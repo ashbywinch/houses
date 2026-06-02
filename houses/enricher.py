@@ -31,8 +31,6 @@ def _tfl_auth_params() -> dict[str, str]:
     params = {}
     if settings.tfl_api_key:
         params["app_key"] = settings.tfl_api_key
-    if settings.tfl_app_id:
-        params["app_id"] = settings.tfl_app_id
     return params
 
 

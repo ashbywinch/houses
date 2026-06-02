@@ -25,6 +25,9 @@ async def lifespan(_app: FastAPI):
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    # httpx logs full URLs including query params — suppress to avoid
+    # leaking API keys in the server log
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     logger.info("Houses server starting")
     yield
     logger.info("Houses server shutting down")
