@@ -33,10 +33,10 @@ run: setup
 	@$(UV) run uvicorn houses.server:app --host 127.0.0.1 --port 8080 --reload
 
 test: setup lint
-	@$(PYTEST) tests/ -v
+	@$(PYTEST) tests/ -q --tb=short
 
 coverage: setup
-	@$(UV) run coverage run -m pytest tests/ -v
+	@$(UV) run coverage run -m pytest tests/ -q --tb=short
 	@$(UV) run coverage report -m
 	@$(UV) run coverage html
 	@echo "${GREEN}Coverage report: htmlcov/index.html${NC}"

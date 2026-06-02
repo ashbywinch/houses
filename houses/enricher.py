@@ -1,7 +1,7 @@
 """Transit commute, petrol cost, and school lookup logic.
 
-Uses TravelTime API for transit routing, OpenRouteService for
-driving distances, and UK government school data for education lookups.
+Uses TfL Unified API for transit routing, OpenRouteService for
+driving distances, and UK government GIAS school data.
 """
 
 from __future__ import annotations
@@ -17,43 +17,37 @@ from houses.config import settings
 from houses.models import PetrolCost, SchoolInfo, TransitInfo
 from houses.retry import retry_async
 
-POSTCODES_IO_URL = "https://api.postcodes.io/postcodes"
-
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-TRAVELTIME_URL = "https://api.traveltimeapp.com/v4/time-filter"
+POSTCODES_IO_URL = "https://api.postcodes.io/postcodes"
+TFL_JOURNEY_URL = "https://api.tfl.gov.uk/Journey/JourneyResults"
 ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-car"
 
-
-def _build_traveltime_headers() -> dict[str, str]:
-    return {
-        "X-Application-Id": settings.traveltime_app_id,
-        "X-Api-Key": settings.traveltime_api_key,
-        "Content-Type": "application/json",
-    }
-
-
 # ---------------------------------------------------------------------------
-# Transit — TravelTime API
+# Transit — TfL Unified API (free, no expiring trial)
 # ---------------------------------------------------------------------------
+
+def _tfl_auth_params() -> dict[str, str]:
+    params = {}
+    if settings.tfl_api_key:
+        params["app_key"] = settings.tfl_api_key
+    if settings.tfl_app_id:
+        params["app_id"] = settings.tfl_app_id
+    return params
+
 
 async def compute_transit(
     origin_postcode: str,
     destination_postcode: str,
     label: str,
 ) -> TransitInfo:
-    """Return transit commute time from origin to destination (minutes).
+    """Return transit commute time using TfL Unified API (free, London focus).
 
-    Uses TravelTime API with public_transport mode.
-    Returns a TransitInfo with duration_minutes=None on failure or
-    if API is not configured.
+    Returns TransitInfo with duration_minutes=None if API unavailable or
+    if the route is outside TfL's coverage area.
     """
-    if not settings.traveltime_app_id or not settings.traveltime_api_key:
-        logger.warning("TravelTime API not configured; skipping transit for %s", label)
+    if not settings.tfl_api_key:
+        logger.warning("TfL API key not configured; skipping transit for %s", label)
         return TransitInfo(
             destination_label=label,
             destination_postcode=destination_postcode,
@@ -61,53 +55,19 @@ async def compute_transit(
             mode="transit",
         )
 
-    payload = {
-        "locations": [
-            {"id": "origin", "postcode": origin_postcode},
-            {"id": "destination", "postcode": destination_postcode},
-        ],
-        "departure_searches": [
-            {
-                "id": "commute",
-                "coords": {"lat": 51.5, "lon": -0.13},  # placeholder — overridden by postcode
-                "transportation": {"type": "public_transport"},
-                "departure_time": "2026-06-02T08:00:00",
-                "travel_time": 7200,
-                "properties": ["travel_time"],
-                "range": {"enabled": False},
-            }
-        ],
-    }
-    # TravelTime v4 requires origin/destination as proper location references.
-    # The postcode-based search is done via locations[].postcode and then
-    # arrival_searches / departure_searches reference location IDs.
-    # Re-structure for postcode input:
-    payload = {
-        "locations": [
-            {"id": "origin", "postcode": origin_postcode},
-            {"id": "destination", "postcode": destination_postcode},
-        ],
-        "departure_searches": [
-            {
-                "id": "to-work",
-                "departure_location_id": "origin",
-                "arrival_location_ids": ["destination"],
-                "transportation": {"type": "public_transport"},
-                "departure_time": "2026-06-02T08:00:00",
-                "travel_time": 5400,
-                "properties": ["travel_time"],
-            }
-        ],
+    url = f"{TFL_JOURNEY_URL}/{origin_postcode}/to/{destination_postcode}"
+    params = {
+        "nationalSearch": "true",
+        "timeIs": "departing",
+        "journeyPreference": "leasttime",
+        "mode": "tube,bus,overground,dlr,tram,national-rail,walking",
+        **_tfl_auth_params(),
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await retry_async(
-                lambda: client.post(
-                    TRAVELTIME_URL,
-                    headers=_build_traveltime_headers(),
-                    json=payload,
-                ),
+                lambda: client.get(url, params=params),
                 max_retries=2,
                 base_delay=1.0,
                 exceptions=(httpx.HTTPStatusError, httpx.RequestError),
@@ -115,20 +75,19 @@ async def compute_transit(
             resp.raise_for_status()
             data = resp.json()
 
-        results = data.get("results", [])
-        if results:
-            travel_time_secs = results[0].get("travel_time", 0)
-            duration_minutes = round(travel_time_secs / 60)
-        else:
-            duration_minutes = None
+        journeys = data.get("journeys", [])
+        duration_minutes = journeys[0].get("duration") if journeys else None
     except httpx.HTTPStatusError as e:
-        logger.error("TravelTime API HTTP error for %s: %s", label, e)
+        if e.response.status_code == 404:
+            logger.warning("TfL could not route %s: route may be outside London area", label)
+        else:
+            logger.error("TfL API HTTP error for %s: %s", label, e)
         duration_minutes = None
     except httpx.RequestError as e:
-        logger.error("TravelTime API request failed for %s: %s", label, e)
+        logger.error("TfL API request failed for %s: %s", label, e)
         duration_minutes = None
     except (KeyError, IndexError, TypeError) as e:
-        logger.error("TravelTime API unexpected response for %s: %s", label, e)
+        logger.error("TfL API unexpected response for %s: %s", label, e)
         duration_minutes = None
 
     return TransitInfo(
@@ -140,7 +99,6 @@ async def compute_transit(
 
 
 async def compute_simon_commute(property_postcode: str) -> TransitInfo:
-    """Transit time from property to Simon's work anchor (Pimlico/Victoria)."""
     return await compute_transit(
         property_postcode,
         settings.simon_postcode,
@@ -149,7 +107,6 @@ async def compute_simon_commute(property_postcode: str) -> TransitInfo:
 
 
 async def compute_lorena_commute(property_postcode: str) -> TransitInfo:
-    """Transit time from property to Lorena's work anchor (Aldgate)."""
     return await compute_transit(
         property_postcode,
         settings.lorena_postcode,
@@ -162,28 +119,16 @@ async def compute_lorena_commute(property_postcode: str) -> TransitInfo:
 # ---------------------------------------------------------------------------
 
 def _compute_petrol_from_distance_km(round_trip_km: float) -> float:
-    """Convert driving distance to petrol cost.
-
-    45 mpg → 5.23 L/100km → cost = (km / 100) * 5.23 * price_per_litre
-    """
-    litres_per_100km = 235.214 / settings.petrol_mpg  # ~5.23 L/100km at 45mpg
+    litres_per_100km = 235.214 / settings.petrol_mpg
     litres_used = (round_trip_km / 100) * litres_per_100km
     return round(litres_used * settings.petrol_price_per_litre, 2)
 
 
 async def compute_petrol_cost(origin_postcode: str) -> PetrolCost:
-    """Estimate round-trip petrol cost to the Bracknell office.
-
-    Uses OpenRouteService driving-car profile to get one-way distance,
-    doubles it for round trip, then applies 45 mpg at £1.45/L cost calc.
-    """
     if not settings.ors_api_key:
         logger.warning("ORS API key not configured; skipping petrol cost")
         return PetrolCost()
 
-    # We need to geocode the postcodes first. ORS doesn't accept
-    # postcodes directly for directions — it needs coordinates.
-    # Use a simple approach: geocode via ORS Pelias search.
     geocode_url = "https://api.openrouteservice.org/geocode/search"
 
     try:
@@ -202,9 +147,8 @@ async def compute_petrol_cost(origin_postcode: str) -> PetrolCost:
             geo_data = geo_resp.json()
             features = geo_data.get("features", [])
             if not features:
-                logger.warning("Could not geocode origin postcode: %s", origin_postcode)
+                logger.warning("Could not geocode origin: %s", origin_postcode)
                 return PetrolCost()
-
             origin_coords = features[0]["geometry"]["coordinates"]
 
             geo_resp2 = await retry_async(
@@ -221,9 +165,8 @@ async def compute_petrol_cost(origin_postcode: str) -> PetrolCost:
             dest_data = geo_resp2.json()
             dest_features = dest_data.get("features", [])
             if not dest_features:
-                logger.warning("Could not geocode Bracknell postcode")
+                logger.warning("Could not geocode Bracknell")
                 return PetrolCost()
-
             dest_coords = dest_features[0]["geometry"]["coordinates"]
 
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -253,35 +196,45 @@ async def compute_petrol_cost(origin_postcode: str) -> PetrolCost:
         return PetrolCost(round_trip_km=round_trip_km, cost_gbp=cost)
 
     except (httpx.HTTPStatusError, httpx.RequestError, KeyError, IndexError) as e:
-        logger.error("Failed to compute petrol cost for %s: %s", origin_postcode, e)
+        logger.error("Petrol cost failed for %s: %s", origin_postcode, e)
         return PetrolCost()
 
 
 # ---------------------------------------------------------------------------
-# Schools — UK government GIAS / Get Information About Schools
+# Schools — GIAS CSV + postcodes.io geocoding
 # ---------------------------------------------------------------------------
-# There is no official public REST API for GIAS that provides free,
-# anonymous proximity search. The recommended approach is:
-#
-#   Option A — Bulk data download (recommended for a local server):
-#     Download the full GIAS CSV from
-#     https://www.get-information-schools.service.gov.uk/Downloads
-#     This is ~25 MB. Load locally, filter by postcode proximity.
-#
-#   Option B — Ofsted API (requires API key, limited free tier).
-#
-# We implement Option A here since it's free, offline once downloaded,
-# and gives full control over the gender/fee-substitution logic.
 
-SCHOOLS_CSV_PATH = Path("data/uk_schools.csv")
+# GIAS column name mappings — the CSVs use "FieldName (name)" format
+COL_NAME = "EstablishmentName"
+COL_PHASE = "PhaseOfEducation (name)"
+COL_GENDER = "Gender (name)"
+COL_TYPE = "TypeOfEstablishment (name)"
+COL_POSTCODE = "Postcode"
+
+# The enriched CSV — has Latitude/Longitude columns added via scripts/enrich_schools.py
+# Falls back to postcodes.io on-the-fly for any schools missing coordinates.
+SCHOOLS_CSV_PATH = Path("data/edubaseall_enriched.csv")
+
+FEE_PAYING_TYPES = frozenset({
+    "independent school",
+    "other independent school",
+    "independent special school",
+    "non-maintained special school",
+})
+
+# In-memory cache: postcode -> (lat, lng)
+_geo_cache: dict[str, tuple[float, float]] = {}
 
 
-async def _postcode_to_lat_lng(postcode: str) -> tuple[float, float] | None:
-    """Look up lat/lng for a UK postcode using postcodes.io (free, no key)."""
+async def _geocode(postcode: str) -> tuple[float, float] | None:
+    """Geocode a UK postcode via postcodes.io with in-memory caching."""
+    key = postcode.strip().upper()
+    if key in _geo_cache:
+        return _geo_cache[key]
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await retry_async(
-                lambda: client.get(f"{POSTCODES_IO_URL}/{postcode}"),
+                lambda: client.get(f"{POSTCODES_IO_URL}/{key}"),
                 max_retries=2, base_delay=0.5,
                 exceptions=(httpx.HTTPStatusError, httpx.RequestError),
             )
@@ -290,14 +243,15 @@ async def _postcode_to_lat_lng(postcode: str) -> tuple[float, float] | None:
             result = data.get("result")
             if not result:
                 return None
-            return result["latitude"], result["longitude"]
+            latlng = result["latitude"], result["longitude"]
+            _geo_cache[key] = latlng
+            return latlng
     except Exception:
-        logger.exception("Failed to geocode postcode: %s", postcode)
+        logger.exception("Failed to geocode postcode: %s", key)
         return None
 
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Haversine distance between two lat/lng points in km."""
     r = 6371.0
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
@@ -311,44 +265,47 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def _load_schools() -> list[dict]:
-    """Load schools from local CSV. Returns empty list if file missing."""
     if not SCHOOLS_CSV_PATH.is_file():
         logger.warning("Schools CSV not found at %s", SCHOOLS_CSV_PATH)
         return []
-    with SCHOOLS_CSV_PATH.open(newline="", encoding="utf-8-sig") as f:
+    with SCHOOLS_CSV_PATH.open(newline="", encoding="latin-1") as f:
         return list(csv.DictReader(f))
 
 
-FEE_PAYING_TYPES = frozenset({
-    "independent school",
-    "other independent school",
-    "independent special school",
-    "non-maintained special school",
-})
-
-
 def _boys_eligible(school: dict) -> bool:
-    gender = (school.get("Gender") or "").strip().lower()
+    gender = (school.get(COL_GENDER) or "").strip().lower()
     if gender not in ("mixed", "boys"):
         return False
-    estab_type = (school.get("TypeOfEstablishment") or "").strip().lower()
+    estab_type = (school.get(COL_TYPE) or "").strip().lower()
     return estab_type not in FEE_PAYING_TYPES
 
 
 def _phase_filter(school: dict, target: str) -> bool:
-    phase = (school.get("PhaseOfEducation") or "").strip().lower()
+    phase = (school.get(COL_PHASE) or "").strip().lower()
     return target in phase
 
 
 def _school_to_info(school: dict, dist_km: float, school_type: str) -> SchoolInfo:
     return SchoolInfo(
-        name=school.get("EstablishmentName", "Unknown"),
+        name=school.get(COL_NAME, "Unknown"),
         type=school_type,
         distance_km=round(dist_km, 2),
-        gender=(school.get("Gender") or "").strip().lower(),
+        gender=(school.get(COL_GENDER) or "").strip().lower(),
         fee_paying=False,
         walking_time_minutes=None,
     )
+
+
+def _school_coords(school: dict) -> tuple[float, float] | None:
+    """Read lat/lng from the enriched CSV row."""
+    try:
+        lat = school.get("Latitude")
+        lng = school.get("Longitude")
+        if lat and lng:
+            return float(lat), float(lng)
+    except (ValueError, TypeError):
+        pass
+    return None
 
 
 async def _find_nearest_boys(
@@ -359,11 +316,11 @@ async def _find_nearest_boys(
     if not schools:
         return None
 
-    coords = await _postcode_to_lat_lng(postcode)
-    if coords is None:
+    property_coords = await _geocode(postcode)
+    if property_coords is None:
         return None
 
-    origin_lat, origin_lon = coords
+    origin_lat, origin_lon = property_coords
     candidates: list[tuple[float, dict]] = []
 
     for school in schools:
@@ -371,14 +328,17 @@ async def _find_nearest_boys(
             continue
         if not _boys_eligible(school):
             continue
-        try:
-            slat = float(school.get("Latitude", 0))
-            slon = float(school.get("Longitude", 0))
-        except (ValueError, TypeError):
-            continue
-        if not slat or not slon:
-            continue
-        dist = _haversine_km(origin_lat, origin_lon, slat, slon)
+
+        school_coords = _school_coords(school)
+        if school_coords is None:
+            school_postcode = school.get(COL_POSTCODE, "")
+            if not school_postcode:
+                continue
+            school_coords = await _geocode(school_postcode)
+            if school_coords is None:
+                continue
+
+        dist = _haversine_km(origin_lat, origin_lon, school_coords[0], school_coords[1])
         if dist <= settings.school_search_radius_km:
             candidates.append((dist, school))
 

@@ -17,13 +17,14 @@ class Settings(BaseSettings):
     lorena_postcode: str = "EC3A 7LP"
     bracknell_postcode: str = "RG12 8YA"
 
-    # TravelTime API (for transit commute times)
-    # Sign up at https://traveltime.com/free-api-trial
-    traveltime_app_id: str = ""
-    traveltime_api_key: str = ""
+    # TfL Unified API (for public-transit commute times)
+    # Get a free API key: https://api-portal.tfl.gov.uk/profile
+    # Anonymous access: 50 req/min. With a key: much higher.
+    tfl_api_key: str = ""
+    tfl_app_id: str = ""
 
     # OpenRouteService API key (for driving distance — petrol calc)
-    # Sign up at https://openrouteservice.org/dev/#/signup
+    # Sign up: https://openrouteservice.org/dev/#/signup
     ors_api_key: str = ""
 
     # Petrol calculation

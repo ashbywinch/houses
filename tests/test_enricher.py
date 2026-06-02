@@ -5,16 +5,16 @@ from houses.enricher import FEE_PAYING_TYPES, _boys_eligible, _haversine_km
 
 class TestBoysEligible:
     def test_mixed_gender_eligible(self):
-        assert _boys_eligible({"Gender": "Mixed", "TypeOfEstablishment": "Community School"})
+        assert _boys_eligible({"Gender (name)": "Mixed", "TypeOfEstablishment (name)": "Community School"})
 
     def test_boys_gender_eligible(self):
-        assert _boys_eligible({"Gender": "Boys", "TypeOfEstablishment": "Academy Converter"})
+        assert _boys_eligible({"Gender (name)": "Boys", "TypeOfEstablishment (name)": "Academy Converter"})
 
     def test_girls_gender_ineligible(self):
-        assert not _boys_eligible({"Gender": "Girls", "TypeOfEstablishment": "Community School"})
+        assert not _boys_eligible({"Gender (name)": "Girls", "TypeOfEstablishment (name)": "Community School"})
 
     def test_independent_school_ineligible(self):
-        assert not _boys_eligible({"Gender": "Mixed", "TypeOfEstablishment": "Independent School"})
+        assert not _boys_eligible({"Gender (name)": "Mixed", "TypeOfEstablishment (name)": "Independent School"})
 
     def test_missing_fields_returns_false(self):
         assert not _boys_eligible({})
