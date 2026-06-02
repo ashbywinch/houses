@@ -1,31 +1,34 @@
 """Configuration — postcodes, API keys, sheet IDs."""
 
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    host: str = Field(default="127.0.0.1", env="HOUSES_HOST")
-    port: int = Field(default=8080, env="HOUSES_PORT")
-    reload: bool = Field(default=True, env="HOUSES_RELOAD")
+    host: str = "127.0.0.1"
+    port: int = 8080
+    reload: bool = True
 
-    sheet_id: str = Field(default="", env="HOUSES_SHEET_ID")
-    service_account_json: str = Field(default="", env="GOOGLE_SHEETS_SERVICE_ACCOUNT")
+    sheet_id: str = ""
 
-    simon_postcode: str = Field(default="SW1V 2QQ", env="HOUSES_SIMON_POSTCODE")
-    lorena_postcode: str = Field(default="EC3A 7LP", env="HOUSES_LORENA_POSTCODE")
-    bracknell_postcode: str = Field(default="RG12 8YA", env="HOUSES_BRACKNELL_POSTCODE")
+    simon_postcode: str = "SW1V 2QQ"
+    lorena_postcode: str = "EC3A 7LP"
+    bracknell_postcode: str = "RG12 8YA"
 
-    tfl_api_key: str = Field(default="", env="TFL_API_KEY")
+    tfl_api_key: str = Field(default="", alias="TFL_API_KEY")
+    ors_api_key: str = Field(default="", alias="HEIGIT_API_KEY")
+    service_account_json: str = Field(default="", alias="GOOGLE_SHEETS_SERVICE_ACCOUNT")
 
-    ors_api_key: str = Field(default="", env="HEIGIT_API_KEY")
+    petrol_mpg: float = 45.0
+    petrol_price_per_litre: float = 1.45
 
-    petrol_mpg: float = Field(default=45.0, env="HOUSES_PETROL_MPG")
-    petrol_price_per_litre: float = Field(default=1.45, env="HOUSES_PETROL_PRICE")
+    school_search_radius_km: float = 5.0
 
-    school_search_radius_km: float = Field(default=5.0, env="HOUSES_SCHOOL_RADIUS")
-
-    model_config = {"env_file": ".env"}
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_prefix="HOUSES_",
+        populate_by_name=True,
+    )
 
 
 settings = Settings()

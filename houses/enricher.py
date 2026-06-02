@@ -246,8 +246,15 @@ async def _geocode(postcode: str) -> tuple[float, float] | None:
             latlng = result["latitude"], result["longitude"]
             _geo_cache[key] = latlng
             return latlng
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            _geo_cache[key] = None  # don't retry invalid postcodes
+        else:
+            logger.warning("Geocode HTTP error for %s: %s", key, e)
+        return None
     except Exception:
         logger.exception("Failed to geocode postcode: %s", key)
+        return None
         return None
 
 

@@ -49,6 +49,9 @@ Thumbs.db
 config.local.json
 service-account.json
 .env.local
+extract.zip
+data/edubaseallstatefunded*.csv
+data/edubaseallacademies*.csv
 
 # OpenCode
 .opencode/
