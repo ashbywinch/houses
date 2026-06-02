@@ -215,6 +215,8 @@ COL_PHASE = "PhaseOfEducation (name)"
 COL_GENDER = "Gender (name)"
 COL_TYPE = "TypeOfEstablishment (name)"
 COL_POSTCODE = "Postcode"
+COL_URN = "URN"
+COL_WEBSITE = "SchoolWebsite"
 
 # The enriched CSV — has Latitude/Longitude columns added via scripts/enrich_schools.py
 # Falls back to postcodes.io on-the-fly for any schools missing coordinates.
@@ -342,13 +344,16 @@ def _phase_filter(school: dict, target: str) -> bool:
 
 
 def _school_to_info(school: dict, dist_km: float, school_type: str) -> SchoolInfo:
+    walk_mins = round(dist_km / 5 * 60) if dist_km else None
     return SchoolInfo(
         name=school.get(COL_NAME, "Unknown"),
         type=school_type,
-        distance_km=round(dist_km, 2),
+        distance_km=round(dist_km, 2) if dist_km else None,
         gender=(school.get(COL_GENDER) or "").strip().lower(),
         fee_paying=False,
-        walking_time_minutes=None,
+        walking_time_minutes=walk_mins,
+        urn=school.get(COL_URN, ""),
+        website=school.get(COL_WEBSITE, ""),
     )
 
 

@@ -38,6 +38,9 @@ class SchoolInfo(BaseModel):
     gender: str = "mixed"
     fee_paying: bool = False
     walking_time_minutes: int | None = None
+    urn: str = ""
+    website: str = ""
+    ofsted_rating: str = ""
 
 
 class PetrolCost(BaseModel):

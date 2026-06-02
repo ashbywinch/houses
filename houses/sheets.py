@@ -25,8 +25,12 @@ COLUMN_HEADERS: list[str] = [
     "Bracknell Petrol (£)",
     "Primary School",
     "Primary School Distance (km)",
+    "Primary Walk (min)",
+    "Primary School Link",
     "Secondary School",
     "Secondary School Distance (km)",
+    "Secondary Walk (min)",
+    "Secondary School Link",
 ]
 
 _client: gspread.Client | None = None
@@ -60,6 +64,16 @@ def _fmt_dist(s: SchoolInfo | None) -> str:
     return f"{s.distance_km:.2f}" if s and s.distance_km is not None else ""
 
 
+def _fmt_walk(s: SchoolInfo | None) -> str:
+    return str(s.walking_time_minutes) if s and s.walking_time_minutes is not None else ""
+
+
+def _fmt_school_link(s: SchoolInfo | None) -> str:
+    if s and s.urn:
+        return f"https://get-information-schools.service.gov.uk/Establishments/Establishment/Details/{s.urn}"
+    return ""
+
+
 def _row_values(property_: EnrichedProperty) -> list[str]:
     return [
         property_.url,
@@ -72,8 +86,12 @@ def _row_values(property_: EnrichedProperty) -> list[str]:
         f"{property_.petrol.cost_gbp:.2f}" if property_.petrol and property_.petrol.cost_gbp is not None else "",
         property_.primary_school.name if property_.primary_school else "",
         _fmt_dist(property_.primary_school),
+        _fmt_walk(property_.primary_school),
+        _fmt_school_link(property_.primary_school),
         property_.secondary_school.name if property_.secondary_school else "",
         _fmt_dist(property_.secondary_school),
+        _fmt_walk(property_.secondary_school),
+        _fmt_school_link(property_.secondary_school),
     ]
 
 
