@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     reload: bool = Field(default=True, env="HOUSES_RELOAD")
 
     sheet_id: str = Field(default="", env="HOUSES_SHEET_ID")
-    service_account_json: str = Field(default="", env="HOUSES_SERVICE_ACCOUNT_JSON")
+    service_account_json: str = Field(default="", env="GOOGLE_SHEETS_SERVICE_ACCOUNT")
 
     simon_postcode: str = Field(default="SW1V 2QQ", env="HOUSES_SIMON_POSTCODE")
     lorena_postcode: str = Field(default="EC3A 7LP", env="HOUSES_LORENA_POSTCODE")
