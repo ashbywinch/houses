@@ -82,7 +82,7 @@ def ensure_headers(worksheet: gspread.Worksheet) -> None:
         worksheet.append_row(COLUMN_HEADERS, value_input_option="USER_ENTERED")
 
 
-async def write_enriched_row(property_: EnrichedProperty) -> str | None:
+async def write_enriched_row(property_: EnrichedProperty, tab: str = SHEET_TAB) -> str | None:
     if not settings.sheet_id:
         logger.info("No HOUSES_SHEET_ID configured; skipping sheet write")
         return None
@@ -94,7 +94,7 @@ async def write_enriched_row(property_: EnrichedProperty) -> str | None:
 
     try:
         sh = client.open_by_key(settings.sheet_id)
-        worksheet = sh.worksheet(SHEET_TAB)
+        worksheet = sh.worksheet(tab)
 
         ensure_headers(worksheet)
         row = _row_values(property_)
@@ -102,13 +102,13 @@ async def write_enriched_row(property_: EnrichedProperty) -> str | None:
 
         new_row_num = worksheet.row_count
         url = f"https://docs.google.com/spreadsheets/d/{settings.sheet_id}/edit#gid={worksheet.id}&range=A{new_row_num}"
-        logger.info("Appended row %d for %s", new_row_num, property_.url)
+        logger.info("Appended row %d for %s to tab '%s'", new_row_num, property_.url, tab)
         return url
     except gspread.SpreadsheetNotFound:
         logger.error("Sheet with id=%s not found. Share it with the service account email.", settings.sheet_id)
         return None
     except gspread.WorksheetNotFound:
-        logger.error("Worksheet '%s' not found in sheet %s", SHEET_TAB, settings.sheet_id)
+        logger.error("Worksheet '%s' not found in sheet %s", tab, settings.sheet_id)
         return None
     except Exception:
         logger.exception("Failed to write row to Google Sheets")

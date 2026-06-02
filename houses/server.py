@@ -114,7 +114,7 @@ async def inject_property(payload: PropertyPayload) -> JSONResponse:
         secondary_school=secondary,
     )
 
-    row_url = await write_enriched_row(enriched)
+    row_url = await write_enriched_row(enriched, payload.tab)
 
     if row_url:
         logger.info("Written to sheet: %s", row_url)

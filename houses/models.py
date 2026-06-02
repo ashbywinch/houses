@@ -17,6 +17,7 @@ class PropertyPayload(BaseModel):
     postcode: str = ""
     bedrooms: int | None = None
     price: float | None = None
+    tab: str = "AI_Data_Source (Bot)"
 
 
 class TransitInfo(BaseModel):
