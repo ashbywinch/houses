@@ -47,6 +47,11 @@ def extract_postcode(address: str) -> str:
     return ""
 
 
+def _is_outcode(s: str) -> bool:
+    """True if the string is a partial postcode (outcode) like 'SL6' or 'SW1E'."""
+    return bool(re.match(r"^[A-Z]{1,2}[0-9][A-Z0-9]?$", s))
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     logging.basicConfig(
@@ -75,18 +80,24 @@ async def inject_property(payload: PropertyPayload) -> JSONResponse:
 
     postcode = payload.postcode or extract_postcode(payload.address)
 
+    # TfL and ORS can geocode full street addresses, but choke on outcodes
+    # ("SL6" returns 300 Multiple Choices). When we only have an outcode,
+    # use the full address as the lookup location instead.
+    lookup = payload.address if _is_outcode(postcode) else postcode
+
     logger.info(
-        "Processing: %s | address=%s | postcode=%s | beds=%s | price=%s",
+        "Processing: %s | address=%s | postcode=%s | lookup=%s | beds=%s | price=%s",
         payload.url,
         payload.address,
         postcode,
+        lookup,
         payload.bedrooms,
         payload.price,
     )
 
-    simon = await compute_simon_commute(postcode)
-    lorena = await compute_lorena_commute(postcode)
-    petrol = await compute_petrol_cost(postcode)
+    simon = await compute_simon_commute(lookup)
+    lorena = await compute_lorena_commute(lookup)
+    petrol = await compute_petrol_cost(lookup)
     primary = await find_nearest_boys_primary(postcode, payload.address)
     secondary = await find_nearest_boys_secondary(postcode, payload.address)
 
