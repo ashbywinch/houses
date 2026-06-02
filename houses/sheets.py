@@ -16,6 +16,7 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 SHEET_TAB = "AI_Data_Source (Bot)"
 COLUMN_HEADERS: list[str] = [
     "Rightmove URL",
+    "Address",
     "Postcode",
     "Bedrooms",
     "Price (£)",
@@ -62,6 +63,7 @@ def _fmt_dist(s: SchoolInfo | None) -> str:
 def _row_values(property_: EnrichedProperty) -> list[str]:
     return [
         property_.url,
+        property_.address,
         property_.postcode,
         str(property_.bedrooms),
         f"{property_.price:,.0f}" if property_.price else "",

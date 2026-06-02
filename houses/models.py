@@ -4,12 +4,16 @@ from pydantic import BaseModel
 
 
 class PropertyPayload(BaseModel):
-    """Raw payload extracted by Page Assist from a Rightmove listing."""
+    """Raw payload extracted by Page Assist from a Rightmove listing.
+
+    Only `url` is required. `address`, `bedrooms`, and `price` are optional
+    — the LLM may not always be able to extract them from every listing.
+    """
 
     url: str
-    postcode: str
-    bedrooms: int
-    price: float
+    address: str = ""
+    bedrooms: int | None = None
+    price: float | None = None
 
 
 class TransitInfo(BaseModel):
@@ -44,9 +48,10 @@ class EnrichedProperty(BaseModel):
     """Full enriched property record written to the Google Sheet."""
 
     url: str
-    postcode: str
-    bedrooms: int
-    price: float
+    address: str = ""
+    postcode: str = ""
+    bedrooms: int = 0
+    price: float = 0.0
 
     # Commute enrichment
     simon_commute: TransitInfo | None = None

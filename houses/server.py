@@ -1,6 +1,7 @@
 """FastAPI app — /inject-property endpoint, startup/shutdown."""
 
 import logging
+import re
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -17,6 +18,20 @@ from houses.models import EnrichedProperty, PropertyPayload
 from houses.sheets import write_enriched_row
 
 logger = logging.getLogger(__name__)
+
+# UK postcode pattern: matches "RG14 1AA", "SW1A 1AA", "EC3A 7LP", etc.
+_POSTCODE_RE = re.compile(
+    r"[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}",
+    re.IGNORECASE,
+)
+
+
+def _extract_postcode(address: str) -> str:
+    """Try to extract a UK postcode from an address string."""
+    m = _POSTCODE_RE.search(address)
+    if m:
+        return m.group(0).strip().upper()
+    return address.strip()  # fallback — use the raw address
 
 
 @asynccontextmanager
@@ -45,22 +60,26 @@ async def inject_property(payload: PropertyPayload) -> JSONResponse:
     if not payload.url.startswith("https://www.rightmove.co.uk/"):
         raise HTTPException(status_code=400, detail="URL must be a Rightmove listing")
 
+    postcode = _extract_postcode(payload.address)
+
     logger.info(
-        "Processing: %s (%s, %d bed, £%.0f)",
-        payload.url, payload.postcode, payload.bedrooms, payload.price,
+        "Processing: %s | address=%s | postcode=%s | beds=%s | price=%s",
+        payload.url, payload.address, postcode,
+        payload.bedrooms, payload.price,
     )
 
-    simon = await compute_simon_commute(payload.postcode)
-    lorena = await compute_lorena_commute(payload.postcode)
-    petrol = await compute_petrol_cost(payload.postcode)
-    primary = await find_nearest_boys_primary(payload.postcode)
-    secondary = await find_nearest_boys_secondary(payload.postcode)
+    simon = await compute_simon_commute(postcode)
+    lorena = await compute_lorena_commute(postcode)
+    petrol = await compute_petrol_cost(postcode)
+    primary = await find_nearest_boys_primary(postcode)
+    secondary = await find_nearest_boys_secondary(postcode)
 
     enriched = EnrichedProperty(
         url=payload.url,
-        postcode=payload.postcode,
-        bedrooms=payload.bedrooms,
-        price=payload.price,
+        address=payload.address,
+        postcode=postcode,
+        bedrooms=payload.bedrooms or 0,
+        price=payload.price or 0.0,
         simon_commute=simon,
         lorena_commute=lorena,
         petrol=petrol,

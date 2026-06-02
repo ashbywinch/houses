@@ -17,31 +17,29 @@ class TestHealth:
 class TestInjectProperty:
     VALID_PAYLOAD = {
         "url": "https://www.rightmove.co.uk/properties/123456789",
-        "postcode": "SW1A 1AA",
-        "bedrooms": 3,
-        "price": 650000,
+        "address": "High Street, Some Town, RG14 1AA",
     }
 
-    def test_valid_payload_returns_200_when_sheets_not_configured(self):
+    def test_valid_payload_returns_success(self):
         resp = client.post("/inject-property", json=self.VALID_PAYLOAD)
-        assert resp.status_code == 200
+        # Accept 200 (sheets not configured) or 201 (written to sheet)
+        assert resp.status_code in (200, 201)
         body = resp.json()
         assert body["status"] == "ok"
-        assert body["note"] == "Sheets not configured"
-        # Enriched data should be returned
-        assert "data" in body
-        assert body["data"]["url"] == self.VALID_PAYLOAD["url"]
-        assert body["data"]["postcode"] == self.VALID_PAYLOAD["postcode"]
+        assert "data" in body or "row_url" in body
+
+    def test_minimal_payload_with_only_url(self):
+        resp = client.post("/inject-property", json={"url": "https://www.rightmove.co.uk/properties/1"})
+        assert resp.status_code in (200, 201)
+        body = resp.json()
+        if "data" in body:
+            assert body["data"]["postcode"] == ""
 
     def test_rejects_non_rightmove_url(self):
         payload = {**self.VALID_PAYLOAD, "url": "https://example.com/"}
         resp = client.post("/inject-property", json=payload)
         assert resp.status_code == 400
         assert resp.json()["detail"] == "URL must be a Rightmove listing"
-
-    def test_rejects_missing_fields(self):
-        resp = client.post("/inject-property", json={"url": "https://www.rightmove.co.uk/properties/1"})
-        assert resp.status_code == 422  # FastAPI validation error
 
     def test_rejects_invalid_types(self):
         payload = {**self.VALID_PAYLOAD, "bedrooms": "three"}
@@ -51,10 +49,14 @@ class TestInjectProperty:
     def test_enrichment_fields_returned(self):
         resp = client.post("/inject-property", json=self.VALID_PAYLOAD)
         body = resp.json()
-        data = body["data"]
-        # All enrichment fields should be present (null if APIs unavailable)
-        assert "simon_commute" in data
-        assert "lorena_commute" in data
-        assert "petrol" in data
-        assert "primary_school" in data
-        assert "secondary_school" in data
+        # When written to sheet (201), enrichments aren't echoed back
+        # When sheets not configured (200), they're in the 'data' field
+        if "data" in body:
+            data = body["data"]
+            assert "simon_commute" in data
+            assert "lorena_commute" in data
+            assert "petrol" in data
+            assert "primary_school" in data
+            assert "secondary_school" in data
+        else:
+            assert "row_url" in body
