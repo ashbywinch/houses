@@ -1,6 +1,6 @@
 """Pydantic models for property payload and enriched data."""
 
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
 
 
 class PropertyPayload(BaseModel):
