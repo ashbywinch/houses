@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import logging
 import math
+import re
 from pathlib import Path
 
 import httpx
@@ -20,8 +21,12 @@ from houses.retry import retry_async
 logger = logging.getLogger(__name__)
 
 POSTCODES_IO_URL = "https://api.postcodes.io/postcodes"
+OUTCODES_IO_URL = "https://api.postcodes.io/outcodes"
 TFL_JOURNEY_URL = "https://api.tfl.gov.uk/Journey/JourneyResults"
 ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-car"
+
+# Full postcode: "SL6 1AA", outcode: "SL6"
+_OUTCODE_RE = re.compile(r"^[A-Z]{1,2}[0-9][A-Z0-9]?$")
 
 # ---------------------------------------------------------------------------
 # Transit — TfL Unified API (free, no expiring trial)
@@ -222,17 +227,63 @@ FEE_PAYING_TYPES = frozenset({
 
 # In-memory cache: postcode -> (lat, lng)
 _geo_cache: dict[str, tuple[float, float]] = {}
+ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 
 
-async def _geocode(postcode: str) -> tuple[float, float] | None:
-    """Geocode a UK postcode via postcodes.io with in-memory caching."""
-    key = postcode.strip().upper()
-    if key in _geo_cache:
-        return _geo_cache[key]
+async def _geocode_address(address: str) -> tuple[float, float] | None:
+    """Geocode a free-form address via ORS Pelias (street-level accuracy).
+
+    Used as fallback when postcodes.io can't resolve an outcode.
+    """
+    cache_key = f"addr::{address.strip().upper()}"
+    if cache_key in _geo_cache:
+        return _geo_cache[cache_key]
+    api_key = settings.ors_api_key
+    if not api_key:
+        return None
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await retry_async(
-                lambda: client.get(f"{POSTCODES_IO_URL}/{key}"),
+                lambda: client.get(
+                    ORS_GEOCODE_URL,
+                    params={"text": f"{address}, UK", "size": 1},
+                    headers={"Authorization": api_key},
+                ),
+                max_retries=2, base_delay=0.5,
+                exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            features = data.get("features", [])
+            if not features:
+                return None
+            lng, lat = features[0]["geometry"]["coordinates"]
+            _geo_cache[cache_key] = (lat, lng)
+            return (lat, lng)
+    except Exception:
+        logger.exception("Failed to geocode address: %s", address)
+        return None
+
+
+async def _geocode(postcode: str) -> tuple[float, float] | None:
+    """Geocode a UK postcode via postcodes.io with in-memory caching.
+
+    Supports both full postcodes ("SL6 1AA") and outcodes ("SL6").
+    """
+    key = postcode.strip().upper()
+    if not key:
+        return None
+    if key in _geo_cache:
+        return _geo_cache[key]
+
+    is_outcode = bool(_OUTCODE_RE.match(key))
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            url = f"{OUTCODES_IO_URL}/{key}" if is_outcode else f"{POSTCODES_IO_URL}/{key}"
+
+            resp = await retry_async(
+                lambda: client.get(url),
                 max_retries=2, base_delay=0.5,
                 exceptions=(httpx.HTTPStatusError, httpx.RequestError),
             )
@@ -246,13 +297,12 @@ async def _geocode(postcode: str) -> tuple[float, float] | None:
             return latlng
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 404:
-            _geo_cache[key] = None  # don't retry invalid postcodes
+            _geo_cache[key] = None
         else:
             logger.warning("Geocode HTTP error for %s: %s", key, e)
         return None
     except Exception:
         logger.exception("Failed to geocode postcode: %s", key)
-        return None
         return None
 
 
@@ -316,12 +366,15 @@ def _school_coords(school: dict) -> tuple[float, float] | None:
 async def _find_nearest_boys(
     postcode: str,
     target_phase: str,
+    address: str = "",
 ) -> SchoolInfo | None:
     schools = _load_schools()
     if not schools:
         return None
 
     property_coords = await _geocode(postcode)
+    if property_coords is None and address:
+        property_coords = await _geocode_address(address)
     if property_coords is None:
         return None
 
@@ -355,9 +408,9 @@ async def _find_nearest_boys(
     return _school_to_info(best, candidates[0][0], target_phase)
 
 
-async def find_nearest_boys_primary(postcode: str) -> SchoolInfo | None:
-    return await _find_nearest_boys(postcode, "primary")
+async def find_nearest_boys_primary(postcode: str, address: str = "") -> SchoolInfo | None:
+    return await _find_nearest_boys(postcode, "primary", address)
 
 
-async def find_nearest_boys_secondary(postcode: str) -> SchoolInfo | None:
-    return await _find_nearest_boys(postcode, "secondary")
+async def find_nearest_boys_secondary(postcode: str, address: str = "") -> SchoolInfo | None:
+    return await _find_nearest_boys(postcode, "secondary", address)

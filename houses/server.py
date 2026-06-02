@@ -19,19 +19,32 @@ from houses.sheets import write_enriched_row
 
 logger = logging.getLogger(__name__)
 
-# UK postcode pattern: matches "RG14 1AA", "SW1A 1AA", "EC3A 7LP", etc.
-_POSTCODE_RE = re.compile(
+# UK postcode patterns
+# Full: "RG14 1AA", "SW1A 1AA", "EC3A 7LP"
+# Outcode (partial): "RG14", "SW1A", "SL6"
+_FULL_POSTCODE_RE = re.compile(
     r"[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}",
+    re.IGNORECASE,
+)
+_OUTCODE_RE = re.compile(
+    r"\b[A-Z]{1,2}[0-9][A-Z0-9]?\b",
     re.IGNORECASE,
 )
 
 
-def _extract_postcode(address: str) -> str:
-    """Try to extract a UK postcode from an address string."""
-    m = _POSTCODE_RE.search(address)
+def extract_postcode(address: str) -> str:
+    """Extract the best postcode from an address string.
+
+    Tries full postcode first (e.g. "SL6 1AA"), then falls back to
+    outcode only (e.g. "SL6"). Returns empty string if nothing found.
+    """
+    m = _FULL_POSTCODE_RE.search(address)
     if m:
         return m.group(0).strip().upper()
-    return ""  # no valid postcode found — leave it empty
+    m = _OUTCODE_RE.search(address)
+    if m:
+        return m.group(0).strip().upper()
+    return ""
 
 
 @asynccontextmanager
@@ -60,7 +73,7 @@ async def inject_property(payload: PropertyPayload) -> JSONResponse:
     if not payload.url.startswith("https://www.rightmove.co.uk/"):
         raise HTTPException(status_code=400, detail="URL must be a Rightmove listing")
 
-    postcode = payload.postcode or _extract_postcode(payload.address)
+    postcode = payload.postcode or extract_postcode(payload.address)
 
     logger.info(
         "Processing: %s | address=%s | postcode=%s | beds=%s | price=%s",
@@ -71,8 +84,8 @@ async def inject_property(payload: PropertyPayload) -> JSONResponse:
     simon = await compute_simon_commute(postcode)
     lorena = await compute_lorena_commute(postcode)
     petrol = await compute_petrol_cost(postcode)
-    primary = await find_nearest_boys_primary(postcode)
-    secondary = await find_nearest_boys_secondary(postcode)
+    primary = await find_nearest_boys_primary(postcode, payload.address)
+    secondary = await find_nearest_boys_secondary(postcode, payload.address)
 
     enriched = EnrichedProperty(
         url=payload.url,
