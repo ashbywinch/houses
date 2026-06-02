@@ -1,13 +1,7 @@
-"""gspread integration — write enriched rows to the AI_Data_Source (Bot) tab.
-
-Server has exclusive write access to this tab. Never write to
-the Properties (Human) tab.
-"""
+"""gspread integration — write enriched rows to the AI_Data_Source (Bot) tab."""
 
 import json
 import logging
-import os
-from pathlib import Path
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -17,10 +11,7 @@ from houses.models import EnrichedProperty, SchoolInfo, TransitInfo
 
 logger = logging.getLogger(__name__)
 
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 SHEET_TAB = "AI_Data_Source (Bot)"
 COLUMN_HEADERS: list[str] = [
@@ -37,36 +28,20 @@ COLUMN_HEADERS: list[str] = [
     "Secondary School Distance (km)",
 ]
 
+_client: gspread.Client | None = None
+
 
 def _build_client() -> gspread.Client | None:
-    """Authenticate and return a gspread client.
-
-    Tries (in order):
-      1. Service account JSON string from env var HOUSES_SERVICE_ACCOUNT_JSON_STRING
-      2. Service account file from settings.google_service_account_json path
-      3. Returns None if no credentials are configured.
-    """
-    json_str = os.environ.get("HOUSES_SERVICE_ACCOUNT_JSON_STRING")
-    if json_str:
-        try:
-            creds_dict = json.loads(json_str)
-            credentials = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-            return gspread.authorize(credentials)
-        except Exception:
-            logger.exception("Failed to authenticate from HOUSES_SERVICE_ACCOUNT_JSON_STRING")
-
-    sa_path = Path(settings.google_service_account_json)
-    if sa_path.is_file():
-        try:
-            credentials = Credentials.from_service_account_file(str(sa_path), scopes=SCOPES)
-            return gspread.authorize(credentials)
-        except Exception:
-            logger.exception("Failed to authenticate from %s", sa_path)
-
-    return None
-
-
-_client: gspread.Client | None = None
+    raw = settings.service_account_json
+    if not raw:
+        return None
+    try:
+        creds_dict = json.loads(raw)
+        credentials = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        return gspread.authorize(credentials)
+    except Exception:
+        logger.exception("Failed to authenticate from HOUSES_SERVICE_ACCOUNT_JSON")
+        return None
 
 
 def get_client() -> gspread.Client | None:
@@ -101,24 +76,18 @@ def _row_values(property_: EnrichedProperty) -> list[str]:
 
 
 def ensure_headers(worksheet: gspread.Worksheet) -> None:
-    """Write column headers if the sheet is empty."""
     if worksheet.row_count == 0 or not worksheet.get_all_values():
         worksheet.append_row(COLUMN_HEADERS, value_input_option="USER_ENTERED")
 
 
 async def write_enriched_row(property_: EnrichedProperty) -> str | None:
-    """Append one enriched property row to the AI_Data_Source (Bot) tab.
-
-    Returns the URL of the newly appended row, or None if sheets
-    are not configured.
-    """
     if not settings.sheet_id:
         logger.info("No HOUSES_SHEET_ID configured; skipping sheet write")
         return None
 
     client = get_client()
     if client is None:
-        logger.warning("No Google Sheets credentials configured; skipping sheet write")
+        logger.warning("No service account credentials configured; skipping sheet write")
         return None
 
     try:

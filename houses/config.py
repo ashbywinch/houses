@@ -1,40 +1,31 @@
 """Configuration — postcodes, API keys, sheet IDs."""
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    host: str = "127.0.0.1"
-    port: int = 8080
-    reload: bool = True
+    host: str = Field(default="127.0.0.1", env="HOUSES_HOST")
+    port: int = Field(default=8080, env="HOUSES_PORT")
+    reload: bool = Field(default=True, env="HOUSES_RELOAD")
 
-    # Google Sheets
-    sheet_id: str = ""
-    google_service_account_json: str = "service-account.json"
+    sheet_id: str = Field(default="", env="HOUSES_SHEET_ID")
+    service_account_json: str = Field(default="", env="HOUSES_SERVICE_ACCOUNT_JSON")
 
-    # Commute anchors
-    simon_postcode: str = "SW1V 2QQ"
-    lorena_postcode: str = "EC3A 7LP"
-    bracknell_postcode: str = "RG12 8YA"
+    simon_postcode: str = Field(default="SW1V 2QQ", env="HOUSES_SIMON_POSTCODE")
+    lorena_postcode: str = Field(default="EC3A 7LP", env="HOUSES_LORENA_POSTCODE")
+    bracknell_postcode: str = Field(default="RG12 8YA", env="HOUSES_BRACKNELL_POSTCODE")
 
-    # TfL Unified API (for public-transit commute times)
-    # Get a free API key: https://api-portal.tfl.gov.uk/profile
-    # Anonymous access: 50 req/min. With a key: much higher.
-    tfl_api_key: str = ""
-    tfl_app_id: str = ""
+    tfl_api_key: str = Field(default="", env="TFL_API_KEY")
 
-    # OpenRouteService API key (for driving distance — petrol calc)
-    # Sign up: https://openrouteservice.org/dev/#/signup
-    ors_api_key: str = ""
+    ors_api_key: str = Field(default="", env="HEIGIT_API_KEY")
 
-    # Petrol calculation
-    petrol_mpg: float = 45.0
-    petrol_price_per_litre: float = 1.45
+    petrol_mpg: float = Field(default=45.0, env="HOUSES_PETROL_MPG")
+    petrol_price_per_litre: float = Field(default=1.45, env="HOUSES_PETROL_PRICE")
 
-    # School search
-    school_search_radius_km: float = 5.0
+    school_search_radius_km: float = Field(default=5.0, env="HOUSES_SCHOOL_RADIUS")
 
-    model_config = {"env_prefix": "HOUSES_", "env_file": ".env"}
+    model_config = {"env_file": ".env"}
 
 
 settings = Settings()
