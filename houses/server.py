@@ -31,7 +31,7 @@ def _extract_postcode(address: str) -> str:
     m = _POSTCODE_RE.search(address)
     if m:
         return m.group(0).strip().upper()
-    return address.strip()  # fallback — use the raw address
+    return ""  # no valid postcode found — leave it empty
 
 
 @asynccontextmanager
@@ -60,7 +60,7 @@ async def inject_property(payload: PropertyPayload) -> JSONResponse:
     if not payload.url.startswith("https://www.rightmove.co.uk/"):
         raise HTTPException(status_code=400, detail="URL must be a Rightmove listing")
 
-    postcode = _extract_postcode(payload.address)
+    postcode = payload.postcode or _extract_postcode(payload.address)
 
     logger.info(
         "Processing: %s | address=%s | postcode=%s | beds=%s | price=%s",

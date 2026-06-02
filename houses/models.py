@@ -6,12 +6,15 @@ from pydantic import BaseModel
 class PropertyPayload(BaseModel):
     """Raw payload extracted by Page Assist from a Rightmove listing.
 
-    Only `url` is required. `address`, `bedrooms`, and `price` are optional
-    — the LLM may not always be able to extract them from every listing.
+    Only `url` is required. The LLM should extract `address` (the street
+    address line) and `postcode` (the full UK postcode if visible on the
+    page) separately. If no full postcode is found, the server will try
+    to extract it from the address.
     """
 
     url: str
     address: str = ""
+    postcode: str = ""
     bedrooms: int | None = None
     price: float | None = None
 
