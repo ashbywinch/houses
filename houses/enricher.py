@@ -32,6 +32,7 @@ _OUTCODE_RE = re.compile(r"^[A-Z]{1,2}[0-9][A-Z0-9]?$")
 # Transit — TfL Unified API (free, no expiring trial)
 # ---------------------------------------------------------------------------
 
+
 def _tfl_auth_params() -> dict[str, str]:
     params = {}
     if settings.tfl_api_key:
@@ -120,6 +121,7 @@ async def compute_lorena_commute(property_postcode: str) -> TransitInfo:
 # ---------------------------------------------------------------------------
 # Petrol — OpenRouteService driving distance
 # ---------------------------------------------------------------------------
+
 
 def _compute_petrol_from_distance_km(round_trip_km: float) -> float:
     litres_per_100km = 235.214 / settings.petrol_mpg
@@ -218,12 +220,14 @@ COL_POSTCODE = "Postcode"
 # Falls back to postcodes.io on-the-fly for any schools missing coordinates.
 SCHOOLS_CSV_PATH = Path("data/edubaseall_enriched.csv")
 
-FEE_PAYING_TYPES = frozenset({
-    "independent school",
-    "other independent school",
-    "independent special school",
-    "non-maintained special school",
-})
+FEE_PAYING_TYPES = frozenset(
+    {
+        "independent school",
+        "other independent school",
+        "independent special school",
+        "non-maintained special school",
+    }
+)
 
 # In-memory cache: postcode -> (lat, lng)
 _geo_cache: dict[str, tuple[float, float]] = {}
@@ -249,7 +253,8 @@ async def _geocode_address(address: str) -> tuple[float, float] | None:
                     params={"text": f"{address}, UK", "size": 1},
                     headers={"Authorization": api_key},
                 ),
-                max_retries=2, base_delay=0.5,
+                max_retries=2,
+                base_delay=0.5,
                 exceptions=(httpx.HTTPStatusError, httpx.RequestError),
             )
             resp.raise_for_status()
@@ -284,7 +289,8 @@ async def _geocode(postcode: str) -> tuple[float, float] | None:
 
             resp = await retry_async(
                 lambda: client.get(url),
-                max_retries=2, base_delay=0.5,
+                max_retries=2,
+                base_delay=0.5,
                 exceptions=(httpx.HTTPStatusError, httpx.RequestError),
             )
             resp.raise_for_status()
@@ -310,12 +316,7 @@ def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     r = 6371.0
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
-    a = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(math.radians(lat1))
-        * math.cos(math.radians(lat2))
-        * math.sin(dlon / 2) ** 2
-    )
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
     return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 

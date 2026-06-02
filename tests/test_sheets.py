@@ -43,14 +43,14 @@ def test_row_values_with_full_enrichment():
 
     # Index positions must match COLUMN_HEADERS order
     assert row[0] == "https://www.rightmove.co.uk/properties/123"  # URL
-    assert row[1] == "High Street, Some Town, RG14 1AA"            # Address
-    assert row[2] == "RG14 1AA"                                    # Postcode
-    assert row[3] == "3"                                           # Bedrooms
-    assert row[4] == "650,000"                                     # Price
-    assert row[5] == "22"                                          # Simon
-    assert row[6] == "38"                                          # Lorena
-    assert row[7] == "8.50"                                        # Petrol
-    assert row[8] == "St Vincent School"                           # Primary
-    assert row[9] == "0.65"                                        # Primary dist
-    assert row[10] == "Westminster School"                         # Secondary
-    assert row[11] == "1.20"                                       # Secondary dist
+    assert row[1] == "High Street, Some Town, RG14 1AA"  # Address
+    assert row[2] == "RG14 1AA"  # Postcode
+    assert row[3] == "3"  # Bedrooms
+    assert row[4] == "650,000"  # Price
+    assert row[5] == "22"  # Simon
+    assert row[6] == "38"  # Lorena
+    assert row[7] == "8.50"  # Petrol
+    assert row[8] == "St Vincent School"  # Primary
+    assert row[9] == "0.65"  # Primary dist
+    assert row[10] == "Westminster School"  # Secondary
+    assert row[11] == "1.20"  # Secondary dist

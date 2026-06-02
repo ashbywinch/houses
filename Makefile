@@ -15,13 +15,14 @@ NC := \033[0m
 
 help:
 	@echo "Available commands:"
-	@echo "  ${GREEN}make setup${NC}        Create venv and install dependencies"
-	@echo "  ${GREEN}make run${NC}          Start the FastAPI server (uvicorn)"
-	@echo "  ${GREEN}make test${NC}         Run tests"
-	@echo "  ${GREEN}make lint${NC}         Check code quality with ruff"
-	@echo "  ${GREEN}make format${NC}       Auto-fix formatting issues"
-	@echo "  ${GREEN}make coverage${NC}     Run tests with coverage report"
-	@echo "  ${GREEN}make clean${NC}        Clean up generated files"
+	@echo "  ${GREEN}make setup${NC}              Create venv and install dependencies"
+	@echo "  ${GREEN}make run${NC}                Start the FastAPI server (uvicorn)"
+	@echo "  ${GREEN}make test${NC}               Run unit tests (fast, no external calls)"
+	@echo "  ${GREEN}make test-integration${NC}   Run integration tests (hits real APIs)"
+	@echo "  ${GREEN}make lint${NC}               Check code quality with ruff"
+	@echo "  ${GREEN}make format${NC}             Auto-fix formatting issues"
+	@echo "  ${GREEN}make coverage${NC}           Run tests with coverage report"
+	@echo "  ${GREEN}make clean${NC}              Clean up generated files"
 
 setup:
 	@$(UV) --version >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -33,7 +34,10 @@ run: setup
 	@$(UV) run uvicorn houses.server:app --host 127.0.0.1 --port 8080 --reload
 
 test: setup lint
-	@$(PYTEST) tests/ -q --tb=short
+	@$(PYTEST) tests/ -q --tb=short -m "not integration"
+
+test-integration: setup lint
+	@$(PYTEST) tests/ -v --tb=long -m "integration"
 
 coverage: setup
 	@$(UV) run coverage run -m pytest tests/ -q --tb=short

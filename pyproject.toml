@@ -37,6 +37,11 @@ fixable = ["ALL"]
 [tool.ruff.format]
 quote-style = "double"
 
+[tool.pytest.ini_options]
+markers = [
+    "integration: tests that hit real external APIs (skip unless explicitly run)",
+]
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",

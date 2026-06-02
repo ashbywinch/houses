@@ -77,8 +77,11 @@ async def inject_property(payload: PropertyPayload) -> JSONResponse:
 
     logger.info(
         "Processing: %s | address=%s | postcode=%s | beds=%s | price=%s",
-        payload.url, payload.address, postcode,
-        payload.bedrooms, payload.price,
+        payload.url,
+        payload.address,
+        postcode,
+        payload.bedrooms,
+        payload.price,
     )
 
     simon = await compute_simon_commute(postcode)

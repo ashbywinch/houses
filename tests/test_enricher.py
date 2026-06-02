@@ -1,6 +1,29 @@
 """Tests for enrichment logic."""
 
-from houses.enricher import FEE_PAYING_TYPES, _boys_eligible, _haversine_km
+from houses.enricher import _OUTCODE_RE, FEE_PAYING_TYPES, _boys_eligible, _haversine_km
+
+
+class TestOutcodeDetection:
+    def test_outcode_matches_sl6(self):
+        assert _OUTCODE_RE.match("SL6")
+
+    def test_outcode_matches_sw1e(self):
+        assert _OUTCODE_RE.match("SW1E")
+
+    def test_outcode_matches_ec3a(self):
+        assert _OUTCODE_RE.match("EC3A")
+
+    def test_full_postcode_does_not_match(self):
+        assert not _OUTCODE_RE.match("RG14 1AA")
+
+    def test_full_postcode_no_space_does_not_match(self):
+        assert not _OUTCODE_RE.match("RG141AA")
+
+    def test_empty_does_not_match(self):
+        assert not _OUTCODE_RE.match("")
+
+    def test_not_a_postcode_does_not_match(self):
+        assert not _OUTCODE_RE.match("not a postcode")
 
 
 class TestBoysEligible:

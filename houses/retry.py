@@ -35,12 +35,15 @@ async def retry_async(
         except exceptions as e:
             last_exc = e
             if attempt < max_retries:
-                delay = min(base_delay * (backoff ** attempt), max_delay)
+                delay = min(base_delay * (backoff**attempt), max_delay)
                 if jitter:
                     delay *= 0.5 + random.random() * 0.5  # 50-100% of computed delay
                 logger.warning(
                     "Attempt %d/%d failed: %s. Retrying in %.1fs...",
-                    attempt + 1, max_retries + 1, e, delay,
+                    attempt + 1,
+                    max_retries + 1,
+                    e,
+                    delay,
                 )
                 await asyncio.sleep(delay)
 
@@ -56,6 +59,7 @@ def with_retry(
     exceptions: tuple[type[Exception], ...] = (Exception,),
 ):
     """Decorator: wrap an async function with retry logic."""
+
     def decorator(func: Callable[..., Awaitable]):
         @wraps(func)
         async def wrapper(*args, **kwargs):
@@ -68,5 +72,7 @@ def with_retry(
                 jitter=jitter,
                 exceptions=exceptions,
             )
+
         return wrapper
+
     return decorator
