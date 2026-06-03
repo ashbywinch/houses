@@ -17,44 +17,12 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from houses.sheets import COLUMN_HEADERS, col_letter, ensure_named_ranges, named_range_name  # noqa: E402
+from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS, col_letter, ensure_named_ranges, named_range_name  # noqa: E402
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 DATA_TAB = "Properties Data"
 VIEW_TAB = "Properties View"
-
-# View tab headers are only used when CREATING the tab for the first time.
-# Existing tabs keep their current headers — never overwrite them.
-VIEW_HEADERS = [
-    "Listing Address",
-    "Rightmove Link",
-    "Rightmove ID",
-    "Purchase Cost (£)",
-    "EPC Rating",
-    "Yearly Commute Total (£)",
-    "Yearly Council Tax (£)",
-    "Simon London (min)",
-    "Lorena London (min)",
-    "Bracknell Time (min)",
-    "What the Area is Like",
-    "Walk to Town (min)",
-    "Walkable Amenities",
-    "Primary School",
-    "Primary Ofsted",
-    "Primary Walk (min)",
-    "Secondary School",
-    "Secondary Ofsted",
-    "Secondary Walk (min)",
-    "Secondary Bus Route",
-    "Group Notes / WhatsApp",
-    "Ashby comments",
-    "Status",
-    "Primary Inspection Year",
-    "Primary Inspection Summary",
-    "Secondary Inspection Year",
-    "Secondary Inspection Summary",
-]
 
 
 def main():

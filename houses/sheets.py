@@ -57,6 +57,38 @@ COLUMN_HEADERS: list[str] = [
     "Approx Station Name",        # AJ (35)
 ]
 
+# Canonical View tab headers — single source of truth. Must be imported by
+# scripts/setup_sheet.py and tests/integration/test_view_formulas.py.
+VIEW_HEADERS: list[str] = [
+    "Listing Address",
+    "Rightmove Link",
+    "Rightmove ID",
+    "Purchase Cost (£)",
+    "EPC Rating",
+    "Yearly Commute Total (£)",
+    "Yearly Council Tax (£)",
+    "Simon London",
+    "Lorena London",
+    "Bracknell Time",
+    "What the Area is Like",
+    "Walk to Town",
+    "Walkable Amenities",
+    "Primary School",
+    "Primary Ofsted",
+    "Primary Walk",
+    "Secondary School",
+    "Secondary Ofsted",
+    "Secondary Walk",
+    "Secondary Bus Route",
+    "Group Notes / WhatsApp",
+    "Ashby comments",
+    "Status",
+    "Primary Inspection Year",
+    "Primary Inspection Summary",
+    "Secondary Inspection Year",
+    "Secondary Inspection Summary",
+]
+
 _USER_COLUMNS = frozenset({
     "Rightmove URL", "Address", "Postcode", "Bedrooms", "Price (£)",
     "Actual Latitude", "Actual Longitude",
