@@ -53,38 +53,38 @@ def main():
     # Build named range references dynamically from COLUMN_HEADERS
     ensure_named_ranges(sh)
 
-    K = f"VALUE(INDEX(View_RightmoveID, ROW()))"
-    L = "INDEX(View_RightmoveLink, ROW())"
-    NR = named_range_name
-    RID = NR("Rightmove ID")
+    lookup_key = "VALUE(INDEX(View_RightmoveID, ROW()))"
+    link_formula = "INDEX(View_RightmoveLink, ROW())"
+    named_range = named_range_name
+    rid_range = named_range("Rightmove ID")
 
     formulas = [
         "",  # A: Listing Address (manual)
         "",  # B: Rightmove Link (manual)
-        f'=REGEXEXTRACT({L},"properties/(\\d+)")',                                                     # C: ID from URL
-        f'=XLOOKUP({K},{RID},{NR("Price (£)")}    )',                                                   # D
-        f'=XLOOKUP({K},{RID},{NR("EPC Rating")}    )',                                                  # E
-        f'=LET(k,XLOOKUP({K},{RID},{NR("Bracknell Cost (£)")}),g,XLOOKUP({K},{RID},{NR("Simon London Cost (£)")}),i,XLOOKUP({K},{RID},{NR("Lorena London Cost (£)")}),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)))',  # F
+        f'=REGEXEXTRACT({link_formula},"properties/(\\d+)")',                                                     # C: ID from URL
+        f'=XLOOKUP({lookup_key},{rid_range},{named_range("Price (£)")}    )',                                                   # D
+        f'=XLOOKUP({lookup_key},{rid_range},{named_range("EPC Rating")}    )',                                                  # E
+        f'=LET(k,XLOOKUP({lookup_key},{rid_range},{named_range("Bracknell Cost (£)")}),g,XLOOKUP({lookup_key},{rid_range},{named_range("Simon London Cost (£)")}),i,XLOOKUP({lookup_key},{rid_range},{named_range("Lorena London Cost (£)")}),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)))',  # F
         "",                                                                                               # G
-        f'=LET(v,XLOOKUP({K},{RID},{NR("Simon London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',        # H
-        f'=LET(v,XLOOKUP({K},{RID},{NR("Lorena London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',       # I
-        f'=LET(v,XLOOKUP({K},{RID},{NR("Bracknell Time (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',      # J
-        f'=XLOOKUP({K},{RID},{NR("Area Description")}     )',                                             # K
-        f'=LET(v,XLOOKUP({K},{RID},{NR("Walk to Town (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',        # L
-        f'=XLOOKUP({K},{RID},{NR("Walkable Amenities")}   )',                                             # M
-        f'=HYPERLINK(XLOOKUP({K},{RID},{NR("Primary School Link")}),XLOOKUP({K},{RID},{NR("Primary School")}))',  # N
-        f'=XLOOKUP({K},{RID},{NR("Primary Ofsted")}       )',                                             # O
-        f'=LET(v,XLOOKUP({K},{RID},{NR("Primary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',        # P
-        f'=HYPERLINK(XLOOKUP({K},{RID},{NR("Secondary School Link")}),XLOOKUP({K},{RID},{NR("Secondary School")}))',  # Q
-        f'=XLOOKUP({K},{RID},{NR("Secondary Ofsted")}     )',                                             # R
-        f'=LET(v,XLOOKUP({K},{RID},{NR("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',      # S
-        f'=XLOOKUP({K},{RID},{NR("Secondary Bus Route")}  )',                                             # T
-        f'=LET(v,XLOOKUP({K},{RID},{NR("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',        # U
+        f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Simon London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',        # H
+        f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Lorena London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',       # I
+        f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Bracknell Time (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',      # J
+        f'=XLOOKUP({lookup_key},{rid_range},{named_range("Area Description")}     )',                                             # K
+        f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Walk to Town (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',        # L
+        f'=XLOOKUP({lookup_key},{rid_range},{named_range("Walkable Amenities")}   )',                                             # M
+        f'=HYPERLINK(XLOOKUP({lookup_key},{rid_range},{named_range("Primary School Link")}),XLOOKUP({lookup_key},{rid_range},{named_range("Primary School")}))',  # N
+        f'=XLOOKUP({lookup_key},{rid_range},{named_range("Primary Ofsted")}       )',                                             # O
+        f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Primary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',        # P
+        f'=HYPERLINK(XLOOKUP({lookup_key},{rid_range},{named_range("Secondary School Link")}),XLOOKUP({lookup_key},{rid_range},{named_range("Secondary School")}))',  # Q
+        f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Ofsted")}     )',                                             # R
+        f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',      # S
+        f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Bus Route")}  )',                                             # T
+        f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',        # U
         "", "", "", "",  # V W X Y: manual (Group Notes, Ashby comments, Status, Status Reason)
-        f'=XLOOKUP({K},{RID},{NR("Primary Inspection Year")})',                                           # Z
-        "",  # AA: Primary Inspection Summary (removed from Data)
-        f'=XLOOKUP({K},{RID},{NR("Secondary Inspection Year")})',                                          # AB
-        "",  # AC: Secondary Inspection Summary (removed from Data)
+        f'=XLOOKUP({lookup_key},{rid_range},{named_range("Primary Inspection Year")})',                                           # Z
+        f'=XLOOKUP({lookup_key},{rid_range},{named_range("Primary Inspection Summary")})',  # AA
+        f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Inspection Year")})',                                          # AB
+        f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Inspection Summary")})',  # AC
     ]
 
     last_col = col_letter(len(formulas) - 1)

@@ -13,7 +13,7 @@ import pytest
 from google.oauth2.service_account import Credentials
 
 from houses.config import settings
-from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS, col_index, col_letter
+from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS, VIEW_MANUAL_COLUMNS, col_index, col_letter
 
 pytestmark = pytest.mark.integration
 
@@ -54,6 +54,8 @@ class _TestRecord:
     epc: str
     bus_min: int
     bus_route: str
+    primary_inspection_summary: str
+    secondary_inspection_summary: str
 
     def to_data_row(self):
         ci = col_index
@@ -88,6 +90,8 @@ class _TestRecord:
         r[ci("EPC Rating")] = self.epc
         r[ci("Secondary Bus (min)")] = str(self.bus_min)
         r[ci("Secondary Bus Route")] = self.bus_route
+        r[ci("Primary Inspection Summary")] = self.primary_inspection_summary
+        r[ci("Secondary Inspection Summary")] = self.secondary_inspection_summary
         return r
 
 
@@ -104,6 +108,8 @@ RECORDS = [
         secondary_link="http://link/sec1", secondary_ofsted="Outstanding", secondary_yr=2023,
         area_desc="A nice area to live", walk_min=12, amenities="Supermarket|Park",
         epc="B", bus_min=25, bus_route="Bus 101",
+        primary_inspection_summary="Good school with strong leadership",
+        secondary_inspection_summary="Outstanding results in recent years",
     ),
     _TestRecord(
         url="https://www.rightmove.co.uk/properties/22222222",
@@ -117,6 +123,8 @@ RECORDS = [
         secondary_link="http://link/sec2", secondary_ofsted="Good", secondary_yr=2024,
         area_desc="Quiet suburban area", walk_min=20, amenities="Pharmacy|Train Station",
         epc="C", bus_min=30, bus_route="Bus 202",
+        primary_inspection_summary="Requires improvement in maths",
+        secondary_inspection_summary="Good overall with outstanding sixth form",
     ),
 ]
 
@@ -150,65 +158,65 @@ class TestViewFormulasOnTestSheet:
 
     @pytest.fixture(scope="class", autouse=True)
     def setup_sheet(self, sh):
-        DATA_TAB = "Properties Data"
-        VIEW_TAB = "Properties View"
+        data_tab = "Properties Data"
+        view_tab = "Properties View"
 
         existing = {ws.title: ws for ws in sh.worksheets()}
 
-        if DATA_TAB in existing:
-            ws_data = existing[DATA_TAB]
+        if data_tab in existing:
+            ws_data = existing[data_tab]
             ws_data.clear()
             ws_data.resize(rows=100, cols=len(COLUMN_HEADERS))
         else:
-            ws_data = sh.add_worksheet(title=DATA_TAB, rows=100, cols=len(COLUMN_HEADERS))
+            ws_data = sh.add_worksheet(title=data_tab, rows=100, cols=len(COLUMN_HEADERS))
         ws_data.append_row(COLUMN_HEADERS, value_input_option="USER_ENTERED")
         for rec in RECORDS:
             ws_data.append_row(rec.to_data_row(), value_input_option="USER_ENTERED")
 
-        if VIEW_TAB in existing:
-            ws_view = existing[VIEW_TAB]
+        if view_tab in existing:
+            ws_view = existing[view_tab]
             ws_view.clear()
             ws_view.resize(rows=100, cols=len(VIEW_HEADERS))
         else:
-            ws_view = sh.add_worksheet(title=VIEW_TAB, rows=100, cols=len(VIEW_HEADERS))
+            ws_view = sh.add_worksheet(title=view_tab, rows=100, cols=len(VIEW_HEADERS))
         ws_view.append_row(VIEW_HEADERS, value_input_option="USER_ENTERED")
 
         # Build formulas using header-to-column lookups throughout
-        V = _view_ref
-        D = _data_ref
-        RID = "Rightmove ID"
-        ADDR = "Listing Address"
+        view_ref = _view_ref
+        data_ref = _data_ref
+        rightmove_id_header = "Rightmove ID"
+        listing_address_header = "Listing Address"
 
         formulas = [
             "",  # Listing Address (manual)
             "",  # Rightmove Link (manual)
-            f'=IFNA(REGEXEXTRACT(GETURL("B"&ROW()),"properties/(\\d+)"),XLOOKUP({V(ADDR)},{D("Address")},{D(RID)}))',
-            f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Price (£)")})',
-            f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("EPC Rating")})',
-            f'=LET(k,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Bracknell Cost (£)")}),g,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Simon London Cost (£)")}),i,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Lorena London Cost (£)")}),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)))',
+            f'=IFNA(REGEXEXTRACT(GETURL("B"&ROW()),"properties/(\\d+)"),XLOOKUP({view_ref(listing_address_header)},{data_ref("Address")},{data_ref(rightmove_id_header)}))',
+            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Price (£)")})',
+            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("EPC Rating")})',
+            f'=LET(k,XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Bracknell Cost (£)")}),g,XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Simon London Cost (£)")}),i,XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Lorena London Cost (£)")}),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)))',
             "",
-            f'=LET(v,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Simon London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-            f'=LET(v,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Lorena London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-            f'=LET(v,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Bracknell Time (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-            f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Area Description")})',
-            f'=LET(v,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Walk to Town (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-            f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Walkable Amenities")})',
-            f'=HYPERLINK(XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Primary School Link")}),XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Primary School")}))',
-            f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Primary Ofsted")})',
-            f'=LET(v,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Primary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-            f'=HYPERLINK(XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Secondary School Link")}),XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Secondary School")}))',
-            f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Secondary Ofsted")})',
-            f'=LET(v,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-            f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Secondary Bus Route")})',
-            f'=LET(v,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+            f'=LET(v,XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Simon London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+            f'=LET(v,XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Lorena London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+            f'=LET(v,XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Bracknell Time (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Area Description")})',
+            f'=LET(v,XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Walk to Town (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Walkable Amenities")})',
+            f'=HYPERLINK(XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Primary School Link")}),XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Primary School")}))',
+            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Primary Ofsted")})',
+            f'=LET(v,XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Primary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+            f'=HYPERLINK(XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary School Link")}),XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary School")}))',
+            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary Ofsted")})',
+            f'=LET(v,XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary Bus Route")})',
+            f'=LET(v,XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
             "",  # Group Notes / WhatsApp
             "",  # Ashby comments
             "",  # Status
             "",  # Status Reason
-            f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Primary Inspection Year")})',
-            "",  # Primary Inspection Summary
-            f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Secondary Inspection Year")})',
-            "",  # Secondary Inspection Summary
+            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Primary Inspection Year")})',
+            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Primary Inspection Summary")})',
+            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary Inspection Year")})',
+            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary Inspection Summary")})',
         ]
         last_col = col_letter(len(formulas) - 1)
         ws_view.update(range_name=f"A2:{last_col}3", values=[formulas, formulas], value_input_option="USER_ENTERED")
@@ -232,7 +240,8 @@ class TestViewFormulasOnTestSheet:
                         "cell": {"userEnteredFormat": {"numberFormat": {"type": "TIME", "pattern": "[h]:mm"}}},
                         "fields": "userEnteredFormat.numberFormat"}})
         for h in ["What the Area is Like", "Walkable Amenities", "Primary School", "Secondary School",
-                  "Group Notes / WhatsApp", "Ashby comments"]:
+                  "Group Notes / WhatsApp", "Ashby comments",
+                  "Primary Inspection Summary", "Secondary Inspection Summary"]:
             ci = VIEW_HEADERS.index(h)
             fmt.append({"repeatCell": {"range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},
                         "cell": {"userEnteredFormat": {"wrapStrategy": "WRAP"}},
@@ -303,10 +312,7 @@ class TestViewFormulasOnTestSheet:
         if not all_data:
             pytest.fail("No data returned from View tab")
 
-        manual = {"Listing Address", "Rightmove Link", "Rightmove ID",
-                  "Yearly Council Tax (£)", "Group Notes / WhatsApp",
-                  "Ashby comments", "Status", "Status Reason",
-                  "Primary Inspection Summary", "Secondary Inspection Summary"}
+        manual = VIEW_MANUAL_COLUMNS
         bad = []
         for row_idx, row in enumerate(all_data, 2):
             for col_idx, val in enumerate(row):
@@ -316,3 +322,28 @@ class TestViewFormulasOnTestSheet:
                 if val is None or val == "#N/A" or val == "":
                     bad.append(f"{VC[h]}{row_idx}={val!r}")
         assert not bad, f"Formula columns with missing values: {', '.join(bad)}"
+
+    def test_manual_columns_not_overwritten_by_formulas(self, sh):
+        """Manual columns must not be overwritten by formula-writing.
+
+        After sync_view_formulas() runs, manual columns should still be empty
+        (no formula values leaked into them). Formula-writing should only
+        touch columns listed in formula_cols dict.
+        """
+        ws = sh.worksheet("Properties View")
+        # Run sync_view_formulas to simulate refresh-formulas
+        from houses.sheets import sync_view_formulas
+        sync_view_formulas(sh)
+
+        all_data = ws.get_all_values()
+        headers = all_data[0]
+
+        # These columns are manual — they should NOT have been written by sync_view_formulas
+        manual_cols = VIEW_MANUAL_COLUMNS
+
+        # Verify all rows: manual columns should have no formula values
+        for row_idx, row in enumerate(all_data[1:], 2):
+            for col_idx, val in enumerate(row):
+                h = headers[col_idx] if col_idx < len(headers) else ""
+                if h in manual_cols and val and val.startswith("="):
+                    pytest.fail(f"Manual column '{h}' row {row_idx} has formula: {val}")

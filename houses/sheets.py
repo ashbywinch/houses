@@ -55,6 +55,8 @@ COLUMN_HEADERS: list[str] = [
     "Approx Longitude (est)",     # AH (33)
     "Approx Station CRS",         # AI (34)
     "Approx Station Name",        # AJ (35)
+    "Primary Inspection Summary",  # AK (36)
+    "Secondary Inspection Summary", # AL (37)
 ]
 
 # Conditional formatting colors (RGB 0-1 floats for Google Sheets API)
@@ -96,6 +98,17 @@ VIEW_HEADERS: list[str] = [
     "Secondary Inspection Year",
     "Secondary Inspection Summary",
 ]
+
+# View tab columns that are manual (user-entered), never written by formulas
+VIEW_MANUAL_COLUMNS: frozenset[str] = frozenset({
+    "Listing Address",
+    "Rightmove Link",
+    "Yearly Council Tax (£)",
+    "Group Notes / WhatsApp",
+    "Ashby comments",
+    "Status",
+    "Status Reason",
+})
 
 _USER_COLUMNS = frozenset({
     "Rightmove URL", "Address", "Postcode", "Bedrooms", "Price (£)",
@@ -292,7 +305,7 @@ def _add_status_data_validation(fmt_requests: list, sid: int, header_lookup: dic
 def _add_color_rules(fmt_requests: list, sid: int, headers: list[str]) -> None:
     """Orchestrate conditional formatting rules and Status column validation."""
     header_lookup = {h.strip().lower(): i for i, h in enumerate(headers)}
-    col_letter_fn = lambda i: chr(65 + i) if i < 26 else chr(64 + i // 26) + chr(65 + i % 26)
+    col_letter_fn = col_letter
 
     _add_epc_rules(fmt_requests, sid, header_lookup, col_letter_fn)
     _add_commute_cost_rules(fmt_requests, sid, header_lookup, col_letter_fn)
@@ -315,39 +328,43 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
     ws = spreadsheet.worksheet("Properties View")
     data = ws.get_all_values()
     num_rows = len(data)
-    vh = {h.strip().lower(): i for i, h in enumerate(data[0])}
-    vl = lambda h: col_letter(vh[h])
+    view_header_idx = {h.strip().lower(): i for i, h in enumerate(data[0])}
+    def _view_col_letter(header_key: str) -> str:
+        return col_letter(view_header_idx[header_key])
 
-    KEY = "VALUE(INDEX(View_RightmoveID, ROW()))"
-    LINK_URL = 'GETURL("B"&ROW())'
-    NR = named_range_name
-    RID = NR("Rightmove ID")
+    lookup_key = "VALUE(INDEX(View_RightmoveID, ROW()))"
+    link_col = col_letter(view_header_idx.get("rightmove link", 1))
+    link_formula = f'GETURL("{link_col}"&ROW())'
+    named_range = named_range_name
+    rid_range = named_range("Rightmove ID")
 
     formula_cols = {
-        "rightmove id": f'=IFNA(REGEXEXTRACT({LINK_URL},"properties/(\\d+)"),XLOOKUP(INDEX(View_ListingAddress, ROW()),{NR("Address")},{RID}))',
-        "purchase cost (£)": f'=XLOOKUP({KEY},{RID},{NR("Price (£)")}    )',
-        "epc rating": f'=XLOOKUP({KEY},{RID},{NR("EPC Rating")}    )',
-        "yearly commute total (£)": f'=LET(k,XLOOKUP({KEY},{RID},{NR("Bracknell Cost (£)")}),g,XLOOKUP({KEY},{RID},{NR("Simon London Cost (£)")}),i,XLOOKUP({KEY},{RID},{NR("Lorena London Cost (£)")}),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)))',
-        "simon london": f'=LET(v,XLOOKUP({KEY},{RID},{NR("Simon London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-        "lorena london": f'=LET(v,XLOOKUP({KEY},{RID},{NR("Lorena London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-        "bracknell time": f'=LET(v,XLOOKUP({KEY},{RID},{NR("Bracknell Time (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-        "what the area is like": f'=XLOOKUP({KEY},{RID},{NR("Area Description")})',
-        "walk to town": f'=LET(v,XLOOKUP({KEY},{RID},{NR("Walk to Town (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-        "walkable amenities": f'=XLOOKUP({KEY},{RID},{NR("Walkable Amenities")})',
-        "primary school": f'=HYPERLINK(XLOOKUP({KEY},{RID},{NR("Primary School Link")}),XLOOKUP({KEY},{RID},{NR("Primary School")}))',
-        "primary ofsted": f'=XLOOKUP({KEY},{RID},{NR("Primary Ofsted")})',
-        "primary walk": f'=LET(v,XLOOKUP({KEY},{RID},{NR("Primary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-        "secondary school": f'=HYPERLINK(XLOOKUP({KEY},{RID},{NR("Secondary School Link")}),XLOOKUP({KEY},{RID},{NR("Secondary School")}))',
-        "secondary ofsted": f'=XLOOKUP({KEY},{RID},{NR("Secondary Ofsted")})',
-        "secondary walk": f'=LET(v,XLOOKUP({KEY},{RID},{NR("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-        "secondary bus route": f'=XLOOKUP({KEY},{RID},{NR("Secondary Bus Route")})',
-        "secondary bus (min)": f'=LET(v,XLOOKUP({KEY},{RID},{NR("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-        "primary inspection year": f'=XLOOKUP({KEY},{RID},{NR("Primary Inspection Year")})',
-        "secondary inspection year": f'=XLOOKUP({KEY},{RID},{NR("Secondary Inspection Year")})',
+        "rightmove id": f'=IFNA(REGEXEXTRACT({link_formula},"properties/(\\d+)"),XLOOKUP(INDEX(View_ListingAddress, ROW()),{named_range("Address")},{rid_range}))',
+        "purchase cost (£)": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Price (£)")}    )',
+        "epc rating": f'=XLOOKUP({lookup_key},{rid_range},{named_range("EPC Rating")}    )',
+        "yearly commute total (£)": f'=LET(k,XLOOKUP({lookup_key},{rid_range},{named_range("Bracknell Cost (£)")}),g,XLOOKUP({lookup_key},{rid_range},{named_range("Simon London Cost (£)")}),i,XLOOKUP({lookup_key},{rid_range},{named_range("Lorena London Cost (£)")}),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)))',
+        "simon london": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Simon London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+        "lorena london": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Lorena London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+        "bracknell time": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Bracknell Time (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+        "what the area is like": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Area Description")})',
+        "walk to town": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Walk to Town (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+        "walkable amenities": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Walkable Amenities")})',
+        "primary school": f'=HYPERLINK(XLOOKUP({lookup_key},{rid_range},{named_range("Primary School Link")}),XLOOKUP({lookup_key},{rid_range},{named_range("Primary School")}))',
+        "primary ofsted": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Primary Ofsted")})',
+        "primary walk": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Primary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+        "secondary school": f'=HYPERLINK(XLOOKUP({lookup_key},{rid_range},{named_range("Secondary School Link")}),XLOOKUP({lookup_key},{rid_range},{named_range("Secondary School")}))',
+        "secondary ofsted": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Ofsted")})',
+        "secondary walk": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+        "secondary bus route": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Bus Route")})',
+        "secondary bus (min)": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+        "primary inspection year": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Primary Inspection Year")})',
+        "secondary inspection year": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Inspection Year")})',
+        "primary inspection summary": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Primary Inspection Summary")})',
+        "secondary inspection summary": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Inspection Summary")})',
     }
     for header_key, formula in formula_cols.items():
-        if header_key in vh:
-            cl = vl(header_key)
+        if header_key in view_header_idx:
+            cl = _view_col_letter(header_key)
             if num_rows > 1:
                 ws.update(values=[[formula] for _ in range(num_rows - 1)],
                            range_name=f'{cl}2:{cl}{num_rows}',
@@ -391,6 +408,29 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
 
     # Extended: conditional formatting rules + Status data validation
     extra_requests: list = []
+
+    # Clear existing conditional formatting rules for the View tab
+    try:
+        sheet_data = spreadsheet.client.request(
+            "get",
+            f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet.id}",
+            params={"fields": "sheets(conditionalFormatRules,properties.sheetId)"}
+        )
+        parsed = json.loads(sheet_data.content)
+        for s in parsed.get("sheets", []):
+            if s["properties"]["sheetId"] == sid:
+                rule_count = len(s.get("conditionalFormatRules", []))
+                for _ in range(rule_count):
+                    extra_requests.append({
+                        "deleteConditionalFormatRule": {
+                            "sheetId": sid,
+                            "index": 0  # Always delete index 0, list shrinks
+                        }
+                    })
+                break
+    except Exception as exc:
+        logger.warning("Failed to clear existing conditional formatting rules: %s", exc)
+
     _add_color_rules(extra_requests, sid, headers)
     if extra_requests:
         spreadsheet.batch_update({"requests": extra_requests})

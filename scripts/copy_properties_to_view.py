@@ -20,7 +20,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from houses.sheets import col_letter  # noqa: E402
+from houses.sheets import _rightmove_id, col_letter  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
@@ -55,11 +55,6 @@ def _get_sheet_id() -> str:
 
 def _build_header_index(headers: list[str]) -> dict[str, int]:
     return {h.strip().lower(): i for i, h in enumerate(headers)}
-
-
-def _extract_rid(link: str) -> str | None:
-    m = re.search(r"properties/(\d+)", link)
-    return m.group(1) if m else None
 
 
 def _parse_status(raw: str) -> tuple[str, str]:
@@ -149,7 +144,7 @@ def main() -> None:
 
         link_col = props_cols["rightmove link"]
         link = row[link_col] if link_col < len(row) else ""
-        rid = _extract_rid(link)
+        rid = _rightmove_id(link)
         if not rid:
             skipped += 1
             continue
@@ -168,27 +163,27 @@ def main() -> None:
 
         updates = []
 
-        src_col_gn = props_cols.get("group notes / whatsapp comments")
-        if src_col_gn is not None and src_col_gn < len(row) and row[src_col_gn].strip():
+        comments_col = props_cols.get("group notes / whatsapp comments")
+        if comments_col is not None and comments_col < len(row) and row[comments_col].strip():
             dst_col = view_cols.get("group notes / whatsapp")
             if dst_col is not None:
                 cl = col_letter(dst_col)
                 updates.append(
-                    {"range": f"{cl}{view_row_num}", "values": [[row[src_col_gn]]]}
+                    {"range": f"{cl}{view_row_num}", "values": [[row[comments_col]]]}
                 )
 
-        src_col_ac = props_cols.get("ashby comments")
-        if src_col_ac is not None and src_col_ac < len(row) and row[src_col_ac].strip():
+        ashby_col = props_cols.get("ashby comments")
+        if ashby_col is not None and ashby_col < len(row) and row[ashby_col].strip():
             dst_col = view_cols.get("ashby comments")
             if dst_col is not None:
                 cl = col_letter(dst_col)
                 updates.append(
-                    {"range": f"{cl}{view_row_num}", "values": [[row[src_col_ac]]]}
+                    {"range": f"{cl}{view_row_num}", "values": [[row[ashby_col]]]}
                 )
 
-        src_col_st = props_cols.get("status")
-        if src_col_st is not None and src_col_st < len(row):
-            raw_status = row[src_col_st].strip() if row[src_col_st] else ""
+        status_col = props_cols.get("status")
+        if status_col is not None and status_col < len(row):
+            raw_status = row[status_col].strip() if row[status_col] else ""
             status_val, reason_val = _parse_status(raw_status)
 
             dst_status_col = view_cols.get("status")
