@@ -88,7 +88,7 @@ VIEW_HEADERS: list[str] = [
     "Secondary Walk",
     "Secondary Ofsted",
     "Secondary Inspection Year",
-    "Secondary Bus (min)",
+    "Secondary Bus",
     "Secondary Bus Route",
     "Group Notes / WhatsApp",
     "Ashby comments",
@@ -233,8 +233,8 @@ def _add_commute_time_rules(fmt_requests: list, sid: int, header_lookup: dict, c
 
 
 def _add_walk_time_rules(fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn):
-    """Walk to Town, Primary Walk, Secondary Walk, Secondary Bus (min): <15/15-30/>30."""
-    for hdr in ["walk to town", "primary walk", "secondary walk", "secondary bus (min)"]:
+    """Walk to Town, Primary Walk, Secondary Walk, Secondary Bus: <15/15-30/>30."""
+    for hdr in ["walk to town", "primary walk", "secondary walk", "secondary bus"]:
         _add_time_tiered(fmt_requests, sid, header_lookup, col_letter_fn, hdr, 0, 15, 0, 30)
 
 
@@ -353,7 +353,7 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
         "secondary ofsted": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Ofsted")})',
         "secondary walk": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
         "secondary bus route": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Bus Route")})',
-        "secondary bus (min)": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+        "secondary bus": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
         "primary inspection year": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Primary Inspection Year")})',
         "secondary inspection year": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Inspection Year")})',
 
@@ -370,14 +370,15 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
     headers = data[0]
     header_lookup = {h.strip().lower(): i for i, h in enumerate(headers)}
     fmt_requests = []
-    for h in ["simon london", "lorena london", "bracknell time", "walk to town", "primary walk", "secondary walk", "secondary bus (min)"]:
+    for h in ["simon london", "lorena london", "bracknell time", "walk to town", "primary walk", "secondary walk", "secondary bus"]:
         if h in header_lookup:
             ci = header_lookup[h]
             fmt_requests.append({"repeatCell": {"range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},
                                   "cell": {"userEnteredFormat": {"numberFormat": {"type": "TIME", "pattern": "[h]:mm"}}},
                                   "fields": "userEnteredFormat.numberFormat"}})
     for h in ["what the area is like", "walkable amenities", "primary school", "secondary school",
-              "group notes / whatsapp", "ashby comments"]:
+              "group notes / whatsapp", "ashby comments",
+              "primary inspection year", "secondary inspection year", "secondary bus"]:
         if h in header_lookup:
             ci = header_lookup[h]
             fmt_requests.append({"repeatCell": {"range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},
