@@ -41,6 +41,7 @@ quote-style = "double"
 markers = [
     "integration: tests that hit real external APIs (skip unless explicitly run)",
 ]
+addopts = ["-m", "not integration"]
 
 [dependency-groups]
 dev = [

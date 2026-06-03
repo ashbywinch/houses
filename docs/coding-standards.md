@@ -55,6 +55,9 @@ Keep modules flat in the `houses/` directory rather than nesting them in subdire
 - Don't silence errors with empty `except` blocks.
 - Don't provide default values where there is no good default (e.g., API keys should be configured, not defaulted to empty strings that silently skip enrichment).
 - When an external API call fails, log the warning and return `None` — the caller decides the graceful degradation strategy.
+- **A warning that still proceeds is wasted code.** If a condition is bad enough to warn about, it's bad enough to fail. The only exception is when the caller explicitly opted into the risk (e.g. `--obliterate`).
+- **Don't waste API credits.** Backfill scripts must only enrich columns that are empty. Running full enrichment on existing data when only a few columns need updating is a bug. The server should refuse to do this unless explicitly told to.
+- **Every API call should be necessary and justified.** If you're debugging, construct models directly instead of hitting real endpoints.
 
 ### Prefer Libraries Over Reinvention
 
