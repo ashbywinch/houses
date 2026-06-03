@@ -14,6 +14,18 @@ from houses.retry import retry_async
 
 logger = logging.getLogger(__name__)
 
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in km between two lat/lng points."""
+    import math
+
+    r = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
 ORS_WALKING_URL = "https://api.openrouteservice.org/v2/directions/foot-walking"
 ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 GOOGLE_MAPS_PLACES_URL = "https://places.googleapis.com/v1/places:searchNearby"
@@ -196,7 +208,7 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
                         GOOGLE_MAPS_PLACES_URL,
                         headers={
                             "X-Goog-Api-Key": settings.google_maps_api_key,
-                            "X-Goog-FieldMask": "places.displayName,places.types",
+                            "X-Goog-FieldMask": "places.displayName,places.types,places.location",
                             "Content-Type": "application/json",
                         },
                         json={
@@ -219,7 +231,7 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
 
             google_places = data.get("places", [])
             if google_places:
-                formatted = []
+                hits = []
                 for p in google_places:
                     p_types = set(p.get("types", []))
                     if p_types & {
@@ -232,10 +244,17 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
                     }:
                         continue
                     name = p.get("displayName", {}).get("text", "Unknown")
-                    formatted.append(name)
-                    if len(formatted) >= 3:
-                        break
-                places = " | ".join(formatted)
+                    location = p.get("location", {})
+                    place_lat = location.get("latitude")
+                    place_lng = location.get("longitude")
+                    if place_lat is not None and place_lng is not None:
+                        dist_km = _haversine_km(lat, lng, place_lat, place_lng)
+                        walk_min = round(dist_km / 5 * 60)  # 5 km/h walking speed
+                        hits.append((walk_min, f"{name} ({walk_min}m)"))
+                    else:
+                        hits.append((999, name))  # no location, put at end
+                hits.sort(key=lambda x: x[0])
+                places = " | ".join(name for _, name in hits[:5])
             if places:
                 return places
         except httpx.HTTPStatusError as exc:
@@ -268,16 +287,22 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
                 data = resp.json()
 
             elements = data.get("elements", [])
-            names = []
+            hits = []
             for e in elements:
                 tags = e.get("tags", {})
                 name = tags.get("name", "")
-                if name and name not in names:
-                    names.append(name)
-                if len(names) >= 3:
-                    break
-            if names:
-                places = " | ".join(names)
+                if not name:
+                    continue
+                e_lat = e.get("lat") or (e.get("center") or {}).get("lat")
+                e_lng = e.get("lon") or (e.get("center") or {}).get("lon")
+                if e_lat is not None and e_lng is not None:
+                    dist_km = _haversine_km(lat, lng, e_lat, e_lng)
+                    walk_min = round(dist_km / 5 * 60)
+                    hits.append((walk_min, f"{name} ({walk_min}m)"))
+                else:
+                    hits.append((999, name))
+            hits.sort(key=lambda x: x[0])
+            places = " | ".join(name for _, name in hits[:5])
         except Exception as e:
             logger.warning("Overpass fallback failed: %s: %s", type(e).__name__, e)
 
