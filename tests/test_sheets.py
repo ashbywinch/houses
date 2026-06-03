@@ -36,11 +36,14 @@ def test_row_values_with_full_enrichment():
     )
     row = _row_values(ep)
 
-    assert row[_col("Rightmove URL")] == "https://www.rightmove.co.uk/properties/123"
-    assert row[_col("Address")] == "High Street, Some Town, RG14 1AA"
-    assert row[_col("Postcode")] == "RG14 1AA"
-    assert row[_col("Bedrooms")] == "3"
-    assert row[_col("Price (£)")] == "650,000"
+    # User columns (A-G) are never written by the server
+    assert row[_col("Rightmove URL")] == ""
+    assert row[_col("Address")] == ""
+    assert row[_col("Postcode")] == ""
+    assert row[_col("Bedrooms")] == ""
+    assert row[_col("Price (£)")] == ""
+    # Enriched columns start here
+    assert row[_col("Rightmove ID")] == "123"
     assert row[_col("Simon London (min)")] == "22"
     assert row[_col("Simon London Cost (£)")] == ""
     assert row[_col("Lorena London (min)")] == "38"

@@ -72,6 +72,12 @@ def col_index(header: str) -> int:
     raise ValueError(f"Column '{header}' not found in COLUMN_HEADERS")
 
 
+# Index positions of user-owned columns (must never be written by the server)
+_USER_COL_INDICES = frozenset(
+    col_index(h) for h in _USER_COLUMNS
+)
+
+
 def col_letter(i: int) -> str:
     """Convert 0-based column index to Google Sheets column letter."""
     if i < 26:
@@ -211,14 +217,16 @@ async def write_enriched_row(property_: EnrichedProperty, tab: str = SHEET_TAB) 
 
         ensure_headers(worksheet)
         row = _row_values(property_)
+        _assert_no_user_column_writes(row)
 
-        # Find existing row by Rightmove ID (column B). Never append duplicates.
+        # Find existing row by Rightmove ID (column H, index 7). Never append duplicates.
         existing = worksheet.get_all_values()
         target_row = None
         rid = _rightmove_id(property_.url)
+        RID_COL = col_index("Rightmove ID")
         if rid:
             for i, r in enumerate(existing[1:], 2):
-                if len(r) > 1 and r[1].strip() == rid:
+                if len(r) > RID_COL and r[RID_COL].strip() == rid:
                     target_row = i
                     break
 
