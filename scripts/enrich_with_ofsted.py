@@ -127,30 +127,54 @@ def _determine_rating(row: dict) -> str:
 
 
 def _generate_summary(row: dict, rating: str) -> str:
-    """Generate a concise summary: rating + source + SEND flag if notable."""
+    """Generate a concise summary: rating, source, notable dimension highlights, SEND flags."""
     parts = []
 
-    # Source: OEIF > old S5 > ungraded
+    OEIF_DIMS = [
+        ("quality", "Latest OEIF quality of education"),
+        ("behaviour", "Latest OEIF behaviour and attitudes"),
+        ("personal dev", "Latest OEIF personal development"),
+        ("leadership", "Latest OEIF effectiveness of leadership and management"),
+    ]
+    S5_DIMS = [
+        ("Achievement", "Achievement"),
+        ("Curriculum", "Curriculum and teaching"),
+        ("Leadership", "Leadership and governance"),
+        ("Personal dev", "Personal development and wellbeing"),
+        ("Attendance", "Attendance and behaviour"),
+    ]
+
     oeif = (row.get("Latest OEIF overall effectiveness") or "").strip()
-    oeif_date = row.get("Inspection start date of latest OEIF graded inspection", "")
+
     if oeif and oeif != "NULL":
+        # OEIF framework: overall rating + year + notable dimension highlights
+        oeif_date = row.get("Inspection start date of latest OEIF graded inspection", "")
         year = _extract_year(oeif_date)
         source = f"OEIF {year}" if year else "OEIF"
-        parts.append(f"{rating} ({source})")
+
+        highlights = []
+        for label, col in OEIF_DIMS:
+            val = (row.get(col) or "").strip()
+            if val and val != "NULL" and val.upper() != oeif.upper():
+                mapped = OEIF_RATING_MAP.get(val, val)
+                highlights.append(f"{label}={mapped}")
+        suffix = f" [{', '.join(highlights)}]" if highlights else ""
+        parts.append(f"{rating} ({source}){suffix}")
     else:
-        s5_dims = [
-            (row.get(d) or "").strip()
-            for d in ["Achievement", "Curriculum and teaching", "Leadership and governance",
-                       "Personal development and wellbeing", "Attendance and behaviour"]
-        ]
-        s5_dims = [d for d in s5_dims if d and d != "NULL"]
+        # Old-format S5 inspection: dimension grades + SEND
+        s5_data = {label: (row.get(col) or "").strip()
+                   for label, col in S5_DIMS}
+        s5_data = {k: v for k, v in s5_data.items() if v and v != "NULL"}
+
         insp_date = row.get("Inspection start date", "")
-        if s5_dims:
+        if s5_data:
             year = _extract_year(insp_date)
             s5_type = (row.get("Inspection type") or "").strip()
             source = f"{s5_type} {year}" if year else (s5_type or "S5")
-            parts.append(f"{rating} ({source})")
+            highlights = [f"{k}={v}" for k, v in s5_data.items()]
+            parts.append(f"{rating} ({source}: {', '.join(highlights)})")
         else:
+            # Ungraded inspection: the outcome text is the best info we have
             ungraded = (row.get("Ungraded inspection overall outcome") or "").strip()
             ungraded_date = row.get("Date of latest ungraded inspection", "")
             if ungraded and ungraded != "NULL":
@@ -159,7 +183,7 @@ def _generate_summary(row: dict, rating: str) -> str:
                 label = f"{rating} " if rating else ""
                 parts.append(f"{label}({source}: {ungraded})")
 
-    # SEND: only mention if notably good (Strong/Exceptional) or bad (Needs attention/Urgent)
+    # SEND: mention if notably good (Strong/Exceptional) or bad (Needs attention/Urgent)
     inclusion = (row.get("Inclusion") or "").strip()
     if inclusion and inclusion != "NULL" and inclusion not in ("Expected standard", ""):
         send_label = {
