@@ -187,6 +187,7 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
         "secondary ofsted": f'=XLOOKUP({KEY},{RID},{NR("Secondary Ofsted")})',
         "secondary walk": f'=LET(v,XLOOKUP({KEY},{RID},{NR("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
         "secondary bus route": f'=XLOOKUP({KEY},{RID},{NR("Secondary Bus Route")})',
+        "secondary bus (min)": f'=LET(v,XLOOKUP({KEY},{RID},{NR("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
         "primary inspection year": f'=XLOOKUP({KEY},{RID},{NR("Primary Inspection Year")})',
         "secondary inspection year": f'=XLOOKUP({KEY},{RID},{NR("Secondary Inspection Year")})',
     }
@@ -202,7 +203,7 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
     headers = data[0]
     header_lookup = {h.strip().lower(): i for i, h in enumerate(headers)}
     fmt_requests = []
-    for h in ["simon london", "lorena london", "bracknell time", "walk to town", "primary walk", "secondary walk"]:
+    for h in ["simon london", "lorena london", "bracknell time", "walk to town", "primary walk", "secondary walk", "secondary bus (min)"]:
         if h in header_lookup:
             ci = header_lookup[h]
             fmt_requests.append({"repeatCell": {"range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},

@@ -200,11 +200,15 @@ class TestViewFormulasOnTestSheet:
             f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Secondary Ofsted")})',
             f'=LET(v,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
             f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Secondary Bus Route")})',
-            "", "", "",
+            f'=LET(v,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+            "",  # Group Notes / WhatsApp
+            "",  # Ashby comments
+            "",  # Status
+            "",  # Status Reason
             f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Primary Inspection Year")})',
-            "",
+            "",  # Primary Inspection Summary
             f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Secondary Inspection Year")})',
-            "",
+            "",  # Secondary Inspection Summary
         ]
         last_col = col_letter(len(formulas) - 1)
         ws_view.update(range_name=f"A2:{last_col}3", values=[formulas, formulas], value_input_option="USER_ENTERED")
@@ -301,7 +305,7 @@ class TestViewFormulasOnTestSheet:
 
         manual = {"Listing Address", "Rightmove Link", "Rightmove ID",
                   "Yearly Council Tax (£)", "Group Notes / WhatsApp",
-                  "Ashby comments", "Status",
+                  "Ashby comments", "Status", "Status Reason",
                   "Primary Inspection Summary", "Secondary Inspection Summary"}
         bad = []
         for row_idx, row in enumerate(all_data, 2):

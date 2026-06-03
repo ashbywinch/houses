@@ -79,11 +79,12 @@ def main():
         f'=XLOOKUP({K},{RID},{NR("Secondary Ofsted")}     )',                                             # R
         f'=LET(v,XLOOKUP({K},{RID},{NR("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',      # S
         f'=XLOOKUP({K},{RID},{NR("Secondary Bus Route")}  )',                                             # T
-        "", "", "",  # U V W: manual (Notes, Comments, Status)
-        f'=XLOOKUP({K},{RID},{NR("Primary Inspection Year")})',                                           # X
-        "",  # Y: Primary Inspection Summary (removed from Data)
-        f'=XLOOKUP({K},{RID},{NR("Secondary Inspection Year")})',                                          # Z
-        "",  # AA: Secondary Inspection Summary (removed from Data)
+        f'=LET(v,XLOOKUP({K},{RID},{NR("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',        # U
+        "", "", "", "",  # V W X Y: manual (Group Notes, Ashby comments, Status, Status Reason)
+        f'=XLOOKUP({K},{RID},{NR("Primary Inspection Year")})',                                           # Z
+        "",  # AA: Primary Inspection Summary (removed from Data)
+        f'=XLOOKUP({K},{RID},{NR("Secondary Inspection Year")})',                                          # AB
+        "",  # AC: Secondary Inspection Summary (removed from Data)
     ]
 
     last_col = col_letter(len(formulas) - 1)
