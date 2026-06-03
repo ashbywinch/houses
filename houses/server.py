@@ -19,10 +19,10 @@ from houses.enricher import (
     find_nearest_boys_primary,
     find_nearest_boys_secondary,
 )
+from houses.epc import lookup_epc
 from houses.models import CommuteBreakdown, EnrichedProperty, PetrolCost, PropertyPayload, TransitInfo
 from houses.rail_fares import fare_between, nearest_station
-from houses.sheets import col_index, get_client, write_enriched_row
-from houses.epc import lookup_epc
+from houses.sheets import col_index, write_enriched_row
 from houses.town_desc import generate_town_description
 from houses.walkability import _KNOWN_COUNTIES, enrich_walkability
 
