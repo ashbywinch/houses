@@ -17,7 +17,10 @@ class PropertyPayload(BaseModel):
     postcode: str = ""
     bedrooms: int | None = None
     price: float | None = None
-    tab: str = "AI_Data_Source (Bot)"
+    tab: str = "Properties Data"
+    actual_latitude: float | None = None
+    actual_longitude: float | None = None
+    actual_postcode: str = ""
 
 
 class TransitInfo(BaseModel):
@@ -26,6 +29,7 @@ class TransitInfo(BaseModel):
     destination_label: str
     destination_postcode: str
     duration_minutes: int | None = None
+    daily_cost_gbp: float | None = None
     mode: str = "transit"
 
 
@@ -38,9 +42,13 @@ class SchoolInfo(BaseModel):
     gender: str = "mixed"
     fee_paying: bool = False
     walking_time_minutes: int | None = None
+    bus_time_minutes: int | None = None
+    bus_route: str = ""
     urn: str = ""
     website: str = ""
     ofsted_rating: str = ""
+    inspection_year: str = ""
+    inspection_summary: str = ""
 
 
 class PetrolCost(BaseModel):
@@ -48,7 +56,26 @@ class PetrolCost(BaseModel):
 
     destination: str = "Bracknell Office (RG12 8YA)"
     round_trip_km: float | None = None
+    round_trip_minutes: int | None = None
     cost_gbp: float | None = None
+
+
+class CouncilTaxInfo(BaseModel):
+    """Council tax band, cost, and evidence source."""
+
+    band: str = ""
+    yearly_cost: float | None = None
+    evidence_url: str = ""
+
+
+class CommuteBreakdown(BaseModel):
+    """Individual daily costs plus yearly total."""
+
+    simon_daily_gbp: float | None = None
+    lorena_daily_gbp: float | None = None
+    bracknell_daily_gbp: float | None = None
+    yearly_total_gbp: float | None = None
+    formula_explanation: str = ""
 
 
 class EnrichedProperty(BaseModel):
@@ -70,3 +97,27 @@ class EnrichedProperty(BaseModel):
     # Schools
     primary_school: SchoolInfo | None = None
     secondary_school: SchoolInfo | None = None
+
+    town_description: str = ""
+    walk_to_town_minutes: int | None = None
+    walkable_amenities: str = ""
+    primary_ofsted: str = ""
+    secondary_ofsted: str = ""
+    primary_inspection_year: str = ""
+    primary_inspection_summary: str = ""
+    secondary_inspection_year: str = ""
+    secondary_inspection_summary: str = ""
+    epc_rating: str = ""
+
+    commute_breakdown: CommuteBreakdown | None = None
+
+    # User-provided overrides (from Actual Latitude/Longitude columns)
+    actual_latitude: float | None = None
+    actual_longitude: float | None = None
+    actual_postcode: str = ""
+
+    # Cached approximate values (from geocoding)
+    approx_latitude: float | None = None
+    approx_longitude: float | None = None
+    approx_station_crs: str = ""
+    approx_station_name: str = ""

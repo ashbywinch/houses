@@ -1,6 +1,15 @@
 """Tests for enrichment logic."""
 
-from houses.enricher import _OUTCODE_RE, FEE_PAYING_TYPES, _boys_eligible, _haversine_km
+import pytest
+
+from houses.enricher import (
+    _OUTCODE_RE,
+    FEE_PAYING_TYPES,
+    _boys_eligible,
+    _haversine_km,
+    compute_commute_breakdown,
+)
+from houses.models import PetrolCost, TransitInfo
 
 
 class TestOutcodeDetection:
@@ -58,6 +67,29 @@ class TestHaversine:
         d1 = _haversine_km(51.5, -0.13, 52.0, 0.0)
         d2 = _haversine_km(52.0, 0.0, 51.5, -0.13)
         assert abs(d1 - d2) < 0.001
+
+
+class TestCommuteBreakdown:
+    @pytest.mark.asyncio
+    async def test_yearly_formula_with_all_costs(self):
+        """46wk x (10 + 15 + 2*24) = 46 x 73 = 3358"""
+        simon = TransitInfo(destination_label="S", destination_postcode="SW1V 2QQ", daily_cost_gbp=15.0)
+        lorena = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", daily_cost_gbp=24.0)
+        petrol = PetrolCost(cost_gbp=10.0)
+        result = await compute_commute_breakdown(simon, lorena, petrol)
+        assert result.simon_daily_gbp == 15.0
+        assert result.lorena_daily_gbp == 24.0
+        assert result.bracknell_daily_gbp == 10.0
+        assert result.yearly_total_gbp == 3358.0
+        assert "46" in result.formula_explanation
+
+    @pytest.mark.asyncio
+    async def test_missing_costs_returns_none(self):
+        simon = TransitInfo(destination_label="S", destination_postcode="SW1V 2QQ", daily_cost_gbp=None)
+        lorena = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", daily_cost_gbp=24.0)
+        petrol = PetrolCost(cost_gbp=10.0)
+        result = await compute_commute_breakdown(simon, lorena, petrol)
+        assert result.yearly_total_gbp is None
 
 
 class TestFeePayingTypes:

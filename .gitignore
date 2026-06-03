@@ -52,6 +52,16 @@ service-account.json
 extract.zip
 data/edubaseallstatefunded*.csv
 data/edubaseallacademies*.csv
+data/edubaseall_full.csv
+data/ofsted_inspections.csv
+data/rail_fares.csv
+data/stations.csv
+
+# Playwright MCP browser snapshots
+.playwright-mcp/
+
+# Large generated data files
+/tmp/gias_*.zip
 
 # OpenCode
 .opencode/

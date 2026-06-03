@@ -41,7 +41,7 @@ class TestInjectProperty:
     }
 
     MAIDENHEAD_PAYLOAD = {
-        "url": "https://www.rightmove.co.uk/properties/173431283",
+        "url": "https://www.rightmove.co.uk/properties/999999991",
         "address": "Shoppenhangers Road, Maidenhead, SL6",
         "bedrooms": 5,
         "price": 775000,
@@ -78,6 +78,9 @@ class TestInjectProperty:
         assert "petrol" in data
         assert "primary_school" in data
         assert "secondary_school" in data
+        assert "town_description" in data
+        assert "commute_breakdown" in data
+        assert "epc_rating" in data
 
     def test_maidenhead_outcode_gets_full_enrichment(self):
         """Address with only outcode 'SL6' — server must use full street

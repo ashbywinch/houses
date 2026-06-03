@@ -1,48 +1,50 @@
-"""One-time setup: create AI_Data_Source (Bot) tab and setup Properties with XLOOKUP formulas.
+"""One-time setup: create Properties Data and Properties View tabs with XLOOKUP formulas.
+
+The canonical column header list lives in houses/sheets.py — this script imports it
+rather than duplicating it. See docs/column-reference.md for the full layout.
 
 Usage: uv run python scripts/setup_sheet.py
 """
 
 import json
 import os
+import sys
 
 import gspread
 from google.oauth2.service_account import Credentials
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from houses.sheets import COLUMN_HEADERS  # noqa: E402
+
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
-BOT_TAB = "AI_Data_Source (Bot)"
-HUMAN_TAB = "Properties"
+DATA_TAB = "Properties Data"
+VIEW_TAB = "Properties View"
 
-BOT_HEADERS = [
-    "Rightmove URL",
-    "Address",
-    "Postcode",
-    "Bedrooms",
-    "Price (£)",
-    "Simon Commute (min)",
-    "Lorenas Commute (min)",
-    "Bracknell Petrol (£)",
+# View tab headers — these stay manual/fixed and are NOT in COLUMN_HEADERS
+VIEW_HEADERS = [
+    "Listing Address",
+    "Rightmove Link",
+    "Purchase Cost (£)",
+    "EPC Rating",
+    "Yearly Commute Total (£)",
+    "Yearly Council Tax (£)",
+    "Simon London (min)",
+    "Lorena London (min)",
+    "Bracknell Time (min)",
+    "What the Area is Like",
+    "Walk to Town (min)",
+    "Walkable Amenities",
     "Primary School",
-    "Primary School Distance (km)",
+    "Primary Ofsted",
+    "Primary Walk (min)",
     "Secondary School",
-    "Secondary School Distance (km)",
-]
-
-HUMAN_HEADERS = [
-    "Property Name",
-    "Rightmove URL",
-    "Address",
-    "Postcode",
-    "Bedrooms",
-    "Price (£)",
-    "Simon Commute (min)",
-    "Lorenas Commute (min)",
-    "Bracknell Petrol (£)",
-    "Primary School",
-    "Secondary School",
+    "Secondary Ofsted",
+    "Secondary Walk (min)",
+    "Secondary Bus Route",
+    "Group Notes / WhatsApp",
+    "Ashby comments",
     "Status",
-    "Comments",
 ]
 
 
@@ -54,53 +56,62 @@ def main():
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(sheet_id)
 
-    # Create AI_Data_Source (Bot) tab
     existing = {w.title for w in sh.worksheets()}
-    if BOT_TAB not in existing:
-        ws_bot = sh.add_worksheet(title=BOT_TAB, rows=500, cols=12)
-        ws_bot.append_row(BOT_HEADERS, value_input_option="USER_ENTERED")
-        print(f"Created '{BOT_TAB}' tab")
+
+    if DATA_TAB not in existing:
+        ws_data = sh.add_worksheet(title=DATA_TAB, rows=500, cols=len(COLUMN_HEADERS))
+        ws_data.append_row(COLUMN_HEADERS, value_input_option="USER_ENTERED")
+        print(f"Created '{DATA_TAB}' tab with {len(COLUMN_HEADERS)} columns")
     else:
-        print(f"'{BOT_TAB}' tab already exists")
+        print(f"'{DATA_TAB}' tab already exists — leaving untouched")
 
-    # Setup Properties tab with XLOOKUP formulas
-    if HUMAN_TAB not in existing:
-        ws_human = sh.add_worksheet(title=HUMAN_TAB, rows=500, cols=12)
-        print(f"Created '{HUMAN_TAB}' tab")
+    if VIEW_TAB not in existing:
+        ws_view = sh.add_worksheet(title=VIEW_TAB, rows=500, cols=len(VIEW_HEADERS))
+        ws_view.append_row(VIEW_HEADERS, value_input_option="USER_ENTERED")
+        print(f"Created '{VIEW_TAB}' tab with {len(VIEW_HEADERS)} columns")
     else:
-        ws_human = sh.worksheet(HUMAN_TAB)
-        print(f"Updating existing '{HUMAN_TAB}' tab")
+        ws_view = sh.worksheet(VIEW_TAB)
+        print(f"Updating existing '{VIEW_TAB}' tab headers")
+        ws_view.update(
+            range_name=f"A1:{chr(64 + len(VIEW_HEADERS))}1",
+            values=[VIEW_HEADERS],
+            value_input_option="USER_ENTERED",
+        )
 
-    ws_human.update(
-        range_name="A1:M1",
-        values=[HUMAN_HEADERS],
-        value_input_option="USER_ENTERED",
-    )
-
-    # XLOOKUP formulas for row 2 (template)
-    # Column B has the Rightmove URL, which matches column A in AI_Data_Source
-    bot = f"'{BOT_TAB}'"
+    # Column B has the Rightmove URL, which matches column A in Properties Data
+    # Time columns (H, I, J, M, P, S, T) show fractional hours = minutes/60
+    # Manual columns (A, B, C, U, V, W) are left empty — user fills them in
+    # Key: Rightmove ID (View col $C2) matched against Data col I ($I:$I)
+    d = f"'{DATA_TAB}'"
     formulas = [
-        "",  # A: Property name (manual)
-        "",  # B: Rightmove URL (manual — paste link here)
-        f'=IFERROR(XLOOKUP($B2, {bot}!$A:$A, {bot}!$B:$B), "")',   # C: Address
-        f'=IFERROR(XLOOKUP($B2, {bot}!$A:$A, {bot}!$C:$C), "")',   # D: Postcode
-        f'=IFERROR(XLOOKUP($B2, {bot}!$A:$A, {bot}!$D:$D), "")',   # E: Bedrooms
-        f'=IFERROR(XLOOKUP($B2, {bot}!$A:$A, {bot}!$E:$E), "")',   # F: Price
-        f'=IFERROR(XLOOKUP($B2, {bot}!$A:$A, {bot}!$F:$F), "")',   # G: Simon
-        f'=IFERROR(XLOOKUP($B2, {bot}!$A:$A, {bot}!$G:$G), "")',   # H: Lorena
-        f'=IFERROR(XLOOKUP($B2, {bot}!$A:$A, {bot}!$H:$H), "")',   # I: Petrol
-        f'=IFERROR(XLOOKUP($B2, {bot}!$A:$A, {bot}!$I:$I), "")',   # J: Primary School
-        f'=IFERROR(XLOOKUP($B2, {bot}!$A:$A, {bot}!$K:$K), "")',   # K: Secondary School
-        "",  # L: Status (manual)
-        "",  # M: Comments (manual)
+        "", "", "",                                                                              # A B C: manual
+        f'=IFERROR(XLOOKUP($C2,{d}!$I:$I,{d}!$E:$E),"")',                                         # D: purchase cost (Data E)
+        f'=IFERROR(XLOOKUP($C2,{d}!$I:$I,{d}!$AG:$AG),"")',                                       # E: EPC (Data AG)
+        f'=IFERROR(LET(k,XLOOKUP($C2,{d}!$I:$I,{d}!$O:$O),g,XLOOKUP($C2,{d}!$I:$I,{d}!$K:$K),i,XLOOKUP($C2,{d}!$I:$I,{d}!$M:$M),IF(OR(k="",g="",i=""),"",46*(k+g+2*i))),"")',
+        "",                                                                                         # G: (council tax removed)
+        f'=IFERROR(LET(v,XLOOKUP($C2,{d}!$I:$I,{d}!$J:$J),IF(v="","",IF(v*1=0,"",v/1440))),"")',  # H: Simon (Data J)
+        f'=IFERROR(LET(v,XLOOKUP($C2,{d}!$I:$I,{d}!$L:$L),IF(v="","",IF(v*1=0,"",v/1440))),"")',  # I: Lorena (Data L)
+        f'=IFERROR(LET(v,XLOOKUP($C2,{d}!$I:$I,{d}!$N:$N),IF(v="","",IF(v*1=0,"",v/1440))),"")',  # J: Bracknell (Data N)
+        f'=IFERROR(XLOOKUP($C2,{d}!$I:$I,{d}!$AD:$AD),"")',                                       # K: area desc (Data AD)
+        f'=IFERROR(LET(v,XLOOKUP($C2,{d}!$I:$I,{d}!$AE:$AE),IF(v="","",IF(v*1=0,"",v/1440))),"")',# L: walk (Data AE)
+        f'=IFERROR(XLOOKUP($C2,{d}!$I:$I,{d}!$AF:$AF),"")',                                       # M: amenities (Data AF)
+        f'=IFERROR(HYPERLINK(XLOOKUP($C2,{d}!$I:$I,{d}!$S:$S),XLOOKUP($C2,{d}!$I:$I,{d}!$P:$P)),"")',  # N: primary (Data P,S)
+        f'=IFERROR(XLOOKUP($C2,{d}!$I:$I,{d}!$T:$T),"")',                                         # O: primary ofsted (Data T)
+        f'=IFERROR(LET(v,XLOOKUP($C2,{d}!$I:$I,{d}!$R:$R),IF(v="","",IF(v*1=0,"",v/1440))),"")',  # P: primary walk (Data R)
+        f'=IFERROR(HYPERLINK(XLOOKUP($C2,{d}!$I:$I,{d}!$Z:$Z),XLOOKUP($C2,{d}!$I:$I,{d}!$W:$W)),"")',  # Q: secondary (Data W,Z)
+        f'=IFERROR(XLOOKUP($C2,{d}!$I:$I,{d}!$AA:$AA),"")',                                       # R: sec ofsted (Data AA)
+        f'=IFERROR(LET(v,XLOOKUP($C2,{d}!$I:$I,{d}!$Y:$Y),IF(v="","",IF(v*1=0,"",v/1440))),"")',  # S: sec walk (Data Y)
+        f'=IFERROR(XLOOKUP($C2,{d}!$I:$I,{d}!$AI:$AI),"")',                                       # T: bus route (Data AI)
+        "", "", "",  # U V W: manual
     ]
-    ws_human.update(
-        range_name="A2:M2",
+    from houses.sheets import col_letter
+    last_col = col_letter(len(formulas) - 1)
+    ws_view.update(
+        range_name=f"A2:{last_col}2",
         values=[formulas],
         value_input_option="USER_ENTERED",
     )
-    print(f"Added XLOOKUP formulas to {HUMAN_TAB}!A2:M2")
+    print(f"Column count: Data={len(COLUMN_HEADERS)}, View={len(VIEW_HEADERS)}")
     print("Done!")
 
 

@@ -1,0 +1,72 @@
+import logging
+
+import httpx
+
+from houses.config import settings
+from houses.retry import retry_async
+
+logger = logging.getLogger(__name__)
+
+_town_cache: dict[str, str] = {}
+
+API_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+
+async def generate_town_description(town_name: str, postcode: str) -> str:
+    if not settings.llm_api_key:
+        logger.warning("llm_api_key not set — skipping town description")
+        return ""
+
+    key = town_name.strip().lower()
+    if key in _town_cache:
+        return _town_cache[key]
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            data = {
+                "model": settings.llm_model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You describe a UK neighbourhood for someone choosing where to buy a home."
+                            " Exactly ONE sentence — no more. Never list multiple areas."
+                            " Be specific and balanced: mention character and notable trade-offs"
+                            " (lively vs quiet, polished vs gritty, green vs urban, practical vs characterful)."
+                            " Differentiate it from other places. No marketing fluff."
+                            " Do NOT mention: prices, transport links, commute times, or schools (separate columns)."
+                            " Do not start by repeating the area name."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"{town_name}, {postcode}",
+                    },
+                    {
+                        "role": "user",
+                        "content": f"{town_name}, {postcode}.",
+                    },
+                ],
+                "max_tokens": settings.llm_max_tokens,
+                "temperature": settings.llm_temperature,
+            }
+            resp: object = await retry_async(
+                lambda: client.post(
+                    API_URL,
+                    json=data,
+                    headers={"Authorization": f"Bearer {settings.llm_api_key}"},
+                ),
+                max_retries=2,
+                base_delay=1.0,
+            )
+            assert isinstance(resp, httpx.Response)
+            resp.raise_for_status()
+            body = resp.json()
+            raw = body["choices"][0]["message"]["content"].strip()
+            # Take only first sentence as safety against multi-town leakage
+            description = raw.split(".")[0].strip() + "."
+            _town_cache[key] = description
+            return description
+    except Exception:
+        logger.warning("Failed to generate town description for %s", town_name, exc_info=True)
+        return ""

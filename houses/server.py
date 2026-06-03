@@ -3,19 +3,28 @@
 import logging
 import re
 from contextlib import asynccontextmanager
+from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 
+from houses.config import settings
 from houses.enricher import (
+    _geocode,
+    _geocode_address,
+    compute_commute_breakdown,
     compute_lorena_commute,
     compute_petrol_cost,
     compute_simon_commute,
     find_nearest_boys_primary,
     find_nearest_boys_secondary,
 )
-from houses.models import EnrichedProperty, PropertyPayload
+from houses.models import CommuteBreakdown, EnrichedProperty, PetrolCost, PropertyPayload, TransitInfo
+from houses.rail_fares import fare_between, nearest_station
 from houses.sheets import write_enriched_row
+from houses.epc import lookup_epc
+from houses.town_desc import generate_town_description
+from houses.walkability import _KNOWN_COUNTIES, enrich_walkability
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +83,11 @@ app = FastAPI(
 
 
 @app.post("/inject-property")
-async def inject_property(payload: PropertyPayload) -> JSONResponse:
+async def inject_property(
+    payload: PropertyPayload,
+    dry_run: bool = False,
+    fields: list[str] | None = Query(default=None),
+) -> JSONResponse:
     if not payload.url.startswith("https://www.rightmove.co.uk/"):
         raise HTTPException(status_code=400, detail="URL must be a Rightmove listing")
 
@@ -86,20 +99,112 @@ async def inject_property(payload: PropertyPayload) -> JSONResponse:
     lookup = payload.address if _is_outcode(postcode) else postcode
 
     logger.info(
-        "Processing: %s | address=%s | postcode=%s | lookup=%s | beds=%s | price=%s",
+        "Processing: %s | address=%s | postcode=%s | lookup=%s | beds=%s | price=%s | fields=%s",
         payload.url,
         payload.address,
         postcode,
         lookup,
         payload.bedrooms,
         payload.price,
+        fields or "all",
     )
 
-    simon = await compute_simon_commute(lookup)
-    lorena = await compute_lorena_commute(lookup)
-    petrol = await compute_petrol_cost(lookup)
-    primary = await find_nearest_boys_primary(postcode, payload.address)
-    secondary = await find_nearest_boys_secondary(postcode, payload.address)
+    # Track which enrichments completed (for logging/debug)
+    enabled = set(fields) if fields else None
+
+    simon = TransitInfo(destination_label="Simon (London)", destination_postcode=postcode)
+    lorena = TransitInfo(destination_label="Lorena (London)", destination_postcode=postcode)
+    petrol = PetrolCost()
+    primary = None
+    secondary = None
+    town_desc = ""
+    walk_data: dict[str, Any] = {"walk_to_town_minutes": None, "amenities": ""}
+    epc = ""
+    breakdown = CommuteBreakdown()
+    approx_lat = None
+    approx_lng = None
+    station_crs = ""
+    station_name = ""
+
+    # Transit — TfL + NR fallback
+    if enabled is None or enabled & {"transit"}:
+        simon = await compute_simon_commute(lookup)
+        lorena = await compute_lorena_commute(lookup)
+
+    # Petrol — ORS driving-car
+    if enabled is None or enabled & {"petrol"}:
+        petrol = await compute_petrol_cost(postcode)
+
+    # Schools — GIAS lookup + bus routes
+    if enabled is None or enabled & {"schools"}:
+        primary = await find_nearest_boys_primary(postcode, payload.address)
+        secondary = await find_nearest_boys_secondary(postcode, payload.address)
+
+    # Walkability — needs coords, geocode the address first
+    if enabled is None or enabled & {"walk"}:
+        coords = await _geocode_address(lookup)
+        if coords is None:
+            coords = await _geocode(postcode)
+        walk_data = (
+            await enrich_walkability(coords[0], coords[1], payload.address)
+            if coords
+            else {"walk_to_town_minutes": None, "amenities": ""}
+        )
+
+    # Town description — LLM
+    if enabled is None or enabled & {"town"}:
+        town_name = ""
+        if payload.address:
+            parts = [p.strip() for p in payload.address.split(",")]
+            outcode_re = re.compile(r"^[A-Z]{1,2}[0-9][A-Z0-9]?$")
+            postcode_re = re.compile(r"^[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}$", re.IGNORECASE)
+            candidates = [p for p in parts if p and not postcode_re.match(p) and not outcode_re.match(p)]
+            non_county = [p for p in candidates if p.lower().strip() not in _KNOWN_COUNTIES]
+            town_name = non_county[-1] if non_county else (candidates[-1] if candidates else "")
+        town_desc = await generate_town_description(town_name, postcode)
+
+    # NR rail fare fallback for missing TfL fares (only if transit ran)
+    if (enabled is None or enabled & {"transit"}) and (simon.daily_cost_gbp is None or lorena.daily_cost_gbp is None):
+        tube_single = 2.80
+        fare_coords = await _geocode(postcode)
+        if fare_coords:
+            station = nearest_station(fare_coords[0], fare_coords[1])
+            if station:
+                if simon.daily_cost_gbp is None:
+                    f = fare_between(station["crs"], settings.simon_station_crs)
+                    if f is not None:
+                        simon.daily_cost_gbp = round((f + tube_single) * 2, 2)
+                if lorena.daily_cost_gbp is None:
+                    f = fare_between(station["crs"], settings.lorena_station_crs)
+                    if f is not None:
+                        lorena.daily_cost_gbp = round((f + tube_single) * 2, 2)
+
+    if (enabled is None or enabled & {"transit"}) and (enabled is None or enabled & {"petrol"}):
+        breakdown = await compute_commute_breakdown(simon, lorena, petrol)
+
+    # EPC
+    if enabled is None or enabled & {"epc"}:
+        epc = await lookup_epc(postcode) if not _is_outcode(postcode) else ""
+
+    # Geocode for approx cache fields
+    if enabled is None or enabled & {"geo"}:
+        actual_lat = payload.actual_latitude
+        actual_lng = payload.actual_longitude
+        effective_postcode = payload.actual_postcode or postcode
+
+        if actual_lat is not None and actual_lng is not None:
+            approx_lat, approx_lng = actual_lat, actual_lng
+        else:
+            coords = await _geocode(effective_postcode)
+            approx_lat, approx_lng = coords if coords else (None, None)
+
+        station_crs = ""
+        station_name = ""
+        if approx_lat is not None and approx_lng is not None:
+            station = nearest_station(approx_lat, approx_lng)
+            if station:
+                station_crs = station["crs"]
+                station_name = station["name"]
 
     enriched = EnrichedProperty(
         url=payload.url,
@@ -110,21 +215,44 @@ async def inject_property(payload: PropertyPayload) -> JSONResponse:
         simon_commute=simon,
         lorena_commute=lorena,
         petrol=petrol,
+        commute_breakdown=breakdown,
         primary_school=primary,
         secondary_school=secondary,
+        town_description=town_desc,
+        walk_to_town_minutes=walk_data.get("walk_to_town_minutes"),
+        walkable_amenities=walk_data.get("amenities", ""),
+        primary_ofsted=primary.ofsted_rating if primary else "",
+        secondary_ofsted=secondary.ofsted_rating if secondary else "",
+        primary_inspection_year=primary.inspection_year if primary else "",
+        primary_inspection_summary=primary.inspection_summary if primary else "",
+        secondary_inspection_year=secondary.inspection_year if secondary else "",
+        secondary_inspection_summary=secondary.inspection_summary if secondary else "",
+        epc_rating=epc,
+        approx_latitude=approx_lat,
+        approx_longitude=approx_lng,
+        approx_station_crs=station_crs,
+        approx_station_name=station_name,
     )
 
-    row_url = await write_enriched_row(enriched, payload.tab)
+    row_url = None
+    if not dry_run:
+        row_url = await write_enriched_row(enriched, payload.tab)
+
+    dump = enriched.model_dump(mode="json")
+
+    # dry_run skips sheet write — returns data with 200
+    if dry_run:
+        return JSONResponse(content={"status": "ok", "data": dump}, status_code=200)
 
     if row_url:
         logger.info("Written to sheet: %s", row_url)
         return JSONResponse(
-            content={"status": "ok", "row_url": row_url},
+            content={"status": "ok", "row_url": row_url, "data": dump},
             status_code=201,
         )
 
     return JSONResponse(
-        content={"status": "ok", "note": "Sheets not configured", "data": enriched.model_dump(mode="json")},
+        content={"status": "ok", "note": "Sheets not configured", "data": dump},
         status_code=200,
     )
 
