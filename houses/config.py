@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     port: int = 8080
     reload: bool = True
 
-    sheet_id: str = ""
+    sheet_id: str = "1CUWQfy5KnyKko2L-H7whQbOVYL_Uzr_5JSHO6HpH_2s"
 
     simon_postcode: str = "SW1V 2QQ"
     lorena_postcode: str = "EC3A 7LP"
@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.7
     llm_max_tokens: int = 150
     epc_bearer_token: str = Field(default="", alias="EPC_BEARER_TOKEN")
+    
+    test_sheet_id: str = "1I0LSMRRA2hzLdS1Jfjht8Av908a4Ttf99Ly0p0lnseA"
 
     petrol_mpg: float = 45.0
     petrol_price_per_litre: float = 1.45
