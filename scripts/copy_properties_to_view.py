@@ -156,7 +156,8 @@ def main() -> None:
 
         view_row_num = None
         for i, vrow in enumerate(view_data[1:], 2):
-            if len(vrow) > 2 and vrow[2].strip() == rid:
+            rid_col = view_cols.get("rightmove id")
+            if rid_col is not None and len(vrow) > rid_col and vrow[rid_col].strip() == rid:
                 view_row_num = i
                 break
 

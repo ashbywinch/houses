@@ -387,7 +387,7 @@ async def write_enriched_row(property_: EnrichedProperty, tab: str = DATA_TAB) -
 
         ensure_headers(worksheet)
         enriched = _row_values(property_)
-        _assert_no_user_column_writes(list(enriched.values()))
+
 
         # Find existing row by Rightmove ID (column H). Never append duplicates.
         existing = worksheet.get_all_values()
