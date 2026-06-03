@@ -256,7 +256,7 @@ def main():
             if col_idx >= len(new_row):
                 continue
             old_val = row[col_idx] if col_idx < len(row) else ""
-            new_val = new_row[col_idx]
+            new_val = new_row.get(headers[col_idx] if col_idx < len(headers) else "", "")
             if old_val != new_val:
                 cells.append({
                     "range": f"{DATA_TAB}!{col_letter(col_idx)}{row_idx}",

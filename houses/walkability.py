@@ -77,7 +77,7 @@ def _extract_town(address: str) -> str:
 
 # Suffixes to strip from town names before geocoding, e.g. "Maidenhead Station Area" -> "Maidenhead"
 _TOWN_SUFFIXES = re.compile(
-    r"\s+(Station Area|Station|Area|Village|Town Centre|Centre|Villlage|Park|Business Park)$",
+    r"\s+(Station Area|Station|Area|Village|Town Centre|Centre|Villlage|Park|Business Park|Bottom)$",
     re.IGNORECASE,
 )
 
@@ -249,7 +249,7 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
                     place_lng = location.get("longitude")
                     if place_lat is not None and place_lng is not None:
                         dist_km = _haversine_km(lat, lng, place_lat, place_lng)
-                        walk_min = round(dist_km / 5 * 60)  # 5 km/h walking speed
+                        walk_min = max(1, round(dist_km / 5 * 60))  # 5 km/h walking speed
                         hits.append((walk_min, f"{name} ({walk_min}m)"))
                     else:
                         hits.append((999, name))  # no location, put at end
@@ -297,7 +297,7 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
                 e_lng = e.get("lon") or (e.get("center") or {}).get("lon")
                 if e_lat is not None and e_lng is not None:
                     dist_km = _haversine_km(lat, lng, e_lat, e_lng)
-                    walk_min = round(dist_km / 5 * 60)
+                    walk_min = max(1, round(dist_km / 5 * 60))
                     hits.append((walk_min, f"{name} ({walk_min}m)"))
                 else:
                     hits.append((999, name))
