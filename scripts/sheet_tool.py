@@ -108,22 +108,35 @@ def cmd_move(header: str, after: str | None):
     print(f"Moved '{header}' to position {dst_idx}")
 
 
-def cmd_add(header: str):
+def cmd_add(header: str, after: str | None = None):
     sh, ws = _get_sheet()
     sheet_id = ws._properties["sheetId"]
-    col_count = ws.col_count
+    headers = ws.get_all_values()[0]
+
+    if after:
+        dst_idx = None
+        for i, h in enumerate(headers):
+            if h.strip().lower() == after.strip().lower():
+                dst_idx = i + 1
+                break
+        if dst_idx is None:
+            print(f"Column '{after}' not found in sheet")
+            sys.exit(1)
+    else:
+        dst_idx = len(headers)
 
     body = {
         "requests": [{
             "insertDimension": {
                 "range": {"sheetId": sheet_id, "dimension": "COLUMNS",
-                          "startIndex": col_count, "endIndex": col_count + 1},
+                          "startIndex": dst_idx, "endIndex": dst_idx + 1},
             }
         }]
     }
     sh.batch_update(body)
-    ws.update_acell(f"{col_letter(col_count)}1", header)
-    print(f"Added column '{header}' at position {col_count}")
+    cl = col_letter(dst_idx)
+    ws.update_acell(f"{cl}1", header)
+    print(f"Added column '{header}' at position {dst_idx} ({cl})")
 
 
 def _find_column(ws, header: str) -> int | None:
@@ -312,9 +325,13 @@ def main():
         cmd_move(header, after)
     elif cmd == "add":
         if len(sys.argv) < 3:
-            print("Usage: sheet_tool.py add <header>")
+            print("Usage: sheet_tool.py add <header> [--after <header>]")
             return
-        cmd_add(sys.argv[2])
+        header = sys.argv[2]
+        after = None
+        if "--after" in sys.argv:
+            after = sys.argv[sys.argv.index("--after") + 1]
+        cmd_add(header, after)
     elif cmd == "delete" or cmd == "delete-column":
         if len(sys.argv) < 3:
             print("Usage: sheet_tool.py delete <header> [--tab <name>]")
