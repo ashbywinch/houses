@@ -1,5 +1,8 @@
 """One-time setup: create Properties Data and Properties View tabs with XLOOKUP formulas.
 
+View tab formulas use Google Sheets named ranges, so they survive column
+insertions and reorders in the Data tab.
+
 The canonical column header list lives in houses/sheets.py — this script imports it
 rather than duplicating it. See docs/column-reference.md for the full layout.
 
@@ -14,17 +17,19 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from houses.sheets import COLUMN_HEADERS  # noqa: E402
+from houses.sheets import COLUMN_HEADERS, col_letter, ensure_named_ranges, named_range_name  # noqa: E402
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 DATA_TAB = "Properties Data"
 VIEW_TAB = "Properties View"
 
-# View tab headers — these stay manual/fixed and are NOT in COLUMN_HEADERS
+# View tab headers are only used when CREATING the tab for the first time.
+# Existing tabs keep their current headers — never overwrite them.
 VIEW_HEADERS = [
     "Listing Address",
     "Rightmove Link",
+    "Rightmove ID",
     "Purchase Cost (£)",
     "EPC Rating",
     "Yearly Commute Total (£)",
@@ -45,6 +50,10 @@ VIEW_HEADERS = [
     "Group Notes / WhatsApp",
     "Ashby comments",
     "Status",
+    "Primary Inspection Year",
+    "Primary Inspection Summary",
+    "Secondary Inspection Year",
+    "Secondary Inspection Summary",
 ]
 
 
@@ -71,47 +80,51 @@ def main():
         print(f"Created '{VIEW_TAB}' tab with {len(VIEW_HEADERS)} columns")
     else:
         ws_view = sh.worksheet(VIEW_TAB)
-        print(f"Updating existing '{VIEW_TAB}' tab headers")
-        ws_view.update(
-            range_name=f"A1:{chr(64 + len(VIEW_HEADERS))}1",
-            values=[VIEW_HEADERS],
-            value_input_option="USER_ENTERED",
-        )
+        print(f"'{VIEW_TAB}' tab already exists — leaving headers untouched")
 
-    # Column B has the Rightmove URL, which matches column A in Properties Data
-    # Time columns (H, I, J, M, P, S, T) show fractional hours = minutes/60
-    # Manual columns (A, B, C, U, V, W) are left empty — user fills them in
-    # Key: Rightmove ID (View col $C2) matched against Data col I ($I:$I)
-    d = f"'{DATA_TAB}'"
+    # Build named range references dynamically from COLUMN_HEADERS
+    ensure_named_ranges(sh)
+
+    K = f"VALUE(INDEX(View_RightmoveID, ROW()))"
+    L = "INDEX(View_RightmoveLink, ROW())"
+    NR = named_range_name
+    RID = NR("Rightmove ID")
+
     formulas = [
-        "", "", "",                                                                              # A B C: manual
-        f'=IFERROR(XLOOKUP($C2,{d}!$I:$I,{d}!$E:$E),"")',                                         # D: purchase cost (Data E)
-        f'=IFERROR(XLOOKUP($C2,{d}!$I:$I,{d}!$AG:$AG),"")',                                       # E: EPC (Data AG)
-        f'=IFERROR(LET(k,XLOOKUP($C2,{d}!$I:$I,{d}!$O:$O),g,XLOOKUP($C2,{d}!$I:$I,{d}!$K:$K),i,XLOOKUP($C2,{d}!$I:$I,{d}!$M:$M),IF(OR(k="",g="",i=""),"",46*(k+g+2*i))),"")',
-        "",                                                                                         # G: (council tax removed)
-        f'=IFERROR(LET(v,XLOOKUP($C2,{d}!$I:$I,{d}!$J:$J),IF(v="","",IF(v*1=0,"",v/1440))),"")',  # H: Simon (Data J)
-        f'=IFERROR(LET(v,XLOOKUP($C2,{d}!$I:$I,{d}!$L:$L),IF(v="","",IF(v*1=0,"",v/1440))),"")',  # I: Lorena (Data L)
-        f'=IFERROR(LET(v,XLOOKUP($C2,{d}!$I:$I,{d}!$N:$N),IF(v="","",IF(v*1=0,"",v/1440))),"")',  # J: Bracknell (Data N)
-        f'=IFERROR(XLOOKUP($C2,{d}!$I:$I,{d}!$AD:$AD),"")',                                       # K: area desc (Data AD)
-        f'=IFERROR(LET(v,XLOOKUP($C2,{d}!$I:$I,{d}!$AE:$AE),IF(v="","",IF(v*1=0,"",v/1440))),"")',# L: walk (Data AE)
-        f'=IFERROR(XLOOKUP($C2,{d}!$I:$I,{d}!$AF:$AF),"")',                                       # M: amenities (Data AF)
-        f'=IFERROR(HYPERLINK(XLOOKUP($C2,{d}!$I:$I,{d}!$S:$S),XLOOKUP($C2,{d}!$I:$I,{d}!$P:$P)),"")',  # N: primary (Data P,S)
-        f'=IFERROR(XLOOKUP($C2,{d}!$I:$I,{d}!$T:$T),"")',                                         # O: primary ofsted (Data T)
-        f'=IFERROR(LET(v,XLOOKUP($C2,{d}!$I:$I,{d}!$R:$R),IF(v="","",IF(v*1=0,"",v/1440))),"")',  # P: primary walk (Data R)
-        f'=IFERROR(HYPERLINK(XLOOKUP($C2,{d}!$I:$I,{d}!$Z:$Z),XLOOKUP($C2,{d}!$I:$I,{d}!$W:$W)),"")',  # Q: secondary (Data W,Z)
-        f'=IFERROR(XLOOKUP($C2,{d}!$I:$I,{d}!$AA:$AA),"")',                                       # R: sec ofsted (Data AA)
-        f'=IFERROR(LET(v,XLOOKUP($C2,{d}!$I:$I,{d}!$Y:$Y),IF(v="","",IF(v*1=0,"",v/1440))),"")',  # S: sec walk (Data Y)
-        f'=IFERROR(XLOOKUP($C2,{d}!$I:$I,{d}!$AI:$AI),"")',                                       # T: bus route (Data AI)
-        "", "", "",  # U V W: manual
+        "",  # A: Listing Address (manual)
+        "",  # B: Rightmove Link (manual)
+        f'=REGEXEXTRACT({L},"properties/(\\d+)")',                                                     # C: ID from URL
+        f'=XLOOKUP({K},{RID},{NR("Price (£)")}    )',                                                   # D
+        f'=XLOOKUP({K},{RID},{NR("EPC Rating")}    )',                                                  # E
+        f'=LET(k,XLOOKUP({K},{RID},{NR("Bracknell Cost (£)")}),g,XLOOKUP({K},{RID},{NR("Simon London Cost (£)")}),i,XLOOKUP({K},{RID},{NR("Lorena London Cost (£)")}),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)))',  # F
+        "",                                                                                               # G
+        f'=LET(v,XLOOKUP({K},{RID},{NR("Simon London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',        # H
+        f'=LET(v,XLOOKUP({K},{RID},{NR("Lorena London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',       # I
+        f'=LET(v,XLOOKUP({K},{RID},{NR("Bracknell Time (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',      # J
+        f'=XLOOKUP({K},{RID},{NR("Area Description")}     )',                                             # K
+        f'=LET(v,XLOOKUP({K},{RID},{NR("Walk to Town (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',        # L
+        f'=XLOOKUP({K},{RID},{NR("Walkable Amenities")}   )',                                             # M
+        f'=HYPERLINK(XLOOKUP({K},{RID},{NR("Primary School Link")}),XLOOKUP({K},{RID},{NR("Primary School")}))',  # N
+        f'=XLOOKUP({K},{RID},{NR("Primary Ofsted")}       )',                                             # O
+        f'=LET(v,XLOOKUP({K},{RID},{NR("Primary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',        # P
+        f'=HYPERLINK(XLOOKUP({K},{RID},{NR("Secondary School Link")}),XLOOKUP({K},{RID},{NR("Secondary School")}))',  # Q
+        f'=XLOOKUP({K},{RID},{NR("Secondary Ofsted")}     )',                                             # R
+        f'=LET(v,XLOOKUP({K},{RID},{NR("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',      # S
+        f'=XLOOKUP({K},{RID},{NR("Secondary Bus Route")}  )',                                             # T
+        "", "", "",  # U V W: manual (Notes, Comments, Status)
+        f'=XLOOKUP({K},{RID},{NR("Primary Inspection Year")})',                                           # X
+        "",  # Y: Primary Inspection Summary (removed from Data)
+        f'=XLOOKUP({K},{RID},{NR("Secondary Inspection Year")})',                                          # Z
+        "",  # AA: Secondary Inspection Summary (removed from Data)
     ]
-    from houses.sheets import col_letter
+
     last_col = col_letter(len(formulas) - 1)
     ws_view.update(
         range_name=f"A2:{last_col}2",
         values=[formulas],
         value_input_option="USER_ENTERED",
     )
-    print(f"Column count: Data={len(COLUMN_HEADERS)}, View={len(VIEW_HEADERS)}")
+    print(f"Column count: Data={len(COLUMN_HEADERS)}, View={len(formulas)}")
     print("Done!")
 
 

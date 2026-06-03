@@ -20,7 +20,6 @@ Manual columns (Rightmove URL, Bedrooms, Actual Lat/Lng/Postcode) are preserved.
 
 import json
 import os
-import re
 import sys
 
 import gspread
@@ -30,7 +29,7 @@ from google.oauth2.service_account import Credentials
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from houses.config import settings  # noqa: E402
 from houses.server import app  # noqa: E402
-from houses.sheets import col_index, col_letter, COLUMN_HEADERS  # noqa: E402
+from houses.sheets import COLUMN_HEADERS, col_index, col_letter  # noqa: E402
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 SHEET_ID = os.environ.get("HOUSES_SHEET_ID", settings.sheet_id)
@@ -98,14 +97,12 @@ _COLUMN_FIELDS: dict[int, str] = {
     col_index("Primary School Link"): "schools",
     col_index("Primary Ofsted"): "schools",
     col_index("Primary Inspection Year"): "schools",
-    col_index("Primary Inspection Summary"): "schools",
     col_index("Secondary School"): "schools",
     col_index("Secondary Distance (km)"): "schools",
     col_index("Secondary Walk (min)"): "schools",
     col_index("Secondary School Link"): "schools",
     col_index("Secondary Ofsted"): "schools",
     col_index("Secondary Inspection Year"): "schools",
-    col_index("Secondary Inspection Summary"): "schools",
     col_index("Secondary Bus (min)"): "schools",
     col_index("Secondary Bus Route"): "schools",
     col_index("Walk to Town (min)"): "walk",
@@ -247,8 +244,8 @@ def main():
             continue
 
         # Build new row from server response
-        from houses.sheets import _row_values
         from houses.models import EnrichedProperty
+        from houses.sheets import _row_values
 
         new_row = _row_values(EnrichedProperty(**enriched))
 

@@ -16,6 +16,13 @@ Usage:
     # Show cell-level diff between two tabs for a given Rightmove ID
     uv run python scripts/sheet_tool.py diff "88375569" --tab "Properties Data" --other "Properties"
 
+    # Delete a column by header name (safe: matches header text, not fragile index)
+    uv run python scripts/sheet_tool.py delete "Obsolete Column"
+    uv run python scripts/sheet_tool.py delete "Actual Postcode" --tab "Properties Data"
+
+    # Delete a tab (cleans up named ranges first to avoid orphans)
+    uv run python scripts/sheet_tool.py delete-tab "Properties View"
+
     # Update View tab formulas after column shifts
     uv run python scripts/sheet_tool.py refresh-formulas
 """
@@ -24,16 +31,14 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
-from typing import Any
 
 import gspread
 from google.oauth2.service_account import Credentials
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from houses.config import settings  # noqa: E402
-from houses.sheets import col_letter, col_index, COLUMN_HEADERS  # noqa: E402
+from houses.sheets import COLUMN_HEADERS, col_letter, ensure_named_ranges, named_range_name  # noqa: E402
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 DATA_TAB = "Properties Data"
@@ -121,6 +126,79 @@ def cmd_add(header: str):
     print(f"Added column '{header}' at position {col_count}")
 
 
+def _find_column(ws, header: str) -> int | None:
+    """Return 0-based column index matching header name (case-insensitive), or None."""
+    data = ws.get_all_values()
+    for i, h in enumerate(data[0]):
+        if h.strip().lower() == header.strip().lower():
+            return i
+    return None
+
+
+def cmd_delete(header: str, tab: str | None = None):
+    """Delete a column from the sheet by matching its header name.
+
+    When --tab is omitted, searches both Properties Data and Properties View.
+    If the header exists in both tabs, refuses with a message asking for --tab.
+    If found in exactly one tab, deletes from that tab.
+
+    Safe against index drift because it finds the column by header text first.
+    """
+    creds = Credentials.from_service_account_info(
+        json.loads(settings.service_account_json), scopes=SCOPES
+    )
+    gc = gspread.authorize(creds)
+    sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
+
+    if tab:
+        tabs_to_check = [tab]
+    else:
+        tabs_to_check = [DATA_TAB, VIEW_TAB]
+
+    found_in = {}
+    for t in tabs_to_check:
+        try:
+            ws = sh.worksheet(t)
+            idx = _find_column(ws, header)
+            if idx is not None:
+                found_in[t] = idx
+        except Exception:
+            pass
+
+    if len(found_in) == 0:
+        search_msg = f" in {tab}" if tab else f" in either '{DATA_TAB}' or '{VIEW_TAB}'"
+        print(f"Column '{header}' not found{search_msg}")
+        sys.exit(1)
+
+    if len(found_in) > 1:
+        tabs = "', '".join(found_in.keys())
+        print(
+            f"Column '{header}' exists in both '{tabs}'. "
+            f"Specify --tab to disambiguate."
+        )
+        sys.exit(1)
+
+    target_tab = next(iter(found_in))
+    col_idx = found_in[target_tab]
+    ws = sh.worksheet(target_tab)
+    sheet_id = ws._properties["sheetId"]
+
+    body = {
+        "requests": [{
+            "deleteDimension": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "dimension": "COLUMNS",
+                    "startIndex": col_idx,
+                    "endIndex": col_idx + 1,
+                }
+            }
+        }]
+    }
+    sh.batch_update(body)
+    print(f"Deleted column '{header}' (col {col_idx}) from '{target_tab}'")
+
+
 def cmd_rename(old_name: str, new_name: str):
     sh, ws = _get_sheet()
     headers = ws.get_all_values()[0]
@@ -181,50 +259,37 @@ def cmd_diff(rid: str, tab: str, other: str | None):
             print(f"  {col_letter(i):3s} {h:25s} {tab}={this_val[:40]:40s} {other_tab}={other_val[:40]}")
 
 
-def cmd_refresh_formulas():
-    """Rewrite View tab XLOOKUP formulas to use Rightmove ID (Data column H)."""
-    from houses.sheets import col_letter
-
+def cmd_delete_tab(tab: str):
+    """Delete a worksheet tab, cleaning up its named ranges first to avoid orphans."""
     creds = Credentials.from_service_account_info(
         json.loads(settings.service_account_json), scopes=SCOPES
     )
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
-    ws = sh.worksheet(VIEW_TAB)
-    data = ws.get_all_values()
-    num_rows = len(data)
-    d = f"'{DATA_TAB}'"
+    ws = sh.worksheet(tab)
+    sid = ws._properties["sheetId"]
 
-    formulas = {
-        'D': f'=IFERROR(XLOOKUP($C2,{d}!$H:$H,{d}!$E:$E),"")',
-        'E': f'=IFERROR(XLOOKUP($C2,{d}!$H:$H,{d}!$AF:$AF),"")',
-        'F': f'=IFERROR(LET(k,XLOOKUP($C2,{d}!$H:$H,{d}!$N:$N),g,XLOOKUP($C2,{d}!$H:$H,{d}!$J:$J),i,XLOOKUP($C2,{d}!$H:$H,{d}!$L:$L),IF(OR(k="",g="",i=""),"",46*(k+g+2*i))),"")',
-        'H': f'=IFERROR(LET(v,XLOOKUP($C2,{d}!$H:$H,{d}!$I:$I),IF(v="","",IF(v*1=0,"",v/1440))),"")',
-        'I': f'=IFERROR(LET(v,XLOOKUP($C2,{d}!$H:$H,{d}!$K:$K),IF(v="","",IF(v*1=0,"",v/1440))),"")',
-        'J': f'=IFERROR(LET(v,XLOOKUP($C2,{d}!$H:$H,{d}!$M:$M),IF(v="","",IF(v*1=0,"",v/1440))),"")',
-        'K': f'=IFERROR(XLOOKUP($C2,{d}!$H:$H,{d}!$AC:$AC),"")',
-        'L': f'=IFERROR(LET(v,XLOOKUP($C2,{d}!$H:$H,{d}!$AD:$AD),IF(v="","",IF(v*1=0,"",v/1440))),"")',
-        'M': f'=IFERROR(XLOOKUP($C2,{d}!$H:$H,{d}!$AE:$AE),"")',
-        'N': f'=IFERROR(HYPERLINK(XLOOKUP($C2,{d}!$H:$H,{d}!$R:$R),XLOOKUP($C2,{d}!$H:$H,{d}!$O:$O)),"")',
-        'O': f'=IFERROR(XLOOKUP($C2,{d}!$H:$H,{d}!$S:$S),"")',
-        'P': f'=IFERROR(LET(v,XLOOKUP($C2,{d}!$H:$H,{d}!$Q:$Q),IF(v="","",IF(v*1=0,"",v/1440))),"")',
-        'Q': f'=IFERROR(HYPERLINK(XLOOKUP($C2,{d}!$H:$H,{d}!$Y:$Y),XLOOKUP($C2,{d}!$H:$H,{d}!$V:$V)),"")',
-        'R': f'=IFERROR(XLOOKUP($C2,{d}!$H:$H,{d}!$Z:$Z),"")',
-        'S': f'=IFERROR(LET(v,XLOOKUP($C2,{d}!$H:$H,{d}!$X:$X),IF(v="","",IF(v*1=0,"",v/1440))),"")',
-        'T': f'=IFERROR(XLOOKUP($C2,{d}!$H:$H,{d}!$AH:$AH),"")',
-        'X': f'=IFERROR(XLOOKUP($C2,{d}!$H:$H,{d}!$T:$T),"")',
-        'Y': f'=IFERROR(XLOOKUP($C2,{d}!$H:$H,{d}!$U:$U),"")',
-        'Z': f'=IFERROR(XLOOKUP($C2,{d}!$H:$H,{d}!$AA:$AA),"")',
-        'AA': f'=IFERROR(XLOOKUP($C2,{d}!$H:$H,{d}!$AB:$AB),"")',
-    }
+    named_ranges = sh.list_named_ranges() or []
+    cleanup = [{"deleteNamedRange": {"namedRangeId": r["namedRangeId"]}}
+               for r in named_ranges
+               if r.get("range", {}).get("sheetId") == sid]
+    if cleanup:
+        sh.batch_update({"requests": cleanup})
+        print(f"Cleaned up {len(cleanup)} named ranges on '{tab}'")
 
-    for col_let, formula in formulas.items():
-        if num_rows > 1:
-            f_list = [[formula] for _ in range(num_rows - 1)]
-            ws.update(values=f_list, range_name=f'{col_let}2:{col_let}{num_rows}',
-                       value_input_option='USER_ENTERED')
+    sh.del_worksheet(ws)
+    print(f"Deleted tab '{tab}'")
 
-    print(f"Updated {len(formulas)} View formulas (key: Data H)")
+
+def cmd_refresh_formulas():
+    creds = Credentials.from_service_account_info(
+        json.loads(settings.service_account_json), scopes=SCOPES
+    )
+    gc = gspread.authorize(creds)
+    sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
+    from houses.sheets import sync_view_formulas
+    sync_view_formulas(sh)
+    print("View formulas refreshed via named ranges")
 
 
 def main():
@@ -250,6 +315,15 @@ def main():
             print("Usage: sheet_tool.py add <header>")
             return
         cmd_add(sys.argv[2])
+    elif cmd == "delete" or cmd == "delete-column":
+        if len(sys.argv) < 3:
+            print("Usage: sheet_tool.py delete <header> [--tab <name>]")
+            return
+        header = sys.argv[2]
+        tab = None
+        if "--tab" in sys.argv:
+            tab = sys.argv[sys.argv.index("--tab") + 1]
+        cmd_delete(header, tab)
     elif cmd == "rename":
         if len(sys.argv) < 4:
             print("Usage: sheet_tool.py rename <old> <new>")
@@ -266,6 +340,11 @@ def main():
         if "--other" in sys.argv:
             other = sys.argv[sys.argv.index("--other") + 1]
         cmd_diff(sys.argv[2], tab, other)
+    elif cmd == "delete-tab":
+        if len(sys.argv) < 3:
+            print("Usage: sheet_tool.py delete-tab <tab_name>")
+            return
+        cmd_delete_tab(sys.argv[2])
     elif cmd == "refresh-formulas":
         cmd_refresh_formulas()
     else:
