@@ -183,10 +183,10 @@ def _add_time_tiered(
 ) -> None:
     """Add green/orange/red for a time column: <G:H G:M green, G:H G:M–O:H O:M orange, >O:H O:M red."""
     letter = col_letter_fn(header_lookup[header])
-    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=${letter}2<TIME({green_hours},{green_mins},0)', GREEN_BG)
-    orange_f = f'=AND(${letter}2>=TIME({green_hours},{green_mins},0),${letter}2<=TIME({orange_hours},{orange_mins},0))'
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=AND(${letter}2<>"",${letter}2<TIME({green_hours},{green_mins},0))', GREEN_BG)
+    orange_f = f'=AND(${letter}2<>"",${letter}2>=TIME({green_hours},{green_mins},0),${letter}2<=TIME({orange_hours},{orange_mins},0))'
     _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, orange_f, ORANGE_BG)
-    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=${letter}2>TIME({orange_hours},{orange_mins},0)', RED_BG)
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=AND(${letter}2<>"",${letter}2>TIME({orange_hours},{orange_mins},0))', RED_BG)
 
 
 def _add_numeric_tiered(
@@ -195,10 +195,10 @@ def _add_numeric_tiered(
 ) -> None:
     """Add green/orange/red for a numeric column: <green_max green, green_max–orange_max orange, >orange_max red."""
     letter = col_letter_fn(header_lookup[header])
-    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=${letter}2<{green_max}', GREEN_BG)
-    orange_f = f'=AND(${letter}2>={green_max},${letter}2<={orange_max})'
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=AND(${letter}2<>"",${letter}2<{green_max})', GREEN_BG)
+    orange_f = f'=AND(${letter}2<>"",${letter}2>={green_max},${letter}2<={orange_max})'
     _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, orange_f, ORANGE_BG)
-    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=${letter}2>{orange_max}', RED_BG)
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=AND(${letter}2<>"",${letter}2>{orange_max})', RED_BG)
 
 
 def _add_epc_rules(fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn):
@@ -242,8 +242,8 @@ def _add_inspection_year_rules(fmt_requests: list, sid: int, header_lookup: dict
     """Inspection years: >=2023 green, <=2022 orange. 2-tier only."""
     for hdr in ["primary inspection year", "secondary inspection year"]:
         letter = col_letter_fn(header_lookup[hdr])
-        _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, hdr, f'=VALUE(${letter}2)>=2023', GREEN_BG)
-        _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, hdr, f'=AND(VALUE(${letter}2)>0,VALUE(${letter}2)<=2022)', ORANGE_BG)
+        _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, hdr, f'=AND(${letter}2<>"",VALUE(${letter}2)>=2023)', GREEN_BG)
+        _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, hdr, f'=AND(${letter}2<>"",VALUE(${letter}2)>0,VALUE(${letter}2)<=2022)', ORANGE_BG)
 
 
 def _add_grey_text_row_rule(fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn, num_cols: int):
