@@ -10,52 +10,51 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 from houses.config import settings
-from houses.models import CommuteBreakdown, EnrichedProperty, PetrolCost, SchoolInfo, TransitInfo
+from houses.models import EnrichedProperty, SchoolInfo, TransitInfo
 
 logger = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
-SHEET_TAB = "Properties Data"
+DATA_TAB = "Properties Data"
+VIEW_TAB = "Properties View"
 COLUMN_HEADERS: list[str] = [
-    "Rightmove URL",           # A  (0) — user-owned, never overwrite
-    "Address",                 # B  (1) — user-owned, never overwrite
-    "Postcode",                # C  (2) — user-owned, never overwrite
-    "Bedrooms",                # D  (3) — user-owned, never overwrite
-    "Price (£)",               # E  (4) — user-owned, never overwrite
-    "Actual Latitude",         # F  (5) — user-owned, never overwrite
-    "Actual Longitude",        # G  (6) — user-owned, never overwrite
-    "Rightmove ID",            # H  (7) — server-written stable lookup key
-    "Simon London (min)",      # I  (8)
-    "Simon London Cost (£)",   # J  (9)
-    "Lorena London (min)",     # K  (10)
-    "Lorena London Cost (£)",  # L  (11)
-    "Bracknell Time (min)",    # M  (12)
-    "Bracknell Cost (£)",      # N  (13)
-    "Primary School",          # O  (14)
-    "Primary Distance (km)",   # P  (15)
-    "Primary Walk (min)",      # Q  (16)
-    "Primary School Link",     # R  (17)
-    "Primary Ofsted",          # S  (18)
-    "Primary Inspection Year", # T  (19)
-    "Primary Inspection Summary",  # U  (20)
-    "Secondary School",        # V  (21)
-    "Secondary Distance (km)", # W  (22)
-    "Secondary Walk (min)",    # X  (23)
-    "Secondary School Link",   # Y  (24)
-    "Secondary Ofsted",        # Z  (25)
-    "Secondary Inspection Year",  # AA (26)
-    "Secondary Inspection Summary",  # AB (27)
-    "Area Description",        # AC (28)
-    "Walk to Town (min)",      # AD (29)
-    "Walkable Amenities",      # AE (30)
-    "EPC Rating",              # AF (31)
-    "Secondary Bus (min)",     # AG (32)
-    "Secondary Bus Route",     # AH (33)
-    "Approx Latitude (est)",   # AI (34)
-    "Approx Longitude (est)",  # AJ (35)
-    "Approx Station CRS",      # AK (36)
-    "Approx Station Name",     # AL (37)
+    "Rightmove URL",              # A  (0) — user-owned, never overwrite
+    "Address",                    # B  (1) — user-owned, never overwrite
+    "Postcode",                   # C  (2) — user-owned, never overwrite
+    "Bedrooms",                   # D  (3) — user-owned, never overwrite
+    "Price (£)",                  # E  (4) — user-owned, never overwrite
+    "Actual Latitude",            # F  (5) — user-owned, never overwrite
+    "Actual Longitude",           # G  (6) — user-owned, never overwrite
+    "Rightmove ID",               # H  (7) — server-written stable lookup key
+    "Simon London (min)",         # I  (8)
+    "Simon London Cost (£)",      # J  (9)
+    "Lorena London (min)",        # K  (10)
+    "Lorena London Cost (£)",     # L  (11)
+    "Bracknell Time (min)",       # M  (12)
+    "Bracknell Cost (£)",         # N  (13)
+    "Primary School",             # O  (14)
+    "Primary Distance (km)",      # P  (15)
+    "Primary Walk (min)",         # Q  (16)
+    "Primary School Link",        # R  (17)
+    "Primary Ofsted",             # S  (18)
+    "Primary Inspection Year",    # T  (19)
+    "Secondary School",           # U  (20)
+    "Secondary Distance (km)",    # V  (21)
+    "Secondary Walk (min)",       # W  (22)
+    "Secondary School Link",      # X  (23)
+    "Secondary Ofsted",           # Y  (24)
+    "Secondary Inspection Year",  # Z  (25)
+    "Area Description",           # AA (26)
+    "Walk to Town (min)",         # AB (27)
+    "Walkable Amenities",         # AC (28)
+    "EPC Rating",                 # AD (29)
+    "Secondary Bus (min)",        # AE (30)
+    "Secondary Bus Route",        # AF (31)
+    "Approx Latitude (est)",      # AG (32)
+    "Approx Longitude (est)",     # AH (33)
+    "Approx Station CRS",         # AI (34)
+    "Approx Station Name",        # AJ (35)
 ]
 
 _USER_COLUMNS = frozenset({
@@ -106,6 +105,144 @@ def _rightmove_id(url_or_text: str) -> str:
 _client: gspread.Client | None = None
 
 
+def named_range_name(header: str) -> str:
+    """Generate a deterministic named range identifier from a column header.
+
+    Strips special characters, CamelCases each word, prefixes with 'Data_'.
+    E.g. 'Simon London (min)' → 'Data_SimonLondonMin'
+    """
+    clean = re.sub(r"[^a-zA-Z0-9 ]+", "", header).strip()
+    words = clean.split()
+    return "Data_" + "".join(w.capitalize() for w in words)
+
+
+def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
+    """Ensure named ranges, write View formulas, and apply cell formatting.
+
+    This is the single source of truth for View formula generation — called by
+    both the production refresh-formulas command and integration tests.
+    """
+    ensure_named_ranges(spreadsheet)
+
+    ws = spreadsheet.worksheet("Properties View")
+    data = ws.get_all_values()
+    num_rows = len(data)
+    vh = {h.strip().lower(): i for i, h in enumerate(data[0])}
+    vl = lambda h: col_letter(vh[h])
+
+    KEY = "VALUE(INDEX(View_RightmoveID, ROW()))"
+    LINK_URL = 'GETURL("B"&ROW())'
+    NR = named_range_name
+    RID = NR("Rightmove ID")
+
+    formula_cols = {
+        "rightmove id": f'=IFNA(REGEXEXTRACT({LINK_URL},"properties/(\\d+)"),XLOOKUP(INDEX(View_ListingAddress, ROW()),{NR("Address")},{RID}))',
+        "purchase cost (£)": f'=XLOOKUP({KEY},{RID},{NR("Price (£)")}    )',
+        "epc rating": f'=XLOOKUP({KEY},{RID},{NR("EPC Rating")}    )',
+        "yearly commute total (£)": f'=LET(k,XLOOKUP({KEY},{RID},{NR("Bracknell Cost (£)")}),g,XLOOKUP({KEY},{RID},{NR("Simon London Cost (£)")}),i,XLOOKUP({KEY},{RID},{NR("Lorena London Cost (£)")}),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)))',
+        "simon london": f'=LET(v,XLOOKUP({KEY},{RID},{NR("Simon London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+        "lorena london": f'=LET(v,XLOOKUP({KEY},{RID},{NR("Lorena London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+        "bracknell time": f'=LET(v,XLOOKUP({KEY},{RID},{NR("Bracknell Time (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+        "what the area is like": f'=XLOOKUP({KEY},{RID},{NR("Area Description")})',
+        "walk to town": f'=LET(v,XLOOKUP({KEY},{RID},{NR("Walk to Town (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+        "walkable amenities": f'=XLOOKUP({KEY},{RID},{NR("Walkable Amenities")})',
+        "primary school": f'=HYPERLINK(XLOOKUP({KEY},{RID},{NR("Primary School Link")}),XLOOKUP({KEY},{RID},{NR("Primary School")}))',
+        "primary ofsted": f'=XLOOKUP({KEY},{RID},{NR("Primary Ofsted")})',
+        "primary walk": f'=LET(v,XLOOKUP({KEY},{RID},{NR("Primary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+        "secondary school": f'=HYPERLINK(XLOOKUP({KEY},{RID},{NR("Secondary School Link")}),XLOOKUP({KEY},{RID},{NR("Secondary School")}))',
+        "secondary ofsted": f'=XLOOKUP({KEY},{RID},{NR("Secondary Ofsted")})',
+        "secondary walk": f'=LET(v,XLOOKUP({KEY},{RID},{NR("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+        "secondary bus route": f'=XLOOKUP({KEY},{RID},{NR("Secondary Bus Route")})',
+        "primary inspection year": f'=XLOOKUP({KEY},{RID},{NR("Primary Inspection Year")})',
+        "secondary inspection year": f'=XLOOKUP({KEY},{RID},{NR("Secondary Inspection Year")})',
+    }
+    for header_key, formula in formula_cols.items():
+        if header_key in vh:
+            cl = vl(header_key)
+            if num_rows > 1:
+                ws.update(values=[[formula] for _ in range(num_rows - 1)],
+                           range_name=f'{cl}2:{cl}{num_rows}',
+                           value_input_option='USER_ENTERED')
+
+    sid = ws._properties["sheetId"]
+    headers = data[0]
+    header_lookup = {h.strip().lower(): i for i, h in enumerate(headers)}
+    fmt_requests = []
+    for h in ["simon london", "lorena london", "bracknell time", "walk to town", "primary walk", "secondary walk"]:
+        if h in header_lookup:
+            ci = header_lookup[h]
+            fmt_requests.append({"repeatCell": {"range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},
+                                  "cell": {"userEnteredFormat": {"numberFormat": {"type": "TIME", "pattern": "[h]:mm"}}},
+                                  "fields": "userEnteredFormat.numberFormat"}})
+    for h in ["what the area is like", "walkable amenities", "primary school", "secondary school",
+              "group notes / whatsapp", "ashby comments", "primary inspection summary", "secondary inspection summary"]:
+        if h in header_lookup:
+            ci = header_lookup[h]
+            fmt_requests.append({"repeatCell": {"range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},
+                                  "cell": {"userEnteredFormat": {"wrapStrategy": "WRAP"}},
+                                  "fields": "userEnteredFormat.wrapStrategy"}})
+    fmt_requests.append({
+        "updateSheetProperties": {
+            "properties": {"sheetId": sid, "gridProperties": {"frozenRowCount": 1, "frozenColumnCount": 4}},
+            "fields": "gridProperties.frozenRowCount,gridProperties.frozenColumnCount",
+        }
+    })
+    fmt_requests.append({
+        "repeatCell": {
+            "range": {"sheetId": sid, "startRowIndex": 0, "endRowIndex": 1},
+            "cell": {"userEnteredFormat": {
+                "backgroundColor": {"red": 0.18, "green": 0.24, "blue": 0.31},
+                "textFormat": {"foregroundColor": {"red": 1, "green": 1, "blue": 1}, "bold": True},
+            }},
+            "fields": "userEnteredFormat(backgroundColor,textFormat)",
+        }
+    })
+    if fmt_requests:
+        spreadsheet.batch_update({"requests": fmt_requests})
+
+
+def ensure_named_ranges(spreadsheet: gspread.Spreadsheet) -> None:
+    existing = {r["name"]: r for r in (spreadsheet.list_named_ranges() or [])}
+    current_names = set()
+
+    requests = []
+
+    # Data tab named ranges
+    ws_data = spreadsheet.worksheet(DATA_TAB)
+    sid_data = ws_data._properties["sheetId"]
+    for col_idx, header in enumerate(COLUMN_HEADERS):
+        name = named_range_name(header)
+        current_names.add(name)
+        range_spec = {"sheetId": sid_data, "startColumnIndex": col_idx, "endColumnIndex": col_idx + 1}
+        if name in existing:
+            rid = existing[name]["namedRangeId"]
+            requests.append({"updateNamedRange": {"namedRange": {"namedRangeId": rid, "name": name, "range": range_spec},
+                                                   "fields": "range"}})
+        else:
+            requests.append({"addNamedRange": {"namedRange": {"name": name, "range": range_spec}}})
+
+    # View tab named ranges
+    ws_view = spreadsheet.worksheet("Properties View")
+    sid_view = ws_view._properties["sheetId"]
+    for name, col_idx in [("View_RightmoveLink", 1), ("View_RightmoveID", 2), ("View_ListingAddress", 0)]:
+        current_names.add(name)
+        range_spec = {"sheetId": sid_view, "startColumnIndex": col_idx, "endColumnIndex": col_idx + 1}
+        if name in existing:
+            rid = existing[name]["namedRangeId"]
+            requests.append({"updateNamedRange": {"namedRange": {"namedRangeId": rid, "name": name, "range": range_spec},
+                                                   "fields": "range"}})
+        else:
+            requests.append({"addNamedRange": {"namedRange": {"name": name, "range": range_spec}}})
+
+    # Delete orphaned ranges (names we no longer generate)
+    for name, info in existing.items():
+        if (name.startswith("Data_") or name.startswith("View_")) and name not in current_names:
+            requests.append({"deleteNamedRange": {"namedRangeId": info["namedRangeId"]}})
+
+    if requests:
+        spreadsheet.batch_update({"requests": requests})
+
+
 def _build_client() -> gspread.Client | None:
     raw = settings.service_account_json
     if not raw:
@@ -152,48 +289,46 @@ def _fmt_bus(s: SchoolInfo | None) -> str:
     return str(s.bus_time_minutes) if s and s.bus_time_minutes is not None else ""
 
 
-def _row_values(property_: EnrichedProperty) -> list[str]:
-    """Build a row for the sheet. User columns (A-G) are left empty — never overwrite."""
-    return [
-        "",                                           # A  (0) user-owned
-        "",                                           # B  (1) user-owned
-        "",                                           # C  (2) user-owned
-        "",                                           # D  (3) user-owned
-        "",                                           # E  (4) user-owned
-        "",                                           # F  (5) user-owned
-        "",                                           # G  (6) user-owned
-        _rightmove_id(property_.url),                 # H  (7) stable lookup key
-        _fmt_duration(property_.simon_commute),             # I  (8)
-        _fmt_cost(property_.simon_commute.daily_cost_gbp if property_.simon_commute else None),  # J  (9)
-        _fmt_duration(property_.lorena_commute),            # K (10)
-        _fmt_cost(property_.lorena_commute.daily_cost_gbp if property_.lorena_commute else None),  # L (11)
-        str(property_.petrol.round_trip_minutes) if property_.petrol and property_.petrol.round_trip_minutes is not None else "",  # M (12)
-        _fmt_cost(property_.petrol.cost_gbp if property_.petrol else None),  # N (13)
-        property_.primary_school.name if property_.primary_school else "",  # O (14)
-        _fmt_dist(property_.primary_school),                # P (15)
-        _fmt_walk(property_.primary_school),                # Q (16)
-        _fmt_school_link(property_.primary_school),         # R (17)
-        property_.primary_school.ofsted_rating if property_.primary_school else "",  # S (18)
-        property_.primary_school.inspection_year if property_.primary_school else "",  # T (19)
-        property_.primary_school.inspection_summary if property_.primary_school else "",  # U (20)
-        property_.secondary_school.name if property_.secondary_school else "",  # V (21)
-        _fmt_dist(property_.secondary_school),              # W (22)
-        _fmt_walk(property_.secondary_school),              # X (23)
-        _fmt_school_link(property_.secondary_school),       # Y (24)
-        property_.secondary_school.ofsted_rating if property_.secondary_school else "",  # Z (25)
-        property_.secondary_school.inspection_year if property_.secondary_school else "",  # AA (26)
-        property_.secondary_school.inspection_summary if property_.secondary_school else "",  # AB (27)
-        property_.town_description,                         # AC (28)
-        str(property_.walk_to_town_minutes) if property_.walk_to_town_minutes is not None else "",  # AD (29)
-        property_.walkable_amenities,                       # AE (30)
-        property_.epc_rating,                               # AF (31)
-        _fmt_bus(property_.secondary_school),               # AG (32)
-        property_.secondary_school.bus_route if property_.secondary_school else "",  # AH (33)
-        str(property_.approx_latitude) if property_.approx_latitude is not None else "",  # AI (34)
-        str(property_.approx_longitude) if property_.approx_longitude is not None else "",  # AJ (35)
-        property_.approx_station_crs,                       # AK (36)
-        property_.approx_station_name,                      # AL (37)
-    ]
+def _row_values(property_: EnrichedProperty) -> dict[str, str]:
+    """Enriched values keyed by header name. User columns are omitted — never written."""
+    result: dict[str, str] = {}
+    r = result
+    r["Rightmove ID"] = _rightmove_id(property_.url)
+    r["Simon London (min)"] = _fmt_duration(property_.simon_commute)
+    r["Simon London Cost (£)"] = _fmt_cost(property_.simon_commute.daily_cost_gbp if property_.simon_commute else None)
+    r["Lorena London (min)"] = _fmt_duration(property_.lorena_commute)
+    r["Lorena London Cost (£)"] = _fmt_cost(property_.lorena_commute.daily_cost_gbp if property_.lorena_commute else None)
+    r["Bracknell Time (min)"] = str(property_.petrol.round_trip_minutes) if property_.petrol and property_.petrol.round_trip_minutes is not None else ""
+    r["Bracknell Cost (£)"] = _fmt_cost(property_.petrol.cost_gbp if property_.petrol else None)
+    r["Primary School"] = property_.primary_school.name if property_.primary_school else ""
+    r["Primary Distance (km)"] = _fmt_dist(property_.primary_school)
+    r["Primary Walk (min)"] = _fmt_walk(property_.primary_school)
+    r["Primary School Link"] = _fmt_school_link(property_.primary_school)
+    r["Primary Ofsted"] = property_.primary_school.ofsted_rating if property_.primary_school else ""
+    r["Primary Inspection Year"] = property_.primary_school.inspection_year if property_.primary_school else ""
+    r["Secondary School"] = property_.secondary_school.name if property_.secondary_school else ""
+    r["Secondary Distance (km)"] = _fmt_dist(property_.secondary_school)
+    r["Secondary Walk (min)"] = _fmt_walk(property_.secondary_school)
+    r["Secondary School Link"] = _fmt_school_link(property_.secondary_school)
+    r["Secondary Ofsted"] = property_.secondary_school.ofsted_rating if property_.secondary_school else ""
+    r["Secondary Inspection Year"] = property_.secondary_school.inspection_year if property_.secondary_school else ""
+    r["Area Description"] = property_.town_description
+    r["Walk to Town (min)"] = str(property_.walk_to_town_minutes) if property_.walk_to_town_minutes is not None else ""
+    r["Walkable Amenities"] = property_.walkable_amenities
+    r["EPC Rating"] = property_.epc_rating
+    r["Secondary Bus (min)"] = _fmt_bus(property_.secondary_school)
+    r["Secondary Bus Route"] = property_.secondary_school.bus_route if property_.secondary_school else ""
+    r["Approx Latitude (est)"] = str(property_.approx_latitude) if property_.approx_latitude is not None else ""
+    r["Approx Longitude (est)"] = str(property_.approx_longitude) if property_.approx_longitude is not None else ""
+    r["Approx Station CRS"] = property_.approx_station_crs
+    r["Approx Station Name"] = property_.approx_station_name
+    return result
+
+
+def _build_full_row(property_: EnrichedProperty) -> list[str]:
+    """Build a full positional row matching COLUMN_HEADERS order, for appending new rows."""
+    enriched = _row_values(property_)
+    return [enriched.get(h, "") for h in COLUMN_HEADERS]
 
 
 def ensure_headers(worksheet: gspread.Worksheet) -> None:
@@ -201,7 +336,7 @@ def ensure_headers(worksheet: gspread.Worksheet) -> None:
         worksheet.append_row(COLUMN_HEADERS, value_input_option="USER_ENTERED")
 
 
-async def write_enriched_row(property_: EnrichedProperty, tab: str = SHEET_TAB) -> str | None:
+async def write_enriched_row(property_: EnrichedProperty, tab: str = DATA_TAB) -> str | None:
     if not settings.sheet_id:
         logger.info("No HOUSES_SHEET_ID configured; skipping sheet write")
         return None
@@ -216,27 +351,32 @@ async def write_enriched_row(property_: EnrichedProperty, tab: str = SHEET_TAB) 
         worksheet = sh.worksheet(tab)
 
         ensure_headers(worksheet)
-        row = _row_values(property_)
-        _assert_no_user_column_writes(row)
+        enriched = _row_values(property_)
+        _assert_no_user_column_writes(list(enriched.values()))
 
-        # Find existing row by Rightmove ID (column H, index 7). Never append duplicates.
+        # Find existing row by Rightmove ID (column H). Never append duplicates.
         existing = worksheet.get_all_values()
         target_row = None
         rid = _rightmove_id(property_.url)
-        RID_COL = col_index("Rightmove ID")
-        if rid:
+        sheet_headers = existing[0]
+        try:
+            rid_col = sheet_headers.index("Rightmove ID")
+        except ValueError:
+            rid_col = -1
+        if rid and rid_col >= 0:
             for i, r in enumerate(existing[1:], 2):
-                if len(r) > RID_COL and r[RID_COL].strip() == rid:
+                if len(r) > rid_col and r[rid_col].strip() == rid:
                     target_row = i
                     break
 
         if target_row:
-            # Only write non-empty cells to avoid blanking user data
+            # Look up each enriched value's column by header name. Never use positions.
+            header_to_col = {h: i for i, h in enumerate(sheet_headers)}
             cells = []
-            last_col = len(row) - 1
-            for j, val in enumerate(row):
-                if val:
-                    cl = _col_letter(j)
+            for name, val in enriched.items():
+                if val and name in header_to_col:
+                    col_idx = header_to_col[name]
+                    cl = _col_letter(col_idx)
                     cells.append({"range": f"{cl}{target_row}", "values": [[val]]})
             if cells:
                 worksheet.spreadsheet.values_batch_update(
@@ -245,7 +385,7 @@ async def write_enriched_row(property_: EnrichedProperty, tab: str = SHEET_TAB) 
             row_url = f"https://docs.google.com/spreadsheets/d/{settings.sheet_id}/edit#gid={worksheet.id}&range=A{target_row}"
             logger.info("Updated row %d for Rightmove ID %s", target_row, rid)
         else:
-            worksheet.append_row(row, value_input_option="USER_ENTERED")
+            worksheet.append_row(_build_full_row(property_), value_input_option="USER_ENTERED")
             new_row_num = worksheet.row_count
             row_url = f"https://docs.google.com/spreadsheets/d/{settings.sheet_id}/edit#gid={worksheet.id}&range=A{new_row_num}"
             logger.info("Appended row for %s", property_.url)
