@@ -1,101 +1,86 @@
 # Column Reference
 
-> **Single source of truth** for all column definitions. The canonical `COLUMN_HEADERS` list lives in `houses/sheets.py`. If you need to add, remove, or reorder a column, edit `sheets.py` first, then update this document.
+> The canonical `COLUMN_HEADERS` list in `houses/sheets.py` is the single source of truth for column definitions. View it directly:
+> ```bash
+> uv run python -c "from houses.sheets import COLUMN_HEADERS; [print(f'{i:3d} {chr(65+i) if i<26 else chr(64+i//26)+chr(65+i%26):3s} {h}') for i,h in enumerate(COLUMN_HEADERS)]"
+> ```
+> To add or remove a column, edit `sheets.py` first, then run `uv run python scripts/sheet_tool.py refresh-formulas`.
 
 ## Properties Data Tab (Bot / Server-Written)
 
-Column letters are alphabetical for the current 28-column layout. The server writes rows via `sheets.py:_row_values()`.
+36 columns (A–AJ), packed densely with no gaps. The server writes enriched rows via `sheets.py:_row_values()`.
 
-| Col | Header | Type | Source / Description |
-|-----|--------|------|---------------------|
-| A | Rightmove URL | string | Primary key. From payload. |
-| B | Address | string | From payload. |
-| C | Postcode | string | From payload or extracted from address. |
-| D | Bedrooms | int | From payload. |
-| E | Price (£) | float | From payload. No £ prefix in raw data. |
-| F | Simon London (min) | int | Transit time to SW1V 2QQ (TfL). |
-| G | Simon London Cost (£) | float | Daily public transport cost (return trip, 2× single fare). |
-| H | Lorena London (min) | int | Transit time to EC3A 7LP (TfL). |
-| I | Lorena London Cost (£) | float | Daily public transport cost (return trip, 2× single fare). |
-| J | Bracknell Time (min) | int | Drive time to RG12 8YA (ORS, round trip). |
-| K | Bracknell Cost (£) | float | Daily petrol cost (ORS distance × mpg × price). |
-| L | Primary School | string | Nearest boys-eligible primary school name. |
-| M | Primary Distance (km) | float | Haversine distance from property. |
-| N | Primary Walk (min) | int | Walking time at 5 km/h. |
-| O | Primary School Link | string | GIAS details URL. |
-| P | Primary Ofsted | string | Ofsted rating from merged GIAS data. |
-| Q | Secondary School | string | Nearest boys-eligible secondary school name. |
-| R | Secondary Distance (km) | float | Haversine distance from property. |
-| S | Secondary Walk (min) | int | Walking time at 5 km/h. |
-| T | Secondary School Link | string | GIAS details URL. |
-| U | Secondary Ofsted | string | Ofsted rating from merged GIAS data. |
-| V | Area Description | string | LLM-generated description (OpenRouter). |
-| W | Walk to Town (min) | int | Walking time to town centre (ORS). |
-| X | Walkable Amenities | string | Formatted list: "Supermarket (5m) | Park (10m)". |
-| Y | Council Tax Band | string | From Homedata API (deferred — stub only). |
-| Z | Council Tax Yearly (£) | float | Band ratio × Band D rate (deferred — stub only). |
-| AA | Council Tax Source | string | Evidence URL (CivAccount page) (deferred — stub only). |
-| AB | EPC Rating | string | Placeholder — enrichment not yet implemented. |
-
-### Cost Format
-
-All monetary values are stored as **floats** (or empty string when unavailable). No `£` prefix, no commas in raw data. Formatting for display is handled by Google Sheets cell formatting or XLOOKUP formatting in the View tab.
-
-### School Info Structure
-
-Each school entry includes the linked GIAS details page URL:
-`https://get-information-schools.service.gov.uk/Establishments/Establishment/Details/{URN}`
+Key conventions:
+- **Primary key**: Rightmove URL (col A). Stable lookup key: Rightmove ID (col H).
+- **Monetary values**: floats, no £ prefix. Display formatting is the sheet's job.
+- **Missing data**: empty string (never `None`, `0`, or `"N/A"`).
+- **User-owned columns** (A–G): server never overwrites these (Rightmove URL, Address, Postcode, Bedrooms, Price, Actual Lat/Lng).
 
 ## Properties View Tab (Human / Formula-Driven)
 
-Column layout optimized for human readability. Groups: Identity → Financial Summary → Commute Detail → Location → Schools → Commentary.
+27 columns (A–AA). Formulas use named ranges (`Data_*`) instead of hardcoded column letters,
+so they survive column insertions/reorders in the Data tab.
 
-| Col | Header | Group | Formula |
-|-----|--------|-------|---------|
-| A | Listing Address | **Identity** | Manual (Rightmove listing title) |
-| B | Rightmove Link | **Identity** | Manual (paste URL) |
-| C | Purchase Cost (£) | **Financial Summary** | `=XLOOKUP($B2, 'Properties Data'!$A:$A, 'Properties Data'!$E:$E)` |
-| D | EPC Rating | **Financial Summary** | `=XLOOKUP($B2, 'Properties Data'!$A:$A, 'Properties Data'!$AB:$AB)` (placeholder) |
-| E | Yearly Commute Total (£) | **Financial Summary** | `=46*(XLOOKUP(K)+XLOOKUP(G)+2*XLOOKUP(I))` — see formula below |
-| F | Yearly Council Tax (£) | **Financial Summary** | `=XLOOKUP($B2, 'Properties Data'!$A:$A, 'Properties Data'!$Z:$Z)` (placeholder) |
-| G | Simon London (min) | **Commute Detail** | `=XLOOKUP($B2, 'Properties Data'!$A:$A, 'Properties Data'!$F:$F)` |
-| H | Lorena London (min) | **Commute Detail** | `=XLOOKUP($B2, 'Properties Data'!$A:$A, 'Properties Data'!$H:$H)` |
-| I | Bracknell Time (min) | **Commute Detail** | `=XLOOKUP($B2, 'Properties Data'!$A:$A, 'Properties Data'!$J:$J)` |
-| J | What the Area is Like | **Location** | `=XLOOKUP($B2, 'Properties Data'!$A:$A, 'Properties Data'!$V:$V)` |
-| K | Walk to Town (min) | **Location** | `=XLOOKUP($B2, 'Properties Data'!$A:$A, 'Properties Data'!$W:$W)` |
-| L | Walkable Amenities | **Location** | `=XLOOKUP($B2, 'Properties Data'!$A:$A, 'Properties Data'!$X:$X)` |
-| M | Primary School | **Schools** | `=HYPERLINK(XLOOKUP(O), XLOOKUP(L))` — clickable name |
-| N | Primary Ofsted | **Schools** | `=XLOOKUP($B2, 'Properties Data'!$A:$A, 'Properties Data'!$P:$P)` |
-| O | Primary Walk (min) | **Schools** | `=XLOOKUP($B2, 'Properties Data'!$A:$A, 'Properties Data'!$N:$N)` |
-| P | Secondary School | **Schools** | `=HYPERLINK(XLOOKUP(T), XLOOKUP(Q))` — clickable name |
-| Q | Secondary Ofsted | **Schools** | `=XLOOKUP($B2, 'Properties Data'!$A:$A, 'Properties Data'!$U:$U)` |
-| R | Secondary Walk (min) | **Schools** | `=XLOOKUP($B2, 'Properties Data'!$A:$A, 'Properties Data'!$S:$S)` |
-| Q | Group Notes / WhatsApp | **Commentary** | Manual |
-| R | Ashby comments | **Commentary** | Manual |
-| S | Status | **Commentary** | Manual |
+### Formula Reference
 
-### Yearly Commute Formula (Col E)
+**Lookup key**: `$C2` (Rightmove ID, manually entered per row).
 
-```
-=46 * (XLOOKUP(B2, Data!K:K) + XLOOKUP(B2, Data!G:G) + 2 * XLOOKUP(B2, Data!I:I))
-```
+| Col | Header | Formula |
+|-----|--------|---------|
+| D | Purchase Cost (£) | `XLOOKUP($C2, Data_RightmoveID, Data_Price)` |
+| E | EPC Rating | `XLOOKUP($C2, Data_RightmoveID, Data_EPC)` |
+| F | Yearly Commute Total (£) | `LET(k,XLOOKUP(BracknellCost),g,XLOOKUP(SimonCost),i,XLOOKUP(LorenaCost),46*(k+g+2*i))` |
+| H | Simon London (min) | `XLOOKUP(Data_SimonMins) / 1440` |
+| I | Lorena London (min) | `XLOOKUP(Data_LorenaMins) / 1440` |
+| J | Bracknell Time (min) | `XLOOKUP(Data_BracknellMins) / 1440` |
+| K | What the Area is Like | `XLOOKUP(Data_AreaDescription)` |
+| L | Walk to Town (min) | `XLOOKUP(Data_WalkToTown) / 1440` |
+| M | Walkable Amenities | `XLOOKUP(Data_WalkableAmenities)` |
+| N | Primary School | `HYPERLINK(XLOOKUP(Data_PrimaryLink), XLOOKUP(Data_PrimarySchool))` |
+| O | Primary Ofsted | `XLOOKUP(Data_PrimaryOfsted)` |
+| P | Primary Walk (min) | `XLOOKUP(Data_PrimaryWalk) / 1440` |
+| Q | Secondary School | `HYPERLINK(XLOOKUP(Data_SecondaryLink), XLOOKUP(Data_SecondarySchool))` |
+| R | Secondary Ofsted | `XLOOKUP(Data_SecondaryOfsted)` |
+| S | Secondary Walk (min) | `XLOOKUP(Data_SecondaryWalk) / 1440` |
+| T | Secondary Bus Route | `XLOOKUP(Data_SecondaryBusRoute)` |
+| X | Primary Inspection Year | `XLOOKUP(Data_PrimaryInspYear)` |
+| Z | Secondary Inspection Year | `XLOOKUP(Data_SecondaryInspYear)` |
+| A,B,C,G,U,V,W,Y,AA | All other cols | Manual |
 
-Where:
-- **Data!K** = Bracknell daily petrol cost (return trip)
-- **Data!G** = Simon London daily PT cost (return trip)
-- **Data!I** = Lorena London daily PT cost (return trip)
-- **46** = working weeks per year
-- **2×** = Lorena commutes 2 days/week (Simon and Bracknell are 1 day/week)
-- **Daily PT cost** = 2 × single TfL fare (return trip) or estimated at £0.30/min when fare unavailable
+All XLOOKUP references implicitly start with `$C2, Data_RightmoveID,` for the key lookup.
 
-### School Hyperlink Formula (Cols M, P)
+### Yearly Commute Formula (Col F)
 
-```
-M: =HYPERLINK(XLOOKUP(B2, Data!O:O), XLOOKUP(B2, Data!L:L))
-P: =HYPERLINK(XLOOKUP(B2, Data!T:T), XLOOKUP(B2, Data!Q:Q))
+```gsheets
+=LET(
+  k, XLOOKUP($C2, Data_RightmoveID, Data_BracknellCost),
+  g, XLOOKUP($C2, Data_RightmoveID, Data_SimonCost),
+  i, XLOOKUP($C2, Data_RightmoveID, Data_LorenaCost),
+  IF(OR(k="",g="",i=""),"",46 * (k + g + 2 * i))
+)
 ```
 
-The school name is a clickable link to the GIAS details page. Ofsted ratings are in separate columns (N, Q).
+- **46** working weeks × (1×Bracknell + 1×Simon + 2×Lorena) trips per week
+- Lorena commutes 2 days/week; Simon and Bracknell are 1 day/week
+- Daily PT cost = 2 × single TfL fare, or NR fare + tube continuation
+
+### School Hyperlink Formula (Cols N, Q)
+
+```gsheets
+N: =HYPERLINK(XLOOKUP($C2, Data_RightmoveID, Data_PrimaryLink), XLOOKUP($C2, Data_RightmoveID, Data_PrimarySchool))
+Q: =HYPERLINK(XLOOKUP($C2, Data_RightmoveID, Data_SecondaryLink), XLOOKUP($C2, Data_RightmoveID, Data_SecondarySchool))
+```
+
+Each school's GIAS details URL is `https://get-information-schools.service.gov.uk/Establishments/Establishment/Details/{URN}`.
+
+### Named Ranges
+
+The full list of named ranges is in `sheets.py:NAMED_RANGE_NAMES`. To refresh them after
+a column operation:
+
+```bash
+uv run python scripts/sheet_tool.py refresh-formulas
+```
 
 ## Update Process
 
@@ -103,7 +88,8 @@ To add or modify a column:
 
 1. Edit `COLUMN_HEADERS` in `houses/sheets.py`
 2. Update `_row_values()` in `houses/sheets.py` to read/write the new field
-3. Update this `column-reference.md`
-4. Update the XLOOKUP formulas in `scripts/setup_sheet.py`
-5. Update any tests that assert column count or column values
-6. Run `make test` to verify alignment
+3. Add a named range entry in `NAMED_RANGE_NAMES` if the View tab needs it
+4. Update `scripts/setup_sheet.py` formula generation if adding a new View column
+5. Run `uv run python scripts/sheet_tool.py refresh-formulas` to sync named ranges and rewrite View formulas
+6. Update tests that assert column count or column values
+7. Run `make test` to verify alignment

@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from houses.models import EnrichedProperty
 from houses.server import app
-from houses.sheets import COLUMN_HEADERS, _row_values, col_index
+from houses.sheets import COLUMN_HEADERS, _build_full_row, _row_values
 
 client = TestClient(app)
 
@@ -78,11 +78,11 @@ class TestUpdateScriptLogic:
     """update_sheet.py should only update cells, never append rows."""
 
     def test_row_count_preserved(self):
-        """_row_values always returns exactly len(COLUMN_HEADERS) values."""
+        """_build_full_row always returns exactly len(COLUMN_HEADERS) values."""
         ep = _make_enriched("https://rightmove.co.uk/properties/1")
-        row = _row_values(ep)
+        row = _build_full_row(ep)
         assert len(row) == len(COLUMN_HEADERS), (
-            f"_row_values returned {len(row)} values but COLUMN_HEADERS has {len(COLUMN_HEADERS)}"
+            f"_build_full_row returned {len(row)} values but COLUMN_HEADERS has {len(COLUMN_HEADERS)}"
         )
 
     def test_cell_values_change_when_data_changes(self):
@@ -93,29 +93,29 @@ class TestUpdateScriptLogic:
         row1 = _row_values(ep1)
         row2 = _row_values(ep2)
 
-        # Simon London Cost column
-        cost_idx = col_index("Simon London Cost (£)")
-        assert row1[cost_idx] == "10.00"
-        assert row2[cost_idx] == "25.00"
+        # Simon London Cost column — accessed by header name, not index
+        assert row1["Simon London Cost (£)"] == "10.00"
+        assert row2["Simon London Cost (£)"] == "25.00"
 
-        # URL at index 0 stays the same
-        assert row1[0] == row2[0]
+        # Rightmove ID stays the same
+        assert row1["Rightmove ID"] == row2["Rightmove ID"]
 
     def test_empty_cells_do_not_become_zeros(self):
         """Missing data should leave cells empty, never '0' or '0.00'."""
         ep = _make_enriched("https://rightmove.co.uk/properties/1", simon_cost=None)
         row = _row_values(ep)
-        cost_idx = col_index("Simon London Cost (£)")
-        assert row[cost_idx] == "", f"Expected empty string for None cost, got {row[cost_idx]!r}"
+        assert row["Simon London Cost (£)"] == "", f"Expected empty string for None cost, got {row['Simon London Cost (£)']!r}"
 
     def test_cache_fields_present(self):
-        """Cache columns (lat/lng/station) are at the end of the row."""
+        """Cache columns are present in _row_values."""
         ep = _make_enriched("https://rightmove.co.uk/properties/1")
         row = _row_values(ep)
-        # Cache fields are the last 4 entries
-        assert len(row) == len(COLUMN_HEADERS)
+        assert "Approx Latitude (est)" in row
+        assert "Approx Longitude (est)" in row
+        assert "Approx Station CRS" in row
+        assert "Approx Station Name" in row
         # Default values should be empty strings
-        assert row[-4] == ""  # property_latitude
-        assert row[-3] == ""  # property_longitude
-        assert row[-2] == ""  # nearest_station_crs
-        assert row[-1] == ""  # nearest_station_name
+        assert row["Approx Latitude (est)"] == ""
+        assert row["Approx Longitude (est)"] == ""
+        assert row["Approx Station CRS"] == ""
+        assert row["Approx Station Name"] == ""

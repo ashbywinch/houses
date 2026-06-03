@@ -4,18 +4,22 @@ Run with:  make test-integration
 Skip with:  make test  (unit tests only)
 """
 
-import os
-import re
 
+import json
+import os
+import time
+
+import gspread
 import httpx
 import pytest
+from google.oauth2.service_account import Credentials
 
 pytestmark = pytest.mark.integration
 
+from houses.config import settings
 from houses.enricher import OUTCODES_IO_URL, POSTCODES_IO_URL
 from houses.server import extract_postcode
 
-pytestmark = pytest.mark.integration
 
 
 class TestPostcodesIO:
@@ -88,3 +92,5 @@ class TestExtractPostcodeEdgeCases:
     def test_property_with_full_postcode(self):
         pc = extract_postcode("High Street, Oxford, OX1 4RP")
         assert pc == "OX1 4RP"
+
+
