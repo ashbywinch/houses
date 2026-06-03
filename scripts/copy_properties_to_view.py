@@ -168,8 +168,9 @@ def main() -> None:
             dst_col = view_cols.get("group notes / whatsapp")
             if dst_col is not None:
                 cl = col_letter(dst_col)
+                range_str = f"'{VIEW_TAB}'!{cl}{view_row_num}"
                 updates.append(
-                    {"range": f"{cl}{view_row_num}", "values": [[row[comments_col]]]}
+                    {"range": range_str, "values": [[row[comments_col]]]}
                 )
 
         ashby_col = props_cols.get("ashby comments")
@@ -177,8 +178,9 @@ def main() -> None:
             dst_col = view_cols.get("ashby comments")
             if dst_col is not None:
                 cl = col_letter(dst_col)
+                range_str = f"'{VIEW_TAB}'!{cl}{view_row_num}"
                 updates.append(
-                    {"range": f"{cl}{view_row_num}", "values": [[row[ashby_col]]]}
+                    {"range": range_str, "values": [[row[ashby_col]]]}
                 )
 
         status_col = props_cols.get("status")
@@ -187,17 +189,19 @@ def main() -> None:
             status_val, reason_val = _parse_status(raw_status)
 
             dst_status_col = view_cols.get("status")
-            if dst_status_col is not None and status_val:
+            if dst_status_col is not None:
                 cl = col_letter(dst_status_col)
+                range_str = f"'{VIEW_TAB}'!{cl}{view_row_num}"
                 updates.append(
-                    {"range": f"{cl}{view_row_num}", "values": [[status_val]]}
+                    {"range": range_str, "values": [[status_val]]}
                 )
 
             dst_reason_col = view_cols.get("status reason")
-            if dst_reason_col is not None and reason_val:
+            if dst_reason_col is not None:
                 cl = col_letter(dst_reason_col)
+                range_str = f"'{VIEW_TAB}'!{cl}{view_row_num}"
                 updates.append(
-                    {"range": f"{cl}{view_row_num}", "values": [[reason_val]]}
+                    {"range": range_str, "values": [[reason_val]]}
                 )
 
         if updates:
