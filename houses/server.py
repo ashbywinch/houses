@@ -5,7 +5,7 @@ import re
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 
 from houses.config import settings
@@ -21,7 +21,7 @@ from houses.enricher import (
 )
 from houses.models import CommuteBreakdown, EnrichedProperty, PetrolCost, PropertyPayload, TransitInfo
 from houses.rail_fares import fare_between, nearest_station
-from houses.sheets import write_enriched_row
+from houses.sheets import col_index, get_client, write_enriched_row
 from houses.epc import lookup_epc
 from houses.town_desc import generate_town_description
 from houses.walkability import _KNOWN_COUNTIES, enrich_walkability
@@ -88,15 +88,40 @@ async def inject_property(
     dry_run: bool = False,
     fields: list[str] | None = Query(default=None),
 ) -> JSONResponse:
-    if not payload.url.startswith("https://www.rightmove.co.uk/"):
-        raise HTTPException(status_code=400, detail="URL must be a Rightmove listing")
-
     postcode = payload.postcode or extract_postcode(payload.address)
 
     # TfL and ORS can geocode full street addresses, but choke on outcodes
     # ("SL6" returns 300 Multiple Choices). When we only have an outcode,
     # use the full address as the lookup location instead.
     lookup = payload.address if _is_outcode(postcode) else postcode
+
+    # Check if this property already exists in the sheet. Full enrichment without
+    # explicit fields is only valid for new properties.
+    rid_match = re.search(r"properties/(\d+)", payload.url)
+    rid = rid_match.group(1) if rid_match else ""
+    RID_COL = col_index("Rightmove ID")
+    if not fields and rid:
+        from houses.sheets import get_client
+        gclient = get_client()
+        if gclient and settings.sheet_id:
+            try:
+                sh = gclient.open_by_key(settings.sheet_id)
+                ws = sh.worksheet(payload.tab or "Properties Data")
+                existing = ws.get_all_values()
+                for r in existing[1:]:
+                    if len(r) > col_index("Rightmove ID") and r[col_index("Rightmove ID")].strip() == rid:
+                        return JSONResponse(
+                            content={
+                                "error": (
+                                    f"Property {rid} already exists in the sheet. "
+                                    "To update it you must specify which enrichment fields to re-run: "
+                                    "?fields=transit,petrol,schools,town,walk,epc,geo"
+                                )
+                            },
+                            status_code=400,
+                        )
+            except Exception:
+                pass  # If we can't check, proceed anyway
 
     logger.info(
         "Processing: %s | address=%s | postcode=%s | lookup=%s | beds=%s | price=%s | fields=%s",
@@ -195,7 +220,7 @@ async def inject_property(
         if actual_lat is not None and actual_lng is not None:
             approx_lat, approx_lng = actual_lat, actual_lng
         else:
-            coords = await _geocode(effective_postcode)
+            coords = await _geocode_address(lookup)
             approx_lat, approx_lng = coords if coords else (None, None)
 
         station_crs = ""
