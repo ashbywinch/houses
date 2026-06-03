@@ -127,7 +127,7 @@ def _determine_rating(row: dict) -> str:
 
 
 def _generate_summary(row: dict, rating: str) -> str:
-    """Generate a concise summary: rating, source, notable dimension highlights, SEND flags."""
+    """Generate a concise report summary: rating, notable findings, SEND flags."""
     parts = []
 
     OEIF_DIMS = [
@@ -147,21 +147,29 @@ def _generate_summary(row: dict, rating: str) -> str:
     oeif = (row.get("Latest OEIF overall effectiveness") or "").strip()
 
     if oeif and oeif != "NULL":
-        # OEIF framework: overall rating + year + notable dimension highlights
         oeif_date = row.get("Inspection start date of latest OEIF graded inspection", "")
         year = _extract_year(oeif_date)
         source = f"OEIF {year}" if year else "OEIF"
 
-        highlights = []
+        # Collect dimension grades
+        dims = []
         for label, col in OEIF_DIMS:
             val = (row.get(col) or "").strip()
-            if val and val != "NULL" and val.upper() != oeif.upper():
+            if val and val != "NULL":
                 mapped = OEIF_RATING_MAP.get(val, val)
-                highlights.append(f"{label}={mapped}")
-        suffix = f" [{', '.join(highlights)}]" if highlights else ""
-        parts.append(f"{rating} ({source}){suffix}")
+                dims.append((label, mapped, val.upper() != oeif.upper()))
+
+        better = [f"{l}={m}" for l, m, diff in dims if diff and _grade_score(m) > _grade_score(rating)]
+        worse = [f"{l}={m}" for l, m, diff in dims if diff and _grade_score(m) < _grade_score(rating)]
+
+        summary = f"{rating} ({source})"
+        if better:
+            summary += f" - {', '.join(better)} {'is' if len(better)==1 else 'are'} stronger than overall"
+        if worse and not better:
+            summary += f" - {', '.join(worse)} {'is' if len(worse)==1 else 'are'} below overall"
+        parts.append(summary)
+
     else:
-        # Old-format S5 inspection: dimension grades + SEND
         s5_data = {label: (row.get(col) or "").strip()
                    for label, col in S5_DIMS}
         s5_data = {k: v for k, v in s5_data.items() if v and v != "NULL"}
@@ -171,10 +179,9 @@ def _generate_summary(row: dict, rating: str) -> str:
             year = _extract_year(insp_date)
             s5_type = (row.get("Inspection type") or "").strip()
             source = f"{s5_type} {year}" if year else (s5_type or "S5")
-            highlights = [f"{k}={v}" for k, v in s5_data.items()]
-            parts.append(f"{rating} ({source}: {', '.join(highlights)})")
+            worst = min(s5_data, key=lambda k: _s5_score(s5_data[k]))
+            parts.append(f"{rating} ({source}) - {worst} rated {s5_data[worst]}")
         else:
-            # Ungraded inspection: the outcome text is the best info we have
             ungraded = (row.get("Ungraded inspection overall outcome") or "").strip()
             ungraded_date = row.get("Date of latest ungraded inspection", "")
             if ungraded and ungraded != "NULL":
@@ -183,18 +190,28 @@ def _generate_summary(row: dict, rating: str) -> str:
                 label = f"{rating} " if rating else ""
                 parts.append(f"{label}({source}: {ungraded})")
 
-    # SEND: mention if notably good (Strong/Exceptional) or bad (Needs attention/Urgent)
+    # SEND: mention if notably good or bad
     inclusion = (row.get("Inclusion") or "").strip()
     if inclusion and inclusion != "NULL" and inclusion not in ("Expected standard", ""):
         send_label = {
-            "Strong standard": "SEND: Strong",
-            "Exceptional": "SEND: Exceptional",
-            "Needs attention": "SEND: Needs attention",
-            "Urgent improvement": "SEND: Urgent improvement",
+            "Strong standard": "SEND support is strong",
+            "Exceptional": "SEND support is exceptional",
+            "Needs attention": "SEND support needs attention",
+            "Urgent improvement": "SEND support needs urgent improvement",
         }.get(inclusion, f"SEND: {inclusion}")
         parts.append(send_label)
 
     return " | ".join(parts) if parts else rating
+
+
+def _grade_score(grade: str) -> int:
+    """Order OEIF grades by quality for comparison."""
+    return {"Outstanding": 4, "Good": 3, "Requires Improvement": 2, "Inadequate": 1}.get(grade, 0)
+
+
+def _s5_score(grade: str) -> int:
+    """Order old-format S5 grade descriptors by quality."""
+    return {"Strong standard": 4, "Expected standard": 3, "Needs attention": 2, "Cause for concern": 1}.get(grade, 0)
 
 
 def main():
