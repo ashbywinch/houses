@@ -55,8 +55,7 @@ COLUMN_HEADERS: list[str] = [
     "Approx Longitude (est)",     # AH (33)
     "Approx Station CRS",         # AI (34)
     "Approx Station Name",        # AJ (35)
-    "Primary Inspection Summary",  # AK (36)
-    "Secondary Inspection Summary", # AL (37)
+
 ]
 
 # Conditional formatting colors (RGB 0-1 floats for Google Sheets API)
@@ -82,21 +81,19 @@ VIEW_HEADERS: list[str] = [
     "Walk to Town",
     "Walkable Amenities",
     "Primary School",
-    "Primary Ofsted",
     "Primary Walk",
+    "Primary Ofsted",
+    "Primary Inspection Year",
     "Secondary School",
-    "Secondary Ofsted",
     "Secondary Walk",
-    "Secondary Bus Route",
+    "Secondary Ofsted",
+    "Secondary Inspection Year",
     "Secondary Bus (min)",
+    "Secondary Bus Route",
     "Group Notes / WhatsApp",
     "Ashby comments",
     "Status",
     "Status Reason",
-    "Primary Inspection Year",
-    "Primary Inspection Summary",
-    "Secondary Inspection Year",
-    "Secondary Inspection Summary",
 ]
 
 # View tab columns that are manual (user-entered), never written by formulas
@@ -359,8 +356,7 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
         "secondary bus (min)": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
         "primary inspection year": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Primary Inspection Year")})',
         "secondary inspection year": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Inspection Year")})',
-        "primary inspection summary": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Primary Inspection Summary")})',
-        "secondary inspection summary": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Inspection Summary")})',
+
     }
     for header_key, formula in formula_cols.items():
         if header_key in view_header_idx:
@@ -381,7 +377,7 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
                                   "cell": {"userEnteredFormat": {"numberFormat": {"type": "TIME", "pattern": "[h]:mm"}}},
                                   "fields": "userEnteredFormat.numberFormat"}})
     for h in ["what the area is like", "walkable amenities", "primary school", "secondary school",
-              "group notes / whatsapp", "ashby comments", "primary inspection summary", "secondary inspection summary"]:
+              "group notes / whatsapp", "ashby comments"]:
         if h in header_lookup:
             ci = header_lookup[h]
             fmt_requests.append({"repeatCell": {"range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},

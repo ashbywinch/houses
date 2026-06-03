@@ -6,6 +6,7 @@ Usage:
 
     # Move a column by header name to a new position
     uv run python scripts/sheet_tool.py move "Actual Postcode" --after "Approx Station Name"
+    uv run python scripts/sheet_tool.py move "Actual Postcode" --after "Approx Station Name" --tab "Properties View"
 
     # Add a new column at the end
     uv run python scripts/sheet_tool.py add "New Column"
@@ -38,7 +39,7 @@ from google.oauth2.service_account import Credentials
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from houses.config import settings  # noqa: E402
-from houses.sheets import COLUMN_HEADERS, col_letter, ensure_named_ranges, named_range_name  # noqa: E402
+from houses.sheets import COLUMN_HEADERS, col_letter  # noqa: E402
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 DATA_TAB = "Properties Data"
@@ -68,8 +69,13 @@ def cmd_layout():
             print(f"       code: {code_name}")
 
 
-def cmd_move(header: str, after: str | None):
-    sh, ws = _get_sheet()
+def cmd_move(header: str, after: str | None, tab: str | None = None):
+    creds = Credentials.from_service_account_info(
+        json.loads(settings.service_account_json), scopes=SCOPES
+    )
+    gc = gspread.authorize(creds)
+    sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
+    ws = sh.worksheet(tab or DATA_TAB)
     sheet_id = ws._properties["sheetId"]
 
     data = ws.get_all_values()
@@ -163,10 +169,7 @@ def cmd_delete(header: str, tab: str | None = None):
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
 
-    if tab:
-        tabs_to_check = [tab]
-    else:
-        tabs_to_check = [DATA_TAB, VIEW_TAB]
+    tabs_to_check = [tab] if tab else [DATA_TAB, VIEW_TAB]
 
     found_in = {}
     for t in tabs_to_check:
@@ -263,7 +266,7 @@ def cmd_diff(rid: str, tab: str, other: str | None):
     print(f"Diff for Rightmove ID {rid} ({tab} row {this_row_num} vs {other_tab}):")
     for i in range(min(len(this_row), len(other_headers))):
         this_val = this_row[i].strip() if i < len(this_row) else ""
-        other_header = other_headers[i] if i < len(other_headers) else f"?{i}"
+        _ = other_headers[i] if i < len(other_headers) else f"?{i}"
         other_val = ""
         if other_data and len(other_data) > 1 and i < len(other_data[1]):
             other_val = other_data[1][i].strip()
@@ -316,13 +319,16 @@ def main():
         cmd_layout()
     elif cmd == "move":
         if len(sys.argv) < 3:
-            print("Usage: sheet_tool.py move <header> [--after <header>]")
+            print("Usage: sheet_tool.py move <header> [--after <header>] [--tab <name>]")
             return
         header = sys.argv[2]
         after = None
+        tab = None
         if "--after" in sys.argv:
             after = sys.argv[sys.argv.index("--after") + 1]
-        cmd_move(header, after)
+        if "--tab" in sys.argv:
+            tab = sys.argv[sys.argv.index("--tab") + 1]
+        cmd_move(header, after, tab)
     elif cmd == "add":
         if len(sys.argv) < 3:
             print("Usage: sheet_tool.py add <header> [--after <header>]")

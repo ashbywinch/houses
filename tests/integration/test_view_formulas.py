@@ -54,8 +54,7 @@ class _TestRecord:
     epc: str
     bus_min: int
     bus_route: str
-    primary_inspection_summary: str
-    secondary_inspection_summary: str
+
 
     def to_data_row(self):
         ci = col_index
@@ -90,8 +89,6 @@ class _TestRecord:
         r[ci("EPC Rating")] = self.epc
         r[ci("Secondary Bus (min)")] = str(self.bus_min)
         r[ci("Secondary Bus Route")] = self.bus_route
-        r[ci("Primary Inspection Summary")] = self.primary_inspection_summary
-        r[ci("Secondary Inspection Summary")] = self.secondary_inspection_summary
         return r
 
 
@@ -108,8 +105,6 @@ RECORDS = [
         secondary_link="http://link/sec1", secondary_ofsted="Outstanding", secondary_yr=2023,
         area_desc="A nice area to live", walk_min=12, amenities="Supermarket|Park",
         epc="B", bus_min=25, bus_route="Bus 101",
-        primary_inspection_summary="Good school with strong leadership",
-        secondary_inspection_summary="Outstanding results in recent years",
     ),
     _TestRecord(
         url="https://www.rightmove.co.uk/properties/22222222",
@@ -123,8 +118,6 @@ RECORDS = [
         secondary_link="http://link/sec2", secondary_ofsted="Good", secondary_yr=2024,
         area_desc="Quiet suburban area", walk_min=20, amenities="Pharmacy|Train Station",
         epc="C", bus_min=30, bus_route="Bus 202",
-        primary_inspection_summary="Requires improvement in maths",
-        secondary_inspection_summary="Good overall with outstanding sixth form",
     ),
 ]
 
@@ -202,21 +195,19 @@ class TestViewFormulasOnTestSheet:
             f'=LET(v,XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Walk to Town (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
             f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Walkable Amenities")})',
             f'=HYPERLINK(XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Primary School Link")}),XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Primary School")}))',
-            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Primary Ofsted")})',
             f'=LET(v,XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Primary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Primary Ofsted")})',
+            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Primary Inspection Year")})',
             f'=HYPERLINK(XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary School Link")}),XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary School")}))',
-            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary Ofsted")})',
             f'=LET(v,XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary Bus Route")})',
+            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary Ofsted")})',
+            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary Inspection Year")})',
             f'=LET(v,XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary Bus Route")})',
             "",  # Group Notes / WhatsApp
             "",  # Ashby comments
             "",  # Status
             "",  # Status Reason
-            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Primary Inspection Year")})',
-            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Primary Inspection Summary")})',
-            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary Inspection Year")})',
-            f'=XLOOKUP(VALUE({view_ref(rightmove_id_header)}),{data_ref(rightmove_id_header)},{data_ref("Secondary Inspection Summary")})',
         ]
         last_col = col_letter(len(formulas) - 1)
         ws_view.update(range_name=f"A2:{last_col}3", values=[formulas, formulas], value_input_option="USER_ENTERED")
@@ -240,8 +231,7 @@ class TestViewFormulasOnTestSheet:
                         "cell": {"userEnteredFormat": {"numberFormat": {"type": "TIME", "pattern": "[h]:mm"}}},
                         "fields": "userEnteredFormat.numberFormat"}})
         for h in ["What the Area is Like", "Walkable Amenities", "Primary School", "Secondary School",
-                  "Group Notes / WhatsApp", "Ashby comments",
-                  "Primary Inspection Summary", "Secondary Inspection Summary"]:
+                  "Group Notes / WhatsApp", "Ashby comments"]:
             ci = VIEW_HEADERS.index(h)
             fmt.append({"repeatCell": {"range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},
                         "cell": {"userEnteredFormat": {"wrapStrategy": "WRAP"}},
