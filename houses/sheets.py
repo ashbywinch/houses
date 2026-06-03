@@ -410,21 +410,22 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
     extra_requests: list = []
 
     # Clear existing conditional formatting rules for the View tab
+    # Must delete from highest index to lowest since batch processes in order
     try:
         sheet_data = spreadsheet.client.request(
             "get",
             f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet.id}",
-            params={"fields": "sheets(conditionalFormatRules,properties.sheetId)"}
+            params={"fields": "sheets(conditionalFormats,properties.sheetId)"}
         )
         parsed = json.loads(sheet_data.content)
         for s in parsed.get("sheets", []):
             if s["properties"]["sheetId"] == sid:
-                rule_count = len(s.get("conditionalFormatRules", []))
-                for _ in range(rule_count):
+                rule_count = len(s.get("conditionalFormats", []))
+                for i in range(rule_count - 1, -1, -1):
                     extra_requests.append({
                         "deleteConditionalFormatRule": {
                             "sheetId": sid,
-                            "index": 0  # Always delete index 0, list shrinks
+                            "index": i
                         }
                     })
                 break
