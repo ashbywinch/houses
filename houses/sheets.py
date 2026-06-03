@@ -156,9 +156,9 @@ def named_range_name(header: str) -> str:
     return "Data_" + "".join(w.capitalize() for w in words)
 
 
-def _add_rule(fmt_requests: list, sid: int, hl: dict, col_letter_fn, header_name: str, formula: str, bg_color: dict | None = None, text_color: dict | None = None) -> None:
+def _add_rule(fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn, header_name: str, formula: str, bg_color: dict | None = None, text_color: dict | None = None) -> None:
     """Append a single conditional formatting rule to fmt_requests."""
-    col_idx = hl[header_name.lower()]
+    col_idx = header_lookup[header_name.lower()]
     rule = {
         "addConditionalFormatRule": {
             "rule": {
@@ -178,77 +178,77 @@ def _add_rule(fmt_requests: list, sid: int, hl: dict, col_letter_fn, header_name
 
 
 def _add_time_tiered(
-    fmt_requests: list, sid: int, hl: dict, cl, header: str,
-    g_h: int, g_m: int, o_h: int, o_m: int,
+    fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn, header: str,
+    green_hours: int, green_mins: int, orange_hours: int, orange_mins: int,
 ) -> None:
     """Add green/orange/red for a time column: <G:H G:M green, G:H G:M–O:H O:M orange, >O:H O:M red."""
-    letter = cl(hl[header])
-    _add_rule(fmt_requests, sid, hl, cl, header, f'=${letter}2<TIME({g_h},{g_m},0)', GREEN_BG)
-    orange_f = f'=AND(${letter}2>=TIME({g_h},{g_m},0),${letter}2<=TIME({o_h},{o_m},0))'
-    _add_rule(fmt_requests, sid, hl, cl, header, orange_f, ORANGE_BG)
-    _add_rule(fmt_requests, sid, hl, cl, header, f'=${letter}2>TIME({o_h},{o_m},0)', RED_BG)
+    letter = col_letter_fn(header_lookup[header])
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=${letter}2<TIME({green_hours},{green_mins},0)', GREEN_BG)
+    orange_f = f'=AND(${letter}2>=TIME({green_hours},{green_mins},0),${letter}2<=TIME({orange_hours},{orange_mins},0))'
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, orange_f, ORANGE_BG)
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=${letter}2>TIME({orange_hours},{orange_mins},0)', RED_BG)
 
 
 def _add_numeric_tiered(
-    fmt_requests: list, sid: int, hl: dict, cl, header: str,
+    fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn, header: str,
     green_max: float, orange_max: float,
 ) -> None:
     """Add green/orange/red for a numeric column: <green_max green, green_max–orange_max orange, >orange_max red."""
-    letter = cl(hl[header])
-    _add_rule(fmt_requests, sid, hl, cl, header, f'=${letter}2<{green_max}', GREEN_BG)
+    letter = col_letter_fn(header_lookup[header])
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=${letter}2<{green_max}', GREEN_BG)
     orange_f = f'=AND(${letter}2>={green_max},${letter}2<={orange_max})'
-    _add_rule(fmt_requests, sid, hl, cl, header, orange_f, ORANGE_BG)
-    _add_rule(fmt_requests, sid, hl, cl, header, f'=${letter}2>{orange_max}', RED_BG)
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, orange_f, ORANGE_BG)
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=${letter}2>{orange_max}', RED_BG)
 
 
-def _add_epc_rules(fmt_requests: list, sid: int, hl: dict, cl):
+def _add_epc_rules(fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn):
     """EPC Rating: A/B green, C/D orange, E/F/G red."""
-    letter = cl(hl["epc rating"])
-    _add_rule(fmt_requests, sid, hl, cl, "epc rating", f'=OR(LEFT(${letter}2,1)="A",LEFT(${letter}2,1)="B")', GREEN_BG)
-    _add_rule(fmt_requests, sid, hl, cl, "epc rating", f'=OR(LEFT(${letter}2,1)="C",LEFT(${letter}2,1)="D")', ORANGE_BG)
+    letter = col_letter_fn(header_lookup["epc rating"])
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, "epc rating", f'=OR(LEFT(${letter}2,1)="A",LEFT(${letter}2,1)="B")', GREEN_BG)
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, "epc rating", f'=OR(LEFT(${letter}2,1)="C",LEFT(${letter}2,1)="D")', ORANGE_BG)
     f = f'=OR(LEFT(${letter}2,1)="E",LEFT(${letter}2,1)="F",LEFT(${letter}2,1)="G")'
-    _add_rule(fmt_requests, sid, hl, cl, "epc rating", f, RED_BG)
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, "epc rating", f, RED_BG)
 
 
-def _add_commute_cost_rules(fmt_requests: list, sid: int, hl: dict, cl):
+def _add_commute_cost_rules(fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn):
     """Yearly Commute Total: <£5k green, £5-10k orange, >£10k red."""
-    _add_numeric_tiered(fmt_requests, sid, hl, cl, "yearly commute total (£)", 5000, 10000)
+    _add_numeric_tiered(fmt_requests, sid, header_lookup, col_letter_fn, "yearly commute total (£)", 5000, 10000)
 
 
-def _add_commute_time_rules(fmt_requests: list, sid: int, hl: dict, cl):
+def _add_commute_time_rules(fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn):
     """Simon/Lorena: <45m green, 45-75m orange, >75m red. Bracknell: <30/30-60/>60."""
-    _add_time_tiered(fmt_requests, sid, hl, cl, "simon london", 0, 45, 1, 15)
-    _add_time_tiered(fmt_requests, sid, hl, cl, "lorena london", 0, 45, 1, 15)
-    _add_time_tiered(fmt_requests, sid, hl, cl, "bracknell time", 0, 30, 1, 0)
+    _add_time_tiered(fmt_requests, sid, header_lookup, col_letter_fn, "simon london", 0, 45, 1, 15)
+    _add_time_tiered(fmt_requests, sid, header_lookup, col_letter_fn, "lorena london", 0, 45, 1, 15)
+    _add_time_tiered(fmt_requests, sid, header_lookup, col_letter_fn, "bracknell time", 0, 30, 1, 0)
 
 
-def _add_walk_time_rules(fmt_requests: list, sid: int, hl: dict, cl):
+def _add_walk_time_rules(fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn):
     """Walk to Town, Primary Walk, Secondary Walk, Secondary Bus (min): <15/15-30/>30."""
     for hdr in ["walk to town", "primary walk", "secondary walk", "secondary bus (min)"]:
-        _add_time_tiered(fmt_requests, sid, hl, cl, hdr, 0, 15, 0, 30)
+        _add_time_tiered(fmt_requests, sid, header_lookup, col_letter_fn, hdr, 0, 15, 0, 30)
 
 
-def _add_ofsted_rules(fmt_requests: list, sid: int, hl: dict, cl):
+def _add_ofsted_rules(fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn):
     """Primary/Secondary Ofsted: Outstanding green, Good orange, Requires Improvement/Inadequate red."""
     for hdr in ["primary ofsted", "secondary ofsted"]:
-        letter = cl(hl[hdr])
-        _add_rule(fmt_requests, sid, hl, cl, hdr, f'=${letter}2="Outstanding"', GREEN_BG)
-        _add_rule(fmt_requests, sid, hl, cl, hdr, f'=LEFT(${letter}2,4)="Good"', ORANGE_BG)
+        letter = col_letter_fn(header_lookup[hdr])
+        _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, hdr, f'=${letter}2="Outstanding"', GREEN_BG)
+        _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, hdr, f'=LEFT(${letter}2,4)="Good"', ORANGE_BG)
         f = f'=OR(LEFT(${letter}2,20)="Requires Improvement",LEFT(${letter}2,9)="Inadequate")'
-        _add_rule(fmt_requests, sid, hl, cl, hdr, f, RED_BG)
+        _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, hdr, f, RED_BG)
 
 
-def _add_inspection_year_rules(fmt_requests: list, sid: int, hl: dict, cl):
+def _add_inspection_year_rules(fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn):
     """Inspection years: >=2023 green, <=2022 orange. 2-tier only."""
     for hdr in ["primary inspection year", "secondary inspection year"]:
-        letter = cl(hl[hdr])
-        _add_rule(fmt_requests, sid, hl, cl, hdr, f'=VALUE(${letter}2)>=2023', GREEN_BG)
-        _add_rule(fmt_requests, sid, hl, cl, hdr, f'=AND(VALUE(${letter}2)>0,VALUE(${letter}2)<=2022)', ORANGE_BG)
+        letter = col_letter_fn(header_lookup[hdr])
+        _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, hdr, f'=VALUE(${letter}2)>=2023', GREEN_BG)
+        _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, hdr, f'=AND(VALUE(${letter}2)>0,VALUE(${letter}2)<=2022)', ORANGE_BG)
 
 
-def _add_grey_text_row_rule(fmt_requests: list, sid: int, hl: dict, cl, num_cols: int):
+def _add_grey_text_row_rule(fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn, num_cols: int):
     """Full-row grey text when Status column is 'No'. Applied LAST so text dims but backgrounds stay."""
-    status_letter = cl(hl["status"])
+    status_letter = col_letter_fn(header_lookup["status"])
     fmt_requests.append({
         "addConditionalFormatRule": {
             "rule": {
@@ -267,9 +267,9 @@ def _add_grey_text_row_rule(fmt_requests: list, sid: int, hl: dict, cl, num_cols
     })
 
 
-def _add_status_data_validation(fmt_requests: list, sid: int, hl: dict):
+def _add_status_data_validation(fmt_requests: list, sid: int, header_lookup: dict):
     """Add dropdown validation (No, Maybe) to the Status column."""
-    status_idx = hl.get("status")
+    status_idx = header_lookup.get("status")
     if status_idx is not None:
         fmt_requests.append({
             "setDataValidation": {
@@ -291,17 +291,17 @@ def _add_status_data_validation(fmt_requests: list, sid: int, hl: dict):
 
 def _add_color_rules(fmt_requests: list, sid: int, headers: list[str]) -> None:
     """Orchestrate conditional formatting rules and Status column validation."""
-    hl = {h.strip().lower(): i for i, h in enumerate(headers)}
-    cl = lambda i: chr(65 + i) if i < 26 else chr(64 + i // 26) + chr(65 + i % 26)
+    header_lookup = {h.strip().lower(): i for i, h in enumerate(headers)}
+    col_letter_fn = lambda i: chr(65 + i) if i < 26 else chr(64 + i // 26) + chr(65 + i % 26)
 
-    _add_epc_rules(fmt_requests, sid, hl, cl)
-    _add_commute_cost_rules(fmt_requests, sid, hl, cl)
-    _add_commute_time_rules(fmt_requests, sid, hl, cl)
-    _add_walk_time_rules(fmt_requests, sid, hl, cl)
-    _add_ofsted_rules(fmt_requests, sid, hl, cl)
-    _add_inspection_year_rules(fmt_requests, sid, hl, cl)
-    _add_grey_text_row_rule(fmt_requests, sid, hl, cl, len(headers))
-    _add_status_data_validation(fmt_requests, sid, hl)
+    _add_epc_rules(fmt_requests, sid, header_lookup, col_letter_fn)
+    _add_commute_cost_rules(fmt_requests, sid, header_lookup, col_letter_fn)
+    _add_commute_time_rules(fmt_requests, sid, header_lookup, col_letter_fn)
+    _add_walk_time_rules(fmt_requests, sid, header_lookup, col_letter_fn)
+    _add_ofsted_rules(fmt_requests, sid, header_lookup, col_letter_fn)
+    _add_inspection_year_rules(fmt_requests, sid, header_lookup, col_letter_fn)
+    _add_grey_text_row_rule(fmt_requests, sid, header_lookup, col_letter_fn, len(headers))
+    _add_status_data_validation(fmt_requests, sid, header_lookup)
 
 
 def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
