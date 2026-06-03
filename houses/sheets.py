@@ -162,7 +162,7 @@ def _add_rule(fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn, 
     rule = {
         "addConditionalFormatRule": {
             "rule": {
-                "ranges": [{"sheetId": sid, "startColumnIndex": col_idx, "endColumnIndex": col_idx + 1}],
+                "ranges": [{"sheetId": sid, "startColumnIndex": col_idx, "endColumnIndex": col_idx + 1, "startRowIndex": 1}],
                 "booleanRule": {
                     "condition": {"type": "CUSTOM_FORMULA", "values": [{"userEnteredValue": formula}]},
                     "format": {}
@@ -252,7 +252,7 @@ def _add_grey_text_row_rule(fmt_requests: list, sid: int, header_lookup: dict, c
     fmt_requests.append({
         "addConditionalFormatRule": {
             "rule": {
-                "ranges": [{"sheetId": sid, "startColumnIndex": 0, "endColumnIndex": num_cols}],
+                "ranges": [{"sheetId": sid, "startColumnIndex": 0, "endColumnIndex": num_cols, "startRowIndex": 1}],
                 "booleanRule": {
                     "condition": {
                         "type": "CUSTOM_FORMULA",
@@ -273,7 +273,7 @@ def _add_status_data_validation(fmt_requests: list, sid: int, header_lookup: dic
     if status_idx is not None:
         fmt_requests.append({
             "setDataValidation": {
-                "range": {"sheetId": sid, "startColumnIndex": status_idx, "endColumnIndex": status_idx + 1},
+                "range": {"sheetId": sid, "startColumnIndex": status_idx, "endColumnIndex": status_idx + 1, "startRowIndex": 1},
                 "rule": {
                     "condition": {
                         "type": "ONE_OF_LIST",
