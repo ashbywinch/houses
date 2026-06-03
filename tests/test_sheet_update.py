@@ -1,5 +1,6 @@
 """Tests for sheet update logic — never hits the real spreadsheet."""
 
+import pytest
 from fastapi.testclient import TestClient
 
 from houses.models import EnrichedProperty
@@ -33,6 +34,7 @@ def _make_enriched(url: str, simon_cost: float = 10.0) -> EnrichedProperty:
     )
 
 
+@pytest.mark.integration
 class TestDryRun:
     """dry_run=true returns enriched data without writing to the sheet."""
 

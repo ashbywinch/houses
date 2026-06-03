@@ -97,11 +97,15 @@ _COLUMN_FIELDS: dict[int, str] = {
     col_index("Primary Walk (min)"): "schools",
     col_index("Primary School Link"): "schools",
     col_index("Primary Ofsted"): "schools",
+    col_index("Primary Inspection Year"): "schools",
+    col_index("Primary Inspection Summary"): "schools",
     col_index("Secondary School"): "schools",
     col_index("Secondary Distance (km)"): "schools",
     col_index("Secondary Walk (min)"): "schools",
     col_index("Secondary School Link"): "schools",
     col_index("Secondary Ofsted"): "schools",
+    col_index("Secondary Inspection Year"): "schools",
+    col_index("Secondary Inspection Summary"): "schools",
     col_index("Secondary Bus (min)"): "schools",
     col_index("Secondary Bus Route"): "schools",
     col_index("Walk to Town (min)"): "walk",
@@ -143,6 +147,7 @@ def _fields_for_columns(col_indices: set[int]) -> str:
 def main():
     columns = None
     dry_run = False
+    obliterate = False
     i = 0
     while i < len(sys.argv[1:]):
         a = sys.argv[1:][i]
@@ -151,6 +156,8 @@ def main():
             i += 1
         elif a == "--dry-run":
             dry_run = True
+        elif a == "--obliterate":
+            obliterate = True
         i += 1
 
     creds = Credentials.from_service_account_info(
@@ -166,19 +173,45 @@ def main():
         return
 
     headers = existing[0]
+
+    # Safety check: refuse to regenerate all enriched columns without explicit consent.
+    enriched_cols = [i for i in range(len(headers)) if i not in MANUAL_COLS]
+    already_populated = [
+        i for i in enriched_cols
+        if any(len(r) > i and r[i].strip() for r in existing[1:])
+    ]
+    if not columns and not obliterate and already_populated:
+        populated_names = [headers[i] for i in already_populated[:5]]
+        print(
+            f"ERROR: {len(already_populated)} enriched columns already have data "
+            f"(e.g. {', '.join(populated_names)}...).\n"
+            f"Regenerating them would waste API credits on unnecessary lookups.\n"
+            f"  Use --columns \"Col1,Col2\" to target specific columns, or\n"
+            f"  Use --obliterate if you really want to regenerate everything."
+        )
+        sys.exit(1)
     client = TestClient(app)
     changed_rows = 0
     changed_cells = 0
     dry_run_changes: list[tuple[int, str, str, str]] = []  # (row, col_header, old, new)
 
     for row_idx, row in enumerate(existing[1:], 2):
+        # Read URL from column A (user-provided). If absent, construct from Rightmove ID.
         url = row[0].strip() if row else ""
-        if not url or not url.startswith("http"):
-            continue
+        if not url.startswith("http"):
+            rid = row[col_index("Rightmove ID")] if len(row) > col_index("Rightmove ID") else ""
+            if rid:
+                url = f"https://www.rightmove.co.uk/properties/{rid}"
+            else:
+                continue
 
         payload = {"url": url}
-        if len(row) > 1 and row[1]:
-            payload["address"] = row[1]
+        addr_col = col_index("Address")
+        if len(row) > addr_col and row[addr_col]:
+            payload["address"] = row[addr_col]
+        pc_col = col_index("Postcode")
+        if len(row) > pc_col and row[pc_col]:
+            payload["postcode"] = row[pc_col]
         # Pass user-filled actual values if they exist
         if len(row) > 5 and row[5]:
             try: payload["actual_latitude"] = float(row[5])
@@ -189,9 +222,22 @@ def main():
         if len(row) > 7 and row[7]:
             payload["actual_postcode"] = row[7]
 
-        url_params = "dry_run=true"
+        # Determine which enriched columns are empty for this row.
+        # Only request those field groups from the server to avoid wasting API calls.
+        enriched_cols = [i for i in range(len(headers)) if i not in MANUAL_COLS]
+        empty_columns = [i for i in enriched_cols if i < len(row) and not row[i].strip()]
+
         if columns is not None:
-            url_params += f"&fields={_fields_for_columns(columns)}"
+            # User specified columns — only those, even if already filled
+            needed_cols = [i for i in columns if i in enriched_cols]
+        elif not empty_columns:
+            # All enriched columns are already populated — nothing to do
+            continue
+        else:
+            needed_cols = empty_columns
+
+        needed_fields = _fields_for_columns(needed_cols)
+        url_params = f"dry_run=true&fields={needed_fields}"
         resp = client.post(f"/inject-property?{url_params}", json=payload, timeout=30)
         if resp.status_code != 200:
             continue
@@ -206,10 +252,7 @@ def main():
 
         new_row = _row_values(EnrichedProperty(**enriched))
 
-        if columns is None:
-            update_cols = [i for i in range(len(headers)) if i not in MANUAL_COLS]
-        else:
-            update_cols = [i for i in columns if i < len(headers)]
+        update_cols = needed_cols
 
         cells = []
         for col_idx in update_cols:
