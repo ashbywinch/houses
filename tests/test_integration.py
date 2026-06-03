@@ -5,9 +5,12 @@ Skip with:  make test  (unit tests only)
 """
 
 import os
+import re
 
 import httpx
 import pytest
+
+pytestmark = pytest.mark.integration
 
 from houses.enricher import OUTCODES_IO_URL, POSTCODES_IO_URL
 from houses.server import extract_postcode
