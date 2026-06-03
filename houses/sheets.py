@@ -57,6 +57,12 @@ COLUMN_HEADERS: list[str] = [
     "Approx Station Name",        # AJ (35)
 ]
 
+# Conditional formatting colors (RGB 0-1 floats for Google Sheets API)
+GREEN_BG = {"red": 0.85, "green": 0.92, "blue": 0.83}
+ORANGE_BG = {"red": 1.0, "green": 0.95, "blue": 0.80}
+RED_BG = {"red": 0.96, "green": 0.80, "blue": 0.80}
+GREY_TEXT = {"red": 0.6, "green": 0.6, "blue": 0.6}
+
 # Canonical View tab headers — single source of truth. Must be imported by
 # scripts/setup_sheet.py and tests/integration/test_view_formulas.py.
 VIEW_HEADERS: list[str] = [
@@ -150,6 +156,154 @@ def named_range_name(header: str) -> str:
     return "Data_" + "".join(w.capitalize() for w in words)
 
 
+def _add_rule(fmt_requests: list, sid: int, hl: dict, col_letter_fn, header_name: str, formula: str, bg_color: dict | None = None, text_color: dict | None = None) -> None:
+    """Append a single conditional formatting rule to fmt_requests."""
+    col_idx = hl[header_name.lower()]
+    rule = {
+        "addConditionalFormatRule": {
+            "rule": {
+                "ranges": [{"sheetId": sid, "startColumnIndex": col_idx, "endColumnIndex": col_idx + 1}],
+                "booleanRule": {
+                    "condition": {"type": "CUSTOM_FORMULA", "values": [{"userEnteredValue": formula}]},
+                    "format": {}
+                }
+            }
+        }
+    }
+    if bg_color:
+        rule["addConditionalFormatRule"]["rule"]["booleanRule"]["format"]["backgroundColor"] = bg_color
+    if text_color:
+        rule["addConditionalFormatRule"]["rule"]["booleanRule"]["format"]["textFormat"] = {"foregroundColor": text_color}
+    fmt_requests.append(rule)
+
+
+def _add_time_tiered(
+    fmt_requests: list, sid: int, hl: dict, cl, header: str,
+    g_h: int, g_m: int, o_h: int, o_m: int,
+) -> None:
+    """Add green/orange/red for a time column: <G:H G:M green, G:H G:M–O:H O:M orange, >O:H O:M red."""
+    letter = cl(hl[header])
+    _add_rule(fmt_requests, sid, hl, cl, header, f'=${letter}2<TIME({g_h},{g_m},0)', GREEN_BG)
+    orange_f = f'=AND(${letter}2>=TIME({g_h},{g_m},0),${letter}2<=TIME({o_h},{o_m},0))'
+    _add_rule(fmt_requests, sid, hl, cl, header, orange_f, ORANGE_BG)
+    _add_rule(fmt_requests, sid, hl, cl, header, f'=${letter}2>TIME({o_h},{o_m},0)', RED_BG)
+
+
+def _add_numeric_tiered(
+    fmt_requests: list, sid: int, hl: dict, cl, header: str,
+    green_max: float, orange_max: float,
+) -> None:
+    """Add green/orange/red for a numeric column: <green_max green, green_max–orange_max orange, >orange_max red."""
+    letter = cl(hl[header])
+    _add_rule(fmt_requests, sid, hl, cl, header, f'=${letter}2<{green_max}', GREEN_BG)
+    orange_f = f'=AND(${letter}2>={green_max},${letter}2<={orange_max})'
+    _add_rule(fmt_requests, sid, hl, cl, header, orange_f, ORANGE_BG)
+    _add_rule(fmt_requests, sid, hl, cl, header, f'=${letter}2>{orange_max}', RED_BG)
+
+
+def _add_epc_rules(fmt_requests: list, sid: int, hl: dict, cl):
+    """EPC Rating: A/B green, C/D orange, E/F/G red."""
+    letter = cl(hl["epc rating"])
+    _add_rule(fmt_requests, sid, hl, cl, "epc rating", f'=OR(LEFT(${letter}2,1)="A",LEFT(${letter}2,1)="B")', GREEN_BG)
+    _add_rule(fmt_requests, sid, hl, cl, "epc rating", f'=OR(LEFT(${letter}2,1)="C",LEFT(${letter}2,1)="D")', ORANGE_BG)
+    f = f'=OR(LEFT(${letter}2,1)="E",LEFT(${letter}2,1)="F",LEFT(${letter}2,1)="G")'
+    _add_rule(fmt_requests, sid, hl, cl, "epc rating", f, RED_BG)
+
+
+def _add_commute_cost_rules(fmt_requests: list, sid: int, hl: dict, cl):
+    """Yearly Commute Total: <£5k green, £5-10k orange, >£10k red."""
+    _add_numeric_tiered(fmt_requests, sid, hl, cl, "yearly commute total (£)", 5000, 10000)
+
+
+def _add_commute_time_rules(fmt_requests: list, sid: int, hl: dict, cl):
+    """Simon/Lorena: <45m green, 45-75m orange, >75m red. Bracknell: <30/30-60/>60."""
+    _add_time_tiered(fmt_requests, sid, hl, cl, "simon london", 0, 45, 1, 15)
+    _add_time_tiered(fmt_requests, sid, hl, cl, "lorena london", 0, 45, 1, 15)
+    _add_time_tiered(fmt_requests, sid, hl, cl, "bracknell time", 0, 30, 1, 0)
+
+
+def _add_walk_time_rules(fmt_requests: list, sid: int, hl: dict, cl):
+    """Walk to Town, Primary Walk, Secondary Walk, Secondary Bus (min): <15/15-30/>30."""
+    for hdr in ["walk to town", "primary walk", "secondary walk", "secondary bus (min)"]:
+        _add_time_tiered(fmt_requests, sid, hl, cl, hdr, 0, 15, 0, 30)
+
+
+def _add_ofsted_rules(fmt_requests: list, sid: int, hl: dict, cl):
+    """Primary/Secondary Ofsted: Outstanding green, Good orange, Requires Improvement/Inadequate red."""
+    for hdr in ["primary ofsted", "secondary ofsted"]:
+        letter = cl(hl[hdr])
+        _add_rule(fmt_requests, sid, hl, cl, hdr, f'=${letter}2="Outstanding"', GREEN_BG)
+        _add_rule(fmt_requests, sid, hl, cl, hdr, f'=LEFT(${letter}2,4)="Good"', ORANGE_BG)
+        f = f'=OR(LEFT(${letter}2,20)="Requires Improvement",LEFT(${letter}2,9)="Inadequate")'
+        _add_rule(fmt_requests, sid, hl, cl, hdr, f, RED_BG)
+
+
+def _add_inspection_year_rules(fmt_requests: list, sid: int, hl: dict, cl):
+    """Inspection years: >=2023 green, <=2022 orange. 2-tier only."""
+    for hdr in ["primary inspection year", "secondary inspection year"]:
+        letter = cl(hl[hdr])
+        _add_rule(fmt_requests, sid, hl, cl, hdr, f'=VALUE(${letter}2)>=2023', GREEN_BG)
+        _add_rule(fmt_requests, sid, hl, cl, hdr, f'=AND(VALUE(${letter}2)>0,VALUE(${letter}2)<=2022)', ORANGE_BG)
+
+
+def _add_grey_text_row_rule(fmt_requests: list, sid: int, hl: dict, cl, num_cols: int):
+    """Full-row grey text when Status column is 'No'. Applied LAST so text dims but backgrounds stay."""
+    status_letter = cl(hl["status"])
+    fmt_requests.append({
+        "addConditionalFormatRule": {
+            "rule": {
+                "ranges": [{"sheetId": sid, "startColumnIndex": 0, "endColumnIndex": num_cols}],
+                "booleanRule": {
+                    "condition": {
+                        "type": "CUSTOM_FORMULA",
+                        "values": [{"userEnteredValue": f'=${status_letter}2="No"'}]
+                    },
+                    "format": {
+                        "textFormat": {"foregroundColor": GREY_TEXT}
+                    }
+                }
+            }
+        }
+    })
+
+
+def _add_status_data_validation(fmt_requests: list, sid: int, hl: dict):
+    """Add dropdown validation (No, Maybe) to the Status column."""
+    status_idx = hl.get("status")
+    if status_idx is not None:
+        fmt_requests.append({
+            "setDataValidation": {
+                "range": {"sheetId": sid, "startColumnIndex": status_idx, "endColumnIndex": status_idx + 1},
+                "rule": {
+                    "condition": {
+                        "type": "ONE_OF_LIST",
+                        "values": [
+                            {"userEnteredValue": "No"},
+                            {"userEnteredValue": "Maybe"},
+                        ]
+                    },
+                    "showCustomUi": True,
+                    "strict": "true",
+                }
+            }
+        })
+
+
+def _add_color_rules(fmt_requests: list, sid: int, headers: list[str]) -> None:
+    """Orchestrate conditional formatting rules and Status column validation."""
+    hl = {h.strip().lower(): i for i, h in enumerate(headers)}
+    cl = lambda i: chr(65 + i) if i < 26 else chr(64 + i // 26) + chr(65 + i % 26)
+
+    _add_epc_rules(fmt_requests, sid, hl, cl)
+    _add_commute_cost_rules(fmt_requests, sid, hl, cl)
+    _add_commute_time_rules(fmt_requests, sid, hl, cl)
+    _add_walk_time_rules(fmt_requests, sid, hl, cl)
+    _add_ofsted_rules(fmt_requests, sid, hl, cl)
+    _add_inspection_year_rules(fmt_requests, sid, hl, cl)
+    _add_grey_text_row_rule(fmt_requests, sid, hl, cl, len(headers))
+    _add_status_data_validation(fmt_requests, sid, hl)
+
+
 def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
     """Ensure named ranges, write View formulas, and apply cell formatting.
 
@@ -197,7 +351,7 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
             if num_rows > 1:
                 ws.update(values=[[formula] for _ in range(num_rows - 1)],
                            range_name=f'{cl}2:{cl}{num_rows}',
-                           value_input_option='USER_ENTERED')
+                           value_input_option='USER_ENTEred')
 
     sid = ws._properties["sheetId"]
     headers = data[0]
@@ -234,6 +388,12 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
     })
     if fmt_requests:
         spreadsheet.batch_update({"requests": fmt_requests})
+
+    # Extended: conditional formatting rules + Status data validation
+    extra_requests: list = []
+    _add_color_rules(extra_requests, sid, headers)
+    if extra_requests:
+        spreadsheet.batch_update({"requests": extra_requests})
 
 
 def ensure_named_ranges(spreadsheet: gspread.Spreadsheet) -> None:
@@ -368,7 +528,7 @@ def _build_full_row(property_: EnrichedProperty) -> list[str]:
 
 def ensure_headers(worksheet: gspread.Worksheet) -> None:
     if worksheet.row_count == 0 or not worksheet.get_all_values():
-        worksheet.append_row(COLUMN_HEADERS, value_input_option="USER_ENTERED")
+        worksheet.append_row(COLUMN_HEADERS, value_input_option="USER_ENTEred")
 
 
 async def write_enriched_row(property_: EnrichedProperty, tab: str = DATA_TAB) -> str | None:
@@ -415,12 +575,12 @@ async def write_enriched_row(property_: EnrichedProperty, tab: str = DATA_TAB) -
                     cells.append({"range": f"{cl}{target_row}", "values": [[val]]})
             if cells:
                 worksheet.spreadsheet.values_batch_update(
-                    {"valueInputOption": "USER_ENTERED", "data": cells}
+                    {"valueInputOption": "USER_ENTEred", "data": cells}
                 )
             row_url = f"https://docs.google.com/spreadsheets/d/{settings.sheet_id}/edit#gid={worksheet.id}&range=A{target_row}"
             logger.info("Updated row %d for Rightmove ID %s", target_row, rid)
         else:
-            worksheet.append_row(_build_full_row(property_), value_input_option="USER_ENTERED")
+            worksheet.append_row(_build_full_row(property_), value_input_option="USER_ENTEred")
             new_row_num = worksheet.row_count
             row_url = f"https://docs.google.com/spreadsheets/d/{settings.sheet_id}/edit#gid={worksheet.id}&range=A{new_row_num}"
             logger.info("Appended row for %s", property_.url)
