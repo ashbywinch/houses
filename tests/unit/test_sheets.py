@@ -1,7 +1,9 @@
 """Tests for sheet integration — column alignment invariant."""
 
+import pytest
+
 from houses.models import EnrichedProperty, PetrolCost, SchoolInfo, TransitInfo
-from houses.sheets import COLUMN_HEADERS, _row_values
+from houses.sheets import COLUMN_HEADERS, _rightmove_id, _row_values, col_index, col_letter, named_range_name
 
 
 def test_row_values_contains_all_enriched_columns():
@@ -141,8 +143,6 @@ def test_row_values_missing_commute_empty():
 
 
 def test_named_range_name_is_deterministic():
-    from houses.sheets import COLUMN_HEADERS, named_range_name
-
     for header in COLUMN_HEADERS:
         name = named_range_name(header)
         assert name.startswith("Data_"), f"{header} → {name} must start with Data_"
@@ -226,3 +226,68 @@ def test_xlookup_key_is_typed_as_number():
         assert "VALUE(" in formula, f"Missing VALUE() wrapping in: {formula[:80]}"
         assert "!$" not in formula
         assert "IFERROR" not in formula
+
+
+class TestRightmoveID:
+    """_rightmove_id — extract numeric ID from Rightmove URLs and text."""
+
+    def test_standard_url(self):
+        assert _rightmove_id("https://www.rightmove.co.uk/properties/123456789") == "123456789"
+
+    def test_url_with_extra_params(self):
+        assert _rightmove_id("https://www.rightmove.co.uk/properties/98765432?queryParam=value") == "98765432"
+
+    def test_bare_id_number(self):
+        """Fallback: any 8+ digit number counts as an ID."""
+        assert _rightmove_id("88375569") == "88375569"
+
+    def test_short_number_not_id(self):
+        """Less than 8 digits should not match the fallback."""
+        assert _rightmove_id("123") == ""
+
+    def test_no_id_returns_empty(self):
+        assert _rightmove_id("not a url") == ""
+
+    def test_empty_string(self):
+        assert _rightmove_id("") == ""
+
+    def test_url_with_non_numeric_id(self):
+        """URL with no numeric segment should fall through to empty."""
+        assert _rightmove_id("https://example.com/properties/abc") == ""
+
+
+class TestColLetter:
+    """col_letter — 0-based index to Google Sheets column letter."""
+
+    def test_a(self):
+        assert col_letter(0) == "A"
+
+    def test_z(self):
+        assert col_letter(25) == "Z"
+
+    def test_aa(self):
+        assert col_letter(26) == "AA"
+
+    def test_az(self):
+        assert col_letter(51) == "AZ"
+
+    def test_ba(self):
+        assert col_letter(52) == "BA"
+
+
+class TestColIndex:
+    """col_index — header name to 0-based column index."""
+
+    def test_rightmove_url_is_zero(self):
+        assert col_index("Rightmove URL") == 0
+
+    def test_address_is_one(self):
+        assert col_index("Address") == 1
+
+    def test_last_column(self):
+        last = COLUMN_HEADERS[-1]
+        assert col_index(last) == len(COLUMN_HEADERS) - 1
+
+    def test_unknown_header_raises(self):
+        with pytest.raises(ValueError, match="not found"):
+            col_index("Nonexistent Column")
