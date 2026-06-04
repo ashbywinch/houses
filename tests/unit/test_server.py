@@ -80,11 +80,11 @@ class TestInjectProperty:
         from houses.config import settings
         from houses.sheets import col_index
 
-        RID_INDEX = col_index("Rightmove ID")
+        rid_index = col_index("Rightmove ID")
 
         # Build a fake row that looks like the sheet's row 2
         fake_row = [""] * 38
-        fake_row[RID_INDEX] = "88375569"
+        fake_row[rid_index] = "88375569"
 
         # Mock get_client to return a sheet with this row
         fake_cell_data = [[f"header {i}" for i in range(38)]] + [fake_row]

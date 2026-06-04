@@ -13,22 +13,9 @@ import pytest
 from google.oauth2.service_account import Credentials
 
 from houses.config import settings
-from houses.sheets import COLUMN_HEADERS, col_index, col_letter
+from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS, VIEW_MANUAL_COLUMNS, col_index, col_letter
 
 pytestmark = pytest.mark.integration
-
-VIEW_HEADERS = [
-    "Listing Address", "Rightmove Link", "Rightmove ID",
-    "Purchase Cost (£)", "EPC Rating", "Yearly Commute Total (£)",
-    "Yearly Council Tax (£)", "Simon London", "Lorena London", "Bracknell Time",
-    "What the Area is Like", "Walk to Town", "Walkable Amenities",
-    "Primary School", "Primary Ofsted", "Primary Walk",
-    "Secondary School", "Secondary Ofsted", "Secondary Walk",
-    "Secondary Bus Route",
-    "Group Notes / WhatsApp", "Ashby comments", "Status",
-    "Primary Inspection Year", "Primary Inspection Summary",
-    "Secondary Inspection Year", "Secondary Inspection Summary",
-]
 
 # Column letter for each View header — single source of truth for every test
 VC = {h: col_letter(i) for i, h in enumerate(VIEW_HEADERS)}
@@ -37,6 +24,7 @@ VC = {h: col_letter(i) for i, h in enumerate(VIEW_HEADERS)}
 @dataclass
 class _TestRecord:
     """A property record for test data. Fields map to COLUMN_HEADERS by name."""
+
     url: str
     address: str
     postcode: str
@@ -67,6 +55,8 @@ class _TestRecord:
     epc: str
     bus_min: int
     bus_route: str
+    council_tax_band: str
+    council_tax_cost: float
 
     def to_data_row(self):
         ci = col_index
@@ -101,35 +91,83 @@ class _TestRecord:
         r[ci("EPC Rating")] = self.epc
         r[ci("Secondary Bus (min)")] = str(self.bus_min)
         r[ci("Secondary Bus Route")] = self.bus_route
+        r[ci("Council Tax Band")] = self.council_tax_band
+        r[ci("Council Tax Cost (£)")] = str(self.council_tax_cost)
+        assert len(r) == len(COLUMN_HEADERS), (
+            f"to_data_row returned {len(r)} values but COLUMN_HEADERS has {len(COLUMN_HEADERS)}. "
+            "Did you add a Data column without adding test data?"
+        )
         return r
 
 
 RECORDS = [
     _TestRecord(
         url="https://www.rightmove.co.uk/properties/11111111",
-        address="1 Test Street, Testville, TE1 1ST", postcode="TE1 1ST",
-        bedrooms=3, price=350000, rid=11111111,
-        simon_min=45, simon_cost=12.50, lorena_min=55, lorena_cost=15.00,
-        bracknell_min=30, bracknell_cost=8.50,
-        primary_school="Test Primary", primary_dist=0.8, primary_walk=10,
-        primary_link="http://link/prim1", primary_ofsted="Good", primary_yr=2022,
-        secondary_school="Test Secondary", secondary_dist=1.5, secondary_walk=18,
-        secondary_link="http://link/sec1", secondary_ofsted="Outstanding", secondary_yr=2023,
-        area_desc="A nice area to live", walk_min=12, amenities="Supermarket|Park",
-        epc="B", bus_min=25, bus_route="Bus 101",
+        address="1 Test Street, Testville, TE1 1ST",
+        postcode="TE1 1ST",
+        bedrooms=3,
+        price=350000,
+        rid=11111111,
+        simon_min=45,
+        simon_cost=12.50,
+        lorena_min=55,
+        lorena_cost=15.00,
+        bracknell_min=30,
+        bracknell_cost=8.50,
+        primary_school="Test Primary",
+        primary_dist=0.8,
+        primary_walk=10,
+        primary_link="http://link/prim1",
+        primary_ofsted="Good",
+        primary_yr=2022,
+        secondary_school="Test Secondary",
+        secondary_dist=1.5,
+        secondary_walk=18,
+        secondary_link="http://link/sec1",
+        secondary_ofsted="Outstanding",
+        secondary_yr=2023,
+        area_desc="A nice area to live",
+        walk_min=12,
+        amenities="Supermarket|Park",
+        epc="B",
+        bus_min=25,
+        bus_route="Bus 101",
+        council_tax_band="D",
+        council_tax_cost=1800.00,
     ),
     _TestRecord(
         url="https://www.rightmove.co.uk/properties/22222222",
-        address="2 Another Road, Otherville, OT2 2ND", postcode="OT2 2ND",
-        bedrooms=4, price=450000, rid=22222222,
-        simon_min=35, simon_cost=10.00, lorena_min=42, lorena_cost=12.00,
-        bracknell_min=25, bracknell_cost=6.50,
-        primary_school="Test Primary 2", primary_dist=0.6, primary_walk=8,
-        primary_link="http://link/prim2", primary_ofsted="Requires Improvement", primary_yr=2021,
-        secondary_school="Test Secondary 2", secondary_dist=2.0, secondary_walk=25,
-        secondary_link="http://link/sec2", secondary_ofsted="Good", secondary_yr=2024,
-        area_desc="Quiet suburban area", walk_min=20, amenities="Pharmacy|Train Station",
-        epc="C", bus_min=30, bus_route="Bus 202",
+        address="2 Another Road, Otherville, OT2 2ND",
+        postcode="OT2 2ND",
+        bedrooms=4,
+        price=450000,
+        rid=22222222,
+        simon_min=35,
+        simon_cost=10.00,
+        lorena_min=42,
+        lorena_cost=12.00,
+        bracknell_min=25,
+        bracknell_cost=6.50,
+        primary_school="Test Primary 2",
+        primary_dist=0.6,
+        primary_walk=8,
+        primary_link="http://link/prim2",
+        primary_ofsted="Requires Improvement",
+        primary_yr=2021,
+        secondary_school="Test Secondary 2",
+        secondary_dist=2.0,
+        secondary_walk=25,
+        secondary_link="http://link/sec2",
+        secondary_ofsted="Good",
+        secondary_yr=2024,
+        area_desc="Quiet suburban area",
+        walk_min=20,
+        amenities="Pharmacy|Train Station",
+        epc="C",
+        bus_min=30,
+        bus_route="Bus 202",
+        council_tax_band="E",
+        council_tax_cost=2200.00,
     ),
 ]
 
@@ -154,7 +192,9 @@ class TestViewFormulasOnTestSheet:
         raw = os.environ.get("GOOGLE_SHEETS_SERVICE_ACCOUNT", settings.service_account_json)
         if not raw:
             pytest.skip("No sheet credentials")
-        creds = Credentials.from_service_account_info(json.loads(raw), scopes=["https://www.googleapis.com/auth/spreadsheets"])
+        creds = Credentials.from_service_account_info(
+            json.loads(raw), scopes=["https://www.googleapis.com/auth/spreadsheets"]
+        )
         return gspread.authorize(creds)
 
     @pytest.fixture(scope="class")
@@ -163,89 +203,128 @@ class TestViewFormulasOnTestSheet:
 
     @pytest.fixture(scope="class", autouse=True)
     def setup_sheet(self, sh):
-        DATA_TAB = "Properties Data"
-        VIEW_TAB = "Properties View"
+        data_tab = "Properties Data"
+        view_tab = "Properties View"
 
         existing = {ws.title: ws for ws in sh.worksheets()}
 
-        if DATA_TAB in existing:
-            ws_data = existing[DATA_TAB]
+        if data_tab in existing:
+            ws_data = existing[data_tab]
             ws_data.clear()
             ws_data.resize(rows=100, cols=len(COLUMN_HEADERS))
         else:
-            ws_data = sh.add_worksheet(title=DATA_TAB, rows=100, cols=len(COLUMN_HEADERS))
+            ws_data = sh.add_worksheet(title=data_tab, rows=100, cols=len(COLUMN_HEADERS))
         ws_data.append_row(COLUMN_HEADERS, value_input_option="USER_ENTERED")
         for rec in RECORDS:
             ws_data.append_row(rec.to_data_row(), value_input_option="USER_ENTERED")
 
-        if VIEW_TAB in existing:
-            ws_view = existing[VIEW_TAB]
+        if view_tab in existing:
+            ws_view = existing[view_tab]
             ws_view.clear()
             ws_view.resize(rows=100, cols=len(VIEW_HEADERS))
         else:
-            ws_view = sh.add_worksheet(title=VIEW_TAB, rows=100, cols=len(VIEW_HEADERS))
+            ws_view = sh.add_worksheet(title=view_tab, rows=100, cols=len(VIEW_HEADERS))
         ws_view.append_row(VIEW_HEADERS, value_input_option="USER_ENTERED")
 
-        # Build formulas using header-to-column lookups throughout
-        V = _view_ref
-        D = _data_ref
-        RID = "Rightmove ID"
-        ADDR = "Listing Address"
+        # Build formulas keyed by View header name (not position), so reordering
+        # VIEW_HEADERS or inserting a column auto-aligns the formulas.
+        view_ref = _view_ref
+        data_ref = _data_ref
+        rid = "Rightmove ID"
 
-        formulas = [
-            "",  # Listing Address (manual)
-            "",  # Rightmove Link (manual)
-            f'=IFNA(REGEXEXTRACT(GETURL("B"&ROW()),"properties/(\\d+)"),XLOOKUP({V(ADDR)},{D("Address")},{D(RID)}))',
-            f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Price (£)")})',
-            f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("EPC Rating")})',
-            f'=LET(k,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Bracknell Cost (£)")}),g,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Simon London Cost (£)")}),i,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Lorena London Cost (£)")}),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)))',
-            "",
-            f'=LET(v,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Simon London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-            f'=LET(v,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Lorena London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-            f'=LET(v,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Bracknell Time (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-            f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Area Description")})',
-            f'=LET(v,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Walk to Town (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-            f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Walkable Amenities")})',
-            f'=HYPERLINK(XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Primary School Link")}),XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Primary School")}))',
-            f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Primary Ofsted")})',
-            f'=LET(v,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Primary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-            f'=HYPERLINK(XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Secondary School Link")}),XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Secondary School")}))',
-            f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Secondary Ofsted")})',
-            f'=LET(v,XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-            f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Secondary Bus Route")})',
-            "", "", "",
-            f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Primary Inspection Year")})',
-            "",
-            f'=XLOOKUP(VALUE({V(RID)}),{D(RID)},{D("Secondary Inspection Year")})',
-            "",
-        ]
+        formula_by_header: dict[str, str] = {
+            "rightmove id": f'=IFNA(REGEXEXTRACT(GETURL("B"&ROW()),"properties/(\\d+)"),XLOOKUP({view_ref("Listing Address")},{data_ref("Address")},{data_ref(rid)}))',  # noqa: E501
+            "purchase cost (£)": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Price (£)')})",
+            "epc rating": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('EPC Rating')})",
+            "yearly commute total (£)": f'=LET(k,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Bracknell Cost (£)")}),g,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Simon London Cost (£)")}),i,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Lorena London Cost (£)")}),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)))',  # noqa: E501
+            "yearly council tax (£)": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Council Tax Cost (£)')})",  # noqa: E501
+            "simon london": f'=LET(v,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Simon London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
+            "lorena london": f'=LET(v,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Lorena London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
+            "bracknell time": f'=LET(v,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Bracknell Time (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
+            "what the area is like": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Area Description')})",
+            "walk to town": f'=LET(v,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Walk to Town (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
+            "walkable amenities": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Walkable Amenities')})",
+            "primary school": f"=HYPERLINK(XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Primary School Link')}),XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Primary School')}))",  # noqa: E501
+            "primary walk": f'=LET(v,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Primary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
+            "primary ofsted": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Primary Ofsted')})",
+            "primary inspection year": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Primary Inspection Year')})",  # noqa: E501
+            "secondary school": f"=HYPERLINK(XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Secondary School Link')}),XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Secondary School')}))",  # noqa: E501
+            "secondary walk": f'=LET(v,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
+            "secondary ofsted": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Secondary Ofsted')})",
+            "secondary inspection year": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Secondary Inspection Year')})",  # noqa: E501
+            "secondary bus": f'=LET(v,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
+            "secondary bus route": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Secondary Bus Route')})",  # noqa: E501
+        }
+
+        # Generate positional formulas list from VIEW_HEADERS + formula_by_header
+        formulas = []
+        manual_lower = {h.lower() for h in VIEW_MANUAL_COLUMNS}
+        for h in VIEW_HEADERS:
+            key = h.lower()
+            if key in formula_by_header:
+                formulas.append(formula_by_header[key])
+            elif key in manual_lower:
+                formulas.append("")
+            else:
+                raise AssertionError(
+                    f"View header {h!r} has neither a formula entry nor is listed "
+                    "in VIEW_MANUAL_COLUMNS. Add it to one or the other."
+                )
+
         last_col = col_letter(len(formulas) - 1)
         ws_view.update(range_name=f"A2:{last_col}3", values=[formulas, formulas], value_input_option="USER_ENTERED")
 
         # Write human-entry columns by header lookup
         addr_col = VC["Listing Address"]
         link_col = VC["Rightmove Link"]
-        ws_view.update(values=[[RECORDS[0].address, RECORDS[0].url]],
-                       range_name=f"{addr_col}2:{link_col}2", value_input_option="USER_ENTERED")
-        ws_view.update(values=[[RECORDS[1].address, RECORDS[1].url]],  # bare URL: REGEXEXTRACT path tested
-                       range_name=f"{addr_col}3:{link_col}3", value_input_option="USER_ENTERED")
-        ws_view.update(values=[[RECORDS[1].address, RECORDS[1].url]],  # title only: IFNA fallback path
-                       range_name=f"{addr_col}4:{link_col}4", value_input_option="USER_ENTERED")
+        ws_view.update(
+            values=[[RECORDS[0].address, RECORDS[0].url]],
+            range_name=f"{addr_col}2:{link_col}2",
+            value_input_option="USER_ENTERED",
+        )
+        ws_view.update(
+            values=[[RECORDS[1].address, RECORDS[1].url]],  # bare URL: REGEXEXTRACT path tested
+            range_name=f"{addr_col}3:{link_col}3",
+            value_input_option="USER_ENTERED",
+        )
+        ws_view.update(
+            values=[[RECORDS[1].address, RECORDS[1].url]],  # title only: IFNA fallback path
+            range_name=f"{addr_col}4:{link_col}4",
+            value_input_option="USER_ENTERED",
+        )
 
         # Apply formatting by header name
         sid = ws_view._properties["sheetId"]
         fmt = []
         for h in ["Simon London", "Lorena London", "Bracknell Time", "Walk to Town", "Primary Walk", "Secondary Walk"]:
             ci = VIEW_HEADERS.index(h)
-            fmt.append({"repeatCell": {"range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},
+            fmt.append(
+                {
+                    "repeatCell": {
+                        "range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},
                         "cell": {"userEnteredFormat": {"numberFormat": {"type": "TIME", "pattern": "[h]:mm"}}},
-                        "fields": "userEnteredFormat.numberFormat"}})
-        for h in ["What the Area is Like", "Walkable Amenities", "Primary School", "Secondary School",
-                  "Group Notes / WhatsApp", "Ashby comments"]:
+                        "fields": "userEnteredFormat.numberFormat",
+                    }
+                }
+            )
+        for h in [
+            "What the Area is Like",
+            "Walkable Amenities",
+            "Primary School",
+            "Secondary School",
+            "Group Notes / WhatsApp",
+            "Ashby comments",
+        ]:
             ci = VIEW_HEADERS.index(h)
-            fmt.append({"repeatCell": {"range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},
+            fmt.append(
+                {
+                    "repeatCell": {
+                        "range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},
                         "cell": {"userEnteredFormat": {"wrapStrategy": "WRAP"}},
-                        "fields": "userEnteredFormat.wrapStrategy"}})
+                        "fields": "userEnteredFormat.wrapStrategy",
+                    }
+                }
+            )
         if fmt:
             sh.batch_update({"requests": fmt})
 
@@ -312,10 +391,7 @@ class TestViewFormulasOnTestSheet:
         if not all_data:
             pytest.fail("No data returned from View tab")
 
-        manual = {"Listing Address", "Rightmove Link", "Rightmove ID",
-                  "Yearly Council Tax (£)", "Group Notes / WhatsApp",
-                  "Ashby comments", "Status",
-                  "Primary Inspection Summary", "Secondary Inspection Summary"}
+        manual = VIEW_MANUAL_COLUMNS
         bad = []
         for row_idx, row in enumerate(all_data, 2):
             for col_idx, val in enumerate(row):
@@ -325,3 +401,29 @@ class TestViewFormulasOnTestSheet:
                 if val is None or val == "#N/A" or val == "":
                     bad.append(f"{VC[h]}{row_idx}={val!r}")
         assert not bad, f"Formula columns with missing values: {', '.join(bad)}"
+
+    def test_manual_columns_not_overwritten_by_formulas(self, sh):
+        """Manual columns must not be overwritten by formula-writing.
+
+        After sync_view_formulas() runs, manual columns should still be empty
+        (no formula values leaked into them). Formula-writing should only
+        touch columns listed in formula_cols dict.
+        """
+        ws = sh.worksheet("Properties View")
+        # Run sync_view_formulas to simulate refresh-formulas
+        from houses.sheets import sync_view_formulas
+
+        sync_view_formulas(sh)
+
+        all_data = ws.get_all_values()
+        headers = all_data[0]
+
+        # These columns are manual — they should NOT have been written by sync_view_formulas
+        manual_cols = VIEW_MANUAL_COLUMNS
+
+        # Verify all rows: manual columns should have no formula values
+        for row_idx, row in enumerate(all_data[1:], 2):
+            for col_idx, val in enumerate(row):
+                h = headers[col_idx] if col_idx < len(headers) else ""
+                if h in manual_cols and val and val.startswith("="):
+                    pytest.fail(f"Manual column '{h}' row {row_idx} has formula: {val}")
