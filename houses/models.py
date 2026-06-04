@@ -23,6 +23,16 @@ class PropertyPayload(BaseModel):
     actual_postcode: str = ""
 
 
+class ReprocessRequest(BaseModel):
+    """Request to re-enrich existing properties by Rightmove ID.
+
+    Omit ``ids`` to re-enrich every row in the sheet that has the
+    necessary data for the requested fields.
+    """
+
+    ids: list[str] | None = None
+
+
 class TransitInfo(BaseModel):
     """Transit commute details for a single person."""
 
@@ -48,7 +58,6 @@ class SchoolInfo(BaseModel):
     website: str = ""
     ofsted_rating: str = ""
     inspection_year: str = ""
-    inspection_summary: str = ""
 
 
 class PetrolCost(BaseModel):
@@ -104,10 +113,10 @@ class EnrichedProperty(BaseModel):
     primary_ofsted: str = ""
     secondary_ofsted: str = ""
     primary_inspection_year: str = ""
-    primary_inspection_summary: str = ""
     secondary_inspection_year: str = ""
-    secondary_inspection_summary: str = ""
     epc_rating: str = ""
+
+    council_tax: CouncilTaxInfo | None = None
 
     commute_breakdown: CommuteBreakdown | None = None
 

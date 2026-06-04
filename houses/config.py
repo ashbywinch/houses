@@ -19,13 +19,12 @@ class Settings(BaseSettings):
     ors_api_key: str = Field(default="", alias="HEIGIT_API_KEY")
     service_account_json: str = Field(default="", alias="GOOGLE_SHEETS_SERVICE_ACCOUNT")
     google_maps_api_key: str = Field(default="", alias="PLACES_API_KEY")
-    homedata_api_key: str = Field(default="", alias="HOMEDATA_API_KEY")
     llm_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
     llm_model: str = Field(default="deepseek/deepseek-chat", alias="HOUSES_LLM_MODEL")
     llm_temperature: float = 0.7
     llm_max_tokens: int = 150
     epc_bearer_token: str = Field(default="", alias="EPC_BEARER_TOKEN")
-    
+
     test_sheet_id: str = "1I0LSMRRA2hzLdS1Jfjht8Av908a4Ttf99Ly0p0lnseA"
 
     petrol_mpg: float = 45.0

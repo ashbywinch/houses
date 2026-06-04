@@ -7,6 +7,7 @@ driving distances, and UK government GIAS school data.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import csv
 import logging
 import math
@@ -21,6 +22,7 @@ from houses.retry import retry_async
 
 logger = logging.getLogger(__name__)
 
+
 # Per-process-run API exhaustion tracking.
 # Set when an API returns a usage-limit error so subsequent calls
 # skip straight to the fallback instead of hammering the dead endpoint.
@@ -29,6 +31,7 @@ class _APIState:
     ors_geo_exhausted: bool = False
     nominatim_exhausted: bool = False
     nominatim_last_call: float = 0.0
+
 
 _api_state = _APIState()
 
@@ -278,7 +281,6 @@ COL_URN = "URN"
 COL_WEBSITE = "SchoolWebsite"
 COL_OFSTED = "OfstedRating (name)"
 COL_INSPECTION_YEAR = "InspectionYear"
-COL_INSPECTION_SUMMARY = "InspectionSummary"
 
 # The enriched CSV — has Latitude/Longitude columns added via scripts/enrich_schools.py
 # Falls back to postcodes.io on-the-fly for any schools missing coordinates.
@@ -494,7 +496,6 @@ def _school_to_info(school: dict, dist_km: float, school_type: str) -> SchoolInf
         website=school.get(COL_WEBSITE, ""),
         ofsted_rating=school.get(COL_OFSTED, ""),
         inspection_year=school.get(COL_INSPECTION_YEAR, ""),
-        inspection_summary=school.get(COL_INSPECTION_SUMMARY, ""),
     )
 
 
@@ -587,10 +588,8 @@ async def _find_nearest_boys(
                         # Extract total transit duration
                         duration_s = leg.get("duration", "")
                         if duration_s and duration_s.endswith("s"):
-                            try:
+                            with contextlib.suppress(ValueError):
                                 info.bus_time_minutes = round(int(duration_s.rstrip("s")) / 60)
-                            except ValueError:
-                                pass
                         # Extract first transit leg for route description
                         steps = leg.get("steps", [])
                         for s in steps:
