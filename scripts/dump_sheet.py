@@ -17,9 +17,7 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 
 def main():
-    creds = Credentials.from_service_account_info(
-        json.loads(settings.service_account_json), scopes=SCOPES
-    )
+    creds = Credentials.from_service_account_info(json.loads(settings.service_account_json), scopes=SCOPES)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(settings.sheet_id)
 
@@ -31,18 +29,14 @@ def main():
             continue
 
         headers = data[0]
-        print(f"\n=== {tab_name}: {len(data)-1} rows, {len(headers)} cols ===")
+        print(f"\n=== {tab_name}: {len(data) - 1} rows, {len(headers)} cols ===")
         for i, h in enumerate(headers):
             print(f"  [{i:2d}] {h}")
 
         for row in data[1:]:
             url = row[0][:40] if row else ""
             filled = sum(1 for v in row if v.strip())
-            missing = [
-                f"[{i}]{headers[i]}"
-                for i, v in enumerate(row)
-                if not v.strip()
-            ]
+            missing = [f"[{i}]{headers[i]}" for i, v in enumerate(row) if not v.strip()]
             print(f"\n  {url:40s} {filled}/{len(headers)} filled")
             if missing:
                 for m in missing[:10]:

@@ -13,6 +13,7 @@ dependencies = [
     "pydantic-settings>=2.8.0",
     "httpx>=0.28.0",
     "python-dotenv>=1.2.0",
+    "uk-property-apis",
 ]
 
 [project.scripts]
@@ -42,6 +43,9 @@ markers = [
     "integration: tests that hit real external APIs (skip unless explicitly run)",
 ]
 addopts = ["-m", "not integration"]
+
+[tool.uv.sources]
+uk-property-apis = { git = "https://github.com/kubilay-yavuz/uk-property-intel.git", subdirectory = "packages/apis" }
 
 [dependency-groups]
 dev = [

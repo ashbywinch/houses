@@ -18,7 +18,7 @@ Key conventions:
 
 ## Properties View Tab (Human / Formula-Driven)
 
-27 columns (A–AA). Formulas use named ranges (`Data_*`) instead of hardcoded column letters,
+29 columns (A–AC). Formulas use named ranges (`Data_*`) instead of hardcoded column letters,
 so they survive column insertions/reorders in the Data tab.
 
 ### Formula Reference
@@ -43,9 +43,10 @@ so they survive column insertions/reorders in the Data tab.
 | R | Secondary Ofsted | `XLOOKUP(Data_SecondaryOfsted)` |
 | S | Secondary Walk (min) | `XLOOKUP(Data_SecondaryWalk) / 1440` |
 | T | Secondary Bus Route | `XLOOKUP(Data_SecondaryBusRoute)` |
-| X | Primary Inspection Year | `XLOOKUP(Data_PrimaryInspYear)` |
-| Z | Secondary Inspection Year | `XLOOKUP(Data_SecondaryInspYear)` |
-| A,B,C,G,U,V,W,Y,AA | All other cols | Manual |
+| U | Secondary Bus (min) | `=LET(v,XLOOKUP($C2, Data_RightmoveID, Data_SecondaryBusMin),IF(v="","",IF(v*1=0,"",v/1440)))` |
+| Z | Primary Inspection Year | `XLOOKUP(Data_PrimaryInspYear)` |
+| AB | Secondary Inspection Year | `XLOOKUP(Data_SecondaryInspYear)` |
+| A, B, C, G, V, W, X, Y, AA, AC | All other cols | Manual |
 
 All XLOOKUP references implicitly start with `$C2, Data_RightmoveID,` for the key lookup.
 
@@ -93,3 +94,7 @@ To add or modify a column:
 5. Run `uv run python scripts/sheet_tool.py refresh-formulas` to sync named ranges and rewrite View formulas
 6. Update tests that assert column count or column values
 7. Run `make test` to verify alignment
+
+## Color Coding
+
+The View tab uses Google Sheets conditional formatting to color-code cells. Thresholds and rules are defined in `houses/sheets.py:sync_view_formulas()`. See that function for the canonical list of coloring rules.

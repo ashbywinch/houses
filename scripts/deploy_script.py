@@ -31,34 +31,31 @@ def _get_sheet_id() -> str:
 
 def _get_or_create_script(sheets_service, script_service, sheet_id: str) -> str:
     """Return the Apps Script project ID bound to the spreadsheet."""
-    try:
-        # Get metadata about the spreadsheet — it includes the linked script ID
-        meta = sheets_service.spreadsheets().get(
-            spreadsheetId=sheet_id, fields="namedRanges"
-        ).execute()
-    except Exception:
-        pass
+    with contextlib.suppress(Exception):  # noqa: F821
+        sheets_service.spreadsheets().get(spreadsheetId=sheet_id, fields="namedRanges").execute()
 
     # Try to find an existing project by checking the content
     # The script ID for a bound script is often the spreadsheet ID in reverse
     # or we can list projects
     try:
         # Try to get project content using spreadsheet ID as script ID
-        content = script_service.projects().getContent(
-            scriptId=sheet_id
-        ).execute()
+        script_service.projects().getContent(scriptId=sheet_id).execute()
         print(f"Found existing script project: {sheet_id}")
         return sheet_id
     except Exception:
         pass
 
     # Need to create a new project bound to the spreadsheet
-    project = script_service.projects().create(
-        body={
-            "title": "ViewTab",
-            "parentId": sheet_id,
-        }
-    ).execute()
+    project = (
+        script_service.projects()
+        .create(
+            body={
+                "title": "ViewTab",
+                "parentId": sheet_id,
+            }
+        )
+        .execute()
+    )
     pid = project["scriptId"]
     print(f"Created new script project: {pid}")
     return pid
@@ -69,36 +66,41 @@ def _upload_script(script_service, script_id: str):
         code = f.read()
 
     body = {
-        "files": [{
-            "name": "ViewTab",
-            "type": "SERVER_JS",
-            "source": code,
-        }],
+        "files": [
+            {
+                "name": "ViewTab",
+                "type": "SERVER_JS",
+                "source": code,
+            }
+        ],
     }
-    result = script_service.projects().updateContent(
-        scriptId=script_id, body=body
-    ).execute()
+    script_service.projects().updateContent(scriptId=script_id, body=body).execute()
     print(f"Uploaded script ({len(code)} bytes)")
 
 
 def _create_deployment(script_service, script_id: str):
     # First list existing deployments
-    existing = script_service.projects().deployments().list(
-        scriptId=script_id
-    ).execute()
+    existing = script_service.projects().deployments().list(scriptId=script_id).execute()
     deployments = existing.get("deployments", [])
     for dep in deployments:
-        print(f"  Existing deployment: {dep.get('deploymentId')} — {dep.get('entryPoints', [{}])[0].get('functionName', '?')}")
+        print(
+            f"  Existing deployment: {dep.get('deploymentId')} — {dep.get('entryPoints', [{}])[0].get('functionName', '?')}"  # noqa: E501
+        )
 
     # Create a new deployment
-    deployment = script_service.projects().deployments().create(
-        scriptId=script_id,
-        body={
-            "versionNumber": 1,
-            "manifestFileName": "appsscript",
-            "description": "GETURL custom function deployment",
-        },
-    ).execute()
+    deployment = (
+        script_service.projects()
+        .deployments()
+        .create(
+            scriptId=script_id,
+            body={
+                "versionNumber": 1,
+                "manifestFileName": "appsscript",
+                "description": "GETURL custom function deployment",
+            },
+        )
+        .execute()
+    )
     dep_id = deployment.get("deploymentId", "?")
     print(f"Created deployment: {dep_id}")
 
@@ -107,9 +109,7 @@ def main():
     sheet_id = _get_sheet_id()
     print(f"Target sheet: {sheet_id}")
 
-    creds = Credentials.from_service_account_info(
-        json.loads(settings.service_account_json), scopes=SCOPES
-    )
+    creds = Credentials.from_service_account_info(json.loads(settings.service_account_json), scopes=SCOPES)
     sheets_service = build("sheets", "v4", credentials=creds)
     script_service = build("script", "v1", credentials=creds)
 

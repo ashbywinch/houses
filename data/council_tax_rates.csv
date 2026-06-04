@@ -1,0 +1,272 @@
+code,authority,class,band_d_rate
+Lon ex GLA,London boroughs (excluding GLA),LB,1559.00
+MD ex MPAs,Metropolitan districts (excluding major precepting authorities),MD,2030.00
+UA ex MPAs,Unitary authorities (excluding major precepting authorities),UA,2087.00
+SD ex MPAs,Shire districts (excluding major precepting authorities),SD,286.00
+Lon incl,London boroughs (including GLA),LB,2068.00
+MD,Metropolitan districts (including major precepting authorities),MD,2409.00
+UA,Unitary authorities ,UA,2490.00
+SD,Shire districts (including major precepting authorities),SD,2452.00
+E3831,Adur,SD,2548.00
+E1031,Amber Valley,SD,2408.00
+E3832,Arun,SD,2487.00
+E3031,Ashfield,SD,2609.00
+E2231,Ashford,SD,2410.00
+E3531,Babergh,SD,2342.00
+E4401,Barnsley,MD,2326.00
+E1531,Basildon,SD,2327.00
+E1731,Basingstoke & Deane,SD,2255.00
+E3032,Bassetlaw,SD,2645.00
+E0101,Bath & North East Somerset UA,UA,2383.00
+E0202,Bedford UA,UA,2472.00
+E4601,Birmingham,MD,2363.00
+E2431,Blaby,SD,2490.00
+E2301,Blackburn with Darwen UA,UA,2455.00
+E2302,Blackpool UA,UA,2513.00
+E1032,Bolsover,SD,2559.00
+E4201,Bolton,MD,2400.00
+E2531,Boston,SD,2309.00
+E1204,"Bournemouth, Christchurch & Poole",UA,2436.00
+E0301,Bracknell Forest UA,UA,2265.00
+E4701,Bradford,MD,2361.00
+E1532,Braintree,SD,2280.00
+E2631,Breckland,SD,2444.00
+E1533,Brentwood,SD,2258.00
+E1401,Brighton & Hove UA,UA,2581.00
+E0102,Bristol UA,UA,2714.00
+E2632,Broadland,SD,2438.00
+E1831,Bromsgrove,SD,2479.00
+E1931,Broxbourne,SD,2306.00
+E3033,Broxtowe,SD,2618.00
+E0402,Buckinghamshire UA,UA,2527.00
+E2333,Burnley,SD,2549.00
+E4202,Bury,MD,2555.00
+E4702,Calderdale,MD,2420.00
+E0531,Cambridge,SD,2467.00
+E3431,Cannock Chase,SD,2376.00
+E2232,Canterbury,SD,2419.00
+E1534,Castle Point,SD,2319.00
+E0203,Central Bedfordshire UA,UA,2516.00
+E2432,Charnwood,SD,2406.00
+E1535,Chelmsford,SD,2300.00
+E1631,Cheltenham,SD,2370.00
+E3131,Cherwell,SD,2583.00
+E0603,Cheshire East UA,UA,2455.00
+E0604,Cheshire West and Chester UA,UA,2517.00
+E1033,Chesterfield,SD,2339.00
+E3833,Chichester,SD,2470.00
+E2334,Chorley,SD,2430.00
+E3001,City of Nottingham UA,UA,2755.00
+E1536,Colchester,SD,2283.00
+E0801,Cornwall UA,UA,2591.00
+E1632,Cotswold,SD,2392.00
+E4602,Coventry,MD,2517.00
+E3834,Crawley,SD,2418.00
+E0901,Cumberland,UA,2511.00
+E1932,Dacorum,SD,2409.00
+E1301,Darlington UA,UA,2494.00
+E2233,Dartford,SD,2375.00
+E1001,Derby City UA,UA,2306.00
+E1035,Derbyshire Dales,SD,2445.00
+E4402,Doncaster,MD,2168.00
+E1203,Dorset Council,UA,2765.00
+E2234,Dover,SD,2462.00
+E4603,Dudley,MD,2145.00
+E1302,Durham UA,UA,2622.00
+E0532,East Cambridgeshire,SD,2485.00
+E1131,East Devon,SD,2595.00
+E1732,East Hampshire,SD,2344.00
+E1933,East Hertfordshire,SD,2455.00
+E2532,East Lindsey,SD,2276.00
+E2001,East Riding of Yorkshire UA,UA,2466.00
+E3432,East Staffordshire,SD,2351.00
+E3538,East Suffolk,SD,2335.00
+E1432,Eastbourne,SD,2654.00
+E1733,Eastleigh,SD,2342.00
+E3631,Elmbridge,SD,2558.00
+E1537,Epping Forest,SD,2277.00
+E3632,Epsom & Ewell,SD,2531.00
+E1036,Erewash,SD,2361.00
+E1132,Exeter,SD,2495.00
+E1734,Fareham,SD,2271.00
+E0533,Fenland,SD,2538.00
+E2240,Folkestone & Hythe,SD,2539.00
+E1633,Forest of Dean,SD,2443.00
+E2335,Fylde,SD,2484.00
+E4501,Gateshead,MD,2716.00
+E3034,Gedling,SD,2610.00
+E1634,Gloucester,SD,2356.00
+E1735,Gosport,SD,2344.00
+E2236,Gravesham,SD,2408.00
+E2633,Great Yarmouth,SD,2414.00
+E3633,Guildford,SD,2547.00
+E0601,Halton UA,UA,2367.00
+E2433,Harborough,SD,2390.00
+E1538,Harlow,SD,2299.00
+E1736,Hart,SD,2400.00
+E0701,Hartlepool UA,UA,2560.00
+E1433,Hastings,SD,2677.00
+E1737,Havant,SD,2320.00
+E1801,Herefordshire UA,UA,2574.00
+E1934,Hertsmere,SD,2406.00
+E1037,High Peak,SD,2385.00
+E2434,Hinckley & Bosworth,SD,2383.00
+E3835,Horsham,SD,2441.00
+E0551,Huntingdonshire,SD,2556.00
+E2336,Hyndburn,SD,2466.00
+E3533,Ipswich,SD,2468.00
+E2101,Isle of Wight UA,UA,2626.00
+E4001,Isles of Scilly,UA,2048.00
+E2634,King's Lynn & West Norfolk,SD,2430.00
+E2002,Kingston upon Hull UA,UA,2295.00
+E4703,Kirklees,MD,2441.00
+E4301,Knowsley,MD,2488.00
+E2337,Lancaster,SD,2503.00
+E4704,Leeds,MD,2284.00
+E2401,Leicester City UA,UA,2529.00
+E1435,Lewes,SD,2756.00
+E3433,Lichfield,SD,2352.00
+E2533,Lincoln,SD,2323.00
+E4302,Liverpool,MD,2674.00
+E0201,Luton UA,UA,2440.00
+E2237,Maidstone,SD,2503.00
+E1539,Maldon,SD,2328.00
+E1851,Malvern Hills,SD,2451.00
+E4203,Manchester,MD,2312.00
+E3035,Mansfield,SD,2600.00
+E2201,Medway UA,UA,2329.00
+E2436,Melton,SD,2430.00
+E1133,Mid Devon,SD,2656.00
+E3534,Mid Suffolk,SD,2317.00
+E3836,Mid Sussex,SD,2474.00
+E0702,Middlesbrough UA,UA,2549.00
+E0401,Milton Keynes UA,UA,2372.00
+E3634,Mole Valley,SD,2520.00
+E1738,New Forest,SD,2420.00
+E3036,Newark & Sherwood,SD,2682.00
+E4502,Newcastle upon Tyne,MD,2542.00
+E3434,Newcastle-under-Lyme,SD,2334.00
+E1134,North Devon,SD,2642.00
+E1038,North East Derbyshire,SD,2467.00
+E2003,North East Lincolnshire UA,UA,2484.00
+E1935,North Hertfordshire,SD,2449.00
+E2534,North Kesteven,SD,2337.81
+E2004,North Lincolnshire UA,UA,2348.00
+E2635,North Norfolk,SD,2460.00
+E2801,North Northamptonshire,UA,2424.00
+E0104,North Somerset UA,UA,2491.00
+E4503,North Tyneside,MD,2462.00
+E3731,North Warwickshire,SD,2532.00
+E2437,North West Leicestershire,SD,2418.00
+E2702,North Yorkshire UA,UA,2544.00
+E2901,Northumberland UA,UA,2597.00
+E2636,Norwich,SD,2503.00
+E3732,Nuneaton & Bedworth,SD,2502.00
+E2438,Oadby & Wigston,SD,2407.00
+E4204,Oldham,MD,2602.00
+E3132,Oxford,SD,2678.00
+E2338,Pendle,SD,2640.00
+E0501,Peterborough UA,UA,2293.00
+E1101,Plymouth UA,UA,2442.00
+E1701,Portsmouth UA,UA,2292.00
+E2339,Preston,SD,2576.00
+E0303,Reading UA,UA,2613.00
+E0703,Redcar & Cleveland UA,UA,2544.00
+E1835,Redditch,SD,2463.00
+E3635,Reigate & Banstead,SD,2567.00
+E2340,Ribble Valley,SD,2387.00
+E4205,Rochdale,MD,2601.00
+E1540,Rochford,SD,2363.00
+E2341,Rossendale,SD,2520.00
+E1436,Rother,SD,2701.00
+E4403,Rotherham,MD,2382.00
+E3733,Rugby,SD,2483.00
+E3636,Runnymede,SD,2493.00
+E3038,Rushcliffe,SD,2643.00
+E1740,Rushmoor,SD,2320.00
+E2402,Rutland UA,UA,2738.00
+E4206,Salford,MD,2594.00
+E4604,Sandwell,MD,2244.00
+E4304,Sefton,MD,2583.00
+E2239,Sevenoaks,SD,2522.00
+E4404,Sheffield,MD,2510.00
+E3202,Shropshire UA,UA,2528.00
+E0304,Slough UA,UA,2414.00
+E4605,Solihull,MD,2197.00
+E3301,Somerset UA,UA,2561.00
+E0536,South Cambridgeshire,SD,2536.00
+E1039,South Derbyshire,SD,2340.00
+E0103,South Gloucestershire UA,UA,2551.00
+E1136,South Hams,SD,2615.00
+E2535,South Holland,SD,2278.00
+E2536,South Kesteven,SD,2260.00
+E2637,South Norfolk,SD,2483.00
+E3133,South Oxfordshire,SD,2598.00
+E2342,South Ribble,SD,2443.00
+E3435,South Staffordshire,SD,2314.00
+E4504,South Tyneside,MD,2434.00
+E1702,Southampton UA,UA,2381.00
+E1501,Southend-on-Sea UA,UA,2265.00
+E3637,Spelthorne,SD,2526.00
+E1936,St Albans,SD,2419.00
+E4303,St Helens,MD,2403.00
+E3436,Stafford,SD,2303.00
+E3437,Staffordshire Moorlands,SD,2338.00
+E1937,Stevenage,SD,2392.00
+E4207,Stockport,MD,2619.00
+E0704,Stockton-on-Tees UA,UA,2590.00
+E3401,Stoke-on-Trent UA,UA,2183.00
+E3734,Stratford-on-Avon,SD,2484.00
+E1635,Stroud,SD,2491.00
+E4505,Sunderland,MD,2197.00
+E3638,Surrey Heath,SD,2585.00
+E2241,Swale,SD,2406.00
+E3901,Swindon UA,UA,2438.00
+E4208,Tameside,MD,2447.00
+E3439,Tamworth,SD,2301.00
+E3639,Tandridge,SD,2595.00
+E1137,Teignbridge,SD,2643.00
+E3201,Telford and the Wrekin UA,UA,2256.00
+E1542,Tendring,SD,2270.00
+E1742,Test Valley,SD,2306.00
+E1636,Tewkesbury,SD,2341.00
+E2242,Thanet,SD,2491.00
+E1938,Three Rivers,SD,2422.00
+E1502,Thurrock UA,UA,2255.00
+E2243,Tonbridge & Malling,SD,2472.00
+E1102,Torbay UA,UA,2470.00
+E1139,Torridge,SD,2601.00
+E4209,Trafford,MD,2292.00
+E2244,Tunbridge Wells,SD,2446.00
+E1544,Uttlesford,SD,2334.00
+E3134,Vale of White Horse,SD,2577.00
+E4705,Wakefield,MD,2297.00
+E4606,Walsall,MD,2627.00
+E0602,Warrington UA,UA,2448.00
+E3735,Warwick,SD,2462.00
+E1939,Watford,SD,2447.00
+E3640,Waverley,SD,2605.00
+E1437,Wealden,SD,2728.00
+E1940,Welwyn Hatfield,SD,2452.00
+E0302,West Berkshire UA,UA,2505.00
+E1140,West Devon,SD,2705.00
+E2343,West Lancashire,SD,2456.00
+E2537,West Lindsey,SD,2354.00
+E2802,West Northamptonshire,UA,2487.00
+E3135,West Oxfordshire,SD,2567.00
+E3539,West Suffolk,SD,2351.00
+E0902,Westmorland and Furness UA,UA,2508.00
+E4210,Wigan,MD,2153.00
+E3902,Wiltshire UA,UA,2572.00
+E1743,Winchester,SD,2360.00
+E0305,Windsor & Maidenhead UA,UA,1953.00
+E4305,Wirral,MD,2501.00
+E3641,Woking,SD,2598.00
+E0306,Wokingham UA,UA,2498.00
+E4607,Wolverhampton,MD,2539.00
+E1837,Worcester,SD,2406.00
+E3837,Worthing,SD,2456.00
+E1838,Wychavon,SD,2373.00
+E2344,Wyre,SD,2461.00
+E1839,Wyre Forest,SD,2512.00
+E2701,York UA,UA,2287.00

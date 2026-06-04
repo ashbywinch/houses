@@ -82,7 +82,7 @@ def _determine_rating(row: dict) -> str:
     2. Old-format S5 inspection grade dimensions
     3. Ungraded inspection outcome text
     """
-    urn = row.get("URN", "")
+    row.get("URN", "")
 
     # Priority 1: OEIF
     oeif = (row.get("Latest OEIF overall effectiveness") or "").strip()
@@ -92,8 +92,13 @@ def _determine_rating(row: dict) -> str:
     # Priority 2: Old-format S5 with grade dimensions
     # Summarise the pattern of grades across dimensions
     dims = []
-    for dim in ["Achievement", "Curriculum and teaching", "Leadership and governance",
-                 "Personal development and wellbeing", "Attendance and behaviour"]:
+    for dim in [
+        "Achievement",
+        "Curriculum and teaching",
+        "Leadership and governance",
+        "Personal development and wellbeing",
+        "Attendance and behaviour",
+    ]:
         val = (row.get(dim) or "").strip()
         if val and val != "NULL":
             dims.append(val)
@@ -134,13 +139,13 @@ def _generate_summary(row: dict, rating: str) -> str:
     """
     parts = []
 
-    OEIF_DIMS = [
+    oeif_dims = [
         ("quality", "Latest OEIF quality of education"),
         ("behaviour", "Latest OEIF behaviour and attitudes"),
         ("personal dev", "Latest OEIF personal development"),
         ("leadership", "Latest OEIF effectiveness of leadership and management"),
     ]
-    S5_DIMS = [
+    s5_dims = [
         ("Achievement", "Achievement"),
         ("Curriculum", "Curriculum and teaching"),
         ("Leadership", "Leadership and governance"),
@@ -157,7 +162,7 @@ def _generate_summary(row: dict, rating: str) -> str:
 
         # Collect dimension grades that differ from overall
         better = []
-        for label, col in OEIF_DIMS:
+        for label, col in oeif_dims:
             val = (row.get(col) or "").strip()
             if val and val != "NULL":
                 mapped = OEIF_RATING_MAP.get(val, val)
@@ -170,8 +175,7 @@ def _generate_summary(row: dict, rating: str) -> str:
             parts.append(f"{rating} ({tag})")
 
     else:
-        s5_data = {label: (row.get(col) or "").strip()
-                   for label, col in S5_DIMS}
+        s5_data = {label: (row.get(col) or "").strip() for label, col in s5_dims}
         s5_data = {k: v for k, v in s5_data.items() if v and v != "NULL"}
 
         insp_date = row.get("Inspection start date", "")
@@ -226,13 +230,13 @@ def _determine_effective_rating(row: dict) -> tuple[str, str]:
     - Ungraded monitoring visits (rating only, no year/framework noise)
     - "Not judged" or missing overall grade → infer from dimension grades
     """
-    OEIF_DIMS = [
+    oeif_dims = [
         ("Quality", "Latest OEIF quality of education"),
         ("Behaviour", "Latest OEIF behaviour and attitudes"),
         ("Personal development", "Latest OEIF personal development"),
         ("Leadership", "Latest OEIF effectiveness of leadership and management"),
     ]
-    S5_DIMS = [
+    s5_dims = [
         ("Achievement", "Achievement"),
         ("Curriculum", "Curriculum and teaching"),
         ("Leadership", "Leadership and governance"),
@@ -245,7 +249,7 @@ def _determine_effective_rating(row: dict) -> tuple[str, str]:
 
     # Collect OEIF dimension grades
     oeif_dims = []
-    for label, col in OEIF_DIMS:
+    for label, col in oeif_dims:
         val = (row.get(col) or "").strip()
         if val and val != "NULL":
             oeif_dims.append((label, OEIF_RATING_MAP.get(val, val)))
@@ -262,8 +266,7 @@ def _determine_effective_rating(row: dict) -> tuple[str, str]:
             if _grade_score(grade) > _grade_score(oeif_rating):
                 highlights.append(f"{label} {grade}")
         # S5 data available as supplement
-        s5_data = {label: (row.get(col) or "").strip()
-                   for label, col in S5_DIMS}
+        s5_data = {label: (row.get(col) or "").strip() for label, col in s5_dims}
         s5_data = {k: v for k, v in s5_data.items() if v and v != "NULL"}
         if not highlights and s5_data:
             worst = min(s5_data, key=lambda k: _s5_score(s5_data[k]))
@@ -272,8 +275,7 @@ def _determine_effective_rating(row: dict) -> tuple[str, str]:
         return oeif_rating, highlights_str
 
     # Old-format S5 inspection
-    s5_data = {label: (row.get(col) or "").strip()
-               for label, col in S5_DIMS}
+    s5_data = {label: (row.get(col) or "").strip() for label, col in s5_dims}
     s5_data = {k: v for k, v in s5_data.items() if v and v != "NULL"}
     if s5_data:
         scores = [_s5_score(v) for v in s5_data.values()]
@@ -379,8 +381,8 @@ def main():
             year = _best_inspection_year(ofsted_row)
             summary = _generate_ofsted_cell(ofsted_row)
 
-            school["OfstedRating (name)"] = summary  # combined rating + year + highlights
-            school["InspectionYear"] = ""   # merged into OfstedRating
+            school["OfstedRating (name)"] = summary
+            school["InspectionYear"] = year  # separate column for formulas to XLOOKUP
             school["InspectionSummary"] = ""  # merged into OfstedRating
             if rating:
                 matched += 1

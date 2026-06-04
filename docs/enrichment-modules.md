@@ -162,48 +162,36 @@ cost = litres_used × petrol_price_per_litre    # default: £1.45/L
 - Returns empty string if no API key configured
 - Logs warning and returns "" on any API failure
 
-## Council Tax (Homedata + CivAccount)
+## Council Tax (VOA Scraper + CivAccount)
 
 **Module**: `houses/council_tax.py` — `lookup_council_tax()`
 
-**Purpose**: Look up council tax band and yearly cost for a property.
-
-**API Details:**
-- Base URL: `https://homedata.co.uk/api` (NOT `api.homedata.co.uk`)
-- Auth: `Authorization: Api-Key {key}`
-- Endpoint: `GET /council_tax_band/` — accepts `uprn`, or `postcode` + `building_number`/`building_name`
-- Also: `GET /property/{uprn}/core` — newer endpoint (May 2026) that includes council tax + EPC + flood risk + schools + broadband in one call
+**Purpose**: Look up council tax band and yearly cost for a property by scraping the public VOA (Valuation Office Agency) website.
 
 **How it works:**
-1. Extracts building name/number from the property address
-2. Calls Homedata: `GET /council_tax_band/?postcode={pc}&building_name={name}` with `Api-Key` auth
-3. Parses council tax band and local authority from response
-4. Derives council slug from local authority name
-5. Calls CivAccount (free, no auth): `GET https://www.civaccount.co.uk/api/v1/councils/{slug}`
-6. Applies band ratio to Band D rate for specific band cost
-7. Caches results in-memory per postcode
+1. Scrapes `https://www.tax.service.gov.uk/check-council-tax-band/search` — the public VOA council tax bands lookup
+2. GETs the search form, extracts a CSRF token, POSTs the postcode
+3. Parses the HTML results table into a list of properties with bands
+4. Filters out deleted properties (band = "DELETED")
+5. Matches the specific property by building name/number from the full address
+6. Extracts the band and local authority
+7. Calls CivAccount (free, no auth): `GET https://www.civaccount.co.uk/api/v1/councils/{slug}`
+8. Applies band ratio to Band D rate for specific band cost
 
-**Current limitation:** The Homedata API returns 404 for all postcode/UPRN lookups in the free tier. The address search endpoint works (returns suggestions with UPRNs) but the property data endpoints return 404. This may require:
-- Upgrading from the free tier (100 calls/month) to Starter (£49/mo)
-- Waiting for the API migration to the new `/property/{uprn}/` system (May 2026)
-- Checking that the API key has been activated for property data access
+**Dependency:** `uk-property-apis` (MIT licensed, via GitHub) — provides the `VOAClient` and HTML parser.
 
-**Council tax band ratios:**
-| Band | Ratio |
-|------|-------|
-| A | 6/9 |
-| B | 7/9 |
-| C | 8/9 |
-| D | 9/9 |
-| E | 11/9 |
-| F | 13/9 |
-| G | 15/9 |
-| H | 18/9 |
+**Coverage:** England and Wales only. Scottish postcodes return no results.
+
+**Important constraints:**
+- A full property address with building number/name is **required** — without it the lookup returns `None` (no guessing)
+- Only returns data on a **positive match** — if the building identifier doesn't match any VOA result, returns `None`
+- Deleted properties (band = "DELETED") are automatically filtered out
 
 **Graceful degradation:**
-- Returns `None` if API key not configured
-- Returns `None` if property not found (404)
-- Returns `None` on any API failure or auth error (403)
+- Returns `None` if `uk-property-apis` is not installed
+- Returns `None` if no address provided or no building identifier extractable
+- Returns `None` if VOA returns no results or no match found
+- Returns `None` on any HTTP or parsing error
 
 ## Commute Breakdown (Yearly Cost Calculation)
 
