@@ -81,14 +81,14 @@ def parse_columns(arg: str) -> set[int]:
     return indices
 
 
-# Column header to enrichment field group mapping.
+# Column header to enrichment field name mapping.
 # When --columns is specified, only the corresponding enrichment modules run,
 # saving API credits on unnecessary lookups.
 _COLUMN_FIELDS: dict[int, str] = {
-    col_index("Simon London (min)"): "transit",
-    col_index("Simon London Cost (£)"): "transit",
-    col_index("Lorena London (min)"): "transit",
-    col_index("Lorena London Cost (£)"): "transit",
+    col_index("Simon London (min)"): "simon",
+    col_index("Simon London Cost (£)"): "simon",
+    col_index("Lorena London (min)"): "lorena",
+    col_index("Lorena London Cost (£)"): "lorena",
     col_index("Bracknell Time (min)"): "petrol",
     col_index("Bracknell Cost (£)"): "petrol",
     col_index("Primary School"): "schools",
@@ -105,8 +105,8 @@ _COLUMN_FIELDS: dict[int, str] = {
     col_index("Secondary Inspection Year"): "schools",
     col_index("Secondary Bus (min)"): "schools",
     col_index("Secondary Bus Route"): "schools",
-    col_index("Walk to Town (min)"): "walk",
-    col_index("Walkable Amenities"): "walk",
+    col_index("Walk to Town (min)"): "walk_time",
+    col_index("Walkable Amenities"): "amenities",
     col_index("Area Description"): "town",
     col_index("EPC Rating"): "epc",
     col_index("Approx Latitude (est)"): "geo",
@@ -122,23 +122,7 @@ def _fields_for_columns(col_indices: set[int]) -> str:
     for idx in col_indices:
         if idx in _COLUMN_FIELDS:
             needed.add(_COLUMN_FIELDS[idx])
-    # Bracknell columns need transit for commute_breakdown
-    if needed & {"petrol"} and "transit" not in needed:
-        needed.add("transit")
     return ",".join(sorted(needed))
-    """Return the closest matching header name, or None if no close match."""
-    name_lower = name.lower().strip()
-    # Try exact match first
-    for h in COLUMN_HEADERS:
-        if h.lower() == name_lower:
-            return h
-    # Try substring match
-    matches = [h for h in COLUMN_HEADERS if name_lower in h.lower()]
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        return None  # ambiguous — let user pick
-    return None
 
 
 def main():

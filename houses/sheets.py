@@ -377,7 +377,7 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
                                   "cell": {"userEnteredFormat": {"numberFormat": {"type": "TIME", "pattern": "[h]:mm"}}},
                                   "fields": "userEnteredFormat.numberFormat"}})
     for h in ["what the area is like", "walkable amenities", "primary school", "secondary school",
-              "group notes / whatsapp", "ashby comments",
+              "group notes / whatsapp", "ashby comments", "status reason",
               "primary inspection year", "secondary inspection year", "secondary bus"]:
         if h in header_lookup:
             ci = header_lookup[h]

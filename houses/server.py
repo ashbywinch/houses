@@ -115,7 +115,7 @@ async def inject_property(
                                 "error": (
                                     f"Property {rid} already exists in the sheet. "
                                     "To update it you must specify which enrichment fields to re-run: "
-                                    "?fields=transit,petrol,schools,town,walk,epc,geo"
+                                    "?fields=simon,lorena,petrol,schools,walk_time,amenities,town,epc,geo"
                                 )
                             },
                             status_code=400,
@@ -152,8 +152,9 @@ async def inject_property(
     station_name = ""
 
     # Transit — TfL + NR fallback
-    if enabled is None or enabled & {"transit"}:
+    if enabled is None or enabled & {"simon"}:
         simon = await compute_simon_commute(lookup)
+    if enabled is None or enabled & {"lorena"}:
         lorena = await compute_lorena_commute(lookup)
 
     # Petrol — ORS driving-car
@@ -166,7 +167,7 @@ async def inject_property(
         secondary = await find_nearest_boys_secondary(postcode, payload.address)
 
     # Walkability — needs coords, geocode the address first
-    if enabled is None or enabled & {"walk"}:
+    if enabled is None or {"walk_time", "amenities"} & enabled:
         coords = await _geocode_address(lookup)
         if coords is None:
             coords = await _geocode(postcode)
@@ -188,8 +189,8 @@ async def inject_property(
             town_name = non_county[-1] if non_county else (candidates[-1] if candidates else "")
         town_desc = await generate_town_description(town_name, postcode)
 
-    # NR rail fare fallback for missing TfL fares (only if transit ran)
-    if (enabled is None or enabled & {"transit"}) and (simon.daily_cost_gbp is None or lorena.daily_cost_gbp is None):
+    # NR rail fare fallback for missing TfL fares (only if simon or lorena computed)
+    if (enabled is None or enabled & {"simon"} or enabled & {"lorena"}) and (simon.daily_cost_gbp is None or lorena.daily_cost_gbp is None):
         tube_single = 2.80
         fare_coords = await _geocode(postcode)
         if fare_coords:
@@ -204,7 +205,7 @@ async def inject_property(
                     if f is not None:
                         lorena.daily_cost_gbp = round((f + tube_single) * 2, 2)
 
-    if (enabled is None or enabled & {"transit"}) and (enabled is None or enabled & {"petrol"}):
+    if enabled is None or (enabled & {"simon"} and enabled & {"lorena"} and enabled & {"petrol"}):
         breakdown = await compute_commute_breakdown(simon, lorena, petrol)
 
     # EPC

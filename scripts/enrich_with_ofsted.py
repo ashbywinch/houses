@@ -379,8 +379,8 @@ def main():
             year = _best_inspection_year(ofsted_row)
             summary = _generate_ofsted_cell(ofsted_row)
 
-            school["OfstedRating (name)"] = summary  # combined rating + year + highlights
-            school["InspectionYear"] = ""   # merged into OfstedRating
+            school["OfstedRating (name)"] = summary
+            school["InspectionYear"] = year  # separate column for formulas to XLOOKUP
             school["InspectionSummary"] = ""  # merged into OfstedRating
             if rating:
                 matched += 1
