@@ -168,13 +168,18 @@ def named_range_name(header: str) -> str:
     return "Data_" + "".join(w.capitalize() for w in words)
 
 
-def _add_rule(fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn, header_name: str, formula: str, bg_color: dict | None = None, text_color: dict | None = None) -> None:
+def _add_rule(
+    fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn,
+    header_name: str, formula: str,
+    bg_color: dict | None = None, text_color: dict | None = None,
+) -> None:
     """Append a single conditional formatting rule to fmt_requests."""
     col_idx = header_lookup[header_name.lower()]
     rule = {
         "addConditionalFormatRule": {
             "rule": {
-                "ranges": [{"sheetId": sid, "startColumnIndex": col_idx, "endColumnIndex": col_idx + 1, "startRowIndex": 1}],
+                "ranges": [{"sheetId": sid, "startColumnIndex": col_idx,
+                            "endColumnIndex": col_idx + 1, "startRowIndex": 1}],
                 "booleanRule": {
                     "condition": {"type": "CUSTOM_FORMULA", "values": [{"userEnteredValue": formula}]},
                     "format": {}
@@ -185,7 +190,8 @@ def _add_rule(fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn, 
     if bg_color:
         rule["addConditionalFormatRule"]["rule"]["booleanRule"]["format"]["backgroundColor"] = bg_color
     if text_color:
-        rule["addConditionalFormatRule"]["rule"]["booleanRule"]["format"]["textFormat"] = {"foregroundColor": text_color}
+        text_fmt = rule["addConditionalFormatRule"]["rule"]["booleanRule"]["format"]
+        text_fmt["textFormat"] = {"foregroundColor": text_color}
     fmt_requests.append(rule)
 
 
@@ -195,10 +201,10 @@ def _add_time_tiered(
 ) -> None:
     """Add green/orange/red for a time column: <G:H G:M green, G:H G:M–O:H O:M orange, >O:H O:M red."""
     letter = col_letter_fn(header_lookup[header])
-    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=AND(${letter}2<>"",${letter}2<TIME({green_hours},{green_mins},0))', GREEN_BG)
-    orange_f = f'=AND(${letter}2<>"",${letter}2>=TIME({green_hours},{green_mins},0),${letter}2<=TIME({orange_hours},{orange_mins},0))'
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=AND(${letter}2<>"",${letter}2<TIME({green_hours},{green_mins},0))', GREEN_BG)  # noqa: E501
+    orange_f = f'=AND(${letter}2<>"",${letter}2>=TIME({green_hours},{green_mins},0),${letter}2<=TIME({orange_hours},{orange_mins},0))'  # noqa: E501
     _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, orange_f, ORANGE_BG)
-    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=AND(${letter}2<>"",${letter}2>TIME({orange_hours},{orange_mins},0))', RED_BG)
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=AND(${letter}2<>"",${letter}2>TIME({orange_hours},{orange_mins},0))', RED_BG)  # noqa: E501
 
 
 def _add_numeric_tiered(
@@ -207,17 +213,17 @@ def _add_numeric_tiered(
 ) -> None:
     """Add green/orange/red for a numeric column: <green_max green, green_max–orange_max orange, >orange_max red."""
     letter = col_letter_fn(header_lookup[header])
-    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=AND(${letter}2<>"",${letter}2<{green_max})', GREEN_BG)
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=AND(${letter}2<>"",${letter}2<{green_max})', GREEN_BG)  # noqa: E501
     orange_f = f'=AND(${letter}2<>"",${letter}2>={green_max},${letter}2<={orange_max})'
     _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, orange_f, ORANGE_BG)
-    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=AND(${letter}2<>"",${letter}2>{orange_max})', RED_BG)
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, header, f'=AND(${letter}2<>"",${letter}2>{orange_max})', RED_BG)  # noqa: E501
 
 
 def _add_epc_rules(fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn):
     """EPC Rating: A/B green, C/D orange, E/F/G red."""
     letter = col_letter_fn(header_lookup["epc rating"])
-    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, "epc rating", f'=OR(LEFT(${letter}2,1)="A",LEFT(${letter}2,1)="B")', GREEN_BG)
-    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, "epc rating", f'=OR(LEFT(${letter}2,1)="C",LEFT(${letter}2,1)="D")', ORANGE_BG)
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, "epc rating", f'=OR(LEFT(${letter}2,1)="A",LEFT(${letter}2,1)="B")', GREEN_BG)  # noqa: E501
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, "epc rating", f'=OR(LEFT(${letter}2,1)="C",LEFT(${letter}2,1)="D")', ORANGE_BG)  # noqa: E501
     f = f'=OR(LEFT(${letter}2,1)="E",LEFT(${letter}2,1)="F",LEFT(${letter}2,1)="G")'
     _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, "epc rating", f, RED_BG)
 
@@ -254,8 +260,8 @@ def _add_inspection_year_rules(fmt_requests: list, sid: int, header_lookup: dict
     """Inspection years: >=2023 green, <=2022 orange. 2-tier only."""
     for hdr in ["primary inspection year", "secondary inspection year"]:
         letter = col_letter_fn(header_lookup[hdr])
-        _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, hdr, f'=AND(${letter}2<>"",VALUE(${letter}2)>=2023)', GREEN_BG)
-        _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, hdr, f'=AND(${letter}2<>"",VALUE(${letter}2)>0,VALUE(${letter}2)<=2022)', ORANGE_BG)
+        _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, hdr, f'=AND(${letter}2<>"",VALUE(${letter}2)>=2023)', GREEN_BG)  # noqa: E501
+        _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, hdr, f'=AND(${letter}2<>"",VALUE(${letter}2)>0,VALUE(${letter}2)<=2022)', ORANGE_BG)  # noqa: E501
 
 
 def _add_grey_text_row_rule(fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn, num_cols: int):
@@ -285,7 +291,8 @@ def _add_status_data_validation(fmt_requests: list, sid: int, header_lookup: dic
     if status_idx is not None:
         fmt_requests.append({
             "setDataValidation": {
-                "range": {"sheetId": sid, "startColumnIndex": status_idx, "endColumnIndex": status_idx + 1, "startRowIndex": 1},
+                "range": {"sheetId": sid, "startColumnIndex": status_idx,
+                          "endColumnIndex": status_idx + 1, "startRowIndex": 1},
                 "rule": {
                     "condition": {
                         "type": "ONE_OF_LIST",
@@ -338,25 +345,25 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
     rid_range = named_range("Rightmove ID")
 
     formula_cols = {
-        "rightmove id": f'=IFNA(REGEXEXTRACT({link_formula},"properties/(\\d+)"),XLOOKUP(INDEX(View_ListingAddress, ROW()),{named_range("Address")},{rid_range}))',
+        "rightmove id": f'=IFNA(REGEXEXTRACT({link_formula},"properties/(\\d+)"),XLOOKUP(INDEX(View_ListingAddress, ROW()),{named_range("Address")},{rid_range}))',  # noqa: E501
         "purchase cost (£)": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Price (£)")}    )',
         "epc rating": f'=XLOOKUP({lookup_key},{rid_range},{named_range("EPC Rating")}    )',
-        "yearly commute total (£)": f'=LET(k,XLOOKUP({lookup_key},{rid_range},{named_range("Bracknell Cost (£)")}),g,XLOOKUP({lookup_key},{rid_range},{named_range("Simon London Cost (£)")}),i,XLOOKUP({lookup_key},{rid_range},{named_range("Lorena London Cost (£)")}),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)))',
+        "yearly commute total (£)": f'=LET(k,XLOOKUP({lookup_key},{rid_range},{named_range("Bracknell Cost (£)")}),g,XLOOKUP({lookup_key},{rid_range},{named_range("Simon London Cost (£)")}),i,XLOOKUP({lookup_key},{rid_range},{named_range("Lorena London Cost (£)")}),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)))',  # noqa: E501
         "yearly council tax (£)": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Council Tax Cost (£)")})',
-        "simon london": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Simon London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-        "lorena london": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Lorena London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-        "bracknell time": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Bracknell Time (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+        "simon london": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Simon London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
+        "lorena london": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Lorena London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
+        "bracknell time": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Bracknell Time (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
         "what the area is like": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Area Description")})',
-        "walk to town": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Walk to Town (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+        "walk to town": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Walk to Town (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
         "walkable amenities": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Walkable Amenities")})',
-        "primary school": f'=HYPERLINK(XLOOKUP({lookup_key},{rid_range},{named_range("Primary School Link")}),XLOOKUP({lookup_key},{rid_range},{named_range("Primary School")}))',
+        "primary school": f'=HYPERLINK(XLOOKUP({lookup_key},{rid_range},{named_range("Primary School Link")}),XLOOKUP({lookup_key},{rid_range},{named_range("Primary School")}))',  # noqa: E501
         "primary ofsted": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Primary Ofsted")})',
-        "primary walk": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Primary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
-        "secondary school": f'=HYPERLINK(XLOOKUP({lookup_key},{rid_range},{named_range("Secondary School Link")}),XLOOKUP({lookup_key},{rid_range},{named_range("Secondary School")}))',
+        "primary walk": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Primary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
+        "secondary school": f'=HYPERLINK(XLOOKUP({lookup_key},{rid_range},{named_range("Secondary School Link")}),XLOOKUP({lookup_key},{rid_range},{named_range("Secondary School")}))',  # noqa: E501
         "secondary ofsted": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Ofsted")})',
-        "secondary walk": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+        "secondary walk": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
         "secondary bus route": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Bus Route")})',
-        "secondary bus": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
+        "secondary bus": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
         "primary inspection year": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Primary Inspection Year")})',
         "secondary inspection year": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Inspection Year")})',
 
@@ -373,24 +380,26 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
     headers = data[0]
     header_lookup = {h.strip().lower(): i for i, h in enumerate(headers)}
     fmt_requests = []
-    for h in ["simon london", "lorena london", "bracknell time", "walk to town", "primary walk", "secondary walk", "secondary bus"]:
+    time_cols = ["simon london", "lorena london", "bracknell time", "walk to town",
+                 "primary walk", "secondary walk", "secondary bus"]
+    for h in time_cols:
         if h in header_lookup:
             ci = header_lookup[h]
-            fmt_requests.append({"repeatCell": {"range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},
-                                  "cell": {"userEnteredFormat": {"numberFormat": {"type": "TIME", "pattern": "[h]:mm"}}},
+            fmt_requests.append({"repeatCell": {"range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},  # noqa: E501
+                                  "cell": {"userEnteredFormat": {"numberFormat": {"type": "TIME", "pattern": "[h]:mm"}}},  # noqa: E501
                                    "fields": "userEnteredFormat.numberFormat"}})
     for h in ["purchase cost (£)", "yearly commute total (£)", "yearly council tax (£)"]:
         if h in header_lookup:
             ci = header_lookup[h]
-            fmt_requests.append({"repeatCell": {"range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},
-                                  "cell": {"userEnteredFormat": {"numberFormat": {"type": "CURRENCY", "pattern": "£#,##0.00"}}},
+            fmt_requests.append({"repeatCell": {"range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},  # noqa: E501
+                                  "cell": {"userEnteredFormat": {"numberFormat": {"type": "CURRENCY", "pattern": "£#,##0.00"}}},  # noqa: E501
                                   "fields": "userEnteredFormat.numberFormat"}})
     for h in ["what the area is like", "walkable amenities", "primary school", "secondary school",
               "group notes / whatsapp", "ashby comments", "status reason",
               "primary inspection year", "secondary inspection year", "secondary bus"]:
         if h in header_lookup:
             ci = header_lookup[h]
-            fmt_requests.append({"repeatCell": {"range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},
+            fmt_requests.append({"repeatCell": {"range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},  # noqa: E501
                                   "cell": {"userEnteredFormat": {"wrapStrategy": "WRAP"}},
                                   "fields": "userEnteredFormat.wrapStrategy"}})
     fmt_requests.append({
@@ -458,8 +467,8 @@ def ensure_named_ranges(spreadsheet: gspread.Spreadsheet) -> None:
         range_spec = {"sheetId": sid_data, "startColumnIndex": col_idx, "endColumnIndex": col_idx + 1}
         if name in existing:
             rid = existing[name]["namedRangeId"]
-            requests.append({"updateNamedRange": {"namedRange": {"namedRangeId": rid, "name": name, "range": range_spec},
-                                                   "fields": "range"}})
+            requests.append({"updateNamedRange": {"namedRange": {"namedRangeId": rid, "name": name, "range": range_spec},  # noqa: E501
+                                                    "fields": "range"}})
         else:
             requests.append({"addNamedRange": {"namedRange": {"name": name, "range": range_spec}}})
 
@@ -471,8 +480,8 @@ def ensure_named_ranges(spreadsheet: gspread.Spreadsheet) -> None:
         range_spec = {"sheetId": sid_view, "startColumnIndex": col_idx, "endColumnIndex": col_idx + 1}
         if name in existing:
             rid = existing[name]["namedRangeId"]
-            requests.append({"updateNamedRange": {"namedRange": {"namedRangeId": rid, "name": name, "range": range_spec},
-                                                   "fields": "range"}})
+            requests.append({"updateNamedRange": {"namedRange": {"namedRangeId": rid, "name": name, "range": range_spec},  # noqa: E501
+                                                    "fields": "range"}})
         else:
             requests.append({"addNamedRange": {"namedRange": {"name": name, "range": range_spec}}})
 
@@ -539,8 +548,9 @@ def _row_values(property_: EnrichedProperty) -> dict[str, str]:
     r["Simon London (min)"] = _fmt_duration(property_.simon_commute)
     r["Simon London Cost (£)"] = _fmt_cost(property_.simon_commute.daily_cost_gbp if property_.simon_commute else None)
     r["Lorena London (min)"] = _fmt_duration(property_.lorena_commute)
-    r["Lorena London Cost (£)"] = _fmt_cost(property_.lorena_commute.daily_cost_gbp if property_.lorena_commute else None)
-    r["Bracknell Time (min)"] = str(property_.petrol.round_trip_minutes) if property_.petrol and property_.petrol.round_trip_minutes is not None else ""
+    r["Lorena London Cost (£)"] = _fmt_cost(property_.lorena_commute.daily_cost_gbp if property_.lorena_commute else None)  # noqa: E501
+    bt = property_.petrol.round_trip_minutes if property_.petrol else None
+    r["Bracknell Time (min)"] = str(bt) if bt is not None else ""
     r["Bracknell Cost (£)"] = _fmt_cost(property_.petrol.cost_gbp if property_.petrol else None)
     r["Primary School"] = property_.primary_school.name if property_.primary_school else ""
     r["Primary Distance (km)"] = _fmt_dist(property_.primary_school)

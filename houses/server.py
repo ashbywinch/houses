@@ -87,7 +87,7 @@ app = FastAPI(
 async def inject_property(
     payload: PropertyPayload,
     dry_run: bool = False,
-    fields: list[str] | None = Query(default=None),
+    fields: list[str] | None = Query(default=None),  # noqa: B008
 ) -> JSONResponse:
     postcode = payload.postcode or extract_postcode(payload.address)
 
@@ -100,7 +100,7 @@ async def inject_property(
     # explicit fields is only valid for new properties.
     rid_match = re.search(r"properties/(\d+)", payload.url)
     rid = rid_match.group(1) if rid_match else ""
-    RID_COL = col_index("Rightmove ID")
+
     if not fields and rid:
         from houses.sheets import get_client
         gclient = get_client()
@@ -191,7 +191,8 @@ async def inject_property(
         town_desc = await generate_town_description(town_name, postcode)
 
     # NR rail fare fallback for missing TfL fares (only if simon or lorena computed)
-    if (enabled is None or enabled & {"simon"} or enabled & {"lorena"}) and (simon.daily_cost_gbp is None or lorena.daily_cost_gbp is None):
+    needs_rail = enabled is None or enabled & {"simon"} or enabled & {"lorena"}
+    if needs_rail and (simon.daily_cost_gbp is None or lorena.daily_cost_gbp is None):
         tube_single = 2.80
         fare_coords = await _geocode(postcode)
         if fare_coords:
@@ -221,7 +222,6 @@ async def inject_property(
     if enabled is None or enabled & {"geo"}:
         actual_lat = payload.actual_latitude
         actual_lng = payload.actual_longitude
-        effective_postcode = payload.actual_postcode or postcode
 
         if actual_lat is not None and actual_lng is not None:
             approx_lat, approx_lng = actual_lat, actual_lng
