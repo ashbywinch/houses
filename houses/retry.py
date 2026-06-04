@@ -6,7 +6,6 @@ import asyncio
 import logging
 import random
 from collections.abc import Awaitable, Callable
-from functools import wraps
 
 logger = logging.getLogger(__name__)
 
@@ -48,31 +47,3 @@ async def retry_async(
                 await asyncio.sleep(delay)
 
     raise last_exc  # type: ignore[misc]
-
-
-def with_retry(
-    max_retries: int = 3,
-    base_delay: float = 1.0,
-    max_delay: float = 30.0,
-    backoff: float = 2.0,
-    jitter: bool = True,
-    exceptions: tuple[type[Exception], ...] = (Exception,),
-):
-    """Decorator: wrap an async function with retry logic."""
-
-    def decorator(func: Callable[..., Awaitable]):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            return await retry_async(
-                lambda: func(*args, **kwargs),
-                max_retries=max_retries,
-                base_delay=base_delay,
-                max_delay=max_delay,
-                backoff=backoff,
-                jitter=jitter,
-                exceptions=exceptions,
-            )
-
-        return wrapper
-
-    return decorator
