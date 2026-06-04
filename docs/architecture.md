@@ -30,7 +30,7 @@
    - Nearest boys-eligible schools (GIAS CSV + postcodes.io)
    - Walkability (Google Maps Places + ORS walking) — planned
    - Town description (OpenRouter LLM) — planned
-   - Council tax lookup (Homedata + CivAccount) — deferred
+   - Council tax lookup (VOA scraper + CivAccount)
 5. **Server writes** the full enriched row to the **Properties Data** tab in Google Sheets.
 6. **Properties View** tab automatically picks up the new data via live XLOOKUP formulas.
 
@@ -69,7 +69,7 @@ The primary key linking both tabs is the **Rightmove URL** (Column A in Properti
 | Geocoding | postcodes.io (free) + ORS Pelias | Full postcodes + fallback for outcodes |
 | Walkability | Google Maps Places API (New) | Nearby Search for amenities |
 | Town descriptions | OpenRouter (BYOK LLM) | LLM-generated descriptions |
-| Council tax | Homedata + CivAccount | Deferred — awaiting API key |
+| Council tax | VOA scraper + CivAccount | Live — scrapes public gov.uk page |
 
 ## Key Files
 
@@ -79,11 +79,11 @@ The primary key linking both tabs is the **Rightmove URL** (Column A in Properti
 | `houses/models.py` | Pydantic models for property payload and enriched data |
 | `houses/config.py` | Configuration — postcodes, API keys, constants |
 | `houses/enricher.py` | Transit commute, petrol cost, school lookup |
-| `houses/sheets.py` | gspread integration, column headers (canonical), row formatting |
+| `houses/sheets.py` | Service account auth, gspread integration, column headers (canonical), row formatting |
 | `houses/retry.py` | Async retry with exponential backoff and jitter |
 | `houses/walkability.py` | Google Maps Places + ORS walking (planned) |
 | `houses/town_desc.py` | LLM-generated town descriptions (planned) |
-| `houses/council_tax.py` | Council tax lookup stub (deferred) |
+| `houses/council_tax.py` | Council tax lookup (VOA scraper + CivAccount) |
 | `scripts/setup_sheet.py` | Sheet tab creation, XLOOKUP formula templates |
 | `scripts/enrich_with_ofsted.py` | Ofsted data merge into school CSV |
 | `Agent Briefing.txt` | **Archived** — see `docs/` for current documentation |
