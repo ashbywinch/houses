@@ -37,11 +37,7 @@ with src_path.open(newline="", encoding="latin-1") as f:
 print(f"Loaded {len(rows)} rows")
 
 # Collect unique non-empty postcodes
-postcodes = sorted({
-    r["Postcode"].strip().upper()
-    for r in rows
-    if r.get("Postcode", "").strip()
-})
+postcodes = sorted({r["Postcode"].strip().upper() for r in rows if r.get("Postcode", "").strip()})
 print(f"Unique postcodes to geocode: {len(postcodes)}")
 
 # Geocode in batches of 100

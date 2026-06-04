@@ -9,6 +9,7 @@ from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 
 from houses.config import settings
+from houses.council_tax import lookup_council_tax
 from houses.enricher import (
     _geocode,
     _geocode_address,
@@ -212,6 +213,10 @@ async def inject_property(
     if enabled is None or enabled & {"epc"}:
         epc = await lookup_epc(postcode) if not _is_outcode(postcode) else ""
 
+    council_tax = None
+    if (enabled is None or enabled & {"council_tax"}) and postcode and payload.address:
+        council_tax = await lookup_council_tax(postcode, payload.address)
+
     # Geocode for approx cache fields
     if enabled is None or enabled & {"geo"}:
         actual_lat = payload.actual_latitude
@@ -254,6 +259,7 @@ async def inject_property(
         secondary_inspection_year=secondary.inspection_year if secondary else "",
         secondary_inspection_summary=secondary.inspection_summary if secondary else "",
         epc_rating=epc,
+        council_tax=council_tax,
         approx_latitude=approx_lat,
         approx_longitude=approx_lng,
         approx_station_crs=station_crs,

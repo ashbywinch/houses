@@ -41,20 +41,56 @@ _POSTCODE_OUTCODE_RE = re.compile(
 
 # UK ceremonial counties that sometimes appear in address lines.
 # Filtered out during town extraction so "Berkshire" doesn't win over "Maidenhead".
-_KNOWN_COUNTIES = frozenset({
-    "berkshire", "buckinghamshire", "oxfordshire", "surrey", "kent",
-    "essex", "hertfordshire", "bedfordshire", "cambridgeshire", "suffolk",
-    "norfolk", "northamptonshire", "warwickshire", "worcestershire",
-    "gloucestershire", "somerset", "devon", "cornwall", "dorset", "wiltshire",
-    "hampshire", "west sussex", "east sussex", "middlesex",
-    "lancashire", "yorkshire", "cheshire", "derbyshire", "nottinghamshire",
-    "lincolnshire", "leicestershire", "staffordshire", "shropshire",
-    "herefordshire", "durham", "northumberland", "cumbria",
-    "greater manchester", "merseyside", "tyne and wear",
-    "west midlands", "south yorkshire", "west yorkshire",
-})
+_KNOWN_COUNTIES = frozenset(
+    {
+        "berkshire",
+        "buckinghamshire",
+        "oxfordshire",
+        "surrey",
+        "kent",
+        "essex",
+        "hertfordshire",
+        "bedfordshire",
+        "cambridgeshire",
+        "suffolk",
+        "norfolk",
+        "northamptonshire",
+        "warwickshire",
+        "worcestershire",
+        "gloucestershire",
+        "somerset",
+        "devon",
+        "cornwall",
+        "dorset",
+        "wiltshire",
+        "hampshire",
+        "west sussex",
+        "east sussex",
+        "middlesex",
+        "lancashire",
+        "yorkshire",
+        "cheshire",
+        "derbyshire",
+        "nottinghamshire",
+        "lincolnshire",
+        "leicestershire",
+        "staffordshire",
+        "shropshire",
+        "herefordshire",
+        "durham",
+        "northumberland",
+        "cumbria",
+        "greater manchester",
+        "merseyside",
+        "tyne and wear",
+        "west midlands",
+        "south yorkshire",
+        "west yorkshire",
+    }
+)
 
 _town_geo_cache: dict[str, tuple[float, float]] = {}
+
 
 # Per-process-run API exhaustion tracking.
 # Set when an API returns a usage-limit error so subsequent calls
@@ -64,6 +100,7 @@ class _APIState:
     ors_geo_exhausted: bool = False
     nominatim_exhausted: bool = False
     nominatim_last_call: float = 0.0
+
 
 _api_state = _APIState()
 
@@ -270,11 +307,11 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
     if google_failed or not places:
         overpass_url = "https://overpass-api.de/api/interpreter"
         overpass_query = (
-            f'[out:json][timeout:10];'
+            f"[out:json][timeout:10];"
             f'(node(around:1000,{lat},{lng})["shop"~"supermarket|convenience"];'
             f'node(around:1000,{lat},{lng})["amenity"="pharmacy"];'
             f'way(around:1000,{lat},{lng})["leisure"="park"];'
-            f');out center 5;'
+            f");out center 5;"
         )
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:

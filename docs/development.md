@@ -40,6 +40,8 @@ GOOGLE_MAPS_API_KEY=...
 
 # OpenRouter API key (for LLM town descriptions)
 OPENROUTER_API_KEY=...
+
+
 ```
 
 ### Configuration Constants
@@ -157,6 +159,22 @@ See `.env.example` for all configurable environment variables with comments.
 }
 ```
 
+**Query parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| `dry_run` | bool | Skip sheet write, return enriched data only |
+| `fields` | list | Re-enrich specific columns on an existing property. Bypasses the duplicate-property guard. Comma-separated: `simon,lorena,petrol,schools,walk_time,amenities,town,epc,council_tax,geo` |
+
+**Re-enriching a single column** — e.g. re-run only council tax on an existing row:
+```bash
+curl -X POST "http://127.0.0.1:8080/inject-property?fields=council_tax" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.rightmove.co.uk/properties/123456789",
+       "address": "123 High Street, Maidenhead, SL6 1AA",
+       "postcode": "SL6 1AA"}'
+```
+This skips the "property already exists" check and only writes the council tax columns to the existing row.
+
 **Response (200 — sheet not configured):**
 ```json
 {
@@ -171,5 +189,51 @@ See `.env.example` for all configurable environment variables with comments.
 {
   "status": "ok",
   "row_url": "https://docs.google.com/spreadsheets/..."
+}
+```
+
+### POST /reprocess
+
+Re-run enrichment for existing properties by Rightmove ID. Reads existing row data from the sheet, runs the specified fields, and writes only those columns back in-place.
+
+**Request:**
+
+```json
+{
+  "ids": ["162493277", "88375569"]
+}
+```
+
+Omit `ids` to reprocess every row in the sheet.
+
+**Query parameters:**
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `fields` | list (required) | Comma-separated enrichment fields to re-run: `simon,lorena,petrol,schools,walk_time,amenities,town,epc,council_tax,geo` |
+
+**Examples:**
+
+```bash
+# Re-run council tax for specific properties
+curl -X POST "http://127.0.0.1:8080/reprocess?fields=council_tax" \
+  -H "Content-Type: application/json" \
+  -d '{"ids": ["162493277"]}'
+
+# Re-run EPC for all properties
+curl -X POST "http://127.0.0.1:8080/reprocess?fields=epc" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "processed": 1,
+  "total_requested": 1,
+  "results": {
+    "162493277": "updated"
+  }
 }
 ```

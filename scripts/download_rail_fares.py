@@ -86,11 +86,13 @@ def extract_relevant_fares(zip_data: bytes) -> list[dict]:
                         key = (origin, dest)
                         if key not in seen:
                             seen.add(key)
-                            relevant.append({
-                                "origin_crs": origin,
-                                "dest_crs": dest,
-                                "single_fare_gbp": fare,
-                            })
+                            relevant.append(
+                                {
+                                    "origin_crs": origin,
+                                    "dest_crs": dest,
+                                    "single_fare_gbp": fare,
+                                }
+                            )
     logger.info("Extracted %d relevant fare records", len(relevant))
     return relevant
 

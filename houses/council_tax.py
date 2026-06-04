@@ -1,22 +1,18 @@
-"""Council tax band lookup via Homedata API + CivAccount rates."""
+"""Council tax band lookup via VOA website scraper + CivAccount rates."""
 
 from __future__ import annotations
 
+import csv
 import logging
 import re
+from pathlib import Path
 
 import httpx
 
-from houses.config import settings
 from houses.models import CouncilTaxInfo
 
 logger = logging.getLogger(__name__)
 
-# Homedata free tier returns 404 for all property lookups (confirmed).
-# This flag is set once per process at first call and never re-tried.
-# Upgrade to a paid plan to re-enable: set _homedata_disabled = False
-_homedata_disabled = True
-logger.info("Homedata: disabled (free tier doesn't return property data)")
 BAND_RATIOS = {
     "A": 6 / 9,
     "B": 7 / 9,
@@ -27,8 +23,29 @@ BAND_RATIOS = {
     "G": 15 / 9,
     "H": 18 / 9,
 }
-HOMEDATA_URL = "https://homedata.co.uk/api/council_tax_band/"
 CIVACCOUNT_URL = "https://www.civaccount.co.uk/api/v1/councils"
+COUNCIL_TAX_CSV = "data/council_tax_rates.csv"
+
+# In-memory cache: lowercased authority name -> Band D rate (float)
+_cached_rates: dict[str, float] | None = None
+
+
+def _load_rates() -> dict[str, float]:
+    global _cached_rates
+    if _cached_rates is not None:
+        return _cached_rates
+    _cached_rates = {}
+    path = Path(__file__).parent.parent / COUNCIL_TAX_CSV
+    if not path.is_file():
+        logger.warning("Council tax rates CSV not found at %s", path)
+        return _cached_rates
+    with open(path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            rate = row.get("band_d_rate", "")
+            if rate:
+                _cached_rates[row["authority"].strip().lower()] = float(rate)
+    logger.debug("Loaded %d council tax rates from %s", len(_cached_rates), COUNCIL_TAX_CSV)
+    return _cached_rates
 
 
 def _extract_building(address: str) -> dict:
@@ -44,81 +61,113 @@ def _extract_building(address: str) -> dict:
         postcode = last if outcode_match else ""
 
     building = first
-    # Check if first part starts with a number (building number)
     num_match = re.match(r"^(\d+[A-Z]?)\s", building)
     if num_match:
         return {"postcode": postcode, "building_number": num_match.group(1)}
     return {"postcode": postcode, "building_name": building}
 
 
-async def lookup_council_tax(postcode: str, address: str = "") -> CouncilTaxInfo | None:
-    if not settings.homedata_api_key:
-        logger.warning("Homedata API key not configured")
-        return None
+def _normalise(text: str) -> str:
+    """Strip whitespace, uppercase, remove punctuation for comparison."""
+    return re.sub(r"[^A-Z0-9 ]", "", text.upper().strip())
 
-    params = _extract_building(address) if address else {"postcode": postcode}
 
-    if not params.get("postcode"):
-        logger.warning("No valid postcode for council tax lookup")
-        return None
-
-    # Homedata free tier doesn't return property data — skip if proven
-    global _homedata_disabled
-    if _homedata_disabled:
-        return None
-
+def _lookup_yearly_cost(band: str, local_authority: str) -> float | None:
+    """Fetch the Band D rate from CivAccount, falling back to the CSV."""
+    # 1) Try CivAccount (live API, may have up-to-date rates)
+    slug = local_authority.lower().replace(" ", "-").replace(".", "")
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                HOMEDATA_URL,
-                params=params,
-                headers={"Authorization": f"Api-Key {settings.homedata_api_key}"},
-            )
-            if resp.status_code == 404:
-                logger.warning("Council tax lookup failed — Homedata free tier has no property data. Disabling.")
-                _homedata_disabled = True
-                return None
-            if resp.status_code in (400, 422):
-                logger.warning("Homedata bad request for %s: %s", params, resp.text)
-                return None
-            if resp.status_code == 403:
-                logger.warning("Homedata API key lacks permission for %s: %s", params, resp.text)
-                return None
-            resp.raise_for_status()
-            data = resp.json()
+        with httpx.Client(timeout=10.0) as client:
+            civ = client.get(f"{CIVACCOUNT_URL}/{slug}")
+            if civ.status_code == 200:
+                civ_data = civ.json()
+                band_d_rate = civ_data.get("band_d_rate")
+                if band_d_rate and band in BAND_RATIOS:
+                    return round(band_d_rate * BAND_RATIOS[band], 2)
+    except Exception:
+        logger.warning("CivAccount lookup failed for %s (%s)", local_authority, slug)
 
-        band = data.get("council_tax_band", "")
-        local_authority = data.get("local_authority", "")
+    # 2) Fall back to the cached CSV of government Band D rates
+    rates = _load_rates()
+    norm = local_authority.strip().lower()
+    # Try exact match first, then prefix match (e.g. "Woking" matches "Woking")
+    band_d_rate = rates.get(norm)
+    if band_d_rate is None:
+        for key, val in rates.items():
+            if key.startswith(norm) or norm.startswith(key):
+                band_d_rate = val
+                break
+    if band_d_rate and band in BAND_RATIOS:
+        return round(band_d_rate * BAND_RATIOS[band], 2)
 
-        if not band:
-            return CouncilTaxInfo(band="", yearly_cost=None, evidence_url="")
+    return None
 
-        # Derive council slug for CivAccount
-        slug = local_authority.lower().replace(" ", "-").replace(".", "")
-        evidence_url = f"https://www.civaccount.co.uk/councils/{slug}"
 
-        # Fetch Band D rate from CivAccount
-        yearly_cost = None
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client2:
-                civ = await client2.get(f"{CIVACCOUNT_URL}/{slug}")
-                if civ.status_code == 200:
-                    civ_data = civ.json()
-                    band_d_rate = civ_data.get("band_d_rate")
-                    if band_d_rate and band in BAND_RATIOS:
-                        yearly_cost = round(band_d_rate * BAND_RATIOS[band], 2)
-        except Exception:
-            logger.warning("CivAccount lookup failed for %s", slug)
+async def lookup_council_tax(postcode: str, address: str = "") -> CouncilTaxInfo | None:
+    """Look up council tax band via VOA website scraper.
 
-        return CouncilTaxInfo(
-            band=band,
-            yearly_cost=yearly_cost,
-            evidence_url=evidence_url,
-        )
+    Scrapes the public gov.uk council tax bands page for the given postcode,
+    matches the specific property by building name/number, then fetches the
+    yearly cost from CivAccount.
 
-    except httpx.HTTPStatusError as e:
-        logger.warning("Homedata API error: %s", e)
+    Returns ``CouncilTaxInfo`` with band, yearly cost, and an evidence URL,
+    or ``None`` if the lookup fails entirely.
+    """
+    try:
+        from uk_property_apis.voa import VOAClient
+
+        async with VOAClient() as client:
+            page = await client.fetch_page(postcode, page=0)
+        results = page.rows
+    except ImportError:
+        logger.warning("uk-property-apis not installed; skipping council tax lookup")
         return None
     except Exception as e:
-        logger.warning("Council tax lookup failed: %s", e)
+        logger.warning("VOA council tax lookup failed for %s: %s", postcode, e)
         return None
+
+    if not address:
+        logger.debug("No address provided — cannot positively identify property")
+        return None
+
+    active = [r for r in results if r.band in BAND_RATIOS or r.band == "I"]
+    if not active:
+        logger.debug("VOA returned no active properties for %s", postcode)
+        return None
+
+    building = _extract_building(address)
+    building_id = building.get("building_number") or building.get("building_name") or ""
+    norm_id = _normalise(building_id)
+
+    if not norm_id:
+        logger.debug("Could not extract building identifier from address %r", address)
+        return None
+
+    matched = None
+    for r in active:
+        if norm_id in _normalise(r.address):
+            matched = r
+            break
+
+    if matched is None:
+        logger.debug(
+            "Could not match building %r in VOA results for %s",
+            building_id,
+            postcode,
+        )
+        return None
+
+    yearly_cost = None
+    evidence_url = ""
+    if matched.local_authority:
+        yearly_cost = _lookup_yearly_cost(matched.band, matched.local_authority)
+        slug = matched.local_authority.lower().replace(" ", "-").replace(".", "")
+        evidence_url = f"https://www.civaccount.co.uk/councils/{slug}"
+    else:
+        logger.warning("No local authority found for %s postcode %s", building_id, postcode)
+
+    return CouncilTaxInfo(
+        band=matched.band,
+        yearly_cost=yearly_cost,
+        evidence_url=evidence_url,
+    )

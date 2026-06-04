@@ -17,10 +17,21 @@ logger = logging.getLogger("extract_rail_fares")
 
 # London terminal NLCs and their CRS codes
 DEST_NLCS = {
-    "5426": "VIC", "7490": "FST", "1444": "EUS", "3087": "PAD",
-    "5158": "WAE", "5598": "WAT", "6965": "LST", "5148": "LBG",
-    "6121": "KGX", "1555": "STP", "5142": "CST", "5143": "CHX",
-    "5112": "BFR", "6969": "SRA", "1072": "LON",
+    "5426": "VIC",
+    "7490": "FST",
+    "1444": "EUS",
+    "3087": "PAD",
+    "5158": "WAE",
+    "5598": "WAT",
+    "6965": "LST",
+    "5148": "LBG",
+    "6121": "KGX",
+    "1555": "STP",
+    "5142": "CST",
+    "5143": "CHX",
+    "5112": "BFR",
+    "6969": "SRA",
+    "1072": "LON",
 }
 # Standard walk-up ticket codes. A fare is valid at peak times iff its
 # RESTRICTION_CODE (positions 20-21 of RT record) is empty.

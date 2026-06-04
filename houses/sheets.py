@@ -49,12 +49,14 @@ COLUMN_HEADERS: list[str] = [
     "Walk to Town (min)",         # AB (27)
     "Walkable Amenities",         # AC (28)
     "EPC Rating",                 # AD (29)
-    "Secondary Bus (min)",        # AE (30)
-    "Secondary Bus Route",        # AF (31)
-    "Approx Latitude (est)",      # AG (32)
-    "Approx Longitude (est)",     # AH (33)
-    "Approx Station CRS",         # AI (34)
-    "Approx Station Name",        # AJ (35)
+    "Council Tax Band",           # AE (30)
+    "Council Tax Cost (£)",       # AF (31)
+    "Secondary Bus (min)",        # AG (32)
+    "Secondary Bus Route",        # AH (33)
+    "Approx Latitude (est)",      # AI (34)
+    "Approx Longitude (est)",     # AJ (35)
+    "Approx Station CRS",         # AK (36)
+    "Approx Station Name",        # AL (37)
 
 ]
 
@@ -340,6 +342,7 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
         "purchase cost (£)": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Price (£)")}    )',
         "epc rating": f'=XLOOKUP({lookup_key},{rid_range},{named_range("EPC Rating")}    )',
         "yearly commute total (£)": f'=LET(k,XLOOKUP({lookup_key},{rid_range},{named_range("Bracknell Cost (£)")}),g,XLOOKUP({lookup_key},{rid_range},{named_range("Simon London Cost (£)")}),i,XLOOKUP({lookup_key},{rid_range},{named_range("Lorena London Cost (£)")}),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)))',
+        "yearly council tax (£)": f'=XLOOKUP({lookup_key},{rid_range},{named_range("Council Tax Cost (£)")})',
         "simon london": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Simon London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
         "lorena london": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Lorena London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
         "bracknell time": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Bracknell Time (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',
@@ -375,6 +378,12 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
             ci = header_lookup[h]
             fmt_requests.append({"repeatCell": {"range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},
                                   "cell": {"userEnteredFormat": {"numberFormat": {"type": "TIME", "pattern": "[h]:mm"}}},
+                                   "fields": "userEnteredFormat.numberFormat"}})
+    for h in ["purchase cost (£)", "yearly commute total (£)", "yearly council tax (£)"]:
+        if h in header_lookup:
+            ci = header_lookup[h]
+            fmt_requests.append({"repeatCell": {"range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},
+                                  "cell": {"userEnteredFormat": {"numberFormat": {"type": "CURRENCY", "pattern": "£#,##0.00"}}},
                                   "fields": "userEnteredFormat.numberFormat"}})
     for h in ["what the area is like", "walkable amenities", "primary school", "secondary school",
               "group notes / whatsapp", "ashby comments", "status reason",
@@ -549,6 +558,8 @@ def _row_values(property_: EnrichedProperty) -> dict[str, str]:
     r["Walk to Town (min)"] = str(property_.walk_to_town_minutes) if property_.walk_to_town_minutes is not None else ""
     r["Walkable Amenities"] = property_.walkable_amenities
     r["EPC Rating"] = property_.epc_rating
+    r["Council Tax Band"] = property_.council_tax.band if property_.council_tax else ""
+    r["Council Tax Cost (£)"] = _fmt_cost(property_.council_tax.yearly_cost if property_.council_tax else None)
     r["Secondary Bus (min)"] = _fmt_bus(property_.secondary_school)
     r["Secondary Bus Route"] = property_.secondary_school.bus_route if property_.secondary_school else ""
     r["Approx Latitude (est)"] = str(property_.approx_latitude) if property_.approx_latitude is not None else ""

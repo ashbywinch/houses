@@ -104,7 +104,9 @@ class TestUpdateScriptLogic:
         """Missing data should leave cells empty, never '0' or '0.00'."""
         ep = _make_enriched("https://rightmove.co.uk/properties/1", simon_cost=None)
         row = _row_values(ep)
-        assert row["Simon London Cost (£)"] == "", f"Expected empty string for None cost, got {row['Simon London Cost (£)']!r}"
+        assert row["Simon London Cost (£)"] == "", (
+            f"Expected empty string for None cost, got {row['Simon London Cost (£)']!r}"
+        )
 
     def test_cache_fields_present(self):
         """Cache columns are present in _row_values."""

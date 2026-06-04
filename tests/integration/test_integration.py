@@ -4,22 +4,12 @@ Run with:  make test-integration
 Skip with:  make test  (unit tests only)
 """
 
-
-import json
-import os
-import time
-
-import gspread
-import httpx
+import httpx  # noqa: I001
 import pytest
-from google.oauth2.service_account import Credentials
-
-pytestmark = pytest.mark.integration
-
-from houses.config import settings
 from houses.enricher import OUTCODES_IO_URL, POSTCODES_IO_URL
 from houses.server import extract_postcode
 
+pytestmark = pytest.mark.integration
 
 
 class TestPostcodesIO:
@@ -74,6 +64,22 @@ class TestGeocodeAddress:
         assert -0.8 < lng < -0.6, f"Longitude {lng} not in Maidenhead range"
 
 
+class TestVOACouncilTaxLookup:
+    """Real VOA API calls — verify the scraper returns data for known postcodes."""
+
+    @pytest.mark.asyncio
+    async def test_voa_returns_results_for_gu22_8bq(self):
+        from uk_property_apis.voa import VOAClient
+
+        async with VOAClient() as client:
+            page = await client.fetch_page("GU22 8BQ", page=0)
+
+        assert len(page.rows) > 0, (
+            "VOAClient.fetch_page returned 0 results for GU22 8BQ, "
+            "but the VOA website has 9 properties including 7 Sandy Close."
+        )
+
+
 class TestExtractPostcodeEdgeCases:
     """Real-world address formats from Rightmove."""
 
@@ -92,5 +98,3 @@ class TestExtractPostcodeEdgeCases:
     def test_property_with_full_postcode(self):
         pc = extract_postcode("High Street, Oxford, OX1 4RP")
         assert pc == "OX1 4RP"
-
-
