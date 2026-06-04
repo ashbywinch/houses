@@ -103,6 +103,7 @@ async def inject_property(
 
     if not fields and rid:
         from houses.sheets import get_client
+
         gclient = get_client()
         if gclient and settings.sheet_id:
             try:
