@@ -5,7 +5,7 @@ import re
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, Query  # noqa: F401
+from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 
 from houses.config import settings
@@ -21,7 +21,7 @@ from houses.enricher import (
     find_nearest_boys_secondary,
 )
 from houses.epc import lookup_epc
-from houses.models import CommuteBreakdown, EnrichedProperty, PetrolCost, PropertyPayload, ReprocessRequest, TransitInfo
+from houses.models import CommuteBreakdown, EnrichedProperty, PetrolCost, PropertyPayload, TransitInfo
 from houses.rail_fares import fare_between, nearest_station
 from houses.sheets import col_index, write_enriched_row
 from houses.town_desc import generate_town_description
@@ -100,10 +100,9 @@ async def inject_property(
     # explicit fields is only valid for new properties.
     rid_match = re.search(r"properties/(\d+)", payload.url)
     rid = rid_match.group(1) if rid_match else ""
-    col_index("Rightmove ID")
+
     if not fields and rid:
         from houses.sheets import get_client
-
         gclient = get_client()
         if gclient and settings.sheet_id:
             try:
@@ -256,7 +255,9 @@ async def inject_property(
         primary_ofsted=primary.ofsted_rating if primary else "",
         secondary_ofsted=secondary.ofsted_rating if secondary else "",
         primary_inspection_year=primary.inspection_year if primary else "",
+        primary_inspection_summary=primary.inspection_summary if primary else "",
         secondary_inspection_year=secondary.inspection_year if secondary else "",
+        secondary_inspection_summary=secondary.inspection_summary if secondary else "",
         epc_rating=epc,
         council_tax=council_tax,
         approx_latitude=approx_lat,
@@ -285,166 +286,6 @@ async def inject_property(
     return JSONResponse(
         content={"status": "ok", "note": "Sheets not configured", "data": dump},
         status_code=200,
-    )
-
-
-@app.post("/reprocess")
-async def reprocess(
-    fields: list[str] | None = Query(default=None),  # noqa: B008
-    body: ReprocessRequest | None = None,
-) -> JSONResponse:
-    """Re-run enrichment for existing properties.
-
-    Reads all rows from the sheet, re-runs the specified enrichment fields,
-    and writes only those columns back in-place.
-
-    - Omit ``ids`` to reprocess every row that has the necessary data.
-    - Provide ``ids`` to reprocess only specific Rightmove IDs.
-    """
-    if not settings.sheet_id:
-        return JSONResponse(content={"error": "Sheet not configured"}, status_code=400)
-
-    from houses.sheets import get_client
-
-    gclient = get_client()
-    if not gclient:
-        return JSONResponse(content={"error": "Sheets credentials not configured"}, status_code=400)
-
-    try:
-        sh = gclient.open_by_key(settings.sheet_id)
-        ws = sh.worksheet("Properties Data")
-        all_rows = ws.get_all_values()
-    except Exception as e:
-        logger.error("Failed to read sheet: %s", e)
-        return JSONResponse(content={"error": f"Failed to read sheet: {e}"}, status_code=500)
-
-    if not all_rows:
-        return JSONResponse(content={"error": "Sheet is empty"}, status_code=400)
-
-    headers = all_rows[0]
-
-    def col(h: str) -> int:
-        try:
-            return headers.index(h)
-        except ValueError:
-            return -1
-
-    col_url = col("Rightmove URL")
-    col_addr = col("Address")
-    col_pc = col("Postcode")
-    col_rid = col("Rightmove ID")
-
-    if col_rid < 0:
-        return JSONResponse(content={"error": "Sheet missing Rightmove ID column"}, status_code=400)
-
-    allowed_ids = set(body.ids) if body and body.ids else None
-    target_ids: set[str] = set()
-    rows_by_id: dict[str, dict[str, str]] = {}
-
-    for row in all_rows[1:]:
-        if len(row) <= col_rid:
-            continue
-        rid = row[col_rid].strip()
-        if not rid:
-            continue
-        if allowed_ids is not None and rid not in allowed_ids:
-            continue
-        target_ids.add(rid)
-        rows_by_id[rid] = {
-            "url": row[col_url].strip() if col_url >= 0 and len(row) > col_url else "",
-            "address": row[col_addr].strip() if col_addr >= 0 and len(row) > col_addr else "",
-            "postcode": row[col_pc].strip() if col_pc >= 0 and len(row) > col_pc else "",
-        }
-
-    if not target_ids:
-        if allowed_ids:
-            return JSONResponse(content={"error": "None of the requested IDs were found in the sheet"}, status_code=404)
-        return JSONResponse(content={"error": "No rows with Rightmove IDs found in sheet"}, status_code=400)
-
-    enabled = set(fields)
-    results: dict[str, str] = {}
-    processed = 0
-
-    for rid in sorted(target_ids):
-        row_data = rows_by_id[rid]
-        url = row_data["url"]
-        address = row_data["address"]
-        postcode = row_data["postcode"]
-
-        # The stored URL might be a description text, not a real URL.
-        # write_enriched_row uses _rightmove_id which parses the path.
-        # Ensure we have a valid URL so existing rows can be found.
-        if not url or "properties/" not in url:
-            url = f"https://www.rightmove.co.uk/properties/{rid}"
-        if not url:
-            results[rid] = "skipped: no URL"
-            continue
-
-        lookup_pc = postcode or extract_postcode(address)
-
-        enriched = EnrichedProperty(
-            url=url,
-            address=address,
-            postcode=lookup_pc,
-        )
-
-        if "council_tax" in enabled and lookup_pc and address:
-            ct = await lookup_council_tax(lookup_pc, address)
-            enriched.council_tax = ct
-
-        if "simon" in enabled and lookup_pc:
-            from houses.enricher import compute_simon_commute
-
-            enriched.simon_commute = await compute_simon_commute(lookup_pc)
-
-        if "lorena" in enabled and lookup_pc:
-            from houses.enricher import compute_lorena_commute
-
-            enriched.lorena_commute = await compute_lorena_commute(lookup_pc)
-
-        if "petrol" in enabled and lookup_pc:
-            from houses.enricher import compute_petrol_cost
-
-            enriched.petrol = await compute_petrol_cost(lookup_pc)
-
-        if "schools" in enabled and lookup_pc:
-            from houses.enricher import find_nearest_boys_primary, find_nearest_boys_secondary
-
-            enriched.primary_school = await find_nearest_boys_primary(lookup_pc, address)
-            enriched.secondary_school = await find_nearest_boys_secondary(lookup_pc, address)
-
-        if "town" in enabled and (address or lookup_pc):
-            from houses.town_desc import generate_town_description
-
-            town_name = ""
-            if address:
-                parts = [p.strip() for p in address.split(",")]
-                pc_re = re.compile(r"^[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}$", re.IGNORECASE)
-                oc_re = re.compile(r"^[A-Z]{1,2}[0-9][A-Z0-9]?$")
-                candidates = [p for p in parts if p and not pc_re.match(p) and not oc_re.match(p)]
-                town_name = candidates[-1] if candidates else ""
-            enriched.town_description = await generate_town_description(town_name, lookup_pc)
-
-        if "epc" in enabled and lookup_pc and not _is_outcode(lookup_pc):
-            from houses.epc import lookup_epc
-
-            enriched.epc_rating = await lookup_epc(lookup_pc)
-
-        try:
-            row_url = await write_enriched_row(enriched, "Properties Data")
-            results[rid] = "updated" if row_url else "write_skipped"
-            processed += 1
-        except Exception as e:
-            logger.error("Failed to write row %s: %s", rid, e)
-            results[rid] = f"error: {e}"
-
-    return JSONResponse(
-        content={
-            "status": "ok",
-            "processed": processed,
-            "total_requested": len(target_ids),
-            "results": results,
-        }
     )
 
 

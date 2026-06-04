@@ -33,7 +33,9 @@ VIEW_TAB = "Properties View"
 
 def _get_service_account_json() -> str:
     raw = (
-        os.environ.get("GOOGLE_SHEETS_SERVICE_ACCOUNT") or os.environ.get("HOUSES_GOOGLE_SHEETS_SERVICE_ACCOUNT") or ""
+        os.environ.get("GOOGLE_SHEETS_SERVICE_ACCOUNT")
+        or os.environ.get("HOUSES_GOOGLE_SHEETS_SERVICE_ACCOUNT")
+        or ""
     )
     if raw:
         return raw
@@ -81,11 +83,14 @@ def main() -> None:
     raw_json = _get_service_account_json()
     if not raw_json:
         logger.error(
-            "No service account JSON found. Set GOOGLE_SHEETS_SERVICE_ACCOUNT or HOUSES_GOOGLE_SHEETS_SERVICE_ACCOUNT."
+            "No service account JSON found. "
+            "Set GOOGLE_SHEETS_SERVICE_ACCOUNT or HOUSES_GOOGLE_SHEETS_SERVICE_ACCOUNT."
         )
         sys.exit(1)
 
-    creds = Credentials.from_service_account_info(json.loads(raw_json), scopes=SCOPES)
+    creds = Credentials.from_service_account_info(
+        json.loads(raw_json), scopes=SCOPES
+    )
     gc = gspread.authorize(creds)
     sheet_id = _get_sheet_id()
     sh = gc.open_by_key(sheet_id)
@@ -99,22 +104,20 @@ def main() -> None:
     if "status reason" not in view_cols and "status" in view_cols:
         status_idx = view_cols["status"]
         sid_val = view_ws._properties["sheetId"]
-        sh.batch_update(
-            {
-                "requests": [
-                    {
-                        "insertDimension": {
-                            "range": {
-                                "sheetId": sid_val,
-                                "dimension": "COLUMNS",
-                                "startIndex": status_idx + 1,
-                                "endIndex": status_idx + 2,
-                            }
+        sh.batch_update({
+            "requests": [
+                {
+                    "insertDimension": {
+                        "range": {
+                            "sheetId": sid_val,
+                            "dimension": "COLUMNS",
+                            "startIndex": status_idx + 1,
+                            "endIndex": status_idx + 2,
                         }
                     }
-                ]
-            }
-        )
+                }
+            ]
+        })
         view_ws.update_cell(1, status_idx + 2, "Status Reason")
         view_headers = view_ws.get_all_values()[0]
         view_cols = _build_header_index(view_headers)
@@ -166,7 +169,9 @@ def main() -> None:
             if dst_col is not None:
                 cl = col_letter(dst_col)
                 range_str = f"'{VIEW_TAB}'!{cl}{view_row_num}"
-                updates.append({"range": range_str, "values": [[row[comments_col]]]})
+                updates.append(
+                    {"range": range_str, "values": [[row[comments_col]]]}
+                )
 
         ashby_col = props_cols.get("ashby comments")
         if ashby_col is not None and ashby_col < len(row) and row[ashby_col].strip():
@@ -174,7 +179,9 @@ def main() -> None:
             if dst_col is not None:
                 cl = col_letter(dst_col)
                 range_str = f"'{VIEW_TAB}'!{cl}{view_row_num}"
-                updates.append({"range": range_str, "values": [[row[ashby_col]]]})
+                updates.append(
+                    {"range": range_str, "values": [[row[ashby_col]]]}
+                )
 
         status_col = props_cols.get("status")
         if status_col is not None and status_col < len(row):
@@ -185,16 +192,22 @@ def main() -> None:
             if dst_status_col is not None:
                 cl = col_letter(dst_status_col)
                 range_str = f"'{VIEW_TAB}'!{cl}{view_row_num}"
-                updates.append({"range": range_str, "values": [[status_val]]})
+                updates.append(
+                    {"range": range_str, "values": [[status_val]]}
+                )
 
             dst_reason_col = view_cols.get("status reason")
             if dst_reason_col is not None:
                 cl = col_letter(dst_reason_col)
                 range_str = f"'{VIEW_TAB}'!{cl}{view_row_num}"
-                updates.append({"range": range_str, "values": [[reason_val]]})
+                updates.append(
+                    {"range": range_str, "values": [[reason_val]]}
+                )
 
         if updates:
-            view_ws.spreadsheet.values_batch_update({"valueInputOption": "USER_ENTERED", "data": updates})
+            view_ws.spreadsheet.values_batch_update(
+                {"valueInputOption": "USER_ENTERED", "data": updates}
+            )
             copied += 1
 
     logger.info(

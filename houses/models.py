@@ -58,6 +58,7 @@ class SchoolInfo(BaseModel):
     website: str = ""
     ofsted_rating: str = ""
     inspection_year: str = ""
+    inspection_summary: str = ""
 
 
 class PetrolCost(BaseModel):
@@ -113,7 +114,9 @@ class EnrichedProperty(BaseModel):
     primary_ofsted: str = ""
     secondary_ofsted: str = ""
     primary_inspection_year: str = ""
+    primary_inspection_summary: str = ""
     secondary_inspection_year: str = ""
+    secondary_inspection_summary: str = ""
     epc_rating: str = ""
 
     council_tax: CouncilTaxInfo | None = None

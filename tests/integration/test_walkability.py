@@ -12,7 +12,7 @@ async def test_amenities_include_walk_times():
     """Amenities should include walk times in the format 'Name (Xm)'."""
     # Maidenhead — known town with amenities nearby
     result = await enrich_walkability(
-        lat=51.521,  # Maidenhead station area
+        lat=51.521,   # Maidenhead station area
         lng=-0.720,
         address="Maidenhead Station Area, Maidenhead, SL6",
     )
@@ -22,9 +22,8 @@ async def test_amenities_include_walk_times():
     # Each entry should have a walk time like "(5m)" or "(12m)"
     parts = amenities.split(" | ")
     for part in parts:
-        assert "(" in part and ")" in part and "m" in part, (
+        assert "(" in part and ")" in part and "m" in part, \
             f"Each amenity should have walk time like 'Name (Xm)', got: {part!r}"
-        )
         name, time_part = part.rsplit("(", 1)
         time_str = time_part.rstrip(")")
         assert time_str.endswith("m"), f"Walk time should end with 'm', got: {time_str!r}"
