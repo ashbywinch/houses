@@ -27,6 +27,8 @@ from fastapi.testclient import TestClient
 from google.oauth2.service_account import Credentials
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import contextlib
+
 from houses.config import settings  # noqa: E402
 from houses.server import app  # noqa: E402
 from houses.sheets import COLUMN_HEADERS, col_index, col_letter  # noqa: E402
@@ -81,14 +83,14 @@ def parse_columns(arg: str) -> set[int]:
     return indices
 
 
-# Column header to enrichment field group mapping.
+# Column header to enrichment field name mapping.
 # When --columns is specified, only the corresponding enrichment modules run,
 # saving API credits on unnecessary lookups.
 _COLUMN_FIELDS: dict[int, str] = {
-    col_index("Simon London (min)"): "transit",
-    col_index("Simon London Cost (£)"): "transit",
-    col_index("Lorena London (min)"): "transit",
-    col_index("Lorena London Cost (£)"): "transit",
+    col_index("Simon London (min)"): "simon",
+    col_index("Simon London Cost (£)"): "simon",
+    col_index("Lorena London (min)"): "lorena",
+    col_index("Lorena London Cost (£)"): "lorena",
     col_index("Bracknell Time (min)"): "petrol",
     col_index("Bracknell Cost (£)"): "petrol",
     col_index("Primary School"): "schools",
@@ -105,8 +107,8 @@ _COLUMN_FIELDS: dict[int, str] = {
     col_index("Secondary Inspection Year"): "schools",
     col_index("Secondary Bus (min)"): "schools",
     col_index("Secondary Bus Route"): "schools",
-    col_index("Walk to Town (min)"): "walk",
-    col_index("Walkable Amenities"): "walk",
+    col_index("Walk to Town (min)"): "walk_time",
+    col_index("Walkable Amenities"): "amenities",
     col_index("Area Description"): "town",
     col_index("EPC Rating"): "epc",
     col_index("Approx Latitude (est)"): "geo",
@@ -122,23 +124,7 @@ def _fields_for_columns(col_indices: set[int]) -> str:
     for idx in col_indices:
         if idx in _COLUMN_FIELDS:
             needed.add(_COLUMN_FIELDS[idx])
-    # Bracknell columns need transit for commute_breakdown
-    if needed & {"petrol"} and "transit" not in needed:
-        needed.add("transit")
     return ",".join(sorted(needed))
-    """Return the closest matching header name, or None if no close match."""
-    name_lower = name.lower().strip()
-    # Try exact match first
-    for h in COLUMN_HEADERS:
-        if h.lower() == name_lower:
-            return h
-    # Try substring match
-    matches = [h for h in COLUMN_HEADERS if name_lower in h.lower()]
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        return None  # ambiguous — let user pick
-    return None
 
 
 def main():
@@ -157,9 +143,7 @@ def main():
             obliterate = True
         i += 1
 
-    creds = Credentials.from_service_account_info(
-        json.loads(settings.service_account_json), scopes=SCOPES
-    )
+    creds = Credentials.from_service_account_info(json.loads(settings.service_account_json), scopes=SCOPES)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(SHEET_ID)
     ws = sh.worksheet(DATA_TAB)
@@ -173,17 +157,14 @@ def main():
 
     # Safety check: refuse to regenerate all enriched columns without explicit consent.
     enriched_cols = [i for i in range(len(headers)) if i not in MANUAL_COLS]
-    already_populated = [
-        i for i in enriched_cols
-        if any(len(r) > i and r[i].strip() for r in existing[1:])
-    ]
+    already_populated = [i for i in enriched_cols if any(len(r) > i and r[i].strip() for r in existing[1:])]
     if not columns and not obliterate and already_populated:
         populated_names = [headers[i] for i in already_populated[:5]]
         print(
             f"ERROR: {len(already_populated)} enriched columns already have data "
             f"(e.g. {', '.join(populated_names)}...).\n"
             f"Regenerating them would waste API credits on unnecessary lookups.\n"
-            f"  Use --columns \"Col1,Col2\" to target specific columns, or\n"
+            f'  Use --columns "Col1,Col2" to target specific columns, or\n'
             f"  Use --obliterate if you really want to regenerate everything."
         )
         sys.exit(1)
@@ -211,11 +192,11 @@ def main():
             payload["postcode"] = row[pc_col]
         # Pass user-filled actual values if they exist
         if len(row) > 5 and row[5]:
-            try: payload["actual_latitude"] = float(row[5])
-            except ValueError: pass
+            with contextlib.suppress(ValueError):
+                payload["actual_latitude"] = float(row[5])
         if len(row) > 6 and row[6]:
-            try: payload["actual_longitude"] = float(row[6])
-            except ValueError: pass
+            with contextlib.suppress(ValueError):
+                payload["actual_longitude"] = float(row[6])
         if len(row) > 7 and row[7]:
             payload["actual_postcode"] = row[7]
 
@@ -256,22 +237,24 @@ def main():
             if col_idx >= len(new_row):
                 continue
             old_val = row[col_idx] if col_idx < len(row) else ""
-            new_val = new_row[col_idx]
+            new_val = new_row.get(headers[col_idx] if col_idx < len(headers) else "", "")
             if old_val != new_val:
-                cells.append({
-                    "range": f"{DATA_TAB}!{col_letter(col_idx)}{row_idx}",
-                    "values": [[new_val]],
-                })
-                dry_run_changes.append((row_idx, headers[col_idx] if col_idx < len(headers) else f"?{col_idx}", old_val[:40], new_val[:40]))
+                cells.append(
+                    {
+                        "range": f"{DATA_TAB}!{col_letter(col_idx)}{row_idx}",
+                        "values": [[new_val]],
+                    }
+                )
+                dry_run_changes.append(
+                    (row_idx, headers[col_idx] if col_idx < len(headers) else f"?{col_idx}", old_val[:40], new_val[:40])
+                )
 
         if cells:
             if dry_run:
                 changed_rows += 1
                 changed_cells += len(cells)
             else:
-                ws.spreadsheet.values_batch_update(
-                    {"valueInputOption": "USER_ENTERED", "data": cells}
-                )
+                ws.spreadsheet.values_batch_update({"valueInputOption": "USER_ENTERED", "data": cells})
                 changed_rows += 1
                 changed_cells += len(cells)
 
