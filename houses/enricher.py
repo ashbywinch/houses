@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import re
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -103,6 +104,127 @@ _END_PC_RE = re.compile(r",\s*[A-Z]{1,2}[0-9][A-Z0-9]?(?:\s*[0-9][A-Z]{2})?\s*$"
 # ---------------------------------------------------------------------------
 
 
+def _next_weekday_date_params() -> dict[str, str]:
+    """Return ``date`` and ``time`` params for the next upcoming weekday at 09:00."""
+    now = datetime.now()
+    if now.weekday() < 5 and now.hour < 9:
+        return {"date": now.strftime("%Y%m%d"), "time": "0900"}
+    target = now + timedelta(days=1)
+    while target.weekday() >= 5:
+        target += timedelta(days=1)
+    return {"date": target.strftime("%Y%m%d"), "time": "0900"}
+
+
+_STATION_SUFFIXES = [" Rail Station", " Underground Station", " Rail Station", " Station"]
+
+
+def _shorten_station(name: str) -> str:
+    for suffix in _STATION_SUFFIXES:
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    if name.startswith("London "):
+        name = name[7:]
+    return name
+
+
+_STATIONS_CSV = Path("data/stations.csv")
+
+
+def _lookup_station_coords(station_name: str) -> tuple[float, float] | None:
+    """Find station coordinates from stations.csv by matching name (suffix-stripped)."""
+    if not _STATIONS_CSV.is_file():
+        return None
+    clean = _shorten_station(station_name).strip().lower()
+    if not clean:
+        return None
+    with _STATIONS_CSV.open(newline="") as f:
+        for row in csv.DictReader(f):
+            if row.get("stationName", "").strip().lower() == clean:
+                try:
+                    return float(row["lat"]), float(row["long"])
+                except (ValueError, KeyError):
+                    return None
+    return None
+
+
+def _format_route_summary(journey: dict) -> str:
+    """Build a human-readable route summary from a TfL journey dict.
+
+    Each transit leg shows mode, destination, and duration::
+
+        walk 6m → bus(7) to Maidenhead (9m) → walk 5m
+        → Train to Paddington (18m) → Bakerloo line to Oxford Circus (8m)
+        → walk 7m
+    """
+    legs = journey.get("legs", [])
+    parts: list[str] = []
+
+    for i, leg in enumerate(legs):
+        mode = leg.get("mode", {}).get("name", "?")
+        duration = leg.get("duration", 0)
+        instr = leg.get("instruction", {}).get("summary", "")
+        arr = leg.get("arrivalPoint", {}).get("commonName", "")
+        is_last = i == len(legs) - 1
+
+        if mode == "walking":
+            if is_last:
+                parts.append(f"walk {duration}m")
+            else:
+                clean_arr = _shorten_station(arr) if arr else ""
+                is_station = bool(arr) and any(
+                    arr.endswith(s) for s in _STATION_SUFFIXES if s
+                )
+                if is_station and clean_arr:
+                    parts.append(f"walk to {clean_arr} ({duration}m)")
+                else:
+                    parts.append(f"walk {duration}m")
+            continue
+
+        clean_arr = _shorten_station(arr) if arr else ""
+
+        if mode == "tube":
+            line_from_instr = instr.split(" to ")[0] if " to " in instr else ""
+            tube_line = line_from_instr.replace(" line", "").replace(" Line", "").strip()
+            label = f"{tube_line} line to {clean_arr} ({duration}m)"
+        elif mode == "driving":
+            label = f"Drive to {clean_arr} ({duration}m)" if clean_arr else f"Drive {duration}m"
+        elif mode == "bus":
+            bus_num = instr.split(" bus")[0] if " bus" in instr else ""
+            label = f"bus({bus_num}) to {clean_arr} ({duration}m)" if bus_num else f"Bus to {clean_arr} ({duration}m)"
+        elif mode == "national-rail":
+            label = f"Train to {clean_arr} ({duration}m)"
+        elif mode == "overground":
+            label = f"Overground to {clean_arr} ({duration}m)"
+        elif mode == "dlr":
+            label = f"DLR to {clean_arr} ({duration}m)"
+        elif mode == "tram":
+            label = f"Tram to {clean_arr} ({duration}m)"
+        else:
+            label = f"{mode} to {clean_arr} ({duration}m)" if clean_arr else f"{mode} {duration}m"
+
+        parts.append(label)
+
+    return " → ".join(parts)
+
+
+def _pick_best_journey(data: dict | None) -> tuple[int | None, float | None, str]:
+    """Return (duration_minutes, daily_cost_gbp, route_summary) for the shortest journey."""
+    if data is None:
+        return None, None, ""
+    journeys = data.get("journeys", [])
+    if not journeys:
+        return None, None, ""
+    best = min(journeys, key=lambda j: j.get("duration", 9999))
+    duration = best.get("duration")
+    fare = best.get("fare")
+    cost = None
+    if fare and fare.get("totalCost") is not None:
+        cost = round(fare["totalCost"] / 100.0 * 2, 2)
+    route_summary = _format_route_summary(best)
+    return duration, cost, route_summary
+
+
 def _tfl_auth_params() -> dict[str, str]:
     params = {}
     if settings.tfl_api_key:
@@ -110,15 +232,98 @@ def _tfl_auth_params() -> dict[str, str]:
     return params
 
 
+async def _get_drive_minutes(origin_postcode: str, station_name: str) -> int | None:
+    """Driving duration (minutes) from postcode to station via ORS Directions.
+
+    Looks up station coordinates from ``data/stations.csv`` first (by name),
+    falling back to geocoding the station name if not found.
+    """
+    origin_coords = await _geocode(origin_postcode)
+    if origin_coords is None:
+        origin_coords = await _geocode_address(origin_postcode)
+    if origin_coords is None:
+        return None
+
+    dest_coords = _lookup_station_coords(station_name)
+    if dest_coords is None:
+        dest_coords = await _geocode_address(station_name)
+    if dest_coords is None:
+        return None
+
+    body = {
+        "coordinates": [[origin_coords[1], origin_coords[0]], [dest_coords[1], dest_coords[0]]],
+        "units": "km",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            cached = get_cached("POST", ORS_DIRECTIONS_URL, None, json.dumps(body, sort_keys=True))
+            if cached is not None:
+                return round(cached["routes"][0]["summary"]["duration"] / 60)
+            resp = await retry_async(
+                lambda: client.post(
+                    ORS_DIRECTIONS_URL,
+                    headers={"Authorization": settings.ors_api_key, "Content-Type": "application/json"},
+                    json=body,
+                ),
+                max_retries=2, base_delay=1.0,
+                exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            set_cached("POST", ORS_DIRECTIONS_URL, None, json.dumps(body, sort_keys=True), data)
+            return round(data["routes"][0]["summary"]["duration"] / 60)
+    except Exception:
+        logger.warning("Park-and-ride ORS lookup failed for %s → %s", origin_postcode, station_name)
+        return None
+
+
+async def _apply_park_and_ride_to_journeys(
+    data: dict,
+    origin_postcode: str,
+    max_walk_minutes: int,
+) -> dict:
+    """Replace first-leg walks exceeding ``max_walk_minutes`` with driving."""
+    journeys = data.get("journeys", [])
+    if not journeys:
+        return data
+    for journey in journeys:
+        legs = journey.get("legs", [])
+        if not legs:
+            continue
+        first = legs[0]
+        if first.get("mode", {}).get("name") != "walking":
+            continue
+        walk_duration = first.get("duration", 0)
+        if walk_duration <= max_walk_minutes:
+            continue
+        station_name = first.get("arrivalPoint", {}).get("commonName", "")
+        if not station_name:
+            continue
+        drive_minutes = await _get_drive_minutes(origin_postcode, station_name)
+        if drive_minutes is None:
+            continue
+        legs[0] = {
+            "mode": {"name": "driving"},
+            "duration": drive_minutes,
+            "instruction": {"summary": f"Drive to {station_name}"},
+            "arrivalPoint": first.get("arrivalPoint"),
+        }
+        old_duration = journey.get("duration", 0)
+        journey["duration"] = old_duration - walk_duration + drive_minutes
+    return data
+
+
 async def compute_transit(
     origin_postcode: str,
     destination_postcode: str,
     label: str,
+    park_and_ride: bool = False,
 ) -> TransitInfo:
     """Return transit commute time using TfL Unified API (free, London focus).
 
-    Returns TransitInfo with duration_minutes=None if API unavailable or
-    if the route is outside TfL's coverage area.
+    When ``park_and_ride`` is True, any first-leg walk to the station
+    longer than ``settings.max_walk_to_station_minutes`` is replaced with
+    a driving leg via ORS Directions API.
     """
     if not settings.tfl_api_key:
         logger.warning("TfL API key not configured; skipping transit for %s", label)
@@ -132,26 +337,22 @@ async def compute_transit(
     url = f"{TFL_JOURNEY_URL}/{origin_postcode}/to/{destination_postcode}"
     params = {
         "nationalSearch": "true",
-        "timeIs": "departing",
+        "timeIs": "arriving",
         "journeyPreference": "leasttime",
-        "mode": "tube,bus,overground,dlr,tram,national-rail,walking",
+        "mode": "tube,overground,dlr,tram,national-rail,walking",
+        **_next_weekday_date_params(),
         **_tfl_auth_params(),
     }
 
     duration_minutes = None
     daily_cost_gbp = None
+    route_summary = ""
     data = None
 
     # Check cache first
     cached = get_cached("GET", url, params)
     if cached is not None:
         data = cached
-        journeys = data.get("journeys", [])
-        duration_minutes = journeys[0].get("duration") if journeys else None
-        if journeys:
-            fare = journeys[0].get("fare")
-            if fare and fare.get("totalCost") is not None:
-                daily_cost_gbp = round(fare["totalCost"] / 100.0 * 2, 2)
     else:
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
@@ -164,13 +365,6 @@ async def compute_transit(
                 resp.raise_for_status()
                 data = resp.json()
                 set_cached("GET", url, params, None, data)
-
-            journeys = data.get("journeys", [])
-            duration_minutes = journeys[0].get("duration") if journeys else None
-            if journeys:
-                fare = journeys[0].get("fare")
-                if fare and fare.get("totalCost") is not None:
-                    daily_cost_gbp = round(fare["totalCost"] / 100.0 * 2, 2)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 logger.warning("TfL could not route %s: route may be outside London area", label)
@@ -189,12 +383,7 @@ async def compute_transit(
                             r2.raise_for_status()
                             d2 = r2.json()
                             set_cached("GET", url2, params, None, d2)
-                            j2 = d2.get("journeys", [])
-                            if j2:
-                                duration_minutes = j2[0].get("duration")
-                                f2 = j2[0].get("fare")
-                                if f2 and f2.get("totalCost") is not None:
-                                    daily_cost_gbp = round(f2["totalCost"] / 100.0 * 2, 2)
+                            duration_minutes, daily_cost_gbp, route_summary = _pick_best_journey(d2)
                     except Exception:
                         logger.warning("TfL geocode fallback failed for %s", label)
             else:
@@ -204,11 +393,20 @@ async def compute_transit(
         except (KeyError, IndexError, TypeError) as e:
             logger.error("TfL API unexpected response for %s: %s", label, e)
 
+    if data is not None and park_and_ride:
+        data = await _apply_park_and_ride_to_journeys(
+            data, origin_postcode, settings.max_walk_to_station_minutes,
+        )
+
+    if data is not None:
+        duration_minutes, daily_cost_gbp, route_summary = _pick_best_journey(data)
+
     return TransitInfo(
         destination_label=label,
         destination_postcode=destination_postcode,
         duration_minutes=duration_minutes,
         daily_cost_gbp=daily_cost_gbp,
+        route_summary=route_summary,
         mode="transit",
     )
 
@@ -218,6 +416,7 @@ async def compute_simon_commute(property_postcode: str) -> TransitInfo:
         property_postcode,
         settings.simon_postcode,
         "Simon — Pimlico / Victoria",
+        park_and_ride=True,
     )
 
 

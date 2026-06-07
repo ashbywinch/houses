@@ -36,34 +36,36 @@ COLUMN_HEADERS: list[str] = [
     "Rightmove ID",  # H  (7) — server-written stable lookup key
     "Simon London (min)",  # I  (8)
     "Simon London Cost (£)",  # J  (9)
-    "Lorena London (min)",  # K  (10)
-    "Lorena London Cost (£)",  # L  (11)
-    "Bracknell Time (min)",  # M  (12)
-    "Bracknell Cost (£)",  # N  (13)
-    "Primary School",  # O  (14)
-    "Primary Distance (km)",  # P  (15)
-    "Primary Walk (min)",  # Q  (16)
-    "Primary School Link",  # R  (17)
-    "Primary Ofsted",  # S  (18)
-    "Primary Inspection Year",  # T  (19)
-    "Secondary School",  # U  (20)
-    "Secondary Distance (km)",  # V  (21)
-    "Secondary Walk (min)",  # W  (22)
-    "Secondary School Link",  # X  (23)
-    "Secondary Ofsted",  # Y  (24)
-    "Secondary Inspection Year",  # Z  (25)
-    "Area Description",  # AA (26)
-    "Walk to Town (min)",  # AB (27)
-    "Walkable Amenities",  # AC (28)
-    "EPC Rating",  # AD (29)
-    "Council Tax Band",  # AE (30)
-    "Council Tax Cost (£)",  # AF (31)
-    "Secondary Bus (min)",  # AG (32)
-    "Secondary Bus Route",  # AH (33)
-    "Approx Latitude (est)",  # AI (34)
-    "Approx Longitude (est)",  # AJ (35)
-    "Approx Station CRS",  # AK (36)
-    "Approx Station Name",  # AL (37)
+    "Simon London Route",  # K  (10)
+    "Lorena London (min)",  # L  (11)
+    "Lorena London Cost (£)",  # M  (12)
+    "Lorena London Route",  # N  (13)
+    "Bracknell Time (min)",  # O  (14)
+    "Bracknell Cost (£)",  # P  (15)
+    "Primary School",  # Q  (16)
+    "Primary Distance (km)",  # R  (17)
+    "Primary Walk (min)",  # S  (18)
+    "Primary School Link",  # T  (19)
+    "Primary Ofsted",  # U  (20)
+    "Primary Inspection Year",  # V  (21)
+    "Secondary School",  # W  (22)
+    "Secondary Distance (km)",  # X  (23)
+    "Secondary Walk (min)",  # Y  (24)
+    "Secondary School Link",  # Z  (25)
+    "Secondary Ofsted",  # AA (26)
+    "Secondary Inspection Year",  # AB (27)
+    "Area Description",  # AC (28)
+    "Walk to Town (min)",  # AD (29)
+    "Walkable Amenities",  # AE (30)
+    "EPC Rating",  # AF (31)
+    "Council Tax Band",  # AG (32)
+    "Council Tax Cost (£)",  # AH (33)
+    "Secondary Bus (min)",  # AI (34)
+    "Secondary Bus Route",  # AJ (35)
+    "Approx Latitude (est)",  # AK (36)
+    "Approx Longitude (est)",  # AL (37)
+    "Approx Station CRS",  # AM (38)
+    "Approx Station Name",  # AN (39)
 ]
 
 # Conditional formatting colors (RGB 0-1 floats for Google Sheets API)
@@ -83,7 +85,9 @@ VIEW_HEADERS: list[str] = [
     "Yearly Commute Total (£)",
     "Yearly Council Tax (£)",
     "Simon London",
+    "Simon London Route",
     "Lorena London",
+    "Lorena London Route",
     "Bracknell Time",
     "What the Area is Like",
     "Walk to Town",
@@ -240,7 +244,9 @@ VIEW_FORMULA_COLS: dict[str, str] = {
     "yearly commute total (£)": f'=IFNA(LET(k,IFNA(INDEX({_nr("Bracknell Cost (£)")},ROW()),),g,IFNA(INDEX({_nr("Simon London Cost (£)")},ROW()),),i,IFNA(INDEX({_nr("Lorena London Cost (£)")},ROW()),),IF(OR(k="",g="",i=""),"",46*(k+g+2*i))),)',  # noqa: E501
     "yearly council tax (£)": f"=IFNA(INDEX({_nr('Council Tax Cost (£)')},ROW()),)",
     "simon london": f'=IFNA(LET(v,IFNA(INDEX({_nr("Simon London (min)")},ROW()),),IF(v="","",IF(v*1=0,"",v/1440))),)',  # noqa: E501
+    "simon london route": f"=IFNA(INDEX({_nr('Simon London Route')},ROW()),)",
     "lorena london": f'=IFNA(LET(v,IFNA(INDEX({_nr("Lorena London (min)")},ROW()),),IF(v="","",IF(v*1=0,"",v/1440))),)',  # noqa: E501
+    "lorena london route": f"=IFNA(INDEX({_nr('Lorena London Route')},ROW()),)",
     "bracknell time": f'=IFNA(LET(v,IFNA(INDEX({_nr("Bracknell Time (min)")},ROW()),),IF(v="","",IF(v*1=0,"",v/1440))),)',  # noqa: E501
     "what the area is like": f"=IFNA(INDEX({_nr('Area Description')},ROW()),)",
     "walk to town": f'=IFNA(LET(v,IFNA(INDEX({_nr("Walk to Town (min)")},ROW()),),IF(v="","",IF(v*1=0,"",v/1440))),)',  # noqa: E501
@@ -558,6 +564,8 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
     for h in [
         "what the area is like",
         "walkable amenities",
+        "simon london route",
+        "lorena london route",
         "primary school",
         "secondary school",
         "group notes / whatsapp",
@@ -751,10 +759,12 @@ def _row_values(property_: EnrichedProperty) -> dict[str, str]:
     r["Rightmove ID"] = _rightmove_id(property_.url)
     r["Simon London (min)"] = _fmt_duration(property_.simon_commute)
     r["Simon London Cost (£)"] = _fmt_cost(property_.simon_commute.daily_cost_gbp if property_.simon_commute else None)
+    r["Simon London Route"] = property_.simon_commute.route_summary if property_.simon_commute else ""
     r["Lorena London (min)"] = _fmt_duration(property_.lorena_commute)
     r["Lorena London Cost (£)"] = _fmt_cost(
         property_.lorena_commute.daily_cost_gbp if property_.lorena_commute else None
     )  # noqa: E501
+    r["Lorena London Route"] = property_.lorena_commute.route_summary if property_.lorena_commute else ""
     bt = property_.petrol.round_trip_minutes if property_.petrol else None
     r["Bracknell Time (min)"] = str(bt) if bt is not None else ""
     r["Bracknell Cost (£)"] = _fmt_cost(property_.petrol.cost_gbp if property_.petrol else None)

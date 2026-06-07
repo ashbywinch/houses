@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from httpx import AsyncClient, Client, MockTransport, Response
 
 from houses.config import settings
-from houses.models import EnrichedProperty
+from houses.models import EnrichedProperty, TransitInfo
 from houses.server import _run_backfill_enrichment, app, extract_postcode
 from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS
 
@@ -207,7 +207,9 @@ class TestBackfillView:
         "Yearly Commute Total (£)",
         "Yearly Council Tax (£)",
         "Simon London",
+        "Simon London Route",
         "Lorena London",
+        "Lorena London Route",
         "Bracknell Time",
         "What the Area is Like",
         "Walk to Town",
@@ -239,8 +241,10 @@ class TestBackfillView:
         "Rightmove ID",
         "Simon London (min)",
         "Simon London Cost (£)",
+        "Simon London Route",
         "Lorena London (min)",
         "Lorena London Cost (£)",
+        "Lorena London Route",
         "Bracknell Time (min)",
         "Bracknell Cost (£)",
         "Primary School",
@@ -522,7 +526,11 @@ class TestBackfillView:
             # Build a Data row with simon/lorena fully filled, other enriched cols empty
             data_row = [""] * len(self.DATA_HEADERS)
             data_row[self.DATA_HEADERS.index("Rightmove ID")] = rid
-            for col in ["Simon London (min)", "Simon London Cost (£)", "Lorena London (min)", "Lorena London Cost (£)"]:
+            filled_cols = [
+                "Simon London (min)", "Simon London Cost (£)", "Simon London Route",
+                "Lorena London (min)", "Lorena London Cost (£)", "Lorena London Route",
+            ]
+            for col in filled_cols:
                 data_row[self.DATA_HEADERS.index(col)] = "filled"
 
             mock_client = self._mock_sheet(view_rows=view_rows, data_rows=[data_row])
@@ -874,3 +882,36 @@ class TestBackfillView:
                 mock_epc.assert_not_called()
         finally:
             settings.sheet_id = original_id
+
+    def test_lookup_derived_when_empty_with_address_and_postcode(self):
+        """When lookup='' but address+postcode are provided, lookup should be
+        derived from the postcode (not left as empty string)."""
+        with (
+            patch("houses.server.compute_simon_commute") as mock_simon,
+            patch("houses.server.compute_lorena_commute") as mock_lorena,
+        ):
+            mock_simon.return_value = TransitInfo(
+                destination_label="S", destination_postcode="SW1V 2QQ",
+                duration_minutes=45,
+            )
+            mock_lorena.return_value = TransitInfo(
+                destination_label="L", destination_postcode="EC3A 7LP",
+                duration_minutes=30,
+            )
+
+            result = asyncio.run(
+                _run_backfill_enrichment(
+                    url="https://www.rightmove.co.uk/properties/999",
+                    address="Some Road, Maidenhead",
+                    postcode="SL6 3YZ",
+                    lookup="",
+                    bedrooms=None,
+                    price=None,
+                    enabled={"simon", "lorena"},
+                )
+            )
+
+            # Should have used the full postcode, not empty string
+            mock_simon.assert_called_once_with("SL6 3YZ")
+            mock_lorena.assert_called_once_with("SL6 3YZ")
+            assert result.simon_commute.duration_minutes == 45

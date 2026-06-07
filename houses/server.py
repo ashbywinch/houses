@@ -74,8 +74,8 @@ def _is_outcode(s: str) -> bool:
 # Maps enrichment field names to the set of column headers they populate.
 # Used by /backfill-view to determine which fields to run for empty columns.
 _ENRICHMENT_FIELD_COLUMNS: dict[str, set[str]] = {
-    "simon": {"Simon London (min)", "Simon London Cost (£)"},
-    "lorena": {"Lorena London (min)", "Lorena London Cost (£)"},
+    "simon": {"Simon London (min)", "Simon London Cost (£)", "Simon London Route"},
+    "lorena": {"Lorena London (min)", "Lorena London Cost (£)", "Lorena London Route"},
     "petrol": {"Bracknell Time (min)", "Bracknell Cost (£)"},
     "schools": {
         "Primary School",
@@ -676,8 +676,9 @@ async def _run_backfill_enrichment(
             bedrooms = scraped["bedrooms"]
         if scraped.get("price") is not None and price is None:
             price = scraped["price"]
-        if not lookup:
-            lookup = address if _is_outcode(postcode) else postcode
+
+    if not lookup:
+        lookup = address if _is_outcode(postcode) else postcode
 
     simon = TransitInfo(destination_label="Simon (London)", destination_postcode=postcode)
     lorena = TransitInfo(destination_label="Lorena (London)", destination_postcode=postcode)
