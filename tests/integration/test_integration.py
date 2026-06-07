@@ -1,15 +1,11 @@
-"""Integration tests that hit real external APIs.
-
-Run with:  make test-integration
-Skip with:  make test  (unit tests only)
-"""
+"""Integration tests that hit real external APIs."""
 
 import httpx  # noqa: I001
 import pytest
 from houses.enricher import OUTCODES_IO_URL, POSTCODES_IO_URL
 from houses.server import extract_postcode
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.e2e
 
 
 class TestPostcodesIO:

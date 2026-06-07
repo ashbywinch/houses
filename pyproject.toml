@@ -41,9 +41,10 @@ quote-style = "double"
 
 [tool.pytest.ini_options]
 markers = [
-    "integration: tests that hit real external APIs (skip unless explicitly run)",
+    "integration: tests against a real Google Sheet with mocked httpx transport",
+    "e2e: tests that hit real external APIs (skipped unless make test-all)",
 ]
-addopts = ["-m", "not integration"]
+addopts = ["-m", "not e2e"]
 
 [tool.uv.sources]
 uk-property-apis = { git = "https://github.com/kubilay-yavuz/uk-property-intel.git", subdirectory = "packages/apis" }

@@ -1,6 +1,6 @@
-"""Integration test for View tab formulas — writes test records, validates outputs.
+"""E2E test for View tab formulas — writes test records, validates outputs.
 
-Run with:  make test-integration
+Run with:  make test-all
 """
 
 import json
@@ -15,7 +15,7 @@ from google.oauth2.service_account import Credentials
 from houses.config import settings
 from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS, VIEW_MANUAL_COLUMNS, col_index, col_letter
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.e2e
 
 # Column letter for each View header — single source of truth for every test
 VC = {h: col_letter(i) for i, h in enumerate(VIEW_HEADERS)}

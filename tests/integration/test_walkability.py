@@ -4,7 +4,7 @@ import pytest
 
 from houses.walkability import enrich_walkability
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.e2e
 
 
 @pytest.mark.asyncio
