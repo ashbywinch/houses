@@ -468,10 +468,6 @@ def _compute_petrol_from_distance_km(round_trip_km: float) -> float:
 
 
 async def compute_petrol_cost(origin_postcode: str) -> PetrolCost:
-    if not settings.ors_api_key:
-        logger.warning("ORS API key not configured; skipping petrol cost")
-        return PetrolCost()
-
     try:
         # Use postcodes.io first (more reliable for UK), fall back to ORS
         origin_coords = None
