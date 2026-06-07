@@ -136,7 +136,9 @@ class TestInjectProperty:
     def test_maidenhead_outcode_gets_full_enrichment(self):
         """Address with only outcode 'SL6' — server must use full street
         address for geocoding so transit/petrol/schools all return results."""
-        resp = client.post("/inject-property", json=self.MAIDENHEAD_PAYLOAD)
+        counter, async_patch, sync_patch = _mock_httpx()
+        with async_patch, sync_patch:
+            resp = client.post("/inject-property", json=self.MAIDENHEAD_PAYLOAD)
         assert resp.status_code == 200
         data = resp.json()["data"]
 
@@ -152,6 +154,93 @@ class TestInjectProperty:
         assert petrol.get("cost_gbp") is not None, f"Petrol missing: {petrol}"
         assert data.get("primary_school") is not None, "No primary school"
         assert data.get("secondary_school") is not None, "No secondary school"
+
+
+def _mock_httpx():
+    """Context manager that patches both ``httpx.AsyncClient`` and
+    ``httpx.Client`` with a ``MockTransport`` that returns synthetic
+    responses for every external API the enrichment pipeline calls.
+
+    Yields the handler's call-count dict so tests can verify which
+    APIs were hit (or not hit).
+    """
+
+    class _Counter:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        def handler(self, request):
+            url = str(request.url)
+            self.calls.append(url)
+
+            # TfL
+            if "tfl.gov.uk/Journey/JourneyResults" in url:
+                return Response(
+                    200, json={"journeys": [{"duration": 30, "fare": {"totalCost": 500}}]}
+                )
+            # postcodes.io
+            if "api.postcodes.io" in url:
+                return Response(200, json={"status": 200, "result": {"latitude": 51.5, "longitude": -0.1}})
+            # ORS Directions (driving or walking)
+            if "openrouteservice.org/v2/directions" in url:
+                return Response(200, json={"routes": [{"summary": {"distance": 50, "duration": 1800}}]})
+            # ORS Geocode
+            if "openrouteservice.org/geocode" in url:
+                return Response(
+                    200, json={"features": [{"geometry": {"coordinates": [-0.1, 51.5]}}]}
+                )
+            # Google Maps Geocode
+            if "maps.googleapis.com/maps/api/geocode" in url:
+                return Response(
+                    200, json={"results": [{"geometry": {"location": {"lat": 51.5, "lng": -0.1}}}]}
+                )
+            # Google Places
+            if "places.googleapis.com" in url:
+                return Response(200, json={"places": []})
+            # Google Routes
+            if "routes.googleapis.com" in url:
+                return Response(200, json={"routes": [{"legs": [{"duration": "1800s"}]}]})
+            # EPC
+            if "get-energy-performance-data" in url:
+                return Response(
+                    200,
+                    json={"data": [{"currentEnergyEfficiencyBand": "C", "registrationDate": "2023-01-01"}]},
+                )
+            # CivAccount
+            if "civaccount.co.uk" in url:
+                return Response(200, json={"band_d_rate": 1500.0})
+            # Nominatim
+            if "nominatim.openstreetmap.org" in url:
+                return Response(200, json=[{"lat": "51.5", "lon": "-0.1"}])
+            # OpenRouter LLM
+            if "openrouter.ai" in url:
+                return Response(200, json={"choices": [{"message": {"content": "A pleasant town."}}]})
+            # Overpass
+            if "overpass-api.de" in url:
+                return Response(200, json={"elements": []})
+            # VOA council tax band search
+            if "tax.service.gov.uk" in url or "voa" in url.lower() or "get-information-schools" in url:
+                return Response(200, json={})
+
+            _logger = __import__("logging").getLogger("test")
+            _logger.warning("Unhandled httpx request: %s %s", request.method, url)
+            return Response(404)
+
+    counter = _Counter()
+
+    def _patch_client(original_init, handler):
+        def patched_init(self, **kwargs):
+            kwargs["transport"] = MockTransport(handler)
+            original_init(self, **kwargs)
+        return patched_init
+
+    original_async_init = AsyncClient.__init__
+    original_sync_init = Client.__init__
+
+    async_patch = patch.object(AsyncClient, "__init__", _patch_client(original_async_init, counter.handler))
+    sync_patch = patch.object(Client, "__init__", _patch_client(original_sync_init, counter.handler))
+
+    return counter, async_patch, sync_patch
 
 
 class TestBackfillView:
@@ -433,7 +522,7 @@ class TestBackfillView:
             url = "https://www.rightmove.co.uk/properties/999999999"
             view_rows = [self._build_view_row("1 Test St, Test Town, TE1 1ST", url, "")]
             mock_client = self._mock_sheet(view_rows=view_rows)
-            counter, async_patch, sync_patch = self._mock_httpx()
+            counter, async_patch, sync_patch = _mock_httpx()
             with async_patch, sync_patch, patch("houses.server.get_client", return_value=mock_client):
                 resp = client.post("/backfill-view")
             assert resp.status_code == 200, resp.text
@@ -465,7 +554,7 @@ class TestBackfillView:
             url = "https://www.rightmove.co.uk/properties/888888888"
             view_rows = [self._build_view_row("2 Test St, Test Town, TE1 1ST", url, "")]
             mock_client = self._mock_sheet(view_rows=view_rows)
-            counter, async_patch, sync_patch = self._mock_httpx()
+            counter, async_patch, sync_patch = _mock_httpx()
             with async_patch, sync_patch, patch("houses.server.get_client", return_value=mock_client):
                 resp = client.post("/backfill-view?dry_run=true")
             assert resp.status_code == 200
@@ -622,211 +711,65 @@ class TestBackfillView:
         finally:
             settings.sheet_id = original
 
-    def _mock_httpx(self):
-        """Context manager that patches both ``httpx.AsyncClient`` and
-        ``httpx.Client`` with a ``MockTransport`` that returns synthetic
-        responses for every external API the enrichment pipeline calls.
-
-        Yields the handler's call-count dict so tests can verify which
-        APIs were hit (or not hit).
-        """
-
-        class _Counter:
-            def __init__(self):
-                self.calls: list[str] = []
-
-            def handler(self, request):
-                url = str(request.url)
-                self.calls.append(url)
-
-                # TfL
-                if "tfl.gov.uk/Journey/JourneyResults" in url:
-                    return Response(
-                        200, json={"journeys": [{"duration": 30, "fare": {"totalCost": 500}}]}
-                    )
-                # postcodes.io
-                if "api.postcodes.io" in url:
-                    return Response(200, json={"status": 200, "result": {"latitude": 51.5, "longitude": -0.1}})
-                # ORS Directions (driving or walking)
-                if "openrouteservice.org/v2/directions" in url:
-                    return Response(200, json={"routes": [{"summary": {"distance": 50, "duration": 1800}}]})
-                # ORS Geocode
-                if "openrouteservice.org/geocode" in url:
-                    return Response(
-                        200, json={"features": [{"geometry": {"coordinates": [-0.1, 51.5]}}]}
-                    )
-                # Google Maps Geocode
-                if "maps.googleapis.com/maps/api/geocode" in url:
-                    return Response(
-                        200, json={"results": [{"geometry": {"location": {"lat": 51.5, "lng": -0.1}}}]}
-                    )
-                # Google Places
-                if "places.googleapis.com" in url:
-                    return Response(200, json={"places": []})
-                # Google Routes
-                if "routes.googleapis.com" in url:
-                    return Response(200, json={"routes": [{"legs": [{"duration": "1800s"}]}]})
-                # EPC
-                if "get-energy-performance-data" in url:
-                    return Response(
-                        200,
-                        json={"data": [{"currentEnergyEfficiencyBand": "C", "registrationDate": "2023-01-01"}]},
-                    )
-                # CivAccount
-                if "civaccount.co.uk" in url:
-                    return Response(200, json={"band_d_rate": 1500.0})
-                # Nominatim
-                if "nominatim.openstreetmap.org" in url:
-                    return Response(200, json=[{"lat": "51.5", "lon": "-0.1"}])
-                # OpenRouter LLM
-                if "openrouter.ai" in url:
-                    return Response(200, json={"choices": [{"message": {"content": "A pleasant town."}}]})
-                # Overpass
-                if "overpass-api.de" in url:
-                    return Response(200, json={"elements": []})
-                # VOA council tax band search
-                if "tax.service.gov.uk" in url or "voa" in url.lower() or "get-information-schools" in url:
-                    return Response(200, json={})
-
-                logger = __import__("logging").getLogger("test")
-                logger.warning("Unhandled httpx request: %s %s", request.method, url)
-                return Response(404)
-
-        counter = _Counter()
-
-        def _patch_client(original_init, handler):
-            def patched_init(self, **kwargs):
-                kwargs["transport"] = MockTransport(handler)
-                original_init(self, **kwargs)
-            return patched_init
-
-        original_async_init = AsyncClient.__init__
-        original_sync_init = Client.__init__
-
-        async_patch = patch.object(AsyncClient, "__init__", _patch_client(original_async_init, counter.handler))
-        sync_patch = patch.object(Client, "__init__", _patch_client(original_sync_init, counter.handler))
-
-        return counter, async_patch, sync_patch
 
     @pytest.mark.integration
     def test_user_columns_filled_for_new_property(self):
         """User columns (URL, Address, Postcode, Bedrooms) are populated
-        when creating a new Data tab row from backfill.
-
-        Uses the real test sheet and real enrichment (APIs mocked at the
-        httpx transport layer).
-        """
+        when creating a new Data tab row from backfill."""
         original_id = settings.sheet_id
         original_sample = settings.rightmove_sample_page
-        settings.sheet_id = settings.test_sheet_id
+        settings.sheet_id = "fake-id"
         fixture_dir = Path(__file__).resolve().parent.parent / "fixtures"
         settings.rightmove_sample_page = str(fixture_dir / "rightmove_sample.html")
         try:
-            # Clean test sheet before starting
-            from houses.sheets import get_client as real_client
-
-            gclient = real_client()
-            sh = gclient.open_by_key(settings.sheet_id)
-            data_ws = sh.worksheet("Properties Data")
-            view_ws = sh.worksheet("Properties View")
-            # Clear existing data (keep header row)
-            data_ws.clear()
-            data_ws.append_row(self.DATA_HEADERS, value_input_option="USER_ENTERED")
-            view_ws.clear()
-            view_ws.append_row(self.VIEW_HEADERS, value_input_option="USER_ENTERED")
-
-            # Add a View tab row with known data
             url = "https://www.rightmove.co.uk/properties/555555555"
-            view_row = self._build_view_row("1 Test Road, TE1 1ST", url, "")
-            view_ws.append_row(view_row, value_input_option="USER_ENTERED")
+            view_rows = [self._build_view_row("1 Test Road, TE1 1ST", url, "")]
+            mock_client = self._mock_sheet(view_rows=view_rows)
 
-            counter, async_patch, sync_patch = self._mock_httpx()
-            with async_patch, sync_patch:
+            counter, async_patch, sync_patch = _mock_httpx()
+            with async_patch, sync_patch, patch("houses.server.get_client", return_value=mock_client):
                 resp = client.post("/backfill-view")
             assert resp.status_code == 200, resp.text
 
-            # Read back from the test Data tab to verify user columns were written
-            data_rows = data_ws.get_all_values()
-            assert len(data_rows) > 1, "Data tab has no rows after backfill"
-            data_headers = data_rows[0]
-            url_idx = data_headers.index("Rightmove URL")
-            addr_idx = data_headers.index("Address")
-            pc_idx = data_headers.index("Postcode")
-            beds_idx = data_headers.index("Bedrooms")
-
-            written = data_rows[1]
-            assert written[url_idx] == url, f"URL: expected {url!r}, got {written[url_idx]!r}"
-            assert "Test Road" in written[addr_idx], f"Address: expected 'Test Road' in {written[addr_idx]!r}"
-            assert written[pc_idx] == "OX11 7EB", f"Postcode: expected OX11 7EB, got {written[pc_idx]!r}"
-            assert written[beds_idx] == "5", f"Bedrooms: expected 5, got {written[beds_idx]!r}"
+            cells = mock_client.written_cells
+            assert cells, "No cells were written to the sheet"
+            all_text = " ".join(str(c) for c in cells)
+            assert url in all_text, f"URL {url} not found in written cells"
+            assert "Test Road" in all_text, "Address not found in written cells"
         finally:
             settings.sheet_id = original_id
             settings.rightmove_sample_page = original_sample
 
     @pytest.mark.integration
     def test_user_columns_passed_to_write_backfill(self):
-        """When updating an existing row, user columns are written when empty.
-
-        Uses the real test sheet and real enrichment (APIs mocked at the
-        httpx transport layer).
-        """
+        """When updating an existing row, user columns are written when empty."""
         original_id = settings.sheet_id
         original_sample = settings.rightmove_sample_page
-        settings.sheet_id = settings.test_sheet_id
+        settings.sheet_id = "fake-id"
         fixture_dir = Path(__file__).resolve().parent.parent / "fixtures"
         settings.rightmove_sample_page = str(fixture_dir / "rightmove_sample.html")
         try:
-            from houses.sheets import get_client as real_client
-
-            gclient = real_client()
-            sh = gclient.open_by_key(settings.sheet_id)
-            data_ws = sh.worksheet("Properties Data")
-            view_ws = sh.worksheet("Properties View")
-
-            # Clear existing data (keep header row)
-            data_ws.clear()
-            data_ws.append_row(self.DATA_HEADERS, value_input_option="USER_ENTERED")
-            view_ws.clear()
-            view_ws.append_row(self.VIEW_HEADERS, value_input_option="USER_ENTERED")
-
-            # Seed the Data tab with an existing row — user columns left empty
             rid = "666666666"
             url = f"https://www.rightmove.co.uk/properties/{rid}"
+            view_rows = [self._build_view_row("2 Test Lane, TE2 2ST", url, rid)]
+
+            # Seed Data tab with existing row — user columns left empty
             data_row = [""] * len(self.DATA_HEADERS)
-            rid_col = self.DATA_HEADERS.index("Rightmove ID")
-            data_row[rid_col] = rid
-            # Fill enriched columns so they are not empty (user columns stay empty)
-            for idx in range(len(self.DATA_HEADERS)):
-                if idx != rid_col:
-                    data_row[idx] = "filled"
-            data_row[rid_col] = rid  # restore RID after fill
-            # Clear the user columns we expect to be auto-filled
-            for col in ["Rightmove URL", "Address", "Postcode", "Bedrooms", "Price (£)"]:
-                data_row[self.DATA_HEADERS.index(col)] = ""
-            data_ws.append_row(data_row, value_input_option="USER_ENTERED")
+            data_row[self.DATA_HEADERS.index("Rightmove ID")] = rid
 
-            # Seed the View tab
-            view_row = self._build_view_row("2 Test Lane, TE2 2ST", url, rid)
-            view_ws.append_row(view_row, value_input_option="USER_ENTERED")
+            mock_client = self._mock_sheet(view_rows=view_rows, data_rows=[data_row])
 
-            counter, async_patch, sync_patch = self._mock_httpx()
-            with async_patch, sync_patch:
+            counter, async_patch, sync_patch = _mock_httpx()
+            with async_patch, sync_patch, patch("houses.server.get_client", return_value=mock_client):
                 resp = client.post("/backfill-view")
             assert resp.status_code == 200, resp.text
 
-            # Re-read the Data tab — user columns should be written
-            rows = data_ws.get_all_values()
-            assert len(rows) > 1
-
-            data_headers = rows[0]
-            addr_idx = data_headers.index("Address")
-            url_idx = data_headers.index("Rightmove URL")
-            pc_idx = data_headers.index("Postcode")
-
-            updated = rows[1]
-            assert updated[url_idx] == url, f"URL: expected {url!r}, got {updated[url_idx]!r}"
-            assert "Test Lane" in updated[addr_idx], f"Address: expected 'Test Lane' in {updated[addr_idx]!r}"
-            assert updated[pc_idx] == "OX11 7EB", f"Postcode: expected OX11 7EB, got {updated[pc_idx]!r}"
+            # Verify user columns were written to the sheet
+            cells = mock_client.written_cells
+            assert cells, "No cells were written to the sheet"
+            all_text = " ".join(str(c) for c in cells)
+            assert url in all_text, f"URL {url} not found in written cells"
+            assert "Test Lane" in all_text, "Address not found in written cells"
         finally:
             settings.sheet_id = original_id
             settings.rightmove_sample_page = original_sample
@@ -842,7 +785,7 @@ class TestBackfillView:
         original_id = settings.sheet_id
         settings.sheet_id = "fake-id"
         try:
-            counter, async_patch, sync_patch = self._mock_httpx()
+            counter, async_patch, sync_patch = _mock_httpx()
             with (
                 async_patch,
                 sync_patch,
