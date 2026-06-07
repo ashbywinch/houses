@@ -344,12 +344,10 @@ async def compute_transit(
     route_summary = ""
     data = None
 
-    # Check cache first — works without API key
+    # Check cache first
     cached = get_cached("GET", url, params)
     if cached is not None:
         data = cached
-    elif not settings.tfl_api_key:
-        logger.warning("TfL API key not configured; skipping transit for %s", label)
     else:
         try:
             async with cached_async_client(timeout=20.0) as client:

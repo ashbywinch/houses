@@ -141,11 +141,9 @@ class TestInjectProperty:
             resp = client.post("/inject-property", json=self.MAIDENHEAD_PAYLOAD)
         assert resp.status_code == 200
         data = resp.json()["data"]
-
         assert data["url"] == self.MAIDENHEAD_PAYLOAD["url"]
         assert data["address"] == self.MAIDENHEAD_PAYLOAD["address"]
         assert data["postcode"] == "SL6"
-
         simon = data.get("simon_commute") or {}
         assert simon.get("duration_minutes") is not None, f"Simon missing: {simon}"
         lorena = data.get("lorena_commute") or {}
