@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from typing import Any
 
 import httpx
 
+from houses.api_cache import get_cached, with_cache
 from houses.config import settings
 from houses.retry import retry_async
 
@@ -126,22 +128,35 @@ async def _geocode_town(town: str) -> tuple[float, float] | None:
     if key in _town_geo_cache:
         return _town_geo_cache[key]
 
+    ors_params = {"text": f"{town}, UK", "size": 1}
+    ors_cached = get_cached("GET", ORS_GEOCODE_URL, ors_params)
+    if ors_cached is not None:
+        features = ors_cached.get("features", [])
+        if features:
+            lng, lat = features[0]["geometry"]["coordinates"]
+            _town_geo_cache[key] = (lat, lng)
+            return (lat, lng)
+
     # Try ORS Pelias (skip if exhausted to avoid hammering)
     if settings.ors_api_key and not _api_state.ors_geo_exhausted:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await retry_async(
-                    lambda: client.get(
-                        ORS_GEOCODE_URL,
-                        params={"text": f"{town}, UK", "size": 1},
-                        headers={"Authorization": settings.ors_api_key},
-                    ),
-                    max_retries=2,
-                    base_delay=1.0,
-                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-                )
-                resp.raise_for_status()
-                data = resp.json()
+
+                async def _fetch():
+                    resp = await retry_async(
+                        lambda: client.get(
+                            ORS_GEOCODE_URL,
+                            params=ors_params,
+                            headers={"Authorization": settings.ors_api_key},
+                        ),
+                        max_retries=2,
+                        base_delay=1.0,
+                        exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+                    )
+                    resp.raise_for_status()
+                    return resp.json()
+
+                data = await with_cache("GET", ORS_GEOCODE_URL, params=ors_params, fetch=_fetch)
                 features = data.get("features", [])
                 if features:
                     lng, lat = features[0]["geometry"]["coordinates"]
@@ -155,6 +170,12 @@ async def _geocode_town(town: str) -> tuple[float, float] | None:
             logger.warning("ORS geocoding failed for town: %s", town)
 
     # Fallback: Nominatim (free, no key)
+    nom_params = {"q": f"{town}, UK", "format": "json", "limit": 1}
+    nom_cached = get_cached("GET", "https://nominatim.openstreetmap.org/search", nom_params)
+    if nom_cached is not None and nom_cached:
+        _town_geo_cache[key] = (float(nom_cached[0]["lat"]), float(nom_cached[0]["lon"]))
+        return _town_geo_cache[key]
+
     if not _api_state.nominatim_exhausted:
         now = asyncio.get_event_loop().time()
         since_last = now - _api_state.nominatim_last_call
@@ -162,14 +183,19 @@ async def _geocode_town(town: str) -> tuple[float, float] | None:
             await asyncio.sleep(1.0 - since_last)
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(
-                    "https://nominatim.openstreetmap.org/search",
-                    params={"q": f"{town}, UK", "format": "json", "limit": 1},
-                    headers={"User-Agent": "HousesApp/1.0"},
-                )
-                _api_state.nominatim_last_call = asyncio.get_event_loop().time()
-                resp.raise_for_status()
-                data = resp.json()
+
+                async def _fetch_nom():
+                    resp = await client.get(
+                        "https://nominatim.openstreetmap.org/search",
+                        params=nom_params,
+                        headers={"User-Agent": "HousesApp/1.0"},
+                    )
+                    _api_state.nominatim_last_call = asyncio.get_event_loop().time()
+                    resp.raise_for_status()
+                    return resp.json()
+
+                nom_url = "https://nominatim.openstreetmap.org/search"
+                data = await with_cache("GET", nom_url, params=nom_params, fetch=_fetch_nom)
                 if data:
                     lat = float(data[0]["lat"])
                     lng = float(data[0]["lon"])
@@ -200,23 +226,31 @@ async def _walk_duration(
 ) -> int | None:
     origin = [lng, lat]
     dest = [town_centre[1], town_centre[0]]
+    body = {"coordinates": [origin, dest]}
+    cached = get_cached("POST", ORS_WALKING_URL, None, json.dumps(body, sort_keys=True))
+    if cached is not None:
+        return round(cached["routes"][0]["summary"]["duration"] / 60)
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await retry_async(
-                lambda: client.post(
-                    ORS_WALKING_URL,
-                    headers={
-                        "Authorization": settings.ors_api_key,
-                        "Content-Type": "application/json",
-                    },
-                    json={"coordinates": [origin, dest]},
-                ),
-                max_retries=2,
-                base_delay=1.0,
-                exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-            )
-            resp.raise_for_status()
-            data = resp.json()
+
+            async def _fetch():
+                resp = await retry_async(
+                    lambda: client.post(
+                        ORS_WALKING_URL,
+                        headers={
+                            "Authorization": settings.ors_api_key,
+                            "Content-Type": "application/json",
+                        },
+                        json=body,
+                    ),
+                    max_retries=2,
+                    base_delay=1.0,
+                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+                )
+                resp.raise_for_status()
+                return resp.json()
+
+            data = await with_cache("POST", ORS_WALKING_URL, body=body, fetch=_fetch)
         return round(data["routes"][0]["summary"]["duration"] / 60)
     except (httpx.HTTPStatusError, httpx.RequestError, KeyError, IndexError) as e:
         logger.warning("ORS walk directions failed: %s", e)
@@ -237,63 +271,46 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
     google_failed = False
 
     # Skip Places if exhausted to avoid hammering
+    places_body = {
+        "includedTypes": types,
+        "maxResultCount": 5,
+        "locationRestriction": {
+            "circle": {
+                "center": {"latitude": lat, "longitude": lng},
+                "radius": 1000.0,
+            }
+        },
+    }
+    places_cached = get_cached("POST", GOOGLE_MAPS_PLACES_URL, None, json.dumps(places_body, sort_keys=True))
+    if places_cached is not None:
+        return _format_places(places_cached, lat, lng)
+
     if not _api_state.places_exhausted:
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await retry_async(
-                    lambda: client.post(
-                        GOOGLE_MAPS_PLACES_URL,
-                        headers={
-                            "X-Goog-Api-Key": settings.google_maps_api_key,
-                            "X-Goog-FieldMask": "places.displayName,places.types,places.location",
-                            "Content-Type": "application/json",
-                        },
-                        json={
-                            "includedTypes": types,
-                            "maxResultCount": 5,
-                            "locationRestriction": {
-                                "circle": {
-                                    "center": {"latitude": lat, "longitude": lng},
-                                    "radius": 1000.0,
-                                }
-                            },
-                        },
-                    ),
-                    max_retries=2,
-                    base_delay=1.0,
-                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-                )
-                resp.raise_for_status()
-                data = resp.json()
 
-            google_places = data.get("places", [])
-            if google_places:
-                hits = []
-                for p in google_places:
-                    p_types = set(p.get("types", []))
-                    if p_types & {
-                        "transit_station",
-                        "bus_stop",
-                        "bus_station",
-                        "locality",
-                        "administrative_area_level_3",
-                        "administrative_area_level_4",
-                    }:
-                        continue
-                    name = p.get("displayName", {}).get("text", "Unknown")
-                    location = p.get("location", {})
-                    place_lat = location.get("latitude")
-                    place_lng = location.get("longitude")
-                    if place_lat is not None and place_lng is not None:
-                        dist_km = _haversine_km(lat, lng, place_lat, place_lng)
-                        walk_min = max(1, round(dist_km / 5 * 60))  # 5 km/h walking speed
-                        hits.append((walk_min, f"{name} ({walk_min}m)"))
-                    else:
-                        hits.append((999, name))  # no location, put at end
-                hits.sort(key=lambda x: x[0])
-                places = " | ".join(name for _, name in hits[:5])
-            if places:
-                return places
+                async def _fetch_places():
+                    resp = await retry_async(
+                        lambda: client.post(
+                            GOOGLE_MAPS_PLACES_URL,
+                            headers={
+                                "X-Goog-Api-Key": settings.google_maps_api_key,
+                                "X-Goog-FieldMask": "places.displayName,places.types,places.location",
+                                "Content-Type": "application/json",
+                            },
+                            json=places_body,
+                        ),
+                        max_retries=2,
+                        base_delay=1.0,
+                        exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+                    )
+                    resp.raise_for_status()
+                    return resp.json()
+
+                data = await with_cache("POST", GOOGLE_MAPS_PLACES_URL, body=places_body, fetch=_fetch_places)
+            result = _format_places(data, lat, lng)
+            if result:
+                return result
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 429:
                 _api_state.places_exhausted = True
@@ -313,37 +330,80 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
             f'way(around:1000,{lat},{lng})["leisure"="park"];'
             f");out center 5;"
         )
+        overpass_params = {"data": overpass_query}
+        overpass_cached = get_cached("GET", overpass_url, overpass_params)
+        if overpass_cached is not None:
+            return _format_overpass(overpass_cached, lat, lng)
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get(
-                    overpass_url,
-                    params={"data": overpass_query},
-                    headers={"Accept": "application/json", "User-Agent": "HousesApp/1.0"},
-                )
-                resp.raise_for_status()
-                data = resp.json()
 
-            elements = data.get("elements", [])
-            hits = []
-            for e in elements:
-                tags = e.get("tags", {})
-                name = tags.get("name", "")
-                if not name:
-                    continue
-                e_lat = e.get("lat") or (e.get("center") or {}).get("lat")
-                e_lng = e.get("lon") or (e.get("center") or {}).get("lon")
-                if e_lat is not None and e_lng is not None:
-                    dist_km = _haversine_km(lat, lng, e_lat, e_lng)
-                    walk_min = max(1, round(dist_km / 5 * 60))
-                    hits.append((walk_min, f"{name} ({walk_min}m)"))
-                else:
-                    hits.append((999, name))
-            hits.sort(key=lambda x: x[0])
-            places = " | ".join(name for _, name in hits[:5])
+                async def _fetch_overpass():
+                    resp = await client.get(
+                        overpass_url,
+                        params=overpass_params,
+                        headers={"Accept": "application/json", "User-Agent": "HousesApp/1.0"},
+                    )
+                    resp.raise_for_status()
+                    return resp.json()
+
+                data = await with_cache("GET", overpass_url, params=overpass_params, fetch=_fetch_overpass)
+            places = _format_overpass(data, lat, lng)
         except Exception as e:
             logger.warning("Overpass fallback failed: %s: %s", type(e).__name__, e)
 
     return places
+
+
+def _format_places(data: dict, lat: float, lng: float) -> str:
+    """Format Google Places response into a human-readable string."""
+    google_places = data.get("places", [])
+    if not google_places:
+        return ""
+    hits = []
+    for p in google_places:
+        p_types = set(p.get("types", []))
+        if p_types & {
+            "transit_station",
+            "bus_stop",
+            "bus_station",
+            "locality",
+            "administrative_area_level_3",
+            "administrative_area_level_4",
+        }:
+            continue
+        name = p.get("displayName", {}).get("text", "Unknown")
+        location = p.get("location", {})
+        place_lat = location.get("latitude")
+        place_lng = location.get("longitude")
+        if place_lat is not None and place_lng is not None:
+            dist_km = _haversine_km(lat, lng, place_lat, place_lng)
+            walk_min = max(1, round(dist_km / 5 * 60))
+            hits.append((walk_min, f"{name} ({walk_min}m)"))
+        else:
+            hits.append((999, name))
+    hits.sort(key=lambda x: x[0])
+    return " | ".join(name for _, name in hits[:5])
+
+
+def _format_overpass(data: dict, lat: float, lng: float) -> str:
+    """Format Overpass API response into a human-readable string."""
+    elements = data.get("elements", [])
+    hits = []
+    for e in elements:
+        tags = e.get("tags", {})
+        name = tags.get("name", "")
+        if not name:
+            continue
+        e_lat = e.get("lat") or (e.get("center") or {}).get("lat")
+        e_lng = e.get("lon") or (e.get("center") or {}).get("lon")
+        if e_lat is not None and e_lng is not None:
+            dist_km = _haversine_km(lat, lng, e_lat, e_lng)
+            walk_min = max(1, round(dist_km / 5 * 60))
+            hits.append((walk_min, f"{name} ({walk_min}m)"))
+        else:
+            hits.append((999, name))
+    hits.sort(key=lambda x: x[0])
+    return " | ".join(name for _, name in hits[:5])
 
 
 async def enrich_walkability(

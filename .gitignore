@@ -54,11 +54,14 @@ data/edubaseallstatefunded*.csv
 data/edubaseallacademies*.csv
 data/edubaseall_full.csv
 data/ofsted_inspections.csv
-data/rail_fares.csv
-data/stations.csv
+
 
 # Playwright MCP browser snapshots
 .playwright-mcp/
+
+# Rightmove page cache (fetched HTML used for scraping)
+data/rightmove_pages/
+data/api_cache/
 
 # Large generated data files
 /tmp/gias_*.zip

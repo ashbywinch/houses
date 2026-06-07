@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 150
     epc_bearer_token: str = Field(default="", alias="EPC_BEARER_TOKEN")
 
+    rightmove_chrome_port: int = 9222
+    rightmove_sample_page: str = ""
+    rightmove_scraper_offline: bool = False
+
+
+
     test_sheet_id: str = "1I0LSMRRA2hzLdS1Jfjht8Av908a4Ttf99Ly0p0lnseA"
 
     petrol_mpg: float = 45.0

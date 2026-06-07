@@ -90,8 +90,8 @@ async def test_geocode_caches_result():
         original_init(self, **kwargs)
 
     with patch.object(AsyncClient, "__init__", patched_init):
-        result1 = await _geocode("RG14 1AA")
-        result2 = await _geocode("RG14 1AA")
+        result1 = await _geocode("OX11 1AA")
+        result2 = await _geocode("OX11 1AA")
 
     assert result1 == (51.4, -1.32)
     assert result2 == (51.4, -1.32)
@@ -116,8 +116,8 @@ async def test_geocode_404_caches_none():
         original_init(self, **kwargs)
 
     with patch.object(AsyncClient, "__init__", patched_init):
-        result1 = await _geocode("RG14 1AA")
-        result2 = await _geocode("RG14 1AA")
+        result1 = await _geocode("GU22 8BQ")
+        result2 = await _geocode("GU22 8BQ")
 
     assert result1 is None
     assert result2 is None

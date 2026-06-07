@@ -11,6 +11,7 @@ import logging
 
 import httpx
 
+from houses.api_cache import get_cached, set_cached
 from houses.config import settings
 
 logger = logging.getLogger(__name__)
@@ -27,11 +28,23 @@ async def lookup_epc(postcode: str) -> str:
     if not settings.epc_bearer_token:
         return ""
 
+    pc = postcode.strip().upper()
+    params = {"postcode": pc, "page_size": 5}
+
+    cached = get_cached("GET", EPC_SEARCH_URL, params)
+    if cached is not None:
+        certs = cached.get("data", [])
+        if not certs:
+            return ""
+        certs.sort(key=lambda c: c.get("registrationDate", ""), reverse=True)
+        band = certs[0].get("currentEnergyEfficiencyBand", "")
+        return band.strip() if band else ""
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
                 EPC_SEARCH_URL,
-                params={"postcode": postcode.strip().upper(), "page_size": 5},
+                params=params,
                 headers={
                     "Accept": "application/json",
                     "Authorization": f"Bearer {settings.epc_bearer_token}",
@@ -42,6 +55,7 @@ async def lookup_epc(postcode: str) -> str:
                 return ""
 
             data = resp.json()
+            set_cached("GET", EPC_SEARCH_URL, params, None, data)
             certs = data.get("data", [])
             if not certs:
                 return ""

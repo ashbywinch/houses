@@ -1,10 +1,17 @@
-"""gspread integration — write enriched rows to the AI_Data_Source (Bot) tab."""
+"""gspread integration — write enriched rows to the AI_Data_Source (Bot) tab.
+
+All cell writes MUST go through ``batch_update_cells`` so that every
+range is qualified with the sheet name. This prevents accidentally
+writing to the wrong tab when Google Sheets resolves bare ranges to
+the first sheet.
+"""
 
 from __future__ import annotations
 
 import json
 import logging
 import re
+from typing import Any
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -100,7 +107,6 @@ VIEW_HEADERS: list[str] = [
 # View tab columns that are manual (user-entered), never written by formulas
 VIEW_MANUAL_COLUMNS: frozenset[str] = frozenset(
     {
-        "Listing Address",
         "Rightmove Link",
         "Yearly Council Tax (£)",
         "Group Notes / WhatsApp",
@@ -148,6 +154,56 @@ def _col_letter(index: int) -> str:
     return chr(64 + index // 26) + chr(65 + index % 26)
 
 
+class Tab:
+    """Wraps a gspread Worksheet, auto-qualifying all ranges with the sheet name.
+
+    Every cell write goes through ``batch_update``, which prefixes bare
+    ranges with ``'SheetName'!`` so Google Sheets never defaults to the
+    wrong tab. Use ``Tab`` everywhere instead of raw ``Worksheet``.
+    """
+
+    def __init__(self, ws: gspread.Worksheet):
+        self._ws = ws
+
+    @property
+    def title(self) -> str:
+        return self._ws.title
+
+    @property
+    def id(self) -> int:
+        return self._ws.id
+
+    @property
+    def row_count(self) -> int:
+        return self._ws.row_count
+
+    @property
+    def spreadsheet(self) -> gspread.Spreadsheet:
+        return self._ws.spreadsheet
+
+    def get_all_values(self) -> list[list[str]]:
+        return self._ws.get_all_values()
+
+    def append_row(self, values: list[str], value_input_option: str = "USER_ENTERED") -> None:
+        self._ws.append_row(values, value_input_option=value_input_option)
+
+    def update_cell(self, row: int, col: int, value: str) -> None:
+        self._ws.update_cell(row, col, value)
+
+    def _qualify(self, cells: list[dict[str, Any]]) -> None:
+        """Prefix bare ranges with the sheet name in-place."""
+        for cell in cells:
+            rng = cell.get("range", "")
+            if rng and not rng.startswith("'"):
+                cell["range"] = f"'{self._ws.title}'!{rng}"
+
+    def batch_update(self, cells: list[dict[str, Any]]) -> None:
+        self._qualify(cells)
+        self._ws.spreadsheet.values_batch_update(
+            {"valueInputOption": "USER_ENTERED", "data": cells},
+        )
+
+
 _RIGHTMOVE_ID_RE = re.compile(r"properties/(\d+)")
 
 
@@ -172,6 +228,34 @@ def named_range_name(header: str) -> str:
     clean = re.sub(r"[^a-zA-Z0-9 ]+", "", header).strip()
     words = clean.split()
     return "Data_" + "".join(w.capitalize() for w in words)
+
+
+_nr = named_range_name
+
+VIEW_FORMULA_COLS: dict[str, str] = {
+    "listing address": f"=IFNA(INDEX({_nr('Address')},ROW()),)",
+    "rightmove id": f"=IFNA(INDEX({_nr('Rightmove ID')},ROW()),)",
+    "purchase cost (£)": f"=IFNA(INDEX({_nr('Price (£)')},ROW()),)",
+    "epc rating": f"=IFNA(INDEX({_nr('EPC Rating')},ROW()),)",
+    "yearly commute total (£)": f'=IFNA(LET(k,IFNA(INDEX({_nr("Bracknell Cost (£)")},ROW()),),g,IFNA(INDEX({_nr("Simon London Cost (£)")},ROW()),),i,IFNA(INDEX({_nr("Lorena London Cost (£)")},ROW()),),IF(OR(k="",g="",i=""),"",46*(k+g+2*i))),)',  # noqa: E501
+    "yearly council tax (£)": f"=IFNA(INDEX({_nr('Council Tax Cost (£)')},ROW()),)",
+    "simon london": f'=IFNA(LET(v,IFNA(INDEX({_nr("Simon London (min)")},ROW()),),IF(v="","",IF(v*1=0,"",v/1440))),)',  # noqa: E501
+    "lorena london": f'=IFNA(LET(v,IFNA(INDEX({_nr("Lorena London (min)")},ROW()),),IF(v="","",IF(v*1=0,"",v/1440))),)',  # noqa: E501
+    "bracknell time": f'=IFNA(LET(v,IFNA(INDEX({_nr("Bracknell Time (min)")},ROW()),),IF(v="","",IF(v*1=0,"",v/1440))),)',  # noqa: E501
+    "what the area is like": f"=IFNA(INDEX({_nr('Area Description')},ROW()),)",
+    "walk to town": f'=IFNA(LET(v,IFNA(INDEX({_nr("Walk to Town (min)")},ROW()),),IF(v="","",IF(v*1=0,"",v/1440))),)',  # noqa: E501
+    "walkable amenities": f"=IFNA(INDEX({_nr('Walkable Amenities')},ROW()),)",
+    "primary school": f"=HYPERLINK(IFNA(INDEX({_nr('Primary School Link')},ROW()),),IFNA(INDEX({_nr('Primary School')},ROW()),))",  # noqa: E501
+    "primary ofsted": f"=IFNA(INDEX({_nr('Primary Ofsted')},ROW()),)",
+    "primary walk": f'=IFNA(LET(v,IFNA(INDEX({_nr("Primary Walk (min)")},ROW()),),IF(v="","",IF(v*1=0,"",v/1440))),)',  # noqa: E501
+    "secondary school": f"=HYPERLINK(IFNA(INDEX({_nr('Secondary School Link')},ROW()),),IFNA(INDEX({_nr('Secondary School')},ROW()),))",  # noqa: E501
+    "secondary ofsted": f"=IFNA(INDEX({_nr('Secondary Ofsted')},ROW()),)",
+    "secondary walk": f'=IFNA(LET(v,IFNA(INDEX({_nr("Secondary Walk (min)")},ROW()),),IF(v="","",IF(v*1=0,"",v/1440))),)',  # noqa: E501
+    "secondary bus route": f"=IFNA(INDEX({_nr('Secondary Bus Route')},ROW()),)",
+    "secondary bus": f'=IFNA(LET(v,IFNA(INDEX({_nr("Secondary Bus (min)")},ROW()),),IF(v="","",IF(v*1=0,"",v/1440))),)',  # noqa: E501
+    "primary inspection year": f"=IFNA(INDEX({_nr('Primary Inspection Year')},ROW()),)",
+    "secondary inspection year": f"=IFNA(INDEX({_nr('Secondary Inspection Year')},ROW()),)",
+}
 
 
 def _add_rule(
@@ -424,45 +508,13 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
     num_rows = len(data)
     view_header_idx = {h.strip().lower(): i for i, h in enumerate(data[0])}
 
-    def _view_col_letter(header_key: str) -> str:
-        return col_letter(view_header_idx[header_key])
-
-    lookup_key = "VALUE(INDEX(View_RightmoveID, ROW()))"
-    link_col = col_letter(view_header_idx.get("rightmove link", 1))
-    link_formula = f'GETURL("{link_col}"&ROW())'
-    named_range = named_range_name
-    rid_range = named_range("Rightmove ID")
-
-    formula_cols = {
-        "rightmove id": f'=IFNA(REGEXEXTRACT({link_formula},"properties/(\\d+)"),XLOOKUP(INDEX(View_ListingAddress, ROW()),{named_range("Address")},{rid_range}))',  # noqa: E501
-        "purchase cost (£)": f"=XLOOKUP({lookup_key},{rid_range},{named_range('Price (£)')}    )",
-        "epc rating": f"=XLOOKUP({lookup_key},{rid_range},{named_range('EPC Rating')}    )",
-        "yearly commute total (£)": f'=LET(k,XLOOKUP({lookup_key},{rid_range},{named_range("Bracknell Cost (£)")}),g,XLOOKUP({lookup_key},{rid_range},{named_range("Simon London Cost (£)")}),i,XLOOKUP({lookup_key},{rid_range},{named_range("Lorena London Cost (£)")}),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)))',  # noqa: E501
-        "yearly council tax (£)": f"=XLOOKUP({lookup_key},{rid_range},{named_range('Council Tax Cost (£)')})",
-        "simon london": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Simon London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
-        "lorena london": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Lorena London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
-        "bracknell time": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Bracknell Time (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
-        "what the area is like": f"=XLOOKUP({lookup_key},{rid_range},{named_range('Area Description')})",
-        "walk to town": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Walk to Town (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
-        "walkable amenities": f"=XLOOKUP({lookup_key},{rid_range},{named_range('Walkable Amenities')})",
-        "primary school": f"=HYPERLINK(XLOOKUP({lookup_key},{rid_range},{named_range('Primary School Link')}),XLOOKUP({lookup_key},{rid_range},{named_range('Primary School')}))",  # noqa: E501
-        "primary ofsted": f"=XLOOKUP({lookup_key},{rid_range},{named_range('Primary Ofsted')})",
-        "primary walk": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Primary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
-        "secondary school": f"=HYPERLINK(XLOOKUP({lookup_key},{rid_range},{named_range('Secondary School Link')}),XLOOKUP({lookup_key},{rid_range},{named_range('Secondary School')}))",  # noqa: E501
-        "secondary ofsted": f"=XLOOKUP({lookup_key},{rid_range},{named_range('Secondary Ofsted')})",
-        "secondary walk": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
-        "secondary bus route": f"=XLOOKUP({lookup_key},{rid_range},{named_range('Secondary Bus Route')})",
-        "secondary bus": f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
-        "primary inspection year": f"=XLOOKUP({lookup_key},{rid_range},{named_range('Primary Inspection Year')})",
-        "secondary inspection year": f"=XLOOKUP({lookup_key},{rid_range},{named_range('Secondary Inspection Year')})",
-    }
-    for header_key, formula in formula_cols.items():
+    for header_key, formula in VIEW_FORMULA_COLS.items():
         if header_key in view_header_idx:
-            cl = _view_col_letter(header_key)
+            cl = col_letter(view_header_idx[header_key])
             if num_rows > 1:
                 ws.update(
-                    values=[[formula] for _ in range(num_rows - 1)],
-                    range_name=f"{cl}2:{cl}{num_rows}",
+                    values=[[formula] for _ in range(max(num_rows - 1, 1))],
+                    range_name=f"{cl}2:{cl}2000",
                     value_input_option="USER_ENTEred",
                 )
 
@@ -688,9 +740,14 @@ def _fmt_bus(s: SchoolInfo | None) -> str:
 
 
 def _row_values(property_: EnrichedProperty) -> dict[str, str]:
-    """Enriched values keyed by header name. User columns are omitted — never written."""
+    """Values keyed by header name. Includes both enriched and user-owned columns."""
     result: dict[str, str] = {}
     r = result
+    r["Rightmove URL"] = property_.url
+    r["Address"] = property_.address
+    r["Postcode"] = property_.postcode
+    r["Bedrooms"] = str(property_.bedrooms) if property_.bedrooms else ""
+    r["Price (£)"] = str(property_.price) if property_.price else ""
     r["Rightmove ID"] = _rightmove_id(property_.url)
     r["Simon London (min)"] = _fmt_duration(property_.simon_commute)
     r["Simon London Cost (£)"] = _fmt_cost(property_.simon_commute.daily_cost_gbp if property_.simon_commute else None)
@@ -781,7 +838,7 @@ async def write_enriched_row(property_: EnrichedProperty, tab: str = DATA_TAB) -
                     cl = _col_letter(col_idx)
                     cells.append({"range": f"{cl}{target_row}", "values": [[val]]})
             if cells:
-                worksheet.spreadsheet.values_batch_update({"valueInputOption": "USER_ENTEred", "data": cells})
+                Tab(worksheet).batch_update(cells)
             row_url = f"https://docs.google.com/spreadsheets/d/{settings.sheet_id}/edit#gid={worksheet.id}&range=A{target_row}"
             logger.info("Updated row %d for Rightmove ID %s", target_row, rid)
         else:
