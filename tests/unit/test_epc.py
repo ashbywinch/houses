@@ -38,7 +38,7 @@ async def test_returns_band_from_most_recent_certificate():
     original_init = AsyncClient.__init__
 
     def patched_init(self, **kwargs):
-        kwargs.setdefault("transport", MockTransport(handler))
+        kwargs["transport"] = MockTransport(handler)
         original_init(self, **kwargs)
 
     with patch.object(AsyncClient, "__init__", patched_init):
@@ -57,7 +57,7 @@ async def test_no_certificates_returns_empty():
     original_init = AsyncClient.__init__
 
     def patched_init(self, **kwargs):
-        kwargs.setdefault("transport", MockTransport(handler))
+        kwargs["transport"] = MockTransport(handler)
         original_init(self, **kwargs)
 
     with patch.object(AsyncClient, "__init__", patched_init):
@@ -76,7 +76,7 @@ async def test_non_200_response_returns_empty():
     original_init = AsyncClient.__init__
 
     def patched_init(self, **kwargs):
-        kwargs.setdefault("transport", MockTransport(handler))
+        kwargs["transport"] = MockTransport(handler)
         original_init(self, **kwargs)
 
     with patch.object(AsyncClient, "__init__", patched_init):
@@ -96,7 +96,7 @@ async def test_no_token_returns_empty():
     original_init = AsyncClient.__init__
 
     def patched_init(self, **kwargs):
-        kwargs.setdefault("transport", MockTransport(handler))
+        kwargs["transport"] = MockTransport(handler)
         original_init(self, **kwargs)
 
     with patch.object(AsyncClient, "__init__", patched_init):

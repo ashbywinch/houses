@@ -1,6 +1,6 @@
-"""Integration test for View tab formulas — writes test records, validates outputs.
+"""E2E test for View tab formulas — writes test records, validates outputs.
 
-Run with:  make test-integration
+Run with:  make test-all
 """
 
 import json
@@ -15,7 +15,7 @@ from google.oauth2.service_account import Credentials
 from houses.config import settings
 from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS, VIEW_MANUAL_COLUMNS, col_index, col_letter
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.e2e
 
 # Column letter for each View header — single source of truth for every test
 VC = {h: col_letter(i) for i, h in enumerate(VIEW_HEADERS)}
@@ -57,6 +57,8 @@ class _TestRecord:
     bus_route: str
     council_tax_band: str
     council_tax_cost: float
+    simon_route: str = ""
+    lorena_route: str = ""
 
     def to_data_row(self):
         ci = col_index
@@ -69,8 +71,10 @@ class _TestRecord:
         r[ci("Rightmove ID")] = str(self.rid)
         r[ci("Simon London (min)")] = str(self.simon_min)
         r[ci("Simon London Cost (£)")] = str(self.simon_cost)
+        r[ci("Simon London Route")] = self.simon_route
         r[ci("Lorena London (min)")] = str(self.lorena_min)
         r[ci("Lorena London Cost (£)")] = str(self.lorena_cost)
+        r[ci("Lorena London Route")] = self.lorena_route
         r[ci("Bracknell Time (min)")] = str(self.bracknell_min)
         r[ci("Bracknell Cost (£)")] = str(self.bracknell_cost)
         r[ci("Primary School")] = self.primary_school
@@ -110,8 +114,10 @@ RECORDS = [
         rid=11111111,
         simon_min=45,
         simon_cost=12.50,
+        simon_route="walk 5m → Train to Town (30m) → walk 5m",
         lorena_min=55,
         lorena_cost=15.00,
+        lorena_route="walk 3m → Bus to Town (10m) → walk 2m",
         bracknell_min=30,
         bracknell_cost=8.50,
         primary_school="Test Primary",
@@ -144,8 +150,10 @@ RECORDS = [
         rid=22222222,
         simon_min=35,
         simon_cost=10.00,
+        simon_route="walk 3m → Train to City (25m) → walk 5m",
         lorena_min=42,
         lorena_cost=12.00,
+        lorena_route="walk 4m → Tube to Bank (15m) → walk 3m",
         bracknell_min=25,
         bracknell_cost=6.50,
         primary_school="Test Primary 2",
@@ -323,7 +331,9 @@ class TestViewFormulasOnTestSheet:
             v = ws.get_values(f"{col}{i}:{col}{i}", value_render_option="FORMATTED_VALUE")
             val = v[0][0] if v and v[0] else None
             assert val is not None and val not in ("#N/A", ""), f"Row {i} Price: {val!r}"
-            assert float(val) == rec.price, f"Row {i} expected {rec.price}, got {val}"
+            assert float(val.replace("£", "").replace(",", "")) == rec.price, (
+                f"Row {i} expected {rec.price}, got {val}"
+            )
 
     def test_simon_commute_populated(self, sh):
         ws = sh.worksheet("Properties View")
@@ -401,21 +411,38 @@ class TestViewFormulasOnTestSheet:
                     pytest.fail(f"Manual column '{h}' row {row_idx} has formula: {val}")
 
     def test_new_row_gets_formulas_after_sync(self, sh):
-        """When a new row is added to the View tab, sync_view_formulas populates
-        the formula columns and leaves manual columns empty."""
+        """When a new row is added to the View tab and matching data exists in
+        the Data tab, sync_view_formulas populates formula columns."""
         from houses.sheets import sync_view_formulas
 
-        ws_data = sh.worksheet("Properties View")
+        ws_view = sh.worksheet("Properties View")
+        ws_data = sh.worksheet("Properties Data")
 
-        # Find the last row in the View tab
-        existing = ws_data.get_all_values()
+        # Find the last row
+        existing = ws_view.get_all_values()
         new_row_num = len(existing) + 1
 
-        # Add a new View tab row with a Rightmove link (user adds this manually)
+        # Add matching data to Data tab first (formulas reference Data tab by ROW())
+        ci = col_index
         url = "https://www.rightmove.co.uk/properties/33333333"
+        data_row_len = len(COLUMN_HEADERS)
+        dr = [""] * data_row_len
+        dr[ci("Rightmove URL")] = url
+        dr[ci("Address")] = "33 New Street, Testville, TE3 3ST"
+        dr[ci("Postcode")] = "TE3 3ST"
+        dr[ci("Bedrooms")] = "3"
+        dr[ci("Price (£)")] = "275000"
+        dr[ci("Rightmove ID")] = "33333333"
+        ws_data.update(
+            values=[dr],
+            range_name=f"A{new_row_num}:{col_letter(data_row_len - 1)}{new_row_num}",
+            value_input_option="USER_ENTERED",
+        )
+
+        # Add a new View tab row with a Rightmove link (user adds this manually)
         link_col = VC["Rightmove Link"]
         addr_col = VC["Listing Address"]
-        ws_data.update(
+        ws_view.update(
             values=[["33 New Street, Testville, TE3 3ST", url]],
             range_name=f"{addr_col}{new_row_num}:{link_col}{new_row_num}",
             value_input_option="USER_ENTERED",
@@ -425,9 +452,12 @@ class TestViewFormulasOnTestSheet:
         sync_view_formulas(sh)
         time.sleep(2)
 
-        # Read back the new row
-        all_data = ws_data.get_all_values()
-        row = all_data[new_row_num - 1] if len(all_data) > new_row_num - 1 else []
+        # Read back the new row — check formulas exist, not resolved values
+        formula_data = sh.worksheet("Properties View").get_values(
+            f"A{new_row_num}:Z{new_row_num}",
+            value_render_option="FORMULA",
+        )
+        row = formula_data[0] if formula_data else []
 
         manual = VIEW_MANUAL_COLUMNS
         errors = []
@@ -439,10 +469,9 @@ class TestViewFormulasOnTestSheet:
                 if val and val.startswith("="):
                     errors.append(f"Manual column '{h}' has formula: {val}")
             else:
-                # Non-manual columns should have a formula (start with "=") or be a number
-                # (Some computed values might resolve immediately if data exists)
-                if not val:
-                    errors.append(f"Formula column '{h}' is empty")
+                # Non-manual columns should have a formula (start with "=")
+                if not val or not val.startswith("="):
+                    errors.append(f"Formula column '{h}' missing formula (got {val!r})")
         assert not errors, f"New row errors: {'; '.join(errors)}"
 
     def test_yearly_commute_calculated_correctly(self, sh):

@@ -41,6 +41,7 @@ class TransitInfo(BaseModel):
     duration_minutes: int | None = None
     daily_cost_gbp: float | None = None
     mode: str = "transit"
+    route_summary: str = ""
 
 
 class SchoolInfo(BaseModel):

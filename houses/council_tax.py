@@ -7,9 +7,7 @@ import logging
 import re
 from pathlib import Path
 
-import httpx
-
-from houses.api_cache import get_cached, set_cached
+from houses.api_cache import cached_sync_client, get_cached, set_cached
 from houses.models import CouncilTaxInfo
 
 logger = logging.getLogger(__name__)
@@ -85,7 +83,7 @@ def _lookup_yearly_cost(band: str, local_authority: str) -> float | None:
             return round(band_d_rate * BAND_RATIOS[band], 2)
         return None
     try:
-        with httpx.Client(timeout=10.0) as client:
+        with cached_sync_client(timeout=10.0) as client:
             civ = client.get(url)
             if civ.status_code == 200:
                 civ_data = civ.json()

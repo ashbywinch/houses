@@ -1,17 +1,27 @@
 """Tests for enrichment logic."""
 
+import copy
+from datetime import datetime
+from unittest.mock import patch
+
 import pytest
+from httpx import AsyncClient, MockTransport, Response
 
 from houses.enricher import (
     _END_PC_RE,
     _OUTCODE_RE,
     FEE_PAYING_TYPES,
+    _apply_park_and_ride_to_journeys,
     _boys_eligible,
     _compute_petrol_from_distance_km,
+    _format_route_summary,
     _haversine_km,
+    _next_weekday_date_params,
     _phase_filter,
+    _pick_best_journey,
     _school_coords,
     _school_to_info,
+    _shorten_station,
     compute_commute_breakdown,
 )
 from houses.models import PetrolCost, TransitInfo
@@ -282,3 +292,401 @@ class TestEndPostcodePattern:
     def test_postcode_without_comma(self):
         """Pattern requires a leading comma — a bare postcode shouldn't match."""
         assert not _END_PC_RE.search("RG14 1AA")
+
+
+class TestNextWeekdayDateParams:
+    """_next_weekday_date_params — date/time for next weekday 09:00."""
+
+    def test_returns_weekday_date(self):
+        result = _next_weekday_date_params()
+        assert "date" in result
+        assert "time" in result
+        assert result["time"] == "0900"
+        dt = datetime.strptime(result["date"], "%Y%m%d")
+        assert dt.weekday() < 5, f"{result['date']} is not a weekday"
+
+
+class TestShortenStation:
+    """_shorten_station — strip common station suffixes."""
+
+    def test_rail_station(self):
+        assert _shorten_station("Maidenhead Rail Station") == "Maidenhead"
+
+    def test_underground_station(self):
+        assert _shorten_station("Paddington Underground Station") == "Paddington"
+
+    def test_generic_station(self):
+        assert _shorten_station("Oxford Circus Station") == "Oxford Circus"
+
+    def test_no_suffix(self):
+        assert _shorten_station("Some Street, Town") == "Some Street, Town"
+
+    def test_strips_london_prefix(self):
+        assert _shorten_station("London Paddington Rail Station") == "Paddington"
+        assert _shorten_station("London Waterloo Rail Station") == "Waterloo"
+
+    def test_empty_string(self):
+        assert _shorten_station("") == ""
+
+
+class TestFormatRouteSummary:
+    """_format_route_summary — build route string from TfL journey dict."""
+
+    TFL_JOURNEY = {
+        "legs": [
+            {
+                "mode": {"name": "walking"},
+                "duration": 6,
+                "departurePoint": {"commonName": "SL6 3YZ"},
+                "arrivalPoint": {"commonName": "Cox Green, Brill Close"},
+                "instruction": {"summary": "Walk to Cox Green (nr Windsor), Brill Close"},
+            },
+            {
+                "mode": {"name": "bus"},
+                "duration": 9,
+                "departurePoint": {"commonName": "Cox Green, Brill Close"},
+                "arrivalPoint": {"commonName": "Maidenhead, Frascati Way"},
+                "instruction": {"summary": "7 bus to Maidenhead, Frascati Way"},
+            },
+            {
+                "mode": {"name": "walking"},
+                "duration": 5,
+                "departurePoint": {"commonName": "Maidenhead Town Centre, Maidenhead Railway Station"},
+                "arrivalPoint": {"commonName": "Maidenhead Rail Station"},
+                "instruction": {"summary": "Walk to Maidenhead Rail Station"},
+            },
+            {
+                "mode": {"name": "national-rail"},
+                "duration": 20,
+                "departurePoint": {"commonName": "Maidenhead Rail Station"},
+                "arrivalPoint": {"commonName": "London Paddington Rail Station"},
+                "instruction": {"summary": "Great Western Railway to London Paddington"},
+            },
+            {
+                "mode": {"name": "tube"},
+                "duration": 8,
+                "departurePoint": {"commonName": "Paddington Underground Station"},
+                "arrivalPoint": {"commonName": "Oxford Circus Underground Station"},
+                "instruction": {"summary": "Bakerloo line to Oxford Circus"},
+            },
+            {
+                "mode": {"name": "walking"},
+                "duration": 7,
+                "departurePoint": {"commonName": "Pimlico Underground Station"},
+                "arrivalPoint": {"commonName": "SW1V 2QQ"},
+                "instruction": {"summary": "Walk to SW1V 2QQ"},
+            },
+        ]
+    }
+
+    def test_includes_walking_legs(self):
+        result = _format_route_summary(self.TFL_JOURNEY)
+        # First walk is to a non-station → no destination
+        assert "walk 6m" in result
+        # Middle walk to a station → shows destination
+        assert "walk to Maidenhead (5m)" in result
+        # Last walk is final destination → no destination
+        assert "walk 7m" in result
+
+    def test_walking_shows_destination_for_stations(self):
+        """Walking segments show their destination when walking to a station
+        rather than the final property."""
+        result = _format_route_summary(self.TFL_JOURNEY)
+        # The second walking leg arrives at Maidenhead Rail Station
+        assert "walk to Maidenhead (5m)" in result
+
+    def test_includes_transit_legs(self):
+        result = _format_route_summary(self.TFL_JOURNEY)
+        assert "bus(7) to Maidenhead" in result
+        assert "Train to Paddington (20m)" in result
+        assert "Bakerloo line to Oxford Circus (8m)" in result
+
+    def test_includes_station_names_for_transit_legs(self):
+        result = _format_route_summary(self.TFL_JOURNEY)
+        assert "Train to Paddington (20m)" in result
+        assert "Bakerloo line to Oxford Circus (8m)" in result
+
+    def test_omits_departure_when_same_as_previous_arrival(self):
+        """Transit leg's departure is omitted when it matches the previous transit leg's arrival."""
+        result = _format_route_summary(self.TFL_JOURNEY)
+        assert "Train to Paddington (20m)" in result
+        assert "Bakerloo line to Oxford Circus (8m)" in result
+
+    def test_handles_london_prefix_mismatch(self):
+        """NR arrives at 'London X' — 'London ' prefix is stripped."""
+        journey = {
+            "legs": [
+                {"mode": {"name": "walking"}, "duration": 5,
+                 "instruction": {"summary": ""}},
+                {"mode": {"name": "national-rail"}, "duration": 30,
+                 "departurePoint": {"commonName": "Town Rail Station"},
+                 "arrivalPoint": {"commonName": "London Waterloo Rail Station"},
+                 "instruction": {"summary": "Express to London Waterloo"}},
+                {"mode": {"name": "tube"}, "duration": 5,
+                 "departurePoint": {"commonName": "Waterloo Underground Station"},
+                 "arrivalPoint": {"commonName": "Bank Underground Station"},
+                 "instruction": {"summary": "Waterloo & City line to Bank"}},
+            ]
+        }
+        result = _format_route_summary(journey)
+        assert "Train to Waterloo (30m)" in result
+        assert "Waterloo & City line to Bank (5m)" in result
+
+    def test_excludes_station_names_for_walking_legs(self):
+        result = _format_route_summary(self.TFL_JOURNEY)
+        assert "SL6 3YZ" not in result
+        assert "Pimlico" not in result  # walking leg at end has Pimlico, but should be omitted
+
+    def test_duration_numbers_appear(self):
+        result = _format_route_summary(self.TFL_JOURNEY)
+        assert "6m" in result
+        assert "20m" in result
+        assert "8m" in result
+
+    def test_empty_legs(self):
+        result = _format_route_summary({"legs": []})
+        assert result == ""
+
+    def test_no_legs_key(self):
+        result = _format_route_summary({})
+        assert result == ""
+
+    def test_driving_leg_format(self):
+        """Park-and-ride replaces the first walk leg with a drive leg."""
+        journey = {
+            "legs": [
+                {"mode": {"name": "driving"}, "duration": 10,
+                 "arrivalPoint": {"commonName": "Maidenhead Rail Station"},
+                 "instruction": {"summary": "Drive to Maidenhead Rail Station"}},
+                {"mode": {"name": "national-rail"}, "duration": 18,
+                 "arrivalPoint": {"commonName": "London Paddington Rail Station"},
+                 "instruction": {"summary": "Great Western Railway to London Paddington"}},
+                {"mode": {"name": "walking"}, "duration": 7,
+                 "arrivalPoint": {"commonName": "SW1V 2QQ"},
+                 "instruction": {"summary": "Walk to SW1V 2QQ"}},
+            ]
+        }
+        result = _format_route_summary(journey)
+        assert "Drive to Maidenhead (10m)" in result
+        assert "Train to Paddington (18m)" in result
+        assert "walk 7m" in result
+
+
+class TestPickBestJourney:
+    """_pick_best_journey — shortest journey selection."""
+
+    def test_returns_duration_and_cost_and_route(self):
+        walk_leg = {"mode": {"name": "walking"}, "duration": 5, "instruction": {"summary": ""}}
+        data = {
+            "journeys": [
+                {"duration": 50, "legs": [walk_leg]},
+                {"duration": 30, "legs": [walk_leg]},
+                {"duration": 45, "legs": [walk_leg]},
+            ]
+        }
+        duration, cost, route = _pick_best_journey(data)
+        assert duration == 30
+        assert cost is None
+        assert isinstance(route, str)
+        assert route != ""
+
+    def test_picks_shortest_with_fare(self):
+        data = {
+            "journeys": [
+                {"duration": 50, "fare": {"totalCost": 1200}, "legs": []},
+                {"duration": 30, "fare": {"totalCost": 800}, "legs": []},
+            ]
+        }
+        duration, cost, _ = _pick_best_journey(data)
+        assert duration == 30
+        assert cost == 16.00  # 800 / 100 * 2
+
+    def test_empty_journeys(self):
+        duration, cost, route = _pick_best_journey({"journeys": []})
+        assert duration is None
+        assert cost is None
+        assert route == ""
+
+    def test_none_data(self):
+        duration, cost, route = _pick_best_journey(None)
+        assert duration is None
+        assert cost is None
+        assert route == ""
+
+    def test_route_summary_from_best_journey(self):
+        """Route summary describes the best (shortest) journey, not the first."""
+        walk_leg = {"mode": {"name": "walking"}, "duration": 90, "instruction": {"summary": ""}}
+        train_leg = {
+            "mode": {"name": "national-rail"}, "duration": 20,
+            "instruction": {"summary": "TrainCo to London"},
+            "departurePoint": {"commonName": "Town Station"},
+            "arrivalPoint": {"commonName": "London Station"},
+        }
+        data = {
+            "journeys": [
+                {"duration": 90, "legs": [walk_leg]},
+                {"duration": 45, "legs": [train_leg]},
+            ]
+        }
+        _, _, route = _pick_best_journey(data)
+        assert "Train to London" in route
+        assert "walk" not in route
+
+
+class TestStationLookup:
+    """_lookup_station_coords — find station coords from CSV by name."""
+
+    def test_finds_didcot_parkway(self):
+        """'Didcot Parkway Rail Station' should match 'Didcot Parkway' in stations.csv."""
+        from houses.enricher import _lookup_station_coords
+        coords = _lookup_station_coords("Didcot Parkway Rail Station")
+        assert coords is not None
+        # Didcot Parkway is at ~51.611, -1.243 in stations.csv
+        assert abs(coords[0] - 51.611) < 0.02
+        assert abs(coords[1] + 1.243) < 0.02
+
+    def test_returns_none_for_unknown(self):
+        from houses.enricher import _lookup_station_coords
+        assert _lookup_station_coords("Some Fake Station") is None
+
+    def test_strips_station_suffixes(self):
+        from houses.enricher import _lookup_station_coords
+        # Should find Maidenhead in stations.csv (not "Maidenhead Rail Station")
+        coords = _lookup_station_coords("Maidenhead Rail Station")
+        assert coords is not None
+
+
+class TestGetDriveMinutes:
+    """_get_drive_minutes — driving duration using stations.csv coords."""
+
+    @pytest.mark.asyncio
+    async def test_didcot_drive_is_reasonable(self):
+        """OX11 8QP is ~1km from Didcot Parkway — drive should be <30 min."""
+        from houses.enricher import _get_drive_minutes
+
+        def handler(request):
+            url = str(request.url)
+            if "api.postcodes.io" in url:
+                return Response(
+                    200, json={"status": 200, "result": {"latitude": 51.603, "longitude": -1.254}},
+                )
+            if "openrouteservice.org/v2/directions" in url:
+                return Response(
+                    200, json={"routes": [{"summary": {"distance": 1.5, "duration": 180}}]},  # 3 min
+                )
+            return Response(404)
+
+        original_init = AsyncClient.__init__
+        def patched_init(self, **kwargs):
+            kwargs["transport"] = MockTransport(handler)
+            original_init(self, **kwargs)
+
+        with patch.object(AsyncClient, "__init__", patched_init):
+            result = await _get_drive_minutes("OX11 8QP", "Didcot Parkway Rail Station")
+
+        assert result is not None, "Should have found a drive time"
+        assert result < 30, f"Expected <30 min for nearby station, got {result}"
+
+
+class TestParkAndRide:
+    """_apply_park_and_ride_to_journeys — replaces long walks with driving."""
+
+    LONG_WALK_DATA = {
+        "journeys": [
+            {
+                "duration": 87,
+                "legs": [
+                    {"mode": {"name": "walking"}, "duration": 35,
+                     "arrivalPoint": {"commonName": "Maidenhead Rail Station"},
+                     "instruction": {"summary": "Walk to Maidenhead Rail Station"}},
+                    {"mode": {"name": "national-rail"}, "duration": 20,
+                     "arrivalPoint": {"commonName": "London Paddington Rail Station"},
+                     "instruction": {"summary": "Great Western Railway to London Paddington"}},
+                    {"mode": {"name": "walking"}, "duration": 7,
+                     "arrivalPoint": {"commonName": "SW1V 2QQ"},
+                     "instruction": {"summary": "Walk to SW1V 2QQ"}},
+                ],
+            },
+        ]
+    }
+
+    SHORT_WALK_DATA = {
+        "journeys": [
+            {
+                "duration": 60,
+                "legs": [
+                    {"mode": {"name": "walking"}, "duration": 10,
+                     "arrivalPoint": {"commonName": "Weybridge Rail Station"},
+                     "instruction": {"summary": "Walk to Weybridge Rail Station"}},
+                    {"mode": {"name": "national-rail"}, "duration": 25,
+                     "arrivalPoint": {"commonName": "London Waterloo Rail Station"},
+                     "instruction": {"summary": "South Western Railway to London Waterloo"}},
+                ],
+            },
+        ]
+    }
+
+    @pytest.mark.asyncio
+    async def test_replaces_long_walk_with_drive(self):
+        data = copy.deepcopy(self.LONG_WALK_DATA)
+        with patch("houses.enricher._get_drive_minutes", return_value=10):
+            result = await _apply_park_and_ride_to_journeys(
+                data, "SL6 3YZ", max_walk_minutes=20,
+            )
+        legs = result["journeys"][0]["legs"]
+        assert legs[0]["mode"]["name"] == "driving"
+        assert legs[0]["duration"] == 10
+        assert result["journeys"][0]["duration"] == 62  # 87 - 35 + 10
+
+    @pytest.mark.asyncio
+    async def test_skips_short_walk(self):
+        data = copy.deepcopy(self.SHORT_WALK_DATA)
+        with patch("houses.enricher._get_drive_minutes", return_value=3):
+            result = await _apply_park_and_ride_to_journeys(
+                data, "KT13 0TD", max_walk_minutes=20,
+            )
+        legs = result["journeys"][0]["legs"]
+        assert legs[0]["mode"]["name"] == "walking"
+        assert legs[0]["duration"] == 10  # unchanged
+
+    @pytest.mark.asyncio
+    async def test_skips_non_walking_first_leg(self):
+        """When first leg is already a train, park-and-ride does nothing."""
+        data = {
+            "journeys": [
+                {"duration": 45, "legs": [
+                    {"mode": {"name": "national-rail"}, "duration": 20,
+                     "arrivalPoint": {"commonName": "London Paddington Rail Station"},
+                     "instruction": {"summary": "GWR to Paddington"}},
+                ]},
+            ]
+        }
+        with patch("houses.enricher._get_drive_minutes") as mock_drive:
+            result = await _apply_park_and_ride_to_journeys(data, "SL6", 20)
+        mock_drive.assert_not_called()
+        assert result["journeys"][0]["legs"][0]["mode"]["name"] == "national-rail"
+
+    @pytest.mark.asyncio
+    async def test_skips_when_drive_lookup_fails(self):
+        data = copy.deepcopy(self.LONG_WALK_DATA)
+        with patch("houses.enricher._get_drive_minutes", return_value=None):
+            result = await _apply_park_and_ride_to_journeys(
+                data, "SL6 3YZ", max_walk_minutes=20,
+            )
+        legs = result["journeys"][0]["legs"]
+        assert legs[0]["mode"]["name"] == "walking"  # unchanged
+        assert legs[0]["duration"] == 35  # unchanged
+
+    @pytest.mark.asyncio
+    async def test_format_includes_drive_in_route_after_park_and_ride(self):
+        """After park-and-ride, _format_route_summary shows Drive to ..."""
+        data = copy.deepcopy(self.LONG_WALK_DATA)
+        with patch("houses.enricher._get_drive_minutes", return_value=10):
+            result = await _apply_park_and_ride_to_journeys(
+                data, "SL6 3YZ", max_walk_minutes=20,
+            )
+        best = min(result["journeys"], key=lambda j: j.get("duration", 9999))
+        summary = _format_route_summary(best)
+        assert "Drive to Maidenhead (10m)" in summary
+        assert "Train to Paddington (20m)" in summary
+        assert "walk 7m" in summary  # final walk unchanged

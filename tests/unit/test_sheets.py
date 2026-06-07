@@ -95,8 +95,10 @@ def test_row_values_with_full_enrichment():
         "Rightmove ID": "123",
         "Simon London (min)": "22",
         "Simon London Cost (£)": "",
+        "Simon London Route": "",
         "Lorena London (min)": "38",
         "Lorena London Cost (£)": "",
+        "Lorena London Route": "",
         "Bracknell Time (min)": "",
         "Bracknell Cost (£)": "8.50",
         "Primary School": "St Vincent School",
@@ -200,10 +202,30 @@ def test_row_values_missing_commute_empty():
     r = _row_values(ep)
     assert r["Simon London (min)"] == ""
     assert r["Simon London Cost (£)"] == ""
+    assert r["Simon London Route"] == ""
     assert r["Lorena London (min)"] == ""
     assert r["Lorena London Cost (£)"] == ""
+    assert r["Lorena London Route"] == ""
     assert r["Bracknell Time (min)"] == ""
     assert r["Bracknell Cost (£)"] == ""
+
+
+def test_row_values_includes_route_summary():
+    """Route summary from TransitInfo flows into the sheet route column."""
+    ep = EnrichedProperty(
+        url="https://www.rightmove.co.uk/properties/123",
+        simon_commute=TransitInfo(
+            destination_label="S", destination_postcode="SW1V 2QQ",
+            duration_minutes=45, route_summary="walk 5m → train(GWR) 20m → walk 5m",
+        ),
+        lorena_commute=TransitInfo(
+            destination_label="L", destination_postcode="EC3A 7LP",
+            duration_minutes=30, route_summary="walk 3m → tube(Central) 15m → walk 2m",
+        ),
+    )
+    r = _row_values(ep)
+    assert r["Simon London Route"] == "walk 5m → train(GWR) 20m → walk 5m"
+    assert r["Lorena London Route"] == "walk 3m → tube(Central) 15m → walk 2m"
 
 
 def test_named_range_name_is_deterministic():

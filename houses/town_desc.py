@@ -2,7 +2,7 @@ import logging
 
 import httpx
 
-from houses.api_cache import with_cache
+from houses.api_cache import cached_async_client, with_cache
 from houses.config import settings
 from houses.retry import retry_async
 
@@ -53,7 +53,7 @@ async def generate_town_description(town_name: str, postcode: str) -> str:
 
         async def _fetch():
             resp: object = await retry_async(
-                lambda: httpx.AsyncClient(timeout=15.0).post(
+                lambda: cached_async_client(timeout=15.0).post(
                     API_URL,
                     json=body,
                     headers={"Authorization": f"Bearer {settings.llm_api_key}"},

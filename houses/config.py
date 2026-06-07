@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     petrol_price_per_litre: float = 1.45
 
     school_search_radius_km: float = 5.0
+    max_walk_to_station_minutes: int = 20
 
     simon_station_crs: str = "VIC"
     lorena_station_crs: str = "FST"

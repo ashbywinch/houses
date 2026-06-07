@@ -114,8 +114,13 @@ def cmd_move(header: str, after: str | None, tab: str | None = None):
     print(f"Moved '{header}' to position {dst_idx}")
 
 
-def cmd_add(header: str, after: str | None = None):
-    sh, ws = _get_sheet()
+def cmd_add(header: str, after: str | None = None, tab: str | None = None):
+    creds = Credentials.from_service_account_info(
+        json.loads(settings.service_account_json), scopes=SCOPES
+    )
+    gc = gspread.authorize(creds)
+    sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
+    ws = sh.worksheet(tab or DATA_TAB)
     sheet_id = ws._properties["sheetId"]
     headers = ws.get_all_values()[0]
 
@@ -331,13 +336,16 @@ def main():
         cmd_move(header, after, tab)
     elif cmd == "add":
         if len(sys.argv) < 3:
-            print("Usage: sheet_tool.py add <header> [--after <header>]")
+            print("Usage: sheet_tool.py add <header> [--after <header>] [--tab <name>]")
             return
         header = sys.argv[2]
         after = None
+        tab = None
         if "--after" in sys.argv:
             after = sys.argv[sys.argv.index("--after") + 1]
-        cmd_add(header, after)
+        if "--tab" in sys.argv:
+            tab = sys.argv[sys.argv.index("--tab") + 1]
+        cmd_add(header, after, tab)
     elif cmd == "delete" or cmd == "delete-column":
         if len(sys.argv) < 3:
             print("Usage: sheet_tool.py delete <header> [--tab <name>]")
