@@ -61,7 +61,6 @@ data/ofsted_inspections.csv
 
 # Rightmove page cache (fetched HTML used for scraping)
 data/rightmove_pages/
-data/api_cache/
 
 # Large generated data files
 /tmp/gias_*.zip

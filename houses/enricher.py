@@ -321,19 +321,14 @@ async def compute_transit(
 ) -> TransitInfo:
     """Return transit commute time using TfL Unified API (free, London focus).
 
+    Checks the disk cache first — returns cached results even without an
+    API key. Only makes a live API call when no cache exists AND a key is
+    configured.
+
     When ``park_and_ride`` is True, any first-leg walk to the station
     longer than ``settings.max_walk_to_station_minutes`` is replaced with
     a driving leg via ORS Directions API.
     """
-    if not settings.tfl_api_key:
-        logger.warning("TfL API key not configured; skipping transit for %s", label)
-        return TransitInfo(
-            destination_label=label,
-            destination_postcode=destination_postcode,
-            duration_minutes=None,
-            mode="transit",
-        )
-
     url = f"{TFL_JOURNEY_URL}/{origin_postcode}/to/{destination_postcode}"
     params = {
         "nationalSearch": "true",
@@ -349,10 +344,12 @@ async def compute_transit(
     route_summary = ""
     data = None
 
-    # Check cache first
+    # Check cache first — works without API key
     cached = get_cached("GET", url, params)
     if cached is not None:
         data = cached
+    elif not settings.tfl_api_key:
+        logger.warning("TfL API key not configured; skipping transit for %s", label)
     else:
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
