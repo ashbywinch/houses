@@ -67,16 +67,6 @@ async def main():
         if cells:
             Tab(ws).batch_update(cells)
 
-        # Print summary — pick the "minutes" column for each field group
-        parts: list[str] = []
-        for f in fields:
-            cols = _ENRICHMENT_FIELD_COLUMNS.get(f, set())
-            min_col = next((c for c in cols if "(min)" in c or "Time" in c), None)
-            if min_col:
-                parts.append(f"{f}={values.get(min_col, '?')}")
-        summary = ", ".join(parts) if parts else f"fields={','.join(fields)}"
-        print(f"[{row_idx}/{total}] {pc or addr}: {summary}")
-
     print(f"\nDone — {total} rows processed, fields={','.join(fields)}")
 
 
