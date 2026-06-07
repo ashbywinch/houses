@@ -9,6 +9,7 @@ from pathlib import Path
 
 import httpx
 
+from houses.api_cache import get_cached, set_cached
 from houses.models import CouncilTaxInfo
 
 logger = logging.getLogger(__name__)
@@ -76,11 +77,19 @@ def _lookup_yearly_cost(band: str, local_authority: str) -> float | None:
     """Fetch the Band D rate from CivAccount, falling back to the CSV."""
     # 1) Try CivAccount (live API, may have up-to-date rates)
     slug = local_authority.lower().replace(" ", "-").replace(".", "")
+    url = f"{CIVACCOUNT_URL}/{slug}"
+    cached = get_cached("GET", url)
+    if cached is not None:
+        band_d_rate = cached.get("band_d_rate")
+        if band_d_rate and band in BAND_RATIOS:
+            return round(band_d_rate * BAND_RATIOS[band], 2)
+        return None
     try:
         with httpx.Client(timeout=10.0) as client:
-            civ = client.get(f"{CIVACCOUNT_URL}/{slug}")
+            civ = client.get(url)
             if civ.status_code == 200:
                 civ_data = civ.json()
+                set_cached("GET", url, None, None, civ_data)
                 band_d_rate = civ_data.get("band_d_rate")
                 if band_d_rate and band in BAND_RATIOS:
                     return round(band_d_rate * BAND_RATIOS[band], 2)
@@ -113,24 +122,33 @@ async def lookup_council_tax(postcode: str, address: str = "") -> CouncilTaxInfo
     Returns ``CouncilTaxInfo`` with band, yearly cost, and an evidence URL,
     or ``None`` if the lookup fails entirely.
     """
-    try:
-        from uk_property_apis.voa import VOAClient
+    voa_key = f"voa/{postcode.strip().upper()}"
+    voa_cached = get_cached("GET", voa_key)
+    if voa_cached is not None:
+        results_raw = voa_cached.get("rows", [])
+    else:
+        try:
+            from uk_property_apis.voa import VOAClient
 
-        async with VOAClient() as client:
-            page = await client.fetch_page(postcode, page=0)
-        results = page.rows
-    except ImportError:
-        logger.warning("uk-property-apis not installed; skipping council tax lookup")
-        return None
-    except Exception as e:
-        logger.warning("VOA council tax lookup failed for %s: %s", postcode, e)
-        return None
+            async with VOAClient() as client:
+                page = await client.fetch_page(postcode, page=0)
+            results_raw = [
+                {"address": r.address, "band": r.band, "local_authority": r.local_authority}
+                for r in page.rows
+            ]
+            set_cached("GET", voa_key, None, None, {"rows": results_raw})
+        except ImportError:
+            logger.warning("uk-property-apis not installed; skipping council tax lookup")
+            return None
+        except Exception as e:
+            logger.warning("VOA council tax lookup failed for %s: %s", postcode, e)
+            return None
 
     if not address:
         logger.debug("No address provided — cannot positively identify property")
         return None
 
-    active = [r for r in results if r.band in BAND_RATIOS or r.band == "I"]
+    active = [r for r in results_raw if r["band"] in BAND_RATIOS or r["band"] == "I"]
     if not active:
         logger.debug("VOA returned no active properties for %s", postcode)
         return None
@@ -145,7 +163,7 @@ async def lookup_council_tax(postcode: str, address: str = "") -> CouncilTaxInfo
 
     matched = None
     for r in active:
-        if norm_id in _normalise(r.address):
+        if norm_id in _normalise(r["address"]):
             matched = r
             break
 
@@ -159,15 +177,15 @@ async def lookup_council_tax(postcode: str, address: str = "") -> CouncilTaxInfo
 
     yearly_cost = None
     evidence_url = ""
-    if matched.local_authority:
-        yearly_cost = _lookup_yearly_cost(matched.band, matched.local_authority)
-        slug = matched.local_authority.lower().replace(" ", "-").replace(".", "")
+    if matched["local_authority"]:
+        yearly_cost = _lookup_yearly_cost(matched["band"], matched["local_authority"])
+        slug = matched["local_authority"].lower().replace(" ", "-").replace(".", "")
         evidence_url = f"https://www.civaccount.co.uk/councils/{slug}"
     else:
         logger.warning("No local authority found for %s postcode %s", building_id, postcode)
 
     return CouncilTaxInfo(
-        band=matched.band,
+        band=matched["band"],
         yearly_cost=yearly_cost,
         evidence_url=evidence_url,
     )

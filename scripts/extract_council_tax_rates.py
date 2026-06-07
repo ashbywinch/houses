@@ -32,7 +32,7 @@ ODS_URL = (
 OUTPUT_PATH = Path("data/council_tax_rates.csv")
 
 # Billing authority classes that set council tax for individual properties
-BILLING_CLASSES = {"SD", "UA", "MD", "LB", "UA"}
+BILLING_CLASSES = {"SD", "UA", "MD", "LB"}
 
 NS = {
     "table": "urn:oasis:names:tc:opendocument:xmlns:table:1.0",
@@ -54,9 +54,8 @@ def download_ods(url: str, dest: Path) -> None:
 
 
 def extract_rates(ods_path: Path) -> list[dict[str, str]]:
-    with zipfile.ZipFile(ods_path) as z:
-        with z.open("content.xml") as f:
-            tree = ET.parse(f)
+    with zipfile.ZipFile(ods_path) as z, z.open("content.xml") as f:
+        tree = ET.parse(f)
 
     tables = tree.getroot().findall(".//table:table", NS)
     # Table 8 (index 8) is "Table 5: Band D area council tax for local authorities"

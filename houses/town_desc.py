@@ -2,6 +2,7 @@ import logging
 
 import httpx
 
+from houses.api_cache import with_cache
 from houses.config import settings
 from houses.retry import retry_async
 
@@ -22,38 +23,39 @@ async def generate_town_description(town_name: str, postcode: str) -> str:
         return _town_cache[key]
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            data = {
-                "model": settings.llm_model,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You describe a UK neighbourhood for someone choosing where to buy a home."
-                            " Exactly ONE sentence — no more. Never list multiple areas."
-                            " Be specific and balanced: mention character and notable trade-offs"
-                            " (lively vs quiet, polished vs gritty, green vs urban, practical vs characterful)."
-                            " Differentiate it from other places. No marketing fluff."
-                            " Do NOT mention: prices, transport links, commute times, or schools (separate columns)."
-                            " Do not start by repeating the area name."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": f"{town_name}, {postcode}",
-                    },
-                    {
-                        "role": "user",
-                        "content": f"{town_name}, {postcode}.",
-                    },
-                ],
-                "max_tokens": settings.llm_max_tokens,
-                "temperature": settings.llm_temperature,
-            }
+        body = {
+            "model": settings.llm_model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You describe a UK neighbourhood for someone choosing where to buy a home."
+                        " Exactly ONE sentence — no more. Never list multiple areas."
+                        " Be specific and balanced: mention character and notable trade-offs"
+                        " (lively vs quiet, polished vs gritty, green vs urban, practical vs characterful)."
+                        " Differentiate it from other places. No marketing fluff."
+                        " Do NOT mention: prices, transport links, commute times, or schools (separate columns)."
+                        " Do not start by repeating the area name."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"{town_name}, {postcode}",
+                },
+                {
+                    "role": "user",
+                    "content": f"{town_name}, {postcode}.",
+                },
+            ],
+            "max_tokens": settings.llm_max_tokens,
+            "temperature": settings.llm_temperature,
+        }
+
+        async def _fetch():
             resp: object = await retry_async(
-                lambda: client.post(
+                lambda: httpx.AsyncClient(timeout=15.0).post(
                     API_URL,
-                    json=data,
+                    json=body,
                     headers={"Authorization": f"Bearer {settings.llm_api_key}"},
                 ),
                 max_retries=2,
@@ -61,12 +63,13 @@ async def generate_town_description(town_name: str, postcode: str) -> str:
             )
             assert isinstance(resp, httpx.Response)
             resp.raise_for_status()
-            body = resp.json()
-            raw = body["choices"][0]["message"]["content"].strip()
-            # Take only first sentence as safety against multi-town leakage
-            description = raw.split(".")[0].strip() + "."
-            _town_cache[key] = description
-            return description
+            return resp.json()
+
+        result = await with_cache("POST", API_URL, body=body, fetch=_fetch)
+        raw = result["choices"][0]["message"]["content"].strip()
+        description = raw.split(".")[0].strip() + "."
+        _town_cache[key] = description
+        return description
     except Exception:
         logger.warning("Failed to generate town description for %s", town_name, exc_info=True)
         return ""

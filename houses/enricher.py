@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import csv
+import json
 import logging
 import math
 import re
@@ -16,6 +17,7 @@ from pathlib import Path
 
 import httpx
 
+from houses.api_cache import get_cached, set_cached
 from houses.config import settings
 from houses.models import CommuteBreakdown, PetrolCost, SchoolInfo, TransitInfo
 from houses.retry import retry_async
@@ -39,6 +41,57 @@ POSTCODES_IO_URL = "https://api.postcodes.io/postcodes"
 OUTCODES_IO_URL = "https://api.postcodes.io/outcodes"
 TFL_JOURNEY_URL = "https://api.tfl.gov.uk/Journey/JourneyResults"
 ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-car"
+
+# ---------------------------------------------------------------------------
+# API response cache helpers
+# ---------------------------------------------------------------------------
+
+
+async def _cached_get(
+    client: httpx.AsyncClient,
+    url: str,
+    params: dict | None = None,
+    *,
+    max_retries: int = 0,
+) -> dict | None:
+    """GET with disk-backed JSON caching. Returns the parsed JSON or ``None``."""
+    cached = get_cached("GET", url, params)
+    if cached is not None:
+        return cached
+
+    async def _fetch():
+        return await client.get(url, params=params)
+
+    resp = await retry_async(_fetch, max_retries=max_retries, base_delay=0.5) if max_retries else await _fetch()
+    resp.raise_for_status()
+    data = resp.json()
+    set_cached("GET", url, params, None, data)
+    return data
+
+
+async def _cached_post(
+    client: httpx.AsyncClient,
+    url: str,
+    json_body: dict | None = None,
+    headers: dict | None = None,
+    *,
+    max_retries: int = 0,
+) -> dict | None:
+    """POST with disk-backed JSON caching. Returns the parsed JSON or ``None``."""
+    body_str = json.dumps(json_body, sort_keys=True) if json_body else None
+    cached = get_cached("POST", url, None, body_str)
+    if cached is not None:
+        return cached
+
+    async def _fetch():
+        return await client.post(url, json=json_body, headers=headers)
+
+    resp = await retry_async(_fetch, max_retries=max_retries, base_delay=0.5) if max_retries else await _fetch()
+    resp.raise_for_status()
+    data = resp.json()
+    set_cached("POST", url, None, body_str, data)
+    return data
+
 
 # Full postcode: "SL6 1AA", outcode: "SL6"
 _OUTCODE_RE = re.compile(r"^[A-Z]{1,2}[0-9][A-Z0-9]?$")
@@ -87,56 +140,69 @@ async def compute_transit(
 
     duration_minutes = None
     daily_cost_gbp = None
+    data = None
 
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await retry_async(
-                lambda: client.get(url, params=params),
-                max_retries=2,
-                base_delay=1.0,
-                exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
+    # Check cache first
+    cached = get_cached("GET", url, params)
+    if cached is not None:
+        data = cached
         journeys = data.get("journeys", [])
         duration_minutes = journeys[0].get("duration") if journeys else None
         if journeys:
             fare = journeys[0].get("fare")
             if fare and fare.get("totalCost") is not None:
                 daily_cost_gbp = round(fare["totalCost"] / 100.0 * 2, 2)
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            logger.warning("TfL could not route %s: route may be outside London area", label)
-        elif e.response.status_code == 300:
-            # Try to geocode from the postcode in the address (postcodes.io handles outcodes)
-            pc_match = re.search(r"[A-Z]{1,2}[0-9][A-Z0-9]?(?:\s*[0-9][A-Z]{2})?", origin_postcode)
-            pc = pc_match.group(0).strip().upper() if pc_match else None
-            coords = await _geocode(pc) if pc else None
-            if coords is None:
-                coords = await _geocode_address(origin_postcode)
-            if coords:
-                latlng = f"{coords[0]},{coords[1]}"
-                url2 = f"{TFL_JOURNEY_URL}/{latlng}/to/{destination_postcode}"
-                try:
-                    async with httpx.AsyncClient(timeout=20.0) as c2:
-                        r2 = await c2.get(url2, params=params)
-                        r2.raise_for_status()
-                        d2 = r2.json()
-                        j2 = d2.get("journeys", [])
-                        if j2:
-                            duration_minutes = j2[0].get("duration")
-                            f2 = j2[0].get("fare")
-                            if f2 and f2.get("totalCost") is not None:
-                                daily_cost_gbp = round(f2["totalCost"] / 100.0 * 2, 2)
-                except Exception:
-                    logger.warning("TfL geocode fallback failed for %s", label)
-        else:
-            logger.error("TfL API HTTP error for %s: %s", label, e)
-    except httpx.RequestError as e:
-        logger.error("TfL API request failed for %s: %s", label, e)
-    except (KeyError, IndexError, TypeError) as e:
-        logger.error("TfL API unexpected response for %s: %s", label, e)
+    else:
+        try:
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                resp = await retry_async(
+                    lambda: client.get(url, params=params),
+                    max_retries=2,
+                    base_delay=1.0,
+                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                set_cached("GET", url, params, None, data)
+
+            journeys = data.get("journeys", [])
+            duration_minutes = journeys[0].get("duration") if journeys else None
+            if journeys:
+                fare = journeys[0].get("fare")
+                if fare and fare.get("totalCost") is not None:
+                    daily_cost_gbp = round(fare["totalCost"] / 100.0 * 2, 2)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning("TfL could not route %s: route may be outside London area", label)
+            elif e.response.status_code == 300:
+                pc_match = re.search(r"[A-Z]{1,2}[0-9][A-Z0-9]?(?:\s*[0-9][A-Z]{2})?", origin_postcode)
+                pc = pc_match.group(0).strip().upper() if pc_match else None
+                coords = await _geocode(pc) if pc else None
+                if coords is None:
+                    coords = await _geocode_address(origin_postcode)
+                if coords:
+                    latlng = f"{coords[0]},{coords[1]}"
+                    url2 = f"{TFL_JOURNEY_URL}/{latlng}/to/{destination_postcode}"
+                    try:
+                        async with httpx.AsyncClient(timeout=20.0) as c2:
+                            r2 = await c2.get(url2, params=params)
+                            r2.raise_for_status()
+                            d2 = r2.json()
+                            set_cached("GET", url2, params, None, d2)
+                            j2 = d2.get("journeys", [])
+                            if j2:
+                                duration_minutes = j2[0].get("duration")
+                                f2 = j2[0].get("fare")
+                                if f2 and f2.get("totalCost") is not None:
+                                    daily_cost_gbp = round(f2["totalCost"] / 100.0 * 2, 2)
+                    except Exception:
+                        logger.warning("TfL geocode fallback failed for %s", label)
+            else:
+                logger.error("TfL API HTTP error for %s: %s", label, e)
+        except httpx.RequestError as e:
+            logger.error("TfL API request failed for %s: %s", label, e)
+        except (KeyError, IndexError, TypeError) as e:
+            logger.error("TfL API unexpected response for %s: %s", label, e)
 
     return TransitInfo(
         destination_label=label,
@@ -235,24 +301,27 @@ async def compute_petrol_cost(origin_postcode: str) -> PetrolCost:
         dest_coords = [bracknell_coords[1], bracknell_coords[0]]
 
         async with httpx.AsyncClient(timeout=15.0) as client:
-            dir_resp = await retry_async(
-                lambda: client.post(
-                    ORS_DIRECTIONS_URL,
-                    headers={
-                        "Authorization": settings.ors_api_key,
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "coordinates": [origin_coords, dest_coords],
-                        "units": "km",
-                    },
-                ),
-                max_retries=2,
-                base_delay=1.0,
-                exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-            )
-            dir_resp.raise_for_status()
-            dir_data = dir_resp.json()
+            body = {"coordinates": [origin_coords, dest_coords], "units": "km"}
+            cached = get_cached("POST", ORS_DIRECTIONS_URL, None, json.dumps(body, sort_keys=True))
+            if cached is not None:
+                dir_data = cached
+            else:
+                dir_resp = await retry_async(
+                    lambda: client.post(
+                        ORS_DIRECTIONS_URL,
+                        headers={
+                            "Authorization": settings.ors_api_key,
+                            "Content-Type": "application/json",
+                        },
+                        json=body,
+                    ),
+                    max_retries=2,
+                    base_delay=1.0,
+                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+                )
+                dir_resp.raise_for_status()
+                dir_data = dir_resp.json()
+                set_cached("POST", ORS_DIRECTIONS_URL, None, json.dumps(body, sort_keys=True), dir_data)
 
         one_way_km = dir_data["routes"][0]["summary"]["distance"]
         one_way_duration_sec = dir_data["routes"][0]["summary"]["duration"]
@@ -320,27 +389,38 @@ async def _geocode_nominatim(query: str) -> tuple[float, float] | None:
     since_last = now - _api_state.nominatim_last_call
     if since_last < 1.0:
         await asyncio.sleep(1.0 - since_last)
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                NOMINATIM_URL,
-                params={"q": f"{clean}, UK", "format": "json", "limit": 1},
-                headers={"User-Agent": "HousesApp/1.0"},
-            )
-            _api_state.nominatim_last_call = asyncio.get_event_loop().time()
-            resp.raise_for_status()
-            data = resp.json()
-            if data:
-                lat = float(data[0]["lat"])
-                lng = float(data[0]["lon"])
-                _geo_cache[cache_key] = (lat, lng)
-                return (lat, lng)
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 429:
-            _api_state.nominatim_exhausted = True
-        logger.warning("Nominatim geocoding failed for %s (%s)", query, exc.response.status_code)
-    except Exception:
-        logger.warning("Nominatim geocoding failed for: %s", query)
+    params = {"q": f"{clean}, UK", "format": "json", "limit": 1}
+    cached = get_cached("GET", NOMINATIM_URL, params, None)
+    if cached is not None:
+        data = cached
+        if data:
+            lat = float(data[0]["lat"])
+            lng = float(data[0]["lon"])
+            _geo_cache[cache_key] = (lat, lng)
+            return (lat, lng)
+    else:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    NOMINATIM_URL,
+                    params=params,
+                    headers={"User-Agent": "HousesApp/1.0"},
+                )
+                _api_state.nominatim_last_call = asyncio.get_event_loop().time()
+                resp.raise_for_status()
+                data = resp.json()
+                set_cached("GET", NOMINATIM_URL, params, None, data)
+                if data:
+                    lat = float(data[0]["lat"])
+                    lng = float(data[0]["lon"])
+                    _geo_cache[cache_key] = (lat, lng)
+                    return (lat, lng)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 429:
+                _api_state.nominatim_exhausted = True
+            logger.warning("Nominatim geocoding failed for %s (%s)", query, exc.response.status_code)
+        except Exception:
+            logger.warning("Nominatim geocoding failed for: %s", query)
     return None
 
 
@@ -357,50 +437,73 @@ async def _geocode_address(address: str) -> tuple[float, float] | None:
     # Try Google Maps Geocoding first (best accuracy for UK streets)
     google_key = settings.google_maps_api_key
     if google_key:
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(
-                    "https://maps.googleapis.com/maps/api/geocode/json",
-                    params={"address": f"{address}, UK", "key": google_key},
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                if data.get("status") == "OK" and data.get("results"):
-                    loc = data["results"][0]["geometry"]["location"]
-                    lat, lng = loc["lat"], loc["lng"]
-                    _geo_cache[cache_key] = (lat, lng)
-                    return (lat, lng)
-        except Exception:
-            logger.warning("Google Maps geocoding failed for %s", address)
+        google_geocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
+        params = {"address": f"{address}, UK", "key": google_key}
+        cached = get_cached("GET", google_geocode_url, params, None)
+        if cached is not None:
+            data = cached
+            if data.get("status") == "OK" and data.get("results"):
+                loc = data["results"][0]["geometry"]["location"]
+                lat, lng = loc["lat"], loc["lng"]
+                _geo_cache[cache_key] = (lat, lng)
+                return (lat, lng)
+        else:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.get(
+                        google_geocode_url,
+                        params=params,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    set_cached("GET", google_geocode_url, params, None, data)
+                    if data.get("status") == "OK" and data.get("results"):
+                        loc = data["results"][0]["geometry"]["location"]
+                        lat, lng = loc["lat"], loc["lng"]
+                        _geo_cache[cache_key] = (lat, lng)
+                        return (lat, lng)
+            except Exception:
+                logger.warning("Google Maps geocoding failed for %s", address)
 
     # Fallback to ORS Pelias (skip if exhausted to avoid hammering)
     api_key = settings.ors_api_key
     if api_key and not _api_state.ors_geo_exhausted:
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await retry_async(
-                    lambda: client.get(
-                        ORS_GEOCODE_URL,
-                        params={"text": f"{address}, UK", "size": 1},
-                        headers={"Authorization": api_key},
-                    ),
-                    max_retries=2,
-                    base_delay=0.5,
-                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                features = data.get("features", [])
-                if features:
-                    lng, lat = features[0]["geometry"]["coordinates"]
-                    _geo_cache[cache_key] = (lat, lng)
-                    return (lat, lng)
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code in (403, 429):
-                _api_state.ors_geo_exhausted = True
-            logger.warning("ORS geocoding failed for %s (%s)", address, exc.response.status_code)
-        except Exception:
-            logger.warning("ORS geocoding failed for %s", address)
+        params = {"text": f"{address}, UK", "size": 1}
+        cached = get_cached("GET", ORS_GEOCODE_URL, params, None)
+        if cached is not None:
+            data = cached
+            features = data.get("features", [])
+            if features:
+                lng, lat = features[0]["geometry"]["coordinates"]
+                _geo_cache[cache_key] = (lat, lng)
+                return (lat, lng)
+        else:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await retry_async(
+                        lambda: client.get(
+                            ORS_GEOCODE_URL,
+                            params=params,
+                            headers={"Authorization": api_key},
+                        ),
+                        max_retries=2,
+                        base_delay=0.5,
+                        exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    set_cached("GET", ORS_GEOCODE_URL, params, None, data)
+                    features = data.get("features", [])
+                    if features:
+                        lng, lat = features[0]["geometry"]["coordinates"]
+                        _geo_cache[cache_key] = (lat, lng)
+                        return (lat, lng)
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in (403, 429):
+                    _api_state.ors_geo_exhausted = True
+                logger.warning("ORS geocoding failed for %s (%s)", address, exc.response.status_code)
+            except Exception:
+                logger.warning("ORS geocoding failed for %s", address)
 
     # Final fallback: Nominatim (free, no key, works for UK)
     result = await _geocode_nominatim(address)
@@ -422,33 +525,44 @@ async def _geocode(postcode: str) -> tuple[float, float] | None:
 
     is_outcode = bool(_OUTCODE_RE.match(key))
 
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            url = f"{OUTCODES_IO_URL}/{key}" if is_outcode else f"{POSTCODES_IO_URL}/{key}"
-
-            resp = await retry_async(
-                lambda: client.get(url),
-                max_retries=2,
-                base_delay=0.5,
-                exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            result = data.get("result")
-            if not result:
-                return None
-            latlng = result["latitude"], result["longitude"]
-            _geo_cache[key] = latlng
-            return latlng
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            _geo_cache[key] = None
-        else:
-            logger.warning("Geocode HTTP error for %s: %s", key, e)
-        return None
-    except Exception:
-        logger.exception("Failed to geocode postcode: %s", key)
-        return None
+    url = f"{OUTCODES_IO_URL}/{key}" if is_outcode else f"{POSTCODES_IO_URL}/{key}"
+    cached = get_cached("GET", url, None, None)
+    if cached is not None:
+        data = cached
+        result = data.get("result")
+        if not result:
+            return None
+        latlng = result["latitude"], result["longitude"]
+        _geo_cache[key] = latlng
+        return latlng
+    else:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await retry_async(
+                    lambda: client.get(url),
+                    max_retries=2,
+                    base_delay=0.5,
+                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                set_cached("GET", url, None, None, data)
+                result = data.get("result")
+                if not result:
+                    return None
+                latlng = result["latitude"], result["longitude"]
+                _geo_cache[key] = latlng
+                return latlng
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                _geo_cache[key] = None
+                set_cached("GET", url, None, None, {})  # cache empty dict for 404
+            else:
+                logger.warning("Geocode HTTP error for %s: %s", key, e)
+            return None
+        except Exception:
+            logger.exception("Failed to geocode postcode: %s", key)
+            return None
 
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -563,50 +677,69 @@ async def _find_nearest_boys(
     ):
         school_coords = _school_coords(best)
         if school_coords:
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as c:
-                    resp = await c.post(
-                        "https://routes.googleapis.com/directions/v2:computeRoutes",
-                        headers={
-                            "X-Goog-Api-Key": settings.google_maps_api_key,
-                            "X-Goog-FieldMask": "routes.legs.duration,routes.legs.steps.transitDetails",
-                            "Content-Type": "application/json",
-                        },
-                        json={
-                            "origin": {
-                                "location": {"latLng": {"latitude": origin_lat, "longitude": origin_lon}},
+            routes_url = "https://routes.googleapis.com/directions/v2:computeRoutes"
+            body = {
+                "origin": {
+                    "location": {"latLng": {"latitude": origin_lat, "longitude": origin_lon}},
+                },
+                "destination": {
+                    "location": {"latLng": {"latitude": school_coords[0], "longitude": school_coords[1]}},
+                },
+                "travelMode": "TRANSIT",
+            }
+            cached = get_cached("POST", routes_url, None, json.dumps(body, sort_keys=True))
+            if cached is not None:
+                data = cached
+                leg = data.get("routes", [{}])[0].get("legs", [{}])[0]
+                duration_s = leg.get("duration", "")
+                if duration_s and duration_s.endswith("s"):
+                    with contextlib.suppress(ValueError):
+                        info.bus_time_minutes = round(int(duration_s.rstrip("s")) / 60)
+                steps = leg.get("steps", [])
+                for s in steps:
+                    td = s.get("transitDetails")
+                    if td:
+                        line = td.get("transitLine", {}).get("nameShort", "")
+                        dep = td.get("stopDetails", {}).get("departureStop", {}).get("name", "")
+                        if line and dep:
+                            info.bus_route = f"{line} from {dep}"
+                            break
+            else:
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as c:
+                        resp = await c.post(
+                            routes_url,
+                            headers={
+                                "X-Goog-Api-Key": settings.google_maps_api_key,
+                                "X-Goog-FieldMask": "routes.legs.duration,routes.legs.steps.transitDetails",
+                                "Content-Type": "application/json",
                             },
-                            "destination": {
-                                "location": {"latLng": {"latitude": school_coords[0], "longitude": school_coords[1]}},
-                            },
-                            "travelMode": "TRANSIT",
-                        },
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        leg = data.get("routes", [{}])[0].get("legs", [{}])[0]
-                        # Extract total transit duration
-                        duration_s = leg.get("duration", "")
-                        if duration_s and duration_s.endswith("s"):
-                            with contextlib.suppress(ValueError):
-                                info.bus_time_minutes = round(int(duration_s.rstrip("s")) / 60)
-                        # Extract first transit leg for route description
-                        steps = leg.get("steps", [])
-                        for s in steps:
-                            td = s.get("transitDetails")
-                            if td:
-                                line = td.get("transitLine", {}).get("nameShort", "")
-                                dep = td.get("stopDetails", {}).get("departureStop", {}).get("name", "")
-                                if line and dep:
-                                    info.bus_route = f"{line} from {dep}"
-                                    break
-                    else:
-                        logger.error(
-                            "Routes API returned %d — enable routes.googleapis.com",
-                            resp.status_code,
+                            json=body,
                         )
-            except Exception as e:
-                logger.error("Bus directions failed: %s", e)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            set_cached("POST", routes_url, None, json.dumps(body, sort_keys=True), data)
+                            leg = data.get("routes", [{}])[0].get("legs", [{}])[0]
+                            duration_s = leg.get("duration", "")
+                            if duration_s and duration_s.endswith("s"):
+                                with contextlib.suppress(ValueError):
+                                    info.bus_time_minutes = round(int(duration_s.rstrip("s")) / 60)
+                            steps = leg.get("steps", [])
+                            for s in steps:
+                                td = s.get("transitDetails")
+                                if td:
+                                    line = td.get("transitLine", {}).get("nameShort", "")
+                                    dep = td.get("stopDetails", {}).get("departureStop", {}).get("name", "")
+                                    if line and dep:
+                                        info.bus_route = f"{line} from {dep}"
+                                        break
+                        else:
+                            logger.error(
+                                "Routes API returned %d — enable routes.googleapis.com",
+                                resp.status_code,
+                            )
+                except Exception as e:
+                    logger.error("Bus directions failed: %s", e)
 
     return info
 

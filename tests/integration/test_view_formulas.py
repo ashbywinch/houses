@@ -226,43 +226,15 @@ class TestViewFormulasOnTestSheet:
             ws_view = sh.add_worksheet(title=view_tab, rows=100, cols=len(VIEW_HEADERS))
         ws_view.append_row(VIEW_HEADERS, value_input_option="USER_ENTERED")
 
-        # Build formulas keyed by View header name (not position), so reordering
-        # VIEW_HEADERS or inserting a column auto-aligns the formulas.
-        view_ref = _view_ref
-        data_ref = _data_ref
-        rid = "Rightmove ID"
+        # Use the canonical formula definitions from sheets.py, not a local copy.
+        from houses.sheets import VIEW_FORMULA_COLS
 
-        formula_by_header: dict[str, str] = {
-            "rightmove id": f'=IFNA(REGEXEXTRACT(GETURL("B"&ROW()),"properties/(\\d+)"),XLOOKUP({view_ref("Listing Address")},{data_ref("Address")},{data_ref(rid)}))',  # noqa: E501
-            "purchase cost (£)": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Price (£)')})",
-            "epc rating": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('EPC Rating')})",
-            "yearly commute total (£)": f'=LET(k,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Bracknell Cost (£)")}),g,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Simon London Cost (£)")}),i,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Lorena London Cost (£)")}),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)))',  # noqa: E501
-            "yearly council tax (£)": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Council Tax Cost (£)')})",  # noqa: E501
-            "simon london": f'=LET(v,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Simon London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
-            "lorena london": f'=LET(v,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Lorena London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
-            "bracknell time": f'=LET(v,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Bracknell Time (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
-            "what the area is like": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Area Description')})",
-            "walk to town": f'=LET(v,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Walk to Town (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
-            "walkable amenities": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Walkable Amenities')})",
-            "primary school": f"=HYPERLINK(XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Primary School Link')}),XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Primary School')}))",  # noqa: E501
-            "primary walk": f'=LET(v,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Primary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
-            "primary ofsted": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Primary Ofsted')})",
-            "primary inspection year": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Primary Inspection Year')})",  # noqa: E501
-            "secondary school": f"=HYPERLINK(XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Secondary School Link')}),XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Secondary School')}))",  # noqa: E501
-            "secondary walk": f'=LET(v,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
-            "secondary ofsted": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Secondary Ofsted')})",
-            "secondary inspection year": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Secondary Inspection Year')})",  # noqa: E501
-            "secondary bus": f'=LET(v,XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',  # noqa: E501
-            "secondary bus route": f"=XLOOKUP(VALUE({view_ref(rid)}),{data_ref(rid)},{data_ref('Secondary Bus Route')})",  # noqa: E501
-        }
-
-        # Generate positional formulas list from VIEW_HEADERS + formula_by_header
         formulas = []
         manual_lower = {h.lower() for h in VIEW_MANUAL_COLUMNS}
         for h in VIEW_HEADERS:
             key = h.lower()
-            if key in formula_by_header:
-                formulas.append(formula_by_header[key])
+            if key in VIEW_FORMULA_COLS:
+                formulas.append(VIEW_FORMULA_COLS[key])
             elif key in manual_lower:
                 formulas.append("")
             else:
@@ -427,3 +399,82 @@ class TestViewFormulasOnTestSheet:
                 h = headers[col_idx] if col_idx < len(headers) else ""
                 if h in manual_cols and val and val.startswith("="):
                     pytest.fail(f"Manual column '{h}' row {row_idx} has formula: {val}")
+
+    def test_new_row_gets_formulas_after_sync(self, sh):
+        """When a new row is added to the View tab, sync_view_formulas populates
+        the formula columns and leaves manual columns empty."""
+        from houses.sheets import sync_view_formulas
+
+        ws_data = sh.worksheet("Properties View")
+
+        # Find the last row in the View tab
+        existing = ws_data.get_all_values()
+        new_row_num = len(existing) + 1
+
+        # Add a new View tab row with a Rightmove link (user adds this manually)
+        url = "https://www.rightmove.co.uk/properties/33333333"
+        link_col = VC["Rightmove Link"]
+        addr_col = VC["Listing Address"]
+        ws_data.update(
+            values=[["33 New Street, Testville, TE3 3ST", url]],
+            range_name=f"{addr_col}{new_row_num}:{link_col}{new_row_num}",
+            value_input_option="USER_ENTERED",
+        )
+
+        # Run sync_view_formulas to populate the new row
+        sync_view_formulas(sh)
+        time.sleep(2)
+
+        # Read back the new row
+        all_data = ws_data.get_all_values()
+        row = all_data[new_row_num - 1] if len(all_data) > new_row_num - 1 else []
+
+        manual = VIEW_MANUAL_COLUMNS
+        errors = []
+        for col_idx, val in enumerate(row):
+            h = VIEW_HEADERS[col_idx] if col_idx < len(VIEW_HEADERS) else ""
+            if not h:
+                continue
+            if h in manual:
+                if val and val.startswith("="):
+                    errors.append(f"Manual column '{h}' has formula: {val}")
+            else:
+                # Non-manual columns should have a formula (start with "=") or be a number
+                # (Some computed values might resolve immediately if data exists)
+                if not val:
+                    errors.append(f"Formula column '{h}' is empty")
+        assert not errors, f"New row errors: {'; '.join(errors)}"
+
+    def test_yearly_commute_calculated_correctly(self, sh):
+        """Yearly Commute Total (£) matches 46 * (Bracknell + Simon + 2*Lorena)."""
+        col = VC["Yearly Commute Total (£)"]
+        for i, rec in enumerate(RECORDS, 2):
+            v = sh.worksheet("Properties View").get_values(
+                f"{col}{i}:{col}{i}", value_render_option="FORMATTED_VALUE"
+            )
+            val = v[0][0] if v and v[0] else None
+            expected = 46 * (rec.bracknell_cost + rec.simon_cost + 2 * rec.lorena_cost)
+            assert val is not None and val not in ("#N/A", "#ERROR!", ""), (
+                f"Row {i} Yearly Commute is empty/error"
+            )
+            assert abs(float(val.replace("£", "").replace(",", "")) - expected) < 0.01, (
+                f"Row {i} expected {expected}, got {val}"
+            )
+
+    def test_all_view_headers_are_covered(self):
+        """Every View tab header is either a formula column or a manual column.
+        If you add a column to VIEW_HEADERS you must add it to VIEW_FORMULA_COLS
+        or VIEW_MANUAL_COLUMNS — otherwise this test fails."""
+        from houses.sheets import VIEW_FORMULA_COLS
+
+        manual_lower = {h.lower() for h in VIEW_MANUAL_COLUMNS}
+        formula_keys = set(VIEW_FORMULA_COLS.keys())
+        uncovered = []
+        for h in VIEW_HEADERS:
+            key = h.lower()
+            if key not in formula_keys and key not in manual_lower:
+                uncovered.append(h)
+        assert not uncovered, (
+            f"View headers with no formula or manual entry: {uncovered}. "
+            "Add each to VIEW_FORMULA_COLS or VIEW_MANUAL_COLUMNS in sheets.py."
+        )

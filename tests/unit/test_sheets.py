@@ -3,19 +3,60 @@
 import pytest
 
 from houses.models import EnrichedProperty, PetrolCost, SchoolInfo, TransitInfo
-from houses.sheets import COLUMN_HEADERS, _rightmove_id, _row_values, col_index, col_letter, named_range_name
+from houses.sheets import (
+    COLUMN_HEADERS,
+    _build_full_row,
+    _rightmove_id,
+    _row_values,
+    col_index,
+    col_letter,
+    named_range_name,
+)
 
 
 def test_row_values_contains_all_enriched_columns():
-    """Every enriched column header has a corresponding entry in _row_values."""
+    """Every column header has a corresponding entry in _row_values."""
     ep = EnrichedProperty(url="https://www.rightmove.co.uk/properties/123")
     enriched = _row_values(ep)
-    # All keys should be valid column headers
     for key in enriched:
         assert key in COLUMN_HEADERS, f"{key!r} not in COLUMN_HEADERS"
-    # User columns should NOT be in enriched dict
-    for h in ["Rightmove URL", "Address", "Postcode", "Bedrooms", "Price (£)", "Actual Latitude", "Actual Longitude"]:
-        assert h not in enriched, f"User column {h!r} should not be in _row_values"
+    # Non-user columns should all be present
+    user_only = {"Actual Latitude", "Actual Longitude"}
+    for h in COLUMN_HEADERS:
+        if h not in user_only:
+            assert h in enriched, f"Missing column {h!r} in _row_values"
+
+
+def test_row_values_includes_user_columns():
+    """User-owned columns (Rightmove URL, Address, Postcode, Bedrooms, Price)
+    are included in _row_values when the EnrichedProperty has values for them."""
+    ep = EnrichedProperty(
+        url="https://www.rightmove.co.uk/properties/123",
+        address="1 High Street, Test Town, TE1 1ST",
+        postcode="TE1 1ST",
+        bedrooms=4,
+        price=500000.0,
+        actual_latitude=51.5,
+        actual_longitude=-0.1,
+    )
+    r = _row_values(ep)
+    assert r["Rightmove URL"] == "https://www.rightmove.co.uk/properties/123"
+    assert r["Address"] == "1 High Street, Test Town, TE1 1ST"
+    assert r["Postcode"] == "TE1 1ST"
+    assert r["Bedrooms"] == "4"
+    assert r["Price (£)"] == "500000.0"
+
+    # Empty property should produce empty strings for user columns
+    empty_ep = EnrichedProperty(url="")
+    r2 = _row_values(empty_ep)
+    assert r2.get("Rightmove URL", "") == ""
+    assert r2.get("Address", "") == ""
+    assert r2.get("Bedrooms", "") == ""
+    assert r2.get("Price (£)", "") == ""
+
+    # Actual Lat/Lng are NOT in _row_values (truly user-owned)
+    assert "Actual Latitude" not in r2
+    assert "Actual Longitude" not in r2
 
 
 def test_row_values_with_full_enrichment():
@@ -125,6 +166,29 @@ def test_row_values_empty_schools():
     assert r["Primary School Link"] == ""
     assert r["Secondary Walk (min)"] == ""
     assert r["Secondary School Link"] == ""
+
+
+def test_build_full_row_includes_rid():
+    """``_build_full_row`` must place the Rightmove ID at the correct
+    column position so that appended rows are identifiable by RID.
+
+    Regression test: the backfill appended rows with empty RID columns,
+    causing duplicate rows on subsequent runs."""
+    rid = "987654321"
+    url = f"https://www.rightmove.co.uk/properties/{rid}"
+    ep = EnrichedProperty(url=url, address="1 Test Road, TE1 1ST", postcode="TE1 1ST", bedrooms=3, price=500000.0)
+    row = _build_full_row(ep)
+    rid_idx = COLUMN_HEADERS.index("Rightmove ID")
+    assert row[rid_idx] == rid, (
+        f"Rightmove ID column (index {rid_idx}) expected {rid!r}, "
+        f"got {row[rid_idx]!r}. Full row preview: {row[:10]}"
+    )
+    # Also verify that all other user columns are populated
+    assert row[COLUMN_HEADERS.index("Rightmove URL")] == url
+    assert row[COLUMN_HEADERS.index("Address")] == "1 Test Road, TE1 1ST"
+    assert row[COLUMN_HEADERS.index("Postcode")] == "TE1 1ST"
+    assert row[COLUMN_HEADERS.index("Bedrooms")] == "3"
+    assert row[COLUMN_HEADERS.index("Price (£)")] == "500000.0"
 
 
 def test_row_values_missing_commute_empty():

@@ -1,3 +1,4 @@
 # Change Behavior Rule
 
-If the user asks to change the behavior of the agent, use the change behaviour skill. For example, if the user says "Make sure you don't make this mistake again".
+When the user asks to change the agent's behavior — for example "make sure you don't make this mistake again" or "change your behavior" — load the change-behavior skill at ``.kilo/skills/change-behavior/change-behavior.md`` and follow its process.
+

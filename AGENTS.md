@@ -63,7 +63,7 @@ Houses is a local FastAPI server that acts as a webhook broker for property list
 
 ```bash
 make setup    # Create venv, install deps
-make run      # Start dev server on :8080
+make run      # Start dev server on :8080 (auto-reloads on code changes via --reload)
 make test     # Run unit tests
 make lint     # Ruff check
 make format   # Auto-fix formatting
