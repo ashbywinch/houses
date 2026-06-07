@@ -9,9 +9,7 @@ from __future__ import annotations
 
 import logging
 
-import httpx
-
-from houses.api_cache import get_cached, set_cached
+from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.config import settings
 
 logger = logging.getLogger(__name__)
@@ -41,7 +39,7 @@ async def lookup_epc(postcode: str) -> str:
         return band.strip() if band else ""
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with cached_async_client(timeout=10.0) as client:
             resp = await client.get(
                 EPC_SEARCH_URL,
                 params=params,

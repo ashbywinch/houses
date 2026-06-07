@@ -18,7 +18,7 @@ from pathlib import Path
 
 import httpx
 
-from houses.api_cache import get_cached, set_cached
+from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.config import settings
 from houses.models import CommuteBreakdown, PetrolCost, SchoolInfo, TransitInfo
 from houses.retry import retry_async
@@ -255,7 +255,7 @@ async def _get_drive_minutes(origin_postcode: str, station_name: str) -> int | N
         "units": "km",
     }
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with cached_async_client(timeout=15.0) as client:
             cached = get_cached("POST", ORS_DIRECTIONS_URL, None, json.dumps(body, sort_keys=True))
             if cached is not None:
                 return round(cached["routes"][0]["summary"]["duration"] / 60)
@@ -352,7 +352,7 @@ async def compute_transit(
         logger.warning("TfL API key not configured; skipping transit for %s", label)
     else:
         try:
-            async with httpx.AsyncClient(timeout=20.0) as client:
+            async with cached_async_client(timeout=20.0) as client:
                 resp = await retry_async(
                     lambda: client.get(url, params=params),
                     max_retries=2,
@@ -375,7 +375,7 @@ async def compute_transit(
                     latlng = f"{coords[0]},{coords[1]}"
                     url2 = f"{TFL_JOURNEY_URL}/{latlng}/to/{destination_postcode}"
                     try:
-                        async with httpx.AsyncClient(timeout=20.0) as c2:
+                        async with cached_async_client(timeout=20.0) as c2:
                             r2 = await c2.get(url2, params=params)
                             r2.raise_for_status()
                             d2 = r2.json()
@@ -496,7 +496,7 @@ async def compute_petrol_cost(origin_postcode: str) -> PetrolCost:
         # _geocode returns (lat, lng), ORS needs [lng, lat]
         dest_coords = [bracknell_coords[1], bracknell_coords[0]]
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with cached_async_client(timeout=15.0) as client:
             body = {"coordinates": [origin_coords, dest_coords], "units": "km"}
             cached = get_cached("POST", ORS_DIRECTIONS_URL, None, json.dumps(body, sort_keys=True))
             if cached is not None:
@@ -596,7 +596,7 @@ async def _geocode_nominatim(query: str) -> tuple[float, float] | None:
             return (lat, lng)
     else:
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with cached_async_client(timeout=10.0) as client:
                 resp = await client.get(
                     NOMINATIM_URL,
                     params=params,
@@ -645,7 +645,7 @@ async def _geocode_address(address: str) -> tuple[float, float] | None:
                 return (lat, lng)
         else:
             try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                async with cached_async_client(timeout=10.0) as client:
                     resp = await client.get(
                         google_geocode_url,
                         params=params,
@@ -675,7 +675,7 @@ async def _geocode_address(address: str) -> tuple[float, float] | None:
                 return (lat, lng)
         else:
             try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                async with cached_async_client(timeout=10.0) as client:
                     resp = await retry_async(
                         lambda: client.get(
                             ORS_GEOCODE_URL,
@@ -733,7 +733,7 @@ async def _geocode(postcode: str) -> tuple[float, float] | None:
         return latlng
     else:
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with cached_async_client(timeout=10.0) as client:
                 resp = await retry_async(
                     lambda: client.get(url),
                     max_retries=2,
@@ -902,7 +902,7 @@ async def _find_nearest_boys(
                             break
             else:
                 try:
-                    async with httpx.AsyncClient(timeout=10.0) as c:
+                    async with cached_async_client(timeout=10.0) as c:
                         resp = await c.post(
                             routes_url,
                             headers={

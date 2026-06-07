@@ -696,7 +696,7 @@ class TestBackfillView:
 
         def _patch_client(original_init, handler):
             def patched_init(self, **kwargs):
-                kwargs.setdefault("transport", MockTransport(handler))
+                kwargs["transport"] = MockTransport(handler)
                 original_init(self, **kwargs)
             return patched_init
 

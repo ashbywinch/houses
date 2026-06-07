@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from houses.api_cache import get_cached, with_cache
+from houses.api_cache import cached_async_client, get_cached, with_cache
 from houses.config import settings
 from houses.retry import retry_async
 
@@ -140,7 +140,7 @@ async def _geocode_town(town: str) -> tuple[float, float] | None:
     # Try ORS Pelias (skip if exhausted to avoid hammering)
     if settings.ors_api_key and not _api_state.ors_geo_exhausted:
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with cached_async_client(timeout=10.0) as client:
 
                 async def _fetch():
                     resp = await retry_async(
@@ -182,7 +182,7 @@ async def _geocode_town(town: str) -> tuple[float, float] | None:
         if since_last < 1.0:
             await asyncio.sleep(1.0 - since_last)
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with cached_async_client(timeout=10.0) as client:
 
                 async def _fetch_nom():
                     resp = await client.get(
@@ -231,7 +231,7 @@ async def _walk_duration(
     if cached is not None:
         return round(cached["routes"][0]["summary"]["duration"] / 60)
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with cached_async_client(timeout=15.0) as client:
 
             async def _fetch():
                 resp = await retry_async(
@@ -287,7 +287,7 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
 
     if not _api_state.places_exhausted:
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with cached_async_client(timeout=15.0) as client:
 
                 async def _fetch_places():
                     resp = await retry_async(
@@ -335,7 +335,7 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
         if overpass_cached is not None:
             return _format_overpass(overpass_cached, lat, lng)
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with cached_async_client(timeout=15.0) as client:
 
                 async def _fetch_overpass():
                     resp = await client.get(

@@ -31,7 +31,7 @@ async def test_geocode_full_postcode():
     original_init = AsyncClient.__init__
 
     def patched_init(self, **kwargs):
-        kwargs.setdefault("transport", MockTransport(handler))
+        kwargs["transport"] = MockTransport(handler)
         original_init(self, **kwargs)
 
     with patch.object(AsyncClient, "__init__", patched_init):
@@ -57,7 +57,7 @@ async def test_geocode_outcode():
     original_init = AsyncClient.__init__
 
     def patched_init(self, **kwargs):
-        kwargs.setdefault("transport", MockTransport(handler))
+        kwargs["transport"] = MockTransport(handler)
         original_init(self, **kwargs)
 
     with patch.object(AsyncClient, "__init__", patched_init):
@@ -86,7 +86,7 @@ async def test_geocode_caches_result():
     original_init = AsyncClient.__init__
 
     def patched_init(self, **kwargs):
-        kwargs.setdefault("transport", MockTransport(handler))
+        kwargs["transport"] = MockTransport(handler)
         original_init(self, **kwargs)
 
     with patch.object(AsyncClient, "__init__", patched_init):
@@ -112,7 +112,7 @@ async def test_geocode_404_caches_none():
     original_init = AsyncClient.__init__
 
     def patched_init(self, **kwargs):
-        kwargs.setdefault("transport", MockTransport(handler))
+        kwargs["transport"] = MockTransport(handler)
         original_init(self, **kwargs)
 
     with patch.object(AsyncClient, "__init__", patched_init):
@@ -135,7 +135,7 @@ async def test_geocode_empty_postcode():
     original_init = AsyncClient.__init__
 
     def patched_init(self, **kwargs):
-        kwargs.setdefault("transport", MockTransport(handler))
+        kwargs["transport"] = MockTransport(handler)
         original_init(self, **kwargs)
 
     with patch.object(AsyncClient, "__init__", patched_init):
@@ -161,7 +161,7 @@ async def test_geocode_normalises_case():
     original_init = AsyncClient.__init__
 
     def patched_init(self, **kwargs):
-        kwargs.setdefault("transport", MockTransport(handler))
+        kwargs["transport"] = MockTransport(handler)
         original_init(self, **kwargs)
 
     with patch.object(AsyncClient, "__init__", patched_init):

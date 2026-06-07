@@ -22,6 +22,9 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
+
+import httpx
 
 CACHE_DIR = Path("data/api_cache")
 
@@ -106,3 +109,48 @@ async def with_cache(
     data = await fetch()
     set_cached(method, url, params, body_str, data)
     return data
+
+
+class CachingTransport(httpx.AsyncBaseTransport):
+    """httpx async transport that checks the disk cache before making HTTP calls.
+
+    On a cache hit the stored JSON is returned directly.  On a miss the
+    request is forwarded to ``_inner`` and the response is cached before
+    being returned.
+
+    Stores raw response bodies (not wrapped) so that enrichment functions
+    using ``get_cached`` directly remain compatible.
+    """
+
+    def __init__(self, inner: httpx.AsyncBaseTransport | None = None):
+        self._inner = inner or httpx.AsyncHTTPTransport()
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        parsed = urlparse(str(request.url))
+        url_path = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        params = {k: v[0] for k, v in parse_qs(parsed.query).items()} if parsed.query else None
+        body = request.content.decode() if request.content else None
+
+        cached = get_cached(request.method, url_path, params, body)
+        if cached is not None:
+            return httpx.Response(200, json=cached)
+
+        response = await self._inner.handle_async_request(request)
+        try:
+            data = response.json()
+            set_cached(request.method, url_path, params, body, data)
+        except Exception:
+            pass
+        return response
+
+
+def cached_async_client(**kwargs) -> httpx.AsyncClient:
+    """Return an ``AsyncClient`` that auto-caches every response to disk."""
+    kwargs.setdefault("transport", CachingTransport())
+    return httpx.AsyncClient(**kwargs)
+
+
+def cached_sync_client(**kwargs) -> httpx.Client:
+    """Return a ``Client`` that auto-caches every response to disk."""
+    kwargs.setdefault("transport", CachingTransport())
+    return httpx.Client(**kwargs)
