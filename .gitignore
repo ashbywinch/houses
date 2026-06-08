@@ -59,8 +59,12 @@ data/ofsted_inspections.csv
 # Playwright MCP browser snapshots
 .playwright-mcp/
 
-# Rightmove page cache (fetched HTML used for scraping)
+# Rightmove page cache (fetched HTML used during development)
 data/rightmove_pages/
+
+# API cache from development/server runs (backfill, migration, enrichment)
+# NOT for test fixtures — use tests/fixtures/api_cache/ for committed test cache
+data/api_cache/
 
 # Large generated data files
 /tmp/gias_*.zip

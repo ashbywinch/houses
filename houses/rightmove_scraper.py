@@ -388,7 +388,9 @@ async def stop_chrome():
     # Also pkill any remaining chrome processes we own
     try:
         proc = await asyncio.create_subprocess_exec(
-            "pkill", "-f", fingerprint,
+            "pkill",
+            "-f",
+            fingerprint,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -408,8 +410,7 @@ async def _fetch_via_chrome(url: str) -> str:
         from playwright.async_api import async_playwright
     except ImportError:
         logger.error(
-            "playwright is required for Rightmove scraping. "
-            "Run: pip install playwright && playwright install chromium"
+            "playwright is required for Rightmove scraping. Run: pip install playwright && playwright install chromium"
         )
         return ""
 
@@ -433,8 +434,10 @@ def _report_missing(result: dict[str, Any], rid: str) -> None:
     if missing:
         found = [k for k in _EXPECTED_FIELDS if k in result]
         logger.warning(
-            "Rightmove scraper for %s: partial extraction — "
-            "missing %s, found %s", rid, missing, found,
+            "Rightmove scraper for %s: partial extraction — missing %s, found %s",
+            rid,
+            missing,
+            found,
         )
 
 
@@ -479,8 +482,7 @@ async def scrape(url: str) -> dict[str, Any]:
     # 3. Offline mode — fail fast instead of starting Chrome
     if settings.rightmove_scraper_offline:
         logger.warning(
-            "No cached Rightmove page for %s and offline mode is enabled. "
-            "Pre-populate the cache before running tests.",
+            "No cached Rightmove page for %s and offline mode is enabled. Pre-populate the cache before running tests.",
             rid,
         )
         return {}
@@ -495,7 +497,8 @@ async def scrape(url: str) -> dict[str, Any]:
         logger.warning(
             "Rightmove returned a login/verification page for %s. "
             "Please open Chrome in non-headless mode, navigate to "
-            "Rightmove and sign in, then try again.", url,
+            "Rightmove and sign in, then try again.",
+            url,
         )
         return {"_error": "login_required"}
 
@@ -534,7 +537,8 @@ async def scrape_live(url: str) -> dict[str, Any]:
         logger.warning(
             "Rightmove returned a login/verification page for %s. "
             "Please open Chrome in non-headless mode, navigate to "
-            "Rightmove and sign in, then try again.", url,
+            "Rightmove and sign in, then try again.",
+            url,
         )
         return {"_error": "login_required"}
 

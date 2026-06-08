@@ -25,6 +25,7 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 DATA_TAB = "Properties Data"
 VIEW_TAB = "Properties View"
+CONSTANTS_TAB = "Constants"
 COLUMN_HEADERS: list[str] = [
     "Rightmove URL",  # A  (0) — user-owned, never overwrite
     "Address",  # B  (1) — user-owned, never overwrite
@@ -66,6 +67,12 @@ COLUMN_HEADERS: list[str] = [
     "Approx Longitude (est)",  # AL (37)
     "Approx Station CRS",  # AM (38)
     "Approx Station Name",  # AN (39)
+    # Formula columns (server never writes these — populated by Google Sheets formulas)
+    "Stamp Duty (£)",  # AP (40)
+    "Net Ashby Contribution (£)",  # AQ (41)
+    "Mortgage Required (£)",  # AR (42)
+    "Monthly Mortgage Payment (£)",  # AS (43)
+    "Yearly Sinking Fund (£)",  # AT (44)
 ]
 
 # Conditional formatting colors (RGB 0-1 floats for Google Sheets API)
@@ -77,42 +84,52 @@ GREY_TEXT = {"red": 0.6, "green": 0.6, "blue": 0.6}
 # Canonical View tab headers — single source of truth. Must be imported by
 # scripts/setup_sheet.py and tests/integration/test_view_formulas.py.
 VIEW_HEADERS: list[str] = [
-    "Listing Address",
-    "Rightmove Link",
-    "Rightmove ID",
-    "Purchase Cost (£)",
-    "EPC Rating",
-    "Yearly Commute Total (£)",
-    "Yearly Council Tax (£)",
-    "Simon London",
-    "Simon London Route",
-    "Lorena London",
-    "Lorena London Route",
-    "Bracknell Time",
-    "What the Area is Like",
-    "Walk to Town",
-    "Walkable Amenities",
-    "Primary School",
-    "Primary Walk",
-    "Primary Ofsted",
-    "Primary Inspection Year",
-    "Secondary School",
-    "Secondary Walk",
-    "Secondary Ofsted",
-    "Secondary Inspection Year",
-    "Secondary Bus",
-    "Secondary Bus Route",
-    "Group Notes / WhatsApp",
-    "Ashby comments",
-    "Status",
-    "Status Reason",
+    "Listing Address",  # A  (0)
+    "Rightmove Link",  # B  (1)
+    "Rightmove ID",  # C  (2)
+    "Purchase Cost (£)",  # D  (3)
+    "EPC Rating",  # E  (4)
+    "",  # F  (5)  gap column
+    "Simon London",  # G  (6)
+    "Simon London Route",  # H  (7)
+    "Lorena London",  # I  (8)
+    "Lorena London Route",  # J  (9)
+    "Bracknell Time",  # K  (10)
+    "What the Area is Like",  # L  (11)
+    "Walk to Town",  # M  (12)
+    "Walkable Amenities",  # N  (13)
+    "",  # O  (14) gap column
+    "Primary School",  # P  (15)
+    "Primary Walk",  # Q  (16)
+    "Primary Ofsted",  # R  (17)
+    "Primary Inspection Year",  # S  (18)
+    "Secondary School",  # T  (19)
+    "Secondary Walk",  # U  (20)
+    "Secondary Ofsted",  # V  (21)
+    "Secondary Inspection Year",  # W  (22)
+    "Secondary Bus",  # X  (23)
+    "Secondary Bus Route",  # Y  (24)
+    "",  # Z  (25) gap column
+    "Monthly Mortgage Payment (£)",  # AA (26)
+    "Monthly Sinking Fund (£)",  # AB (27)
+    "Monthly Life Insurance (£)",  # AC (28)
+    "Monthly Commute Cost (£)",  # AD (29)
+    "Monthly Council Tax (£)",  # AE (30)
+    "Total Monthly Housing Cost (£)",  # AF (31)
+    "",  # AG (32) gap column
+    "Ashby Works Estimate (£)",  # AH (33)
+    "Group Notes / WhatsApp",  # AI (34)
+    "Ashby comments",  # AJ (35)
+    "Status",  # AK (36)
+    "Status Reason",  # AL (37)
 ]
 
 # View tab columns that are manual (user-entered), never written by formulas
 VIEW_MANUAL_COLUMNS: frozenset[str] = frozenset(
     {
+        "",
         "Rightmove Link",
-        "Yearly Council Tax (£)",
+        "Ashby Works Estimate (£)",
         "Group Notes / WhatsApp",
         "Ashby comments",
         "Status",
@@ -129,6 +146,16 @@ _USER_COLUMNS = frozenset(
         "Price (£)",
         "Actual Latitude",
         "Actual Longitude",
+    }
+)
+
+_FORMULA_COLUMNS: frozenset[str] = frozenset(
+    {
+        "Stamp Duty (£)",
+        "Net Ashby Contribution (£)",
+        "Mortgage Required (£)",
+        "Monthly Mortgage Payment (£)",
+        "Yearly Sinking Fund (£)",
     }
 )
 
@@ -236,13 +263,67 @@ def named_range_name(header: str) -> str:
 
 _nr = named_range_name
 
+# Headers used in the Constants tab (display name in col A, value in col B)
+CONSTANTS_HEADERS: list[str] = [
+    "Constant",
+    "Value",
+]
+
+# (label, value_or_formula) pairs. Label is used for Const_ named range generation,
+# value_or_formula is written to column B (USER_ENTERED so formulas are evaluated).
+CONSTANTS_VALUES: list[tuple[str, str]] = [
+    ("Current Sale Price (£)", "0"),
+    ("Outstanding Mortgage (£)", "0"),
+    ("Deposit", "=B2-B3"),
+    ("Gross Ashby Contribution (£)", "0"),
+    ("Mortgage Rate", "0.0495"),
+    ("Mortgage Term (years)", "27"),
+    ("Life Insurance Monthly (£)", "0"),
+    ("Sinking Fund Rate", "0.01"),
+    ("Rental Income (£)", "0"),
+]
+
+
+def _const_range_name(header: str) -> str:
+    """Generate a Const_ named range from a constant name."""
+    clean = re.sub(r"[^a-zA-Z0-9 ]+", "", header).strip()
+    words = clean.split()
+    return "Const_" + "".join(w.capitalize() for w in words)
+
+
+def _splt(price: float) -> float:
+    """Standard non-first-time-buyer SDLT for England."""
+    if price <= 250000:
+        return 0.0
+    if price <= 925000:
+        return (price - 250000) * 0.05
+    if price <= 1500000:
+        return (price - 925000) * 0.10 + 33750.0
+    return (price - 1500000) * 0.12 + 91250.0
+
+
+def ensure_constants_tab(spreadsheet: gspread.Spreadsheet) -> gspread.Worksheet:
+    """Create the Constants tab if missing. Never overwrites existing values."""
+    try:
+        ws = spreadsheet.worksheet(CONSTANTS_TAB)
+        logger.info("'%s' tab already exists — leaving untouched", CONSTANTS_TAB)
+        return ws
+    except gspread.WorksheetNotFound:
+        ws = spreadsheet.add_worksheet(title=CONSTANTS_TAB, rows=20, cols=2)
+
+    values = [CONSTANTS_HEADERS]
+    for label, val in CONSTANTS_VALUES:
+        values.append([label, val])
+    ws.update(range_name="A1", values=values, value_input_option="USER_ENTERED")
+    logger.info("Created '%s' tab with %d constants", CONSTANTS_TAB, len(CONSTANTS_VALUES))
+    return ws
+
+
 VIEW_FORMULA_COLS: dict[str, str] = {
     "listing address": f"=IFNA(INDEX({_nr('Address')},ROW()),)",
     "rightmove id": f"=IFNA(INDEX({_nr('Rightmove ID')},ROW()),)",
     "purchase cost (£)": f"=IFNA(INDEX({_nr('Price (£)')},ROW()),)",
     "epc rating": f"=IFNA(INDEX({_nr('EPC Rating')},ROW()),)",
-    "yearly commute total (£)": f'=IFNA(LET(k,IFNA(INDEX({_nr("Bracknell Cost (£)")},ROW()),),g,IFNA(INDEX({_nr("Simon London Cost (£)")},ROW()),),i,IFNA(INDEX({_nr("Lorena London Cost (£)")},ROW()),),IF(OR(k="",g="",i=""),"",46*(k+g+2*i))),)',  # noqa: E501
-    "yearly council tax (£)": f"=IFNA(INDEX({_nr('Council Tax Cost (£)')},ROW()),)",
     "simon london": f'=IFNA(LET(v,IFNA(INDEX({_nr("Simon London (min)")},ROW()),),IF(v="","",IF(v*1=0,"",v/1440))),)',  # noqa: E501
     "simon london route": f"=IFNA(INDEX({_nr('Simon London Route')},ROW()),)",
     "lorena london": f'=IFNA(LET(v,IFNA(INDEX({_nr("Lorena London (min)")},ROW()),),IF(v="","",IF(v*1=0,"",v/1440))),)',  # noqa: E501
@@ -261,7 +342,44 @@ VIEW_FORMULA_COLS: dict[str, str] = {
     "secondary bus": f'=IFNA(LET(v,IFNA(INDEX({_nr("Secondary Bus (min)")},ROW()),),IF(v="","",IF(v*1=0,"",v/1440))),)',  # noqa: E501
     "primary inspection year": f"=IFNA(INDEX({_nr('Primary Inspection Year')},ROW()),)",
     "secondary inspection year": f"=IFNA(INDEX({_nr('Secondary Inspection Year')},ROW()),)",
+    # Affordability block — monthly costs only
+    "monthly mortgage payment (£)": f"=IFNA(INDEX({_nr('Monthly Mortgage Payment (£)')},ROW()),)",
+    "monthly sinking fund (£)": f"=IFNA(INDEX({_nr('Yearly Sinking Fund (£)')},ROW())/12*2/3,)",
+    "monthly life insurance (£)": "=IFNA(Const_LifeInsuranceMonthly,)",
+    "monthly commute cost (£)": f'=IFNA(LET(k,IFNA(INDEX({_nr("Bracknell Cost (£)")},ROW()),),g,IFNA(INDEX({_nr("Simon London Cost (£)")},ROW()),),i,IFNA(INDEX({_nr("Lorena London Cost (£)")},ROW()),),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)/12)),)',  # noqa: E501
+    "monthly council tax (£)": f'=IFNA(LET(v,IFNA(INDEX({_nr("Council Tax Cost (£)")},ROW()),),IF(v=0,"",v/12)),)',
+    "total monthly housing cost (£)": f'=IFNA(LET(mp,IFNA(INDEX({_nr("Monthly Mortgage Payment (£)")},ROW()),),sf,IFNA(INDEX({_nr("Yearly Sinking Fund (£)")},ROW())/12*2/3,),li,Const_LifeInsuranceMonthly,ct,IFNA(LET(v,IFNA(INDEX({_nr("Council Tax Cost (£)")},ROW()),),IF(v=0,"",v/12)),),comm,IFNA(LET(k,IFNA(INDEX({_nr("Bracknell Cost (£)")},ROW()),),g,IFNA(INDEX({_nr("Simon London Cost (£)")},ROW()),),i,IFNA(INDEX({_nr("Lorena London Cost (£)")},ROW()),),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)/12)),),s,IFNA(INDEX(View_Status,ROW()),),gross,IF(OR(comm="",ct=""),"",mp+IF(s="Current",0,sf)+IF(s="Current",0,li)+comm+ct),p,IF(gross="","",gross-IF(s="Current",IFNA(Const_RentalIncome,0),0)),IF(OR(p="",p=0),"",p)),)',  # noqa: E501
 }
+
+# Data tab formula columns (lowercase header -> Google Sheets formula string).
+# These are never written by the server — they're formula-driven.
+DATA_FORMULA_COLS: dict[str, str] = {
+    "stamp duty (£)": f'=IFNA(LET(s,IFNA(INDEX(View_Status,ROW()),),p,INDEX({_nr("Price (£)")},ROW()),sd,IF(p<=250000,0,IF(p<=925000,(p-250000)*0.05,IF(p<=1500000,(p-925000)*0.1+33750,(p-1500000)*0.12+91250))),IF(s="Current",0,sd)),)',  # noqa: E501
+    "net ashby contribution (£)": f'=IFNA(LET(s,IFNA(INDEX(View_Status,ROW()),),p,INDEX({_nr("Price (£)")},ROW()),na,Const_GrossAshbyContribution-IFNA(INDEX({_nr("Stamp Duty (£)")},ROW())/3,)-IFNA(INDEX(View_AshbyWorksEstimate,ROW()),),IF(s="Current",0,IF(OR(p=0,p=""),na,MIN(na,p/3)))),)',  # noqa: E501
+    "mortgage required (£)": f"=IFNA(INDEX({_nr('Price (£)')},ROW()),)-Const_Deposit-IFNA(INDEX({_nr('Net Ashby Contribution (£)')},ROW()),)",  # noqa: E501
+    "monthly mortgage payment (£)": f"=IFNA(PMT(Const_MortgageRate/12,Const_MortgageTermYears*12,-IFNA(INDEX({_nr('Mortgage Required (£)')},ROW()),0)),)",  # noqa: E501
+    "yearly sinking fund (£)": f"=IFNA(INDEX({_nr('Price (£)')},ROW())*Const_SinkingFundRate,)",
+}
+
+
+def sync_data_formulas(spreadsheet: gspread.Spreadsheet) -> None:
+    """Write Data tab formulas for all formula-only columns (rows 2–N)."""
+    ws = spreadsheet.worksheet(DATA_TAB)
+    data = ws.get_all_values()
+    num_rows = len(data)
+
+    for header_key, formula in DATA_FORMULA_COLS.items():
+        for col_idx, header in enumerate(COLUMN_HEADERS):
+            if header.lower() == header_key:
+                cl = col_letter(col_idx)
+                if num_rows > 1:
+                    write_rows = max(num_rows - 1, 1)
+                    ws.update(
+                        values=[[formula] for _ in range(write_rows)],
+                        range_name=f"{cl}2:{cl}{1 + write_rows}",
+                        value_input_option="USER_ENTERED",
+                    )
+                break
 
 
 def _add_rule(
@@ -492,7 +610,6 @@ def _add_color_rules(fmt_requests: list, sid: int, headers: list[str]) -> None:
     col_letter_fn = col_letter
 
     _add_epc_rules(fmt_requests, sid, header_lookup, col_letter_fn)
-    _add_commute_cost_rules(fmt_requests, sid, header_lookup, col_letter_fn)
     _add_commute_time_rules(fmt_requests, sid, header_lookup, col_letter_fn)
     _add_walk_time_rules(fmt_requests, sid, header_lookup, col_letter_fn)
     _add_ofsted_rules(fmt_requests, sid, header_lookup, col_letter_fn)
@@ -518,9 +635,10 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
         if header_key in view_header_idx:
             cl = col_letter(view_header_idx[header_key])
             if num_rows > 1:
+                write_rows = max(num_rows - 1, 1)
                 ws.update(
-                    values=[[formula] for _ in range(max(num_rows - 1, 1))],
-                    range_name=f"{cl}2:{cl}2000",
+                    values=[[formula] for _ in range(write_rows)],
+                    range_name=f"{cl}2:{cl}{1 + write_rows}",
                     value_input_option="USER_ENTEred",
                 )
 
@@ -549,7 +667,16 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
                     }
                 }
             )
-    for h in ["purchase cost (£)", "yearly commute total (£)", "yearly council tax (£)"]:
+    for h in [
+        "purchase cost (£)",
+        "monthly mortgage payment (£)",
+        "monthly sinking fund (£)",
+        "monthly life insurance (£)",
+        "monthly commute cost (£)",
+        "monthly council tax (£)",
+        "total monthly housing cost (£)",
+        "ashby works estimate (£)",
+    ]:
         if h in header_lookup:
             ci = header_lookup[h]
             fmt_requests.append(
@@ -561,6 +688,35 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
                     }
                 }
             )
+
+    # Grey text for Monthly Life Insurance (constant, visually distinct)
+    life_key = "monthly life insurance (£)"
+    if life_key in header_lookup:
+        ci = header_lookup[life_key]
+        fmt_requests.append(
+            {
+                "repeatCell": {
+                    "range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},
+                    "cell": {"userEnteredFormat": {"textFormat": {"foregroundColor": GREY_TEXT}}},
+                    "fields": "userEnteredFormat.textFormat",
+                }
+            }
+        )
+
+    # Bold for Total Monthly Housing Cost
+    total_key = "total monthly housing cost (£)"
+    if total_key in header_lookup:
+        ci = header_lookup[total_key]
+        fmt_requests.append(
+            {
+                "repeatCell": {
+                    "range": {"sheetId": sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},
+                    "cell": {"userEnteredFormat": {"textFormat": {"bold": True}}},
+                    "fields": "userEnteredFormat.textFormat",
+                }
+            }
+        )
+
     for h in [
         "what the area is like",
         "walkable amenities",
@@ -570,6 +726,7 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
         "secondary school",
         "group notes / whatsapp",
         "ashby comments",
+        "ashby works estimate (£)",
         "status reason",
         "primary inspection year",
         "secondary inspection year",
@@ -646,6 +803,101 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
     if extra_requests:
         spreadsheet.batch_update({"requests": extra_requests})
 
+    # Visual zone separators — thick right borders between column groups
+    zone_boundaries = [4, 13, 24, 31]  # last column index of each zone (pre-gap)
+    border_requests: list = []
+    for col in zone_boundaries:
+        border_requests.append(
+            {
+                "updateBorders": {
+                    "range": {
+                        "sheetId": sid,
+                        "startColumnIndex": col,
+                        "endColumnIndex": col + 1,
+                    },
+                    "right": {
+                        "style": "SOLID_MEDIUM",
+                        "color": {"red": 0.5, "green": 0.5, "blue": 0.5},
+                    },
+                }
+            }
+        )
+
+        # Column groups — gap columns prevent adjacent merge.
+        # Delete existing groups first to avoid accumulation.
+        delete_requests: list = []
+        try:
+            existing_sheet = json.loads(
+                spreadsheet.client.request(
+                    "get",
+                    f"https://sheets.googleapis.com/v4/spreadsheets/{spreadsheet.id}",
+                    params={"fields": "sheets(properties,columnGroups)"},
+                ).content
+            )
+            for s in existing_sheet.get("sheets", []):
+                if s["properties"]["sheetId"] == sid:
+                    for cg in sorted(s.get("columnGroups", []), key=lambda x: x.get("depth", 0), reverse=True):
+                        r = cg["range"]
+                        delete_requests.append(
+                            {
+                                "deleteDimensionGroup": {
+                                    "range": {
+                                        "sheetId": sid,
+                                        "dimension": "COLUMNS",
+                                        "startIndex": r["startIndex"],
+                                        "endIndex": r["endIndex"],
+                                    }
+                                }
+                            }
+                        )
+                    break
+            if delete_requests:
+                spreadsheet.batch_update({"requests": delete_requests})
+        except Exception as exc:
+            logger.warning("Failed to clear column groups: %s", exc)
+
+    gap_cols = {5, 14, 25, 32}
+    zones = [
+        (0, 5),
+        (6, 14),
+        (15, 25),
+        (26, 32),
+        (33, 38),
+    ]
+    for start, end in zones:
+        border_requests.append(
+            {
+                "addDimensionGroup": {
+                    "range": {
+                        "sheetId": sid,
+                        "dimension": "COLUMNS",
+                        "startIndex": start,
+                        "endIndex": end,
+                    }
+                }
+            }
+        )
+
+    # Gap columns: very narrow width
+    for gc in gap_cols:
+        border_requests.append(
+            {
+                "updateDimensionProperties": {
+                    "range": {
+                        "sheetId": sid,
+                        "dimension": "COLUMNS",
+                        "startIndex": gc,
+                        "endIndex": gc + 1,
+                    },
+                    "properties": {"pixelSize": 16},
+                    "fields": "pixelSize",
+                }
+            }
+        )
+
+    if border_requests:
+        spreadsheet.batch_update({"requests": border_requests})
+
 
 def ensure_named_ranges(spreadsheet: gspread.Spreadsheet) -> None:
     existing = {r["name"]: r for r in (spreadsheet.list_named_ranges() or [])}
@@ -676,7 +928,13 @@ def ensure_named_ranges(spreadsheet: gspread.Spreadsheet) -> None:
     # View tab named ranges
     ws_view = spreadsheet.worksheet("Properties View")
     sid_view = ws_view._properties["sheetId"]
-    for name, col_idx in [("View_RightmoveLink", 1), ("View_RightmoveID", 2), ("View_ListingAddress", 0)]:
+    for name, col_idx in [
+        ("View_RightmoveLink", 1),
+        ("View_RightmoveID", 2),
+        ("View_ListingAddress", 0),
+        ("View_AshbyWorksEstimate", 33),
+        ("View_Status", 36),
+    ]:
         current_names.add(name)
         range_spec = {"sheetId": sid_view, "startColumnIndex": col_idx, "endColumnIndex": col_idx + 1}
         if name in existing:
@@ -692,9 +950,37 @@ def ensure_named_ranges(spreadsheet: gspread.Spreadsheet) -> None:
         else:
             requests.append({"addNamedRange": {"namedRange": {"name": name, "range": range_spec}}})
 
+    # Constants tab named ranges (single-cell ranges)
+    ensure_constants_tab(spreadsheet)
+    ws_const = spreadsheet.worksheet(CONSTANTS_TAB)
+    sid_const = ws_const._properties["sheetId"]
+    for row_idx, (label, _) in enumerate(CONSTANTS_VALUES):
+        name = _const_range_name(label)
+        current_names.add(name)
+        range_spec = {
+            "sheetId": sid_const,
+            "startRowIndex": row_idx + 1,
+            "endRowIndex": row_idx + 2,
+            "startColumnIndex": 1,
+            "endColumnIndex": 2,
+        }
+        if name in existing:
+            rid = existing[name]["namedRangeId"]
+            requests.append(
+                {
+                    "updateNamedRange": {
+                        "namedRange": {"namedRangeId": rid, "name": name, "range": range_spec},
+                        "fields": "range",
+                    }
+                }
+            )
+        else:
+            requests.append({"addNamedRange": {"namedRange": {"name": name, "range": range_spec}}})
+
     # Delete orphaned ranges (names we no longer generate)
     for name, info in existing.items():
-        if (name.startswith("Data_") or name.startswith("View_")) and name not in current_names:
+        prefixes = ("Data_", "View_", "Const_")
+        if name.startswith(prefixes) and name not in current_names:
             requests.append({"deleteNamedRange": {"namedRangeId": info["namedRangeId"]}})
 
     if requests:

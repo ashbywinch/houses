@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import logging
 import re
+from collections import namedtuple
 from pathlib import Path
 
 from houses.api_cache import cached_sync_client, get_cached, set_cached
@@ -72,22 +73,19 @@ def _normalise(text: str) -> str:
 
 
 def _lookup_yearly_cost(band: str, local_authority: str) -> float | None:
-    """Fetch the Band D rate from CivAccount, falling back to the CSV."""
-    # 1) Try CivAccount (live API, may have up-to-date rates)
+    """Fetch the Band D rate from CivAccount, falling back to the CSV.
+
+    CivAccount is called via ``cached_sync_client`` which automatically
+    caches every response to disk — no manual ``get_cached``/``set_cached``
+    needed.
+    """
     slug = local_authority.lower().replace(" ", "-").replace(".", "")
     url = f"{CIVACCOUNT_URL}/{slug}"
-    cached = get_cached("GET", url)
-    if cached is not None:
-        band_d_rate = cached.get("band_d_rate")
-        if band_d_rate and band in BAND_RATIOS:
-            return round(band_d_rate * BAND_RATIOS[band], 2)
-        return None
     try:
         with cached_sync_client(timeout=10.0) as client:
             civ = client.get(url)
             if civ.status_code == 200:
                 civ_data = civ.json()
-                set_cached("GET", url, None, None, civ_data)
                 band_d_rate = civ_data.get("band_d_rate")
                 if band_d_rate and band in BAND_RATIOS:
                     return round(band_d_rate * BAND_RATIOS[band], 2)
@@ -104,10 +102,100 @@ def _lookup_yearly_cost(band: str, local_authority: str) -> float | None:
             if key.startswith(norm) or norm.startswith(key):
                 band_d_rate = val
                 break
+
+    # 3) London boroughs: the CSV only has an aggregate "London boroughs" entry.
+    #    Individual borough names (Ealing, Westminster, etc.) don't appear.
+    if band_d_rate is None:
+        _london_boroughs = frozenset(
+            {
+                "barking and dagenham",
+                "barnet",
+                "bexley",
+                "brent",
+                "bromley",
+                "camden",
+                "croydon",
+                "ealing",
+                "enfield",
+                "greenwich",
+                "hackney",
+                "hammersmith and fulham",
+                "haringey",
+                "harrow",
+                "havering",
+                "hillingdon",
+                "hounslow",
+                "islington",
+                "kensington and chelsea",
+                "kingston upon thames",
+                "lambeth",
+                "lewisham",
+                "merton",
+                "newham",
+                "redbridge",
+                "richmond upon thames",
+                "southwark",
+                "sutton",
+                "tower hamlets",
+                "waltham forest",
+                "wandsworth",
+                "westminster",
+                "city of london",
+                "city of westminster",
+            }
+        )
+        if norm in _london_boroughs or norm.replace(" ", "") in _london_boroughs:
+            for key, val in rates.items():
+                if "london borough" in key.lower():
+                    band_d_rate = val
+                    break
+
     if band_d_rate and band in BAND_RATIOS:
         return round(band_d_rate * BAND_RATIOS[band], 2)
 
     return None
+
+
+class CachedVOAClient:
+    """Async context manager that wraps ``VOAClient`` with disk caching.
+
+    ``VOAClient`` has its own internal HTTP client that bypasses our
+    ``CachingTransport``, so caching must be added at the ``fetch_page``
+    level.  This wrapper provides the same async context manager interface
+    as ``VOAClient`` and automatically serializes/restores page results
+    to/from the ``data/api_cache/`` disk cache.
+    """
+
+    _VoaRow = namedtuple("_VoaRow", ["band", "address", "postcode", "local_authority"])
+
+    def __init__(self):
+        self._inner: object | None = None
+
+    async def __aenter__(self):
+        from uk_property_apis.voa import VOAClient
+
+        self._inner = VOAClient()
+        await self._inner.__aenter__()
+        return self
+
+    async def __aexit__(self, *args):
+        if self._inner is not None:
+            await self._inner.__aexit__(*args)
+
+    async def fetch_page(self, postcode: str, page: int = 0):
+        key = f"voa/{postcode.strip().upper()}"
+        cached = get_cached("GET", key)
+        if cached is not None:
+            rows = [self._VoaRow(**r) for r in cached.get("rows", [])]
+            return type("Page", (), {"rows": rows})()
+
+        result = await self._inner.fetch_page(postcode, page=page)
+        rows = [
+            {"band": r.band, "address": r.address, "postcode": r.postcode, "local_authority": r.local_authority}
+            for r in result.rows
+        ]
+        set_cached("GET", key, None, None, {"rows": rows})
+        return result
 
 
 async def lookup_council_tax(postcode: str, address: str = "") -> CouncilTaxInfo | None:
@@ -120,27 +208,16 @@ async def lookup_council_tax(postcode: str, address: str = "") -> CouncilTaxInfo
     Returns ``CouncilTaxInfo`` with band, yearly cost, and an evidence URL,
     or ``None`` if the lookup fails entirely.
     """
-    voa_key = f"voa/{postcode.strip().upper()}"
-    voa_cached = get_cached("GET", voa_key)
-    if voa_cached is not None:
-        results_raw = voa_cached.get("rows", [])
-    else:
-        try:
-            from uk_property_apis.voa import VOAClient
-
-            async with VOAClient() as client:
-                page = await client.fetch_page(postcode, page=0)
-            results_raw = [
-                {"address": r.address, "band": r.band, "local_authority": r.local_authority}
-                for r in page.rows
-            ]
-            set_cached("GET", voa_key, None, None, {"rows": results_raw})
-        except ImportError:
-            logger.warning("uk-property-apis not installed; skipping council tax lookup")
-            return None
-        except Exception as e:
-            logger.warning("VOA council tax lookup failed for %s: %s", postcode, e)
-            return None
+    try:
+        async with CachedVOAClient() as client:
+            page = await client.fetch_page(postcode)
+        results_raw = [{"address": r.address, "band": r.band, "local_authority": r.local_authority} for r in page.rows]
+    except ImportError:
+        logger.warning("uk-property-apis not installed; skipping council tax lookup")
+        return None
+    except Exception as e:
+        logger.warning("VOA council tax lookup failed for %s: %s", postcode, e)
+        return None
 
     if not address:
         logger.debug("No address provided — cannot positively identify property")
