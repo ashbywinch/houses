@@ -48,7 +48,7 @@ Run these analyses to find candidates for refactoring:
 
 Additionally, look for these patterns by reading key files:
 - **Data clumps**: Same 2+ parameters passed together (e.g. `lat, lng` as separate args, same dict keys in multiple places)
-- **Cross-module duplication**: Same function name or logic in multiple modules
+- **Cross-module duplication**: Same function name or logic in multiple modules. Even for a single instance of a well-known computation (great-circle distance, haversine, coordinate math, hashing, date arithmetic), check for an existing library (`geopy`) before extracting — the library may provide a cleaner API with better accuracy and eliminate the need for the class entirely.
 - **Import violations**: `grep -rn 'from houses\.' houses/*.py` for private-import checks
 - **Magic numbers**: Hardcoded config values in business logic
 
@@ -63,7 +63,7 @@ Examine the code flagged in Step 1 against the standards. Look for:
 - **Module encapsulation violations**: Private symbols imported across modules (`_geocode`, `_rightmove_id`, `_KNOWN_COUNTIES`), imports inside function bodies
 - **Module boundary violations**: Classes with non-trivial behavior mixed into `models.py`, classes not in their own module
 - **Missing member functions**: Serialization, computed properties that live in a separate module instead of on the class
-- **Data clumps**: The same parameters passed together across multiple functions (`lat, lng` as separate args), the same dict keys constructed in multiple places (`{"walk_to_town_minutes", "amenities"}`), the same long parameter lists repeated. Promote to a class named after the domain concept.
+- **Data clumps**: The same parameters passed together across multiple functions (`lat, lng` as separate args), the same dict keys constructed in multiple places (`{"walk_to_town_minutes", "amenities"}`), the same long parameter lists repeated. Promote to a class named after the domain concept — `GeoPoint` not `LatLngPair`, `CommuteRoute` not `CommuteConfig`. Name methods on the class after what they do (`distance_km_to`) not the implementation formula (`haversine_km`). When the class wraps an attribute that may be missing (e.g., resolved coordinates, lookup result), use optional fields on a single domain class (`Address` with `lat: float | None`) — don't create separate resolved/unresolved variants.
 - **Naming smells**: Verb-suffixed class names (Orchestrator, Manager, Handler), "utils" modules, functions named like classes, variables named after their type rather than their domain concept. If you are unsure what the correct domain concept is, stop and ask the user.
 - **Type smells**: `Any`, wide unions, `| None` cop-outs, nested `dict` deep in business logic
 - **Structure smells**: Mixed concerns, deep nesting, cross-module duplication
@@ -85,7 +85,11 @@ Group by severity:
 
 ## Step 4: Pick ONE Goal
 
-From the findings, select exactly one coherent goal for the PR. A good goal satisfies all of:
+From the findings, select exactly one coherent goal for the PR.
+
+**Before settling on a goal, check for libraries in all cases:** Even a single hand-rolled well-known computation (distance, geocoding, coordinate math, hashing, date arithmetic, formatting) should prompt a library search. The library's API may change the right abstraction — for example, `geopy.distance.great_circle` with a `Point` argument eliminates both a hand-rolled `_haversine_km` AND a data-clump `(lat, lng)` parameter pair in one shot. Run `uv add <library> && uv sync` to install, then import directly.
+
+A good goal satisfies all of:
 
 1. **One axis of change** — purely structural (moving code, extracting functions), purely cosmetic (renaming), or purely removal (dead code). Do not mix categories in one PR.
 2. **1–4 files touched** — the entire change stays within a small group of closely related files. If it touches 5+ files, it's too broad; split it.
