@@ -42,5 +42,5 @@ async def test_amenities_include_walk_times():
         minutes = int(time_str.rstrip("m"))
         assert 1 <= minutes <= 60, f"Walk time should be 1-60 min, got: {minutes}"
 
-    assert result.get("walk_to_town_minutes") is not None
+    assert result.get("walk_to_town_minutes") is not None, "Walk to town time not found"
     assert 1 <= result["walk_to_town_minutes"] <= 60

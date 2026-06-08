@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
 import re
 from typing import Any
 
 import httpx
 
-from houses.api_cache import cached_async_client, get_cached, with_cache
+from houses.api_cache import cached_async_client, with_cache
 from houses.config import settings
 from houses.retry import retry_async
 
@@ -91,22 +89,6 @@ _KNOWN_COUNTIES = frozenset(
     }
 )
 
-_town_geo_cache: dict[str, tuple[float, float]] = {}
-
-
-# Per-process-run API exhaustion tracking.
-# Set when an API returns a usage-limit error so subsequent calls
-# skip straight to the fallback instead of hammering the dead endpoint.
-class _APIState:
-    places_exhausted: bool = False
-    ors_geo_exhausted: bool = False
-    nominatim_exhausted: bool = False
-    nominatim_last_call: float = 0.0
-
-
-_api_state = _APIState()
-
-
 def _extract_town(address: str) -> str:
     parts = [p.strip() for p in address.split(",")]
     filtered = [p for p in parts if p and not _POSTCODE_FULL_RE.match(p) and not _POSTCODE_OUTCODE_RE.match(p)]
@@ -125,24 +107,14 @@ async def _geocode_town(town: str) -> tuple[float, float] | None:
     key = town.strip().upper()
     if not key:
         return None
-    if key in _town_geo_cache:
-        return _town_geo_cache[key]
 
+    # ORS Pelias — disk-cached via with_cache
     ors_params = {"text": f"{town}, UK", "size": 1}
-    ors_cached = get_cached("GET", ORS_GEOCODE_URL, ors_params)
-    if ors_cached is not None:
-        features = ors_cached.get("features", [])
-        if features:
-            lng, lat = features[0]["geometry"]["coordinates"]
-            _town_geo_cache[key] = (lat, lng)
-            return (lat, lng)
-
-    # Try ORS Pelias (skip if exhausted to avoid hammering)
-    if settings.ors_api_key and not _api_state.ors_geo_exhausted:
+    if settings.ors_api_key:
         try:
             async with cached_async_client(timeout=10.0) as client:
 
-                async def _fetch():
+                async def _fetch_ors():
                     resp = await retry_async(
                         lambda: client.get(
                             ORS_GEOCODE_URL,
@@ -156,65 +128,43 @@ async def _geocode_town(town: str) -> tuple[float, float] | None:
                     resp.raise_for_status()
                     return resp.json()
 
-                data = await with_cache("GET", ORS_GEOCODE_URL, params=ors_params, fetch=_fetch)
+                data = await with_cache("GET", ORS_GEOCODE_URL, params=ors_params, fetch=_fetch_ors)
                 features = data.get("features", [])
                 if features:
                     lng, lat = features[0]["geometry"]["coordinates"]
-                    _town_geo_cache[key] = (lat, lng)
                     return (lat, lng)
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code in (403, 429):
-                _api_state.ors_geo_exhausted = True
             logger.warning("ORS geocoding failed for town: %s (%s)", town, exc.response.status_code)
         except Exception:
             logger.warning("ORS geocoding failed for town: %s", town)
 
-    # Fallback: Nominatim (free, no key)
+    # Fallback: Nominatim (free, no key) — disk-cached via with_cache
     nom_params = {"q": f"{town}, UK", "format": "json", "limit": 1}
-    nom_cached = get_cached("GET", "https://nominatim.openstreetmap.org/search", nom_params)
-    if nom_cached is not None and nom_cached:
-        _town_geo_cache[key] = (float(nom_cached[0]["lat"]), float(nom_cached[0]["lon"]))
-        return _town_geo_cache[key]
+    try:
+        async with cached_async_client(timeout=10.0) as client:
 
-    if not _api_state.nominatim_exhausted:
-        now = asyncio.get_event_loop().time()
-        since_last = now - _api_state.nominatim_last_call
-        if since_last < 1.0:
-            await asyncio.sleep(1.0 - since_last)
-        try:
-            async with cached_async_client(timeout=10.0) as client:
+            async def _fetch_nom():
+                resp = await client.get(
+                    "https://nominatim.openstreetmap.org/search",
+                    params=nom_params,
+                    headers={"User-Agent": "HousesApp/1.0"},
+                )
+                resp.raise_for_status()
+                return resp.json()
 
-                async def _fetch_nom():
-                    resp = await client.get(
-                        "https://nominatim.openstreetmap.org/search",
-                        params=nom_params,
-                        headers={"User-Agent": "HousesApp/1.0"},
-                    )
-                    _api_state.nominatim_last_call = asyncio.get_event_loop().time()
-                    resp.raise_for_status()
-                    return resp.json()
+            nom_url = "https://nominatim.openstreetmap.org/search"
+            data = await with_cache("GET", nom_url, params=nom_params, fetch=_fetch_nom)
+            if data:
+                return (float(data[0]["lat"]), float(data[0]["lon"]))
+    except httpx.HTTPStatusError as exc:
+        logger.warning("Nominatim geocoding failed for town: %s (%s)", town, exc.response.status_code)
+    except Exception:
+        logger.warning("Nominatim geocoding failed for town: %s", town)
 
-                nom_url = "https://nominatim.openstreetmap.org/search"
-                data = await with_cache("GET", nom_url, params=nom_params, fetch=_fetch_nom)
-                if data:
-                    lat = float(data[0]["lat"])
-                    lng = float(data[0]["lon"])
-                    _town_geo_cache[key] = (lat, lng)
-                    return (lat, lng)
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 429:
-                _api_state.nominatim_exhausted = True
-            logger.warning("Nominatim geocoding failed for town: %s (%s)", town, exc.response.status_code)
-        except Exception:
-            logger.warning("Nominatim geocoding failed for town: %s", town)
-
-    # If exact town failed, try stripping suffixes like "Station Area" → "Maidenhead"
+    # If exact town failed, try stripping suffixes like "Station Area" -> "Maidenhead"
     stripped = _TOWN_SUFFIXES.sub("", town).strip()
     if stripped and stripped.upper() != key:
-        result = await _geocode_town(stripped)
-        if result:
-            _town_geo_cache[key] = result
-            return result
+        return await _geocode_town(stripped)
 
     return None
 
@@ -227,9 +177,6 @@ async def _walk_duration(
     origin = [lng, lat]
     dest = [town_centre[1], town_centre[0]]
     body = {"coordinates": [origin, dest]}
-    cached = get_cached("POST", ORS_WALKING_URL, None, json.dumps(body, sort_keys=True))
-    if cached is not None:
-        return round(cached["routes"][0]["summary"]["duration"] / 60)
     try:
         async with cached_async_client(timeout=15.0) as client:
 
@@ -270,7 +217,6 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
     places = ""
     google_failed = False
 
-    # Skip Places if exhausted to avoid hammering
     places_body = {
         "includedTypes": types,
         "maxResultCount": 5,
@@ -281,42 +227,35 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
             }
         },
     }
-    places_cached = get_cached("POST", GOOGLE_MAPS_PLACES_URL, None, json.dumps(places_body, sort_keys=True))
-    if places_cached is not None:
-        return _format_places(places_cached, lat, lng)
+    try:
+        async with cached_async_client(timeout=15.0) as client:
 
-    if not _api_state.places_exhausted:
-        try:
-            async with cached_async_client(timeout=15.0) as client:
+            async def _fetch_places():
+                resp = await retry_async(
+                    lambda: client.post(
+                        GOOGLE_MAPS_PLACES_URL,
+                        headers={
+                            "X-Goog-Api-Key": settings.google_maps_api_key,
+                            "X-Goog-FieldMask": "places.displayName,places.types,places.location",
+                            "Content-Type": "application/json",
+                        },
+                        json=places_body,
+                    ),
+                    max_retries=2,
+                    base_delay=1.0,
+                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+                )
+                resp.raise_for_status()
+                return resp.json()
 
-                async def _fetch_places():
-                    resp = await retry_async(
-                        lambda: client.post(
-                            GOOGLE_MAPS_PLACES_URL,
-                            headers={
-                                "X-Goog-Api-Key": settings.google_maps_api_key,
-                                "X-Goog-FieldMask": "places.displayName,places.types,places.location",
-                                "Content-Type": "application/json",
-                            },
-                            json=places_body,
-                        ),
-                        max_retries=2,
-                        base_delay=1.0,
-                        exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-                    )
-                    resp.raise_for_status()
-                    return resp.json()
-
-                data = await with_cache("POST", GOOGLE_MAPS_PLACES_URL, body=places_body, fetch=_fetch_places)
-            result = _format_places(data, lat, lng)
-            if result:
-                return result
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 429:
-                _api_state.places_exhausted = True
+            data = await with_cache("POST", GOOGLE_MAPS_PLACES_URL, body=places_body, fetch=_fetch_places)
+        result = _format_places(data, lat, lng)
+        if result:
+            return result
+    except httpx.HTTPStatusError as exc:
             logger.warning("Google Places API failed (%s), falling back to Overpass", exc.response.status_code)
             google_failed = True
-        except (httpx.RequestError, KeyError, IndexError) as e:
+    except (httpx.RequestError, KeyError, IndexError) as e:
             logger.warning("Google Places API failed (%s), falling back to Overpass", e)
             google_failed = True
 
@@ -331,9 +270,6 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
             f");out center 5;"
         )
         overpass_params = {"data": overpass_query}
-        overpass_cached = get_cached("GET", overpass_url, overpass_params)
-        if overpass_cached is not None:
-            return _format_overpass(overpass_cached, lat, lng)
         try:
             async with cached_async_client(timeout=15.0) as client:
 
