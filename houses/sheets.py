@@ -303,26 +303,19 @@ def _splt(price: float) -> float:
 
 
 def ensure_constants_tab(spreadsheet: gspread.Spreadsheet) -> gspread.Worksheet:
-    """Create the Constants tab if missing and write values."""
+    """Create the Constants tab if missing. Never overwrites existing values."""
     try:
         ws = spreadsheet.worksheet(CONSTANTS_TAB)
+        logger.info("'%s' tab already exists — leaving untouched", CONSTANTS_TAB)
+        return ws
     except gspread.WorksheetNotFound:
         ws = spreadsheet.add_worksheet(title=CONSTANTS_TAB, rows=20, cols=2)
 
-    existing = ws.get(
-        "A1:B10",
-        value_render_option="FORMULA",
-    )
-
-    expected = [CONSTANTS_HEADERS]
+    values = [CONSTANTS_HEADERS]
     for label, val in CONSTANTS_VALUES:
-        expected.append([label, val])
-    if existing == expected:
-        return ws
-
-    ws.clear()
-    ws.update(range_name="A1", values=expected, value_input_option="USER_ENTERED")
-    logger.info("Wrote %d constants to '%s' tab", len(CONSTANTS_VALUES), CONSTANTS_TAB)
+        values.append([label, val])
+    ws.update(range_name="A1", values=values, value_input_option="USER_ENTERED")
+    logger.info("Created '%s' tab with %d constants", CONSTANTS_TAB, len(CONSTANTS_VALUES))
     return ws
 
 
