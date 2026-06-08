@@ -1,6 +1,7 @@
 """Pytest configuration — prevents external API calls and sheet writes."""
 
 import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -20,10 +21,15 @@ def _offline_scraper():
 @pytest.fixture(autouse=True)
 def _isolate_api_cache():
     """Isolate the disk API cache to a temp directory per test.
-    Tests that need cached data must seed it before the test runs."""
+    Fail if any cache files appear — unit tests must not hit real APIs."""
     with tempfile.TemporaryDirectory() as tmp:
         set_cache_dir(tmp)
         yield
+        files = list(Path(tmp).iterdir())
+        assert not files, (
+            f"Unit test created {len(files)} cache file(s), meaning it hit a real API. "
+            f"Cache files: {[f.name for f in files]}"
+        )
 
 
 @pytest.fixture(autouse=True)

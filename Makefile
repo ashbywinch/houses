@@ -35,13 +35,13 @@ run: setup
 	@$(UV) run uvicorn houses.server:app --host 127.0.0.1 --port 8080 --reload
 
 test: setup lint
-	@$(PYTEST) tests/ -q --tb=short -m "not e2e"
+	@$(PYTEST) tests/unit/ tests/integration/ -q --tb=short
 
 test-all: setup lint
 	@$(PYTEST) tests/ -q --tb=short -o "addopts="
 
 test-integration: setup lint
-	@$(PYTEST) tests/ -v --tb=long -m "integration"
+	@$(PYTEST) tests/integration/ -v --tb=long
 
 coverage: setup
 	@$(UV) run coverage run -m pytest tests/ -q --tb=short

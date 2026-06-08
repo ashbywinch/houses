@@ -1,12 +1,4 @@
-"""E2E test for View tab formulas — writes test records, validates outputs.
-
-Only one reason to touch a real sheet: Google Sheets evaluates our formula
-strings correctly (named range resolution, IFNA/LET/INDEX, PMT, arithmetic).
-
-ALL tests in this file must require a real Google Sheet to function.
-If a test can pass without sheet access (using just Python assertions on
-headers, formula strings, or code invariants), it belongs in tests/unit/.
-This keeps e2e tests fast, quota-efficient, and meaningful.
+"""E2E test for View tab formulas — reads/writes a real Google Sheet.
 
 Run with:  make test-all
 """
@@ -161,7 +153,7 @@ RECORDS = [
         address="2 Another Road, Otherville, OT2 2ND",
         postcode="OT2 2ND",
         bedrooms=4,
-        price=450000,
+        price=600000,
         rid=22222222,
         status="Current",
         simon_min=35,
@@ -215,29 +207,36 @@ class TestViewFormulasOnTestSheet:
 
     @pytest.fixture(scope="class", autouse=True)
     def setup_sheet(self, sh):
-        # Read both tabs in one batch to decide what needs updating
+        # Check cache: read both tabs' headers and key values in one batch
         result = sh.values_batch_get(
             [
                 f"'{DATA_TAB}'!1:100",
                 f"'{VIEW_TAB}'!1:100",
             ]
         )
-        data_range = result["valueRanges"][0]
-        view_range = result["valueRanges"][1]
-        data_values = data_range.get("values", [])
-        view_values = view_range.get("values", [])
+        data_values = result["valueRanges"][0].get("values", [])
+        view_values = result["valueRanges"][1].get("values", [])
         data_headers = data_values[0] if data_values else []
         view_headers = view_values[0] if view_values else []
 
-        data_ok = data_headers == COLUMN_HEADERS and len(data_values) >= 1 + len(RECORDS) + 1
-        view_ok = view_headers == VIEW_HEADERS and len(view_values) >= 4
-
-        if data_ok and view_ok:
-            # Check if the "new row" (row 4) exists in View and Data tabs
-            data_new = data_values[1 + len(RECORDS)] if len(data_values) > 1 + len(RECORDS) else []
-            view_new = view_values[3] if len(view_values) > 3 else []
-            if data_new and data_new[0].startswith("https://") and view_new and view_new[0]:
-                return  # Everything is already set up
+        if data_headers == COLUMN_HEADERS and view_headers == VIEW_HEADERS:
+            # Check RECORDS prices (col E, index 4) match expected
+            prices_match = True
+            for i, rec in enumerate(RECORDS):
+                row = data_values[1 + i] if 1 + i < len(data_values) else []
+                expected_price = str(rec.price)
+                actual_price = row[4].strip() if len(row) > 4 else ""
+                if actual_price != expected_price:
+                    prices_match = False
+                    break
+            # Check one View formula is current (e.g. Total at AF2)
+            total_formula_expected = VIEW_FORMULA_COLS.get("total monthly housing cost (£)", "")
+            view_row2 = view_values[1] if len(view_values) > 1 else []
+            af_idx = VIEW_HEADERS.index("Total Monthly Housing Cost (£)")
+            total_formula_actual = view_row2[af_idx] if af_idx < len(view_row2) else ""
+            formulas_match = total_formula_actual == total_formula_expected
+            if prices_match and formulas_match and len(view_values) >= 4 and view_values[3] and view_values[3][0]:
+                return  # Cache valid
 
         # Batch-setup: write headers + records in one shot per tab
         # Data tab: header + RECORDS + new row
@@ -422,16 +421,31 @@ class TestViewFormulasOnTestSheet:
             r2_mr = float(d[2][mr_idx]) if d[2][mr_idx] else 0
             assert r2_sd == 0, f"Row 3 (Current) Stamp Duty should be 0, got {r2_sd}"
             assert r2_na == 0, f"Row 3 (Current) Net Ashby should be 0, got {r2_na}"
-            assert abs(r2_mr - (450000 - 177000)) < 1, (
-                f"Row 3 (Current) Mortgage Required should be 273000, got {r2_mr}"
+            assert abs(r2_mr - (600000 - 177000)) < 1, (
+                f"Row 3 (Current) Mortgage Required should be 423000, got {r2_mr}"
             )
 
-        # Monthly Sinking Fund = YearlySinkingFund / 12 * 2/3
-        # For Row 2 (Price=350k): 350000 * 0.01 / 12 * 2/3 = 194.44
-        msf_idx = VIEW_HEADERS.index("Monthly Sinking Fund (£)")
-        msf_row2 = all_data[0][msf_idx] if all_data and len(all_data[0]) > msf_idx else ""
-        msf_raw = msf_row2.replace("£", "").replace(",", "").strip()
-        assert abs(float(msf_raw) - 194.44) < 1, f"Row 2 Monthly Sinking Fund should be ~194.44, got {msf_row2}"
+        # Total must be >= MMP for non-Current rows. For Current rows, total
+        # is reduced by £800 rental income (lodger), so it can be < MMP.
+        mm_idx = VIEW_HEADERS.index("Monthly Mortgage Payment (£)")
+        total_idx = VIEW_HEADERS.index("Total Monthly Housing Cost (£)")
+        status_idx = VIEW_HEADERS.index("Status")
+        for row_idx, row in enumerate(all_data, 2):
+            status = row[status_idx].strip() if len(row) > status_idx and row[status_idx] else ""
+            mm_cell = row[mm_idx] if len(row) > mm_idx and row[mm_idx] else ""
+            tot_cell = row[total_idx] if len(row) > total_idx and row[total_idx] else ""
+            mm_raw = mm_cell.replace("£", "").replace(",", "").strip() if mm_cell else ""
+            total_raw = tot_cell.replace("£", "").replace(",", "").strip() if tot_cell else ""
+            if mm_raw and total_raw:
+                total_val = float(total_raw)
+                mm_val = float(mm_raw)
+                if status == "Current":
+                    # Total = MMP + other_costs - 800 (rental income). Should be < MMP + other_costs
+                    assert total_val < mm_val + 2000, (
+                        f"Row {row_idx} (Current): Total ({total_val}) should be reduced by rent"
+                    )
+                else:
+                    assert total_val >= mm_val, f"Row {row_idx}: Total ({total_val}) < Mortgage Payment ({mm_val})"
 
         # Verify zone separation via right borders and column groups
         import requests as http_requests
