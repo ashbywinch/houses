@@ -490,6 +490,15 @@ def test_current_home_mortgage_excludes_ashby():
     assert "Data_Price" in formula or "Const_Deposit" in formula
 
 
+def test_monthly_mortgage_blank_when_ashby_works_missing():
+    """Monthly Mortgage Payment should be blank when Ashby Works Estimate is empty."""
+    formula = DATA_FORMULA_COLS["monthly mortgage payment (£)"]
+    assert "View_AshbyWorksEstimate" in formula
+    assert "View_Status" in formula
+    assert 'INDEX(View_AshbyWorksEstimate,ROW())=""' in formula
+    assert '"Current"' in formula
+
+
 # ── Slice 3: View Tab Definitions ────────────────────────────────────────
 
 
