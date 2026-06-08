@@ -61,16 +61,31 @@ class TestLookupCouncilTax:
         with patch("uk_property_apis.voa.VOAClient") as mock_voa:
             instance = AsyncMock()
             mock_voa.return_value = instance
-            instance.fetch_page = AsyncMock(return_value=_make_page(_make_bands([("C", "123 OTHER STREET, NEWBURY, RG14 1AA")])))
+            instance.fetch_page = AsyncMock(
+                return_value=_make_page(_make_bands([("C", "123 OTHER STREET, NEWBURY, RG14 1AA")]))
+            )
             result = await lookup_council_tax("RG14 1AA", "94A Northbrook Street, Newbury, RG14 1AA")
             assert result is None
 
     @pytest.mark.asyncio
     async def test_match_returns_band(self):
-        with (patch("uk_property_apis.voa.VOAClient") as mock_voa, patch("houses.council_tax._lookup_yearly_cost", return_value=1500.0)):
+        with (
+            patch("uk_property_apis.voa.VOAClient") as mock_voa,
+            patch("houses.council_tax._lookup_yearly_cost", return_value=1500.0),
+        ):
             instance = AsyncMock()
             mock_voa.return_value = instance
-            instance.fetch_page = AsyncMock(return_value=_make_page(_make_bands([("B", "94A NORTHBROOK STREET, NEWBURY, RG14 1AA"), ("C", "95 NORTHBROOK STREET, NEWBURY, RG14 1AA")], la="West Berkshire")))
+            instance.fetch_page = AsyncMock(
+                return_value=_make_page(
+                    _make_bands(
+                        [
+                            ("B", "94A NORTHBROOK STREET, NEWBURY, RG14 1AA"),
+                            ("C", "95 NORTHBROOK STREET, NEWBURY, RG14 1AA"),
+                        ],
+                        la="West Berkshire",
+                    )
+                )
+            )
             result = await lookup_council_tax("RG14 1AA", "94A Northbrook Street, Newbury, RG14 1AA")
             assert isinstance(result, CouncilTaxInfo)
             assert result.band == "B"
@@ -79,20 +94,46 @@ class TestLookupCouncilTax:
 
     @pytest.mark.asyncio
     async def test_match_among_deleted_and_active(self):
-        with (patch("uk_property_apis.voa.VOAClient") as mock_voa, patch("houses.council_tax._lookup_yearly_cost", return_value=1800.0)):
+        with (
+            patch("uk_property_apis.voa.VOAClient") as mock_voa,
+            patch("houses.council_tax._lookup_yearly_cost", return_value=1800.0),
+        ):
             instance = AsyncMock()
             mock_voa.return_value = instance
-            instance.fetch_page = AsyncMock(return_value=_make_page(_make_bands([("DELETED", "94A NORTHBROOK STREET, NEWBURY, RG14 1AA"), ("D", "94A NORTHBROOK STREET, NEWBURY, RG14 1AA")], la="West Berkshire")))
+            instance.fetch_page = AsyncMock(
+                return_value=_make_page(
+                    _make_bands(
+                        [
+                            ("DELETED", "94A NORTHBROOK STREET, NEWBURY, RG14 1AA"),
+                            ("D", "94A NORTHBROOK STREET, NEWBURY, RG14 1AA"),
+                        ],
+                        la="West Berkshire",
+                    )
+                )
+            )
             result = await lookup_council_tax("RG14 1AA", "94A Northbrook Street, Newbury, RG14 1AA")
             assert isinstance(result, CouncilTaxInfo)
             assert result.band == "D"
 
     @pytest.mark.asyncio
     async def test_match_partial_address(self):
-        with (patch("uk_property_apis.voa.VOAClient") as mock_voa, patch("houses.council_tax._lookup_yearly_cost", return_value=None)):
+        with (
+            patch("uk_property_apis.voa.VOAClient") as mock_voa,
+            patch("houses.council_tax._lookup_yearly_cost", return_value=None),
+        ):
             instance = AsyncMock()
             mock_voa.return_value = instance
-            instance.fetch_page = AsyncMock(return_value=_make_page(_make_bands([("H", "FLAT 2ND FLR 10 DOWNING STREET, LONDON, SW1A 2AA"), ("H", "PRIME MINISTERS RESIDENCE 11-12 DOWNING STREET, LONDON, SW1A 2AA")], la="Westminster")))
+            instance.fetch_page = AsyncMock(
+                return_value=_make_page(
+                    _make_bands(
+                        [
+                            ("H", "FLAT 2ND FLR 10 DOWNING STREET, LONDON, SW1A 2AA"),
+                            ("H", "PRIME MINISTERS RESIDENCE 11-12 DOWNING STREET, LONDON, SW1A 2AA"),
+                        ],
+                        la="Westminster",
+                    )
+                )
+            )
             result = await lookup_council_tax("SW1A 2AA", "10 Downing Street, London, SW1A 2AA")
             assert isinstance(result, CouncilTaxInfo)
             assert result.band == "H"
@@ -102,7 +143,9 @@ class TestLookupCouncilTax:
         with patch("uk_property_apis.voa.VOAClient") as mock_voa:
             instance = AsyncMock()
             mock_voa.return_value = instance
-            instance.fetch_page = AsyncMock(return_value=_make_page(_make_bands([("B", "94A NORTHBROOK STREET, NEWBURY, RG14 1AA")], la=None)))
+            instance.fetch_page = AsyncMock(
+                return_value=_make_page(_make_bands([("B", "94A NORTHBROOK STREET, NEWBURY, RG14 1AA")], la=None))
+            )
             result = await lookup_council_tax("RG14 1AA", "94A Northbrook Street, Newbury, RG14 1AA")
             assert isinstance(result, CouncilTaxInfo)
             assert result.band == "B"
@@ -112,6 +155,7 @@ class TestLookupCouncilTax:
     @pytest.mark.asyncio
     async def test_import_error_graceful(self):
         import sys
+
         with patch.dict(sys.modules, {"uk_property_apis": None, "uk_property_apis.voa": None}, clear=False):
             result = await lookup_council_tax("RG14 1AA", "94A Northbrook Street, Newbury, RG14 1AA")
             assert result is None
@@ -136,10 +180,15 @@ class TestLookupCouncilTax:
 
     @pytest.mark.asyncio
     async def test_welsh_band_i(self):
-        with (patch("uk_property_apis.voa.VOAClient") as mock_voa, patch("houses.council_tax._lookup_yearly_cost", return_value=None)):
+        with (
+            patch("uk_property_apis.voa.VOAClient") as mock_voa,
+            patch("houses.council_tax._lookup_yearly_cost", return_value=None),
+        ):
             instance = AsyncMock()
             mock_voa.return_value = instance
-            instance.fetch_page = AsyncMock(return_value=_make_page(_make_bands([("I", "SOME ADDRESS, CARDIFF, CF10 1AA")], la="Cardiff")))
+            instance.fetch_page = AsyncMock(
+                return_value=_make_page(_make_bands([("I", "SOME ADDRESS, CARDIFF, CF10 1AA")], la="Cardiff"))
+            )
             result = await lookup_council_tax("CF10 1AA", "Some Address, Cardiff, CF10 1AA")
             assert isinstance(result, CouncilTaxInfo)
             assert result.band == "I"
@@ -149,17 +198,18 @@ class TestLookupCouncilTax:
         with patch("uk_property_apis.voa.VOAClient") as mock_voa:
             instance = AsyncMock()
             mock_voa.return_value = instance
-            instance.fetch_page = AsyncMock(return_value=_make_page(_make_bands([("D", "94A NORTHBROOK STREET, NEWBURY, RG14 1AA")])))
+            instance.fetch_page = AsyncMock(
+                return_value=_make_page(_make_bands([("D", "94A NORTHBROOK STREET, NEWBURY, RG14 1AA")]))
+            )
             result = await lookup_council_tax("RG14 1AA", ", RG14 1AA")
             assert result is None
 
 
 class TestLookupYearlyCost:
-
-
     @pytest.mark.asyncio
     async def test_ratio_computation(self):
         from houses.council_tax import BAND_RATIOS
+
         assert BAND_RATIOS["F"] == 13 / 9
         result = round(307.0 * 13 / 9, 2)
         assert result == 443.44
@@ -173,6 +223,7 @@ class TestLookupYearlyCost:
                 resp.status_code = 200
                 resp.json.return_value = {"band_d_rate": None}
                 from houses.council_tax import _lookup_yearly_cost
+
                 result = _lookup_yearly_cost("F", "Woking")
                 assert result == 3752.67
 
@@ -185,6 +236,7 @@ class TestLookupYearlyCost:
                 resp.status_code = 200
                 resp.json.return_value = {"band_d_rate": 500.0}
                 from houses.council_tax import _lookup_yearly_cost
+
                 result = _lookup_yearly_cost("D", "Woking")
                 assert result == 500.0
 
@@ -197,6 +249,7 @@ class TestLookupYearlyCost:
                 resp.status_code = 200
                 resp.json.return_value = {"band_d_rate": None}
                 from houses.council_tax import _lookup_yearly_cost
+
                 result = _lookup_yearly_cost("F", "Woking")
                 assert result == 3752.67
 
@@ -208,6 +261,7 @@ class TestLookupYearlyCost:
                 resp = instance.get.return_value
                 resp.status_code = 404
                 from houses.council_tax import _lookup_yearly_cost
+
                 result = _lookup_yearly_cost("D", "Nonexistent Council")
                 assert result is None
 
@@ -219,6 +273,7 @@ class TestLookupYearlyCost:
                 resp = instance.get.return_value
                 resp.status_code = 404
                 from houses.council_tax import _lookup_yearly_cost
+
                 result = _lookup_yearly_cost("E", "Ealing")
                 assert result is not None
                 assert result == 1905.44
