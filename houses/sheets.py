@@ -348,7 +348,7 @@ VIEW_FORMULA_COLS: dict[str, str] = {
     "monthly life insurance (£)": "=IFNA(Const_LifeInsuranceMonthly,)",
     "monthly commute cost (£)": f'=IFNA(LET(k,IFNA(INDEX({_nr("Bracknell Cost (£)")},ROW()),),g,IFNA(INDEX({_nr("Simon London Cost (£)")},ROW()),),i,IFNA(INDEX({_nr("Lorena London Cost (£)")},ROW()),),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)/12)),)',  # noqa: E501
     "monthly council tax (£)": f'=IFNA(LET(v,IFNA(INDEX({_nr("Council Tax Cost (£)")},ROW()),),IF(v=0,"",v/12)),)',
-    "total monthly housing cost (£)": f'=IFNA(LET(mp,IFNA(INDEX({_nr("Monthly Mortgage Payment (£)")},ROW()),),sf,IFNA(INDEX({_nr("Yearly Sinking Fund (£)")},ROW())/12*2/3,),li,Const_LifeInsuranceMonthly,ct,IFNA(LET(v,IFNA(INDEX({_nr("Council Tax Cost (£)")},ROW()),),IF(v=0,"",v/12)),),comm,IFNA(LET(k,IFNA(INDEX({_nr("Bracknell Cost (£)")},ROW()),),g,IFNA(INDEX({_nr("Simon London Cost (£)")},ROW()),),i,IFNA(INDEX({_nr("Lorena London Cost (£)")},ROW()),),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)/12)),),s,IFNA(INDEX(View_Status,ROW()),),gross,IF(OR(comm="",ct=""),"",mp+IF(s="Current",0,sf)+IF(s="Current",0,li)+comm+ct),p,IF(gross="","",gross-IF(s="Current",IFNA(Const_RentalIncome,0),0)),IF(OR(p="",p=0),"",p)),)',  # noqa: E501
+    "total monthly housing cost (£)": f'=IFNA(LET(mp,IFNA(INDEX({_nr("Monthly Mortgage Payment (£)")},ROW()),),sf,IFNA(INDEX({_nr("Yearly Sinking Fund (£)")},ROW())/12*2/3,),li,Const_LifeInsuranceMonthly,ct,IFNA(LET(v,IFNA(INDEX({_nr("Council Tax Cost (£)")},ROW()),),IF(v=0,"",v/12)),),comm,IFNA(LET(k,IFNA(INDEX({_nr("Bracknell Cost (£)")},ROW()),),g,IFNA(INDEX({_nr("Simon London Cost (£)")},ROW()),),i,IFNA(INDEX({_nr("Lorena London Cost (£)")},ROW()),),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)/12)),),s,IFNA(INDEX(View_Status,ROW()),),gross,IF(OR(mp="",comm="",ct=""),"",mp+IF(s="Current",0,sf)+IF(s="Current",0,li)+comm+ct),p,IF(gross="","",gross-IF(s="Current",IFNA(Const_RentalIncome,0),0)),IF(OR(p="",p=0),"",p)),)',  # noqa: E501
 }
 
 # Data tab formula columns (lowercase header -> Google Sheets formula string).
@@ -357,7 +357,7 @@ DATA_FORMULA_COLS: dict[str, str] = {
     "stamp duty (£)": f'=IFNA(LET(s,IFNA(INDEX(View_Status,ROW()),),p,INDEX({_nr("Price (£)")},ROW()),sd,IF(p<=250000,0,IF(p<=925000,(p-250000)*0.05,IF(p<=1500000,(p-925000)*0.1+33750,(p-1500000)*0.12+91250))),IF(s="Current",0,sd)),)',  # noqa: E501
     "net ashby contribution (£)": f'=IFNA(LET(s,IFNA(INDEX(View_Status,ROW()),),p,INDEX({_nr("Price (£)")},ROW()),na,Const_GrossAshbyContribution-IFNA(INDEX({_nr("Stamp Duty (£)")},ROW())/3,)-IFNA(INDEX(View_AshbyWorksEstimate,ROW()),),IF(s="Current",0,IF(OR(p=0,p=""),na,MIN(na,p/3)))),)',  # noqa: E501
     "mortgage required (£)": f"=IFNA(INDEX({_nr('Price (£)')},ROW()),)-Const_Deposit-IFNA(INDEX({_nr('Net Ashby Contribution (£)')},ROW()),)",  # noqa: E501
-    "monthly mortgage payment (£)": f"=IFNA(PMT(Const_MortgageRate/12,Const_MortgageTermYears*12,-IFNA(INDEX({_nr('Mortgage Required (£)')},ROW()),0)),)",  # noqa: E501
+    "monthly mortgage payment (£)": f"=IFNA(IF(AND(INDEX(View_AshbyWorksEstimate,ROW())=\"\",INDEX(View_Status,ROW())<>\"Current\"),,PMT(Const_MortgageRate/12,Const_MortgageTermYears*12,-IFNA(INDEX({_nr('Mortgage Required (£)')},ROW()),0))),)",  # noqa: E501
     "yearly sinking fund (£)": f"=IFNA(INDEX({_nr('Price (£)')},ROW())*Const_SinkingFundRate,)",
 }
 

@@ -1,5 +1,5 @@
 # Makefile for houses — Browser-to-Spreadsheet Ingestion Engine
-.PHONY: help setup run test test-all test-integration lint format clean
+.PHONY: help setup run test test-all test-integration test-e2e e2e lint format clean
 
 # Variables
 PYTHON := .venv/bin/python
@@ -20,6 +20,8 @@ help:
 	@echo "  ${GREEN}make test${NC}               Run unit + integration tests (fast, mocked APIs)"
 	@echo "  ${GREEN}make test-all${NC}           Run all tests including e2e (hits real APIs)"
 	@echo "  ${GREEN}make test-integration${NC}   Run only integration tests"
+	@echo "  ${GREEN}make test-e2e${NC}           Run only end-to-end tests (hits real APIs)"
+	@echo "  ${GREEN}make e2e${NC}                Alias for test-e2e"
 	@echo "  ${GREEN}make lint${NC}               Check code quality with ruff"
 	@echo "  ${GREEN}make format${NC}             Auto-fix formatting issues"
 	@echo "  ${GREEN}make coverage${NC}           Run tests with coverage report"
@@ -35,13 +37,12 @@ run: setup
 	@$(UV) run uvicorn houses.server:app --host 127.0.0.1 --port 8080 --reload
 
 test: setup lint
-	@$(PYTEST) tests/unit/ tests/integration/ -q --tb=short
+	@$(PYTEST) tests/unit/ tests/integration/ -q 
 
-test-all: setup lint
-	@$(PYTEST) tests/ -q --tb=short -o "addopts="
+test-e2e: setup lint
+	@$(PYTEST) tests/e2e/ -m e2e -q
 
-test-integration: setup lint
-	@$(PYTEST) tests/integration/ -v --tb=long
+e2e: test-e2e
 
 coverage: setup
 	@$(UV) run coverage run -m pytest tests/ -q --tb=short

@@ -70,6 +70,7 @@ class _TestRecord:
     simon_route: str = ""
     lorena_route: str = ""
     status: str = ""
+    ashby_works_estimate: float = 0.0
 
     def to_data_row(self):
         ci = col_index
@@ -147,6 +148,7 @@ RECORDS = [
         bus_route="Bus 101",
         council_tax_band="D",
         council_tax_cost=1800.00,
+        ashby_works_estimate=5000,
     ),
     _TestRecord(
         url="https://www.rightmove.co.uk/properties/22222222",
@@ -285,6 +287,7 @@ class TestViewFormulasOnTestSheet:
         view_rows[1][VIEW_HEADERS.index("Listing Address")] = RECORDS[0].address
         view_rows[1][VIEW_HEADERS.index("Rightmove Link")] = RECORDS[0].url
         view_rows[1][status_idx] = RECORDS[0].status
+        view_rows[1][VIEW_HEADERS.index("Ashby Works Estimate (£)")] = str(RECORDS[0].ashby_works_estimate)
         view_rows[2][VIEW_HEADERS.index("Listing Address")] = RECORDS[1].address
         view_rows[2][VIEW_HEADERS.index("Rightmove Link")] = RECORDS[1].url
         view_rows[2][status_idx] = RECORDS[1].status
