@@ -129,6 +129,324 @@ def _shorten_station(name: str) -> str:
 
 
 _STATIONS_CSV = Path("data/stations.csv")
+_BUS_FARES_PATH = Path("data/bus_fares.json")
+_bus_fares_data: dict | None = None
+
+
+def _load_bus_fares() -> dict | None:
+    global _bus_fares_data
+    if _bus_fares_data is not None:
+        return _bus_fares_data
+    if not _BUS_FARES_PATH.is_file():
+        logger.warning("Bus fares file not found at %s", _BUS_FARES_PATH)
+        _bus_fares_data = {}
+        return _bus_fares_data
+    with _BUS_FARES_PATH.open() as f:
+        _bus_fares_data = json.load(f)
+    return _bus_fares_data
+
+
+def _clean_station_name_for_matching(name: str) -> str:
+    """Strip station suffixes for CRS lookup. Does NOT strip 'London ' prefix."""
+    name = name.replace("'", "").replace("\u2019", "")
+    lower = name.lower()
+    for suffix in [" rail station", " underground station", " station"]:
+        if lower.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    return name.strip()
+
+
+def _lookup_station_crs(station_name: str) -> str | None:
+    """Find CRS code for a station by exact case-insensitive match.
+
+    Returns CRS code or None if not found.
+    """
+    if not _STATIONS_CSV.is_file():
+        return None
+    clean = _clean_station_name_for_matching(station_name).strip().lower()
+    if not clean:
+        return None
+    with _STATIONS_CSV.open(newline="") as f:
+        for row in csv.DictReader(f):
+            if row.get("stationName", "").strip().lower() == clean:
+                return (row.get("crsCode", "") or "").strip() or None
+    logger.error("Station '%s' not found in stations.csv (cleaned: '%s')", station_name, clean)
+    return None
+
+
+_PARKING_RATES_PATH = Path("data/parking_rates.csv")
+_parking_rates_cache: dict[str, float | None] | None = None
+
+
+_ParkingRates = tuple[dict[str, float | None], dict[str, float | None]]
+
+
+def _load_parking_rates() -> _ParkingRates:
+    """Load parking rates from CSV into (name_keyed, crs_keyed) dicts."""
+    global _parking_rates_cache
+    if _parking_rates_cache is not None:
+        return _parking_rates_cache
+    by_name: dict[str, float | None] = {}
+    by_crs: dict[str, float | None] = {}
+    if not _PARKING_RATES_PATH.is_file():
+        logger.warning("Parking rates file not found at %s", _PARKING_RATES_PATH)
+        _parking_rates_cache = (by_name, by_crs)
+        return _parking_rates_cache
+    with _PARKING_RATES_PATH.open(newline="") as f:
+        for row in csv.DictReader(f):
+            name = (row.get("station_name", "") or "").strip().lower()
+            crs = (row.get("crs", "") or "").strip().upper()
+            raw = (row.get("daily_cost_gbp", "") or "").strip()
+            if not name and not crs:
+                continue
+            val: float | None = None
+            if raw:
+                try:
+                    val = float(raw)
+                except ValueError:
+                    val = None
+            if name:
+                by_name[name] = val
+            if crs:
+                by_crs[crs] = val
+    _parking_rates_cache = (by_name, by_crs)
+    return _parking_rates_cache
+
+
+def _add_parking_rate_to_csv(station_name: str, crs: str, cost: float | None) -> None:
+    """Add or update a parking rate in the CSV and refresh the cache."""
+    global _parking_rates_cache
+    rows: list[list[str]] = []
+    name_lower = station_name.strip().lower()
+    found = False
+    if _PARKING_RATES_PATH.is_file():
+        with _PARKING_RATES_PATH.open(newline="") as f:
+            for row in csv.DictReader(f):
+                existing_name = (row.get("station_name", "") or "").strip().lower()
+                existing_crs = (row.get("crs", "") or "").strip().upper()
+                if existing_name == name_lower or existing_crs == crs.upper():
+                    rows.append([station_name, crs.upper(), f"{cost:.2f}" if cost is not None else ""])
+                    found = True
+                else:
+                    rows.append([row.get("station_name", ""), existing_crs, row.get("daily_cost_gbp", "")])
+    if not found:
+        rows.append([station_name, crs.upper(), f"{cost:.2f}" if cost is not None else ""])
+    rows.sort(key=lambda r: r[1])
+    _PARKING_RATES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _PARKING_RATES_PATH.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["station_name", "crs", "daily_cost_gbp"])
+        writer.writerows(rows)
+    _parking_rates_cache = None
+
+
+async def _apcoa_prebook_lookup(station_name: str) -> float | None:
+    """Try to find a nearby APCOA car park via the prebook listing page.
+
+    Uses Playwright to render the JavaScript-dependent listing. Only called
+    as a fallback when the station isn't in the parking_rates.csv cache.
+    """
+    coords = _lookup_station_coords(station_name)
+    if coords is None:
+        return None
+    lat, lng = coords
+
+    try:
+        from playwright.async_api import async_playwright
+
+        async with async_playwright() as pw:
+            async with await pw.chromium.launch(headless=True) as browser:
+                page = await browser.new_page()
+                url = (
+                    f"https://prebook.apcoa.co.uk/locationsearch/nearestcarparks"
+                    f"?latitude={lat}&longitude={lng}&placeName={station_name}&maximumDistance=3"
+                )
+                await page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                await asyncio.sleep(3.5)
+
+                # Dismiss privacy dialog
+                await page.evaluate(
+                    """() => {
+                        const btns = [...document.querySelectorAll('button')];
+                        const a = btns.find(b => b.textContent.includes('Agree always'));
+                        if (a) a.click();
+                    }"""
+                )
+                await asyncio.sleep(1)
+
+                # Extract the first car park's price
+                rate_str = await page.evaluate(
+                    """() => {
+                        const text = document.body.innerText;
+                        const m = text.match(/From[\\s\\S]*?£(\\d+\\.\\d{2})/i);
+                        return m ? m[1] : null;
+                    }"""
+                )
+
+            if rate_str:
+                cost = float(rate_str)
+                if 0 <= cost <= 100:
+                    logger.info("APCOA prebook fallback for '%s': £%.2f", station_name, cost)
+                    return round(cost, 2)
+
+            logger.info("APCOA prebook fallback for '%s': no rate found", station_name)
+            return None
+    except Exception as e:
+        logger.warning("APCOA prebook lookup failed for '%s': %s", station_name, e)
+        return None
+
+
+async def _lookup_parking_cost(station_name: str) -> float | None:
+    """Daily parking cost at a station.
+
+    Tries the parking_rates.csv cache first. When the station isn't found,
+    falls back to searching the APCOA prebook listing page via Playwright.
+    Any newly discovered rate is cached to the CSV for future lookups.
+
+    Returns:
+        0.0 = known free parking
+        None = couldn't find cost
+        float = daily parking cost in GBP
+    """
+    by_name, by_crs = _load_parking_rates()
+    clean = _clean_station_name_for_matching(station_name).strip().lower()
+    val = by_name.get(clean)
+    if val is not None or clean in by_name:
+        logger.debug("parking: '%s' -> '%s' = £%s (CSV hit)", station_name, clean, val)
+        return val
+    crs = _lookup_station_crs(station_name)
+    if crs and crs in by_crs:
+        logger.debug("parking: '%s' CRS=%s = £%s (CSV hit)", station_name, crs, by_crs[crs])
+        return by_crs[crs]
+
+    logger.debug("parking: '%s' not in CSV — trying APCOA prebook fallback", station_name)
+    cost = await _apcoa_prebook_lookup(station_name)
+    crs = crs or ""
+    if cost is not None or (crs and clean):
+        _add_parking_rate_to_csv(station_name, crs, cost)
+    logger.debug("parking: '%s' APCOA fallback = %s", station_name, f"£{cost:.2f}" if cost is not None else "None")
+    return cost
+
+
+def _compute_bus_daily_cost(zone_fares: dict, meta: dict | None = None) -> float:
+    """Compute daily round-trip bus cost from zone fare products.
+
+    Uses the cheapest product covering two journeys:
+    - If adult_return exists: use it
+    - Else if adult_day exists and adult_day < adult_single * 2: use adult_day
+    - Else: use adult_single * 2
+    - Apply national max single cap before doubling
+    """
+    adult_single = zone_fares.get("adult_single")
+    if adult_single is None:
+        return 0.0
+
+    national_cap = None
+    if meta:
+        national_cap = meta.get("national_max_single_gbp")
+
+    if national_cap is not None:
+        adult_single = min(adult_single, national_cap)
+
+    daily = adult_single * 2
+
+    adult_return = zone_fares.get("adult_return")
+    if adult_return is not None and adult_return < daily:
+        daily = adult_return
+
+    adult_day = zone_fares.get("adult_day")
+    if adult_day is not None and adult_day < daily:
+        daily = adult_day
+
+    return round(daily, 2)
+
+
+def _lookup_bus_roundtrip_cost(
+    dep_stop_name: str,
+    arr_stop_name: str,
+    dep_point: dict | None = None,
+    arr_point: dict | None = None,
+) -> float | None:
+    """Look up daily bus fare from data file by stop name → zone → zone pair.
+
+    When name lookup fails, falls back to coordinate-based matching using
+    the TfL stop lat/lon (available from the journey response). Within 50m
+    of a known BODS stop the correct zone is returned regardless of name.
+
+    Returns daily round-trip cost in GBP, or None if lookup fails.
+    """
+    fares_data = _load_bus_fares()
+    if not fares_data:
+        return None
+
+    meta = fares_data.get("_meta")
+    dep_norm = dep_stop_name.strip().lower()
+    arr_norm = arr_stop_name.strip().lower()
+
+    for op_key, op_data in fares_data.items():
+        if op_key == "_meta":
+            continue
+        stop_zones = op_data.get("stop_zones", {})
+        dep_zone = stop_zones.get(dep_norm)
+        arr_zone = stop_zones.get(arr_norm)
+        if dep_zone and arr_zone:
+            zone_pair = f"{dep_zone}:{arr_zone}"
+            zone_fares = op_data.get("zone_fares", {}).get(zone_pair)
+            if zone_fares:
+                return _compute_bus_daily_cost(zone_fares, meta)
+
+    # Name lookup failed — try coordinate fallback against stop_coords index
+    dep_coords = (dep_point.get("lat"), dep_point.get("lon")) if dep_point else (None, None)
+    arr_coords = (arr_point.get("lat"), arr_point.get("lon")) if arr_point else (None, None)
+    if dep_coords[0] is not None and arr_coords[0] is not None:
+        for op_key, op_data in fares_data.items():
+            if op_key == "_meta":
+                continue
+            stop_coords = op_data.get("stop_coords", [])
+            if not stop_coords:
+                continue
+            dep_zone = _nearest_bus_zone(dep_coords[0], dep_coords[1], stop_coords, radius_km=0.05)
+            arr_zone = _nearest_bus_zone(arr_coords[0], arr_coords[1], stop_coords, radius_km=0.05)
+            if dep_zone and arr_zone:
+                zone_pair = f"{dep_zone}:{arr_zone}"
+                zone_fares = op_data.get("zone_fares", {}).get(zone_pair)
+                if zone_fares:
+                    logger.info(
+                        "Bus fare by coords: dep=%s arr=%s = %s",
+                        dep_stop_name,
+                        arr_stop_name,
+                        zone_pair,
+                    )
+                    return _compute_bus_daily_cost(zone_fares, meta)
+
+    logger.warning(
+        "Bus fare zone pair not found for '%s' (lat=%s) → '%s' (lat=%s)",
+        dep_stop_name,
+        f"{dep_coords[0]:.4f}" if dep_coords[0] else "?",
+        arr_stop_name,
+        f"{arr_coords[0]:.4f}" if arr_coords[0] else "?",
+    )
+    return None
+
+
+def _nearest_bus_zone(
+    lat: float,
+    lon: float,
+    stop_coords: list[dict],
+    radius_km: float = 0.05,
+) -> str | None:
+    """Find the zone of the nearest BODS stop within ``radius_km`` of (lat, lon)."""
+    best_dist = float("inf")
+    best_zone = None
+    for sc in stop_coords:
+        d = _haversine_km(lat, lon, sc["lat"], sc["lon"])
+        if d < best_dist:
+            best_dist = d
+            best_zone = sc.get("zone")
+    if best_dist <= radius_km:
+        return best_zone
+    return None
 
 
 def _lookup_station_coords(station_name: str) -> tuple[float, float] | None:
@@ -212,9 +530,18 @@ def _pick_best_journey(data: dict | None) -> tuple[int | None, float | None, str
         return None, None, ""
     journeys = data.get("journeys", [])
     if not journeys:
+        logger.debug("_pick_best_journey: no journeys in response")
         return None, None, ""
     best = min(journeys, key=lambda j: j.get("duration", 9999))
     duration = best.get("duration")
+    first_leg = (best.get("legs") or [{}])[0]
+    logger.debug(
+        "_pick_best_journey: %d journeys, best=%dm, first_leg=%s '%s'",
+        len(journeys),
+        duration,
+        first_leg.get("mode", {}).get("name", "?"),
+        first_leg.get("arrivalPoint", {}).get("commonName", ""),
+    )
     fare = best.get("fare")
     cost = None
     if fare and fare.get("totalCost") is not None:
@@ -293,14 +620,33 @@ async def _apply_park_and_ride_to_journeys(
         if first.get("mode", {}).get("name") != "walking":
             continue
         walk_duration = first.get("duration", 0)
+        logger.debug(
+            "park_and_ride: walk leg=%dm to station='%s' threshold=%dm",
+            walk_duration,
+            first.get("arrivalPoint", {}).get("commonName", "?"),
+            max_walk_minutes,
+        )
         if walk_duration <= max_walk_minutes:
+            logger.debug("park_and_ride: walk %dm <= %dm threshold — keeping walk", walk_duration, max_walk_minutes)
             continue
         station_name = first.get("arrivalPoint", {}).get("commonName", "")
         if not station_name:
+            logger.debug("park_and_ride: walk leg has no arrivalPoint — skipping")
             continue
         drive_minutes = await _get_drive_minutes(origin_postcode, station_name)
         if drive_minutes is None:
+            logger.debug(
+                "park_and_ride: ORS returned None for '%s' -> '%s' — keeping walk",
+                origin_postcode,
+                station_name,
+            )
             continue
+        logger.debug(
+            "park_and_ride: replacing walk %dm with drive %dm to '%s'",
+            walk_duration,
+            drive_minutes,
+            station_name,
+        )
         legs[0] = {
             "mode": {"name": "driving"},
             "duration": drive_minutes,
@@ -317,6 +663,7 @@ async def compute_transit(
     destination_postcode: str,
     label: str,
     park_and_ride: bool = False,
+    allow_bus: bool = False,
 ) -> TransitInfo:
     """Return transit commute time using TfL Unified API (free, London focus).
 
@@ -327,13 +674,28 @@ async def compute_transit(
     When ``park_and_ride`` is True, any first-leg walk to the station
     longer than ``settings.max_walk_to_station_minutes`` is replaced with
     a driving leg via ORS Directions API.
+
+    When ``allow_bus`` is True, includes "bus" in the TfL mode params and
+    attempts bus fare lookup if TfL doesn't price the bus leg.
     """
+    modes = ["tube", "overground", "dlr", "tram", "national-rail", "walking"]
+    if allow_bus:
+        modes.append("bus")
+    logger.debug(
+        "compute_transit: %s origin='%s' dest='%s' park_and_ride=%s allow_bus=%s modes=%s",
+        label,
+        origin_postcode,
+        destination_postcode,
+        park_and_ride,
+        allow_bus,
+        ",".join(modes),
+    )
     url = f"{TFL_JOURNEY_URL}/{origin_postcode}/to/{destination_postcode}"
     params = {
         "nationalSearch": "true",
         "timeIs": "arriving",
         "journeyPreference": "leasttime",
-        "mode": "tube,overground,dlr,tram,national-rail,walking",
+        "mode": ",".join(modes),
         **_next_weekday_date_params(),
         **_tfl_auth_params(),
     }
@@ -341,13 +703,17 @@ async def compute_transit(
     duration_minutes = None
     daily_cost_gbp = None
     route_summary = ""
+    parking_cost_gbp = None
+    bus_cost_gbp = None
     data = None
 
     # Check cache first
     cached = get_cached("GET", url, params)
     if cached is not None:
         data = cached
+        logger.debug("compute_transit: CACHE HIT for %s (params: %s)", label, params)
     else:
+        logger.debug("compute_transit: CACHE MISS for %s — making API call", label)
         try:
             async with cached_async_client(timeout=20.0) as client:
                 resp = await retry_async(
@@ -365,9 +731,11 @@ async def compute_transit(
             elif e.response.status_code == 300:
                 pc_match = re.search(r"[A-Z]{1,2}[0-9][A-Z0-9]?(?:\s*[0-9][A-Z]{2})?", origin_postcode)
                 pc = pc_match.group(0).strip().upper() if pc_match else None
-                coords = await _geocode(pc) if pc else None
-                if coords is None:
-                    coords = await _geocode_address(origin_postcode)
+                # Try the full address string first (better geocoding results),
+                # then fall back to postcode/outcode center
+                coords = await _geocode_address(origin_postcode)
+                if coords is None and pc:
+                    coords = await _geocode(pc)
                 if coords:
                     latlng = f"{coords[0]},{coords[1]}"
                     url2 = f"{TFL_JOURNEY_URL}/{latlng}/to/{destination_postcode}"
@@ -397,6 +765,67 @@ async def compute_transit(
     if data is not None:
         duration_minutes, daily_cost_gbp, route_summary = _pick_best_journey(data)
 
+    # Bus fare: when allow_bus and best journey has bus legs
+    if allow_bus and duration_minutes is not None and data is not None:
+        journeys = data.get("journeys", [])
+        if journeys:
+            best = min(journeys, key=lambda j: j.get("duration", 9999))
+            bus_legs = [leg for leg in best.get("legs", []) if leg.get("mode", {}).get("name") == "bus"]
+            if bus_legs:
+                fare = best.get("fare", {})
+                tfl_total_pence = fare.get("totalCost") if fare else None
+                if tfl_total_pence and tfl_total_pence > 0:
+                    # TfL already priced the bus — use totalCost directly
+                    daily_cost_gbp = round(tfl_total_pence / 100 * 2, 2)
+                else:
+                    # TfL didn't price the bus — look up from data file
+                    tfl_non_bus_fare = 0
+                    fare_fares = fare.get("fares", []) if fare else []
+                    for f in fare_fares:
+                        if f.get("mode") != "bus" and f.get("cost"):
+                            tfl_non_bus_fare += f["cost"]
+
+                    total_bus_cost = 0.0
+                    for bus_leg in bus_legs:
+                        dep = bus_leg.get("departurePoint", {}).get("commonName", "")
+                        arr = bus_leg.get("arrivalPoint", {}).get("commonName", "")
+                        leg_cost = _lookup_bus_roundtrip_cost(
+                            dep,
+                            arr,
+                            dep_point=bus_leg.get("departurePoint", {}),
+                            arr_point=bus_leg.get("arrivalPoint", {}),
+                        )
+                        if leg_cost is not None:
+                            total_bus_cost += leg_cost
+
+                    if total_bus_cost > 0:
+                        bus_cost_gbp = total_bus_cost
+                        daily_cost_gbp = round(tfl_non_bus_fare / 100 * 2 + total_bus_cost, 2)
+
+    # Parking cost: when park_and_ride and best journey has a driving leg
+    if park_and_ride and duration_minutes is not None and data is not None:
+        journeys = data.get("journeys", [])
+        if journeys:
+            best = min(journeys, key=lambda j: j.get("duration", 9999))
+            legs = best.get("legs", [])
+            if legs and legs[0].get("mode", {}).get("name") == "driving":
+                station_name = legs[0].get("arrivalPoint", {}).get("commonName", "")
+                logger.debug(
+                    "parking: driving leg found, arrivalPoint='%s'",
+                    station_name,
+                )
+                if station_name:
+                    parking_cost = await _lookup_parking_cost(station_name)
+                    if parking_cost is not None:
+                        parking_cost_gbp = parking_cost
+                        if daily_cost_gbp is not None:
+                            daily_cost_gbp = round(daily_cost_gbp + parking_cost, 2)
+                    else:
+                        logger.debug("parking: _lookup_parking_cost returned None for '%s'", station_name)
+            else:
+                mode = legs[0].get("mode", {}).get("name") if legs else "no legs"
+                logger.debug("parking: no driving leg (first leg mode=%s) — no parking cost", mode)
+
     return TransitInfo(
         destination_label=label,
         destination_postcode=destination_postcode,
@@ -404,6 +833,8 @@ async def compute_transit(
         daily_cost_gbp=daily_cost_gbp,
         route_summary=route_summary,
         mode="transit",
+        parking_cost_gbp=parking_cost_gbp,
+        bus_cost_gbp=bus_cost_gbp,
     )
 
 
@@ -413,15 +844,40 @@ async def compute_simon_commute(property_postcode: str) -> TransitInfo:
         settings.simon_postcode,
         "Simon — Pimlico / Victoria",
         park_and_ride=True,
+        allow_bus=False,
     )
 
 
+def _pick_best_lorena_route(no_bus: TransitInfo, with_bus: TransitInfo) -> TransitInfo:
+    """Compare no-bus and with-bus commute results.
+
+    Uses the with-bus result only if it saves at least 15 minutes
+    over the no-bus first-leg walk.
+    """
+    if with_bus.duration_minutes is None:
+        return no_bus
+    if no_bus.duration_minutes is None:
+        return with_bus
+
+    no_bus_saves = no_bus.duration_minutes - with_bus.duration_minutes
+    if no_bus_saves >= settings.bus_walk_penalty_minutes:
+        return with_bus
+    return no_bus
+
+
 async def compute_lorena_commute(property_postcode: str) -> TransitInfo:
-    return await compute_transit(
+    no_bus = await compute_transit(
         property_postcode,
         settings.lorena_postcode,
         "Lorena — Aldgate / City of London",
     )
+    with_bus = await compute_transit(
+        property_postcode,
+        settings.lorena_postcode,
+        "Lorena — Aldgate / City of London",
+        allow_bus=True,
+    )
+    return _pick_best_lorena_route(no_bus, with_bus)
 
 
 async def compute_commute_breakdown(

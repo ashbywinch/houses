@@ -9,22 +9,13 @@ logger = logging.getLogger(__name__)
 _STATIONS_CSV = Path("data/stations.csv")
 _FARES_CSV = Path("data/rail_fares.csv")
 
-_stations: list[dict] | None = None
-_fares: dict[tuple[str, str], float] | None = None
-
 
 def _load_stations() -> list[dict]:
-    global _stations
-    if _stations is not None:
-        return _stations
     if not _STATIONS_CSV.is_file():
         logger.warning("Stations CSV not found at %s", _STATIONS_CSV)
-        _stations = []
-        return _stations
+        return []
     with _STATIONS_CSV.open(newline="") as f:
-        _stations = list(csv.DictReader(f))
-    logger.info("Loaded %d stations from %s", len(_stations), _STATIONS_CSV)
-    return _stations
+        return list(csv.DictReader(f))
 
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -56,13 +47,10 @@ def nearest_station(lat: float, lng: float) -> dict | None:
 
 
 def _load_fares() -> dict[tuple[str, str], float]:
-    global _fares
-    if _fares is not None:
-        return _fares
-    _fares = {}
+    fares: dict[tuple[str, str], float] = {}
     if not _FARES_CSV.is_file():
         logger.warning("Rail fares CSV not found at %s", _FARES_CSV)
-        return _fares
+        return fares
     with _FARES_CSV.open(newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
@@ -71,9 +59,8 @@ def _load_fares() -> dict[tuple[str, str], float]:
             cost_str = row.get("single_fare_gbp", "").strip()
             if origin and dest and cost_str:
                 with contextlib.suppress(ValueError):
-                    _fares[(origin, dest)] = float(cost_str)
-    logger.info("Loaded %d fare records from %s", len(_fares), _FARES_CSV)
-    return _fares
+                    fares[(origin, dest)] = float(cost_str)
+    return fares
 
 
 LONDON_CRS = {"VIC", "FST", "PAD", "WAT", "WAE", "EUS", "LST", "STP", "KGX", "LBG", "CST", "CHX", "BFR", "SRA", "LON"}

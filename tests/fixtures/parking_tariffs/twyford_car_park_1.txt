@@ -1,0 +1,9 @@
+Parking tariff
+
+Permit Holders Only
+
+Monthly: £150.00
+
+Quarterly: £410.00
+
+Annual: £1420.00

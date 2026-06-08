@@ -1,0 +1,989 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PublicationDelivery xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:siri="http://www.siri.org.uk/siri" xmlns:gml="http://www.opengis.net/gml/3.2" version="1.1" xsi:schemaLocation="http://www.netex.org.uk/netex http://netex.uk/netex/schema/1.10/xsd/NeTEx_publication.xsd" xmlns="http://www.netex.org.uk/netex">
+  <PublicationTimestamp>2026-05-22T16:17:50.7206149Z</PublicationTimestamp>
+  <ParticipantRef>SCSO</ParticipantRef>
+  <PublicationRequest version="1.0">
+    <RequestTimestamp>2026-05-22T16:17:50.6388474Z</RequestTimestamp>
+    <Description>Request for SCSO bus fares for line 1046</Description>
+    <topics>
+      <NetworkFrameTopic>
+        <selectionValidityConditions>
+          <AvailabilityCondition version="1.0" id="r1">
+            <FromDate>2026-05-20T03:00:00Z</FromDate>
+          </AvailabilityCondition>
+        </selectionValidityConditions>
+        <TypeOfFrameRef versionRef="fxc:v1.0" ref="fxc:UK:DFT:TypeOfFrame_UK_PI_LINE_FARE_OFFER:FXCP" />
+        <NetworkFilterByValue>
+          <objectReferences>
+            <OperatorRef versionRef="1.0" ref="noc:SCSO">noc:136564</OperatorRef>
+            <LineRef versionRef="1.0" ref="SCSO:PK0002571:21:46" />
+            <BrandingRef versionRef="1.0" ref="op:SCSO@brand" />
+          </objectReferences>
+        </NetworkFilterByValue>
+      </NetworkFrameTopic>
+    </topics>
+    <RequestPolicy>
+      <RequestDetail>AllWithXref</RequestDetail>
+    </RequestPolicy>
+  </PublicationRequest>
+  <Description>SCSO bus fares for line 1046</Description>
+  <dataObjects>
+    <CompositeFrame version="1.1" id="epd:UK:SCSO:CompositeFrame_UK_PI_LINE_FARE_OFFER:trip@SCSO:PK0002571:21:46:op" dataSourceRef="op:src" responsibilitySetRef="op:tariff_data">
+      <ValidBetween>
+        <FromDate>2026-05-20T03:00:00Z</FromDate>
+      </ValidBetween>
+      <Name>Fares for SCSO SCSO:PK0002571:21:46</Name>
+      <Description>SCSO SCSO:PK0002571:21:46 is accessible as a single trip fare. Prices are given zone to zone, where each zone is a linear group of stops, i.e. fare stage.</Description>
+      <TypeOfFrameRef versionRef="fxc:v1.0" ref="fxc:UK:DFT:TypeOfFrame_UK_PI_LINE_FARE_OFFER:FXCP" />
+      <codespaces>
+        <CodespaceRef ref="epd_data" />
+        <CodespaceRef ref="fxc_metadata" />
+        <CodespaceRef ref="naptStop_data" />
+        <CodespaceRef ref="nptgLocality_data" />
+        <CodespaceRef ref="noc_data" />
+        <CodespaceRef ref="op_data" />
+      </codespaces>
+      <FrameDefaults>
+        <DefaultCodespaceRef ref="op_data" />
+        <DefaultDataSourceRef version="1.0" ref="op:src" />
+        <DefaultResponsibilitySetRef version="1.0" ref="op:tariff_data" />
+        <DefaultCurrency>GBP</DefaultCurrency>
+      </FrameDefaults>
+      <prerequisites>
+        <CompositeFrameRef versionRef="1.0" ref="epd:UK:SCSO:CompositeFrame_UK_PI_METADATA::op" />
+      </prerequisites>
+      <frames>
+        <ResourceFrame version="1.0" id="epd:UK:SCSO:ResourceFrame_UK_PI_COMMON:SCSO:PK0002571:21:46:op" dataSourceRef="op:src" responsibilitySetRef="op:tariff_data">
+          <Name>Operator specific common resources</Name>
+          <TypeOfFrameRef versionRef="fxc:v1.0" ref="fxc:UK:DFT:TypeOfFrame_UK_PI_COMMON:FXCP" />
+          <codespaces>
+            <Codespace id="epd_data">
+              <Xmlns>epd</Xmlns>
+              <XmlnsUrl>http://fnetex-cen.eu/epd</XmlnsUrl>
+              <Description>European Passenger Information profile data -use for UK frame names</Description>
+            </Codespace>
+            <Codespace id="fxc_metadata">
+              <Xmlns>fxc_metadata</Xmlns>
+              <XmlnsUrl>netex.org.uk/fxc</XmlnsUrl>
+              <Description>UK FareXChange Profile metadata</Description>
+            </Codespace>
+            <Codespace id="naptStop_data">
+              <Xmlns>naptStop</Xmlns>
+              <XmlnsUrl>http://www.naptan.org.uk/stops</XmlnsUrl>
+              <Description>UK National Public Transport Access Nodes: Stops.</Description>
+            </Codespace>
+            <Codespace id="noc_data">
+              <Xmlns>noc</Xmlns>
+              <XmlnsUrl>http://www.traveline.co.uk/noc</XmlnsUrl>
+              <Description>UK national operator codes</Description>
+            </Codespace>
+            <Codespace id="op_data">
+              <Xmlns>op</Xmlns>
+              <XmlnsUrl>http://www.stagecoachbus.com/regional-help-and-contact/south</XmlnsUrl>
+              <Description>Operator Data</Description>
+            </Codespace>
+            <Codespace id="nptgLocality_data">
+              <Xmlns>nptgLocality</Xmlns>
+              <XmlnsUrl>http://nptg.org.uk/locations</XmlnsUrl>
+              <Description>National Public Transport gazetteer locations</Description>
+            </Codespace>
+          </codespaces>
+          <dataSources>
+            <DataSource version="1.0" id="op:src">
+              <Email>south.enquiries@stagecoachbus.com</Email>
+            </DataSource>
+          </dataSources>
+          <responsibilitySets>
+            <ResponsibilitySet version="1.0" id="op:tariff_data">
+              <Name>Operator Tariffs</Name>
+              <roles>
+                <ResponsibilityRoleAssignment version="1.0" id="op:tariff_data@creates">
+                  <DataRoleType>creates</DataRoleType>
+                  <StakeholderRoleType>FareManagement</StakeholderRoleType>
+                  <ResponsibleOrganisationRef version="1.0" ref="noc:SCSO" />
+                </ResponsibilityRoleAssignment>
+              </roles>
+            </ResponsibilitySet>
+            <ResponsibilitySet version="1.0" id="op:network_data">
+              <Name>Operator Network data</Name>
+              <roles>
+                <ResponsibilityRoleAssignment version="1.0" id="op:network_data@creates">
+                  <DataRoleType>creates</DataRoleType>
+                  <StakeholderRoleType>Planning</StakeholderRoleType>
+                  <ResponsibleOrganisationRef version="1.0" ref="noc:SCSO" />
+                </ResponsibilityRoleAssignment>
+              </roles>
+            </ResponsibilitySet>
+            <ResponsibilitySet version="1.0" id="op:metadata">
+              <Name>Operator Metadata</Name>
+              <roles>
+                <ResponsibilityRoleAssignment version="1.0" id="op:metadata@creates">
+                  <DataRoleType>creates</DataRoleType>
+                  <StakeholderRoleType>Planning</StakeholderRoleType>
+                  <ResponsibleOrganisationRef version="1.0" ref="noc:SCSO" />
+                </ResponsibilityRoleAssignment>
+              </roles>
+            </ResponsibilitySet>
+          </responsibilitySets>
+          <typesOfValue>
+            <ValueSet version="1.0" id="op:Branding" classOfValues="Branding">
+              <Name>Operator Branding</Name>
+              <values>
+                <Branding version="1.0" id="op:SCSO@brand">
+                  <Name>Stagecoach South</Name>
+                  <Url>http://www.stagecoachbus.com/regional-help-and-contact/south</Url>
+                </Branding>
+              </values>
+            </ValueSet>
+          </typesOfValue>
+          <organisations>
+            <Operator version="1.0" id="noc:SCSO">
+              <PublicCode>SCSO</PublicCode>
+              <PrivateCode>136564</PrivateCode>
+              <Name>Stagecoach South</Name>
+              <ShortName>Stagecoach South</ShortName>
+              <TradingName>Stagecoach (South) Ltd</TradingName>
+              <ContactDetails>
+                <Phone>03452418000</Phone>
+                <Url>http://www.stagecoachbus.com/regional-help-and-contact/south</Url>
+              </ContactDetails>
+              <OrganisationType>operator</OrganisationType>
+              <Address>
+                <Street>The Bus Station, Southgate, Chichester PO19 2DQ</Street>
+              </Address>
+              <PrimaryMode>bus</PrimaryMode>
+              <CustomerServiceContactDetails>
+                <Email>south.enquiries@stagecoachbus.com</Email>
+              </CustomerServiceContactDetails>
+            </Operator>
+          </organisations>
+        </ResourceFrame>
+        <ServiceFrame version="1.0" id="epd:UK:SCSO:ServiceFrame_UK_PI_NETWORK:SCSO:PK0002571:21:46:op" dataSourceRef="op:src" responsibilitySetRef="op:network_data">
+          <Description>This frame contains the stop and line definitions for the service. It could also be exchanged separately.</Description>
+          <TypeOfFrameRef versionRef="fxc:v1.0" ref="fxc:UK:DFT:TypeOfFrame_UK_PI_NETWORK:FXCP" />
+          <lines>
+            <Line version="1.0" id="SCSO:PK0002571:21:46">
+              <Name>Chichester Cathedral - Chichester Cathedral</Name>
+              <PublicCode>46</PublicCode>
+              <PrivateCode type="txc:Line@id">1046</PrivateCode>
+              <OperatorRef versionRef="1.0" ref="noc:SCSO">noc:136564</OperatorRef>
+            </Line>
+          </lines>
+          <scheduledStopPoints>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0487">
+              <Name>Cathedral</Name>
+              <NameSuffix>Stop C1</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0296">
+              <Name>Orchard Street</Name>
+              <NameSuffix>NE-bound</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0304">
+              <Name>Washington Street</Name>
+              <NameSuffix>adj</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0648">
+              <Name>Woodlands Lane</Name>
+              <NameSuffix>adj</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0649">
+              <Name>Little Breach South</Name>
+              <NameSuffix>opp 142</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0650">
+              <Name>Little Breach Central</Name>
+              <NameSuffix>opp 119</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0651">
+              <Name>Little Breach North</Name>
+              <NameSuffix>opp 81</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0652">
+              <Name>Carlisle Gardens</Name>
+              <NameSuffix>nr</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0653">
+              <Name>Lincoln Green</Name>
+              <NameSuffix>adj</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0654">
+              <Name>York Chase</Name>
+              <NameSuffix>opp</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0640">
+              <Name>Bristol Gardens</Name>
+              <NameSuffix>opp</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0639">
+              <Name>Exeter Road</Name>
+              <NameSuffix>opp</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0655">
+              <Name>Winchester Drive</Name>
+              <NameSuffix>adj</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0656">
+              <Name>Montagu Road</Name>
+              <NameSuffix>just before</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0657">
+              <Name>Brideoake Close</Name>
+              <NameSuffix>opp</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0658">
+              <Name>Gilbert Road</Name>
+              <NameSuffix>adj</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0659">
+              <Name>John Arundel Road</Name>
+              <NameSuffix>S-bound</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0238">
+              <Name>Sherlock Avenue</Name>
+              <NameSuffix>adj</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0237">
+              <Name>St Wilfrid Road</Name>
+              <NameSuffix>adj</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0236">
+              <Name>Langton Road</Name>
+              <NameSuffix>adj</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0261">
+              <Name>Durnford Close</Name>
+              <NameSuffix>opp</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0254">
+              <Name>Oliver Whitby Road</Name>
+              <NameSuffix>adj</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0641">
+              <Name>Oak Close</Name>
+              <NameSuffix>opp</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0660">
+              <Name>Oak Avenue</Name>
+              <NameSuffix>opp</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0661">
+              <Name>Cedar Drive</Name>
+              <NameSuffix>E-bound</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+            <ScheduledStopPoint version="1.0" id="atco:4400CH0638">
+              <Name>Beech Avenue</Name>
+              <NameSuffix>opp</NameSuffix>
+              <TopographicPlaceView>
+                <TopographicPlaceRef ref="nptgLocality:E0052092" />
+                <Name>Chichester</Name>
+              </TopographicPlaceView>
+            </ScheduledStopPoint>
+          </scheduledStopPoints>
+        </ServiceFrame>
+        <ServiceCalendarFrame version="1.0" id="epd:UK:SCSO:ServiceCalendarFrame_UK_PI_CALENDAR:SCSO:PK0002571:21:46:op" dataSourceRef="op:src" responsibilitySetRef="op:tariff_data">
+          <dayTypes>
+            <DayType version="1.0" id="day_type@Public_Holiday">
+              <Name>Public Holiday</Name>
+              <properties>
+                <PropertyOfDay>
+                  <HolidayTypes>AnyHoliday</HolidayTypes>
+                </PropertyOfDay>
+              </properties>
+            </DayType>
+            <DayType version="1.0" id="day_type@Weekday">
+              <Name>Weekday</Name>
+              <properties>
+                <PropertyOfDay>
+                  <DaysOfWeek>Monday Tuesday Wednesday Thursday Friday</DaysOfWeek>
+                  <HolidayTypes>WorkingDay</HolidayTypes>
+                </PropertyOfDay>
+              </properties>
+            </DayType>
+            <DayType version="1.0" id="day_type@Saturday">
+              <Name>Saturday</Name>
+              <properties>
+                <PropertyOfDay>
+                  <DaysOfWeek>Saturday</DaysOfWeek>
+                  <HolidayTypes>NotWorkingDay</HolidayTypes>
+                </PropertyOfDay>
+              </properties>
+            </DayType>
+            <DayType version="1.0" id="day_type@Sunday">
+              <Name>Sunday</Name>
+              <properties>
+                <PropertyOfDay>
+                  <DaysOfWeek>Sunday</DaysOfWeek>
+                  <HolidayTypes>NotWorkingDay</HolidayTypes>
+                </PropertyOfDay>
+              </properties>
+            </DayType>
+          </dayTypes>
+          <dayTypeAssignments>
+            <DayTypeAssignment version="1.0" id="day_type@Public_Holiday@Spring_bank_holiday@2026-05-25" order="1">
+              <Name>Spring bank holiday</Name>
+              <Date>2026-05-25</Date>
+              <DayTypeRef version="1.0" ref="day_type@Public_Holiday" />
+            </DayTypeAssignment>
+            <DayTypeAssignment version="1.0" id="day_type@Public_Holiday@Summer_bank_holiday@2026-08-31" order="1">
+              <Name>Summer bank holiday</Name>
+              <Date>2026-08-31</Date>
+              <DayTypeRef version="1.0" ref="day_type@Public_Holiday" />
+            </DayTypeAssignment>
+            <DayTypeAssignment version="1.0" id="day_type@Public_Holiday@Christmas_Day@2026-12-25" order="1">
+              <Name>Christmas Day</Name>
+              <Date>2026-12-25</Date>
+              <DayTypeRef version="1.0" ref="day_type@Public_Holiday" />
+            </DayTypeAssignment>
+            <DayTypeAssignment version="1.0" id="day_type@Public_Holiday@Boxing_Day_(substitute_day)@2026-12-28" order="1">
+              <Name>Boxing Day (substitute day)</Name>
+              <Date>2026-12-28</Date>
+              <DayTypeRef version="1.0" ref="day_type@Public_Holiday" />
+            </DayTypeAssignment>
+            <DayTypeAssignment version="1.0" id="day_type@Public_Holiday@New_Year’s_Day@2027-01-01" order="1">
+              <Name>New Year’s Day</Name>
+              <Date>2027-01-01</Date>
+              <DayTypeRef version="1.0" ref="day_type@Public_Holiday" />
+            </DayTypeAssignment>
+            <DayTypeAssignment version="1.0" id="day_type@Public_Holiday@Good_Friday@2027-03-26" order="1">
+              <Name>Good Friday</Name>
+              <Date>2027-03-26</Date>
+              <DayTypeRef version="1.0" ref="day_type@Public_Holiday" />
+            </DayTypeAssignment>
+            <DayTypeAssignment version="1.0" id="day_type@Public_Holiday@Easter_Monday@2027-03-29" order="1">
+              <Name>Easter Monday</Name>
+              <Date>2027-03-29</Date>
+              <DayTypeRef version="1.0" ref="day_type@Public_Holiday" />
+            </DayTypeAssignment>
+            <DayTypeAssignment version="1.0" id="day_type@Public_Holiday@Early_May_bank_holiday@2027-05-03" order="1">
+              <Name>Early May bank holiday</Name>
+              <Date>2027-05-03</Date>
+              <DayTypeRef version="1.0" ref="day_type@Public_Holiday" />
+            </DayTypeAssignment>
+            <DayTypeAssignment version="1.0" id="day_type@Public_Holiday@Spring_bank_holiday@2027-05-31" order="1">
+              <Name>Spring bank holiday</Name>
+              <Date>2027-05-31</Date>
+              <DayTypeRef version="1.0" ref="day_type@Public_Holiday" />
+            </DayTypeAssignment>
+            <DayTypeAssignment version="1.0" id="day_type@Public_Holiday@Summer_bank_holiday@2027-08-30" order="1">
+              <Name>Summer bank holiday</Name>
+              <Date>2027-08-30</Date>
+              <DayTypeRef version="1.0" ref="day_type@Public_Holiday" />
+            </DayTypeAssignment>
+            <DayTypeAssignment version="1.0" id="day_type@Public_Holiday@Christmas_Day_(substitute_day)@2027-12-27" order="1">
+              <Name>Christmas Day (substitute day)</Name>
+              <Date>2027-12-27</Date>
+              <DayTypeRef version="1.0" ref="day_type@Public_Holiday" />
+            </DayTypeAssignment>
+            <DayTypeAssignment version="1.0" id="day_type@Public_Holiday@Boxing_Day_(substitute_day)@2027-12-28" order="1">
+              <Name>Boxing Day (substitute day)</Name>
+              <Date>2027-12-28</Date>
+              <DayTypeRef version="1.0" ref="day_type@Public_Holiday" />
+            </DayTypeAssignment>
+          </dayTypeAssignments>
+        </ServiceCalendarFrame>
+        <FareFrame version="1.0" id="epd:UK:SCSO:FareFrame_UK_PI_FARE_NETWORK:SCSO:PK0002571:21:46:op" dataSourceRef="op:src" responsibilitySetRef="op:network_data">
+          <TypeOfFrameRef versionRef="fxc:v1.0" ref="fxc:UK:DFT:TypeOfFrame_UK_PI_FARE_NETWORK:FXCP" />
+          <fareZones>
+            <FareZone version="1.0" id="zone@101@0@boarding">
+              <Name>ChichesterCtr</Name>
+              <members>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0487">Cathedral</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0296">Orchard Street</ScheduledStopPointRef>
+              </members>
+            </FareZone>
+            <FareZone version="1.0" id="zone@101@0@alighting">
+              <Name>ChichesterCtr</Name>
+              <members>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0487">Cathedral</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0487">Cathedral</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0487">Cathedral</ScheduledStopPointRef>
+              </members>
+            </FareZone>
+            <FareZone version="1.0" id="zone@104@1@boarding">
+              <Name>Somerstown</Name>
+              <members>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0304">Washington Street</ScheduledStopPointRef>
+              </members>
+            </FareZone>
+            <FareZone version="1.0" id="zone@104@1@alighting">
+              <Name>Somerstown</Name>
+              <members>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0296">Orchard Street</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0304">Washington Street</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0296">Orchard Street</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0304">Washington Street</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0296">Orchard Street</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0304">Washington Street</ScheduledStopPointRef>
+              </members>
+            </FareZone>
+            <FareZone version="1.0" id="zone@103@2@boarding">
+              <Name>Broyle/Parklds</Name>
+              <members>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0648">Woodlands Lane</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0649">Little Breach South</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0650">Little Breach Central</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0651">Little Breach North</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0652">Carlisle Gardens</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0653">Lincoln Green</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0654">York Chase</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0640">Bristol Gardens</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0639">Exeter Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0655">Winchester Drive</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0656">Montagu Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0657">Brideoake Close</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0658">Gilbert Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0659">John Arundel Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0238">Sherlock Avenue</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0237">St Wilfrid Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0236">Langton Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0261">Durnford Close</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0254">Oliver Whitby Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0641">Oak Close</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0660">Oak Avenue</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0661">Cedar Drive</ScheduledStopPointRef>
+              </members>
+            </FareZone>
+            <FareZone version="1.0" id="zone@103@2@alighting">
+              <Name>Broyle/Parklds</Name>
+              <members>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0648">Woodlands Lane</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0649">Little Breach South</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0650">Little Breach Central</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0651">Little Breach North</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0652">Carlisle Gardens</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0653">Lincoln Green</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0654">York Chase</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0640">Bristol Gardens</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0639">Exeter Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0655">Winchester Drive</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0656">Montagu Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0657">Brideoake Close</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0658">Gilbert Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0659">John Arundel Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0238">Sherlock Avenue</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0237">St Wilfrid Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0236">Langton Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0261">Durnford Close</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0254">Oliver Whitby Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0641">Oak Close</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0660">Oak Avenue</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0661">Cedar Drive</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0648">Woodlands Lane</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0649">Little Breach South</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0650">Little Breach Central</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0651">Little Breach North</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0652">Carlisle Gardens</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0653">Lincoln Green</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0654">York Chase</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0640">Bristol Gardens</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0639">Exeter Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0655">Winchester Drive</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0656">Montagu Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0657">Brideoake Close</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0658">Gilbert Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0659">John Arundel Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0238">Sherlock Avenue</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0237">St Wilfrid Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0236">Langton Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0261">Durnford Close</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0254">Oliver Whitby Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0641">Oak Close</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0660">Oak Avenue</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0661">Cedar Drive</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0648">Woodlands Lane</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0649">Little Breach South</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0650">Little Breach Central</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0651">Little Breach North</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0652">Carlisle Gardens</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0653">Lincoln Green</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0654">York Chase</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0640">Bristol Gardens</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0639">Exeter Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0655">Winchester Drive</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0656">Montagu Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0657">Brideoake Close</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0658">Gilbert Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0659">John Arundel Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0238">Sherlock Avenue</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0237">St Wilfrid Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0236">Langton Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0261">Durnford Close</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0254">Oliver Whitby Road</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0641">Oak Close</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0660">Oak Avenue</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0661">Cedar Drive</ScheduledStopPointRef>
+              </members>
+            </FareZone>
+            <FareZone version="1.0" id="zone@102@3@boarding">
+              <Name>Beech Avenue</Name>
+              <members>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0638">Beech Avenue</ScheduledStopPointRef>
+              </members>
+            </FareZone>
+            <FareZone version="1.0" id="zone@102@3@alighting">
+              <Name>Beech Avenue</Name>
+              <members>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0638">Beech Avenue</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0638">Beech Avenue</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0638">Beech Avenue</ScheduledStopPointRef>
+              </members>
+            </FareZone>
+            <FareZone version="1.0" id="zone@105@4@boarding">
+              <Name>ChichesterCtr</Name>
+              <members>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0487">Cathedral</ScheduledStopPointRef>
+              </members>
+            </FareZone>
+            <FareZone version="1.0" id="zone@105@4@alighting">
+              <Name>ChichesterCtr</Name>
+              <members>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0487">Cathedral</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0487">Cathedral</ScheduledStopPointRef>
+                <ScheduledStopPointRef versionRef="1.0" ref="atco:4400CH0487">Cathedral</ScheduledStopPointRef>
+              </members>
+            </FareZone>
+          </fareZones>
+        </FareFrame>
+        <FareFrame version="1.0" id="epd:UK:SCSO:FareFrame_UK_PI_FARE_PRODUCT:SCSO:PK0002571:21:46:op" dataSourceRef="op:src" responsibilitySetRef="op:tariff_data">
+          <Name>Fare products</Name>
+          <TypeOfFrameRef versionRef="fxc:v1.0" ref="fxc:UK:DFT:TypeOfFrame_UK_PI_FARE_PRODUCT:FXCP" />
+          <tariffs>
+            <Tariff version="1.0" id="Tariff@16-20_Sgl_(WSi)">
+              <validityConditions>
+                <ValidBetween>
+                  <FromDate>2026-05-20T03:00:00Z</FromDate>
+                </ValidBetween>
+              </validityConditions>
+              <Name>Tariff for Single</Name>
+              <OperatorRef versionRef="1.0" ref="noc:SCSO">noc:136564</OperatorRef>
+              <LineRef versionRef="1.0" ref="SCSO:PK0002571:21:46" />
+              <TypeOfTariffRef versionRef="fxc:v1.0" ref="fxc:zone_to_zone" />
+              <TariffBasis>zoneToZone</TariffBasis>
+              <fareStructureElements>
+                <FareStructureElement version="1.0" id="Tariff@16-20_Sgl_(WSi)@Conditions_of_travel">
+                  <Name>Conditions of travel</Name>
+                  <TypeOfFareStructureElementRef versionRef="fxc:v1.0" ref="fxc:travel_conditions" />
+                  <GenericParameterAssignment version="1.0" id="Tariff@16-20_Sgl_(WSi)@Conditions_of_travel" order="1">
+                    <TypeOfAccessRightAssignmentRef versionRef="fxc:v1.0" ref="fxc:condition_of_use" />
+                    <LimitationGroupingType>AND</LimitationGroupingType>
+                    <limitations>
+                      <Transferability version="1.0" id="Tariff@16-20_Sgl_(WSi)@Conditions_of_travel@Transferability">
+                        <Name>Ticket is not transferable</Name>
+                        <CanTransfer>false</CanTransfer>
+                      </Transferability>
+                      <RoundTrip version="1.0" id="Tariff@16-20_Sgl_(WSi)@Conditions_of_travel@Trip">
+                        <Name>Single Trip</Name>
+                        <TripType>single</TripType>
+                      </RoundTrip>
+                      <FrequencyOfUse version="1.0" id="Tariff@16-20_Sgl_(WSi)@Conditions_of_travel@Frequency">
+                        <Name>One trip no transfers</Name>
+                        <FrequencyOfUseType>none</FrequencyOfUseType>
+                        <MaximalFrequency>1</MaximalFrequency>
+                      </FrequencyOfUse>
+                    </limitations>
+                  </GenericParameterAssignment>
+                </FareStructureElement>
+                <FareStructureElement version="1.0" id="Tariff@16-20_Sgl_(WSi)@Eligibility">
+                  <Name>Eligible user types</Name>
+                  <TypeOfFareStructureElementRef versionRef="fxc:v1.0" ref="fxc:eligibility" />
+                  <GenericParameterAssignment version="1.0" id="Tariff@16-20_Sgl_(WSi)@Eligibility" order="1">
+                    <Name>Eligibility to purchase</Name>
+                    <TypeOfAccessRightAssignmentRef versionRef="fxc:v1.0" ref="fxc:eligible" />
+                    <limitations>
+                      <UserProfile version="1.0" id="Tariff@16-20_Sgl_(WSi)@UP@youngPerson">
+                        <Name>Young Person 16-20</Name>
+                        <TypeOfConcessionRef versionRef="fxc:v1.0" ref="fxc:youngPerson" />
+                        <UserType>youngPerson</UserType>
+                        <MinimumAge>16</MinimumAge>
+                        <MaximumAge>20</MaximumAge>
+                      </UserProfile>
+                    </limitations>
+                  </GenericParameterAssignment>
+                </FareStructureElement>
+                <FareStructureElement version="1.0" id="Tariff@16-20_Sgl_(WSi)@Access_Lines">
+                  <Name>Available lines</Name>
+                  <TypeOfFareStructureElementRef versionRef="fxc:v1.0" ref="fxc:access" />
+                  <distanceMatrixElements>
+                    <DistanceMatrixElement version="1.0" id="Tariff@16-20_Sgl_(WSi)@Distance@101@0+101@0">
+                      <Name>ChichesterCtr to ChichesterCtr</Name>
+                      <StartTariffZoneRef version="1.0" ref="zone@101@0@boarding" />
+                      <EndTariffZoneRef version="1.0" ref="zone@101@0@alighting" />
+                    </DistanceMatrixElement>
+                    <DistanceMatrixElement version="1.0" id="Tariff@16-20_Sgl_(WSi)@Distance@101@0+104@1">
+                      <Name>ChichesterCtr to Somerstown</Name>
+                      <StartTariffZoneRef version="1.0" ref="zone@101@0@boarding" />
+                      <EndTariffZoneRef version="1.0" ref="zone@104@1@alighting" />
+                    </DistanceMatrixElement>
+                    <DistanceMatrixElement version="1.0" id="Tariff@16-20_Sgl_(WSi)@Distance@101@0+103@2">
+                      <Name>ChichesterCtr to Broyle/Parklds</Name>
+                      <StartTariffZoneRef version="1.0" ref="zone@101@0@boarding" />
+                      <EndTariffZoneRef version="1.0" ref="zone@103@2@alighting" />
+                    </DistanceMatrixElement>
+                    <DistanceMatrixElement version="1.0" id="Tariff@16-20_Sgl_(WSi)@Distance@101@0+102@3">
+                      <Name>ChichesterCtr to Beech Avenue</Name>
+                      <StartTariffZoneRef version="1.0" ref="zone@101@0@boarding" />
+                      <EndTariffZoneRef version="1.0" ref="zone@102@3@alighting" />
+                    </DistanceMatrixElement>
+                    <DistanceMatrixElement version="1.0" id="Tariff@16-20_Sgl_(WSi)@Distance@101@0+105@4">
+                      <Name>ChichesterCtr to ChichesterCtr</Name>
+                      <StartTariffZoneRef version="1.0" ref="zone@101@0@boarding" />
+                      <EndTariffZoneRef version="1.0" ref="zone@105@4@alighting" />
+                    </DistanceMatrixElement>
+                    <DistanceMatrixElement version="1.0" id="Tariff@16-20_Sgl_(WSi)@Distance@104@1+104@1">
+                      <Name>Somerstown to Somerstown</Name>
+                      <StartTariffZoneRef version="1.0" ref="zone@104@1@boarding" />
+                      <EndTariffZoneRef version="1.0" ref="zone@104@1@alighting" />
+                    </DistanceMatrixElement>
+                    <DistanceMatrixElement version="1.0" id="Tariff@16-20_Sgl_(WSi)@Distance@104@1+103@2">
+                      <Name>Somerstown to Broyle/Parklds</Name>
+                      <StartTariffZoneRef version="1.0" ref="zone@104@1@boarding" />
+                      <EndTariffZoneRef version="1.0" ref="zone@103@2@alighting" />
+                    </DistanceMatrixElement>
+                    <DistanceMatrixElement version="1.0" id="Tariff@16-20_Sgl_(WSi)@Distance@104@1+102@3">
+                      <Name>Somerstown to Beech Avenue</Name>
+                      <StartTariffZoneRef version="1.0" ref="zone@104@1@boarding" />
+                      <EndTariffZoneRef version="1.0" ref="zone@102@3@alighting" />
+                    </DistanceMatrixElement>
+                    <DistanceMatrixElement version="1.0" id="Tariff@16-20_Sgl_(WSi)@Distance@104@1+105@4">
+                      <Name>Somerstown to ChichesterCtr</Name>
+                      <StartTariffZoneRef version="1.0" ref="zone@104@1@boarding" />
+                      <EndTariffZoneRef version="1.0" ref="zone@105@4@alighting" />
+                    </DistanceMatrixElement>
+                    <DistanceMatrixElement version="1.0" id="Tariff@16-20_Sgl_(WSi)@Distance@103@2+103@2">
+                      <Name>Broyle/Parklds to Broyle/Parklds</Name>
+                      <StartTariffZoneRef version="1.0" ref="zone@103@2@boarding" />
+                      <EndTariffZoneRef version="1.0" ref="zone@103@2@alighting" />
+                    </DistanceMatrixElement>
+                    <DistanceMatrixElement version="1.0" id="Tariff@16-20_Sgl_(WSi)@Distance@103@2+102@3">
+                      <Name>Broyle/Parklds to Beech Avenue</Name>
+                      <StartTariffZoneRef version="1.0" ref="zone@103@2@boarding" />
+                      <EndTariffZoneRef version="1.0" ref="zone@102@3@alighting" />
+                    </DistanceMatrixElement>
+                    <DistanceMatrixElement version="1.0" id="Tariff@16-20_Sgl_(WSi)@Distance@103@2+105@4">
+                      <Name>Broyle/Parklds to ChichesterCtr</Name>
+                      <StartTariffZoneRef version="1.0" ref="zone@103@2@boarding" />
+                      <EndTariffZoneRef version="1.0" ref="zone@105@4@alighting" />
+                    </DistanceMatrixElement>
+                    <DistanceMatrixElement version="1.0" id="Tariff@16-20_Sgl_(WSi)@Distance@102@3+102@3">
+                      <Name>Beech Avenue to Beech Avenue</Name>
+                      <StartTariffZoneRef version="1.0" ref="zone@102@3@boarding" />
+                      <EndTariffZoneRef version="1.0" ref="zone@102@3@alighting" />
+                    </DistanceMatrixElement>
+                    <DistanceMatrixElement version="1.0" id="Tariff@16-20_Sgl_(WSi)@Distance@102@3+105@4">
+                      <Name>Beech Avenue to ChichesterCtr</Name>
+                      <StartTariffZoneRef version="1.0" ref="zone@102@3@boarding" />
+                      <EndTariffZoneRef version="1.0" ref="zone@105@4@alighting" />
+                    </DistanceMatrixElement>
+                    <DistanceMatrixElement version="1.0" id="Tariff@16-20_Sgl_(WSi)@Distance@105@4+105@4">
+                      <Name>ChichesterCtr to ChichesterCtr</Name>
+                      <StartTariffZoneRef version="1.0" ref="zone@105@4@boarding" />
+                      <EndTariffZoneRef version="1.0" ref="zone@105@4@alighting" />
+                    </DistanceMatrixElement>
+                  </distanceMatrixElements>
+                  <GenericParameterAssignment version="1.0" id="Tariff@16-20_Sgl_(WSi)@Access_Lines" order="1">
+                    <Name>Lines</Name>
+                    <TypeOfAccessRightAssignmentRef versionRef="fxc:v1.0" ref="fxc:can_access" />
+                    <ValidityParameterAssignmentType>EQ</ValidityParameterAssignmentType>
+                    <validityParameters>
+                      <LineRef versionRef="1.0" ref="SCSO:PK0002571:21:46" />
+                    </validityParameters>
+                  </GenericParameterAssignment>
+                </FareStructureElement>
+              </fareStructureElements>
+            </Tariff>
+          </tariffs>
+          <fareProducts>
+            <PreassignedFareProduct version="1.0" id="trip@16-20_Sgl_(WSi)">
+              <Name>Single</Name>
+              <Description>One single ticket for one journey between the points shown on the ticket</Description>
+              <ChargingMomentRef versionRef="fxc:v1.0" ref="fxc:prepayment" />
+              <ChargingMomentType>beforeTravel</ChargingMomentType>
+              <TypeOfFareProductRef versionRef="fxc:v1.0" ref="fxc:standard_product@trip@single" />
+              <OperatorRef version="1.0" ref="noc:SCSO">noc:136564</OperatorRef>
+              <validableElements>
+                <ValidableElement version="1.0" id="trip@16-20_Sgl_(WSi)@Access">
+                  <Name>Single Ride</Name>
+                  <fareStructureElements>
+                    <FareStructureElementRef version="1.0" ref="Tariff@16-20_Sgl_(WSi)@Eligibility" />
+                    <FareStructureElementRef version="1.0" ref="Tariff@16-20_Sgl_(WSi)@Conditions_of_travel" />
+                    <FareStructureElementRef version="1.0" ref="Tariff@16-20_Sgl_(WSi)@Access_Lines" />
+                  </fareStructureElements>
+                </ValidableElement>
+              </validableElements>
+              <accessRightsInProduct>
+                <AccessRightInProduct version="1.0" id="trip@16-20_Sgl_(WSi)" order="1">
+                  <ValidableElementRef version="1.0" ref="trip@16-20_Sgl_(WSi)@Access" />
+                </AccessRightInProduct>
+              </accessRightsInProduct>
+              <ProductType>singleTrip</ProductType>
+            </PreassignedFareProduct>
+          </fareProducts>
+          <salesOfferPackages>
+            <SalesOfferPackage version="1.0" id="SOP@trip@16-20_Sgl_(WSi)@paperOnBus">
+              <Name>Single - Onboard (paper ticket)</Name>
+              <distributionAssignments>
+                <DistributionAssignment version="1.0" id="SOP@trip@16-20_Sgl_(WSi)@paperOnBus@onBoard" order="1">
+                  <DistributionChannelType>onBoard</DistributionChannelType>
+                  <PaymentMethods>cash contactlessPaymentCard</PaymentMethods>
+                  <FulfilmentMethodRef version="1.0" ref="Fulfilment@collectOnBoard" />
+                </DistributionAssignment>
+              </distributionAssignments>
+              <salesOfferPackageElements>
+                <SalesOfferPackageElement version="1.0" id="SOP@trip@16-20_Sgl_(WSi)@paperOnBus@paperTicket" order="1">
+                  <TypeOfTravelDocumentRef version="1.0" ref="TravelDocument@paperTicket" />
+                  <PreassignedFareProductRef version="1.0" ref="trip@16-20_Sgl_(WSi)" />
+                </SalesOfferPackageElement>
+              </salesOfferPackageElements>
+            </SalesOfferPackage>
+            <SalesOfferPackage version="1.0" id="SOP@trip@16-20_Sgl_(WSi)@mobileApp">
+              <Name>Single - Mobile App</Name>
+              <distributionAssignments>
+                <DistributionAssignment version="1.0" id="SOP@trip@16-20_Sgl_(WSi)@mobileApp@mobileDevice" order="1">
+                  <DistributionChannelType>mobileDevice</DistributionChannelType>
+                  <PaymentMethods>creditCard debitCard</PaymentMethods>
+                  <FulfilmentMethodRef version="1.0" ref="Fulfilment@mobileApp" />
+                </DistributionAssignment>
+              </distributionAssignments>
+              <salesOfferPackageElements>
+                <SalesOfferPackageElement version="1.0" id="SOP@trip@16-20_Sgl_(WSi)@mobileApp@mobileApp" order="1">
+                  <TypeOfTravelDocumentRef version="1.0" ref="TravelDocument@mobileApp" />
+                  <PreassignedFareProductRef version="1.0" ref="trip@16-20_Sgl_(WSi)" />
+                  <validityParameterAssignments>
+                    <GenericParameterAssignment version="1.0" id="SOP@trip@16-20_Sgl_(WSi)@mobileApp@mobileApp" order="1">
+                      <TypeOfAccessRightAssignmentRef versionRef="fxc:v1.0" ref="fxc:can_purchase_when" />
+                      <limitations>
+                        <UsageValidityPeriod version="1.0" id="SOP@trip@16-20_Sgl_(WSi)@mobileApp@mobileApp@hanging">
+                          <UsageTrigger>purchase</UsageTrigger>
+                          <UsageEnd>productExpiry</UsageEnd>
+                          <StandardDuration>P1M</StandardDuration>
+                          <EndTime>03:59:59</EndTime>
+                        </UsageValidityPeriod>
+                      </limitations>
+                    </GenericParameterAssignment>
+                  </validityParameterAssignments>
+                </SalesOfferPackageElement>
+              </salesOfferPackageElements>
+            </SalesOfferPackage>
+          </salesOfferPackages>
+        </FareFrame>
+        <FareFrame version="1.0" id="epd:UK:SCSO:FareFrame_UK_PI_FARE_NETWORK_PRICE:SCSO:PK0002571:21:46:op" dataSourceRef="op:src" responsibilitySetRef="op:tariff_data">
+          <Name>Prices for 16-20 Sgl (WSi)</Name>
+          <TypeOfFrameRef versionRef="fxc:v1.0" ref="fxc:UK:DFT:TypeOfFrame_UK_PI_PRICE:FXCP" />
+          <FrameDefaults>
+            <DefaultCurrency>GBP</DefaultCurrency>
+          </FrameDefaults>
+          <prerequisites>
+            <FareFrameRef versionRef="1.0" ref="epd:UK:SCSO:FareFrame_UK_PI_FARE_PRODUCT:SCSO:PK0002571:21:46:op" />
+          </prerequisites>
+          <fareTables>
+            <FareTable version="1.0" id="fareTable@SCSO:PK0002571:21:46@trip@16-20_Sgl_(WSi)">
+              <Name>Chi-Parklands - 16-20 Sgl (WSi)</Name>
+              <pricesFor>
+                <PreassignedFareProductRef version="1.0" ref="trip@16-20_Sgl_(WSi)" />
+                <SalesOfferPackageRef version="1.0" ref="SOP@trip@16-20_Sgl_(WSi)@paperOnBus" />
+                <SalesOfferPackageRef version="1.0" ref="SOP@trip@16-20_Sgl_(WSi)@mobileApp" />
+                <UserProfileRef version="1.0" ref="Tariff@16-20_Sgl_(WSi)@UP@youngPerson" />
+              </pricesFor>
+              <specifics>
+                <LineRef versionRef="1.0" ref="SCSO:PK0002571:21:46" />
+              </specifics>
+              <prices>
+                <DistanceMatrixElementPrice version="1.0" id="price@Tariff@16-20_Sgl_(WSi)@Distance@101@0+104@1@trip@16-20_Sgl_(WSi)">
+                  <Amount>1.5</Amount>
+                  <DistanceMatrixElementRef version="1.0" ref="Tariff@16-20_Sgl_(WSi)@Distance@101@0+104@1" />
+                </DistanceMatrixElementPrice>
+                <DistanceMatrixElementPrice version="1.0" id="price@Tariff@16-20_Sgl_(WSi)@Distance@101@0+103@2@trip@16-20_Sgl_(WSi)">
+                  <Amount>1.7</Amount>
+                  <DistanceMatrixElementRef version="1.0" ref="Tariff@16-20_Sgl_(WSi)@Distance@101@0+103@2" />
+                </DistanceMatrixElementPrice>
+                <DistanceMatrixElementPrice version="1.0" id="price@Tariff@16-20_Sgl_(WSi)@Distance@101@0+102@3@trip@16-20_Sgl_(WSi)">
+                  <Amount>1.7</Amount>
+                  <DistanceMatrixElementRef version="1.0" ref="Tariff@16-20_Sgl_(WSi)@Distance@101@0+102@3" />
+                </DistanceMatrixElementPrice>
+                <DistanceMatrixElementPrice version="1.0" id="price@Tariff@16-20_Sgl_(WSi)@Distance@104@1+104@1@trip@16-20_Sgl_(WSi)">
+                  <Amount>1.5</Amount>
+                  <DistanceMatrixElementRef version="1.0" ref="Tariff@16-20_Sgl_(WSi)@Distance@104@1+104@1" />
+                </DistanceMatrixElementPrice>
+                <DistanceMatrixElementPrice version="1.0" id="price@Tariff@16-20_Sgl_(WSi)@Distance@104@1+103@2@trip@16-20_Sgl_(WSi)">
+                  <Amount>1.5</Amount>
+                  <DistanceMatrixElementRef version="1.0" ref="Tariff@16-20_Sgl_(WSi)@Distance@104@1+103@2" />
+                </DistanceMatrixElementPrice>
+                <DistanceMatrixElementPrice version="1.0" id="price@Tariff@16-20_Sgl_(WSi)@Distance@104@1+102@3@trip@16-20_Sgl_(WSi)">
+                  <Amount>1.7</Amount>
+                  <DistanceMatrixElementRef version="1.0" ref="Tariff@16-20_Sgl_(WSi)@Distance@104@1+102@3" />
+                </DistanceMatrixElementPrice>
+                <DistanceMatrixElementPrice version="1.0" id="price@Tariff@16-20_Sgl_(WSi)@Distance@104@1+105@4@trip@16-20_Sgl_(WSi)">
+                  <Amount>1.7</Amount>
+                  <DistanceMatrixElementRef version="1.0" ref="Tariff@16-20_Sgl_(WSi)@Distance@104@1+105@4" />
+                </DistanceMatrixElementPrice>
+                <DistanceMatrixElementPrice version="1.0" id="price@Tariff@16-20_Sgl_(WSi)@Distance@103@2+103@2@trip@16-20_Sgl_(WSi)">
+                  <Amount>1.5</Amount>
+                  <DistanceMatrixElementRef version="1.0" ref="Tariff@16-20_Sgl_(WSi)@Distance@103@2+103@2" />
+                </DistanceMatrixElementPrice>
+                <DistanceMatrixElementPrice version="1.0" id="price@Tariff@16-20_Sgl_(WSi)@Distance@103@2+102@3@trip@16-20_Sgl_(WSi)">
+                  <Amount>1.5</Amount>
+                  <DistanceMatrixElementRef version="1.0" ref="Tariff@16-20_Sgl_(WSi)@Distance@103@2+102@3" />
+                </DistanceMatrixElementPrice>
+                <DistanceMatrixElementPrice version="1.0" id="price@Tariff@16-20_Sgl_(WSi)@Distance@103@2+105@4@trip@16-20_Sgl_(WSi)">
+                  <Amount>1.7</Amount>
+                  <DistanceMatrixElementRef version="1.0" ref="Tariff@16-20_Sgl_(WSi)@Distance@103@2+105@4" />
+                </DistanceMatrixElementPrice>
+                <DistanceMatrixElementPrice version="1.0" id="price@Tariff@16-20_Sgl_(WSi)@Distance@102@3+105@4@trip@16-20_Sgl_(WSi)">
+                  <Amount>1.5</Amount>
+                  <DistanceMatrixElementRef version="1.0" ref="Tariff@16-20_Sgl_(WSi)@Distance@102@3+105@4" />
+                </DistanceMatrixElementPrice>
+              </prices>
+            </FareTable>
+          </fareTables>
+        </FareFrame>
+      </frames>
+    </CompositeFrame>
+    <CompositeFrame version="1.0" id="epd:UK:SCSO:CompositeFrame_UK_PI_METADATA_OFFER::op" dataSourceRef="op:src" responsibilitySetRef="op:metadata">
+      <Name>Common resources for SCSO</Name>
+      <Description>Set of SCSO profile metadata.</Description>
+      <TypeOfFrameRef versionRef="fxc:v1.0" ref="fxc:UK:DFT:TypeOfFrame_UK_PI_METADATA_OFFER:FXCP" />
+      <frames>
+        <FareFrame version="1.0" id="epd:UK:SCSO:FareFrame_UK_PI_METADATA:SCSO:PK0002571:21:46:op" dataSourceRef="op:src" responsibilitySetRef="op:metadata">
+          <fulfilmentMethods>
+            <FulfilmentMethod version="1.0" id="Fulfilment@mobileApp">
+              <Name>Mobile App</Name>
+              <FulfilmentMethodType>mobileApp</FulfilmentMethodType>
+            </FulfilmentMethod>
+            <FulfilmentMethod version="1.0" id="Fulfilment@onlinePropagation">
+              <Name>Online propagation</Name>
+              <FulfilmentMethodType>validator</FulfilmentMethodType>
+            </FulfilmentMethod>
+            <FulfilmentMethod version="1.0" id="Fulfilment@post">
+              <Name>Send ticket by post</Name>
+              <FulfilmentMethodType>post</FulfilmentMethodType>
+            </FulfilmentMethod>
+            <FulfilmentMethod version="1.0" id="Fulfilment@collectAtCounter">
+              <Name>Collect at counter</Name>
+              <FulfilmentMethodType>ticketOffice</FulfilmentMethodType>
+            </FulfilmentMethod>
+            <FulfilmentMethod version="1.0" id="Fulfilment@collectOnBoard">
+              <Name>Collect on board</Name>
+              <FulfilmentMethodType>conductor</FulfilmentMethodType>
+            </FulfilmentMethod>
+          </fulfilmentMethods>
+          <typesOfTravelDocuments>
+            <TypeOfTravelDocument version="1.0" id="TravelDocument@mobileApp">
+              <Name>Stored on your mobile phone as m-tickets</Name>
+              <MediaType>mobileApp</MediaType>
+              <MachineReadable>barCode</MachineReadable>
+            </TypeOfTravelDocument>
+            <TypeOfTravelDocument version="1.0" id="TravelDocument@smartCard">
+              <Name>Smart_Card_Ticket</Name>
+              <MediaType>smartCard</MediaType>
+              <MachineReadable>nfc</MachineReadable>
+            </TypeOfTravelDocument>
+            <TypeOfTravelDocument version="1.0" id="TravelDocument@paperTicket">
+              <Name>Printed Ticket</Name>
+              <MediaType>paperTicket</MediaType>
+            </TypeOfTravelDocument>
+          </typesOfTravelDocuments>
+        </FareFrame>
+      </frames>
+    </CompositeFrame>
+  </dataObjects>
+</PublicationDelivery>

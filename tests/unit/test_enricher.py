@@ -1,6 +1,7 @@
 """Tests for enrichment logic."""
 
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -21,6 +22,8 @@ from houses.enricher import (
     compute_commute_breakdown,
 )
 from houses.models import PetrolCost, TransitInfo
+
+FIXTURES_DIR = Path("tests/fixtures/parking_tariffs")
 
 
 class TestOutcodeDetection:
@@ -568,3 +571,553 @@ class TestStationLookup:
         # Should find Maidenhead in stations.csv (not "Maidenhead Rail Station")
         coords = _lookup_station_coords("Maidenhead Rail Station")
         assert coords is not None
+
+
+class TestCleanStationNameForMatching:
+    """_clean_station_name_for_matching — strip suffixes but NOT London prefix."""
+
+    def test_strips_rail_station(self):
+        from houses.enricher import _clean_station_name_for_matching
+
+        assert _clean_station_name_for_matching("Woking Rail Station") == "Woking"
+
+    def test_strips_underground_station(self):
+        from houses.enricher import _clean_station_name_for_matching
+
+        assert _clean_station_name_for_matching("Paddington Underground Station") == "Paddington"
+
+    def test_strips_generic_station(self):
+        from houses.enricher import _clean_station_name_for_matching
+
+        assert _clean_station_name_for_matching("Oxford Circus Station") == "Oxford Circus"
+
+    def test_keeps_london_prefix(self):
+        from houses.enricher import _clean_station_name_for_matching
+
+        assert _clean_station_name_for_matching("London Paddington Rail Station") == "London Paddington"
+
+    def test_no_suffix(self):
+        from houses.enricher import _clean_station_name_for_matching
+
+        assert _clean_station_name_for_matching("Some Street, Town") == "Some Street, Town"
+
+
+class TestStationCrsLookup:
+    """_lookup_station_crs — find CRS from stations.csv by exact match."""
+
+    def test_finds_woking(self):
+        from houses.enricher import _lookup_station_crs
+
+        crs = _lookup_station_crs("Woking Rail Station")
+        assert crs == "WOK"
+
+    def test_finds_maidenhead(self):
+        from houses.enricher import _lookup_station_crs
+
+        crs = _lookup_station_crs("Maidenhead Rail Station")
+        assert crs == "MAI"
+
+    def test_case_insensitive(self):
+        from houses.enricher import _lookup_station_crs
+
+        crs = _lookup_station_crs("woking rail station")
+        assert crs == "WOK"
+
+    def test_not_found_returns_none(self):
+        from houses.enricher import _lookup_station_crs
+
+        crs = _lookup_station_crs("Some Fake Station")
+        assert crs is None
+
+
+class TestBusFareDailyCost:
+    """_compute_bus_daily_cost — cheapest product covering two journeys."""
+
+    def test_uses_return_when_cheaper_than_2x_single(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        # adult_return £4.00 vs 2×single £5.00 → £4.00
+        cost = _compute_bus_daily_cost({"adult_single": 2.50, "adult_return": 4.00})
+        assert cost == 4.00
+
+    def test_uses_day_rider_when_cheapest(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        # adult_day £4.50 < 2×single £5.00 → £4.50
+        cost = _compute_bus_daily_cost({"adult_single": 2.50, "adult_day": 4.50})
+        assert cost == 4.50
+
+    def test_uses_2x_single_when_no_other_products(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({"adult_single": 2.50})
+        assert cost == 5.00
+
+    def test_national_cap_applied_to_single(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        meta = {"national_max_single_gbp": 3.00}
+        # BODS single is £4.00, cap → £3.00, daily → £6.00
+        cost = _compute_bus_daily_cost({"adult_single": 4.00}, meta)
+        assert cost == 6.00
+
+    def test_national_cap_below_cap(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        meta = {"national_max_single_gbp": 3.00}
+        # BODS single £2.50 is below cap → used as-is
+        cost = _compute_bus_daily_cost({"adult_single": 2.50}, meta)
+        assert cost == 5.00
+
+    def test_national_cap_not_set(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        # meta is None → BODS single used as-is
+        cost = _compute_bus_daily_cost({"adult_single": 4.00})
+        assert cost == 8.00
+
+
+class TestBusFareLookup:
+    """_lookup_bus_roundtrip_cost — stop name → zone → zone pair → price."""
+
+    def test_knaphill_to_woking(self):
+        from houses.enricher import _lookup_bus_roundtrip_cost
+
+        cost = _lookup_bus_roundtrip_cost("Knaphill, Randolph Close", "Woking, Woking Railway Station")
+        assert cost == 4.00
+
+    def test_unknown_stops_return_none(self):
+        from houses.enricher import _lookup_bus_roundtrip_cost
+
+        cost = _lookup_bus_roundtrip_cost("Unknown Stop", "Another Unknown")
+        assert cost is None
+
+    def test_case_insensitive_matching(self):
+        from houses.enricher import _lookup_bus_roundtrip_cost
+
+        cost = _lookup_bus_roundtrip_cost("KNAPHILL, RANDOLPH CLOSE", "WOKING, WOKING RAILWAY STATION")
+        assert cost == 4.00
+
+
+class TestStopToZoneMapping:
+    """Zone lookup for stop names from the data file."""
+
+    def test_knaphill_maps_to_zone_knaphill(self):
+        from houses.enricher import _load_bus_fares
+
+        data = _load_bus_fares()
+        scso = data.get("Stagecoach_South", {})
+        zone = scso.get("stop_zones", {}).get("knaphill, randolph close")
+        assert zone == "Zone_Knaphill"
+
+    def test_woking_station_maps_to_zone_woking_station(self):
+        from houses.enricher import _load_bus_fares
+
+        data = _load_bus_fares()
+        scso = data.get("Stagecoach_South", {})
+        zone = scso.get("stop_zones", {}).get("woking, woking railway station")
+        assert zone == "Zone_Woking_Station"
+
+
+class TestZonePairLookup:
+    """Zone pair → fare products."""
+
+    def test_knaphill_woking_has_products(self):
+        from houses.enricher import _load_bus_fares
+
+        data = _load_bus_fares()
+        scso = data.get("Stagecoach_South", {})
+        fares = scso.get("zone_fares", {}).get("Zone_Knaphill:Zone_Woking_Station")
+        assert fares is not None
+        assert fares.get("adult_single") == 2.50
+        assert fares.get("adult_return") == 4.00
+
+
+class TestPickBestLorenaRoute:
+    """_pick_best_lorena_route — bus vs no-bus decision."""
+
+    def test_uses_bus_when_much_faster(self):
+        from houses.enricher import _pick_best_lorena_route
+        from houses.models import TransitInfo
+
+        no_bus = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=50)
+        with_bus = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=30)
+        result = _pick_best_lorena_route(no_bus, with_bus)
+        assert result == with_bus
+
+    def test_rejects_bus_when_not_faster(self):
+        from houses.enricher import _pick_best_lorena_route
+        from houses.models import TransitInfo
+
+        no_bus = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=35)
+        with_bus = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=33)
+        result = _pick_best_lorena_route(no_bus, with_bus)
+        assert result == no_bus
+
+    def test_falls_back_to_no_bus_when_with_bus_none(self):
+        from houses.enricher import _pick_best_lorena_route
+        from houses.models import TransitInfo
+
+        no_bus = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=50)
+        with_bus = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=None)
+        result = _pick_best_lorena_route(no_bus, with_bus)
+        assert result == no_bus
+
+    def test_falls_back_to_with_bus_when_no_bus_none(self):
+        from houses.enricher import _pick_best_lorena_route
+        from houses.models import TransitInfo
+
+        no_bus = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=None)
+        with_bus = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=30)
+        result = _pick_best_lorena_route(no_bus, with_bus)
+        assert result == with_bus
+
+
+class TestBusFaresDataLoaded:
+    """data/bus_fares.json is loaded at runtime."""
+
+    def test_file_loaded(self):
+        from houses.enricher import _load_bus_fares
+
+        data = _load_bus_fares()
+        assert data is not None
+        assert "_meta" in data
+        assert data["_meta"]["national_max_single_gbp"] == 3.00
+
+    def test_has_stagecoach_south(self):
+        from houses.enricher import _load_bus_fares
+
+        data = _load_bus_fares()
+        assert "Stagecoach_South" in data
+        assert "stop_zones" in data["Stagecoach_South"]
+        assert "zone_fares" in data["Stagecoach_South"]
+
+
+class TestParkingRates:
+    """_load_parking_rates and _lookup_parking_cost with CSV."""
+
+    def test_no_csv_file_returns_empty(self, monkeypatch):
+        from houses.enricher import _load_parking_rates
+
+        monkeypatch.setattr("houses.enricher._PARKING_RATES_PATH", Path("/tmp/nonexistent_parking_rates.csv"))
+        by_name, by_crs = _load_parking_rates()
+        assert by_name == {}
+        assert by_crs == {}
+
+    @pytest.mark.asyncio
+    async def test_lookup_known_station(self, tmp_path, monkeypatch):
+        csv_path = tmp_path / "parking_rates.csv"
+        csv_path.write_text("station_name,crs,daily_cost_gbp\nWoking,WOK,12.80\n")
+        monkeypatch.setattr("houses.enricher._PARKING_RATES_PATH", csv_path)
+        monkeypatch.setattr("houses.enricher._parking_rates_cache", None)
+
+        async def _noop(_):
+            return None
+
+        monkeypatch.setattr("houses.enricher._apcoa_prebook_lookup", _noop)
+        from houses.enricher import _lookup_parking_cost
+
+        cost = await _lookup_parking_cost("Woking Rail Station")
+        assert cost == 12.80
+
+    @pytest.mark.asyncio
+    async def test_lookup_free_station(self, tmp_path, monkeypatch):
+        csv_path = tmp_path / "parking_rates.csv"
+        csv_path.write_text("station_name,crs,daily_cost_gbp\nMarlow,MLW,0.0\n")
+        monkeypatch.setattr("houses.enricher._PARKING_RATES_PATH", csv_path)
+        monkeypatch.setattr("houses.enricher._parking_rates_cache", None)
+
+        async def _noop(_):
+            return None
+
+        monkeypatch.setattr("houses.enricher._apcoa_prebook_lookup", _noop)
+        from houses.enricher import _lookup_parking_cost
+
+        cost = await _lookup_parking_cost("Marlow Rail Station")
+        assert cost == 0.0
+
+    @pytest.mark.asyncio
+    async def test_lookup_unknown_station(self, tmp_path, monkeypatch):
+        csv_path = tmp_path / "parking_rates.csv"
+        csv_path.write_text("station_name,crs,daily_cost_gbp\nMarlow,MLW,0.0\n")
+        monkeypatch.setattr("houses.enricher._PARKING_RATES_PATH", csv_path)
+        monkeypatch.setattr("houses.enricher._parking_rates_cache", None)
+
+        async def _noop(_):
+            return None
+
+        monkeypatch.setattr("houses.enricher._apcoa_prebook_lookup", _noop)
+        from houses.enricher import _lookup_parking_cost
+
+        cost = await _lookup_parking_cost("Unknown Station")
+        assert cost is None
+
+    @pytest.mark.asyncio
+    async def test_lookup_blank_cost_returns_none(self, tmp_path, monkeypatch):
+        csv_path = tmp_path / "parking_rates.csv"
+        csv_path.write_text("station_name,crs,daily_cost_gbp\nMarlow,MLW,\n")
+        monkeypatch.setattr("houses.enricher._PARKING_RATES_PATH", csv_path)
+        monkeypatch.setattr("houses.enricher._parking_rates_cache", None)
+
+        async def _noop(_):
+            return None
+
+        monkeypatch.setattr("houses.enricher._apcoa_prebook_lookup", _noop)
+        from houses.enricher import _lookup_parking_cost
+
+        cost = await _lookup_parking_cost("Marlow Rail Station")
+        assert cost is None
+
+    @pytest.mark.asyncio
+    async def test_lookup_by_crs_fallback(self, tmp_path, monkeypatch):
+        """When name doesn't match, falls back to CRS lookup."""
+        csv_path = tmp_path / "parking_rates.csv"
+        csv_path.write_text("station_name,crs,daily_cost_gbp\nCobham & Stoke Dabernon,CSD,8.10\n")
+        monkeypatch.setattr("houses.enricher._PARKING_RATES_PATH", csv_path)
+        monkeypatch.setattr("houses.enricher._parking_rates_cache", None)
+
+        async def _noop(_):
+            return None
+
+        monkeypatch.setattr("houses.enricher._apcoa_prebook_lookup", _noop)
+        from houses.enricher import _lookup_parking_cost
+
+        # TfL returns "Cobham & Stoke D'Abernon Rail Station" — different from CSV name
+        cost = await _lookup_parking_cost("Cobham & Stoke D'Abernon Rail Station")
+        assert cost == 8.10
+
+
+class TestExtractDailyRateFromTariff:
+    """extract_daily_rate_from_tariff — pure function, no I/O, test fixture files."""
+
+    def _load(self, name: str) -> str:
+        return (FIXTURES_DIR / name).read_text()
+
+    def test_woking(self):
+        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
+        rate = extract_daily_rate_from_tariff(self._load("woking.txt"))
+        assert rate == 12.80
+
+    def test_fleet(self):
+        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
+        rate = extract_daily_rate_from_tariff(self._load("fleet.txt"))
+        assert rate == 10.90
+
+    def test_bourne_end_peak_rate(self):
+        """Bourne End has 'Daily Rate before 12pm: £4.00' — should pick peak rate."""
+        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
+        rate = extract_daily_rate_from_tariff(self._load("bourne_end.txt"))
+        assert rate == 4.00
+
+    def test_didcot_24h_rate(self):
+        """Didcot uses 'Up to 24 hours £7.20' format."""
+        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
+        rate = extract_daily_rate_from_tariff(self._load("didcot_foxhall.txt"))
+        assert rate == 7.20
+
+    def test_high_wycombe(self):
+        """High Wycombe has 'Daily Rate: £10.40' with a preceding 'Monday - Sunday' line."""
+        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
+        rate = extract_daily_rate_from_tariff(self._load("high_wycombe.txt"))
+        assert rate == 10.40
+
+    def test_twyford_car_park_2(self):
+        """Twyford CP2 has 'Daily Rate: £9.90'."""
+        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
+        rate = extract_daily_rate_from_tariff(self._load("twyford_car_park_2.txt"))
+        assert rate == 9.90
+
+    def test_twyford_car_park_1_permit_only(self):
+        """Twyford CP1 is permit holders only — returns None."""
+        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
+        rate = extract_daily_rate_from_tariff(self._load("twyford_car_park_1.txt"))
+        assert rate is None
+
+    def test_empty_text_returns_none(self):
+        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
+        assert extract_daily_rate_from_tariff("") is None
+
+    def test_no_tariff_section_returns_none(self):
+        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
+        assert extract_daily_rate_from_tariff("Some random text without pricing") is None
+
+
+class TestNeTExParsing:
+    """parse_netex_fares — extracts stop zones and fares from BODS NeTEx XML."""
+
+    _STATIONS_CACHE: list[dict] | None = None
+
+    @classmethod
+    def _stations(cls) -> list[dict]:
+        if cls._STATIONS_CACHE is None:
+            import csv
+
+            cls._STATIONS_CACHE = []
+            with Path("data/stations.csv").open(newline="") as f:
+                for row in csv.DictReader(f):
+                    cls._STATIONS_CACHE.append(
+                        {
+                            "name": row["stationName"],
+                            "crs": row["crsCode"],
+                            "lat": float(row["lat"]),
+                            "long": float(row["long"]),
+                        }
+                    )
+        return cls._STATIONS_CACHE
+
+    def test_parses_scso_stops_and_zones(self):
+        """Stagecoach South dataset should find stops and zones."""
+        xml = (Path("tests/fixtures/bods") / "scso_sample.xml").read_text()
+        from scripts.extract_bus_fares import parse_netex_fares
+
+        result = parse_netex_fares(xml, self._stations())
+        assert result is not None
+        assert len(result.get("stop_zones", {})) >= 1
+
+    def test_parses_scso_zone_prices(self):
+        """Stagecoach South dataset should extract adult_single prices for zone pairs.
+
+        The real BODS fare data uses StartTariffZoneRef/EndTariffZoneRef
+        and nests prices inside Tariff → FareStructureElement → PriceGroup
+        instead of the simple AC Williams format.
+        """
+        xml = (Path("tests/fixtures/bods") / "scso_sample.xml").read_text()
+        from scripts.extract_bus_fares import parse_netex_fares
+
+        result = parse_netex_fares(xml, self._stations())
+        assert result is not None
+        fares = result.get("zone_fares", {})
+        assert len(fares) >= 1
+        any_single = any("adult_single" in v for v in fares.values())
+        assert any_single, "No zone fare has an adult_single price"
+
+
+class TestEnrichRailFares:
+    """_enrich_rail_fares — adds NR fares when the cost is only bus/parking."""
+
+    @pytest.mark.asyncio
+    async def test_lorena_bus_cost_adds_rail_fare(self, monkeypatch, tmp_path):
+        """Lorena with bus cost only (£4.00) gets rail fare (£37.20) added → £41.20."""
+        # Point at fixture data files so nearest_station and fare_between work
+        stations_csv = tmp_path / "stations.csv"
+        stations_csv.write_text("stationName,crsCode,lat,long\nWoking,WOK,51.317,-0.556\n")
+        monkeypatch.setattr("houses.rail_fares._STATIONS_CSV", stations_csv)
+
+        rail_csv = tmp_path / "rail_fares.csv"
+        rail_csv.write_text("origin_crs,dest_crs,single_fare_gbp\nWOK,WAT,17.00\n")
+        monkeypatch.setattr("houses.rail_fares._FARES_CSV", rail_csv)
+
+        # Mock only the HTTP boundary: geocode returns synthetic coords.
+        # nearest_station and fare_between run for real against tmp CSVs.
+        async def mock_geocode(_):
+            return (51.317, -0.556)
+
+        monkeypatch.setattr("houses.server._geocode", mock_geocode)
+        # nearest_station and fare_between read from the temp CSVs above — they run for real
+
+        from houses.models import TransitInfo
+        from houses.server import _enrich_rail_fares
+
+        lorena = TransitInfo(
+            destination_label="Lorena",
+            destination_postcode="EC3A 7LP",
+            duration_minutes=78,
+            daily_cost_gbp=4.0,
+            bus_cost_gbp=4.0,
+        )
+        simon = TransitInfo(
+            destination_label="Simon",
+            destination_postcode="SW1V 2QQ",
+            duration_minutes=71,
+            daily_cost_gbp=40.4,
+        )
+        await _enrich_rail_fares(
+            enabled={"lorena"},
+            postcode="GU21 7QF",
+            address="St James Close",
+            simon=simon,
+            lorena=lorena,
+        )
+        # rail: (17.00 + 2.80) × 2 = 39.60. existing bus: 4.00. total: 43.60
+        expected = 39.60 + 4.00
+        assert lorena.daily_cost_gbp == pytest.approx(expected, rel=1e-2)
+
+    @pytest.mark.asyncio
+    async def test_simon_parking_cost_adds_rail_fare(self, monkeypatch, tmp_path):
+        """Simon with parking cost only (£10.80) gets rail fare added → £50.40."""
+        stations_csv = tmp_path / "stations.csv"
+        stations_csv.write_text("stationName,crsCode,lat,long\nBrookwood,BKO,51.303,-0.636\n")
+        monkeypatch.setattr("houses.rail_fares._STATIONS_CSV", stations_csv)
+
+        rail_csv = tmp_path / "rail_fares.csv"
+        rail_csv.write_text("origin_crs,dest_crs,single_fare_gbp\nBKO,VIC,17.00\n")
+        monkeypatch.setattr("houses.rail_fares._FARES_CSV", rail_csv)
+
+        async def mock_geocode(_):
+            return (51.303, -0.636)
+
+        monkeypatch.setattr("houses.server._geocode", mock_geocode)
+
+        from houses.models import TransitInfo
+        from houses.server import _enrich_rail_fares
+
+        simon = TransitInfo(
+            destination_label="Simon",
+            destination_postcode="SW1V 2QQ",
+            duration_minutes=71,
+            daily_cost_gbp=10.8,
+            parking_cost_gbp=10.8,
+        )
+        lorena = TransitInfo(
+            destination_label="Lorena",
+            destination_postcode="EC3A 7LP",
+            duration_minutes=90,
+            daily_cost_gbp=None,
+        )
+        await _enrich_rail_fares(
+            enabled={"simon"},
+            postcode="GU21 2NA",
+            address="Robin Hood Road, Knaphill",
+            simon=simon,
+            lorena=lorena,
+        )
+        # rail: (17.00 + 2.80) × 2 = 39.60. existing parking: 10.80. total: 50.40
+        expected = 39.60 + 10.80
+        assert simon.daily_cost_gbp == pytest.approx(expected, rel=1e-2)
+
+    @pytest.mark.asyncio
+    async def test_full_tfl_fare_skips_nr(self, monkeypatch):
+        """When TfL already priced the journey, cost stays unchanged."""
+        from houses.models import TransitInfo
+        from houses.server import _enrich_rail_fares
+
+        lorena = TransitInfo(
+            destination_label="Lorena",
+            destination_postcode="EC3A 7LP",
+            duration_minutes=90,
+            daily_cost_gbp=36.0,
+        )
+        simon = TransitInfo(
+            destination_label="Simon",
+            destination_postcode="SW1V 2QQ",
+            duration_minutes=71,
+            daily_cost_gbp=40.4,
+        )
+        await _enrich_rail_fares(
+            enabled={"simon", "lorena"},
+            postcode="GU22 8RU",
+            address="Test",
+            simon=simon,
+            lorena=lorena,
+        )
+        assert simon.daily_cost_gbp == 40.4
+        assert lorena.daily_cost_gbp == 36.0

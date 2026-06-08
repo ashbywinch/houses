@@ -1,0 +1,49 @@
+{
+  "_meta": {
+    "national_max_single_gbp": 3.00,
+    "national_max_single_notes": "UK Gov Bus Fare Cap Scheme — applies to all participating operators in England"
+  },
+  "Stagecoach_South": {
+    "stop_zones": {
+      "knaphill, randolph close": "Zone_Knaphill",
+      "knaphill, limecroft road": "Zone_Knaphill",
+      "woking, woking railway station": "Zone_Woking_Station",
+      "st johns, st johns lye": "Zone_StJohns",
+      "st johns, st james close": "Zone_StJohns",
+      "westfield, westfield road": "Zone_Westfield",
+      "westfield, cricket pitch": "Zone_Westfield",
+      "pyrford, old palace road": "Zone_Pyrford"
+    },
+    "stop_coords": [
+      {"name": "Knaphill, Randolph Close", "lat": 51.321, "lon": -0.614, "zone": "Zone_Knaphill"},
+      {"name": "Knaphill, Limecroft Road", "lat": 51.318, "lon": -0.617, "zone": "Zone_Knaphill"},
+      {"name": "Woking, Woking Railway Station", "lat": 51.31915, "lon": -0.55599, "zone": "Zone_Woking_Station"},
+      {"name": "St Johns, St Johns Lye", "lat": 51.305, "lon": -0.568, "zone": "Zone_StJohns"},
+      {"name": "St Johns, St James Close", "lat": 51.307, "lon": -0.570, "zone": "Zone_StJohns"},
+      {"name": "Westfield, Westfield Road", "lat": 51.296, "lon": -0.563, "zone": "Zone_Westfield"},
+      {"name": "Westfield, Cricket Pitch", "lat": 51.29657, "lon": -0.56383, "zone": "Zone_Westfield"},
+      {"name": "Pyrford, Old Palace Road", "lat": 51.314, "lon": -0.558, "zone": "Zone_Pyrford"}
+    ],
+    "zone_fares": {
+      "Zone_Knaphill:Zone_Woking_Station": {
+        "adult_single": 2.50,
+        "adult_return": 4.00,
+        "adult_day": 4.50
+      },
+      "Zone_StJohns:Zone_Woking_Station": {
+        "adult_single": 2.20,
+        "adult_return": 3.50,
+        "adult_day": 4.00
+      },
+      "Zone_Westfield:Zone_Woking_Station": {
+        "adult_single": 1.50,
+        "adult_return": 3.00,
+        "adult_day": 3.50
+      },
+      "Zone_Pyrford:Zone_Woking_Station": {
+        "adult_single": 2.00,
+        "adult_return": 3.50
+      }
+    }
+  }
+}

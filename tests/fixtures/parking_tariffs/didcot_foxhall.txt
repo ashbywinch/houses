@@ -1,0 +1,12 @@
+Parking tariff
+
+Monday - Friday
+Up to 2 hours: £2.50
+Up to 3 hours: £4.50
+Up to 4 hours: £5.60
+Up to 24 hours £7.20
+
+Saturday - Sunday
+Up to 2 hours: £2.50
+Up to 3 hours: £3.50
+Up to 24 hours: £4.60
