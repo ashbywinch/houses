@@ -173,9 +173,7 @@ def _mock_httpx():
 
             # TfL
             if "tfl.gov.uk/Journey/JourneyResults" in url:
-                return Response(
-                    200, json={"journeys": [{"duration": 30, "fare": {"totalCost": 500}}]}
-                )
+                return Response(200, json={"journeys": [{"duration": 30, "fare": {"totalCost": 500}}]})
             # postcodes.io
             if "api.postcodes.io" in url:
                 return Response(200, json={"status": 200, "result": {"latitude": 51.5, "longitude": -0.1}})
@@ -184,14 +182,10 @@ def _mock_httpx():
                 return Response(200, json={"routes": [{"summary": {"distance": 50, "duration": 1800}}]})
             # ORS Geocode
             if "openrouteservice.org/geocode" in url:
-                return Response(
-                    200, json={"features": [{"geometry": {"coordinates": [-0.1, 51.5]}}]}
-                )
+                return Response(200, json={"features": [{"geometry": {"coordinates": [-0.1, 51.5]}}]})
             # Google Maps Geocode
             if "maps.googleapis.com/maps/api/geocode" in url:
-                return Response(
-                    200, json={"results": [{"geometry": {"location": {"lat": 51.5, "lng": -0.1}}}]}
-                )
+                return Response(200, json={"results": [{"geometry": {"location": {"lat": 51.5, "lng": -0.1}}}]})
             # Google Places
             if "places.googleapis.com" in url:
                 return Response(200, json={"places": []})
@@ -230,6 +224,7 @@ def _mock_httpx():
         def patched_init(self, **kwargs):
             kwargs["transport"] = MockTransport(handler)
             original_init(self, **kwargs)
+
         return patched_init
 
     original_async_init = AsyncClient.__init__
@@ -291,8 +286,7 @@ class TestBackfillView:
         "Rightmove ID",
         "Purchase Cost (£)",
         "EPC Rating",
-        "Yearly Commute Total (£)",
-        "Yearly Council Tax (£)",
+        "",
         "Simon London",
         "Simon London Route",
         "Lorena London",
@@ -301,6 +295,7 @@ class TestBackfillView:
         "What the Area is Like",
         "Walk to Town",
         "Walkable Amenities",
+        "",
         "Primary School",
         "Primary Walk",
         "Primary Ofsted",
@@ -311,6 +306,15 @@ class TestBackfillView:
         "Secondary Inspection Year",
         "Secondary Bus",
         "Secondary Bus Route",
+        "",
+        "Monthly Mortgage Payment (£)",
+        "Monthly Sinking Fund (£)",
+        "Monthly Life Insurance (£)",
+        "Monthly Commute Cost (£)",
+        "Monthly Council Tax (£)",
+        "Total Monthly Housing Cost (£)",
+        "",
+        "Ashby Works Estimate (£)",
         "Group Notes / WhatsApp",
         "Ashby comments",
         "Status",
@@ -358,6 +362,11 @@ class TestBackfillView:
         "Approx Longitude (est)",
         "Approx Station CRS",
         "Approx Station Name",
+        "Stamp Duty (£)",
+        "Net Ashby Contribution (£)",
+        "Mortgage Required (£)",
+        "Monthly Mortgage Payment (£)",
+        "Yearly Sinking Fund (£)",
     ]
 
     def _make_enriched(self, rid: str, **overrides: dict) -> dict:
@@ -614,8 +623,12 @@ class TestBackfillView:
             data_row = [""] * len(self.DATA_HEADERS)
             data_row[self.DATA_HEADERS.index("Rightmove ID")] = rid
             filled_cols = [
-                "Simon London (min)", "Simon London Cost (£)", "Simon London Route",
-                "Lorena London (min)", "Lorena London Cost (£)", "Lorena London Route",
+                "Simon London (min)",
+                "Simon London Cost (£)",
+                "Simon London Route",
+                "Lorena London (min)",
+                "Lorena London Cost (£)",
+                "Lorena London Route",
             ]
             for col in filled_cols:
                 data_row[self.DATA_HEADERS.index(col)] = "filled"
@@ -708,7 +721,6 @@ class TestBackfillView:
             mock_write.assert_called_once()
         finally:
             settings.sheet_id = original
-
 
     @pytest.mark.integration
     def test_user_columns_filled_for_new_property(self):
@@ -832,11 +844,13 @@ class TestBackfillView:
             patch("houses.server.compute_lorena_commute") as mock_lorena,
         ):
             mock_simon.return_value = TransitInfo(
-                destination_label="S", destination_postcode="SW1V 2QQ",
+                destination_label="S",
+                destination_postcode="SW1V 2QQ",
                 duration_minutes=45,
             )
             mock_lorena.return_value = TransitInfo(
-                destination_label="L", destination_postcode="EC3A 7LP",
+                destination_label="L",
+                destination_postcode="EC3A 7LP",
                 duration_minutes=30,
             )
 

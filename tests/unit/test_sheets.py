@@ -4,10 +4,19 @@ import pytest
 
 from houses.models import EnrichedProperty, PetrolCost, SchoolInfo, TransitInfo
 from houses.sheets import (
+    _FORMULA_COLUMNS,
+    _USER_COLUMNS,
     COLUMN_HEADERS,
+    CONSTANTS_VALUES,
+    DATA_FORMULA_COLS,
+    VIEW_FORMULA_COLS,
+    VIEW_HEADERS,
+    VIEW_MANUAL_COLUMNS,
     _build_full_row,
+    _const_range_name,
     _rightmove_id,
     _row_values,
+    _splt,
     col_index,
     col_letter,
     named_range_name,
@@ -20,10 +29,10 @@ def test_row_values_contains_all_enriched_columns():
     enriched = _row_values(ep)
     for key in enriched:
         assert key in COLUMN_HEADERS, f"{key!r} not in COLUMN_HEADERS"
-    # Non-user columns should all be present
+    # Non-user columns should all be present (excluding formula columns)
     user_only = {"Actual Latitude", "Actual Longitude"}
     for h in COLUMN_HEADERS:
-        if h not in user_only:
+        if h not in user_only and h not in _FORMULA_COLUMNS:
             assert h in enriched, f"Missing column {h!r} in _row_values"
 
 
@@ -131,7 +140,7 @@ def test_row_values_with_full_enrichment():
         assert header in r, f"Missing key {header!r} in _row_values"
         assert r[header] == expect, f"{header}: expected {expect!r}, got {r[header]!r}"
 
-    # Every non-user column must have an expected value.
+    # Every non-user, non-formula column must have an expected value.
     _user_cols = {
         "Rightmove URL",
         "Address",
@@ -141,7 +150,7 @@ def test_row_values_with_full_enrichment():
         "Actual Latitude",
         "Actual Longitude",
     }
-    non_user = {h for h in COLUMN_HEADERS if h not in _user_cols}
+    non_user = {h for h in COLUMN_HEADERS if h not in _user_cols and h not in _FORMULA_COLUMNS}
     expected_set = set(expected.keys())
     assert expected_set == non_user, (
         f"Missing expected entry: {sorted(non_user - expected_set)}, "
@@ -182,8 +191,7 @@ def test_build_full_row_includes_rid():
     row = _build_full_row(ep)
     rid_idx = COLUMN_HEADERS.index("Rightmove ID")
     assert row[rid_idx] == rid, (
-        f"Rightmove ID column (index {rid_idx}) expected {rid!r}, "
-        f"got {row[rid_idx]!r}. Full row preview: {row[:10]}"
+        f"Rightmove ID column (index {rid_idx}) expected {rid!r}, got {row[rid_idx]!r}. Full row preview: {row[:10]}"
     )
     # Also verify that all other user columns are populated
     assert row[COLUMN_HEADERS.index("Rightmove URL")] == url
@@ -215,12 +223,16 @@ def test_row_values_includes_route_summary():
     ep = EnrichedProperty(
         url="https://www.rightmove.co.uk/properties/123",
         simon_commute=TransitInfo(
-            destination_label="S", destination_postcode="SW1V 2QQ",
-            duration_minutes=45, route_summary="walk 5m → train(GWR) 20m → walk 5m",
+            destination_label="S",
+            destination_postcode="SW1V 2QQ",
+            duration_minutes=45,
+            route_summary="walk 5m → train(GWR) 20m → walk 5m",
         ),
         lorena_commute=TransitInfo(
-            destination_label="L", destination_postcode="EC3A 7LP",
-            duration_minutes=30, route_summary="walk 3m → tube(Central) 15m → walk 2m",
+            destination_label="L",
+            destination_postcode="EC3A 7LP",
+            duration_minutes=30,
+            route_summary="walk 3m → tube(Central) 15m → walk 2m",
         ),
     )
     r = _row_values(ep)
@@ -377,3 +389,163 @@ class TestColIndex:
     def test_unknown_header_raises(self):
         with pytest.raises(ValueError, match="not found"):
             col_index("Nonexistent Column")
+
+
+# ── Slice 1: Constants Tab ──────────────────────────────────────────────
+
+
+def test_const_range_name_generates_correct_prefix():
+    assert _const_range_name("Sinking Fund Rate (annual)") == "Const_SinkingFundRateAnnual"
+    assert _const_range_name("Current Sale Price (£)") == "Const_CurrentSalePrice"
+    assert _const_range_name("Mortgage Interest Rate") == "Const_MortgageInterestRate"
+
+
+def test_const_range_name_is_deterministic():
+    for label, _ in CONSTANTS_VALUES:
+        assert _const_range_name(label).startswith("Const_")
+        assert _const_range_name(label) == _const_range_name(label)
+
+
+def test_constants_values_match_constants_headers():
+    """List of constant names should derive from CONSTANTS_VALUES labels."""
+    for label, _ in CONSTANTS_VALUES:
+        assert isinstance(label, str)
+        assert isinstance(_const_range_name(label), str)
+
+
+# ── Slice 2: Data Tab Formula Columns ────────────────────────────────────
+
+
+def test_data_headers_count():
+    assert len(COLUMN_HEADERS) == 45
+
+
+def test_data_formula_count():
+    """Every key in DATA_FORMULA_COLS maps to a header in COLUMN_HEADERS."""
+    keys_lower = {h.lower() for h in COLUMN_HEADERS}
+    for key in DATA_FORMULA_COLS:
+        assert key in keys_lower, f"Data formula key {key!r} not in COLUMN_HEADERS"
+    assert len(DATA_FORMULA_COLS) == 5
+
+
+def test_stamp_duty_known_values():
+    assert _splt(250000) == 0.0
+    assert _splt(350000) == 5000.0
+    assert _splt(550000) == 15000.0
+    assert _splt(925000) == 33750.0
+    assert _splt(1500000) == 91250.0
+    assert _splt(2000000) == 151250.0
+
+
+def test_data_formulas_use_named_ranges():
+    """Every DATA_FORMULA_COLS formula references Data_ or Const_ or View_."""
+    for key, formula in DATA_FORMULA_COLS.items():
+        assert "Data_" in formula or "Const_" in formula or "View_" in formula, (
+            f"Data formula {key!r} has no named range reference"
+        )
+
+
+def test_formula_cols_not_in_row_values():
+    """Formula column headers should NOT appear in _row_values output."""
+    ep = EnrichedProperty(url="https://www.rightmove.co.uk/properties/123")
+    enriched = _row_values(ep)
+    for h in _FORMULA_COLUMNS:
+        assert h not in enriched, f"Formula column {h!r} found in _row_values"
+
+
+def test_formula_cols_not_in_user_cols():
+    """Formula columns should not be in _USER_COLUMNS."""
+    for h in _FORMULA_COLUMNS:
+        assert h not in _USER_COLUMNS, f"Formula column {h!r} found in _USER_COLUMNS"
+
+
+def test_stamp_duty_formula_checks_status():
+    """Stamp Duty formula returns 0 for Status=Current."""
+    formula = DATA_FORMULA_COLS["stamp duty (£)"]
+    assert "View_Status" in formula, "Stamp Duty formula must reference View_Status"
+    assert 'IF(s="Current",0,sd)' in formula or '"Current"' in formula, "Stamp Duty must return 0 when Status=Current"
+
+
+def test_net_ashby_formula_checks_status():
+    """Net Ashby formula returns 0 for Status=Current."""
+    formula = DATA_FORMULA_COLS["net ashby contribution (£)"]
+    assert "View_Status" in formula, "Net Ashby formula must reference View_Status"
+    assert 'IF(s="Current",0' in formula or '"Current"' in formula, "Net Ashby must return 0 when Status=Current"
+
+
+def test_stamp_duty_formula_uses_splt():
+    """Stamp Duty formula implements the same SDLT bands as _splt."""
+    formula = DATA_FORMULA_COLS["stamp duty (£)"]
+    assert "250000" in formula, "Stamp Duty must have 250k threshold"
+    assert "925000" in formula, "Stamp Duty must have 925k threshold"
+    assert "1500000" in formula, "Stamp Duty must have 1.5M threshold"
+
+
+def test_current_home_mortgage_excludes_ashby():
+    """For Status=Current, Mortgage Required = Price - Deposit (Net Ashby=0)."""
+    formula = DATA_FORMULA_COLS["mortgage required (£)"]
+    # Mortgage Required references Data_NetAshbyContribution
+    # Net Ashby returns 0 for Current, so MR = Price - Deposit - 0 = Price - Deposit
+    assert "{_nr('Net Ashby Contribution (£)')}" in formula or "Data_NetAshbyContribution" in formula
+    assert "Data_Price" in formula or "Const_Deposit" in formula
+
+
+# ── Slice 3: View Tab Definitions ────────────────────────────────────────
+
+
+def test_view_headers_count():
+    assert len(VIEW_HEADERS) == 38
+
+
+def test_all_view_headers_are_covered():
+    """Every View header is either a formula column or a manual column."""
+    formula_keys = set(VIEW_FORMULA_COLS.keys())
+    manual_lower = {h.lower() for h in VIEW_MANUAL_COLUMNS}
+    uncovered = []
+    for h in VIEW_HEADERS:
+        key = h.lower()
+        if key not in formula_keys and key not in manual_lower:
+            uncovered.append(h)
+    assert not uncovered, f"View headers with no formula or manual entry: {uncovered}"
+
+
+def test_ashby_works_in_manual_columns():
+    assert "Ashby Works Estimate (£)" in VIEW_MANUAL_COLUMNS
+
+
+def test_removed_headers_gone():
+    """Yearly commute and council tax columns are no longer in VIEW_HEADERS."""
+    assert "Yearly Commute Total (£)" not in VIEW_HEADERS
+    assert "Yearly Council Tax (£)" not in VIEW_HEADERS
+
+
+def test_view_formula_cols_use_named_ranges():
+    """Every VIEW_FORMULA_COLS formula must reference Data_, Const_, or View_."""
+    for key, formula in VIEW_FORMULA_COLS.items():
+        assert "Data_" in formula or "Const_" in formula or "View_" in formula, (
+            f"View formula {key!r} has no named range reference"
+        )
+
+
+def test_total_monthly_formula_includes_all_components():
+    """The Total Monthly formula must reference all 5 cost components."""
+    formula = VIEW_FORMULA_COLS.get("total monthly housing cost (£)", "")
+    assert "Data_MonthlyMortgagePayment" in formula
+    assert "Data_YearlySinkingFund" in formula
+    assert "Const_LifeInsuranceMonthly" in formula
+    assert "Data_BracknellCost" in formula or "Bracknell" in formula
+    assert "Data_CouncilTaxCost" in formula
+
+
+def test_affordability_formulas_use_ifna_not_ifferror():
+    """Every INDEX-based formula must avoid IFERROR (= use IFNA)."""
+    for key, formula in VIEW_FORMULA_COLS.items():
+        assert "IFERROR" not in formula, f"IFERROR found in {key!r}"
+        assert "IFNA" in formula, f"Missing IFNA in {key!r}"
+
+
+def test_view_manual_columns_are_not_formulas():
+    """No manual column key should appear in VIEW_FORMULA_COLS keys."""
+    manual_lower = {h.lower() for h in VIEW_MANUAL_COLUMNS}
+    for key in VIEW_FORMULA_COLS:
+        assert key not in manual_lower, f"Manual column {key!r} also in VIEW_FORMULA_COLS"

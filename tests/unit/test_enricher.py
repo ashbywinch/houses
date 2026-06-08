@@ -416,16 +416,21 @@ class TestFormatRouteSummary:
         """NR arrives at 'London X' — 'London ' prefix is stripped."""
         journey = {
             "legs": [
-                {"mode": {"name": "walking"}, "duration": 5,
-                 "instruction": {"summary": ""}},
-                {"mode": {"name": "national-rail"}, "duration": 30,
-                 "departurePoint": {"commonName": "Town Rail Station"},
-                 "arrivalPoint": {"commonName": "London Waterloo Rail Station"},
-                 "instruction": {"summary": "Express to London Waterloo"}},
-                {"mode": {"name": "tube"}, "duration": 5,
-                 "departurePoint": {"commonName": "Waterloo Underground Station"},
-                 "arrivalPoint": {"commonName": "Bank Underground Station"},
-                 "instruction": {"summary": "Waterloo & City line to Bank"}},
+                {"mode": {"name": "walking"}, "duration": 5, "instruction": {"summary": ""}},
+                {
+                    "mode": {"name": "national-rail"},
+                    "duration": 30,
+                    "departurePoint": {"commonName": "Town Rail Station"},
+                    "arrivalPoint": {"commonName": "London Waterloo Rail Station"},
+                    "instruction": {"summary": "Express to London Waterloo"},
+                },
+                {
+                    "mode": {"name": "tube"},
+                    "duration": 5,
+                    "departurePoint": {"commonName": "Waterloo Underground Station"},
+                    "arrivalPoint": {"commonName": "Bank Underground Station"},
+                    "instruction": {"summary": "Waterloo & City line to Bank"},
+                },
             ]
         }
         result = _format_route_summary(journey)
@@ -455,15 +460,24 @@ class TestFormatRouteSummary:
         """Park-and-ride replaces the first walk leg with a drive leg."""
         journey = {
             "legs": [
-                {"mode": {"name": "driving"}, "duration": 10,
-                 "arrivalPoint": {"commonName": "Maidenhead Rail Station"},
-                 "instruction": {"summary": "Drive to Maidenhead Rail Station"}},
-                {"mode": {"name": "national-rail"}, "duration": 18,
-                 "arrivalPoint": {"commonName": "London Paddington Rail Station"},
-                 "instruction": {"summary": "Great Western Railway to London Paddington"}},
-                {"mode": {"name": "walking"}, "duration": 7,
-                 "arrivalPoint": {"commonName": "SW1V 2QQ"},
-                 "instruction": {"summary": "Walk to SW1V 2QQ"}},
+                {
+                    "mode": {"name": "driving"},
+                    "duration": 10,
+                    "arrivalPoint": {"commonName": "Maidenhead Rail Station"},
+                    "instruction": {"summary": "Drive to Maidenhead Rail Station"},
+                },
+                {
+                    "mode": {"name": "national-rail"},
+                    "duration": 18,
+                    "arrivalPoint": {"commonName": "London Paddington Rail Station"},
+                    "instruction": {"summary": "Great Western Railway to London Paddington"},
+                },
+                {
+                    "mode": {"name": "walking"},
+                    "duration": 7,
+                    "arrivalPoint": {"commonName": "SW1V 2QQ"},
+                    "instruction": {"summary": "Walk to SW1V 2QQ"},
+                },
             ]
         }
         result = _format_route_summary(journey)
@@ -517,7 +531,8 @@ class TestPickBestJourney:
         """Route summary describes the best (shortest) journey, not the first."""
         walk_leg = {"mode": {"name": "walking"}, "duration": 90, "instruction": {"summary": ""}}
         train_leg = {
-            "mode": {"name": "national-rail"}, "duration": 20,
+            "mode": {"name": "national-rail"},
+            "duration": 20,
             "instruction": {"summary": "TrainCo to London"},
             "departurePoint": {"commonName": "Town Station"},
             "arrivalPoint": {"commonName": "London Station"},
@@ -539,6 +554,7 @@ class TestStationLookup:
     def test_finds_didcot_parkway(self):
         """'Didcot Parkway Rail Station' should match 'Didcot Parkway' in stations.csv."""
         from houses.enricher import _lookup_station_coords
+
         coords = _lookup_station_coords("Didcot Parkway Rail Station")
         assert coords is not None
         # Didcot Parkway is at ~51.611, -1.243 in stations.csv
@@ -547,10 +563,12 @@ class TestStationLookup:
 
     def test_returns_none_for_unknown(self):
         from houses.enricher import _lookup_station_coords
+
         assert _lookup_station_coords("Some Fake Station") is None
 
     def test_strips_station_suffixes(self):
         from houses.enricher import _lookup_station_coords
+
         # Should find Maidenhead in stations.csv (not "Maidenhead Rail Station")
         coords = _lookup_station_coords("Maidenhead Rail Station")
         assert coords is not None
@@ -568,15 +586,18 @@ class TestGetDriveMinutes:
             url = str(request.url)
             if "api.postcodes.io" in url:
                 return Response(
-                    200, json={"status": 200, "result": {"latitude": 51.603, "longitude": -1.254}},
+                    200,
+                    json={"status": 200, "result": {"latitude": 51.603, "longitude": -1.254}},
                 )
             if "openrouteservice.org/v2/directions" in url:
                 return Response(
-                    200, json={"routes": [{"summary": {"distance": 1.5, "duration": 180}}]},  # 3 min
+                    200,
+                    json={"routes": [{"summary": {"distance": 1.5, "duration": 180}}]},  # 3 min
                 )
             return Response(404)
 
         original_init = AsyncClient.__init__
+
         def patched_init(self, **kwargs):
             kwargs["transport"] = MockTransport(handler)
             original_init(self, **kwargs)
@@ -596,15 +617,24 @@ class TestParkAndRide:
             {
                 "duration": 87,
                 "legs": [
-                    {"mode": {"name": "walking"}, "duration": 35,
-                     "arrivalPoint": {"commonName": "Maidenhead Rail Station"},
-                     "instruction": {"summary": "Walk to Maidenhead Rail Station"}},
-                    {"mode": {"name": "national-rail"}, "duration": 20,
-                     "arrivalPoint": {"commonName": "London Paddington Rail Station"},
-                     "instruction": {"summary": "Great Western Railway to London Paddington"}},
-                    {"mode": {"name": "walking"}, "duration": 7,
-                     "arrivalPoint": {"commonName": "SW1V 2QQ"},
-                     "instruction": {"summary": "Walk to SW1V 2QQ"}},
+                    {
+                        "mode": {"name": "walking"},
+                        "duration": 35,
+                        "arrivalPoint": {"commonName": "Maidenhead Rail Station"},
+                        "instruction": {"summary": "Walk to Maidenhead Rail Station"},
+                    },
+                    {
+                        "mode": {"name": "national-rail"},
+                        "duration": 20,
+                        "arrivalPoint": {"commonName": "London Paddington Rail Station"},
+                        "instruction": {"summary": "Great Western Railway to London Paddington"},
+                    },
+                    {
+                        "mode": {"name": "walking"},
+                        "duration": 7,
+                        "arrivalPoint": {"commonName": "SW1V 2QQ"},
+                        "instruction": {"summary": "Walk to SW1V 2QQ"},
+                    },
                 ],
             },
         ]
@@ -615,12 +645,18 @@ class TestParkAndRide:
             {
                 "duration": 60,
                 "legs": [
-                    {"mode": {"name": "walking"}, "duration": 10,
-                     "arrivalPoint": {"commonName": "Weybridge Rail Station"},
-                     "instruction": {"summary": "Walk to Weybridge Rail Station"}},
-                    {"mode": {"name": "national-rail"}, "duration": 25,
-                     "arrivalPoint": {"commonName": "London Waterloo Rail Station"},
-                     "instruction": {"summary": "South Western Railway to London Waterloo"}},
+                    {
+                        "mode": {"name": "walking"},
+                        "duration": 10,
+                        "arrivalPoint": {"commonName": "Weybridge Rail Station"},
+                        "instruction": {"summary": "Walk to Weybridge Rail Station"},
+                    },
+                    {
+                        "mode": {"name": "national-rail"},
+                        "duration": 25,
+                        "arrivalPoint": {"commonName": "London Waterloo Rail Station"},
+                        "instruction": {"summary": "South Western Railway to London Waterloo"},
+                    },
                 ],
             },
         ]
@@ -631,7 +667,9 @@ class TestParkAndRide:
         data = copy.deepcopy(self.LONG_WALK_DATA)
         with patch("houses.enricher._get_drive_minutes", return_value=10):
             result = await _apply_park_and_ride_to_journeys(
-                data, "SL6 3YZ", max_walk_minutes=20,
+                data,
+                "SL6 3YZ",
+                max_walk_minutes=20,
             )
         legs = result["journeys"][0]["legs"]
         assert legs[0]["mode"]["name"] == "driving"
@@ -643,7 +681,9 @@ class TestParkAndRide:
         data = copy.deepcopy(self.SHORT_WALK_DATA)
         with patch("houses.enricher._get_drive_minutes", return_value=3):
             result = await _apply_park_and_ride_to_journeys(
-                data, "KT13 0TD", max_walk_minutes=20,
+                data,
+                "KT13 0TD",
+                max_walk_minutes=20,
             )
         legs = result["journeys"][0]["legs"]
         assert legs[0]["mode"]["name"] == "walking"
@@ -654,11 +694,17 @@ class TestParkAndRide:
         """When first leg is already a train, park-and-ride does nothing."""
         data = {
             "journeys": [
-                {"duration": 45, "legs": [
-                    {"mode": {"name": "national-rail"}, "duration": 20,
-                     "arrivalPoint": {"commonName": "London Paddington Rail Station"},
-                     "instruction": {"summary": "GWR to Paddington"}},
-                ]},
+                {
+                    "duration": 45,
+                    "legs": [
+                        {
+                            "mode": {"name": "national-rail"},
+                            "duration": 20,
+                            "arrivalPoint": {"commonName": "London Paddington Rail Station"},
+                            "instruction": {"summary": "GWR to Paddington"},
+                        },
+                    ],
+                },
             ]
         }
         with patch("houses.enricher._get_drive_minutes") as mock_drive:
@@ -671,7 +717,9 @@ class TestParkAndRide:
         data = copy.deepcopy(self.LONG_WALK_DATA)
         with patch("houses.enricher._get_drive_minutes", return_value=None):
             result = await _apply_park_and_ride_to_journeys(
-                data, "SL6 3YZ", max_walk_minutes=20,
+                data,
+                "SL6 3YZ",
+                max_walk_minutes=20,
             )
         legs = result["journeys"][0]["legs"]
         assert legs[0]["mode"]["name"] == "walking"  # unchanged
@@ -683,7 +731,9 @@ class TestParkAndRide:
         data = copy.deepcopy(self.LONG_WALK_DATA)
         with patch("houses.enricher._get_drive_minutes", return_value=10):
             result = await _apply_park_and_ride_to_journeys(
-                data, "SL6 3YZ", max_walk_minutes=20,
+                data,
+                "SL6 3YZ",
+                max_walk_minutes=20,
             )
         best = min(result["journeys"], key=lambda j: j.get("duration", 9999))
         summary = _format_route_summary(best)

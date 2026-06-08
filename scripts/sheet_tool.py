@@ -26,6 +26,9 @@ Usage:
 
     # Update View tab formulas after column shifts
     uv run python scripts/sheet_tool.py refresh-formulas
+
+    # Add gap columns between View tab zones for independent column groups
+    uv run python scripts/sheet_tool.py migrate-view-gaps (--dry-run)
 """
 
 from __future__ import annotations
@@ -308,9 +311,272 @@ def cmd_refresh_formulas():
     )
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
-    from houses.sheets import sync_view_formulas
+    from houses.sheets import sync_data_formulas, sync_view_formulas
     sync_view_formulas(sh)
-    print("View formulas refreshed via named ranges")
+    sync_data_formulas(sh)
+    print("View and Data formulas refreshed via named ranges")
+
+
+_EXPECTED_PRE_MIGRATION_VIEW = [
+    "Listing Address",
+    "Rightmove Link",
+    "Rightmove ID",
+    "Purchase Cost (£)",
+    "EPC Rating",
+    "Yearly Commute Total (£)",
+    "Yearly Council Tax (£)",
+    "Simon London",
+    "Simon London Route",
+    "Lorena London",
+    "Lorena London Route",
+    "Bracknell Time",
+    "What the Area is Like",
+    "Walk to Town",
+    "Walkable Amenities",
+    "Primary School",
+    "Primary Walk",
+    "Primary Ofsted",
+    "Primary Inspection Year",
+    "Secondary School",
+    "Secondary Walk",
+    "Secondary Ofsted",
+    "Secondary Inspection Year",
+    "Secondary Bus",
+    "Secondary Bus Route",
+    "Group Notes / WhatsApp",
+    "Ashby comments",
+    "Status",
+    "Status Reason",
+]
+
+
+def _col_letter(i: int) -> str:
+    return chr(65 + i) if i < 26 else chr(64 + i // 26) + chr(65 + i % 26)
+
+
+def cmd_migrate_view(dry_run: bool = False, undo: bool = False):
+    """Restructure the View tab to the 34-column affordability layout.
+
+    Steps (migrate):
+      1. Delete cols F-G (Yearly Commute Total, Yearly Council Tax) — indices 5-6
+      2. Insert 7 cols at position 23 (after Secondary Bus Route)
+      3. Write all 34 new headers
+      4. Refresh named ranges, Data formulas, View formulas
+
+    Steps (undo):
+      1. Delete the 7 inserted cols (indices 23-29)
+      2. Insert 2 cols at index 5
+      3. Write the original 29 headers
+    """
+    creds = Credentials.from_service_account_info(
+        json.loads(settings.service_account_json), scopes=SCOPES
+    )
+    gc = gspread.authorize(creds)
+    sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
+
+    from houses.sheets import VIEW_HEADERS as new_headers
+    from houses.sheets import ensure_named_ranges, sync_data_formulas, sync_view_formulas
+
+    view_ws = sh.worksheet(VIEW_TAB)
+    sid = view_ws._properties["sheetId"]
+    headers = view_ws.get_all_values()[0]
+
+    if dry_run:
+        if undo:
+            print("[DRY RUN] Would perform undo:")
+            print("  1. Delete 7 columns at indices 23-29 (affordability block)")
+            print("  2. Insert 2 columns at index 5 (Yearly Commute, Yearly Council Tax)")
+            print("  3. Write original 29 headers")
+        else:
+            print("[DRY RUN] Would perform migration:")
+            print("  1. Delete columns F-G (indices 5-6: Yearly Commute Total, Yearly Council Tax)")
+            print("  2. Insert 7 columns at index 23 (affordability block + Ashby Works)")
+            print("  3. Write 34 new headers")
+            print("  4. Refresh named ranges, Data formulas, View formulas")
+        return
+
+    if undo:
+        # Validate current state: must have 34 columns
+        if len(headers) < 34:
+            print(f"ERROR: View tab has {len(headers)} columns, expected 34 for undo.")
+            sys.exit(1)
+
+        # Step 1: Delete the 7 inserted columns (indices 23-29)
+        req_delete = {
+            "deleteDimension": {
+                "range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": 23, "endIndex": 30}
+            }
+        }
+        sh.batch_update({"requests": [req_delete]})
+        print("  Deleted 7 columns (affordability block + Ashby Works)")
+
+        # Step 2: Insert 2 columns at index 5 (Yearly Commute, Yearly Council Tax)
+        req_insert = {
+            "insertDimension": {
+                "range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": 5, "endIndex": 7},
+                "inheritFromBefore": False,
+            }
+        }
+        sh.batch_update({"requests": [req_insert]})
+        print("  Inserted 2 columns at index 5")
+
+        # Step 3: Restore original 29 headers
+        for i, h in enumerate(_EXPECTED_PRE_MIGRATION_VIEW):
+            view_ws.update_acell(f"{_col_letter(i)}1", h)
+        print("  Restored original 29 headers")
+        print("Undo complete.")
+        return
+
+    # --- Forward migration ---
+
+    # Validate expected current layout
+    for i, exp in enumerate(_EXPECTED_PRE_MIGRATION_VIEW):
+        if i >= len(headers) or headers[i].strip() != exp:
+            letter = _col_letter(i)
+            got = headers[i] if i < len(headers) else "MISSING"
+            print(f"ERROR: Expected col {i} ({letter}) to be '{exp}', got '{got}'")
+            print("View tab doesn't match the expected pre-migration layout. Aborting.")
+            sys.exit(1)
+
+    # Step 1: Delete cols F-G (indices 5-6)
+    req_delete = {
+        "deleteDimension": {
+            "range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": 5, "endIndex": 7}
+        }
+    }
+    sh.batch_update({"requests": [req_delete]})
+    print("  Deleted columns F-G (Yearly Commute Total, Yearly Council Tax)")
+
+    # Step 2: Insert 7 cols at position 23 (post-delete index)
+    req_insert = {
+        "insertDimension": {
+            "range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": 23, "endIndex": 30},
+            "inheritFromBefore": False,
+        }
+    }
+    sh.batch_update({"requests": [req_insert]})
+    print("  Inserted 7 columns at position 23 (affordability block + Ashby Works)")
+
+    # Step 3: Write 34 new headers
+    for i, h in enumerate(new_headers):
+        view_ws.update_acell(f"{_col_letter(i)}1", h)
+    print("  Wrote 34 new headers")
+
+    # Step 4: Refresh named ranges, Data formulas, View formulas
+    ensure_named_ranges(sh)
+    print("  Named ranges refreshed")
+    sync_data_formulas(sh)
+    print("  Data formulas refreshed")
+    sync_view_formulas(sh)
+    print("  View formulas refreshed")
+
+    print("Migration complete.")
+
+
+def cmd_migrate_view_gaps(dry_run: bool = False):
+    """Add gap columns between View tab zones so column groups stay independent.
+
+    Each gap column is 16px wide with no header. Run this AFTER migrate-view.
+
+    Gap positions (by header-after):
+      1. After "EPC Rating" — between Listing and Commute zones
+      2. After "Walkable Amenities" — between Commute and Schools zones
+      3. After "Secondary Bus Route" — between Schools and Affordability zones
+      4. After "Total Monthly Housing Cost (£)" — between Affordability and User Inputs
+    """
+    gap_positions = [
+        "EPC Rating",
+        "Walkable Amenities",
+        "Secondary Bus Route",
+        "Total Monthly Housing Cost (£)",
+    ]
+
+    if dry_run:
+        print("[DRY RUN] Would add 4 gap columns after:")
+        for p in gap_positions:
+            print(f"    {p}")
+        print("Then refresh formulas (groups, borders, gap widths)")
+        return
+
+    for after in gap_positions:
+        cmd_add("", after=after, tab=VIEW_TAB)
+
+    cmd_refresh_formulas()
+
+
+def cmd_migrate_data_formulas(dry_run: bool = False):
+    """Write missing Data tab formula column headers and delete excess columns.
+
+    The affordability plan added 5 formula columns to COLUMN_HEADERS (AP-AT,
+    indices 40-44) but the migration only restructured the View tab. This
+    command adds the missing Data tab headers and removes any excess columns
+    beyond index 44 that accumulated from prior resize operations.
+    """
+    creds = Credentials.from_service_account_info(
+        json.loads(settings.service_account_json), scopes=SCOPES
+    )
+    gc = gspread.authorize(creds)
+    sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
+    ws_data = sh.worksheet(DATA_TAB)
+
+    from houses.sheets import COLUMN_HEADERS
+
+    headers = ws_data.get_all_values()[0]
+    num_cols = len(headers)
+    expected = len(COLUMN_HEADERS)
+
+    if dry_run:
+        print(f"[DRY RUN] Data tab: {num_cols} columns, code expects {expected}")
+        missing = []
+        for i in range(min(num_cols, expected)):
+            if headers[i].strip() != COLUMN_HEADERS[i]:
+                missing.append((i, COLUMN_HEADERS[i]))
+        if missing:
+            print(f"  Missing/wrong headers at indices: {[m[0] for m in missing]}")
+        excess = num_cols - expected
+        if excess > 0:
+            print(f"  Excess columns to delete: {excess} (indices {expected}–{num_cols - 1})")
+        return
+
+    # Step 1: Write missing formula column headers
+    sid_data = ws_data._properties["sheetId"]
+    written = 0
+    for i in range(num_cols):
+        if i >= expected:
+            break
+        if headers[i].strip() != COLUMN_HEADERS[i]:
+            ws_data.update_acell(f"{_col_letter(i)}1", COLUMN_HEADERS[i])
+            written += 1
+    if written:
+        print(f"  Updated {written} column headers")
+    else:
+        print("  All column headers already correct")
+
+    # Step 2: Delete excess columns (beyond expected count)
+    if num_cols > expected:
+        sh.batch_update({
+            "requests": [{
+                "deleteDimension": {
+                    "range": {
+                        "sheetId": sid_data,
+                        "dimension": "COLUMNS",
+                        "startIndex": expected,
+                        "endIndex": num_cols,
+                    }
+                }
+            }]
+        })
+        print(f"  Deleted {num_cols - expected} excess columns")
+
+    # Step 3: Refresh formulas
+    from houses.sheets import sync_data_formulas, sync_view_formulas, ensure_named_ranges
+    ensure_named_ranges(sh)
+    print("  Named ranges refreshed")
+    sync_data_formulas(sh)
+    print("  Data formulas refreshed")
+    sync_view_formulas(sh)
+    print("  View formulas refreshed")
+    print("Data formulas migration complete.")
 
 
 def main():
@@ -378,6 +644,17 @@ def main():
         cmd_delete_tab(sys.argv[2])
     elif cmd == "refresh-formulas":
         cmd_refresh_formulas()
+    elif cmd == "migrate-view":
+        dry_run = "--dry-run" in sys.argv
+        undo = "--undo" in sys.argv
+        if dry_run and undo:
+            print("Cannot use both --dry-run and --undo")
+            sys.exit(1)
+        cmd_migrate_view(dry_run=dry_run, undo=undo)
+    elif cmd == "migrate-view-gaps":
+        cmd_migrate_view_gaps(dry_run="--dry-run" in sys.argv)
+    elif cmd == "migrate-data-formulas":
+        cmd_migrate_data_formulas(dry_run="--dry-run" in sys.argv)
     else:
         print(f"Unknown command: {cmd}")
         print(__doc__)

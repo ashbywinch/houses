@@ -1,4 +1,4 @@
-"""One-time setup: create Properties Data and Properties View tabs with XLOOKUP formulas.
+"""One-time setup: create Properties Data, Properties View, and Constants tabs.
 
 View tab formulas use Google Sheets named ranges, so they survive column
 insertions and reorders in the Data tab.
@@ -17,7 +17,18 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS, col_letter, ensure_named_ranges, named_range_name  # noqa: E402
+from houses.sheets import (  # noqa: E402
+    COLUMN_HEADERS,
+    CONSTANTS_TAB,
+    VIEW_FORMULA_COLS,
+    VIEW_HEADERS,
+    VIEW_MANUAL_COLUMNS,
+    col_letter,
+    ensure_constants_tab,
+    ensure_named_ranges,
+    sync_data_formulas,
+    sync_view_formulas,
+)
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -35,6 +46,7 @@ def main():
 
     existing = {w.title for w in sh.worksheets()}
 
+    # Data tab
     if DATA_TAB not in existing:
         ws_data = sh.add_worksheet(title=DATA_TAB, rows=500, cols=len(COLUMN_HEADERS))
         ws_data.append_row(COLUMN_HEADERS, value_input_option="USER_ENTERED")
@@ -42,6 +54,7 @@ def main():
     else:
         print(f"'{DATA_TAB}' tab already exists — leaving untouched")
 
+    # View tab
     if VIEW_TAB not in existing:
         ws_view = sh.add_worksheet(title=VIEW_TAB, rows=500, cols=len(VIEW_HEADERS))
         ws_view.append_row(VIEW_HEADERS, value_input_option="USER_ENTERED")
@@ -50,43 +63,30 @@ def main():
         ws_view = sh.worksheet(VIEW_TAB)
         print(f"'{VIEW_TAB}' tab already exists — leaving headers untouched")
 
-    # Build named range references dynamically from COLUMN_HEADERS
+    # Constants tab
+    ensure_constants_tab(sh)
+    if CONSTANTS_TAB not in existing:
+        print(f"Created '{CONSTANTS_TAB}' tab")
+    else:
+        print(f"'{CONSTANTS_TAB}' tab already exists — leaving untouched")
+
+    # Build named ranges
     ensure_named_ranges(sh)
 
-    lookup_key = "VALUE(INDEX(View_RightmoveID, ROW()))"
-    link_formula = "INDEX(View_RightmoveLink, ROW())"
-    named_range = named_range_name
-    rid_range = named_range("Rightmove ID")
-
-    formulas = [
-        "",  # A: Listing Address (manual)
-        "",  # B: Rightmove Link (manual)
-        f'=REGEXEXTRACT({link_formula},"properties/(\\d+)")',                                                       # C: ID from URL
-        f'=XLOOKUP({lookup_key},{rid_range},{named_range("Price (£)")}    )',                                       # D: Purchase Cost
-        f'=XLOOKUP({lookup_key},{rid_range},{named_range("EPC Rating")}    )',                                      # E: EPC Rating
-        f'=LET(k,XLOOKUP({lookup_key},{rid_range},{named_range("Bracknell Cost (£)")}),g,XLOOKUP({lookup_key},{rid_range},{named_range("Simon London Cost (£)")}),i,XLOOKUP({lookup_key},{rid_range},{named_range("Lorena London Cost (£)")}),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)))',  # F: Commute Total
-        "",                                                                                               # G: Council Tax (manual)
-        f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Simon London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',        # H: Simon London
-        f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Lorena London (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',       # I: Lorena London
-        f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Bracknell Time (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',      # J: Bracknell Time
-        f'=XLOOKUP({lookup_key},{rid_range},{named_range("Area Description")}     )',                                             # K: Area
-        f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Walk to Town (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',        # L: Walk to Town
-        f'=XLOOKUP({lookup_key},{rid_range},{named_range("Walkable Amenities")}   )',                                             # M: Amenities
-        f'=HYPERLINK(XLOOKUP({lookup_key},{rid_range},{named_range("Primary School Link")}),XLOOKUP({lookup_key},{rid_range},{named_range("Primary School")}))',  # N: Primary School
-        f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Primary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',        # O: Primary Walk
-        f'=XLOOKUP({lookup_key},{rid_range},{named_range("Primary Ofsted")}       )',                                             # P: Primary Ofsted
-        f'=XLOOKUP({lookup_key},{rid_range},{named_range("Primary Inspection Year")})',                                           # Q: Primary Year
-        f'=HYPERLINK(XLOOKUP({lookup_key},{rid_range},{named_range("Secondary School Link")}),XLOOKUP({lookup_key},{rid_range},{named_range("Secondary School")}))',  # R: Secondary School
-        f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Walk (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',      # S: Secondary Walk
-        f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Ofsted")}     )',                                             # T: Secondary Ofsted
-        f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Inspection Year")})',                                          # U: Secondary Year
-        f'=LET(v,XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Bus (min)")}),IF(v="","",IF(v*1=0,"",v/1440)))',        # V: Bus Time
-        f'=XLOOKUP({lookup_key},{rid_range},{named_range("Secondary Bus Route")}  )',                                             # W: Bus Route
-        "",  # X: Group Notes / WhatsApp
-        "",  # Y: Ashby comments
-        "",  # Z: Status
-        "",  # AA: Status Reason
-    ]
+    # Build View formula row dynamically from VIEW_FORMULA_COLS + manual columns
+    manual_lower = {h.lower() for h in VIEW_MANUAL_COLUMNS}
+    formulas = []
+    for h in VIEW_HEADERS:
+        key = h.lower()
+        if key in VIEW_FORMULA_COLS:
+            formulas.append(VIEW_FORMULA_COLS[key])
+        elif key in manual_lower:
+            formulas.append("")
+        else:
+            raise AssertionError(
+                f"View header {h!r} has neither a formula entry nor is listed "
+                "in VIEW_MANUAL_COLUMNS. Add it to one or the other."
+            )
 
     last_col = col_letter(len(formulas) - 1)
     ws_view.update(
@@ -94,6 +94,10 @@ def main():
         values=[formulas],
         value_input_option="USER_ENTERED",
     )
+
+    # Write Data tab formulas
+    sync_data_formulas(sh)
+
     print(f"Column count: Data={len(COLUMN_HEADERS)}, View={len(formulas)}")
     print("Done!")
 

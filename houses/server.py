@@ -535,12 +535,22 @@ async def backfill_view(
                         continue
                     # Still write user columns if they're empty
                     enriched = await _run_backfill_enrichment(
-                        url=url, address=address, postcode="", lookup=address,
-                        bedrooms=None, price=None, enabled=set(),
+                        url=url,
+                        address=address,
+                        postcode="",
+                        lookup=address,
+                        bedrooms=None,
+                        price=None,
+                        enabled=set(),
                     )
                     _write_backfill_cells(
-                        sh, data_ws, data_row_num, data_headers, data_row,
-                        enriched, empty_headers,
+                        sh,
+                        data_ws,
+                        data_row_num,
+                        data_headers,
+                        data_row,
+                        enriched,
+                        empty_headers,
                     )
                     yield (
                         json.dumps(
@@ -635,6 +645,7 @@ async def sync_view_formulas_endpoint() -> JSONResponse:
     try:
         sh = gclient.open_by_key(settings.sheet_id)
         from houses.sheets import sync_view_formulas
+
         sync_view_formulas(sh)
         logger.info("View formulas synced")
         return JSONResponse(content={"status": "ok", "message": "View formulas synced"})

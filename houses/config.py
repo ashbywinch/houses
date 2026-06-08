@@ -29,8 +29,6 @@ class Settings(BaseSettings):
     rightmove_sample_page: str = ""
     rightmove_scraper_offline: bool = False
 
-
-
     test_sheet_id: str = "1I0LSMRRA2hzLdS1Jfjht8Av908a4Ttf99Ly0p0lnseA"
 
     petrol_mpg: float = 45.0

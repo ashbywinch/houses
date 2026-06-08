@@ -131,8 +131,7 @@ async def lookup_council_tax(postcode: str, address: str = "") -> CouncilTaxInfo
             async with VOAClient() as client:
                 page = await client.fetch_page(postcode, page=0)
             results_raw = [
-                {"address": r.address, "band": r.band, "local_authority": r.local_authority}
-                for r in page.rows
+                {"address": r.address, "band": r.band, "local_authority": r.local_authority} for r in page.rows
             ]
             set_cached("GET", voa_key, None, None, {"rows": results_raw})
         except ImportError:

@@ -172,9 +172,7 @@ def _format_route_summary(journey: dict) -> str:
                 parts.append(f"walk {duration}m")
             else:
                 clean_arr = _shorten_station(arr) if arr else ""
-                is_station = bool(arr) and any(
-                    arr.endswith(s) for s in _STATION_SUFFIXES if s
-                )
+                is_station = bool(arr) and any(arr.endswith(s) for s in _STATION_SUFFIXES if s)
                 if is_station and clean_arr:
                     parts.append(f"walk to {clean_arr} ({duration}m)")
                 else:
@@ -265,7 +263,8 @@ async def _get_drive_minutes(origin_postcode: str, station_name: str) -> int | N
                     headers={"Authorization": settings.ors_api_key, "Content-Type": "application/json"},
                     json=body,
                 ),
-                max_retries=2, base_delay=1.0,
+                max_retries=2,
+                base_delay=1.0,
                 exceptions=(httpx.HTTPStatusError, httpx.RequestError),
             )
             resp.raise_for_status()
@@ -390,7 +389,9 @@ async def compute_transit(
 
     if data is not None and park_and_ride:
         data = await _apply_park_and_ride_to_journeys(
-            data, origin_postcode, settings.max_walk_to_station_minutes,
+            data,
+            origin_postcode,
+            settings.max_walk_to_station_minutes,
         )
 
     if data is not None:
