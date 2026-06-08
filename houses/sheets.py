@@ -272,14 +272,15 @@ CONSTANTS_HEADERS: list[str] = [
 # (label, value_or_formula) pairs. Label is used for Const_ named range generation,
 # value_or_formula is written to column B (USER_ENTERED so formulas are evaluated).
 CONSTANTS_VALUES: list[tuple[str, str]] = [
-    ("Current Sale Price (£)", "550000"),
-    ("Outstanding Mortgage (£)", "373000"),
+    ("Current Sale Price (£)", "0"),
+    ("Outstanding Mortgage (£)", "0"),
     ("Deposit", "=B2-B3"),
-    ("Gross Ashby Contribution (£)", "300000"),
+    ("Gross Ashby Contribution (£)", "0"),
     ("Mortgage Rate", "0.0495"),
     ("Mortgage Term (years)", "27"),
-    ("Life Insurance Monthly (£)", "150"),
+    ("Life Insurance Monthly (£)", "0"),
     ("Sinking Fund Rate", "0.01"),
+    ("Rental Income (£)", "0"),
 ]
 
 
@@ -309,7 +310,7 @@ def ensure_constants_tab(spreadsheet: gspread.Spreadsheet) -> gspread.Worksheet:
         ws = spreadsheet.add_worksheet(title=CONSTANTS_TAB, rows=20, cols=2)
 
     existing = ws.get(
-        "A1:B9",
+        "A1:B10",
         value_render_option="FORMULA",
     )
 
@@ -354,7 +355,7 @@ VIEW_FORMULA_COLS: dict[str, str] = {
     "monthly life insurance (£)": "=IFNA(Const_LifeInsuranceMonthly,)",
     "monthly commute cost (£)": f'=IFNA(LET(k,IFNA(INDEX({_nr("Bracknell Cost (£)")},ROW()),),g,IFNA(INDEX({_nr("Simon London Cost (£)")},ROW()),),i,IFNA(INDEX({_nr("Lorena London Cost (£)")},ROW()),),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)/12)),)',  # noqa: E501
     "monthly council tax (£)": f'=IFNA(LET(v,IFNA(INDEX({_nr("Council Tax Cost (£)")},ROW()),),IF(v=0,"",v/12)),)',
-    "total monthly housing cost (£)": f'=IFNA(LET(mp,IFNA(INDEX({_nr("Monthly Mortgage Payment (£)")},ROW()),),sf,IFNA(INDEX({_nr("Yearly Sinking Fund (£)")},ROW())/12*2/3,),li,Const_LifeInsuranceMonthly,ct,IFNA(LET(v,IFNA(INDEX({_nr("Council Tax Cost (£)")},ROW()),),IF(v=0,"",v/12)),),comm,IFNA(LET(k,IFNA(INDEX({_nr("Bracknell Cost (£)")},ROW()),),g,IFNA(INDEX({_nr("Simon London Cost (£)")},ROW()),),i,IFNA(INDEX({_nr("Lorena London Cost (£)")},ROW()),),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)/12)),),s,IFNA(INDEX(View_Status,ROW()),),gross,IF(OR(comm="",ct=""),"",mp+IF(s="Current",0,sf)+IF(s="Current",0,li)+comm+ct),p,IF(gross="","",gross-IF(s="Current",800,0)),IF(OR(p="",p=0),"",p)),)',  # noqa: E501
+    "total monthly housing cost (£)": f'=IFNA(LET(mp,IFNA(INDEX({_nr("Monthly Mortgage Payment (£)")},ROW()),),sf,IFNA(INDEX({_nr("Yearly Sinking Fund (£)")},ROW())/12*2/3,),li,Const_LifeInsuranceMonthly,ct,IFNA(LET(v,IFNA(INDEX({_nr("Council Tax Cost (£)")},ROW()),),IF(v=0,"",v/12)),),comm,IFNA(LET(k,IFNA(INDEX({_nr("Bracknell Cost (£)")},ROW()),),g,IFNA(INDEX({_nr("Simon London Cost (£)")},ROW()),),i,IFNA(INDEX({_nr("Lorena London Cost (£)")},ROW()),),IF(OR(k="",g="",i=""),"",46*(k+g+2*i)/12)),),s,IFNA(INDEX(View_Status,ROW()),),gross,IF(OR(comm="",ct=""),"",mp+IF(s="Current",0,sf)+IF(s="Current",0,li)+comm+ct),p,IF(gross="","",gross-IF(s="Current",IFNA(Const_RentalIncome,0),0)),IF(OR(p="",p=0),"",p)),)',  # noqa: E501
 }
 
 # Data tab formula columns (lowercase header -> Google Sheets formula string).
