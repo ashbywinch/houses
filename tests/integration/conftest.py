@@ -1,4 +1,4 @@
-"""Integration test configuration — isolated temp cache, no sheet writes."""
+"""Integration test configuration — isolated temp cache, no sheet writes, offline scraper."""
 
 import tempfile
 
@@ -6,6 +6,15 @@ import pytest
 
 from houses.api_cache import set_cache_dir
 from houses.config import settings
+
+
+@pytest.fixture(autouse=True)
+def _offline_scraper():
+    """Prevent the scraper from starting Chrome during tests."""
+    saved = settings.rightmove_scraper_offline
+    settings.rightmove_scraper_offline = True
+    yield
+    settings.rightmove_scraper_offline = saved
 
 
 @pytest.fixture(autouse=True)

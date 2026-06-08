@@ -89,6 +89,7 @@ _KNOWN_COUNTIES = frozenset(
     }
 )
 
+
 def _extract_town(address: str) -> str:
     parts = [p.strip() for p in address.split(",")]
     filtered = [p for p in parts if p and not _POSTCODE_FULL_RE.match(p) and not _POSTCODE_OUTCODE_RE.match(p)]
@@ -110,33 +111,32 @@ async def _geocode_town(town: str) -> tuple[float, float] | None:
 
     # ORS Pelias — disk-cached via with_cache
     ors_params = {"text": f"{town}, UK", "size": 1}
-    if settings.ors_api_key:
-        try:
-            async with cached_async_client(timeout=10.0) as client:
+    try:
+        async with cached_async_client(timeout=10.0) as client:
 
-                async def _fetch_ors():
-                    resp = await retry_async(
-                        lambda: client.get(
-                            ORS_GEOCODE_URL,
-                            params=ors_params,
-                            headers={"Authorization": settings.ors_api_key},
-                        ),
-                        max_retries=2,
-                        base_delay=1.0,
-                        exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-                    )
-                    resp.raise_for_status()
-                    return resp.json()
+            async def _fetch_ors():
+                resp = await retry_async(
+                    lambda: client.get(
+                        ORS_GEOCODE_URL,
+                        params=ors_params,
+                        headers={"Authorization": settings.ors_api_key},
+                    ),
+                    max_retries=2,
+                    base_delay=1.0,
+                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+                )
+                resp.raise_for_status()
+                return resp.json()
 
-                data = await with_cache("GET", ORS_GEOCODE_URL, params=ors_params, fetch=_fetch_ors)
-                features = data.get("features", [])
-                if features:
-                    lng, lat = features[0]["geometry"]["coordinates"]
-                    return (lat, lng)
-        except httpx.HTTPStatusError as exc:
-            logger.warning("ORS geocoding failed for town: %s (%s)", town, exc.response.status_code)
-        except Exception:
-            logger.warning("ORS geocoding failed for town: %s", town)
+            data = await with_cache("GET", ORS_GEOCODE_URL, params=ors_params, fetch=_fetch_ors)
+            features = data.get("features", [])
+            if features:
+                lng, lat = features[0]["geometry"]["coordinates"]
+                return (lat, lng)
+    except httpx.HTTPStatusError as exc:
+        logger.warning("ORS geocoding failed for town: %s (%s)", town, exc.response.status_code)
+    except Exception:
+        logger.warning("ORS geocoding failed for town: %s", town)
 
     # Fallback: Nominatim (free, no key) — disk-cached via with_cache
     nom_params = {"q": f"{town}, UK", "format": "json", "limit": 1}
@@ -205,9 +205,6 @@ async def _walk_duration(
 
 
 async def _nearby_amenities(lat: float, lng: float) -> str:
-    if not settings.google_maps_api_key:
-        return ""
-
     types = [
         "supermarket",
         "park",
@@ -253,11 +250,11 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
         if result:
             return result
     except httpx.HTTPStatusError as exc:
-            logger.warning("Google Places API failed (%s), falling back to Overpass", exc.response.status_code)
-            google_failed = True
+        logger.warning("Google Places API failed (%s), falling back to Overpass", exc.response.status_code)
+        google_failed = True
     except (httpx.RequestError, KeyError, IndexError) as e:
-            logger.warning("Google Places API failed (%s), falling back to Overpass", e)
-            google_failed = True
+        logger.warning("Google Places API failed (%s), falling back to Overpass", e)
+        google_failed = True
 
     # Fallback: OpenStreetMap Overpass API (free, no key)
     if google_failed or not places:
@@ -350,7 +347,7 @@ async def enrich_walkability(
     walk_to_town_minutes: int | None = None
     town = _extract_town(address)
 
-    if town and settings.ors_api_key:
+    if town:
         town_centre = await _geocode_town(town)
         if town_centre:
             walk_to_town_minutes = await _walk_duration(lat, lng, town_centre)
@@ -361,10 +358,8 @@ async def enrich_walkability(
                 address,
             )
     else:
-        reason = "no ORS key" if not settings.ors_api_key else "no town extracted"
         logger.warning(
-            "Skipping walk time (%s) for address: %s",
-            reason,
+            "No town extracted from address: %s",
             address,
         )
 

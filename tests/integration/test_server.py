@@ -40,9 +40,15 @@ class TestInjectProperty:
 
     @pytest.mark.integration
     def test_minimal_payload_with_only_url(self):
-        resp = client.post("/inject-property", json={"url": "https://www.rightmove.co.uk/properties/1"})
-        assert resp.status_code == 200
-        assert "url" in resp.json()["data"]
+        original = settings.rightmove_sample_page
+        fixture_dir = Path(__file__).parent.parent / "fixtures"
+        settings.rightmove_sample_page = str(fixture_dir / "rightmove_sample.html")
+        try:
+            resp = client.post("/inject-property", json={"url": "https://www.rightmove.co.uk/properties/1"})
+            assert resp.status_code == 200
+            assert "url" in resp.json()["data"]
+        finally:
+            settings.rightmove_sample_page = original
 
     @pytest.mark.integration
     def test_accepts_any_url(self):
