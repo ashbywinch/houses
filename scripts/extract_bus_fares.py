@@ -130,18 +130,18 @@ def get_bods_datasets(noc: str, api_key: str = "") -> list[dict]:
     return results
 
 
-def download_dataset(dataset_id: int, noc: str = "", api_key: str = "") -> str | None:
+def download_dataset(dataset_id: int, noc: str = "", api_key: str = "") -> list[str]:
     """Download BODS fare dataset, using local cache if available.
 
-    Saves downloaded files to ``data/bods_cache/`` so subsequent runs skip
-    the download. Returns the XML string or None on failure.
+    Returns a list of XML strings (one per XML file in the dataset).
+    Saves concatenated content to ``data/bods_cache/`` for reuse.
     """
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache_path = CACHE_DIR / f"dataset_{dataset_id}.xml"
 
     if cache_path.is_file():
         logger.info("Using cached dataset %d from %s", dataset_id, cache_path)
-        return cache_path.read_text(encoding="utf-8")
+        return [cache_path.read_text(encoding="utf-8")]
 
     url = f"{DOWNLOAD_BASE}/fares/dataset/{dataset_id}/download/"
     headers: dict[str, str] = {}
@@ -153,28 +153,32 @@ def download_dataset(dataset_id: int, noc: str = "", api_key: str = "") -> str |
         resp.raise_for_status()
         logger.info("Downloaded dataset %d (%d bytes)", dataset_id, len(resp.content))
 
-        # Response may be zip or raw XML
         content = resp.content
         content_type = resp.headers.get("content-type", "")
+        xml_contents: list[str] = []
+
         if "zip" in content_type or content[:2] == b"PK":
             import zipfile
             import io
             with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                xml_files = [n for n in zf.namelist() if n.endswith(".xml")]
-                if not xml_files:
+                xml_names = sorted([n for n in zf.namelist() if n.endswith(".xml")])
+                if not xml_names:
                     logger.warning("No XML files found in zip for dataset %d", dataset_id)
-                    return None
-                # Use the first (usually only) XML file
-                xml_content = zf.read(xml_files[0]).decode("utf-8")
+                    return []
+                logger.info("Zip contains %d XML files for dataset %d", len(xml_names), dataset_id)
+                for xml_name in xml_names:
+                    xml_contents.append(zf.read(xml_name).decode("utf-8"))
         else:
-            xml_content = resp.text
+            xml_contents.append(resp.text)
 
-        cache_path.write_text(xml_content, encoding="utf-8")
-        logger.info("Cached to %s", cache_path)
-        return xml_content
+        # Concatenate all XML files into one for caching
+        combined = "".join(xml_contents)
+        cache_path.write_text(combined, encoding="utf-8")
+        logger.info("Cached to %s (%d chars)", cache_path, len(combined))
+        return xml_contents
     except Exception as e:
         logger.warning("Failed to download dataset %d: %s", dataset_id, e)
-        return None
+        return []
 
 
 def parse_netex_fares(xml_str: str, stations: list[Station]) -> dict | None:
@@ -210,7 +214,11 @@ def parse_netex_fares(xml_str: str, stations: list[Station]) -> dict | None:
         atco_el = _first_found(
             ssp.find(".//netex:AtcoCode", NS), ssp.find(".//netex:atcoCode", NS),
         )
-        atco = atco_el.text.strip() if atco_el is not None and atco_el.text else name
+        atco = atco_el.text.strip() if atco_el is not None and atco_el.text else (
+            ssp.get("id", "") or ""
+        ).strip()
+        if not atco:
+            continue
 
         lat_el = _first_found(
             ssp.find(".//netex:Latitude", NS), ssp.find(".//netex:latitude", NS),
@@ -259,7 +267,9 @@ def parse_netex_fares(xml_str: str, stations: list[Station]) -> dict | None:
         for member in zone_el.iter():
             mt = _unprefixed(member.tag)
             if mt == "Member" or mt == "StopPointRef" or "ref" in mt.lower():
-                ref = member.text or ""
+                # ScheduledStopPointRef has ATCO code in the ref attribute;
+                # plain Member elements have it as text content
+                ref = member.get("ref", "") or member.text or ""
                 if ref in stops:
                     members.append(ref)
         if zone_id and members:
@@ -579,18 +589,19 @@ def extract_operator_fares(
         # Rate limit: space out requests
         time.sleep(1)
 
-        xml_str = download_dataset(ds_id, noc, api_key)
-        if xml_str is None:
+        xml_strings = download_dataset(ds_id, noc, api_key)
+        if not xml_strings:
             continue
-        result = parse_netex_fares(xml_str, stations)
-        if result is None:
-            continue
-        datasets_processed += 1
-        combined_zones.update(result.get("stop_zones", {}))
-        for key, fares in result.get("zone_fares", {}).items():
-            if key not in combined_fares:
-                combined_fares[key] = {}
-            combined_fares[key].update(fares)
+        for xml_str in xml_strings:
+            result = parse_netex_fares(xml_str, stations)
+            if result is None:
+                continue
+            datasets_processed += 1
+            combined_zones.update(result.get("stop_zones", {}))
+            for key, fares in result.get("zone_fares", {}).items():
+                if key not in combined_fares:
+                    combined_fares[key] = {}
+                combined_fares[key].update(fares)
 
     if not combined_zones or not combined_fares:
         logger.info("No station-serving fare data for %s", display_name)
