@@ -1088,12 +1088,17 @@ async def compute_lorena_commute(property_postcode: str) -> TransitInfo:
                         "Google bus overlay for %s: estimates bus %dm saves %dm over walk %dm, total=£%s",
                         property_postcode, bus_time, savings, walk_to_station, new_cost,
                     )
+                    after_walk = no_bus.route_summary
+                    walk_m = re.search(r"walk.*?\(\d+m\).*?\u2192\s*", after_walk)
+                    if walk_m:
+                        after_walk = after_walk[walk_m.end():]
+                    route_summary = f"walk to bus stop (~{max(3, bus_time - 5)}m) \u2192 bus to station ({bus_time}m) \u2192 {after_walk}"
                     result = TransitInfo(
                         destination_label="Lorena \u2014 Aldgate / City of London",
                         destination_postcode=settings.lorena_postcode,
                         duration_minutes=new_duration,
                         daily_cost_gbp=new_cost,
-                        route_summary=f"walk to bus \u2192 bus \u2192 Train to Waterloo \u2192 walk \u2192 Tube to Bank \u2192 walk",
+                        route_summary=route_summary,
                         mode="transit",
                         bus_cost_gbp=google_route.bus_cost_gbp,
                     )

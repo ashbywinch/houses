@@ -910,6 +910,45 @@ class TestGoogleRouteFallback:
     """compute_lorena_commute falls back to Google when TfL has no bus."""
 
     @pytest.mark.asyncio
+    async def test_route_summary_preserves_timing_brackets(self, monkeypatch):
+        from houses.enricher import compute_lorena_commute
+        from houses.models import TransitInfo
+
+        no_bus = TransitInfo(
+            destination_label="L", destination_postcode="EC3A 7LP",
+            duration_minutes=116, daily_cost_gbp=None,
+            route_summary="walk to Fleet (46m) → Train to Waterloo (42m) → Tube to Bank (4m) → walk (18m)",
+        )
+        with_bus = TransitInfo(
+            destination_label="L", destination_postcode="EC3A 7LP",
+            duration_minutes=116, daily_cost_gbp=None,
+            route_summary="walk to Fleet (46m) → Train to Waterloo (42m) → Tube to Bank (4m) → walk (18m)",
+        )
+        google_bus = TransitInfo(
+            destination_label="L (Google)", destination_postcode="EC3A 7LP",
+            duration_minutes=55, daily_cost_gbp=3.8,
+            route_summary="bus to Fleet → Train to Waterloo",
+            bus_cost_gbp=3.8,
+        )
+
+        async def mock_transit(*_a, **_kw):
+            return with_bus if _kw.get("allow_bus") else no_bus
+
+        async def mock_google(*_):
+            return google_bus
+
+        monkeypatch.setattr("houses.enricher.compute_transit", mock_transit)
+        monkeypatch.setattr("houses.enricher._compute_google_transit", mock_google)
+
+        result = await compute_lorena_commute("GU52")
+        assert result.bus_cost_gbp is not None
+        route = result.route_summary
+        assert "(46m)" not in route, "Should not include old walk duration"
+        assert "(" in route, f"Route should preserve timing brackets: {route}"
+        assert "42m" in route, f"Should preserve train timing: {route}"
+        assert "4m" in route or "18m" in route, f"Should preserve tube/walk timing: {route}"
+
+    @pytest.mark.asyncio
     async def test_triggers_on_long_walk_no_tfl_bus(self, monkeypatch):
         from houses.enricher import compute_lorena_commute
         from houses.models import TransitInfo
