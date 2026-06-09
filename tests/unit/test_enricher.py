@@ -928,6 +928,7 @@ class TestGoogleRouteFallback:
             destination_label="L (Google)", destination_postcode="EC3A 7LP",
             duration_minutes=55, daily_cost_gbp=3.8,
             route_summary="bus to Fleet → Train to Waterloo",
+            bus_cost_gbp=3.8,
         )
 
         async def mock_transit(*_a, **_kw):
@@ -940,7 +941,10 @@ class TestGoogleRouteFallback:
         monkeypatch.setattr("houses.enricher._compute_google_transit", mock_google)
 
         result = await compute_lorena_commute("GU52")
-        assert result is google_bus, "Should pick Google route when TfL has no bus and walk is long"
+        assert result.bus_cost_gbp is not None, "Should find bus cost"
+        assert result.bus_cost_gbp > 0
+        assert result.duration_minutes is not None
+        assert result.duration_minutes < 90, "Should be faster than TfL walk"
 
     @pytest.mark.asyncio
     async def test_skips_when_tfl_already_has_bus(self, monkeypatch):

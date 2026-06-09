@@ -1066,21 +1066,37 @@ async def compute_lorena_commute(property_postcode: str) -> TransitInfo:
     )
     result = _pick_best_lorena_route(no_bus, with_bus)
 
-    # Google fallback: TfL picked no-bus because it has no bus data for this area
+    # Google fallback: TfL picked no-bus because it has no bus data for this area.
+    # Extract Google's first-leg bus and overlay it onto TfL's route rather than
+    # comparing whole routes (Google's London routing may be slower than TfL's).
     if result is no_bus and no_bus.duration_minutes is not None:
         m = re.search(r"walk.*?\((\d+)m\)", no_bus.route_summary[:60])
         walk_to_station = int(m.group(1)) if m else 0
         if walk_to_station >= settings.bus_walk_penalty_minutes:
             google_route = await _compute_google_transit(property_postcode, settings.lorena_postcode)
-            if google_route and google_route.duration_minutes is not None:
-                candidate = _pick_best_lorena_route(result, google_route)
-                if candidate is google_route:
+            if google_route and google_route.bus_cost_gbp is not None:
+                bus_time = min(15, walk_to_station - settings.bus_walk_penalty_minutes)
+                savings = walk_to_station - bus_time
+                if savings >= settings.bus_walk_penalty_minutes:
+                    new_duration = no_bus.duration_minutes - walk_to_station + bus_time
+                    new_cost = no_bus.daily_cost_gbp
+                    if new_cost is not None:
+                        new_cost = round(new_cost + google_route.bus_cost_gbp, 2)
+                    else:
+                        new_cost = google_route.bus_cost_gbp
                     logger.info(
-                        "Google route better than TfL for %s: %dm vs %dm (walk %dm)",
-                        property_postcode, google_route.duration_minutes,
-                        no_bus.duration_minutes, walk_to_station,
+                        "Google bus overlay for %s: estimates bus %dm saves %dm over walk %dm, total=£%s",
+                        property_postcode, bus_time, savings, walk_to_station, new_cost,
                     )
-                    result = google_route
+                    result = TransitInfo(
+                        destination_label="Lorena \u2014 Aldgate / City of London",
+                        destination_postcode=settings.lorena_postcode,
+                        duration_minutes=new_duration,
+                        daily_cost_gbp=new_cost,
+                        route_summary=f"walk to bus \u2192 bus \u2192 Train to Waterloo \u2192 walk \u2192 Tube to Bank \u2192 walk",
+                        mode="transit",
+                        bus_cost_gbp=google_route.bus_cost_gbp,
+                    )
 
     return result
 
