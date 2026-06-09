@@ -807,6 +807,48 @@ class TestComputeBusDailyCost:
         cost = _compute_bus_daily_cost({})
         assert cost == 0.0
 
+    def test_return_more_expensive_than_single_double(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({"adult_single": 1.0, "adult_return": 2.5})
+        assert cost == 2.0
+
+    def test_cap_makes_singles_cheaper_than_return(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({"adult_single": 3.5, "adult_return": 5.0}, {"national_max_single_gbp": 2.0})
+        assert cost == 4.0
+
+    def test_return_only_no_single(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({"adult_return": 4.0})
+        assert cost == 4.0
+
+    def test_day_only_no_single_or_return(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({"adult_day": 5.0})
+        assert cost == 5.0
+
+    def test_all_products_day_is_cheapest(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({"adult_single": 2.0, "adult_return": 3.5, "adult_day": 3.0})
+        assert cost == 3.0
+
+    def test_all_products_return_is_cheapest(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({"adult_single": 2.0, "adult_return": 2.5, "adult_day": 6.0})
+        assert cost == 2.5
+
+    def test_all_products_singles_cheapest_even_with_cap(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({"adult_single": 1.0, "adult_return": 3.0, "adult_day": 4.0})
+        assert cost == 2.0
+
 
 class TestStopToZoneMapping:
     """Zone lookup for stop names from the data file."""

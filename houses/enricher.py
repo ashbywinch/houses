@@ -333,11 +333,9 @@ async def _lookup_parking_cost(station_name: str) -> float | None:
 def _compute_bus_daily_cost(zone_fares: dict, meta: dict | None = None) -> float:
     """Compute daily round-trip bus cost from zone fare products.
 
-    Uses the cheapest product covering two journeys:
-    - If adult_return exists: use it
-    - Else if adult_day exists and adult_day < adult_single * 2: use adult_day
-    - Else: use adult_single * 2
-    - Apply national max single cap before doubling
+    Returns the cheapest of adult_single × 2 (capped), adult_return,
+    or adult_day.  Falls back to adult_return then adult_day when
+    adult_single is missing.
     """
     adult_single = zone_fares.get("adult_single")
     adult_return = zone_fares.get("adult_return")
