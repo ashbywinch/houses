@@ -41,6 +41,7 @@ _api_state = _APIState()
 POSTCODES_IO_URL = "https://api.postcodes.io/postcodes"
 OUTCODES_IO_URL = "https://api.postcodes.io/outcodes"
 TFL_JOURNEY_URL = "https://api.tfl.gov.uk/Journey/JourneyResults"
+GOOGLE_ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
 ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-car"
 
 # ---------------------------------------------------------------------------
@@ -907,6 +908,94 @@ def _pick_best_lorena_route(no_bus: TransitInfo, with_bus: TransitInfo) -> Trans
     return no_bus
 
 
+async def _compute_google_transit(origin: str, destination: str) -> TransitInfo | None:
+    """Fallback transit routing via Google Maps Routes API.
+
+    Used when TfL doesn't find a bus leg (out-of-London areas). Returns a
+    TransitInfo with bus fare looked up from BODS data, or None if Google
+    also can't route the journey.
+    """
+    google_key = settings.google_maps_api_key
+    if not google_key:
+        return None
+
+    body = {
+        "origin": {"address": origin},
+        "destination": {"address": destination},
+        "travelMode": "TRANSIT",
+        "transitPreferences": {"routingPreference": "less_walking"},
+        "computeAlternativeRoutes": False,
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": google_key,
+        "X-Goog-FieldMask": "routes.duration,routes.legs",
+    }
+
+    cached = get_cached("POST", GOOGLE_ROUTES_URL, None, json.dumps(body, sort_keys=True))
+    if cached is not None:
+        data = cached
+    else:
+        try:
+            async with cached_async_client(timeout=15.0) as client:
+                resp = await retry_async(
+                    lambda: client.post(GOOGLE_ROUTES_URL, json=body, headers=headers),
+                    max_retries=2,
+                    base_delay=1.0,
+                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                set_cached("POST", GOOGLE_ROUTES_URL, None, json.dumps(body, sort_keys=True), data)
+        except Exception as e:
+            logger.warning("Google Routes API failed for %s → %s: %s", origin, destination, e)
+            return None
+
+    routes = data.get("routes", [])
+    if not routes:
+        return None
+
+    leg = routes[0].get("legs", [{}])[0]
+    duration_sec = int(routes[0].get("duration", "0s").rstrip("s"))
+    duration_min = round(duration_sec / 60)
+
+    steps = leg.get("steps", [])
+    bus_legs = [s for s in steps if s.get("travelMode") == "TRANSIT" and s.get("transitDetails", {}).get("transitLine", {}).get("vehicle", {}).get("type") == "BUS"]
+
+    total_bus_cost = 0.0
+    bus_cost_gbp = None
+    for bl in bus_legs:
+        transit = bl.get("transitDetails", {})
+        dep_name = transit.get("stopDetails", {}).get("departureStop", {}).get("name", "")
+        arr_name = transit.get("stopDetails", {}).get("arrivalStop", {}).get("name", "")
+        leg_cost = _lookup_bus_roundtrip_cost(dep_name, arr_name)
+        if leg_cost is not None:
+            total_bus_cost += leg_cost
+
+    if total_bus_cost > 0:
+        bus_cost_gbp = total_bus_cost
+        daily_cost_gbp = round(total_bus_cost, 2)
+    else:
+        daily_cost_gbp = None
+
+    steps_summary = []
+    for s in steps:
+        mode = s.get("travelMode", "WALK")
+        instr = s.get("navigationInstruction", {}).get("instructions", "")
+        steps_summary.append(f"{mode.lower()} {instr[:40]}")
+    route_summary = " → ".join(steps_summary)
+
+    return TransitInfo(
+        destination_label="Lorena — Aldgate / City of London (Google)",
+        destination_postcode=destination,
+        duration_minutes=duration_min,
+        daily_cost_gbp=daily_cost_gbp,
+        route_summary=route_summary,
+        mode="transit",
+        bus_cost_gbp=bus_cost_gbp,
+    )
+
+
 async def compute_lorena_commute(property_postcode: str) -> TransitInfo:
     no_bus = await compute_transit(
         property_postcode,
@@ -919,7 +1008,25 @@ async def compute_lorena_commute(property_postcode: str) -> TransitInfo:
         "Lorena — Aldgate / City of London",
         allow_bus=True,
     )
-    return _pick_best_lorena_route(no_bus, with_bus)
+    result = _pick_best_lorena_route(no_bus, with_bus)
+
+    # Google fallback: TfL picked no-bus because it has no bus data for this area
+    if result is no_bus and no_bus.duration_minutes is not None:
+        m = re.search(r"walk.*?\((\d+)m\)", no_bus.route_summary[:60])
+        walk_to_station = int(m.group(1)) if m else 0
+        if walk_to_station >= settings.bus_walk_penalty_minutes:
+            google_route = await _compute_google_transit(property_postcode, settings.lorena_postcode)
+            if google_route and google_route.duration_minutes is not None:
+                candidate = _pick_best_lorena_route(result, google_route)
+                if candidate is google_route:
+                    logger.info(
+                        "Google route better than TfL for %s: %dm vs %dm (walk %dm)",
+                        property_postcode, google_route.duration_minutes,
+                        no_bus.duration_minutes, walk_to_station,
+                    )
+                    result = google_route
+
+    return result
 
 
 async def compute_commute_breakdown(

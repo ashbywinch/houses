@@ -906,6 +906,68 @@ class TestPickBestLorenaRoute:
         assert result == with_bus
 
 
+class TestGoogleRouteFallback:
+    """compute_lorena_commute falls back to Google when TfL has no bus."""
+
+    @pytest.mark.asyncio
+    async def test_triggers_on_long_walk_no_tfl_bus(self, monkeypatch):
+        from houses.enricher import compute_lorena_commute
+        from houses.models import TransitInfo
+
+        no_bus = TransitInfo(
+            destination_label="L", destination_postcode="EC3A 7LP",
+            duration_minutes=90, daily_cost_gbp=None,
+            route_summary="walk to Fleet (46m) → Train to Waterloo (42m)",
+        )
+        with_bus = TransitInfo(
+            destination_label="L", destination_postcode="EC3A 7LP",
+            duration_minutes=90, daily_cost_gbp=None,
+            route_summary="walk to Fleet (46m) → Train to Waterloo (42m)",
+        )
+        google_bus = TransitInfo(
+            destination_label="L (Google)", destination_postcode="EC3A 7LP",
+            duration_minutes=55, daily_cost_gbp=3.8,
+            route_summary="bus to Fleet → Train to Waterloo",
+        )
+
+        async def mock_transit(*_a, **_kw):
+            return with_bus if _kw.get("allow_bus") else no_bus
+
+        async def mock_google(*_):
+            return google_bus
+
+        monkeypatch.setattr("houses.enricher.compute_transit", mock_transit)
+        monkeypatch.setattr("houses.enricher._compute_google_transit", mock_google)
+
+        result = await compute_lorena_commute("GU52")
+        assert result is google_bus, "Should pick Google route when TfL has no bus and walk is long"
+
+    @pytest.mark.asyncio
+    async def test_skips_when_tfl_already_has_bus(self, monkeypatch):
+        from houses.enricher import compute_lorena_commute
+        from houses.models import TransitInfo
+
+        no_bus = TransitInfo(
+            destination_label="L", destination_postcode="EC3A 7LP",
+            duration_minutes=90, daily_cost_gbp=None,
+            route_summary="walk to Fleet (3m) → Train to Waterloo (42m)",
+        )
+        with_bus = TransitInfo(
+            destination_label="L", destination_postcode="EC3A 7LP",
+            duration_minutes=70, daily_cost_gbp=2.8,
+            route_summary="bus to Fleet → Train to Waterloo",
+        )
+
+        async def mock_transit(*_a, **_kw):
+            return with_bus if _kw.get("allow_bus") else no_bus
+
+        monkeypatch.setattr("houses.enricher.compute_transit", mock_transit)
+        monkeypatch.setattr("houses.enricher._compute_google_transit", lambda *_: None)
+
+        result = await compute_lorena_commute("GU52")
+        assert result is with_bus, "Should use TfL bus route when available"
+
+
 class TestBusFaresDataLoaded:
     """data/bus_fares.json is loaded at runtime."""
 
