@@ -339,23 +339,24 @@ def _compute_bus_daily_cost(zone_fares: dict, meta: dict | None = None) -> float
     - Apply national max single cap before doubling
     """
     adult_single = zone_fares.get("adult_single")
-    if adult_single is None:
+    adult_return = zone_fares.get("adult_return")
+    adult_day = zone_fares.get("adult_day")
+
+    national_cap = (meta or {}).get("national_max_single_gbp") if meta else None
+
+    if adult_single is not None:
+        if national_cap is not None:
+            adult_single = min(adult_single, national_cap)
+        daily = adult_single * 2
+    elif adult_return is not None:
+        daily = adult_return
+    elif adult_day is not None:
+        daily = adult_day
+    else:
         return 0.0
 
-    national_cap = None
-    if meta:
-        national_cap = meta.get("national_max_single_gbp")
-
-    if national_cap is not None:
-        adult_single = min(adult_single, national_cap)
-
-    daily = adult_single * 2
-
-    adult_return = zone_fares.get("adult_return")
     if adult_return is not None and adult_return < daily:
         daily = adult_return
-
-    adult_day = zone_fares.get("adult_day")
     if adult_day is not None and adult_day < daily:
         daily = adult_day
 
@@ -384,17 +385,58 @@ def _lookup_bus_roundtrip_cost(
     dep_norm = dep_stop_name.strip().lower()
     arr_norm = arr_stop_name.strip().lower()
 
+    dep_alt = dep_norm.split(", ", 1)[-1] if ", " in dep_norm else dep_norm
+    arr_alt = arr_norm.split(", ", 1)[-1] if ", " in arr_norm else arr_norm
+
     for op_key, op_data in fares_data.items():
         if op_key == "_meta":
             continue
         stop_zones = op_data.get("stop_zones", {})
-        dep_zone = stop_zones.get(dep_norm)
-        arr_zone = stop_zones.get(arr_norm)
+        dep_zone = stop_zones.get(dep_norm) or stop_zones.get(dep_alt)
+        arr_zone = stop_zones.get(arr_norm) or stop_zones.get(arr_alt)
         if dep_zone and arr_zone:
             zone_pair = f"{dep_zone}:{arr_zone}"
             zone_fares = op_data.get("zone_fares", {}).get(zone_pair)
             if zone_fares:
                 return _compute_bus_daily_cost(zone_fares, meta)
+
+    # Token-set fuzzy fallback: normalise punctuation, strip area prefix, then compare token sets
+    if dep_zone is None or arr_zone is None:
+        def _norm(s: str) -> set[str]:
+            core = s.split(", ", 1)[-1]
+            no_punct = re.sub(r"[.,;:'\"!?()]", "", core)
+            return set(no_punct.split())
+        dep_tokens = _norm(dep_norm)
+        arr_tokens = _norm(arr_norm)
+        for op_key, op_data in fares_data.items():
+            if op_key == "_meta":
+                continue
+            stop_zones = op_data.get("stop_zones", {})
+            if dep_zone is None:
+                for bods_name in stop_zones:
+                    bods_tokens = _norm(bods_name)
+                    inter = dep_tokens & bods_tokens
+                    union = dep_tokens | bods_tokens
+                    if union and len(inter) / len(union) >= 0.85:
+                        dep_zone = stop_zones[bods_name]
+                        logger.warning("Bus fare fuzzy match dep='%s' -> '%s' zone=%s", dep_norm, bods_name, dep_zone)
+                        if arr_zone is not None:
+                            break
+            if arr_zone is None:
+                for bods_name in stop_zones:
+                    bods_tokens = _norm(bods_name)
+                    inter = arr_tokens & bods_tokens
+                    union = arr_tokens | bods_tokens
+                    if union and len(inter) / len(union) >= 0.85:
+                        arr_zone = stop_zones[bods_name]
+                        logger.warning("Bus fare fuzzy match arr='%s' -> '%s' zone=%s", arr_norm, bods_name, arr_zone)
+                        if dep_zone is not None:
+                            break
+            if dep_zone and arr_zone:
+                zone_pair = f"{dep_zone}:{arr_zone}"
+                zone_fares = op_data.get("zone_fares", {}).get(zone_pair)
+                if zone_fares:
+                    return _compute_bus_daily_cost(zone_fares, meta)
 
     # Name lookup failed — try coordinate fallback against stop_coords index
     dep_coords = (dep_point.get("lat"), dep_point.get("lon")) if dep_point else (None, None)

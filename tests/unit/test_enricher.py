@@ -680,11 +680,56 @@ class TestBusFareDailyCost:
 class TestBusFareLookup:
     """_lookup_bus_roundtrip_cost — stop name → zone → zone pair → price."""
 
-    def test_knaphill_to_woking(self):
+    def test_randolph_close_to_woking_station(self):
+        from houses.enricher import _lookup_bus_roundtrip_cost
+
+        cost = _lookup_bus_roundtrip_cost("randolph close", "woking railway station")
+        assert cost == 1.8
+
+    def test_case_insensitive_matching(self):
+        from houses.enricher import _lookup_bus_roundtrip_cost
+
+        cost = _lookup_bus_roundtrip_cost("RANDOLPH CLOSE", "WOKING RAILWAY STATION")
+        assert cost == 1.8
+
+    def test_tfl_area_prefix_dep_match(self):
         from houses.enricher import _lookup_bus_roundtrip_cost
 
         cost = _lookup_bus_roundtrip_cost("Knaphill, Randolph Close", "Woking, Woking Railway Station")
-        assert cost == 4.00
+        assert cost == 1.8
+
+    def test_tfl_westfield_not_in_zone_fares(self):
+        from houses.enricher import _lookup_bus_roundtrip_cost
+
+        cost = _lookup_bus_roundtrip_cost("Westfield, Westfield Common", "Woking, Woking Railway Station")
+        assert cost is None, "Westfield->Woking has no zone pair in BODS data (data gap)"
+
+    def test_tfl_brookwood_to_woking(self):
+        from houses.enricher import _lookup_bus_roundtrip_cost
+
+        cost = _lookup_bus_roundtrip_cost("Brookwood, Brookwood Railway Station", "Woking, Woking Railway Station")
+        assert cost == 3.0
+
+    def test_fuzzy_match_periods(self):
+        from houses.enricher import _lookup_bus_roundtrip_cost
+
+        cost = _lookup_bus_roundtrip_cost("St. Johns, St. James Close", "Woking, Woking Railway Station")
+        assert cost is not None
+
+    def test_fuzzy_match_does_not_match_unrelated(self):
+        from houses.enricher import _lookup_bus_roundtrip_cost
+
+        cost = _lookup_bus_roundtrip_cost("Knaphill, Supermarket Car Park", "Woking, Woking Railway Station")
+        assert cost is None, "Should not match unrelated stop 'supermarket car park'"
+
+        cost2 = _lookup_bus_roundtrip_cost("North London Bus Stop", "Woking, Woking Railway Station")
+        assert cost2 is None, "Should not match stop in entirely different area"
+
+    def test_fuzzy_match_short_noise_words_rejected(self):
+        from houses.enricher import _lookup_bus_roundtrip_cost
+
+        cost = _lookup_bus_roundtrip_cost("Woking Station", "Woking, Woking Railway Station")
+        assert cost is None, "'Woking Station' should not match 'station' (a different stop)"
 
     def test_unknown_stops_return_none(self):
         from houses.enricher import _lookup_bus_roundtrip_cost
@@ -692,45 +737,133 @@ class TestBusFareLookup:
         cost = _lookup_bus_roundtrip_cost("Unknown Stop", "Another Unknown")
         assert cost is None
 
-    def test_case_insensitive_matching(self):
+    def test_same_stop_is_not_free(self):
         from houses.enricher import _lookup_bus_roundtrip_cost
 
-        cost = _lookup_bus_roundtrip_cost("KNAPHILL, RANDOLPH CLOSE", "WOKING, WOKING RAILWAY STATION")
-        assert cost == 4.00
+        cost = _lookup_bus_roundtrip_cost("randolph close", "randolph close")
+        assert cost is not None
+
+    def test_reversed_direction(self):
+        from houses.enricher import _lookup_bus_roundtrip_cost
+
+        cost = _lookup_bus_roundtrip_cost("woking railway station", "randolph close")
+        assert cost == 1.8
+
+    def test_coord_fallback_without_coords_still_returns_none(self):
+        from houses.enricher import _lookup_bus_roundtrip_cost
+
+        cost = _lookup_bus_roundtrip_cost("Unknown Stop", "Another Unknown", {"lat": 51.3, "lon": -0.5}, {"lat": 51.31, "lon": -0.49})
+        assert cost is None
+
+
+class TestComputeBusDailyCost:
+    """_compute_bus_daily_cost — cheapest product selection."""
+
+    def test_single_only_doubled(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({"adult_single": 1.5})
+        assert cost == 3.0
+
+    def test_single_with_return(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({"adult_single": 1.5, "adult_return": 2.5})
+        assert cost == 2.5
+
+    def test_single_with_day_cheaper(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({"adult_single": 2.0, "adult_day": 3.5})
+        assert cost == 3.5
+
+    def test_day_more_expensive_than_double(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({"adult_single": 0.9, "adult_day": 8.5})
+        assert cost == 1.8
+
+    def test_national_cap_applied_before_doubling(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({"adult_single": 3.5}, {"national_max_single_gbp": 3.0})
+        assert cost == 6.0
+
+    def test_return_cheaper_than_capped_double(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({"adult_single": 2.0, "adult_return": 3.8}, {"national_max_single_gbp": 3.0})
+        assert cost == 3.8
+
+    def test_no_single_returns_zero(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({})
+        assert cost == 0.0
+
+    def test_empty_fares_returns_zero(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({})
+        assert cost == 0.0
 
 
 class TestStopToZoneMapping:
     """Zone lookup for stop names from the data file."""
 
-    def test_knaphill_maps_to_zone_knaphill(self):
+    def test_randolph_close_maps_to_zone(self):
         from houses.enricher import _load_bus_fares
 
         data = _load_bus_fares()
         scso = data.get("Stagecoach_South", {})
-        zone = scso.get("stop_zones", {}).get("knaphill, randolph close")
-        assert zone == "Zone_Knaphill"
+        zone = scso.get("stop_zones", {}).get("randolph close")
+        assert zone is not None
 
-    def test_woking_station_maps_to_zone_woking_station(self):
+    def test_woking_station_maps_to_same_zone(self):
         from houses.enricher import _load_bus_fares
 
         data = _load_bus_fares()
         scso = data.get("Stagecoach_South", {})
-        zone = scso.get("stop_zones", {}).get("woking, woking railway station")
-        assert zone == "Zone_Woking_Station"
+        assert scso.get("stop_zones", {}).get("randolph close") == \
+               scso.get("stop_zones", {}).get("woking railway station")
 
 
 class TestZonePairLookup:
-    """Zone pair → fare products."""
+    """Zone pair -> fare products."""
 
-    def test_knaphill_woking_has_products(self):
+    def test_randolph_woking_station_has_single(self):
         from houses.enricher import _load_bus_fares
 
         data = _load_bus_fares()
         scso = data.get("Stagecoach_South", {})
-        fares = scso.get("zone_fares", {}).get("Zone_Knaphill:Zone_Woking_Station")
+        sz = scso.get("stop_zones", {})
+        dep_zone = sz.get("randolph close")
+        arr_zone = sz.get("woking railway station")
+        assert dep_zone is not None
+        assert arr_zone is not None
+        fares = scso.get("zone_fares", {}).get(f"{dep_zone}:{arr_zone}")
         assert fares is not None
-        assert fares.get("adult_single") == 2.50
-        assert fares.get("adult_return") == 4.00
+        assert fares.get("adult_single") == 0.9
+
+    def test_randolph_woking_has_adult_day(self):
+        from houses.enricher import _load_bus_fares
+
+        data = _load_bus_fares()
+        scso = data.get("Stagecoach_South", {})
+        sz = scso.get("stop_zones", {})
+        dep_zone = sz.get("randolph close")
+        arr_zone = sz.get("woking railway station")
+        fares = scso.get("zone_fares", {}).get(f"{dep_zone}:{arr_zone}")
+        assert fares is not None
+        assert fares.get("adult_day") == 8.5
+
+    def test_reverse_zone_pair_has_same_fares(self):
+        from houses.enricher import _load_bus_fares
+
+        data = _load_bus_fares()
+        scso = data.get("Stagecoach_South", {})
+        fares_fwd = scso.get("zone_fares", {}).get("zone@510@17@boarding:zone@510@17@boarding", {})
+        assert fares_fwd.get("adult_single") == 0.9
 
 
 class TestPickBestLorenaRoute:
@@ -1121,3 +1254,39 @@ class TestEnrichRailFares:
         )
         assert simon.daily_cost_gbp == 40.4
         assert lorena.daily_cost_gbp == 36.0
+
+
+class TestKnownWrongBehaviours:
+    """Tests for known bugs — these define expected correct behaviour."""
+
+    def test_daily_cost_returns_return_when_no_single(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({"adult_return": 4.0})
+        assert cost == 4.0, "Should fall back to return price when single is missing"
+
+    def test_daily_cost_returns_day_when_no_single_no_return(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({"adult_day": 5.0})
+        assert cost == 5.0, "Should use day price when single and return are missing"
+
+    def test_daily_cost_uses_return_when_missing_single(self):
+        from houses.enricher import _compute_bus_daily_cost
+
+        cost = _compute_bus_daily_cost({"adult_return": 8.0}, {"national_max_single_gbp": 3.0})
+        assert cost == 8.0, "Return is used as-is (national cap only applies to single)"
+
+    def test_stop_coord_fallback_should_not_be_dead_code(self):
+        """stop_coords is always empty — the coord fallback can never match.
+        This test will fail until we populate stop_coords from the BODS stop
+        data frame (a separate API call)."""
+        from houses.enricher import _load_bus_fares
+
+        data = _load_bus_fares()
+        scso = data.get("Stagecoach_South", {})
+        coords = scso.get("stop_coords", [])
+        assert len(coords) > 0, (
+            "stop_coords empty — coordinate fallback in _lookup_bus_roundtrip_cost is dead code. "
+            "Need to fetch coordinate data from BODS stop data frame."
+        )

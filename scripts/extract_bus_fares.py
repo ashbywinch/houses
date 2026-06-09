@@ -9,13 +9,18 @@ Output: data/bus_fares.json — loaded at runtime for bus fare lookups.
 
 from __future__ import annotations
 
+import argparse
 import csv
+import gc
 import json
 import logging
+import math
+import os
 import re
 import time
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass, field
+from collections.abc import Generator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -27,14 +32,13 @@ logger = logging.getLogger(__name__)
 BODS_BASE = "https://data.bus-data.dft.gov.uk/api/v1/"
 DOWNLOAD_BASE = "https://data.bus-data.dft.gov.uk"
 CACHE_DIR = Path("data/bods_cache")
+CHECKPOINT_DIR = Path("data/.bus_fares_checkpoints")
 STATIONS_CSV = Path("data/stations.csv")
 OUTPUT_PATH = Path("data/bus_fares.json")
 
-# Operators to process: (NOC, display_name)
-# NOCs from BODS; display name used as key in output JSON
 OPERATORS: list[tuple[str, str]] = [
     ("SCSO", "Stagecoach_South"),
-    ("SCSE", "Stagecoach_South_East"),
+    ("SCSO", "Stagecoach_South_East"),
     ("SCOX", "Stagecoach_Oxfordshire"),
     ("SCEM", "Stagecoach_East_Midlands"),
     ("READ", "Reading_Buses"),
@@ -43,17 +47,32 @@ OPERATORS: list[tuple[str, str]] = [
     ("GALD", "Go_Ahead_London"),
 ]
 
+NOC_SUB_OPERATORS: dict[str, list[str]] = {
+    "Stagecoach_South": ["Stagecoach South"],
+    "Stagecoach_South_East": ["Stagecoach South East"],
+    "Stagecoach_Oxfordshire": ["Stagecoach Oxfordshire"],
+    "Stagecoach_East_Midlands": ["Stagecoach East Midlands"],
+    "Reading_Buses": ["Reading"],
+    "Metrobus": ["Metrobus"],
+    "Abellio": ["Abellio"],
+    "Go_Ahead_London": ["Go-Ahead London", "Fastrack"],
+}
+
 NATIONAL_MAX_SINGLE_GBP = 3.00
 
 
+def _dataset_cache_path(dataset_id: int, filename: str) -> Path:
+    name = filename.removesuffix(".xml").replace(" ", "_").replace("(", "").replace(")", "")
+    safe = re.sub(r"[^a-zA-Z0-9_.-]", "_", name)[:200]
+    return CACHE_DIR / f"dataset_{dataset_id}_{safe}.xml"
+
+
 def _first_found(*elements):
-    """Return the first Element that is not None (avoids bool()-based ``x or y``
-    pattern, which can give wrong results in Python < 3.14 where
-    :class:`xml.etree.ElementTree.Element` may be falsy)."""
     for el in elements:
         if el is not None:
             return el
     return None
+
 
 NS = {
     "netex": "http://www.netex.org.uk/netex",
@@ -62,7 +81,6 @@ NS = {
 
 
 def _unprefixed(tag: str) -> str:
-    """Strip namespace prefix from an XML tag."""
     return tag.split("}")[-1] if "}" in tag else tag
 
 
@@ -95,13 +113,6 @@ def load_stations() -> list[Station]:
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371.0
-    dlat = (lat2 - lat1) * 3.14159 / 180
-    dlon = (lon2 - lon1) * 3.14159 / 180
-    a = (
-        (dlat / 2) ** 2
-    )  # simplified sin²(dlat/2) for small angles — approximation
-    # Actually use the real formula:
-    import math
     dlat_r = math.radians(lat2 - lat1)
     dlon_r = math.radians(lon2 - lon1)
     a = math.sin(dlat_r / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon_r / 2) ** 2
@@ -115,12 +126,9 @@ def is_near_station(lat: float, lon: float, stations: list[Station], max_dist_km
     return False
 
 
-def get_bods_datasets(noc: str, api_key: str = "") -> list[dict]:
-    """Get fare datasets for a given operator NOC from BODS."""
+def get_bods_datasets(noc: str, api_key: str) -> list[dict]:
     url = f"{BODS_BASE}fares/dataset/"
-    params: dict[str, Any] = {"noc": noc, "limit": 50}
-    if api_key:
-        params["api_key"] = api_key
+    params: dict[str, Any] = {"noc": noc, "limit": 50, "api_key": api_key}
 
     resp = httpx.get(url, params=params, timeout=30)
     resp.raise_for_status()
@@ -130,74 +138,58 @@ def get_bods_datasets(noc: str, api_key: str = "") -> list[dict]:
     return results
 
 
-def download_dataset(dataset_id: int, noc: str = "", api_key: str = "") -> list[str]:
-    """Download BODS fare dataset, using local cache if available.
-
-    Returns a list of XML strings (one per XML file in the dataset).
-    Saves concatenated content to ``data/bods_cache/`` for reuse.
-    """
+def download_dataset(dataset_id: int, api_key: str, cached_only: bool = False) -> Generator[str, None, None]:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cache_path = CACHE_DIR / f"dataset_{dataset_id}.xml"
 
-    if cache_path.is_file():
-        logger.info("Using cached dataset %d from %s", dataset_id, cache_path)
-        return [cache_path.read_text(encoding="utf-8")]
+    if cached_only:
+        cached_paths = sorted(CACHE_DIR.glob(f"dataset_{dataset_id}.xml"))
+        cached_paths.extend(sorted(CACHE_DIR.glob(f"dataset_{dataset_id}_*.xml")))
+        if not cached_paths:
+            logger.warning("No cached files found for dataset %d", dataset_id)
+            return
+        logger.info("Reading %d cached files for dataset %d", len(cached_paths), dataset_id)
+        for path in cached_paths:
+            yield path.read_text(encoding="utf-8")
+        return
 
     url = f"{DOWNLOAD_BASE}/fares/dataset/{dataset_id}/download/"
-    headers: dict[str, str] = {}
-    if api_key:
-        headers["Authorization"] = f"Token {api_key}"
+    headers: dict[str, str] = {"Authorization": f"Token {api_key}"}
 
-    try:
-        resp = httpx.get(url, headers=headers, timeout=120, follow_redirects=True)
-        resp.raise_for_status()
-        logger.info("Downloaded dataset %d (%d bytes)", dataset_id, len(resp.content))
+    resp = httpx.get(url, headers=headers, timeout=120, follow_redirects=True)
+    resp.raise_for_status()
+    logger.info("Downloaded dataset %d (%d bytes)", dataset_id, len(resp.content))
 
-        content = resp.content
-        content_type = resp.headers.get("content-type", "")
-        xml_contents: list[str] = []
+    content = resp.content
+    content_type = resp.headers.get("content-type", "")
 
-        if "zip" in content_type or content[:2] == b"PK":
-            import zipfile
-            import io
-            with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                xml_names = sorted([n for n in zf.namelist() if n.endswith(".xml")])
-                if not xml_names:
-                    logger.warning("No XML files found in zip for dataset %d", dataset_id)
-                    return []
-                logger.info("Zip contains %d XML files for dataset %d", len(xml_names), dataset_id)
-                for xml_name in xml_names:
-                    xml_contents.append(zf.read(xml_name).decode("utf-8"))
-        else:
-            xml_contents.append(resp.text)
-
-        # Concatenate all XML files into one for caching
-        combined = "".join(xml_contents)
-        cache_path.write_text(combined, encoding="utf-8")
-        logger.info("Cached to %s (%d chars)", cache_path, len(combined))
-        return xml_contents
-    except Exception as e:
-        logger.warning("Failed to download dataset %d: %s", dataset_id, e)
-        return []
+    if "zip" in content_type or content[:2] == b"PK":
+        import io
+        import zipfile
+        with zipfile.ZipFile(io.BytesIO(content)) as zf:
+            xml_names = sorted([n for n in zf.namelist() if n.endswith(".xml")])
+            if not xml_names:
+                logger.warning("No XML files found in zip for dataset %d", dataset_id)
+                return
+            logger.info("Zip contains %d XML files for dataset %d", len(xml_names), dataset_id)
+            for xml_name in xml_names:
+                xml_str = zf.read(xml_name).decode("utf-8")
+                cache_path = _dataset_cache_path(dataset_id, Path(xml_name).stem)
+                if not cache_path.is_file():
+                    cache_path.write_text(xml_str, encoding="utf-8")
+                yield xml_str
+    else:
+        yield resp.text
 
 
 def parse_netex_fares(xml_str: str, stations: list[Station]) -> dict | None:
-    """Parse NeTEx XML and extract fare model for routes serving train stations.
-
-    Returns dict in bus_fares.json format, or None if parsing fails.
-    """
     try:
         root = ET.fromstring(xml_str)
     except ET.ParseError as e:
         logger.warning("XML parse error: %s", e)
         return None
 
-    # Map of ATCO code → stop name + coords
     stops: dict[str, dict] = {}
 
-    # Parse ScheduledStopPoints — use name as identifier; AtcoCode
-    # and coordinates are optional and may live in separate data frames.
-    stops: dict[str, dict] = {}
     for ssp in root.iter():
         tag = _unprefixed(ssp.tag)
         if tag not in ("ScheduledStopPoint", "scheduledStopPoint"):
@@ -241,19 +233,18 @@ def parse_netex_fares(xml_str: str, stations: list[Station]) -> dict | None:
         logger.warning("No stops found in NeTEx data")
         return None
 
-    # Check if any stops are near a train station (for station-serving filtering)
     near_count = sum(1 for s in stops.values() if s.get("near_station"))
+    stops_with_coords = sum(1 for s in stops.values() if s.get("lat") is not None and s.get("lon") is not None)
 
-    if not stops:
-        logger.warning("No stops found in NeTEx data")
+    if near_count == 0 and stops_with_coords > 0:
+        logger.info("No stops near any station (%d stops have coordinates), skipping XML", stops_with_coords)
         return None
 
-    if near_count == 0:
-        logger.info("No stop coordinates available — cannot verify station proximity, proceeding anyway")
+    if near_count == 0 and stops_with_coords == 0:
+        logger.warning("No stop coordinates available — cannot verify station proximity, proceeding anyway")
 
     logger.info("Found %d total stops, %d near stations", len(stops), near_count)
 
-    # Parse FareZones: zone id → list of stop ATCO codes
     zones: dict[str, list[str]] = {}
     for zone_el in root.iter():
         tag = _unprefixed(zone_el.tag)
@@ -267,31 +258,26 @@ def parse_netex_fares(xml_str: str, stations: list[Station]) -> dict | None:
         for member in zone_el.iter():
             mt = _unprefixed(member.tag)
             if mt == "Member" or mt == "StopPointRef" or "ref" in mt.lower():
-                # ScheduledStopPointRef has ATCO code in the ref attribute;
-                # plain Member elements have it as text content
                 ref = member.get("ref", "") or member.text or ""
                 if ref in stops:
                     members.append(ref)
         if zone_id and members:
             zones[zone_id] = members
 
-    # Build stop_name → zone_id mapping
     stop_zones: dict[str, str] = {}
     for zone_id, members in zones.items():
         for atco in members:
             stop = stops.get(atco)
             if stop:
                 normalized = stop["name"].strip().lower()
-                # Only keep the first zone mapping for a stop
                 if normalized not in stop_zones:
                     stop_zones[normalized] = zone_id
 
-    logger.info("Parsed %d fare zones, %d stop→zone mappings", len(zones), len(stop_zones))
+    logger.info("Parsed %d fare zones, %d stop->zone mappings", len(zones), len(stop_zones))
 
-    # Parse distance matrix / zone pair → price
     zone_fares: dict[str, dict[str, float]] = {}
+    network_fares: list[dict] = []
 
-    # Phase 1: Collect all DistanceMatrixElement zone pairs keyed by element id
     dme_zone_pairs: dict[str, str] = {}
     for dme in root.iter():
         tag = _unprefixed(dme.tag)
@@ -300,8 +286,6 @@ def parse_netex_fares(xml_str: str, stations: list[Station]) -> dict | None:
 
         dme_id = dme.get("id", "")
 
-        # Try StartTariffZoneRef/EndTariffZoneRef (real BODS format) first,
-        # then fall back to StartZoneRef/EndZoneRef (AC Williams format)
         start_el = _first_found(
             dme.find(".//netex:StartTariffZoneRef", NS), dme.find(".//netex:startTariffZoneRef", NS),
             dme.find(".//netex:StartZoneRef", NS), dme.find(".//netex:startZoneRef", NS),
@@ -319,9 +303,10 @@ def parse_netex_fares(xml_str: str, stations: list[Station]) -> dict | None:
             continue
 
         key = f"{start_zone}:{end_zone}"
+        normalized_key = f"{start_zone}:{end_zone.replace('@alighting', '@boarding')}"
         if dme_id:
             dme_zone_pairs[dme_id] = key
-        # Also try PriceGroupRef path (AC Williams format)
+
         price_ref_el = _first_found(
             dme.find(".//netex:PriceGroupRef", NS), dme.find(".//netex:priceGroupRef", NS),
         )
@@ -329,10 +314,9 @@ def parse_netex_fares(xml_str: str, stations: list[Station]) -> dict | None:
             price_group_ref = price_ref_el.get("ref", "") or price_ref_el.text or ""
             price = _find_price_for_group(root, price_group_ref)
             if price is not None:
-                if key not in zone_fares:
-                    zone_fares[key] = {"adult_single": price}
+                if normalized_key not in zone_fares:
+                    zone_fares[normalized_key] = {"adult_single": price}
 
-    # Phase 2: Find DistanceMatrixElementPrice elements (real BODS format)
     for dmep in root.iter():
         tag = _unprefixed(dmep.tag)
         if tag not in ("DistanceMatrixElementPrice", "distanceMatrixElementPrice"):
@@ -359,21 +343,21 @@ def parse_netex_fares(xml_str: str, stations: list[Station]) -> dict | None:
         zone_key = dme_zone_pairs.get(dme_ref)
         if not zone_key:
             continue
+        nk = zone_key.replace("@alighting", "@boarding")
 
-        if zone_key not in zone_fares:
-            zone_fares[zone_key] = {}
-        if "adult_single" not in zone_fares[zone_key]:
-            zone_fares[zone_key]["adult_single"] = price
+        if nk not in zone_fares:
+            zone_fares[nk] = {}
+        if "adult_single" not in zone_fares[nk]:
+            zone_fares[nk]["adult_single"] = price
 
-    # Also try to find PreassignedFareProduct prices
     _parse_fare_products(root, zone_fares)
+    _parse_fare_tables(root, dme_zone_pairs, zone_fares, network_fares)
 
     if not zone_fares:
         logger.warning("No zone pair prices found — returning zones without prices")
 
     logger.info("Parsed %d zone pair prices", len(zone_fares))
 
-    # Build stop_coords index for spatial matching
     stop_coords: list[dict] = []
     for zone_id, members in zones.items():
         for atco in members:
@@ -392,11 +376,11 @@ def parse_netex_fares(xml_str: str, stations: list[Station]) -> dict | None:
         "stop_zones": stop_zones,
         "stop_coords": stop_coords,
         "zone_fares": zone_fares,
+        "network_fares": network_fares,
     }
 
 
 def _find_price_for_group(root: ET.Element, group_ref: str) -> float | None:
-    """Find the GBP amount for a PriceGroup reference."""
     for pg in root.iter():
         tag = _unprefixed(pg.tag)
         if tag not in ("PriceGroup", "priceGroup"):
@@ -404,14 +388,12 @@ def _find_price_for_group(root: ET.Element, group_ref: str) -> float | None:
         pg_id_el = pg.find(".//netex:id", NS)
         pg_id = pg_id_el.text if pg_id_el is not None else pg.get("id", pg.get("Id", ""))
 
-        # Also check the ref attribute
         attrs = {**pg.attrib}
         pg_id = attrs.get("id", attrs.get("Id", attrs.get("{http://www.netex.org.uk/netex}id", "")))
 
         if pg_id != group_ref:
             continue
 
-        # Find Amount elements
         for amt in pg.iter():
             atag = _unprefixed(amt.tag)
             if atag == "Amount":
@@ -419,7 +401,6 @@ def _find_price_for_group(root: ET.Element, group_ref: str) -> float | None:
                 try:
                     text = amt.text or ""
                     if text:
-                        # Try to parse as the price value
                         val_el = amt.find(".//netex:amount", NS) or amt.find("netex:Amount", NS)
                         if val_el is not None:
                             return float(val_el.text)
@@ -431,7 +412,6 @@ def _find_price_for_group(root: ET.Element, group_ref: str) -> float | None:
 
 
 def _parse_fare_products(root: ET.Element, zone_fares: dict[str, dict[str, float]]) -> None:
-    """Parse PreassignedFareProduct elements for ticket-type info."""
     for product in root.iter():
         tag = _unprefixed(product.tag)
         if tag not in ("PreassignedFareProduct", "preassignedFareProduct"):
@@ -444,7 +424,6 @@ def _parse_fare_products(root: ET.Element, zone_fares: dict[str, dict[str, float
             continue
         product_name = (name_el.text or "").strip().lower()
 
-        # Determine product type
         product_type = None
         if "single" in product_name:
             product_type = "adult_single"
@@ -456,11 +435,8 @@ def _parse_fare_products(root: ET.Element, zone_fares: dict[str, dict[str, float
         if product_type is None:
             continue
 
-        # Find price
         price = _find_product_price(product)
         if price is not None:
-            # Associate with zone pairs
-            # Find which lines/link this product belongs to
             for dme in root.iter():
                 dtag = _unprefixed(dme.tag)
                 if dtag not in ("DistanceMatrixElement", "distanceMatrixElement"):
@@ -484,17 +460,14 @@ def _parse_fare_products(root: ET.Element, zone_fares: dict[str, dict[str, float
                             if start_ref is not None and end_ref is not None:
                                 sz = start_ref.get("ref", "") or start_ref.text or ""
                                 ez = end_ref.get("ref", "") or end_ref.text or ""
-                                key = f"{sz}:{ez}"
+                                key = f"{sz}:{ez}".replace("@alighting", "@boarding")
                                 if key not in zone_fares:
                                     zone_fares[key] = {}
                                 zone_fares[key][product_type] = price
-            # Also try to find via the more direct approach
-            # Search for product references in distance matrix elements
             _associate_product_with_zones(root, product, product_type, price, zone_fares)
 
 
 def _find_product_price(product: ET.Element) -> float | None:
-    """Extract the GBP price from a PreassignedFareProduct element."""
     for child in product.iter():
         tag = _unprefixed(child.tag)
         if tag == "Price" or tag == "price":
@@ -506,7 +479,6 @@ def _find_product_price(product: ET.Element) -> float | None:
                     return float(amt_el.text)
                 except (ValueError, TypeError):
                     continue
-            # Try direct text
             try:
                 return float(child.text)
             except (ValueError, TypeError):
@@ -521,8 +493,6 @@ def _associate_product_with_zones(
     price: float,
     zone_fares: dict[str, dict[str, float]],
 ) -> None:
-    """Associate a fare product price with the correct zone pairs."""
-    # Find the product ID
     product_id = None
     for attr_key in ("id", "Id", "{http://www.netex.org.uk/netex}id"):
         if attr_key in product.attrib:
@@ -531,19 +501,16 @@ def _associate_product_with_zones(
     if not product_id:
         return
 
-    # Look for this product in distance matrix elements via SalesOfferPackage
     for sop in root.iter():
         stag = _unprefixed(sop.tag)
         if stag not in ("SalesOfferPackage", "salesOfferPackage"):
             continue
 
-        # Check if this SOP references our product
         for ref in sop.iter():
             rtag = _unprefixed(ref.tag)
             if rtag in ("PreassignedFareProductRef", "fareProductRef", "fareProduct") or "productRef" in rtag:
                 ref_val = ref.get("ref", "")
                 if ref_val and ref_val == product_id:
-                    # Found the SOP for our product — find which DME it links to
                     for dme in root.iter():
                         dtag = _unprefixed(dme.tag)
                         if dtag not in ("DistanceMatrixElement", "distanceMatrixElement"):
@@ -559,56 +526,227 @@ def _associate_product_with_zones(
                                     if start_ref is not None and end_ref is not None:
                                         sz = start_ref.get("ref", "") or start_ref.text or ""
                                         ez = end_ref.get("ref", "") or end_ref.text or ""
-                                        key = f"{sz}:{ez}"
+                                        key = f"{sz}:{ez}".replace("@alighting", "@boarding")
                                         if key not in zone_fares:
                                             zone_fares[key] = {}
                                         zone_fares[key][product_type] = price
                     return
 
 
+def _parse_fare_tables(
+    root: ET.Element,
+    dme_zone_pairs: dict[str, str],
+    zone_fares: dict[str, dict[str, float]],
+    network_fares: list[dict],
+) -> None:
+    products: dict[str, str] = {}
+    for product in root.iter():
+        tag = _unprefixed(product.tag)
+        if tag not in ("PreassignedFareProduct", "preassignedFareProduct"):
+            continue
+        name_el = _first_found(
+            product.find(".//netex:Name", NS), product.find(".//netex:name", NS),
+        )
+        if name_el is None:
+            continue
+        pname = (name_el.text or "").strip().lower()
+        ptype: str | None = None
+        if "single" in pname:
+            ptype = "adult_single"
+        elif "return" in pname:
+            ptype = "adult_return"
+        elif "day" in pname or "dayrider" in pname or "day rider" in pname:
+            ptype = "adult_day"
+        if ptype is None:
+            continue
+        pid = None
+        for attr_key in ("id", "Id", "{http://www.netex.org.uk/netex}id"):
+            if attr_key in product.attrib:
+                pid = product.attrib[attr_key]
+                break
+        if pid:
+            products[pid] = ptype
+
+    for ft in root.iter():
+        tag = _unprefixed(ft.tag)
+        if tag not in ("FareTable", "fareTable"):
+            continue
+        product_id = None
+        for pf_ref in ft.iter():
+            rt = _unprefixed(pf_ref.tag)
+            if rt == "PreassignedFareProductRef" or "fareProductRef" in rt:
+                product_id = pf_ref.get("ref", "")
+                break
+        if not product_id or product_id not in products:
+            continue
+        ptype = products[product_id]
+        for ft_child in ft.iter():
+            ct = _unprefixed(ft_child.tag)
+            if ct in ("DistanceMatrixElementPrice", "distanceMatrixElementPrice"):
+                amt_el = _first_found(
+                    ft_child.find(".//netex:Amount", NS), ft_child.find(".//netex:amount", NS),
+                )
+                if amt_el is None or not amt_el.text:
+                    continue
+                try:
+                    price = float(amt_el.text)
+                except ValueError:
+                    continue
+                dme_ref_el = _first_found(
+                    ft_child.find(".//netex:DistanceMatrixElementRef", NS),
+                    ft_child.find(".//netex:distanceMatrixElementRef", NS),
+                )
+                if dme_ref_el is not None:
+                    dme_ref = dme_ref_el.get("ref", "") or dme_ref_el.text or ""
+                    zone_key = dme_zone_pairs.get(dme_ref)
+                    if zone_key:
+                        nk = zone_key.replace("@alighting", "@boarding")
+                        if nk not in zone_fares:
+                            zone_fares[nk] = {}
+                        zone_fares[nk][ptype] = price
+                elif ptype in ("adult_day", "adult_return"):
+                    covered_stops: set[str] = set()
+                    for t in root.iter():
+                        tt = _unprefixed(t.tag)
+                        if tt == "Tariff":
+                            for fz_ref in t.iter():
+                                zt = _unprefixed(fz_ref.tag)
+                                if zt == "FareZoneRef":
+                                    zone_id = fz_ref.get("ref", "")
+                                    if zone_id:
+                                        for fz in root.iter():
+                                            ftag = _unprefixed(fz.tag)
+                                            if ftag == "FareZone" and fz.get("id", "") == zone_id:
+                                                for m in fz.iter():
+                                                    mt = _unprefixed(m.tag)
+                                                    if "ref" in mt.lower() and m.text:
+                                                        covered_stops.add(m.text.strip().lower())
+                                    break
+                            break
+                    if covered_stops:
+                        network_fares.append({
+                            "price": price,
+                            "product_type": ptype,
+                            "covered_stops": covered_stops,
+                        })
+
+
+def _dataset_description_matches(desc: str, sub_op: str) -> bool:
+    if not desc:
+        return False
+    return desc.strip().lower() == sub_op.lower()
+
+
 def extract_operator_fares(
     noc: str,
     display_name: str,
     stations: list[Station],
-    api_key: str = "",
+    api_key: str,
+    cached_only: bool = False,
 ) -> dict | None:
-    """Extract fare model for a single BODS operator."""
     datasets = get_bods_datasets(noc, api_key)
     if not datasets:
         logger.warning("No datasets found for NOC %s (%s)", noc, display_name)
         return None
 
+    sub_ops = NOC_SUB_OPERATORS.get(display_name, [])
+    if sub_ops:
+        filtered: list[dict] = []
+        for ds in datasets:
+            desc = (ds.get("description", "") or "").strip()
+            if any(_dataset_description_matches(desc, sub_op) for sub_op in sub_ops):
+                filtered.append(ds)
+            else:
+                logger.info(
+                    "Skipping dataset %s (%s) for %s — does not match sub-operators %s",
+                    ds.get("id"), desc, noc, sub_ops,
+                )
+        datasets = filtered
+        logger.info(
+            "NOC %s: %d datasets remain after sub-operator filter",
+            noc, len(datasets),
+        )
+
+    if not datasets:
+        logger.info("No matching datasets for %s after sub-operator filter", display_name)
+        return None
+
     combined_zones: dict[str, str] = {}
     combined_fares: dict[str, dict[str, float]] = {}
+    combined_network_fares: list[dict] = []
     datasets_processed = 0
+    zone_candidates: dict[str, dict[str, bool]] = {}
 
     for ds in datasets:
         ds_id = ds.get("id")
         if not ds_id:
             continue
-        # Rate limit: space out requests
         time.sleep(1)
 
-        xml_strings = download_dataset(ds_id, noc, api_key)
-        if not xml_strings:
-            continue
-        for xml_str in xml_strings:
+        had_any = False
+        for xml_str in download_dataset(ds_id, api_key, cached_only=cached_only):
+            had_any = True
             result = parse_netex_fares(xml_str, stations)
+            del xml_str
+            gc.collect()
             if result is None:
                 continue
             datasets_processed += 1
-            combined_zones.update(result.get("stop_zones", {}))
-            for key, fares in result.get("zone_fares", {}).items():
+            file_zones = result.get("stop_zones", {})
+            file_fares = result.get("zone_fares", {})
+            file_fare_zones = set()
+            for k in file_fares:
+                file_fare_zones.add(k.split(":")[0])
+                file_fare_zones.add(k.split(":")[1])
+            for stop_name, zone in file_zones.items():
+                if stop_name not in zone_candidates:
+                    zone_candidates[stop_name] = {}
+                zone_candidates[stop_name][zone] = zone in file_fare_zones
+            for key, fares in file_fares.items():
                 if key not in combined_fares:
                     combined_fares[key] = {}
                 combined_fares[key].update(fares)
+            file_network_fares: list[dict] = result.get("network_fares", [])
+            for nf in file_network_fares:
+                if nf.get("covered_stops"):
+                    combined_network_fares.append(nf)
+        del result
+        if not had_any:
+            logger.warning("No XML content yielded for dataset %d", ds_id)
+
+    fare_zones = set()
+    for k in combined_fares:
+        fare_zones.add(k.split(":")[0])
+        fare_zones.add(k.split(":")[1])
+    for stop_name, zones in zone_candidates.items():
+        best = next((z for z, has in zones.items() if has), None)
+        if best is None:
+            best = next(iter(zones))
+        if best in fare_zones:
+            combined_zones[stop_name] = best
+
+    for nf in combined_network_fares:
+        covered_stops = nf.get("covered_stops", set())
+        if not covered_stops:
+            continue
+        covered_zones: set[str] = set()
+        for stop_name, zone in combined_zones.items():
+            if stop_name in covered_stops:
+                covered_zones.add(zone)
+        if len(covered_zones) < 2:
+            continue
+        for key in list(combined_fares):
+            z1, z2 = key.split(":")
+            if z1 in covered_zones and z2 in covered_zones:
+                if nf["product_type"] not in combined_fares[key]:
+                    combined_fares[key][nf["product_type"]] = nf["price"]
 
     if not combined_zones or not combined_fares:
         logger.info("No station-serving fare data for %s", display_name)
         return None
 
     logger.info(
-        "Operator %s: processed %d datasets, %d stop→zone, %d zone pairs",
+        "Operator %s: processed %d datasets, %d stop->zone, %d zone pairs",
         display_name,
         datasets_processed,
         len(combined_zones),
@@ -618,29 +756,30 @@ def extract_operator_fares(
     return {"stop_zones": combined_zones, "zone_fares": combined_fares}
 
 
+def _checkpoint_path(display_name: str) -> Path:
+    safe_name = display_name.replace(" ", "_").replace("/", "_")
+    return CHECKPOINT_DIR / f"{safe_name}.json"
+
+
 def main():
-    api_key = ""
-    # Try to read BODS API key from env or .env
-    import os
-    from pathlib import Path
+    parser = argparse.ArgumentParser(description="Extract BODS bus fare data")
+    parser.add_argument("--cached-only", action="store_true", help="Use cached files only, skip HTTP downloads")
+    parser.add_argument("--force", action="store_true", help="Re-process all operators, ignoring checkpoints")
+    args = parser.parse_args()
 
-    env_path = Path(".env")
-    if env_path.is_file():
-        for line in env_path.read_text().splitlines():
-            if line.startswith("BODS_API_KEY="):
-                api_key = line.split("=", 1)[1].strip().strip('"').strip("'")
-                break
+    api_key = os.environ.get("BUS_DATA_API_KEY", "")
     if not api_key:
-        api_key = os.environ.get("BODS_API_KEY", "")
-
-    if not api_key:
-        api_key = os.environ.get("BUS_DATA_API_KEY", "")
+        logger.error("BUS_DATA_API_KEY is not set")
+        return
 
     logger.info("Loading stations from %s", STATIONS_CSV)
     stations = load_stations()
     if not stations:
         logger.error("No stations loaded — check stations.csv exists")
         return
+
+    CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     all_operator_data: dict[str, Any] = {}
     all_operator_data["_meta"] = {
@@ -649,21 +788,29 @@ def main():
     }
 
     for noc, display_name in OPERATORS:
+        ckpt = _checkpoint_path(display_name)
+        if ckpt.is_file() and not args.force:
+            logger.info("Checkpoint exists for %s — skipping (use --force to re-process)", display_name)
+            with ckpt.open() as f:
+                all_operator_data[display_name] = json.load(f)
+            gc.collect()
+            continue
+
         logger.info("Processing %s (%s)...", display_name, noc)
         try:
-            op_data = extract_operator_fares(noc, display_name, stations, api_key)
+            op_data = extract_operator_fares(noc, display_name, stations, api_key, cached_only=args.cached_only)
             if op_data:
                 all_operator_data[display_name] = op_data
-                logger.info("Extracted data for %s", display_name)
+                with ckpt.open("w") as f:
+                    json.dump(op_data, f, indent=2)
+                logger.info("Extracted data for %s, checkpoint saved", display_name)
             else:
                 logger.info("No data extracted for %s (no station-serving routes)", display_name)
         except Exception as e:
             logger.error("Failed to extract for %s: %s", display_name, e)
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    # Only write if we found at least one operator with data (avoid clobbering
-    # the existing file on a partial/failed run)
-    operator_count = len(all_operator_data) - 1  # exclude _meta
+    operator_count = len(all_operator_data) - 1
     if operator_count > 0:
         with OUTPUT_PATH.open("w") as f:
             json.dump(all_operator_data, f, indent=2)
