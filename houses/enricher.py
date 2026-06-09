@@ -492,6 +492,26 @@ def _nearest_bus_zone(
     return None
 
 
+def _nearby_bus_zones(
+    lat: float,
+    lon: float,
+    stop_coords: list[dict],
+    radius_km: float = 0.2,
+) -> list[str]:
+    """All distinct zone IDs within ``radius_km`` of (lat, lon), ordered by closest stop first."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for sc in sorted(stop_coords, key=lambda c: _haversine_km(lat, lon, c["lat"], c["lon"])):
+        d = _haversine_km(lat, lon, sc["lat"], sc["lon"])
+        if d > radius_km:
+            break
+        z = sc.get("zone", "")
+        if z and z not in seen:
+            seen.add(z)
+            result.append(z)
+    return result
+
+
 def _lookup_station_coords(station_name: str) -> tuple[float, float] | None:
     """Find station coordinates from stations.csv by matching name (suffix-stripped)."""
     if not _STATIONS_CSV.is_file():
@@ -966,9 +986,45 @@ async def _compute_google_transit(origin: str, destination: str) -> TransitInfo 
     bus_cost_gbp = None
     for bl in bus_legs:
         transit = bl.get("transitDetails", {})
-        dep_name = transit.get("stopDetails", {}).get("departureStop", {}).get("name", "")
-        arr_name = transit.get("stopDetails", {}).get("arrivalStop", {}).get("name", "")
-        leg_cost = _lookup_bus_roundtrip_cost(dep_name, arr_name)
+        dep_stop = transit.get("stopDetails", {}).get("departureStop", {})
+        arr_stop = transit.get("stopDetails", {}).get("arrivalStop", {})
+        dep_name = dep_stop.get("name", "")
+        arr_name = arr_stop.get("name", "")
+        dep_coords = dep_stop.get("location", {}).get("latLng", {})
+        arr_coords = arr_stop.get("location", {}).get("latLng", {})
+        dep_point = {"lat": dep_coords.get("latitude"), "lon": dep_coords.get("longitude")} if dep_coords else None
+        arr_point = {"lat": arr_coords.get("latitude"), "lon": arr_coords.get("longitude")} if arr_coords else None
+        leg_cost = _lookup_bus_roundtrip_cost(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
+
+        if leg_cost is None and dep_point and arr_point:
+            data_all = _load_bus_fares()
+            for op_key, op_data in data_all.items():
+                if op_key == "_meta":
+                    continue
+                stop_zones = op_data.get("stop_zones", {})
+                stop_coords = op_data.get("stop_coords", [])
+                zone_fares = op_data.get("zone_fares", {})
+                dep_name_norm = re.sub(r"[.,;:'\"!?()]", "", dep_name.lower()).split(", ")[-1]
+                arr_name_norm = re.sub(r"[.,;:'\"!?()]", "", arr_name.lower()).split(", ")[-1]
+                known_dep = stop_zones.get(dep_name_norm)
+                known_arr = stop_zones.get(arr_name_norm)
+                for radius in (0.2, 0.5, 1.0, 2.0):
+                    dep_zones: list[str] = [known_dep] if known_dep else _nearby_bus_zones(dep_point["lat"], dep_point["lon"], stop_coords, radius_km=radius)
+                    arr_zones: list[str] = [known_arr] if known_arr else _nearby_bus_zones(arr_point["lat"], arr_point["lon"], stop_coords, radius_km=radius)
+                    for dep_zone in dep_zones:
+                        for arr_zone in arr_zones:
+                            zk = f"{dep_zone}:{arr_zone}"
+                            fares = zone_fares.get(zk) or zone_fares.get(f"{arr_zone}:{dep_zone}")
+                            if fares:
+                                leg_cost = _compute_bus_daily_cost(fares, data_all.get("_meta"))
+                                logger.info("Google bus fare (radius=%dm): %s -> %s = %s",
+                                            int(radius * 1000), dep_zone, arr_zone, leg_cost)
+                                break
+                        if leg_cost is not None:
+                            break
+                    if leg_cost is not None:
+                        break
+
         if leg_cost is not None:
             total_bus_cost += leg_cost
 
