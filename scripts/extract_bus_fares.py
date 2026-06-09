@@ -34,6 +34,7 @@ DOWNLOAD_BASE = "https://data.bus-data.dft.gov.uk"
 CACHE_DIR = Path("data/bods_cache")
 CHECKPOINT_DIR = Path("data/.bus_fares_checkpoints")
 STATIONS_CSV = Path("data/stations.csv")
+NAPTAN_CACHE = Path("data/bods_stops.csv")
 OUTPUT_PATH = Path("data/bus_fares.json")
 
 OPERATORS: list[tuple[str, str]] = [
@@ -111,6 +112,52 @@ def load_stations() -> list[Station]:
     return stations
 
 
+NAPTAN_DOWNLOAD = "https://naptan.api.dft.gov.uk/v1/access-nodes?dataFormat=csv"
+
+
+def _load_naptan_stops() -> dict[str, tuple[float, float]] | None:
+    naptan: dict[str, tuple[float, float]] = {}
+
+    if NAPTAN_CACHE.is_file():
+        logger.info("Loading NaPTAN stops from %s", NAPTAN_CACHE)
+        with NAPTAN_CACHE.open(newline="") as f:
+            for row in csv.DictReader(f):
+                atco = row.get("ATCOCode", "").strip()
+                lat_raw = row.get("Latitude", "").strip()
+                lon_raw = row.get("Longitude", "").strip()
+                if atco and lat_raw and lon_raw:
+                    try:
+                        naptan[atco] = (float(lat_raw), float(lon_raw))
+                    except ValueError:
+                        continue
+        logger.info("Loaded %d NaPTAN stop coordinates", len(naptan))
+        return naptan
+
+    logger.info("Downloading NaPTAN stop data from %s (101MB)", NAPTAN_DOWNLOAD)
+    try:
+        resp = httpx.get(NAPTAN_DOWNLOAD, timeout=300, follow_redirects=True)
+        resp.raise_for_status()
+    except Exception as e:
+        logger.warning("Failed to download NaPTAN data: %s", e)
+        return None
+
+    NAPTAN_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    with NAPTAN_CACHE.open("wb") as f:
+        f.write(resp.content)
+
+    for row in csv.DictReader(resp.text.splitlines()):
+        atco = row.get("ATCOCode", "").strip()
+        lat_raw = row.get("Latitude", "").strip()
+        lon_raw = row.get("Longitude", "").strip()
+        if atco and lat_raw and lon_raw:
+            try:
+                naptan[atco] = (float(lat_raw), float(lon_raw))
+            except ValueError:
+                continue
+    logger.info("Downloaded and loaded %d NaPTAN stop coordinates", len(naptan))
+    return naptan
+
+
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371.0
     dlat_r = math.radians(lat2 - lat1)
@@ -119,10 +166,33 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def is_near_station(lat: float, lon: float, stations: list[Station], max_dist_km: float = 0.2) -> bool:
+def _build_station_grid(stations: list[Station]) -> list[list[list[Station]]]:
+    grid: list[list[list[Station]]] = [[[] for _ in range(36)] for _ in range(18)]
     for s in stations:
-        if haversine_km(lat, lon, s.lat, s.long) <= max_dist_km:
-            return True
+        col = int((s.long + 7.5) / 0.5)
+        row = int((s.lat - 49.5) / 0.5)
+        if 0 <= col < 36 and 0 <= row < 18:
+            grid[row][col].append(s)
+    logger.info("Built station grid (%d×%d cells)", len(grid), len(grid[0]))
+    return grid
+
+
+STATION_GRID: list[list[list[Station]]] = []
+
+
+def is_near_station(lat: float, lon: float, stations: list[Station], max_dist_km: float = 0.2) -> bool:
+    global STATION_GRID
+    if not STATION_GRID:
+        STATION_GRID = _build_station_grid(stations)
+    col = int((lon + 7.5) / 0.5)
+    row = int((lat - 49.5) / 0.5)
+    for dr in (-1, 0, 1):
+        for dc in (-1, 0, 1):
+            r, c = row + dr, col + dc
+            if 0 <= r < 18 and 0 <= c < 36:
+                for s in STATION_GRID[r][c]:
+                    if haversine_km(lat, lon, s.lat, s.long) <= max_dist_km:
+                        return True
     return False
 
 
@@ -181,7 +251,7 @@ def download_dataset(dataset_id: int, api_key: str, cached_only: bool = False) -
         yield resp.text
 
 
-def parse_netex_fares(xml_str: str, stations: list[Station]) -> dict | None:
+def parse_netex_fares(xml_str: str, stations: list[Station], naptan: dict[str, tuple[float, float]] | None = None) -> dict | None:
     try:
         root = ET.fromstring(xml_str)
     except ET.ParseError as e:
@@ -220,6 +290,12 @@ def parse_netex_fares(xml_str: str, stations: list[Station]) -> dict | None:
         )
         lat = float(lat_el.text) if lat_el is not None and lat_el.text else None
         lon = float(lon_el.text) if lon_el is not None and lon_el.text else None
+
+        if lat is None and lon is None and naptan is not None:
+            atco_key = atco.removeprefix("atco:")
+            coords = naptan.get(atco_key)
+            if coords is not None:
+                lat, lon = coords
 
         if atco in stops:
             continue
@@ -350,8 +426,10 @@ def parse_netex_fares(xml_str: str, stations: list[Station]) -> dict | None:
         if "adult_single" not in zone_fares[nk]:
             zone_fares[nk]["adult_single"] = price
 
-    _parse_fare_products(root, zone_fares)
-    _parse_fare_tables(root, dme_zone_pairs, zone_fares, network_fares)
+    if b"PreassignedFareProduct" in xml_str.encode():
+        _parse_fare_products(root, zone_fares)
+    if b"FareTable" in xml_str.encode():
+        _parse_fare_tables(root, dme_zone_pairs, zone_fares, network_fares)
 
     if not zone_fares:
         logger.warning("No zone pair prices found — returning zones without prices")
@@ -643,6 +721,7 @@ def extract_operator_fares(
     stations: list[Station],
     api_key: str,
     cached_only: bool = False,
+    naptan: dict[str, tuple[float, float]] | None = None,
 ) -> dict | None:
     datasets = get_bods_datasets(noc, api_key)
     if not datasets:
@@ -674,6 +753,7 @@ def extract_operator_fares(
     combined_zones: dict[str, str] = {}
     combined_fares: dict[str, dict[str, float]] = {}
     combined_network_fares: list[dict] = []
+    combined_stop_coords: list[dict] = []
     datasets_processed = 0
     zone_candidates: dict[str, dict[str, bool]] = {}
 
@@ -686,7 +766,7 @@ def extract_operator_fares(
         had_any = False
         for xml_str in download_dataset(ds_id, api_key, cached_only=cached_only):
             had_any = True
-            result = parse_netex_fares(xml_str, stations)
+            result = parse_netex_fares(xml_str, stations, naptan=naptan)
             del xml_str
             gc.collect()
             if result is None:
@@ -710,9 +790,22 @@ def extract_operator_fares(
             for nf in file_network_fares:
                 if nf.get("covered_stops"):
                     combined_network_fares.append(nf)
+            file_coords: list[dict] = result.get("stop_coords", [])
+            combined_stop_coords.extend(file_coords)
         del result
         if not had_any:
             logger.warning("No XML content yielded for dataset %d", ds_id)
+
+    seen: set[tuple[str, float, float]] = set()
+    deduped: list[dict] = []
+    for c in combined_stop_coords:
+        k = (c.get("name", ""), round(c.get("lat", 0), 4), round(c.get("lon", 0), 4))
+        if k not in seen:
+            seen.add(k)
+            deduped.append(c)
+    combined_stop_coords = deduped
+    del seen, deduped
+    gc.collect()
 
     fare_zones = set()
     for k in combined_fares:
@@ -753,7 +846,7 @@ def extract_operator_fares(
         len(combined_fares),
     )
 
-    return {"stop_zones": combined_zones, "zone_fares": combined_fares}
+    return {"stop_zones": combined_zones, "zone_fares": combined_fares, "stop_coords": combined_stop_coords}
 
 
 def _checkpoint_path(display_name: str) -> Path:
@@ -781,6 +874,8 @@ def main():
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+    naptan = _load_naptan_stops()
+
     all_operator_data: dict[str, Any] = {}
     all_operator_data["_meta"] = {
         "national_max_single_gbp": NATIONAL_MAX_SINGLE_GBP,
@@ -798,7 +893,7 @@ def main():
 
         logger.info("Processing %s (%s)...", display_name, noc)
         try:
-            op_data = extract_operator_fares(noc, display_name, stations, api_key, cached_only=args.cached_only)
+            op_data = extract_operator_fares(noc, display_name, stations, api_key, cached_only=args.cached_only, naptan=naptan)
             if op_data:
                 all_operator_data[display_name] = op_data
                 with ckpt.open("w") as f:

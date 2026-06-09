@@ -72,6 +72,7 @@ data/api_cache/
 # BODS bus fare data cache (5.1 GB of NeTEx XMLs)
 data/bods_cache/
 data/.bus_fares_checkpoints/
+data/bods_stops.csv
 
 # OpenCode
 .opencode/

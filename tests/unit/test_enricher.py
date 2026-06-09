@@ -1277,16 +1277,13 @@ class TestKnownWrongBehaviours:
         cost = _compute_bus_daily_cost({"adult_return": 8.0}, {"national_max_single_gbp": 3.0})
         assert cost == 8.0, "Return is used as-is (national cap only applies to single)"
 
-    def test_stop_coord_fallback_should_not_be_dead_code(self):
-        """stop_coords is always empty — the coord fallback can never match.
-        This test will fail until we populate stop_coords from the BODS stop
-        data frame (a separate API call)."""
+    def test_stop_coord_fallback_is_not_dead_code(self):
+        """stop_coords should be populated from NaPTAN data during extraction."""
         from houses.enricher import _load_bus_fares
 
         data = _load_bus_fares()
         scso = data.get("Stagecoach_South", {})
         coords = scso.get("stop_coords", [])
         assert len(coords) > 0, (
-            "stop_coords empty — coordinate fallback in _lookup_bus_roundtrip_cost is dead code. "
-            "Need to fetch coordinate data from BODS stop data frame."
+            "stop_coords empty — NaPTAN stop data not integrated or extraction needs re-run"
         )
