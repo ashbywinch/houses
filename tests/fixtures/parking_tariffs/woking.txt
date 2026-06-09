@@ -1,0 +1,14 @@
+Parking tariff
+Monday - Friday
+Daily Rate: £12.80
+Day Off Peak from 12:00: £6.40
+Hourly off peak: £2.10
+Saturday
+Daily Rate: £6.40
+Sunday/Bank Holiday
+Daily Rate: £6.40
+Weekend special Fri 00:01 - Tues 03:59 £19.20
+Weekly Ticket: £51.00
+Monthly Ticket: £179.50
+Quarterly Ticket: £538.50
+Annual Ticket: £1795.00

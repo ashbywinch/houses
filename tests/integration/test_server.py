@@ -307,6 +307,7 @@ class TestBackfillView:
         "Simon London (min)",
         "Simon London Cost (£)",
         "Simon London Route",
+        "Simon Parking Cost (£)",
         "Lorena London (min)",
         "Lorena London Cost (£)",
         "Lorena London Route",
@@ -565,13 +566,16 @@ class TestBackfillView:
             url = f"https://www.rightmove.co.uk/properties/{rid}"
             view_rows = [self._build_view_row("4 Test St, Test Town, TE1 1ST", url, rid)]
 
-            # Build a Data row with simon/lorena fully filled, other enriched cols empty
+            # Build a Data row with simon/lorena mostly filled, but Simon Parking
+            # Cost empty. This triggers simon enrichment and tests that the
+            # backfill passes lookup=pc (not lookup=address) to the enrichment.
             data_row = [""] * len(self.DATA_HEADERS)
             data_row[self.DATA_HEADERS.index("Rightmove ID")] = rid
             filled_cols = [
                 "Simon London (min)",
                 "Simon London Cost (£)",
                 "Simon London Route",
+                # Simon Parking Cost (£) deliberately left empty
                 "Lorena London (min)",
                 "Lorena London Cost (£)",
                 "Lorena London Route",
@@ -591,17 +595,24 @@ class TestBackfillView:
             results = self._parse_rows(resp)
             assert len(results) == 1
             assert results[0]["status"] == "updated"
-            # Should have run only non-simon/lorena fields
-            assert "simon" not in results[0]["fields"]
+            # Simon Parking Cost is empty → simon enrichment triggered
+            assert "simon" in results[0]["fields"]
             assert "lorena" not in results[0]["fields"]
             assert "petrol" in results[0]["fields"]
             assert "schools" in results[0]["fields"]
             mock_enrich.assert_called_once()
             mock_write.assert_called_once()
-            # Verify write call skips simon/lorena; gets only empty-enriched headers
+            # The enrichment must receive the postcode as lookup, not the address
+            _, enrich_kwargs = mock_enrich.call_args
+            assert enrich_kwargs["lookup"] == "TE1 1ST", (
+                f"backfill passed lookup={enrich_kwargs['lookup']!r}, expected the postcode"
+            )
+            # Verify write call includes Simon Parking Cost (the only empty simon col)
             args, _ = mock_write.call_args
             allowed = args[6]  # allowed_headers positional arg
-            assert "Simon London (min)" not in allowed
+            assert "Simon Parking Cost (£)" in allowed
+            assert "Simon London (min)" not in allowed  # filled → not in allowed
+            assert "Lorena London (min)" not in allowed
             assert "Bracknell Cost (£)" in allowed
         finally:
             settings.sheet_id = original

@@ -42,6 +42,8 @@ class TransitInfo(BaseModel):
     daily_cost_gbp: float | None = None
     mode: str = "transit"
     route_summary: str = ""
+    parking_cost_gbp: float | None = None
+    bus_cost_gbp: float | None = None
 
 
 class SchoolInfo(BaseModel):

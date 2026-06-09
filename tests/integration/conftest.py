@@ -20,8 +20,10 @@ def _offline_scraper():
 @pytest.fixture(autouse=True)
 def _isolate_api_cache():
     """Isolate the disk API cache to a temp directory per test.
-    Integration tests that need pre-seeded cache from tests/fixtures/api_cache/
-    should set up a separate fixture that copies the needed files."""
+
+    Integration tests that need pre-seeded cache from ``tests/fixtures/api_cache/``
+    should copy fixture files to the tempdir after calling this fixture.
+    """
     with tempfile.TemporaryDirectory() as tmp:
         set_cache_dir(tmp)
         yield

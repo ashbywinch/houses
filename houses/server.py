@@ -74,7 +74,7 @@ def _is_outcode(s: str) -> bool:
 # Maps enrichment field names to the set of column headers they populate.
 # Used by /backfill-view to determine which fields to run for empty columns.
 _ENRICHMENT_FIELD_COLUMNS: dict[str, set[str]] = {
-    "simon": {"Simon London (min)", "Simon London Cost (£)", "Simon London Route"},
+    "simon": {"Simon London (min)", "Simon London Cost (£)", "Simon London Route", "Simon Parking Cost (£)"},
     "lorena": {"Lorena London (min)", "Lorena London Cost (£)", "Lorena London Route"},
     "petrol": {"Bracknell Time (min)", "Bracknell Cost (£)"},
     "schools": {
@@ -114,14 +114,18 @@ for _field, _headers in _ENRICHMENT_FIELD_COLUMNS.items():
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    level = logging.DEBUG if settings.trace else logging.INFO
     logging.basicConfig(
-        level=logging.INFO,
+        level=level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    if settings.trace:
+        logging.getLogger("houses.enricher").setLevel(logging.DEBUG)
+        logging.getLogger("houses.server").setLevel(logging.DEBUG)
     # httpx logs full URLs including query params — suppress to avoid
     # leaking API keys in the server log
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    logger.info("Houses server starting")
+    logger.info("Houses server starting" + (" (TRACE enabled)" if settings.trace else ""))
     yield
     logger.info("Houses server shutting down")
     await stop_chrome()
@@ -362,6 +366,8 @@ async def backfill_view(
     dry_run: bool = Query(default=False),
     no_write: bool = Query(default=False),
     fields: list[str] | None = Query(default=None),  # noqa: B008
+    force: bool = Query(default=False),
+    rids: str | None = Query(default=None),
 ) -> StreamingResponse:
     """Read Properties View tab, find properties missing enrichment, and backfill.
 
@@ -377,6 +383,8 @@ async def backfill_view(
       dry_run  : bool — skip all enrichment and writes, return what would happen
       no_write : bool — run enrichment (caching all API results) but skip sheet writes
       fields   : list[str] — restrict enrichment to these field groups
+      force    : bool — re-run enrichment even for already-filled cells
+      rids     : str — comma-separated Rightmove IDs to process (others skipped)
     """
     if not settings.sheet_id:
 
@@ -429,10 +437,23 @@ async def backfill_view(
                 enriched_col_indices[h] = i
 
         user_fields = set(fields) if fields else None
+        target_rids: set[str] = {r.strip() for r in rids.split(",")} if rids else set()
         processed_rids: set[str] = set()
         total = len(view_data) - 1
 
-        yield json.dumps({"type": "start", "total": total, "dry_run": dry_run, "no_write": no_write}) + "\n"
+        yield (
+            json.dumps(
+                {
+                    "type": "start",
+                    "total": total,
+                    "dry_run": dry_run,
+                    "no_write": no_write,
+                    "force": force,
+                    "rids": rids,
+                }
+            )
+            + "\n"
+        )
 
         for row_idx, view_row in enumerate(view_data[1:], 2):
             url_raw = view_row[url_col].strip() if url_col is not None and url_col < len(view_row) else ""
@@ -442,6 +463,12 @@ async def backfill_view(
             if not rid:
                 yield _json_line(
                     {"type": "row", "row": row_idx, "rid": None, "status": "skipped", "reason": "no Rightmove ID"}
+                )
+                continue
+
+            if target_rids and rid not in target_rids:
+                yield _json_line(
+                    {"type": "row", "row": row_idx, "rid": rid, "status": "skipped", "reason": "not in rids filter"}
                 )
                 continue
 
@@ -475,6 +502,14 @@ async def backfill_view(
                 empty_headers: list[str] = [
                     h for h, ci in enriched_col_indices.items() if ci >= len(data_row) or not data_row[ci].strip()
                 ]
+
+                if force and user_fields:
+                    forced_headers: list[str] = []
+                    for h in data_headers:
+                        ef = _HEADER_TO_ENRICHMENT_FIELD.get(h)
+                        if ef and ef in user_fields:
+                            forced_headers.append(h)
+                    empty_headers = list(set(empty_headers) | set(forced_headers))
 
                 if not empty_headers:
                     yield (
@@ -537,8 +572,8 @@ async def backfill_view(
                     enriched = await _run_backfill_enrichment(
                         url=url,
                         address=address,
-                        postcode="",
-                        lookup=address,
+                        postcode=pc,
+                        lookup=pc,
                         bedrooms=None,
                         price=None,
                         enabled=set(),
@@ -580,8 +615,8 @@ async def backfill_view(
                 enriched = await _run_backfill_enrichment(
                     url=url,
                     address=address,
-                    postcode="",
-                    lookup=address,
+                    postcode=pc,
+                    lookup=pc,
                     bedrooms=None,
                     price=None,
                     enabled=needed,
@@ -603,6 +638,7 @@ async def backfill_view(
                         data_row,
                         enriched,
                         empty_headers,
+                        force=force,
                     )
                     status = "created" if not existing_rid else "updated"
                     r = {"type": "row", "row": row_idx, "rid": rid, "status": status, "fields": sorted(needed)}
@@ -613,11 +649,13 @@ async def backfill_view(
                     continue
 
                 yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "enriching"}) + "\n"
+                new_pc = extract_postcode(addr) if not data_row or len(data_row) <= 2 or not data_row[2].strip() else ""
+                postcode_arg = new_pc if new_pc else ""
                 enriched = await _run_backfill_enrichment(
                     url=url,
                     address=address,
-                    postcode="",
-                    lookup=address,
+                    postcode=postcode_arg,
+                    lookup=postcode_arg,
                     bedrooms=None,
                     price=None,
                     enabled=None,
@@ -783,8 +821,29 @@ async def _enrich_rail_fares(
 ) -> None:
     """Fallback: look up National Rail fares when TfL didn't return a cost."""
     needs_rail = enabled is None or enabled & {"simon"} or enabled & {"lorena"}
-    if not needs_rail or (simon.daily_cost_gbp is not None and lorena.daily_cost_gbp is not None):
+    if not needs_rail:
         return
+
+    # Determine which commutes need NR fare lookup:
+    # - No TfL cost at all (daily_cost_gbp is None)
+    # - OR the cost is only the bus/parking component (no rail fare added yet)
+    def _has_rail_fare(commute: TransitInfo) -> bool:
+        """True when ``daily_cost_gbp`` is explicitly set and includes more than
+        just the bus or parking component — meaning rail is already priced."""
+        if commute.daily_cost_gbp is None:
+            return False
+        non_rail = commute.bus_cost_gbp or commute.parking_cost_gbp or 0
+        if non_rail > 0:
+            # If daily_cost_gbp == bus cost or parking cost alone, rail is missing
+            return commute.daily_cost_gbp != non_rail
+        return True
+
+    simon_needs = simon.duration_minutes is not None and not _has_rail_fare(simon)
+    lorena_needs = lorena.duration_minutes is not None and not _has_rail_fare(lorena)
+
+    if not simon_needs and not lorena_needs:
+        return
+
     tube_single = 2.80
     fare_pc = postcode or extract_postcode(address)
     if not fare_pc:
@@ -795,14 +854,30 @@ async def _enrich_rail_fares(
     station = nearest_station(fare_coords[0], fare_coords[1])
     if not station:
         return
-    if simon.daily_cost_gbp is None:
+    if simon_needs:
         f = fare_between(station["crs"], settings.simon_station_crs)
         if f is not None:
-            simon.daily_cost_gbp = round((f + tube_single) * 2, 2)
-    if lorena.daily_cost_gbp is None:
+            rail_cost = round((f + tube_single) * 2, 2)
+            parking = simon.parking_cost_gbp or 0
+            simon.daily_cost_gbp = rail_cost + parking
+            logger.info(
+                "NR fare fallback for Simon: £%.2f (rail) + £%.2f (parking) = £%.2f",
+                rail_cost,
+                parking,
+                simon.daily_cost_gbp,
+            )
+    if lorena_needs:
         f = fare_between(station["crs"], settings.lorena_station_crs)
         if f is not None:
-            lorena.daily_cost_gbp = round((f + tube_single) * 2, 2)
+            rail_cost = round((f + tube_single) * 2, 2)
+            bus = lorena.bus_cost_gbp or 0
+            lorena.daily_cost_gbp = rail_cost + bus
+            logger.info(
+                "NR fare fallback for Lorena: £%.2f (rail) + £%.2f (bus) = £%.2f",
+                rail_cost,
+                bus,
+                lorena.daily_cost_gbp,
+            )
 
 
 def _write_backfill_cells(
@@ -813,9 +888,14 @@ def _write_backfill_cells(
     current_row: list[str],
     enriched: EnrichedProperty,
     allowed_headers: list[str],
+    force: bool = False,
 ) -> None:
-    """Write enriched values to a Data tab row, but only for cells that are
-    currently empty. Never overwrites existing data."""
+    """Write enriched values to a Data tab row.
+
+    Normally only writes to cells that are currently empty (never overwrites
+    existing data). When ``force=True``, writes to all allowed_headers even
+    if the cell already has data.
+    """
     from houses.sheets import Tab, _row_values
 
     enriched_dict = _row_values(enriched)
@@ -829,8 +909,8 @@ def _write_backfill_cells(
             col_idx = headers.index(name)
         except ValueError:
             continue
-        if col_idx < len(current_row) and current_row[col_idx].strip():
-            continue  # cell already has data — never overwrite
+        if not force and col_idx < len(current_row) and current_row[col_idx].strip():
+            continue  # cell already has data — never overwrite unless force
         cl = col_letter(col_idx)
         cells.append({"range": f"{cl}{row_num}", "values": [[val]]})
 

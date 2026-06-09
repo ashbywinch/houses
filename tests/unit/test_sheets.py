@@ -105,6 +105,7 @@ def test_row_values_with_full_enrichment():
         "Simon London (min)": "22",
         "Simon London Cost (£)": "",
         "Simon London Route": "",
+        "Simon Parking Cost (£)": "",
         "Lorena London (min)": "38",
         "Lorena London Cost (£)": "",
         "Lorena London Route": "",
@@ -417,7 +418,7 @@ def test_constants_values_match_constants_headers():
 
 
 def test_data_headers_count():
-    assert len(COLUMN_HEADERS) == 45
+    assert len(COLUMN_HEADERS) == 46
 
 
 def test_data_formula_count():

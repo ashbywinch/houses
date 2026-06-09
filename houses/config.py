@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="deepseek/deepseek-chat", alias="HOUSES_LLM_MODEL")
     llm_temperature: float = 0.7
     llm_max_tokens: int = 150
+    trace: bool = Field(default=False, alias="HOUSES_TRACE")
     epc_bearer_token: str = Field(default="", alias="EPC_BEARER_TOKEN")
 
     rightmove_chrome_port: int = 9222
@@ -36,6 +37,7 @@ class Settings(BaseSettings):
 
     school_search_radius_km: float = 5.0
     max_walk_to_station_minutes: int = 20
+    bus_walk_penalty_minutes: int = 10
 
     simon_station_crs: str = "VIC"
     lorena_station_crs: str = "FST"

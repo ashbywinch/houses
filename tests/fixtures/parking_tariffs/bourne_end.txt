@@ -1,0 +1,8 @@
+Parking tariff
+
+Monday - Friday
+Daily Rate before 12pm: £4.00
+Daily Rate after 12pm: £3.00
+
+Saturday - Sunday
+Daily Rate: £3.00 per day

@@ -206,6 +206,31 @@ If logic needs to be shared across modules, either:
 
 ## Testing
 
+### Fixture API Cache for Integration Tests
+
+Integration tests that exercise HTTP-transport code (TfL, Google Maps, geocoding)
+should never need live API credentials.  The ``api_cache`` module provides
+disk-backed caching of all external API responses.  The ``tests/integration/conftest.py``
+isolates each test to a temporary copy of ``tests/fixtures/api_cache/`` — pre-seeded
+fixture cache files.  During development, run the test once with real API keys to
+populate the cache; commit the resulting ``.json`` files as permanent fixtures.
+
+When bootstrapping new fixtures:
+
+```bash
+# 1. Run the test with real API keys (generates cache files)
+uv run pytest tests/integration/test_sheet_update.py -k test_dry_run
+# 2. Copy the generated cache files to the fixture directory
+cp data/api_cache/*.json tests/fixtures/api_cache/
+# 3. Commit the fixtures
+git add tests/fixtures/api_cache/
+git commit -m "Add api_cache fixtures for new integration test"
+```
+
+Fixtures that test caching behaviour (call counts, cache misses) should break
+out of the shared cache by monkeypatching ``houses.api_cache.CACHE_DIR`` to an
+empty temporary directory before invoking the function under test.
+
 ### Test Behavior, Not Implementation
 
 A test should verify that the system produces the correct output for a given input — not that specific internal functions were called with specific arguments. Asserts like `mock_function.assert_called_once_with(args)` test call patterns, not behavior. They break when the implementation is refactored even though the output is identical.
