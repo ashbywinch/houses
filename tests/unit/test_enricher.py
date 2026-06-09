@@ -752,7 +752,10 @@ class TestBusFareLookup:
     def test_coord_fallback_without_coords_still_returns_none(self):
         from houses.enricher import _lookup_bus_roundtrip_cost
 
-        cost = _lookup_bus_roundtrip_cost("Unknown Stop", "Another Unknown", {"lat": 51.3, "lon": -0.5}, {"lat": 51.31, "lon": -0.49})
+        cost = _lookup_bus_roundtrip_cost(
+            "Unknown Stop", "Another Unknown",
+            {"lat": 51.3, "lon": -0.5}, {"lat": 51.31, "lon": -0.49},
+        )
         assert cost is None
 
 

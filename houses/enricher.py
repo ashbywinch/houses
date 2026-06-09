@@ -978,7 +978,11 @@ async def _compute_google_transit(origin: str, destination: str) -> TransitInfo 
     duration_min = round(duration_sec / 60)
 
     steps = leg.get("steps", [])
-    bus_legs = [s for s in steps if s.get("travelMode") == "TRANSIT" and s.get("transitDetails", {}).get("transitLine", {}).get("vehicle", {}).get("type") == "BUS"]
+    bus_legs = [
+        s for s in steps
+        if s.get("travelMode") == "TRANSIT"
+        and s.get("transitDetails", {}).get("transitLine", {}).get("vehicle", {}).get("type") == "BUS"
+    ]
 
     total_bus_cost = 0.0
     bus_cost_gbp = None
@@ -1007,8 +1011,14 @@ async def _compute_google_transit(origin: str, destination: str) -> TransitInfo 
                 known_dep = stop_zones.get(dep_name_norm)
                 known_arr = stop_zones.get(arr_name_norm)
                 for radius in (0.2, 0.5, 1.0, 2.0):
-                    dep_zones: list[str] = [known_dep] if known_dep else _nearby_bus_zones(dep_point["lat"], dep_point["lon"], stop_coords, radius_km=radius)
-                    arr_zones: list[str] = [known_arr] if known_arr else _nearby_bus_zones(arr_point["lat"], arr_point["lon"], stop_coords, radius_km=radius)
+                    dep_zones: list[str] = (
+                        [known_dep] if known_dep
+                        else _nearby_bus_zones(dep_point["lat"], dep_point["lon"], stop_coords, radius_km=radius)
+                    )
+                    arr_zones: list[str] = (
+                        [known_arr] if known_arr
+                        else _nearby_bus_zones(arr_point["lat"], arr_point["lon"], stop_coords, radius_km=radius)
+                    )
                     for dep_zone in dep_zones:
                         for arr_zone in arr_zones:
                             zk = f"{dep_zone}:{arr_zone}"
@@ -1090,7 +1100,11 @@ async def compute_lorena_commute(property_postcode: str) -> TransitInfo:
                     walk_m = re.search(r"walk.*?\(\d+m\).*?\u2192\s*", after_walk)
                     if walk_m:
                         after_walk = after_walk[walk_m.end():]
-                    route_summary = f"walk to bus stop (~{max(3, bus_time - 5)}m) \u2192 bus to station ({bus_time}m) \u2192 {after_walk}"
+                    walk_bus = max(3, bus_time - 5)
+                    route_summary = (
+                        f"walk to bus stop (~{walk_bus}m) \u2192 bus to station ({bus_time}m) \u2192 "
+                        f"{after_walk}"
+                    )
                     result = TransitInfo(
                         destination_label="Lorena \u2014 Aldgate / City of London",
                         destination_postcode=settings.lorena_postcode,
