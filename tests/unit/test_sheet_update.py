@@ -2,7 +2,7 @@
 
 from fastapi.testclient import TestClient
 
-from houses.models import EnrichedProperty
+from houses.property import EnrichedProperty
 from houses.server import app
 from houses.sheets import COLUMN_HEADERS, _build_full_row, row_values
 
@@ -10,20 +10,21 @@ client = TestClient(app)
 
 
 def _make_enriched(url: str, simon_cost: float = 10.0) -> EnrichedProperty:
-    from houses.models import PetrolCost, TransitInfo
+    from houses.commute import Commute
+    from houses.property import PetrolCost
 
     return EnrichedProperty(
         url=url,
         address="123 Test Street, Test Town, TE1 1ST",
         postcode="TE1 1ST",
         price=500000,
-        simon_commute=TransitInfo(
+        simon_commute=Commute(
             destination_label="S",
             destination_postcode="SW1V 2QQ",
             duration_minutes=45,
             daily_cost_gbp=simon_cost,
         ),
-        lorena_commute=TransitInfo(
+        lorena_commute=Commute(
             destination_label="L",
             destination_postcode="EC3A 7LP",
             duration_minutes=50,

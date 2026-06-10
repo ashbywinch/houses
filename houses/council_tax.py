@@ -9,7 +9,7 @@ from collections import namedtuple
 from pathlib import Path
 
 from houses.api_cache import cached_sync_client, get_cached, set_cached
-from houses.models import CouncilTaxInfo
+from houses.property import CouncilTaxInfo
 
 logger = logging.getLogger(__name__)
 

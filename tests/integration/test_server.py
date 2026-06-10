@@ -8,8 +8,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from houses.commute import Commute
 from houses.config import settings
-from houses.models import EnrichedProperty, TransitInfo
+from houses.property import EnrichedProperty
 from houses.server import _run_backfill_enrichment, app
 from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS
 from tests.integration.conftest import mock_httpx
@@ -711,7 +712,7 @@ class TestBackfillView:
             from houses.attempt import Attempt
 
             mock_simon.return_value = Attempt.succeeded(
-                TransitInfo(
+                Commute(
                     destination_label="S",
                     destination_postcode="SW1V 2QQ",
                     duration_minutes=45,
@@ -719,7 +720,7 @@ class TestBackfillView:
                 "test",
             )
             mock_lorena.return_value = Attempt.succeeded(
-                TransitInfo(
+                Commute(
                     destination_label="L",
                     destination_postcode="EC3A 7LP",
                     duration_minutes=30,

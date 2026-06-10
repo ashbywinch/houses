@@ -1,13 +1,19 @@
-"""Pydantic models for property payload and enriched data."""
+"""Everything about a house — property payload, enrichment result, value objects."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
 
 from pydantic import BaseModel
 
+from houses.commute import Commute, CommuteBreakdown
 
-class PropertyPayload(BaseModel):
-    """Raw payload extracted by Page Assist from a Rightmove listing.
 
-    Only `url` is required. The LLM should extract `address` (the street
-    address line) and `postcode` (the full UK postcode if visible on the
+class Property(BaseModel):
+    """Raw property listing extracted by Page Assist from a Rightmove page.
+
+    Only ``url`` is required. The LLM should extract ``address`` (the street
+    address line) and ``postcode`` (the full UK postcode if visible on the
     page) separately. If no full postcode is found, the server will try
     to extract it from the address.
     """
@@ -23,30 +29,8 @@ class PropertyPayload(BaseModel):
     actual_postcode: str = ""
 
 
-class ReprocessRequest(BaseModel):
-    """Request to re-enrich existing properties by Rightmove ID.
-
-    Omit ``ids`` to re-enrich every row in the sheet that has the
-    necessary data for the requested fields.
-    """
-
-    ids: list[str] | None = None
-
-
-class TransitInfo(BaseModel):
-    """Transit commute details for a single person."""
-
-    destination_label: str
-    destination_postcode: str
-    duration_minutes: int | None = None
-    daily_cost_gbp: float | None = None
-    mode: str = "transit"
-    route_summary: str = ""
-    parking_cost_gbp: float | None = None
-    bus_cost_gbp: float | None = None
-
-
-class SchoolInfo(BaseModel):
+@dataclass(frozen=True)
+class SchoolInfo:
     """School details for a single school."""
 
     name: str
@@ -64,7 +48,8 @@ class SchoolInfo(BaseModel):
     inspection_summary: str = ""
 
 
-class PetrolCost(BaseModel):
+@dataclass(frozen=True)
+class PetrolCost:
     """Estimated petrol cost for a round trip."""
 
     destination: str = "Bracknell Office (RG12 8YA)"
@@ -73,22 +58,13 @@ class PetrolCost(BaseModel):
     cost_gbp: float | None = None
 
 
-class CouncilTaxInfo(BaseModel):
+@dataclass(frozen=True)
+class CouncilTaxInfo:
     """Council tax band, cost, and evidence source."""
 
     band: str = ""
     yearly_cost: float | None = None
     evidence_url: str = ""
-
-
-class CommuteBreakdown(BaseModel):
-    """Individual daily costs plus yearly total."""
-
-    simon_daily_gbp: float | None = None
-    lorena_daily_gbp: float | None = None
-    bracknell_daily_gbp: float | None = None
-    yearly_total_gbp: float | None = None
-    formula_explanation: str = ""
 
 
 class EnrichedProperty(BaseModel):
@@ -101,8 +77,8 @@ class EnrichedProperty(BaseModel):
     price: float = 0.0
 
     # Commute enrichment
-    simon_commute: TransitInfo | None = None
-    lorena_commute: TransitInfo | None = None
+    simon_commute: Commute | None = None
+    lorena_commute: Commute | None = None
 
     # Bracknell petrol
     petrol: PetrolCost | None = None

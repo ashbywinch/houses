@@ -225,7 +225,7 @@ def main():
             continue
 
         # Build new row from server response
-        from houses.models import EnrichedProperty
+        from houses.property import EnrichedProperty
         from houses.sheets import row_values
 
         new_row = row_values(EnrichedProperty(**enriched))

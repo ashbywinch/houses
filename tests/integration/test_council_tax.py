@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from houses.council_tax import lookup_council_tax
-from houses.models import CouncilTaxInfo
+from houses.property import CouncilTaxInfo
 
 MockBand = namedtuple("MockBand", ["band", "address", "postcode", "local_authority", "local_authority_url"])
 MockPage = namedtuple("MockPage", ["rows"])

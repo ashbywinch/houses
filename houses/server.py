@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from houses.commute import Commute, CommuteBreakdown
 from houses.config import settings
 from houses.council_tax import lookup_council_tax
 from houses.enricher import (
@@ -22,7 +23,7 @@ from houses.enricher import (
     geocode,
 )
 from houses.epc import lookup_epc
-from houses.models import CommuteBreakdown, EnrichedProperty, PetrolCost, PropertyPayload, TransitInfo
+from houses.property import EnrichedProperty, PetrolCost, Property
 from houses.rail_fares import fare_between, nearest_station
 from houses.rightmove_scraper import scrape as scrape_rightmove
 from houses.rightmove_scraper import stop_chrome
@@ -143,7 +144,7 @@ app = FastAPI(
 
 @app.post("/inject-property")
 async def inject_property(
-    payload: PropertyPayload,
+    payload: Property,
     dry_run: bool = False,
     fields: list[str] | None = Query(default=None),  # noqa: B008
 ) -> JSONResponse:
@@ -636,8 +637,8 @@ async def _run_enrichment(
     if not lookup:
         lookup = address if _is_outcode(postcode) else postcode
 
-    simon = TransitInfo(destination_label="Simon (London)", destination_postcode=postcode)
-    lorena = TransitInfo(destination_label="Lorena (London)", destination_postcode=postcode)
+    simon = Commute(destination_label="Simon (London)", destination_postcode=postcode)
+    lorena = Commute(destination_label="Lorena (London)", destination_postcode=postcode)
     petrol = PetrolCost()
     primary = None
     secondary = None
@@ -680,7 +681,7 @@ async def _run_enrichment(
             town_name = non_county[-1] if non_county else (candidates[-1] if candidates else "")
         town_desc = await generate_town_description(town_name, postcode)
 
-    await _enrich_rail_fares(enabled, postcode, address, simon, lorena)
+    simon, lorena = await _enrich_rail_fares(enabled, postcode, address, simon, lorena)
 
     if simon and lorena and (enabled is None or {"simon", "lorena", "petrol"} & enabled):
         breakdown = await compute_commute_breakdown(simon, lorena, petrol)
@@ -762,18 +763,18 @@ async def _enrich_rail_fares(
     enabled: set[str] | None,
     postcode: str,
     address: str,
-    simon: TransitInfo,
-    lorena: TransitInfo,
-) -> None:
+    simon: Commute,
+    lorena: Commute,
+) -> tuple[Commute, Commute]:
     """Fallback: look up National Rail fares when TfL didn't return a cost."""
     needs_rail = enabled is None or enabled & {"simon"} or enabled & {"lorena"}
     if not needs_rail:
-        return
+        return simon, lorena
 
     # Determine which commutes need NR fare lookup:
     # - No TfL cost at all (daily_cost_gbp is None)
     # - OR the cost is only the bus/parking component (no rail fare added yet)
-    def _has_rail_fare(commute: TransitInfo) -> bool:
+    def _has_rail_fare(commute: Commute) -> bool:
         """True when ``daily_cost_gbp`` is explicitly set and includes more than
         just the bus or parking component — meaning rail is already priced."""
         if commute.daily_cost_gbp is None:
@@ -788,42 +789,62 @@ async def _enrich_rail_fares(
     lorena_needs = lorena is not None and lorena.duration_minutes is not None and not _has_rail_fare(lorena)
 
     if not simon_needs and not lorena_needs:
-        return
+        return simon, lorena
 
     tube_single = 2.80
     fare_pc = postcode or extract_postcode(address)
     if not fare_pc:
-        return
+        return simon, lorena
     fare_coords = (await geocode(fare_pc)).value_or_none()
     if not fare_coords:
-        return
+        return simon, lorena
     station = nearest_station(fare_coords.lat, fare_coords.lon)
     if not station:
-        return
+        return simon, lorena
     if simon_needs:
         f = fare_between(station["crs"], settings.simon_station_crs)
         if f is not None:
             rail_cost = round((f + tube_single) * 2, 2)
             parking = simon.parking_cost_gbp or 0
-            simon.daily_cost_gbp = rail_cost + parking
+            simon = Commute(
+                destination_label=simon.destination_label,
+                destination_postcode=simon.destination_postcode,
+                duration_minutes=simon.duration_minutes,
+                daily_cost_gbp=rail_cost + parking,
+                mode=simon.mode,
+                route_summary=simon.route_summary,
+                parking_cost_gbp=simon.parking_cost_gbp,
+                bus_cost_gbp=simon.bus_cost_gbp,
+            )
             logger.info(
                 "NR fare fallback for Simon: £%.2f (rail) + £%.2f (parking) = £%.2f",
                 rail_cost,
                 parking,
-                simon.daily_cost_gbp,
+                rail_cost + parking,
             )
     if lorena_needs:
         f = fare_between(station["crs"], settings.lorena_station_crs)
         if f is not None:
             rail_cost = round((f + tube_single) * 2, 2)
             bus = lorena.bus_cost_gbp or 0
-            lorena.daily_cost_gbp = rail_cost + bus
+            lorena = Commute(
+                destination_label=lorena.destination_label,
+                destination_postcode=lorena.destination_postcode,
+                duration_minutes=lorena.duration_minutes,
+                daily_cost_gbp=rail_cost + bus,
+                mode=lorena.mode,
+                route_summary=lorena.route_summary,
+                parking_cost_gbp=lorena.parking_cost_gbp,
+                bus_cost_gbp=lorena.bus_cost_gbp,
+            )
             logger.info(
                 "NR fare fallback for Lorena: £%.2f (rail) + £%.2f (bus) = £%.2f",
                 rail_cost,
                 bus,
-                lorena.daily_cost_gbp,
+                rail_cost + bus,
             )
+
+    return simon, lorena
 
 
 def _write_backfill_cells(

@@ -2,7 +2,8 @@
 
 import pytest
 
-from houses.models import EnrichedProperty, PetrolCost, SchoolInfo, TransitInfo
+from houses.commute import Commute
+from houses.property import EnrichedProperty, PetrolCost, SchoolInfo
 from houses.sheets import (
     _FORMULA_COLUMNS,
     _USER_COLUMNS,
@@ -80,8 +81,8 @@ def test_row_values_with_full_enrichment():
         postcode="RG14 1AA",
         bedrooms=3,
         price=650000.0,
-        simon_commute=TransitInfo(destination_label="S", destination_postcode="SW1V 2QQ", duration_minutes=22),
-        lorena_commute=TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=38),
+        simon_commute=Commute(destination_label="S", destination_postcode="SW1V 2QQ", duration_minutes=22),
+        lorena_commute=Commute(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=38),
         petrol=PetrolCost(round_trip_km=100.0, cost_gbp=8.50),
         primary_school=SchoolInfo(
             name="St Vincent School",
@@ -160,7 +161,7 @@ def test_row_values_with_full_enrichment():
 
 
 def test_row_values_with_council_tax():
-    from houses.models import CouncilTaxInfo
+    from houses.property import CouncilTaxInfo
 
     ep = EnrichedProperty(
         url="https://www.rightmove.co.uk/properties/456",
@@ -205,8 +206,8 @@ def test_build_full_row_includes_rid():
 def test_row_values_missing_commute_empty():
     ep = EnrichedProperty(
         url="https://www.rightmove.co.uk/properties/123",
-        simon_commute=TransitInfo(destination_label="S", destination_postcode="SW1V 2QQ"),
-        lorena_commute=TransitInfo(destination_label="L", destination_postcode="EC3A 7LP"),
+        simon_commute=Commute(destination_label="S", destination_postcode="SW1V 2QQ"),
+        lorena_commute=Commute(destination_label="L", destination_postcode="EC3A 7LP"),
     )
     r = row_values(ep)
     assert r["Simon London (min)"] == ""
@@ -220,16 +221,16 @@ def test_row_values_missing_commute_empty():
 
 
 def test_row_values_includes_route_summary():
-    """Route summary from TransitInfo flows into the sheet route column."""
+    """Route summary from Commute flows into the sheet route column."""
     ep = EnrichedProperty(
         url="https://www.rightmove.co.uk/properties/123",
-        simon_commute=TransitInfo(
+        simon_commute=Commute(
             destination_label="S",
             destination_postcode="SW1V 2QQ",
             duration_minutes=45,
             route_summary="walk 5m → train(GWR) 20m → walk 5m",
         ),
-        lorena_commute=TransitInfo(
+        lorena_commute=Commute(
             destination_label="L",
             destination_postcode="EC3A 7LP",
             duration_minutes=30,
