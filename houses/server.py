@@ -779,9 +779,9 @@ async def _enrich_rail_fares(
         just the bus or parking component — meaning rail is already priced."""
         if commute.daily_cost_gbp is None:
             return False
-        non_rail = commute.bus_cost_gbp or commute.parking_cost_gbp or 0
+        non_rail = commute.non_rail_cost()
         if non_rail > 0:
-            # If daily_cost_gbp == bus cost or parking cost alone, rail is missing
+            # If daily_cost_gbp == non-rail cost alone, rail is missing
             return commute.daily_cost_gbp != non_rail
         return True
 
@@ -805,16 +805,14 @@ async def _enrich_rail_fares(
         f = fare_between(station["crs"], settings.simon_station_crs)
         if f is not None:
             rail_cost = round((f + tube_single) * 2, 2)
-            parking = simon.parking_cost_gbp or 0
+            parking = simon.non_rail_cost()
             simon = Commute(
                 destination_label=simon.destination_label,
                 destination_postcode=simon.destination_postcode,
                 duration_minutes=simon.duration_minutes,
                 daily_cost_gbp=rail_cost + parking,
                 mode=simon.mode,
-                route_summary=simon.route_summary,
-                parking_cost_gbp=simon.parking_cost_gbp,
-                bus_cost_gbp=simon.bus_cost_gbp,
+                cost_groups=simon.cost_groups,
             )
             logger.info(
                 "NR fare fallback for Simon: £%.2f (rail) + £%.2f (parking) = £%.2f",
@@ -826,16 +824,14 @@ async def _enrich_rail_fares(
         f = fare_between(station["crs"], settings.lorena_station_crs)
         if f is not None:
             rail_cost = round((f + tube_single) * 2, 2)
-            bus = lorena.bus_cost_gbp or 0
+            bus = lorena.non_rail_cost()
             lorena = Commute(
                 destination_label=lorena.destination_label,
                 destination_postcode=lorena.destination_postcode,
                 duration_minutes=lorena.duration_minutes,
                 daily_cost_gbp=rail_cost + bus,
                 mode=lorena.mode,
-                route_summary=lorena.route_summary,
-                parking_cost_gbp=lorena.parking_cost_gbp,
-                bus_cost_gbp=lorena.bus_cost_gbp,
+                cost_groups=lorena.cost_groups,
             )
             logger.info(
                 "NR fare fallback for Lorena: £%.2f (rail) + £%.2f (bus) = £%.2f",

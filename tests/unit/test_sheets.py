@@ -2,7 +2,7 @@
 
 import pytest
 
-from houses.commute import Commute
+from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.property import EnrichedProperty, SchoolInfo
 from houses.sheets import (
     _FORMULA_COLUMNS,
@@ -233,18 +233,26 @@ def test_row_values_includes_route_summary():
             destination_label="S",
             destination_postcode="SW1V 2QQ",
             duration_minutes=45,
-            route_summary="walk 5m → train(GWR) 20m → walk 5m",
+            cost_groups=(
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=5),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration_minutes=20),), operator="GWR"),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=5),)),
+            ),
         ),
         lorena_commute=Commute(
             destination_label="L",
             destination_postcode="EC3A 7LP",
             duration_minutes=30,
-            route_summary="walk 3m → tube(Central) 15m → walk 2m",
+            cost_groups=(
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=3),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TUBE, duration_minutes=15),), operator="TfL"),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=2),)),
+            ),
         ),
     )
     r = row_values(ep)
-    assert r["Simon London Route"] == "walk 5m → train(GWR) 20m → walk 5m"
-    assert r["Lorena London Route"] == "walk 3m → tube(Central) 15m → walk 2m"
+    assert r["Simon London Route"] == "walk (5m) → train (20m) → walk (5m)"
+    assert r["Lorena London Route"] == "walk (3m) → tube (15m) → walk (2m)"
 
 
 def test_named_range_name_is_deterministic():

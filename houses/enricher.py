@@ -764,20 +764,18 @@ async def compute_lorena_commute(property_postcode: str) -> Attempt[Commute]:
 
     # Google fallback: TfL picked no-bus because it has no bus data for this area.
     if result is no_bus_val and no_bus_val.duration_minutes is not None:
-        m = re.search(r"walk.*?\((\d+)m\)", no_bus_val.route_summary[:60])
+        m = re.search(r"walk.*?\((\d+)m\)", no_bus_val.summary()[:60])
         walk_to_station = int(m.group(1)) if m else 0
         if walk_to_station >= settings.bus_walk_penalty_minutes:
             google_route = await _compute_google_transit(property_postcode, settings.lorena_postcode)
-            if google_route and google_route.bus_cost_gbp is not None:
+            if google_route and google_route.non_rail_cost() > 0:
                 bus_time = min(15, walk_to_station - settings.bus_walk_penalty_minutes)
                 savings = walk_to_station - bus_time
                 if savings >= settings.bus_walk_penalty_minutes:
                     new_duration = no_bus_val.duration_minutes - walk_to_station + bus_time
                     new_cost = no_bus_val.daily_cost_gbp
-                    if new_cost is not None:
-                        new_cost = round(new_cost + google_route.bus_cost_gbp, 2)
-                    else:
-                        new_cost = google_route.bus_cost_gbp
+                    bus_cost = google_route.non_rail_cost()
+                    new_cost = round(new_cost + bus_cost, 2) if new_cost is not None else bus_cost
                     logger.info(
                         "Google bus overlay for %s: estimates bus %dm saves %dm over walk %dm, total=£%s",
                         property_postcode,
@@ -786,22 +784,18 @@ async def compute_lorena_commute(property_postcode: str) -> Attempt[Commute]:
                         walk_to_station,
                         new_cost,
                     )
-                    after_walk = no_bus_val.route_summary
-                    walk_m = re.search(r"walk.*?\(\d+m\).*?\u2192\s*", after_walk)
-                    if walk_m:
-                        after_walk = after_walk[walk_m.end() :]
-                    walk_bus = max(3, bus_time - 5)
-                    route_summary = (
-                        f"walk to bus stop (~{walk_bus}m) \u2192 bus to station ({bus_time}m) \u2192 {after_walk}"
-                    )
                     result = Commute(
                         destination_label="Lorena \u2014 Aldgate / City of London",
                         destination_postcode=settings.lorena_postcode,
                         duration_minutes=new_duration,
                         daily_cost_gbp=new_cost,
-                        route_summary=route_summary,
                         mode="transit",
-                        bus_cost_gbp=google_route.bus_cost_gbp,
+                        cost_groups=(
+                            CostGroup(
+                                legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=bus_time),),
+                                cost=bus_cost,
+                            ),
+                        ),
                     )
 
     return Attempt.succeeded(result, "tfl")
@@ -948,21 +942,20 @@ async def _compute_google_transit(origin: str, destination: str) -> Commute | No
     else:
         daily_cost_gbp = None
 
-    steps_summary = []
-    for s in steps:
-        mode = s.get("travelMode", "WALK")
-        instr = s.get("navigationInstruction", {}).get("instructions", "")
-        steps_summary.append(f"{mode.lower()} {instr[:40]}")
-    route_summary = " → ".join(steps_summary)
-
     return Commute(
         destination_label="Lorena — Aldgate / City of London (Google)",
         destination_postcode=destination,
         duration_minutes=duration_min,
         daily_cost_gbp=daily_cost_gbp,
-        route_summary=route_summary,
         mode="transit",
-        bus_cost_gbp=bus_cost_gbp,
+        cost_groups=(
+            CostGroup(
+                legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=duration_min or 0),),
+                cost=bus_cost_gbp,
+            ),
+        )
+        if bus_cost_gbp is not None
+        else (),
     )
 
 

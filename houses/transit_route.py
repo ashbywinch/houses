@@ -149,9 +149,6 @@ class TransitRoute:
             duration_minutes=duration_minutes,
             daily_cost_gbp=daily_cost_gbp,
             mode="transit",
-            route_summary=route_summary,
-            parking_cost_gbp=parking_cost_gbp,
-            bus_cost_gbp=bus_cost_gbp,
             cost_groups=tuple(cost_groups),
         )
         if duration_minutes is not None:

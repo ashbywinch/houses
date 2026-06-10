@@ -57,20 +57,21 @@ class Commute:
     mode: str | CommuteMode = "transit"
     cost_groups: tuple[CostGroup, ...] = ()
 
-    # Transitional fields — stay until cost_groups fully replaces them
-    route_summary: str = ""
-    parking_cost_gbp: float | None = None
-    bus_cost_gbp: float | None = None
-
     def summary(self) -> str:
         """Render as the sheet's route-summary string."""
-        if self.cost_groups:
-            parts: list[str] = []
-            for group in self.cost_groups:
-                for leg, desc in zip(group.legs, group.leg_descriptions(), strict=True):
-                    parts.append(f"{desc} ({leg.duration_minutes}m)")
-            return " \u2192 ".join(parts)
-        return self.route_summary
+        parts: list[str] = []
+        for group in self.cost_groups:
+            for leg, desc in zip(group.legs, group.leg_descriptions(), strict=True):
+                parts.append(f"{desc} ({leg.duration_minutes}m)")
+        return " \u2192 ".join(parts)
+
+    def non_rail_cost(self) -> float:
+        """Sum of costs from non-TfL cost groups (bus, parking, etc.)."""
+        total = 0.0
+        for cg in self.cost_groups:
+            if cg.cost is not None and cg.operator != "TfL":
+                total += cg.cost
+        return total
 
 
 @dataclass(frozen=True)
