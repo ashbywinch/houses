@@ -75,6 +75,13 @@ class PropertyLocation:
         result = await _geocode_postcode(self.postcode)
         return replace(self, coordinates=result)
 
+    def resolved(self, point: GeoPoint, source: str) -> PropertyLocation:
+        """Return a new PropertyLocation with coordinates pre-set from a known value.
+
+        Useful when the sheet already has coordinates and re-geocoding is unnecessary.
+        """
+        return replace(self, coordinates=Attempt.succeeded(point, source))
+
     @classmethod
     async def from_town(cls, town: str) -> PropertyLocation:
         """Resolve a town name to a PropertyLocation.

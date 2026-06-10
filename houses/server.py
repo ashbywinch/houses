@@ -13,7 +13,6 @@ from houses.commute import Commute, CommuteBreakdown
 from houses.config import settings
 from houses.council_tax import lookup_council_tax
 from houses.enricher import (
-    _geocode_address,
     compute_commute_breakdown,
     compute_lorena_commute,
     compute_petrol_cost,
@@ -23,6 +22,7 @@ from houses.enricher import (
     geocode,
 )
 from houses.epc import lookup_epc
+from houses.location import PropertyLocation
 from houses.property import EnrichedProperty, Property
 from houses.rail_fares import fare_between, nearest_station
 from houses.rightmove_scraper import scrape as scrape_rightmove
@@ -652,6 +652,12 @@ async def _run_enrichment(
     station_name = ""
     council_tax = None
 
+    # Single PropertyLocation — resolve once for all enrichment steps
+    location = PropertyLocation(postcode=postcode, address=lookup or address)
+    location = await location.resolve()
+    approx_lat = location.coordinates.value_or_none().lat if location.coordinates.is_succeeded else None
+    approx_lng = location.coordinates.value_or_none().lon if location.coordinates.is_succeeded else None
+
     if enabled is None or "simon" in enabled:
         simon = (await compute_simon_commute(lookup)).value_or_none()
     if enabled is None or "lorena" in enabled:
@@ -662,9 +668,7 @@ async def _run_enrichment(
         primary = await find_nearest_boys_primary(postcode, address)
         secondary = await find_nearest_boys_secondary(postcode, address)
     if enabled is None or {"walk_time", "amenities"} & enabled:
-        coords = (await _geocode_address(lookup)).value_or_none()
-        if coords is None:
-            coords = (await geocode(postcode)).value_or_none()
+        coords = location.coordinates.value_or_none()
         walk_data = (
             await enrich_walkability(coords.lat, coords.lon, address)
             if coords
@@ -699,9 +703,7 @@ async def _run_enrichment(
             scraped_geo = await scrape_rightmove(url)
             if scraped_geo.get("latitude") is not None and scraped_geo.get("longitude") is not None:
                 approx_lat, approx_lng = scraped_geo["latitude"], scraped_geo["longitude"]
-            else:
-                coords = (await _geocode_address(lookup)).value_or_none()
-                approx_lat, approx_lng = (coords.lat, coords.lon) if coords else (None, None)
+            # else: approx_lat/lng already set from shared PropertyLocation above
 
         if approx_lat is not None and approx_lng is not None:
             station = nearest_station(approx_lat, approx_lng)
