@@ -725,197 +725,86 @@ async def _apply_park_and_ride_to_journeys(
     return data
 
 
-async def compute_transit(
-    origin_postcode: str,
-    destination_postcode: str,
-    label: str,
-    park_and_ride: bool = False,
-    allow_bus: bool = False,
-) -> Attempt[Commute]:
-    """Return transit commute time using TfL Unified API (free, London focus).
-
-    Checks the disk cache first — returns cached results even without an
-    API key. Only makes a live API call when no cache exists AND a key is
-    configured.
-
-    When ``park_and_ride`` is True, any first-leg walk to the station
-    longer than ``settings.max_walk_to_station_minutes`` is replaced with
-    a driving leg via ORS Directions API.
-
-    When ``allow_bus`` is True, includes "bus" in the TfL mode params and
-    attempts bus fare lookup if TfL doesn't price the bus leg.
-    """
-    modes = ["tube", "overground", "dlr", "tram", "national-rail", "walking"]
-    if allow_bus:
-        modes.append("bus")
-    logger.debug(
-        "compute_transit: %s origin='%s' dest='%s' park_and_ride=%s allow_bus=%s modes=%s",
-        label,
-        origin_postcode,
-        destination_postcode,
-        park_and_ride,
-        allow_bus,
-        ",".join(modes),
-    )
-    url = f"{TFL_JOURNEY_URL}/{origin_postcode}/to/{destination_postcode}"
-    params = {
-        "nationalSearch": "true",
-        "timeIs": "arriving",
-        "journeyPreference": "leasttime",
-        "mode": ",".join(modes),
-        **_next_weekday_date_params(),
-        **_tfl_auth_params(),
-    }
-
-    duration_minutes = None
-    daily_cost_gbp = None
-    route_summary = ""
-    parking_cost_gbp = None
-    bus_cost_gbp = None
-    data = None
-
-    # Check cache first
-    cached = get_cached("GET", url, params)
-    if cached is not None:
-        data = cached
-        logger.debug("compute_transit: CACHE HIT for %s (params: %s)", label, params)
-    else:
-        logger.debug("compute_transit: CACHE MISS for %s — making API call", label)
-        try:
-            async with cached_async_client(timeout=20.0) as client:
-                resp = await retry_async(
-                    lambda: client.get(url, params=params),
-                    max_retries=2,
-                    base_delay=1.0,
-                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                set_cached("GET", url, params, None, data)
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
-                logger.warning("TfL could not route %s: route may be outside London area", label)
-            elif e.response.status_code == 300:
-                pc_match = re.search(r"[A-Z]{1,2}[0-9][A-Z0-9]?(?:\s*[0-9][A-Z]{2})?", origin_postcode)
-                pc = pc_match.group(0).strip().upper() if pc_match else None
-                # Try the full address string first (better geocoding results),
-                # then fall back to postcode/outcode center
-                coords = (await _geocode_address(origin_postcode)).value_or_none()
-                if coords is None and pc:
-                    coords = (await geocode(pc)).value_or_none()
-                if coords:
-                    latlng = f"{coords.lat},{coords.lon}"
-                    url2 = f"{TFL_JOURNEY_URL}/{latlng}/to/{destination_postcode}"
-                    try:
-                        async with cached_async_client(timeout=20.0) as c2:
-                            r2 = await c2.get(url2, params=params)
-                            r2.raise_for_status()
-                            d2 = r2.json()
-                            set_cached("GET", url2, params, None, d2)
-                            duration_minutes, daily_cost_gbp, route_summary = _pick_best_journey(d2)
-                    except Exception:
-                        logger.warning("TfL geocode fallback failed for %s", label)
-            else:
-                logger.error("TfL API HTTP error for %s: %s", label, e)
-        except httpx.RequestError as e:
-            logger.error("TfL API request failed for %s: %s", label, e)
-        except (KeyError, IndexError, TypeError) as e:
-            logger.error("TfL API unexpected response for %s: %s", label, e)
-
-    if data is not None and park_and_ride:
-        data = await _apply_park_and_ride_to_journeys(
-            data,
-            origin_postcode,
-            settings.max_walk_to_station_minutes,
-        )
-
-    if data is not None:
-        duration_minutes, daily_cost_gbp, route_summary = _pick_best_journey(data)
-
-    # Bus fare: when allow_bus and best journey has bus legs
-    if allow_bus and duration_minutes is not None and data is not None:
-        journeys = data.get("journeys", [])
-        if journeys:
-            best = min(journeys, key=lambda j: j.get("duration", 9999))
-            bus_legs = [leg for leg in best.get("legs", []) if leg.get("mode", {}).get("name") == "bus"]
-            if bus_legs:
-                fare = best.get("fare", {})
-                tfl_total_pence = fare.get("totalCost") if fare else None
-                if tfl_total_pence and tfl_total_pence > 0:
-                    # TfL already priced the bus — use totalCost directly
-                    daily_cost_gbp = round(tfl_total_pence / 100 * 2, 2)
-                else:
-                    # TfL didn't price the bus — look up from data file
-                    tfl_non_bus_fare = 0
-                    fare_fares = fare.get("fares", []) if fare else []
-                    for f in fare_fares:
-                        if f.get("mode") != "bus" and f.get("cost"):
-                            tfl_non_bus_fare += f["cost"]
-
-                    total_bus_cost = 0.0
-                    for bus_leg in bus_legs:
-                        dep = bus_leg.get("departurePoint", {}).get("commonName", "")
-                        arr = bus_leg.get("arrivalPoint", {}).get("commonName", "")
-                        leg_cost = _lookup_bus_roundtrip_cost(
-                            dep,
-                            arr,
-                            dep_point=bus_leg.get("departurePoint", {}),
-                            arr_point=bus_leg.get("arrivalPoint", {}),
-                        )
-                        if leg_cost is not None:
-                            total_bus_cost += leg_cost
-
-                    if total_bus_cost > 0:
-                        bus_cost_gbp = total_bus_cost
-                        daily_cost_gbp = round(tfl_non_bus_fare / 100 * 2 + total_bus_cost, 2)
-
-    # Parking cost: when park_and_ride and best journey has a driving leg
-    if park_and_ride and duration_minutes is not None and data is not None:
-        journeys = data.get("journeys", [])
-        if journeys:
-            best = min(journeys, key=lambda j: j.get("duration", 9999))
-            legs = best.get("legs", [])
-            if legs and legs[0].get("mode", {}).get("name") == "driving":
-                station_name = legs[0].get("arrivalPoint", {}).get("commonName", "")
-                logger.debug(
-                    "parking: driving leg found, arrivalPoint='%s'",
-                    station_name,
-                )
-                if station_name:
-                    parking_cost = await _lookup_parking_cost(station_name)
-                    if parking_cost is not None:
-                        parking_cost_gbp = parking_cost
-                        if daily_cost_gbp is not None:
-                            daily_cost_gbp = round(daily_cost_gbp + parking_cost, 2)
-                    else:
-                        logger.debug("parking: _lookup_parking_cost returned None for '%s'", station_name)
-            else:
-                mode = legs[0].get("mode", {}).get("name") if legs else "no legs"
-                logger.debug("parking: no driving leg (first leg mode=%s) — no parking cost", mode)
-
-    result = Commute(
-        destination_label=label,
-        destination_postcode=destination_postcode,
-        duration_minutes=duration_minutes,
-        daily_cost_gbp=daily_cost_gbp,
-        route_summary=route_summary,
-        mode="transit",
-        parking_cost_gbp=parking_cost_gbp,
-        bus_cost_gbp=bus_cost_gbp,
-    )
-    if duration_minutes is not None:
-        return Attempt.succeeded(result, "tfl")
-    return Attempt.impossible("tfl", "could not route transit")
-
-
 async def compute_simon_commute(property_postcode: str) -> Attempt[Commute]:
-    return await compute_transit(
+    from houses.transit_route import TransitRoute
+
+    route = TransitRoute(
         property_postcode,
         settings.simon_postcode,
         "Simon — Pimlico / Victoria",
         park_and_ride=True,
-        allow_bus=False,
     )
+    return await route.plan()
+
+
+async def compute_lorena_commute(property_postcode: str) -> Attempt[Commute]:
+    from houses.transit_route import TransitRoute
+
+    no_bus = await TransitRoute(
+        property_postcode,
+        settings.lorena_postcode,
+        "Lorena — Aldgate / City of London",
+    ).plan()
+    with_bus = await TransitRoute(
+        property_postcode,
+        settings.lorena_postcode,
+        "Lorena — Aldgate / City of London",
+        allow_bus=True,
+    ).plan()
+
+    if no_bus.is_impossible and with_bus.is_impossible:
+        return no_bus
+    empty = Commute(
+        destination_label="Lorena — Aldgate / City of London",
+        destination_postcode=settings.lorena_postcode,
+    )
+    no_bus_val = no_bus.value_or(empty)
+    with_bus_val = with_bus.value_or(empty)
+    result = _pick_best_lorena_route(no_bus_val, with_bus_val)
+
+    # Google fallback: TfL picked no-bus because it has no bus data for this area.
+    if result is no_bus_val and no_bus_val.duration_minutes is not None:
+        m = re.search(r"walk.*?\((\d+)m\)", no_bus_val.route_summary[:60])
+        walk_to_station = int(m.group(1)) if m else 0
+        if walk_to_station >= settings.bus_walk_penalty_minutes:
+            google_route = await _compute_google_transit(property_postcode, settings.lorena_postcode)
+            if google_route and google_route.bus_cost_gbp is not None:
+                bus_time = min(15, walk_to_station - settings.bus_walk_penalty_minutes)
+                savings = walk_to_station - bus_time
+                if savings >= settings.bus_walk_penalty_minutes:
+                    new_duration = no_bus_val.duration_minutes - walk_to_station + bus_time
+                    new_cost = no_bus_val.daily_cost_gbp
+                    if new_cost is not None:
+                        new_cost = round(new_cost + google_route.bus_cost_gbp, 2)
+                    else:
+                        new_cost = google_route.bus_cost_gbp
+                    logger.info(
+                        "Google bus overlay for %s: estimates bus %dm saves %dm over walk %dm, total=£%s",
+                        property_postcode,
+                        bus_time,
+                        savings,
+                        walk_to_station,
+                        new_cost,
+                    )
+                    after_walk = no_bus_val.route_summary
+                    walk_m = re.search(r"walk.*?\(\d+m\).*?\u2192\s*", after_walk)
+                    if walk_m:
+                        after_walk = after_walk[walk_m.end() :]
+                    walk_bus = max(3, bus_time - 5)
+                    route_summary = (
+                        f"walk to bus stop (~{walk_bus}m) \u2192 bus to station ({bus_time}m) \u2192 {after_walk}"
+                    )
+                    result = Commute(
+                        destination_label="Lorena \u2014 Aldgate / City of London",
+                        destination_postcode=settings.lorena_postcode,
+                        duration_minutes=new_duration,
+                        daily_cost_gbp=new_cost,
+                        route_summary=route_summary,
+                        mode="transit",
+                        bus_cost_gbp=google_route.bus_cost_gbp,
+                    )
+
+    return Attempt.succeeded(result, "tfl")
 
 
 def _pick_best_lorena_route(no_bus: Commute, with_bus: Commute) -> Commute:
@@ -1075,73 +964,6 @@ async def _compute_google_transit(origin: str, destination: str) -> Commute | No
         mode="transit",
         bus_cost_gbp=bus_cost_gbp,
     )
-
-
-async def compute_lorena_commute(property_postcode: str) -> Attempt[Commute]:
-    no_bus = await compute_transit(
-        property_postcode,
-        settings.lorena_postcode,
-        "Lorena — Aldgate / City of London",
-    )
-    with_bus = await compute_transit(
-        property_postcode,
-        settings.lorena_postcode,
-        "Lorena — Aldgate / City of London",
-        allow_bus=True,
-    )
-    if no_bus.is_impossible and with_bus.is_impossible:
-        return no_bus
-    empty = Commute(
-        destination_label="Lorena — Aldgate / City of London",
-        destination_postcode=settings.lorena_postcode,
-    )
-    no_bus_val = no_bus.value_or(empty)
-    with_bus_val = with_bus.value_or(empty)
-    result = _pick_best_lorena_route(no_bus_val, with_bus_val)
-
-    # Google fallback: TfL picked no-bus because it has no bus data for this area.
-    if result is no_bus_val and no_bus_val.duration_minutes is not None:
-        m = re.search(r"walk.*?\((\d+)m\)", no_bus_val.route_summary[:60])
-        walk_to_station = int(m.group(1)) if m else 0
-        if walk_to_station >= settings.bus_walk_penalty_minutes:
-            google_route = await _compute_google_transit(property_postcode, settings.lorena_postcode)
-            if google_route and google_route.bus_cost_gbp is not None:
-                bus_time = min(15, walk_to_station - settings.bus_walk_penalty_minutes)
-                savings = walk_to_station - bus_time
-                if savings >= settings.bus_walk_penalty_minutes:
-                    new_duration = no_bus_val.duration_minutes - walk_to_station + bus_time
-                    new_cost = no_bus_val.daily_cost_gbp
-                    if new_cost is not None:
-                        new_cost = round(new_cost + google_route.bus_cost_gbp, 2)
-                    else:
-                        new_cost = google_route.bus_cost_gbp
-                    logger.info(
-                        "Google bus overlay for %s: estimates bus %dm saves %dm over walk %dm, total=£%s",
-                        property_postcode,
-                        bus_time,
-                        savings,
-                        walk_to_station,
-                        new_cost,
-                    )
-                    after_walk = no_bus_val.route_summary
-                    walk_m = re.search(r"walk.*?\(\d+m\).*?\u2192\s*", after_walk)
-                    if walk_m:
-                        after_walk = after_walk[walk_m.end() :]
-                    walk_bus = max(3, bus_time - 5)
-                    route_summary = (
-                        f"walk to bus stop (~{walk_bus}m) \u2192 bus to station ({bus_time}m) \u2192 {after_walk}"
-                    )
-                    result = Commute(
-                        destination_label="Lorena \u2014 Aldgate / City of London",
-                        destination_postcode=settings.lorena_postcode,
-                        duration_minutes=new_duration,
-                        daily_cost_gbp=new_cost,
-                        route_summary=route_summary,
-                        mode="transit",
-                        bus_cost_gbp=google_route.bus_cost_gbp,
-                    )
-
-    return Attempt.succeeded(result, "tfl")
 
 
 async def compute_commute_breakdown(

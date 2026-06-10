@@ -980,13 +980,13 @@ class TestGoogleRouteFallback:
             bus_cost_gbp=3.8,
         )
 
-        async def mock_transit(*_a, **_kw):
+        async def mock_transit(self):
             return Attempt.succeeded(no_bus, "test")
 
         async def mock_google(*_):
             return google_bus
 
-        monkeypatch.setattr("houses.enricher.compute_transit", mock_transit)
+        monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
         monkeypatch.setattr("houses.enricher._compute_google_transit", mock_google)
 
         result = (await compute_lorena_commute("GU52")).get()
@@ -1025,13 +1025,13 @@ class TestGoogleRouteFallback:
             bus_cost_gbp=3.8,
         )
 
-        async def mock_transit(*_a, **_kw):
-            return Attempt.succeeded(with_bus if _kw.get("allow_bus") else no_bus, "test")
+        async def mock_transit(self):
+            return Attempt.succeeded(with_bus if self._allow_bus else no_bus, "test")
 
         async def mock_google(*_):
             return google_bus
 
-        monkeypatch.setattr("houses.enricher.compute_transit", mock_transit)
+        monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
         monkeypatch.setattr("houses.enricher._compute_google_transit", mock_google)
 
         result = (await compute_lorena_commute("GU52")).get()
@@ -1060,10 +1060,10 @@ class TestGoogleRouteFallback:
             route_summary="bus to Fleet → Train to Waterloo",
         )
 
-        async def mock_transit(*_a, **_kw):
-            return Attempt.succeeded(with_bus if _kw.get("allow_bus") else no_bus, "test")
+        async def mock_transit(self):
+            return Attempt.succeeded(with_bus if self._allow_bus else no_bus, "test")
 
-        monkeypatch.setattr("houses.enricher.compute_transit", mock_transit)
+        monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
         monkeypatch.setattr("houses.enricher._compute_google_transit", lambda *_: None)
 
         result = (await compute_lorena_commute("GU52")).get()
