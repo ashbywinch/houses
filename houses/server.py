@@ -27,14 +27,17 @@ from houses.rail_fares import fare_between, nearest_station
 from houses.rightmove_scraper import scrape as scrape_rightmove
 from houses.rightmove_scraper import stop_chrome
 from houses.sheets import (
+    Tab,
     _rightmove_id,
     col_index,
     col_letter,
     get_client,
+    row_values,
+    sync_view_formulas,
     write_enriched_row,
 )
 from houses.town_desc import generate_town_description
-from houses.walkability import _KNOWN_COUNTIES, enrich_walkability
+from houses.walkability import KNOWN_COUNTIES, enrich_walkability
 
 logger = logging.getLogger(__name__)
 
@@ -157,8 +160,6 @@ async def inject_property(
     rid = rid_match.group(1) if rid_match else ""
 
     if not fields and rid:
-        from houses.sheets import get_client
-
         gclient = get_client()
         if gclient and settings.sheet_id:
             try:
@@ -582,8 +583,6 @@ async def sync_view_formulas_endpoint() -> JSONResponse:
         return JSONResponse(content={"status": "ok", "note": "Sheets not configured"})
     try:
         sh = gclient.open_by_key(settings.sheet_id)
-        from houses.sheets import sync_view_formulas
-
         sync_view_formulas(sh)
         logger.info("View formulas synced")
         return JSONResponse(content={"status": "ok", "message": "View formulas synced"})
@@ -677,7 +676,7 @@ async def _run_enrichment(
             outcode_re = re.compile(r"^[A-Z]{1,2}[0-9][A-Z0-9]?$")
             postcode_re = re.compile(r"^[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}$", re.IGNORECASE)
             candidates = [p for p in parts if p and not postcode_re.match(p) and not outcode_re.match(p)]
-            non_county = [p for p in candidates if p.lower().strip() not in _KNOWN_COUNTIES]
+            non_county = [p for p in candidates if p.lower().strip() not in KNOWN_COUNTIES]
             town_name = non_county[-1] if non_county else (candidates[-1] if candidates else "")
         town_desc = await generate_town_description(town_name, postcode)
 
@@ -843,9 +842,7 @@ def _write_backfill_cells(
     existing data). When ``force=True``, writes to all allowed_headers even
     if the cell already has data.
     """
-    from houses.sheets import Tab, _row_values
-
-    enriched_dict = _row_values(enriched)
+    enriched_dict = row_values(enriched)
     allowed_set = set(allowed_headers)
 
     cells: list[dict[str, Any]] = []

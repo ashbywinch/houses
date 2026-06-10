@@ -81,7 +81,7 @@ class TestInjectProperty:
         original_sheet_id = settings.sheet_id
         settings.sheet_id = "fake-sheet-id-for-test"
         try:
-            with patch("houses.sheets.get_client", return_value=mock_client):
+            with patch("houses.server.get_client", return_value=mock_client):
                 resp = client.post(
                     "/inject-property",
                     json={"url": "https://www.rightmove.co.uk/properties/88375569"},
