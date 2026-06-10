@@ -970,13 +970,6 @@ class TestGoogleRouteFallback:
             daily_cost_gbp=None,
             route_summary="walk to Fleet (46m) → Train to Waterloo (42m) → Tube to Bank (4m) → walk (18m)",
         )
-        with_bus = TransitInfo(
-            destination_label="L",
-            destination_postcode="EC3A 7LP",
-            duration_minutes=116,
-            daily_cost_gbp=None,
-            route_summary="walk to Fleet (46m) → Train to Waterloo (42m) → Tube to Bank (4m) → walk (18m)",
-        )
         google_bus = TransitInfo(
             destination_label="L (Google)",
             destination_postcode="EC3A 7LP",
@@ -987,7 +980,7 @@ class TestGoogleRouteFallback:
         )
 
         async def mock_transit(*_a, **_kw):
-            return with_bus if _kw.get("allow_bus") else no_bus
+            return Attempt.succeeded(no_bus, "test")
 
         async def mock_google(*_):
             return google_bus
@@ -995,7 +988,7 @@ class TestGoogleRouteFallback:
         monkeypatch.setattr("houses.enricher.compute_transit", mock_transit)
         monkeypatch.setattr("houses.enricher._compute_google_transit", mock_google)
 
-        result = await compute_lorena_commute("GU52")
+        result = (await compute_lorena_commute("GU52")).get()
         assert result.bus_cost_gbp is not None
         route = result.route_summary
         assert "(46m)" not in route, "Should not include old walk duration"
@@ -1032,7 +1025,7 @@ class TestGoogleRouteFallback:
         )
 
         async def mock_transit(*_a, **_kw):
-            return with_bus if _kw.get("allow_bus") else no_bus
+            return Attempt.succeeded(with_bus if _kw.get("allow_bus") else no_bus, "test")
 
         async def mock_google(*_):
             return google_bus
@@ -1040,7 +1033,7 @@ class TestGoogleRouteFallback:
         monkeypatch.setattr("houses.enricher.compute_transit", mock_transit)
         monkeypatch.setattr("houses.enricher._compute_google_transit", mock_google)
 
-        result = await compute_lorena_commute("GU52")
+        result = (await compute_lorena_commute("GU52")).get()
         assert result.bus_cost_gbp is not None, "Should find bus cost"
         assert result.bus_cost_gbp > 0
         assert result.duration_minutes is not None
@@ -1067,12 +1060,12 @@ class TestGoogleRouteFallback:
         )
 
         async def mock_transit(*_a, **_kw):
-            return with_bus if _kw.get("allow_bus") else no_bus
+            return Attempt.succeeded(with_bus if _kw.get("allow_bus") else no_bus, "test")
 
         monkeypatch.setattr("houses.enricher.compute_transit", mock_transit)
         monkeypatch.setattr("houses.enricher._compute_google_transit", lambda *_: None)
 
-        result = await compute_lorena_commute("GU52")
+        result = (await compute_lorena_commute("GU52")).get()
         assert result is with_bus, "Should use TfL bus route when available"
 
 
