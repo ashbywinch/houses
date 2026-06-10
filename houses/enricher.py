@@ -1182,15 +1182,26 @@ async def compute_petrol_cost(origin_postcode: str) -> PetrolCost:
     try:
         # Use postcodes.io first (more reliable for UK), fall back to ORS
         origin_coords = None
-        coords = (await geocode(origin_postcode)).value_or_none()
+        last = await geocode(origin_postcode)
+        coords = last.value_or_none()
         if coords is None:
-            coords = (await geocode_address(origin_postcode)).value_or_none()
+            last = await geocode_address(origin_postcode)
+            coords = last.value_or_none()
         if coords is not None:
             # geocode returns (lat, lng), ORS needs [lng, lat]
             origin_coords = [coords[1], coords[0]]
 
         if origin_coords is None:
-            logger.warning("Could not geocode origin: %s", origin_postcode)
+            last.match(
+                succeeded=lambda *_: (),
+                pending=lambda: logger.warning("Could not geocode origin: %s", origin_postcode),
+                impossible=lambda src, reason, exc: logger.warning(
+                    "Could not geocode origin %s via %s: %s",
+                    origin_postcode,
+                    src,
+                    reason,
+                ),
+            )
             return PetrolCost()
 
         # Geocode Bracknell via postcodes.io (more reliable), fall back to ORS
@@ -1417,11 +1428,10 @@ async def geocode_address(address: str) -> Attempt[tuple[float, float]]:
 
     # Final fallback: Nominatim (free, no key, works for UK)
     nominatim_result = await geocode_nominatim(address)
-    coords = nominatim_result.value_or_none()
-    if coords:
-        _geo_cache[cache_key] = coords
-        return Attempt.succeeded(coords, "geocode_nominatim")
-    return nominatim_result
+    if nominatim_result.is_succeeded:
+        _geo_cache[cache_key] = nominatim_result.get()
+        return nominatim_result
+    return Attempt.impossible("geocode_address", "all geocoders failed")
 
 
 async def geocode(postcode: str) -> Attempt[tuple[float, float]]:
