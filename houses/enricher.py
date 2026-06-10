@@ -19,9 +19,10 @@ import httpx
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.attempt import Attempt
+from houses.commute import Commute, CommuteBreakdown
 from houses.config import settings
 from houses.geo import GeoPoint
-from houses.models import CommuteBreakdown, PetrolCost, SchoolInfo, TransitInfo
+from houses.property import PetrolCost, SchoolInfo
 from houses.retry import retry_async
 
 logger = logging.getLogger(__name__)
@@ -730,7 +731,7 @@ async def compute_transit(
     label: str,
     park_and_ride: bool = False,
     allow_bus: bool = False,
-) -> Attempt[TransitInfo]:
+) -> Attempt[Commute]:
     """Return transit commute time using TfL Unified API (free, London focus).
 
     Checks the disk cache first — returns cached results even without an
@@ -892,7 +893,7 @@ async def compute_transit(
                 mode = legs[0].get("mode", {}).get("name") if legs else "no legs"
                 logger.debug("parking: no driving leg (first leg mode=%s) — no parking cost", mode)
 
-    result = TransitInfo(
+    result = Commute(
         destination_label=label,
         destination_postcode=destination_postcode,
         duration_minutes=duration_minutes,
@@ -907,7 +908,7 @@ async def compute_transit(
     return Attempt.impossible("tfl", "could not route transit")
 
 
-async def compute_simon_commute(property_postcode: str) -> Attempt[TransitInfo]:
+async def compute_simon_commute(property_postcode: str) -> Attempt[Commute]:
     return await compute_transit(
         property_postcode,
         settings.simon_postcode,
@@ -917,7 +918,7 @@ async def compute_simon_commute(property_postcode: str) -> Attempt[TransitInfo]:
     )
 
 
-def _pick_best_lorena_route(no_bus: TransitInfo, with_bus: TransitInfo) -> TransitInfo:
+def _pick_best_lorena_route(no_bus: Commute, with_bus: Commute) -> Commute:
     """Compare no-bus and with-bus commute results.
 
     Uses the with-bus result only if it saves at least 15 minutes
@@ -934,11 +935,11 @@ def _pick_best_lorena_route(no_bus: TransitInfo, with_bus: TransitInfo) -> Trans
     return no_bus
 
 
-async def _compute_google_transit(origin: str, destination: str) -> TransitInfo | None:
+async def _compute_google_transit(origin: str, destination: str) -> Commute | None:
     """Fallback transit routing via Google Maps Routes API.
 
     Used when TfL doesn't find a bus leg (out-of-London areas). Returns a
-    TransitInfo with bus fare looked up from BODS data, or None if Google
+    Commute with bus fare looked up from BODS data, or None if Google
     also can't route the journey.
     """
     google_key = settings.google_maps_api_key
@@ -1065,7 +1066,7 @@ async def _compute_google_transit(origin: str, destination: str) -> TransitInfo 
         steps_summary.append(f"{mode.lower()} {instr[:40]}")
     route_summary = " → ".join(steps_summary)
 
-    return TransitInfo(
+    return Commute(
         destination_label="Lorena — Aldgate / City of London (Google)",
         destination_postcode=destination,
         duration_minutes=duration_min,
@@ -1076,7 +1077,7 @@ async def _compute_google_transit(origin: str, destination: str) -> TransitInfo 
     )
 
 
-async def compute_lorena_commute(property_postcode: str) -> Attempt[TransitInfo]:
+async def compute_lorena_commute(property_postcode: str) -> Attempt[Commute]:
     no_bus = await compute_transit(
         property_postcode,
         settings.lorena_postcode,
@@ -1090,7 +1091,7 @@ async def compute_lorena_commute(property_postcode: str) -> Attempt[TransitInfo]
     )
     if no_bus.is_impossible and with_bus.is_impossible:
         return no_bus
-    empty = TransitInfo(
+    empty = Commute(
         destination_label="Lorena — Aldgate / City of London",
         destination_postcode=settings.lorena_postcode,
     )
@@ -1130,7 +1131,7 @@ async def compute_lorena_commute(property_postcode: str) -> Attempt[TransitInfo]
                     route_summary = (
                         f"walk to bus stop (~{walk_bus}m) \u2192 bus to station ({bus_time}m) \u2192 {after_walk}"
                     )
-                    result = TransitInfo(
+                    result = Commute(
                         destination_label="Lorena \u2014 Aldgate / City of London",
                         destination_postcode=settings.lorena_postcode,
                         duration_minutes=new_duration,
@@ -1144,8 +1145,8 @@ async def compute_lorena_commute(property_postcode: str) -> Attempt[TransitInfo]
 
 
 async def compute_commute_breakdown(
-    simon_transit: TransitInfo,
-    lorena_transit: TransitInfo,
+    simon_transit: Commute,
+    lorena_transit: Commute,
     petrol: PetrolCost,
 ) -> CommuteBreakdown:
     simon_daily = simon_transit.daily_cost_gbp

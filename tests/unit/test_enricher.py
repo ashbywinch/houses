@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from houses.attempt import Attempt
+from houses.commute import Commute
 from houses.enricher import (
     _END_PC_RE,
     _OUTCODE_RE,
@@ -22,7 +23,7 @@ from houses.enricher import (
     compute_commute_breakdown,
 )
 from houses.geo import GeoPoint
-from houses.models import PetrolCost, TransitInfo
+from houses.property import PetrolCost
 
 FIXTURES_DIR = Path("tests/fixtures/parking_tariffs")
 
@@ -88,8 +89,8 @@ class TestCommuteBreakdown:
     @pytest.mark.asyncio
     async def test_yearly_formula_with_all_costs(self):
         """46wk x (10 + 15 + 2*24) = 46 x 73 = 3358"""
-        simon = TransitInfo(destination_label="S", destination_postcode="SW1V 2QQ", daily_cost_gbp=15.0)
-        lorena = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", daily_cost_gbp=24.0)
+        simon = Commute(destination_label="S", destination_postcode="SW1V 2QQ", daily_cost_gbp=15.0)
+        lorena = Commute(destination_label="L", destination_postcode="EC3A 7LP", daily_cost_gbp=24.0)
         petrol = PetrolCost(cost_gbp=10.0)
         result = await compute_commute_breakdown(simon, lorena, petrol)
         assert result.simon_daily_gbp == 15.0
@@ -100,8 +101,8 @@ class TestCommuteBreakdown:
 
     @pytest.mark.asyncio
     async def test_missing_costs_returns_none(self):
-        simon = TransitInfo(destination_label="S", destination_postcode="SW1V 2QQ", daily_cost_gbp=None)
-        lorena = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", daily_cost_gbp=24.0)
+        simon = Commute(destination_label="S", destination_postcode="SW1V 2QQ", daily_cost_gbp=None)
+        lorena = Commute(destination_label="L", destination_postcode="EC3A 7LP", daily_cost_gbp=24.0)
         petrol = PetrolCost(cost_gbp=10.0)
         result = await compute_commute_breakdown(simon, lorena, petrol)
         assert result.yearly_total_gbp is None
@@ -919,38 +920,38 @@ class TestPickBestLorenaRoute:
     """_pick_best_lorena_route — bus vs no-bus decision."""
 
     def test_uses_bus_when_much_faster(self):
+        from houses.commute import Commute
         from houses.enricher import _pick_best_lorena_route
-        from houses.models import TransitInfo
 
-        no_bus = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=50)
-        with_bus = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=30)
+        no_bus = Commute(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=50)
+        with_bus = Commute(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=30)
         result = _pick_best_lorena_route(no_bus, with_bus)
         assert result == with_bus
 
     def test_rejects_bus_when_not_faster(self):
+        from houses.commute import Commute
         from houses.enricher import _pick_best_lorena_route
-        from houses.models import TransitInfo
 
-        no_bus = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=35)
-        with_bus = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=33)
+        no_bus = Commute(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=35)
+        with_bus = Commute(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=33)
         result = _pick_best_lorena_route(no_bus, with_bus)
         assert result == no_bus
 
     def test_falls_back_to_no_bus_when_with_bus_none(self):
+        from houses.commute import Commute
         from houses.enricher import _pick_best_lorena_route
-        from houses.models import TransitInfo
 
-        no_bus = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=50)
-        with_bus = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=None)
+        no_bus = Commute(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=50)
+        with_bus = Commute(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=None)
         result = _pick_best_lorena_route(no_bus, with_bus)
         assert result == no_bus
 
     def test_falls_back_to_with_bus_when_no_bus_none(self):
+        from houses.commute import Commute
         from houses.enricher import _pick_best_lorena_route
-        from houses.models import TransitInfo
 
-        no_bus = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=None)
-        with_bus = TransitInfo(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=30)
+        no_bus = Commute(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=None)
+        with_bus = Commute(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=30)
         result = _pick_best_lorena_route(no_bus, with_bus)
         assert result == with_bus
 
@@ -960,17 +961,17 @@ class TestGoogleRouteFallback:
 
     @pytest.mark.asyncio
     async def test_route_summary_preserves_timing_brackets(self, monkeypatch):
+        from houses.commute import Commute
         from houses.enricher import compute_lorena_commute
-        from houses.models import TransitInfo
 
-        no_bus = TransitInfo(
+        no_bus = Commute(
             destination_label="L",
             destination_postcode="EC3A 7LP",
             duration_minutes=116,
             daily_cost_gbp=None,
             route_summary="walk to Fleet (46m) → Train to Waterloo (42m) → Tube to Bank (4m) → walk (18m)",
         )
-        google_bus = TransitInfo(
+        google_bus = Commute(
             destination_label="L (Google)",
             destination_postcode="EC3A 7LP",
             duration_minutes=55,
@@ -998,24 +999,24 @@ class TestGoogleRouteFallback:
 
     @pytest.mark.asyncio
     async def test_triggers_on_long_walk_no_tfl_bus(self, monkeypatch):
+        from houses.commute import Commute
         from houses.enricher import compute_lorena_commute
-        from houses.models import TransitInfo
 
-        no_bus = TransitInfo(
+        no_bus = Commute(
             destination_label="L",
             destination_postcode="EC3A 7LP",
             duration_minutes=90,
             daily_cost_gbp=None,
             route_summary="walk to Fleet (46m) → Train to Waterloo (42m)",
         )
-        with_bus = TransitInfo(
+        with_bus = Commute(
             destination_label="L",
             destination_postcode="EC3A 7LP",
             duration_minutes=90,
             daily_cost_gbp=None,
             route_summary="walk to Fleet (46m) → Train to Waterloo (42m)",
         )
-        google_bus = TransitInfo(
+        google_bus = Commute(
             destination_label="L (Google)",
             destination_postcode="EC3A 7LP",
             duration_minutes=55,
@@ -1041,17 +1042,17 @@ class TestGoogleRouteFallback:
 
     @pytest.mark.asyncio
     async def test_skips_when_tfl_already_has_bus(self, monkeypatch):
+        from houses.commute import Commute
         from houses.enricher import compute_lorena_commute
-        from houses.models import TransitInfo
 
-        no_bus = TransitInfo(
+        no_bus = Commute(
             destination_label="L",
             destination_postcode="EC3A 7LP",
             duration_minutes=90,
             daily_cost_gbp=None,
             route_summary="walk to Fleet (3m) → Train to Waterloo (42m)",
         )
-        with_bus = TransitInfo(
+        with_bus = Commute(
             destination_label="L",
             destination_postcode="EC3A 7LP",
             duration_minutes=70,
@@ -1320,23 +1321,23 @@ class TestEnrichRailFares:
         monkeypatch.setattr("houses.server.geocode", mock_geocode)
         # nearest_station and fare_between read from the temp CSVs above — they run for real
 
-        from houses.models import TransitInfo
+        from houses.commute import Commute
         from houses.server import _enrich_rail_fares
 
-        lorena = TransitInfo(
+        lorena = Commute(
             destination_label="Lorena",
             destination_postcode="EC3A 7LP",
             duration_minutes=78,
             daily_cost_gbp=4.0,
             bus_cost_gbp=4.0,
         )
-        simon = TransitInfo(
+        simon = Commute(
             destination_label="Simon",
             destination_postcode="SW1V 2QQ",
             duration_minutes=71,
             daily_cost_gbp=40.4,
         )
-        await _enrich_rail_fares(
+        _simon, lorena = await _enrich_rail_fares(
             enabled={"lorena"},
             postcode="GU21 7QF",
             address="St James Close",
@@ -1363,23 +1364,23 @@ class TestEnrichRailFares:
 
         monkeypatch.setattr("houses.server.geocode", mock_geocode)
 
-        from houses.models import TransitInfo
+        from houses.commute import Commute
         from houses.server import _enrich_rail_fares
 
-        simon = TransitInfo(
+        simon = Commute(
             destination_label="Simon",
             destination_postcode="SW1V 2QQ",
             duration_minutes=71,
             daily_cost_gbp=10.8,
             parking_cost_gbp=10.8,
         )
-        lorena = TransitInfo(
+        lorena = Commute(
             destination_label="Lorena",
             destination_postcode="EC3A 7LP",
             duration_minutes=90,
             daily_cost_gbp=None,
         )
-        await _enrich_rail_fares(
+        simon, _lorena = await _enrich_rail_fares(
             enabled={"simon"},
             postcode="GU21 2NA",
             address="Robin Hood Road, Knaphill",
@@ -1393,22 +1394,22 @@ class TestEnrichRailFares:
     @pytest.mark.asyncio
     async def test_full_tfl_fare_skips_nr(self, monkeypatch):
         """When TfL already priced the journey, cost stays unchanged."""
-        from houses.models import TransitInfo
+        from houses.commute import Commute
         from houses.server import _enrich_rail_fares
 
-        lorena = TransitInfo(
+        lorena = Commute(
             destination_label="Lorena",
             destination_postcode="EC3A 7LP",
             duration_minutes=90,
             daily_cost_gbp=36.0,
         )
-        simon = TransitInfo(
+        simon = Commute(
             destination_label="Simon",
             destination_postcode="SW1V 2QQ",
             duration_minutes=71,
             daily_cost_gbp=40.4,
         )
-        await _enrich_rail_fares(
+        simon, lorena = await _enrich_rail_fares(
             enabled={"simon", "lorena"},
             postcode="GU22 8RU",
             address="Test",

@@ -1,18 +1,11 @@
 """Tests for data models."""
 
-from houses.models import (
-    CommuteBreakdown,
-    CouncilTaxInfo,
-    EnrichedProperty,
-    PetrolCost,
-    PropertyPayload,
-    SchoolInfo,
-    TransitInfo,
-)
+from houses.commute import Commute, CommuteBreakdown
+from houses.property import CouncilTaxInfo, EnrichedProperty, PetrolCost, Property, SchoolInfo
 
 
 def test_property_payload() -> None:
-    payload = PropertyPayload(
+    payload = Property(
         url="https://www.rightmove.co.uk/properties/123",
         address="High Street, Some Town, RG14 1AA",
         bedrooms=3,
@@ -25,7 +18,7 @@ def test_property_payload() -> None:
 
 def test_property_payload_minimal() -> None:
     """Only url is required — address, bedrooms, price are optional."""
-    payload = PropertyPayload(url="https://www.rightmove.co.uk/properties/123")
+    payload = Property(url="https://www.rightmove.co.uk/properties/123")
     assert payload.address == ""
     assert payload.bedrooms is None
     assert payload.price is None
@@ -52,7 +45,7 @@ def test_enriched_property_defaults() -> None:
 
 
 def test_transit_info() -> None:
-    t = TransitInfo(
+    t = Commute(
         destination_label="Test",
         destination_postcode="EC3A 7LP",
         duration_minutes=30,

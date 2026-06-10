@@ -16,8 +16,9 @@ from typing import Any
 import gspread
 from google.oauth2.service_account import Credentials
 
+from houses.commute import Commute
 from houses.config import settings
-from houses.models import EnrichedProperty, SchoolInfo, TransitInfo
+from houses.property import EnrichedProperty, SchoolInfo
 
 logger = logging.getLogger(__name__)
 
@@ -1093,7 +1094,7 @@ def get_client() -> gspread.Client | None:
     return _client
 
 
-def _fmt_duration(t: TransitInfo | None) -> str:
+def _fmt_duration(t: Commute | None) -> str:
     return str(t.duration_minutes) if t and t.duration_minutes is not None else ""
 
 

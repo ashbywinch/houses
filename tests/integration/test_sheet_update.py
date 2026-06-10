@@ -2,7 +2,7 @@
 
 from fastapi.testclient import TestClient
 
-from houses.models import EnrichedProperty
+from houses.property import EnrichedProperty
 from houses.server import app
 from houses.sheets import row_values
 from tests.integration.conftest import mock_httpx
