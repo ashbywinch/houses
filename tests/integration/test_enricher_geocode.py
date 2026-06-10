@@ -5,8 +5,8 @@ from unittest.mock import patch
 import pytest
 from httpx import AsyncClient, MockTransport, Response
 
-from houses.enricher import _geo_cache, geocode
 from houses.geo import GeoPoint
+from houses.location import _geo_cache, geocode
 
 
 @pytest.fixture(autouse=True)

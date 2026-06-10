@@ -22,6 +22,7 @@ from houses.attempt import Attempt
 from houses.commute import Commute, CommuteBreakdown, CommuteMode, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.geo import GeoPoint
+from houses.location import _geocode_address, geocode
 from houses.property import SchoolInfo
 from houses.retry import retry_async
 
@@ -1089,27 +1090,6 @@ FEE_PAYING_TYPES = frozenset(
 _geo_cache: dict[str, GeoPoint | None] = {}
 ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-
-
-async def _geocode_nominatim(query: str) -> Attempt[GeoPoint]:
-    """Geocode a place name via Nominatim — delegates to location module."""
-    import houses.location as _loc
-
-    return await _loc._geocode_nominatim(query)
-
-
-async def _geocode_address(address: str) -> Attempt[GeoPoint]:
-    """Geocode a free-form UK address — delegates to location module."""
-    import houses.location as _loc
-
-    return await _loc._geocode_address(address)
-
-
-async def geocode(postcode: str) -> Attempt[GeoPoint]:
-    """Geocode a UK postcode — delegates to location module."""
-    import houses.location as _loc
-
-    return await _loc._geocode_postcode(postcode)
 
 
 def _load_schools() -> list[dict]:
