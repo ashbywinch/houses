@@ -1322,7 +1322,7 @@ class TestEnrichRailFares:
         # Mock only the HTTP boundary: geocode returns synthetic coords.
         # nearest_station and fare_between run for real against tmp CSVs.
         async def mock_geocode(_):
-            return Attempt.succeeded((51.317, -0.556), "test")
+            return Attempt.succeeded(GeoPoint(51.317, -0.556), "test")
 
         monkeypatch.setattr("houses.server.geocode", mock_geocode)
         # nearest_station and fare_between read from the temp CSVs above — they run for real
@@ -1366,7 +1366,7 @@ class TestEnrichRailFares:
         monkeypatch.setattr("houses.rail_fares._FARES_CSV", rail_csv)
 
         async def mock_geocode(_):
-            return Attempt.succeeded((51.303, -0.636), "test")
+            return Attempt.succeeded(GeoPoint(51.303, -0.636), "test")
 
         monkeypatch.setattr("houses.server.geocode", mock_geocode)
 

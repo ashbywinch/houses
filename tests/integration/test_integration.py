@@ -45,15 +45,16 @@ class TestGeocodeAddress:
         gracefully regardless of external availability. If Nominatim is
         available, also verify coordinates are in the correct area.
         """
-        from houses.enricher import geocode_address
+        from houses.enricher import _geocode_address
 
-        coords = (await geocode_address("Shoppenhangers Road, Maidenhead, SL6, UK")).value_or_none()
+        result = await _geocode_address("Shoppenhangers Road, Maidenhead, SL6, UK")
+        coords = result.value_or_none()
 
         if coords is None:
             # All backends unavailable (expected when Nomination is rate-limited)
             return
 
-        lat, lng = coords
+        lat, lng = coords.lat, coords.lon
         assert 51.4 < lat < 51.6, f"Latitude {lat} not in Maidenhead range"
         assert -0.8 < lng < -0.6, f"Longitude {lng} not in Maidenhead range"
 

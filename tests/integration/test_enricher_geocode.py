@@ -6,6 +6,7 @@ import pytest
 from httpx import AsyncClient, MockTransport, Response
 
 from houses.enricher import _geo_cache, geocode
+from houses.geo import GeoPoint
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +38,7 @@ async def test_geocode_full_postcode():
     with patch.object(AsyncClient, "__init__", patched_init):
         result = await geocode("RG14 1AA")
 
-    assert result.value_or_none() == (51.4, -1.32)
+    assert result.value_or_none() == GeoPoint(51.4, -1.32)
 
 
 @pytest.mark.asyncio
@@ -63,7 +64,7 @@ async def test_geocode_outcode():
     with patch.object(AsyncClient, "__init__", patched_init):
         result = await geocode("SL6")
 
-    assert result.value_or_none() == (51.5, -0.7)
+    assert result.value_or_none() == GeoPoint(51.5, -0.7)
 
 
 @pytest.mark.asyncio
@@ -93,8 +94,8 @@ async def test_geocode_caches_result():
         result1 = await geocode("OX11 1AA")
         result2 = await geocode("OX11 1AA")
 
-    assert result1.value_or_none() == (51.4, -1.32)
-    assert result2.value_or_none() == (51.4, -1.32)
+    assert result1.value_or_none() == GeoPoint(51.4, -1.32)
+    assert result2.value_or_none() == GeoPoint(51.4, -1.32)
     assert call_count == 1, f"Expected 1 API call, got {call_count}"
 
 
@@ -170,4 +171,4 @@ async def test_geocode_normalises_case():
     with patch.object(AsyncClient, "__init__", patched_init):
         result = await geocode("rg14 1aa")
 
-    assert result.value_or_none() == (51.4, -1.32)
+    assert result.value_or_none() == GeoPoint(51.4, -1.32)

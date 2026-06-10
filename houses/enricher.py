@@ -631,18 +631,18 @@ async def _get_drive_minutes(origin_postcode: str, station_name: str) -> int | N
     """
     origin_coords = (await geocode(origin_postcode)).value_or_none()
     if origin_coords is None:
-        origin_coords = (await geocode_address(origin_postcode)).value_or_none()
+        origin_coords = (await _geocode_address(origin_postcode)).value_or_none()
     if origin_coords is None:
         return None
 
     dest_coords = _lookup_station_coords(station_name)
     if dest_coords is None:
-        dest_coords = (await geocode_address(station_name)).value_or_none()
+        dest_coords = (await _geocode_address(station_name)).value_or_none()
     if dest_coords is None:
         return None
 
     body = {
-        "coordinates": [[origin_coords[1], origin_coords[0]], [dest_coords[1], dest_coords[0]]],
+        "coordinates": [[origin_coords.lon, origin_coords.lat], [dest_coords[1], dest_coords[0]]],
         "units": "km",
     }
     try:
@@ -799,11 +799,11 @@ async def compute_transit(
                 pc = pc_match.group(0).strip().upper() if pc_match else None
                 # Try the full address string first (better geocoding results),
                 # then fall back to postcode/outcode center
-                coords = (await geocode_address(origin_postcode)).value_or_none()
+                coords = (await _geocode_address(origin_postcode)).value_or_none()
                 if coords is None and pc:
                     coords = (await geocode(pc)).value_or_none()
                 if coords:
-                    latlng = f"{coords[0]},{coords[1]}"
+                    latlng = f"{coords.lat},{coords.lon}"
                     url2 = f"{TFL_JOURNEY_URL}/{latlng}/to/{destination_postcode}"
                     try:
                         async with cached_async_client(timeout=20.0) as c2:
@@ -1182,26 +1182,15 @@ async def compute_petrol_cost(origin_postcode: str) -> PetrolCost:
     try:
         # Use postcodes.io first (more reliable for UK), fall back to ORS
         origin_coords = None
-        last = await geocode(origin_postcode)
-        coords = last.value_or_none()
+        coords = (await geocode(origin_postcode)).value_or_none()
         if coords is None:
-            last = await geocode_address(origin_postcode)
-            coords = last.value_or_none()
+            coords = (await _geocode_address(origin_postcode)).value_or_none()
         if coords is not None:
             # geocode returns (lat, lng), ORS needs [lng, lat]
-            origin_coords = [coords[1], coords[0]]
+            origin_coords = [coords.lon, coords.lat]
 
         if origin_coords is None:
-            last.match(
-                succeeded=lambda *_: (),
-                pending=lambda: logger.warning("Could not geocode origin: %s", origin_postcode),
-                impossible=lambda src, reason, exc: logger.warning(
-                    "Could not geocode origin %s via %s: %s",
-                    origin_postcode,
-                    src,
-                    reason,
-                ),
-            )
+            logger.warning("Could not geocode origin: %s", origin_postcode)
             return PetrolCost()
 
         # Geocode Bracknell via postcodes.io (more reliable), fall back to ORS
@@ -1210,7 +1199,7 @@ async def compute_petrol_cost(origin_postcode: str) -> PetrolCost:
             logger.warning("Could not geocode Bracknell")
             return PetrolCost()
         # geocode returns (lat, lng), ORS needs [lng, lat]
-        dest_coords = [bracknell_coords[1], bracknell_coords[0]]
+        dest_coords = [bracknell_coords.lon, bracknell_coords.lat]
 
         async with cached_async_client(timeout=15.0) as client:
             body = {"coordinates": [origin_coords, dest_coords], "units": "km"}
@@ -1277,12 +1266,12 @@ FEE_PAYING_TYPES = frozenset(
 )
 
 # In-memory cache: postcode -> (lat, lng)
-_geo_cache: dict[str, tuple[float, float]] = {}
+_geo_cache: dict[str, GeoPoint | None] = {}
 ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 
 
-async def geocode_nominatim(query: str) -> Attempt[tuple[float, float]]:
+async def _geocode_nominatim(query: str) -> Attempt[GeoPoint]:
     """Geocode a place name via Nominatim (free, 1 req/sec max).
 
     Respects Nominatim's usage policy by enforcing at least 1 second
@@ -1311,8 +1300,9 @@ async def geocode_nominatim(query: str) -> Attempt[tuple[float, float]]:
         if data:
             lat = float(data[0]["lat"])
             lng = float(data[0]["lon"])
-            _geo_cache[cache_key] = (lat, lng)
-            return Attempt.succeeded((lat, lng), "nominatim")
+            gp = GeoPoint(lat, lng)
+            _geo_cache[cache_key] = gp
+            return Attempt.succeeded(gp, "nominatim")
         return Attempt.impossible("nominatim", "no results")
     else:
         try:
@@ -1329,8 +1319,9 @@ async def geocode_nominatim(query: str) -> Attempt[tuple[float, float]]:
                 if data:
                     lat = float(data[0]["lat"])
                     lng = float(data[0]["lon"])
-                    _geo_cache[cache_key] = (lat, lng)
-                    return Attempt.succeeded((lat, lng), "nominatim")
+                    gp = GeoPoint(lat, lng)
+                    _geo_cache[cache_key] = gp
+                    return Attempt.succeeded(gp, "nominatim")
                 return Attempt.impossible("nominatim", "no results")
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 429:
@@ -1342,7 +1333,7 @@ async def geocode_nominatim(query: str) -> Attempt[tuple[float, float]]:
             return Attempt.impossible("nominatim", "unexpected error", exc)
 
 
-async def geocode_address(address: str) -> Attempt[tuple[float, float]]:
+async def _geocode_address(address: str) -> Attempt[GeoPoint]:
     """Geocode a free-form UK address.
 
     Tries Google Maps, ORS Pelias, then Nominatim as final fallback.
@@ -1366,8 +1357,9 @@ async def geocode_address(address: str) -> Attempt[tuple[float, float]]:
             if data.get("status") == "OK" and data.get("results"):
                 loc = data["results"][0]["geometry"]["location"]
                 lat, lng = loc["lat"], loc["lng"]
-                _geo_cache[cache_key] = (lat, lng)
-                return Attempt.succeeded((lat, lng), "google-maps")
+                gp = GeoPoint(lat, lng)
+                _geo_cache[cache_key] = gp
+                return Attempt.succeeded(gp, "google-maps")
         else:
             try:
                 async with cached_async_client(timeout=10.0) as client:
@@ -1381,8 +1373,9 @@ async def geocode_address(address: str) -> Attempt[tuple[float, float]]:
                     if data.get("status") == "OK" and data.get("results"):
                         loc = data["results"][0]["geometry"]["location"]
                         lat, lng = loc["lat"], loc["lng"]
-                        _geo_cache[cache_key] = (lat, lng)
-                        return Attempt.succeeded((lat, lng), "google-maps")
+                        gp = GeoPoint(lat, lng)
+                        _geo_cache[cache_key] = gp
+                        return Attempt.succeeded(gp, "google-maps")
             except Exception:
                 logger.warning("Google Maps geocoding failed for %s", address)
 
@@ -1396,8 +1389,9 @@ async def geocode_address(address: str) -> Attempt[tuple[float, float]]:
             features = data.get("features", [])
             if features:
                 lng, lat = features[0]["geometry"]["coordinates"]
-                _geo_cache[cache_key] = (lat, lng)
-                return Attempt.succeeded((lat, lng), "ors-pelias")
+                gp = GeoPoint(lat, lng)
+                _geo_cache[cache_key] = gp
+                return Attempt.succeeded(gp, "ors-pelias")
         else:
             try:
                 async with cached_async_client(timeout=10.0) as client:
@@ -1417,8 +1411,9 @@ async def geocode_address(address: str) -> Attempt[tuple[float, float]]:
                     features = data.get("features", [])
                     if features:
                         lng, lat = features[0]["geometry"]["coordinates"]
-                        _geo_cache[cache_key] = (lat, lng)
-                        return Attempt.succeeded((lat, lng), "ors-pelias")
+                        gp = GeoPoint(lat, lng)
+                        _geo_cache[cache_key] = gp
+                        return Attempt.succeeded(gp, "ors-pelias")
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code in (403, 429):
                     _api_state.ors_geo_exhausted = True
@@ -1427,18 +1422,14 @@ async def geocode_address(address: str) -> Attempt[tuple[float, float]]:
                 logger.warning("ORS geocoding failed for %s", address)
 
     # Final fallback: Nominatim (free, no key, works for UK)
-    nominatim_result = await geocode_nominatim(address)
-    if nominatim_result.is_succeeded:
-        _geo_cache[cache_key] = nominatim_result.get()
-        return nominatim_result
-    return Attempt.impossible("geocode_address", "all geocoders failed")
+    return await _geocode_nominatim(address)
 
 
-async def geocode(postcode: str) -> Attempt[tuple[float, float]]:
+async def geocode(postcode: str) -> Attempt[GeoPoint]:
     """Geocode a UK postcode via postcodes.io with in-memory caching.
 
     Supports both full postcodes ("SL6 1AA") and outcodes ("SL6").
-    Returns ``Attempt.succeeded((lat, lng), "postcodes.io")`` on success,
+    Returns ``Attempt.succeeded(GeoPoint(lat, lng), "postcodes.io")`` on success,
     or ``Attempt.impossible(...)`` if the postcode could not be resolved.
     """
     key = postcode.strip().upper()
@@ -1459,9 +1450,9 @@ async def geocode(postcode: str) -> Attempt[tuple[float, float]]:
         result = data.get("result")
         if not result:
             return Attempt.impossible("postcodes.io", "postcode not found")
-        latlng = result["latitude"], result["longitude"]
-        _geo_cache[key] = latlng
-        return Attempt.succeeded(latlng, "postcodes.io")
+        gp = GeoPoint(result["latitude"], result["longitude"])
+        _geo_cache[key] = gp
+        return Attempt.succeeded(gp, "postcodes.io")
     else:
         try:
             async with cached_async_client(timeout=10.0) as client:
@@ -1477,9 +1468,9 @@ async def geocode(postcode: str) -> Attempt[tuple[float, float]]:
                 result = data.get("result")
                 if not result:
                     return Attempt.impossible("postcodes.io", "postcode not found")
-                latlng = result["latitude"], result["longitude"]
-                _geo_cache[key] = latlng
-                return Attempt.succeeded(latlng, "postcodes.io")
+                gp = GeoPoint(result["latitude"], result["longitude"])
+                _geo_cache[key] = gp
+                return Attempt.succeeded(gp, "postcodes.io")
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 _geo_cache[key] = None
@@ -1555,11 +1546,11 @@ async def _find_nearest_boys(
 
     property_coords = (await geocode(postcode)).value_or_none()
     if property_coords is None and address:
-        property_coords = (await geocode_address(address)).value_or_none()
+        property_coords = (await _geocode_address(address)).value_or_none()
     if property_coords is None:
         return None
 
-    origin_lat, origin_lon = property_coords
+    origin_lat, origin_lon = property_coords.lat, property_coords.lon
     candidates: list[tuple[float, dict]] = []
 
     for school in schools:
@@ -1568,7 +1559,8 @@ async def _find_nearest_boys(
         if not _boys_eligible(school):
             continue
 
-        school_coords = _school_coords(school)
+        sc = _school_coords(school)
+        school_coords = GeoPoint(*sc) if sc else None
         if school_coords is None:
             school_postcode = school.get(COL_POSTCODE, "")
             if not school_postcode:
@@ -1577,7 +1569,7 @@ async def _find_nearest_boys(
             if school_coords is None:
                 continue
 
-        dist = GeoPoint(origin_lat, origin_lon).distance_km_to(GeoPoint(school_coords[0], school_coords[1]))
+        dist = GeoPoint(origin_lat, origin_lon).distance_km_to(school_coords)
         if dist <= settings.school_search_radius_km:
             candidates.append((dist, school))
 
@@ -1594,15 +1586,16 @@ async def _find_nearest_boys(
         and info.walking_time_minutes > 20
         and settings.google_maps_api_key
     ):
-        school_coords = _school_coords(best)
-        if school_coords:
+        sec_school_coords = _school_coords(best)
+        if sec_school_coords:
+            sec_gp = GeoPoint(*sec_school_coords)
             routes_url = "https://routes.googleapis.com/directions/v2:computeRoutes"
             body = {
                 "origin": {
                     "location": {"latLng": {"latitude": origin_lat, "longitude": origin_lon}},
                 },
                 "destination": {
-                    "location": {"latLng": {"latitude": school_coords[0], "longitude": school_coords[1]}},
+                    "location": {"latLng": {"latitude": sec_gp.lat, "longitude": sec_gp.lon}},
                 },
                 "travelMode": "TRANSIT",
             }
