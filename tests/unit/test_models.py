@@ -1,7 +1,7 @@
 """Tests for data models."""
 
 from houses.commute import Commute, CommuteBreakdown
-from houses.property import CouncilTaxInfo, EnrichedProperty, PetrolCost, Property, SchoolInfo
+from houses.property import CouncilTaxInfo, EnrichedProperty, Property, SchoolInfo
 
 
 def test_property_payload() -> None:
@@ -59,11 +59,11 @@ def test_school_info_defaults() -> None:
     assert s.fee_paying is False
 
 
-def test_petrol_cost_defaults() -> None:
-    p = PetrolCost()
-    assert p.destination == "Bracknell Office (RG12 8YA)"
-    assert p.cost_gbp is None
-    assert p.round_trip_minutes is None
+def test_bracknell_commute_defaults() -> None:
+    p = Commute(destination_label="Bracknell", destination_postcode="RG12 8YA")
+    assert p.destination_label == "Bracknell"
+    assert p.daily_cost_gbp is None
+    assert p.duration_minutes is None
 
 
 def test_council_tax_info() -> None:

@@ -49,16 +49,6 @@ class SchoolInfo:
 
 
 @dataclass(frozen=True)
-class PetrolCost:
-    """Estimated petrol cost for a round trip."""
-
-    destination: str = "Bracknell Office (RG12 8YA)"
-    round_trip_km: float | None = None
-    round_trip_minutes: int | None = None
-    cost_gbp: float | None = None
-
-
-@dataclass(frozen=True)
 class CouncilTaxInfo:
     """Council tax band, cost, and evidence source."""
 
@@ -80,8 +70,8 @@ class EnrichedProperty(BaseModel):
     simon_commute: Commute | None = None
     lorena_commute: Commute | None = None
 
-    # Bracknell petrol
-    petrol: PetrolCost | None = None
+    # Bracknell commute (driving)
+    petrol: Commute | None = None
 
     # Schools
     primary_school: SchoolInfo | None = None

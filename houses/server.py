@@ -23,7 +23,7 @@ from houses.enricher import (
     geocode,
 )
 from houses.epc import lookup_epc
-from houses.property import EnrichedProperty, PetrolCost, Property
+from houses.property import EnrichedProperty, Property
 from houses.rail_fares import fare_between, nearest_station
 from houses.rightmove_scraper import scrape as scrape_rightmove
 from houses.rightmove_scraper import stop_chrome
@@ -639,7 +639,7 @@ async def _run_enrichment(
 
     simon = Commute(destination_label="Simon (London)", destination_postcode=postcode)
     lorena = Commute(destination_label="Lorena (London)", destination_postcode=postcode)
-    petrol = PetrolCost()
+    petrol = Commute(destination_label="Bracknell Office (RG12 8YA)", destination_postcode=settings.bracknell_postcode)
     primary = None
     secondary = None
     town_desc = ""
@@ -657,7 +657,7 @@ async def _run_enrichment(
     if enabled is None or "lorena" in enabled:
         lorena = (await compute_lorena_commute(lookup)).value_or_none()
     if enabled is None or "petrol" in enabled:
-        petrol = await compute_petrol_cost(postcode)
+        petrol = (await compute_petrol_cost(postcode)).value_or_none()
     if enabled is None or "schools" in enabled:
         primary = await find_nearest_boys_primary(postcode, address)
         secondary = await find_nearest_boys_secondary(postcode, address)
@@ -683,7 +683,7 @@ async def _run_enrichment(
 
     simon, lorena = await _enrich_rail_fares(enabled, postcode, address, simon, lorena)
 
-    if simon and lorena and (enabled is None or {"simon", "lorena", "petrol"} & enabled):
+    if simon and lorena and petrol and (enabled is None or {"simon", "lorena", "petrol"} & enabled):
         breakdown = await compute_commute_breakdown(simon, lorena, petrol)
 
     if enabled is None or "epc" in enabled:

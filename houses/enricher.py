@@ -19,10 +19,10 @@ import httpx
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.attempt import Attempt
-from houses.commute import Commute, CommuteBreakdown
+from houses.commute import Commute, CommuteBreakdown, CommuteMode, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.geo import GeoPoint
-from houses.property import PetrolCost, SchoolInfo
+from houses.property import SchoolInfo
 from houses.retry import retry_async
 
 logger = logging.getLogger(__name__)
@@ -969,11 +969,11 @@ async def _compute_google_transit(origin: str, destination: str) -> Commute | No
 async def compute_commute_breakdown(
     simon_transit: Commute,
     lorena_transit: Commute,
-    petrol: PetrolCost,
+    bracknell: Commute,
 ) -> CommuteBreakdown:
     simon_daily = simon_transit.daily_cost_gbp
     lorena_daily = lorena_transit.daily_cost_gbp
-    bracknell_daily = petrol.cost_gbp
+    bracknell_daily = bracknell.daily_cost_gbp
 
     yearly_total = None
     formula = ""
@@ -1010,27 +1010,25 @@ def _compute_petrol_from_distance_km(round_trip_km: float) -> float:
     return round(litres_used * settings.petrol_price_per_litre, 2)
 
 
-async def compute_petrol_cost(origin_postcode: str) -> PetrolCost:
+async def compute_petrol_cost(origin_postcode: str) -> Attempt[Commute]:
     try:
         # Use postcodes.io first (more reliable for UK), fall back to ORS
         origin_coords = None
-        coords = (await geocode(origin_postcode)).value_or_none()
+        last = await geocode(origin_postcode)
+        coords = last.value_or_none()
         if coords is None:
-            coords = (await _geocode_address(origin_postcode)).value_or_none()
+            last = await _geocode_address(origin_postcode)
+            coords = last.value_or_none()
         if coords is not None:
             # geocode returns (lat, lng), ORS needs [lng, lat]
             origin_coords = [coords.lon, coords.lat]
 
         if origin_coords is None:
-            logger.warning("Could not geocode origin: %s", origin_postcode)
-            return PetrolCost()
+            return Attempt.impossible("petrol", "could not geocode origin")
 
-        # Geocode Bracknell via postcodes.io (more reliable), fall back to ORS
         bracknell_coords = (await geocode(settings.bracknell_postcode)).value_or_none()
         if bracknell_coords is None:
-            logger.warning("Could not geocode Bracknell")
-            return PetrolCost()
-        # geocode returns (lat, lng), ORS needs [lng, lat]
+            return Attempt.impossible("petrol", "could not geocode Bracknell")
         dest_coords = [bracknell_coords.lon, bracknell_coords.lat]
 
         async with cached_async_client(timeout=15.0) as client:
@@ -1062,11 +1060,23 @@ async def compute_petrol_cost(origin_postcode: str) -> PetrolCost:
         round_trip_minutes = round(one_way_duration_sec * 2 / 60)
         cost = _compute_petrol_from_distance_km(round_trip_km)
 
-        return PetrolCost(round_trip_km=round_trip_km, round_trip_minutes=round_trip_minutes, cost_gbp=cost)
-
+        commute = Commute(
+            destination_label="Bracknell Office (RG12 8YA)",
+            destination_postcode=settings.bracknell_postcode,
+            duration_minutes=round_trip_minutes,
+            daily_cost_gbp=cost,
+            mode=CommuteMode.DRIVE,
+            cost_groups=(
+                CostGroup(
+                    legs=(JourneyLeg(mode=LegMode.DRIVE, duration_minutes=round_trip_minutes),),
+                    cost=cost,
+                ),
+            ),
+        )
+        return Attempt.succeeded(commute, "ors")
     except (httpx.HTTPStatusError, httpx.RequestError, KeyError, IndexError) as e:
         logger.error("Petrol cost failed for %s: %s", origin_postcode, e)
-        return PetrolCost()
+        return Attempt.impossible("petrol", "driving route failed", e)
 
 
 # ---------------------------------------------------------------------------
