@@ -708,15 +708,23 @@ class TestBackfillView:
             patch("houses.server.compute_simon_commute") as mock_simon,
             patch("houses.server.compute_lorena_commute") as mock_lorena,
         ):
-            mock_simon.return_value = TransitInfo(
-                destination_label="S",
-                destination_postcode="SW1V 2QQ",
-                duration_minutes=45,
+            from houses.attempt import Attempt
+
+            mock_simon.return_value = Attempt.succeeded(
+                TransitInfo(
+                    destination_label="S",
+                    destination_postcode="SW1V 2QQ",
+                    duration_minutes=45,
+                ),
+                "test",
             )
-            mock_lorena.return_value = TransitInfo(
-                destination_label="L",
-                destination_postcode="EC3A 7LP",
-                duration_minutes=30,
+            mock_lorena.return_value = Attempt.succeeded(
+                TransitInfo(
+                    destination_label="L",
+                    destination_postcode="EC3A 7LP",
+                    duration_minutes=30,
+                ),
+                "test",
             )
 
             result = asyncio.run(

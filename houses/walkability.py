@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from houses.api_cache import cached_async_client, with_cache
+from houses.attempt import Attempt
 from houses.config import settings
 from houses.geo import GeoPoint
 from houses.retry import retry_async
@@ -94,10 +95,10 @@ _TOWN_SUFFIXES = re.compile(
 )
 
 
-async def _geocode_town(town: str) -> tuple[float, float] | None:
+async def _geocode_town(town: str) -> Attempt[GeoPoint]:
     key = town.strip().upper()
     if not key:
-        return None
+        return Attempt.impossible("geocode_town", "empty town name")
 
     # ORS Pelias — disk-cached via with_cache
     ors_params = {"text": f"{town}, UK", "size": 1}
@@ -122,7 +123,7 @@ async def _geocode_town(town: str) -> tuple[float, float] | None:
             features = data.get("features", [])
             if features:
                 lng, lat = features[0]["geometry"]["coordinates"]
-                return (lat, lng)
+                return Attempt.succeeded(GeoPoint(lat, lng), "ors")
     except httpx.HTTPStatusError as exc:
         logger.warning("ORS geocoding failed for town: %s (%s)", town, exc.response.status_code)
     except Exception:
@@ -145,7 +146,7 @@ async def _geocode_town(town: str) -> tuple[float, float] | None:
             nom_url = "https://nominatim.openstreetmap.org/search"
             data = await with_cache("GET", nom_url, params=nom_params, fetch=_fetch_nom)
             if data:
-                return (float(data[0]["lat"]), float(data[0]["lon"]))
+                return Attempt.succeeded(GeoPoint(float(data[0]["lat"]), float(data[0]["lon"])), "nominatim")
     except httpx.HTTPStatusError as exc:
         logger.warning("Nominatim geocoding failed for town: %s (%s)", town, exc.response.status_code)
     except Exception:
@@ -156,16 +157,16 @@ async def _geocode_town(town: str) -> tuple[float, float] | None:
     if stripped and stripped.upper() != key:
         return await _geocode_town(stripped)
 
-    return None
+    return Attempt.impossible("geocode_town", "all geocoders failed")
 
 
 async def _walk_duration(
     lat: float,
     lng: float,
-    town_centre: tuple[float, float],
+    town_centre: GeoPoint,
 ) -> int | None:
     origin = [lng, lat]
-    dest = [town_centre[1], town_centre[0]]
+    dest = [town_centre.lon, town_centre.lat]
     body = {"coordinates": [origin, dest]}
     try:
         async with cached_async_client(timeout=15.0) as client:
@@ -340,7 +341,7 @@ async def enrich_walkability(
     town = _extract_town(address)
 
     if town:
-        town_centre = await _geocode_town(town)
+        town_centre = (await _geocode_town(town)).value_or_none()
         if town_centre:
             walk_to_town_minutes = await _walk_duration(lat, lng, town_centre)
         else:

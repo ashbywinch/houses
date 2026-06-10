@@ -730,7 +730,7 @@ async def compute_transit(
     label: str,
     park_and_ride: bool = False,
     allow_bus: bool = False,
-) -> TransitInfo:
+) -> Attempt[TransitInfo]:
     """Return transit commute time using TfL Unified API (free, London focus).
 
     Checks the disk cache first — returns cached results even without an
@@ -892,7 +892,7 @@ async def compute_transit(
                 mode = legs[0].get("mode", {}).get("name") if legs else "no legs"
                 logger.debug("parking: no driving leg (first leg mode=%s) — no parking cost", mode)
 
-    return TransitInfo(
+    result = TransitInfo(
         destination_label=label,
         destination_postcode=destination_postcode,
         duration_minutes=duration_minutes,
@@ -902,9 +902,12 @@ async def compute_transit(
         parking_cost_gbp=parking_cost_gbp,
         bus_cost_gbp=bus_cost_gbp,
     )
+    if duration_minutes is not None:
+        return Attempt.succeeded(result, "tfl")
+    return Attempt.impossible("tfl", "could not route transit")
 
 
-async def compute_simon_commute(property_postcode: str) -> TransitInfo:
+async def compute_simon_commute(property_postcode: str) -> Attempt[TransitInfo]:
     return await compute_transit(
         property_postcode,
         settings.simon_postcode,
@@ -1073,7 +1076,7 @@ async def _compute_google_transit(origin: str, destination: str) -> TransitInfo 
     )
 
 
-async def compute_lorena_commute(property_postcode: str) -> TransitInfo:
+async def compute_lorena_commute(property_postcode: str) -> Attempt[TransitInfo]:
     no_bus = await compute_transit(
         property_postcode,
         settings.lorena_postcode,
@@ -1085,13 +1088,19 @@ async def compute_lorena_commute(property_postcode: str) -> TransitInfo:
         "Lorena — Aldgate / City of London",
         allow_bus=True,
     )
-    result = _pick_best_lorena_route(no_bus, with_bus)
+    if no_bus.is_impossible and with_bus.is_impossible:
+        return no_bus
+    empty = TransitInfo(
+        destination_label="Lorena — Aldgate / City of London",
+        destination_postcode=settings.lorena_postcode,
+    )
+    no_bus_val = no_bus.value_or(empty)
+    with_bus_val = with_bus.value_or(empty)
+    result = _pick_best_lorena_route(no_bus_val, with_bus_val)
 
     # Google fallback: TfL picked no-bus because it has no bus data for this area.
-    # Extract Google's first-leg bus and overlay it onto TfL's route rather than
-    # comparing whole routes (Google's London routing may be slower than TfL's).
-    if result is no_bus and no_bus.duration_minutes is not None:
-        m = re.search(r"walk.*?\((\d+)m\)", no_bus.route_summary[:60])
+    if result is no_bus_val and no_bus_val.duration_minutes is not None:
+        m = re.search(r"walk.*?\((\d+)m\)", no_bus_val.route_summary[:60])
         walk_to_station = int(m.group(1)) if m else 0
         if walk_to_station >= settings.bus_walk_penalty_minutes:
             google_route = await _compute_google_transit(property_postcode, settings.lorena_postcode)
@@ -1099,8 +1108,8 @@ async def compute_lorena_commute(property_postcode: str) -> TransitInfo:
                 bus_time = min(15, walk_to_station - settings.bus_walk_penalty_minutes)
                 savings = walk_to_station - bus_time
                 if savings >= settings.bus_walk_penalty_minutes:
-                    new_duration = no_bus.duration_minutes - walk_to_station + bus_time
-                    new_cost = no_bus.daily_cost_gbp
+                    new_duration = no_bus_val.duration_minutes - walk_to_station + bus_time
+                    new_cost = no_bus_val.daily_cost_gbp
                     if new_cost is not None:
                         new_cost = round(new_cost + google_route.bus_cost_gbp, 2)
                     else:
@@ -1113,7 +1122,7 @@ async def compute_lorena_commute(property_postcode: str) -> TransitInfo:
                         walk_to_station,
                         new_cost,
                     )
-                    after_walk = no_bus.route_summary
+                    after_walk = no_bus_val.route_summary
                     walk_m = re.search(r"walk.*?\(\d+m\).*?\u2192\s*", after_walk)
                     if walk_m:
                         after_walk = after_walk[walk_m.end() :]
@@ -1131,7 +1140,7 @@ async def compute_lorena_commute(property_postcode: str) -> TransitInfo:
                         bus_cost_gbp=google_route.bus_cost_gbp,
                     )
 
-    return result
+    return Attempt.succeeded(result, "tfl")
 
 
 async def compute_commute_breakdown(

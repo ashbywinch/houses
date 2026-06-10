@@ -652,9 +652,9 @@ async def _run_enrichment(
     council_tax = None
 
     if enabled is None or "simon" in enabled:
-        simon = await compute_simon_commute(lookup)
+        simon = (await compute_simon_commute(lookup)).value_or_none()
     if enabled is None or "lorena" in enabled:
-        lorena = await compute_lorena_commute(lookup)
+        lorena = (await compute_lorena_commute(lookup)).value_or_none()
     if enabled is None or "petrol" in enabled:
         petrol = await compute_petrol_cost(postcode)
     if enabled is None or "schools" in enabled:
@@ -682,7 +682,7 @@ async def _run_enrichment(
 
     await _enrich_rail_fares(enabled, postcode, address, simon, lorena)
 
-    if enabled is None or {"simon", "lorena", "petrol"} & enabled:
+    if simon and lorena and (enabled is None or {"simon", "lorena", "petrol"} & enabled):
         breakdown = await compute_commute_breakdown(simon, lorena, petrol)
 
     if enabled is None or "epc" in enabled:
@@ -784,8 +784,8 @@ async def _enrich_rail_fares(
             return commute.daily_cost_gbp != non_rail
         return True
 
-    simon_needs = simon.duration_minutes is not None and not _has_rail_fare(simon)
-    lorena_needs = lorena.duration_minutes is not None and not _has_rail_fare(lorena)
+    simon_needs = simon is not None and simon.duration_minutes is not None and not _has_rail_fare(simon)
+    lorena_needs = lorena is not None and lorena.duration_minutes is not None and not _has_rail_fare(lorena)
 
     if not simon_needs and not lorena_needs:
         return
