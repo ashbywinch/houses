@@ -160,6 +160,11 @@ class PropertyLocation:
 # ── Private helpers ──────────────────────────────────────────────
 
 
+async def geocode(postcode: str) -> Attempt[GeoPoint]:
+    """Geocode a UK postcode — public entry point for one-shot lookups."""
+    return await _geocode_postcode(postcode)
+
+
 async def _geocode_nominatim(query: str) -> Attempt[GeoPoint]:
     """Geocode a place name via Nominatim (free, 1 req/sec max)."""
     if _geo_state.nominatim_exhausted:

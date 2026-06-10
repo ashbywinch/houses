@@ -45,7 +45,7 @@ class TestGeocodeAddress:
         gracefully regardless of external availability. If Nominatim is
         available, also verify coordinates are in the correct area.
         """
-        from houses.enricher import _geocode_address
+        from houses.location import _geocode_address
 
         result = await _geocode_address("Shoppenhangers Road, Maidenhead, SL6, UK")
         coords = result.value_or_none()

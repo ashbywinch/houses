@@ -13,14 +13,13 @@ from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.enricher import (
     _apply_park_and_ride_to_journeys,
-    _geocode_address,
     _lookup_bus_roundtrip_cost,
     _lookup_parking_cost,
     _next_weekday_date_params,
     _pick_best_journey,
     _tfl_auth_params,
-    geocode,
 )
+from houses.location import _geocode_address, geocode
 from houses.retry import retry_async
 
 logger = logging.getLogger(__name__)

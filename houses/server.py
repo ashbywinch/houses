@@ -19,10 +19,9 @@ from houses.enricher import (
     compute_simon_commute,
     find_nearest_boys_primary,
     find_nearest_boys_secondary,
-    geocode,
 )
 from houses.epc import lookup_epc
-from houses.location import PropertyLocation
+from houses.location import PropertyLocation, geocode
 from houses.property import EnrichedProperty, Property
 from houses.rail_fares import fare_between, nearest_station
 from houses.rightmove_scraper import scrape as scrape_rightmove
