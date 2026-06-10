@@ -105,10 +105,44 @@ enriched = EnrichedProperty(
 
 ### Phase B — Enrichment entry point creates PropertyLocation once
 
-1. In `_run_enrichment` (server.py), create approx + actual `PropertyLocation` objects
-2. Resolve both once at the top of the enrichment pipeline
-3. Pass `resolved.coordinates.value_or_none()` to downstream functions (walkability, schools, transit, etc.)
-4. This eliminates the scattered `geocode()` and `geocode_address()` calls that each independently resolve the same location
+Currently `_run_enrichment` (server.py) calls `_geocode_address(lookup)` then
+`geocode(postcode)` in two separate places (lines 665-667 for walkability,
+line 703 for geo). These are the same address+postcode each time.
+
+Replace with a single `PropertyLocation` created at the top of the function:
+
+```python
+# Create and resolve once at the entry point
+location = PropertyLocation(postcode=postcode, address=lookup or address)
+location = await location.resolve()
+coords = location.coordinates.value_or_none()
+approx_lat = coords.lat if coords else None
+approx_lng = coords.lon if coords else None
+```
+
+Then replace the scattered geocoding calls:
+
+| Line | Current code | Replacement |
+|------|-------------|-------------|
+| 665-667 | `_geocode_address(lookup)` then `geocode(postcode)` | Just use `coords` from above |
+| 695-704 | `_geocode_address(lookup)` for approx lat/lng | Use `approx_lat`, `approx_lng` from above |
+
+Also skip geocoding when the sheet already has coordinates (re-enrichment):
+
+```python
+location = PropertyLocation(postcode=postcode, address=lookup or address)
+if approx_lat is not None and approx_lng is not None:
+    location = location.resolved(GeoPoint(approx_lat, approx_lng), "sheet")
+else:
+    location = await location.resolve()
+```
+
+Where `resolved()` is a small helper added to `PropertyLocation`:
+
+```python
+def resolved(self, point: GeoPoint, source: str) -> PropertyLocation:
+    return dataclasses.replace(self, coordinates=Attempt.succeeded(point, source))
+```
 
 ### Phase C — Clean up
 
