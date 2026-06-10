@@ -1141,9 +1141,9 @@ def row_values(property_: EnrichedProperty) -> dict[str, str]:
         property_.lorena_commute.daily_cost_gbp if property_.lorena_commute else None
     )  # noqa: E501
     r["Lorena London Route"] = property_.lorena_commute.route_summary if property_.lorena_commute else ""
-    bt = property_.petrol.round_trip_minutes if property_.petrol else None
+    bt = property_.petrol.duration_minutes if property_.petrol else None
     r["Bracknell Time (min)"] = str(bt) if bt is not None else ""
-    r["Bracknell Cost (£)"] = _fmt_cost(property_.petrol.cost_gbp if property_.petrol else None)
+    r["Bracknell Cost (£)"] = _fmt_cost(property_.petrol.daily_cost_gbp if property_.petrol else None)
     r["Primary School"] = property_.primary_school.name if property_.primary_school else ""
     r["Primary Distance (km)"] = _fmt_dist(property_.primary_school)
     r["Primary Walk (min)"] = _fmt_walk(property_.primary_school)

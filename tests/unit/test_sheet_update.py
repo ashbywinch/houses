@@ -11,7 +11,6 @@ client = TestClient(app)
 
 def _make_enriched(url: str, simon_cost: float = 10.0) -> EnrichedProperty:
     from houses.commute import Commute
-    from houses.property import PetrolCost
 
     return EnrichedProperty(
         url=url,
@@ -30,7 +29,12 @@ def _make_enriched(url: str, simon_cost: float = 10.0) -> EnrichedProperty:
             duration_minutes=50,
             daily_cost_gbp=simon_cost,
         ),
-        petrol=PetrolCost(round_trip_km=60.0, cost_gbp=8.50),
+        petrol=Commute(
+            destination_label="Bracknell",
+            destination_postcode="RG12 8YA",
+            daily_cost_gbp=8.50,
+            mode="drive",
+        ),
     )
 
 

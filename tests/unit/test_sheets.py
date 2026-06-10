@@ -3,7 +3,7 @@
 import pytest
 
 from houses.commute import Commute
-from houses.property import EnrichedProperty, PetrolCost, SchoolInfo
+from houses.property import EnrichedProperty, SchoolInfo
 from houses.sheets import (
     _FORMULA_COLUMNS,
     _USER_COLUMNS,
@@ -83,7 +83,12 @@ def test_row_values_with_full_enrichment():
         price=650000.0,
         simon_commute=Commute(destination_label="S", destination_postcode="SW1V 2QQ", duration_minutes=22),
         lorena_commute=Commute(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=38),
-        petrol=PetrolCost(round_trip_km=100.0, cost_gbp=8.50),
+        petrol=Commute(
+            destination_label="Bracknell",
+            destination_postcode="RG12 8YA",
+            daily_cost_gbp=8.50,
+            mode="drive",
+        ),
         primary_school=SchoolInfo(
             name="St Vincent School",
             type="primary",

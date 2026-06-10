@@ -124,7 +124,7 @@ class TestInjectProperty:
         lorena = data.get("lorena_commute") or {}
         assert lorena.get("duration_minutes") is not None, f"Lorena missing: {lorena}"
         petrol = data.get("petrol") or {}
-        assert petrol.get("cost_gbp") is not None, f"Petrol missing: {petrol}"
+        assert petrol.get("daily_cost_gbp") is not None, f"Petrol missing: {petrol}"
         assert data.get("primary_school") is not None, "No primary school"
         assert data.get("secondary_school") is not None, "No secondary school"
 
@@ -291,7 +291,13 @@ class TestBackfillView:
             "price": 300000.0,
             "simon_commute": simon,
             "lorena_commute": lorena,
-            "petrol": {"round_trip_km": 80.0, "round_trip_minutes": 90, "cost_gbp": 12.50},
+            "petrol": {
+                "destination_label": "Bracknell Office (RG12 8YA)",
+                "destination_postcode": "RG12 8YA",
+                "duration_minutes": 90,
+                "daily_cost_gbp": 12.50,
+                "mode": "drive",
+            },
             "primary_school": {"name": "Test Primary", "type": "primary", "distance_km": 0.5, "urn": "100001"},
             "secondary_school": {"name": "Test Secondary", "type": "secondary", "distance_km": 1.2, "urn": "100002"},
             "town_description": "A nice town.",
