@@ -631,13 +631,13 @@ async def _get_drive_minutes(origin_postcode: str, station_name: str) -> int | N
     """
     origin_coords = (await geocode(origin_postcode)).value_or_none()
     if origin_coords is None:
-        origin_coords = await _geocode_address(origin_postcode)
+        origin_coords = (await geocode_address(origin_postcode)).value_or_none()
     if origin_coords is None:
         return None
 
     dest_coords = _lookup_station_coords(station_name)
     if dest_coords is None:
-        dest_coords = await _geocode_address(station_name)
+        dest_coords = (await geocode_address(station_name)).value_or_none()
     if dest_coords is None:
         return None
 
@@ -799,7 +799,7 @@ async def compute_transit(
                 pc = pc_match.group(0).strip().upper() if pc_match else None
                 # Try the full address string first (better geocoding results),
                 # then fall back to postcode/outcode center
-                coords = await _geocode_address(origin_postcode)
+                coords = (await geocode_address(origin_postcode)).value_or_none()
                 if coords is None and pc:
                     coords = (await geocode(pc)).value_or_none()
                 if coords:
@@ -1184,7 +1184,7 @@ async def compute_petrol_cost(origin_postcode: str) -> PetrolCost:
         origin_coords = None
         coords = (await geocode(origin_postcode)).value_or_none()
         if coords is None:
-            coords = await _geocode_address(origin_postcode)
+            coords = (await geocode_address(origin_postcode)).value_or_none()
         if coords is not None:
             # geocode returns (lat, lng), ORS needs [lng, lat]
             origin_coords = [coords[1], coords[0]]
@@ -1271,18 +1271,21 @@ ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 
 
-async def _geocode_nominatim(query: str) -> tuple[float, float] | None:
+async def geocode_nominatim(query: str) -> Attempt[tuple[float, float]]:
     """Geocode a place name via Nominatim (free, 1 req/sec max).
 
     Respects Nominatim's usage policy by enforcing at least 1 second
     between consecutive calls. If still rate-limited, sets exhaustion
-    flag and returns None.
+    flag and returns ``Attempt.impossible``.
     """
     if _api_state.nominatim_exhausted:
-        return None
+        return Attempt.impossible("nominatim", "rate limit exhausted")
     cache_key = f"nom::{query.strip().upper()}"
     if cache_key in _geo_cache:
-        return _geo_cache[cache_key]
+        cached = _geo_cache[cache_key]
+        if cached is not None:
+            return Attempt.succeeded(cached, "nominatim")
+        return Attempt.impossible("nominatim", "not found (cached)")
     # Strip trailing postcode so Nominatim doesn't choke on ", SL6" etc.
     clean = _END_PC_RE.sub("", query).strip()
     # Enforce 1 req/sec rate limit
@@ -1298,7 +1301,8 @@ async def _geocode_nominatim(query: str) -> tuple[float, float] | None:
             lat = float(data[0]["lat"])
             lng = float(data[0]["lon"])
             _geo_cache[cache_key] = (lat, lng)
-            return (lat, lng)
+            return Attempt.succeeded((lat, lng), "nominatim")
+        return Attempt.impossible("nominatim", "no results")
     else:
         try:
             async with cached_async_client(timeout=10.0) as client:
@@ -1315,17 +1319,19 @@ async def _geocode_nominatim(query: str) -> tuple[float, float] | None:
                     lat = float(data[0]["lat"])
                     lng = float(data[0]["lon"])
                     _geo_cache[cache_key] = (lat, lng)
-                    return (lat, lng)
+                    return Attempt.succeeded((lat, lng), "nominatim")
+                return Attempt.impossible("nominatim", "no results")
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 429:
                 _api_state.nominatim_exhausted = True
             logger.warning("Nominatim geocoding failed for %s (%s)", query, exc.response.status_code)
-        except Exception:
+            return Attempt.impossible("nominatim", f"HTTP {exc.response.status_code}", exc)
+        except Exception as exc:
             logger.warning("Nominatim geocoding failed for: %s", query)
-    return None
+            return Attempt.impossible("nominatim", "unexpected error", exc)
 
 
-async def _geocode_address(address: str) -> tuple[float, float] | None:
+async def geocode_address(address: str) -> Attempt[tuple[float, float]]:
     """Geocode a free-form UK address.
 
     Tries Google Maps, ORS Pelias, then Nominatim as final fallback.
@@ -1333,7 +1339,10 @@ async def _geocode_address(address: str) -> tuple[float, float] | None:
     """
     cache_key = f"addr::{address.strip().upper()}"
     if cache_key in _geo_cache:
-        return _geo_cache[cache_key]
+        cached = _geo_cache[cache_key]
+        if cached is not None:
+            return Attempt.succeeded(cached, "geocode_address")
+        return Attempt.impossible("geocode_address", "not found (cached)")
 
     # Try Google Maps Geocoding first (best accuracy for UK streets)
     google_key = settings.google_maps_api_key
@@ -1347,7 +1356,7 @@ async def _geocode_address(address: str) -> tuple[float, float] | None:
                 loc = data["results"][0]["geometry"]["location"]
                 lat, lng = loc["lat"], loc["lng"]
                 _geo_cache[cache_key] = (lat, lng)
-                return (lat, lng)
+                return Attempt.succeeded((lat, lng), "google-maps")
         else:
             try:
                 async with cached_async_client(timeout=10.0) as client:
@@ -1362,7 +1371,7 @@ async def _geocode_address(address: str) -> tuple[float, float] | None:
                         loc = data["results"][0]["geometry"]["location"]
                         lat, lng = loc["lat"], loc["lng"]
                         _geo_cache[cache_key] = (lat, lng)
-                        return (lat, lng)
+                        return Attempt.succeeded((lat, lng), "google-maps")
             except Exception:
                 logger.warning("Google Maps geocoding failed for %s", address)
 
@@ -1377,7 +1386,7 @@ async def _geocode_address(address: str) -> tuple[float, float] | None:
             if features:
                 lng, lat = features[0]["geometry"]["coordinates"]
                 _geo_cache[cache_key] = (lat, lng)
-                return (lat, lng)
+                return Attempt.succeeded((lat, lng), "ors-pelias")
         else:
             try:
                 async with cached_async_client(timeout=10.0) as client:
@@ -1398,7 +1407,7 @@ async def _geocode_address(address: str) -> tuple[float, float] | None:
                     if features:
                         lng, lat = features[0]["geometry"]["coordinates"]
                         _geo_cache[cache_key] = (lat, lng)
-                        return (lat, lng)
+                        return Attempt.succeeded((lat, lng), "ors-pelias")
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code in (403, 429):
                     _api_state.ors_geo_exhausted = True
@@ -1407,10 +1416,12 @@ async def _geocode_address(address: str) -> tuple[float, float] | None:
                 logger.warning("ORS geocoding failed for %s", address)
 
     # Final fallback: Nominatim (free, no key, works for UK)
-    result = await _geocode_nominatim(address)
-    if result:
-        _geo_cache[cache_key] = result
-    return result
+    nominatim_result = await geocode_nominatim(address)
+    coords = nominatim_result.value_or_none()
+    if coords:
+        _geo_cache[cache_key] = coords
+        return Attempt.succeeded(coords, "geocode_nominatim")
+    return nominatim_result
 
 
 async def geocode(postcode: str) -> Attempt[tuple[float, float]]:
@@ -1534,7 +1545,7 @@ async def _find_nearest_boys(
 
     property_coords = (await geocode(postcode)).value_or_none()
     if property_coords is None and address:
-        property_coords = await _geocode_address(address)
+        property_coords = (await geocode_address(address)).value_or_none()
     if property_coords is None:
         return None
 

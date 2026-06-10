@@ -12,7 +12,6 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from houses.config import settings
 from houses.council_tax import lookup_council_tax
 from houses.enricher import (
-    _geocode_address,
     compute_commute_breakdown,
     compute_lorena_commute,
     compute_petrol_cost,
@@ -20,6 +19,7 @@ from houses.enricher import (
     find_nearest_boys_primary,
     find_nearest_boys_secondary,
     geocode,
+    geocode_address,
 )
 from houses.epc import lookup_epc
 from houses.models import CommuteBreakdown, EnrichedProperty, PetrolCost, PropertyPayload, TransitInfo
@@ -661,7 +661,7 @@ async def _run_enrichment(
         primary = await find_nearest_boys_primary(postcode, address)
         secondary = await find_nearest_boys_secondary(postcode, address)
     if enabled is None or {"walk_time", "amenities"} & enabled:
-        coords = await _geocode_address(lookup)
+        coords = (await geocode_address(lookup)).value_or_none()
         if coords is None:
             coords = (await geocode(postcode)).value_or_none()
         walk_data = (
@@ -699,7 +699,7 @@ async def _run_enrichment(
             if scraped_geo.get("latitude") is not None and scraped_geo.get("longitude") is not None:
                 approx_lat, approx_lng = scraped_geo["latitude"], scraped_geo["longitude"]
             else:
-                coords = await _geocode_address(lookup)
+                coords = (await geocode_address(lookup)).value_or_none()
                 approx_lat, approx_lng = coords if coords else (None, None)
 
         if approx_lat is not None and approx_lng is not None:
