@@ -762,22 +762,22 @@ async def compute_lorena_commute(property_postcode: str) -> Attempt[Commute]:
     with_bus_val = with_bus.value_or(empty)
     result = _pick_best_lorena_route(no_bus_val, with_bus_val)
 
-    # Google fallback: TfL picked no-bus because it has no bus data for this area.
+    # Bus fallback: TfL picked no-bus because it has no bus data for this area.
     if result is no_bus_val and no_bus_val.duration_minutes is not None:
         m = re.search(r"walk.*?\((\d+)m\)", no_bus_val.summary()[:60])
         walk_to_station = int(m.group(1)) if m else 0
         if walk_to_station >= settings.bus_walk_penalty_minutes:
-            google_route = await _compute_google_transit(property_postcode, settings.lorena_postcode)
-            if google_route and google_route.non_rail_cost() > 0:
+            bus_route = await _find_bus_alternative(property_postcode, settings.lorena_postcode)
+            if bus_route and bus_route.non_rail_cost() > 0:
                 bus_time = min(15, walk_to_station - settings.bus_walk_penalty_minutes)
                 savings = walk_to_station - bus_time
                 if savings >= settings.bus_walk_penalty_minutes:
                     new_duration = no_bus_val.duration_minutes - walk_to_station + bus_time
                     new_cost = no_bus_val.daily_cost_gbp
-                    bus_cost = google_route.non_rail_cost()
+                    bus_cost = bus_route.non_rail_cost()
                     new_cost = round(new_cost + bus_cost, 2) if new_cost is not None else bus_cost
                     logger.info(
-                        "Google bus overlay for %s: estimates bus %dm saves %dm over walk %dm, total=£%s",
+                        "Bus overlay for %s: estimates bus %dm saves %dm over walk %dm, total=£%s",
                         property_postcode,
                         bus_time,
                         savings,
@@ -818,11 +818,11 @@ def _pick_best_lorena_route(no_bus: Commute, with_bus: Commute) -> Commute:
     return no_bus
 
 
-async def _compute_google_transit(origin: str, destination: str) -> Commute | None:
-    """Fallback transit routing via Google Maps Routes API.
+async def _find_bus_alternative(origin: str, destination: str) -> Commute | None:
+    """Find a bus alternative via Google Routes API (for areas outside TfL coverage).
 
     Used when TfL doesn't find a bus leg (out-of-London areas). Returns a
-    Commute with bus fare looked up from BODS data, or None if Google
+    Commute with bus fare looked up from BODS data, or None if the API
     also can't route the journey.
     """
     google_key = settings.google_maps_api_key
@@ -858,7 +858,7 @@ async def _compute_google_transit(origin: str, destination: str) -> Commute | No
                 data = resp.json()
                 set_cached("POST", GOOGLE_ROUTES_URL, None, json.dumps(body, sort_keys=True), data)
         except Exception as e:
-            logger.warning("Google Routes API failed for %s → %s: %s", origin, destination, e)
+            logger.warning("Routes API failed for %s → %s: %s", origin, destination, e)
             return None
 
     routes = data.get("routes", [])
@@ -921,7 +921,7 @@ async def _compute_google_transit(origin: str, destination: str) -> Commute | No
                             if fares:
                                 leg_cost = _compute_bus_daily_cost(fares, data_all.get("_meta"))
                                 logger.info(
-                                    "Google bus fare (radius=%dm): %s -> %s = %s",
+                                    "Bus fare (radius=%dm): %s -> %s = %s",
                                     int(radius * 1000),
                                     dep_zone,
                                     arr_zone,
@@ -943,7 +943,7 @@ async def _compute_google_transit(origin: str, destination: str) -> Commute | No
         daily_cost_gbp = None
 
     return Commute(
-        destination_label="Lorena — Aldgate / City of London (Google)",
+        destination_label="Lorena — Aldgate / City of London (Bus)",
         destination_postcode=destination,
         duration_minutes=duration_min,
         daily_cost_gbp=daily_cost_gbp,

@@ -964,8 +964,8 @@ class TestPickBestLorenaRoute:
         assert result == with_bus
 
 
-class TestGoogleRouteFallback:
-    """compute_lorena_commute falls back to Google when TfL has no bus."""
+class TestBusFallback:
+    """compute_lorena_commute falls back to bus route when TfL has no bus."""
 
     @pytest.mark.asyncio
     async def test_route_summary_preserves_timing_brackets(self, monkeypatch):
@@ -984,8 +984,8 @@ class TestGoogleRouteFallback:
                 CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=18),)),
             ),
         )
-        google_bus = Commute(
-            destination_label="L (Google)",
+        bus_route = Commute(
+            destination_label="L (Bus)",
             destination_postcode="EC3A 7LP",
             duration_minutes=55,
             daily_cost_gbp=3.8,
@@ -1000,11 +1000,11 @@ class TestGoogleRouteFallback:
         async def mock_transit(self):
             return Attempt.succeeded(no_bus, "test")
 
-        async def mock_google(*_):
-            return google_bus
+        async def mock_bus(*_):
+            return bus_route
 
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
-        monkeypatch.setattr("houses.enricher._compute_google_transit", mock_google)
+        monkeypatch.setattr("houses.enricher._find_bus_alternative", mock_bus)
 
         result = (await compute_lorena_commute("GU52")).get()
         assert result.non_rail_cost() > 0, "Should find bus cost"
@@ -1033,7 +1033,7 @@ class TestGoogleRouteFallback:
             return Attempt.succeeded(with_bus if self._allow_bus else no_bus, "test")
 
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
-        monkeypatch.setattr("houses.enricher._compute_google_transit", lambda *_: None)
+        monkeypatch.setattr("houses.enricher._find_bus_alternative", lambda *_: None)
 
         result = (await compute_lorena_commute("GU52")).get()
         assert result is with_bus, "Should use TfL bus route when available"
