@@ -418,7 +418,7 @@ def test_constants_values_match_constants_headers():
 
 
 def test_data_headers_count():
-    assert len(COLUMN_HEADERS) == 46
+    assert len(COLUMN_HEADERS) == 49
 
 
 def test_data_formula_count():
@@ -426,7 +426,7 @@ def test_data_formula_count():
     keys_lower = {h.lower() for h in COLUMN_HEADERS}
     for key in DATA_FORMULA_COLS:
         assert key in keys_lower, f"Data formula key {key!r} not in COLUMN_HEADERS"
-    assert len(DATA_FORMULA_COLS) == 5
+    assert len(DATA_FORMULA_COLS) == 8
 
 
 def test_stamp_duty_known_values():
@@ -504,7 +504,7 @@ def test_monthly_mortgage_blank_when_ashby_works_missing():
 
 
 def test_view_headers_count():
-    assert len(VIEW_HEADERS) == 38
+    assert len(VIEW_HEADERS) == 41
 
 
 def test_all_view_headers_are_covered():

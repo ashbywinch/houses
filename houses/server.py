@@ -182,33 +182,30 @@ async def inject_property(
 
     # ── Scrape Rightmove if address is missing ──
     scrape_error: str | None = None
-    if not payload.address:
+    address = payload.address
+    if not address:
         scraped = await scrape_rightmove(payload.url)
         if scraped.get("_error") == "login_required":
             scrape_error = (
                 "Rightmove returned a login/verification page. Open Chrome, sign in to Rightmove, then try again."
             )
         if scraped.get("address"):
-            payload.address = scraped["address"]
+            address = scraped["address"]
         if scraped.get("postcode") and not payload.postcode:
             payload.postcode = scraped["postcode"]
         if scraped.get("bedrooms") is not None and payload.bedrooms is None:
             payload.bedrooms = scraped["bedrooms"]
         if scraped.get("price") is not None and payload.price is None:
             payload.price = scraped["price"]
-        if scraped.get("latitude") is not None:
-            payload.actual_latitude = scraped["latitude"]
-        if scraped.get("longitude") is not None:
-            payload.actual_longitude = scraped["longitude"]
 
         # Re-derive postcode and lookup now that we have the address
-        postcode = payload.postcode or extract_postcode(payload.address)
-        lookup = payload.address if _is_outcode(postcode) else postcode
+        postcode = payload.postcode or extract_postcode(address)
+        lookup = address if _is_outcode(postcode) else postcode
 
     logger.info(
         "Processing: %s | address=%s | postcode=%s | lookup=%s | beds=%s | price=%s | fields=%s",
         payload.url,
-        payload.address,
+        address,
         postcode,
         lookup,
         payload.bedrooms,
@@ -216,121 +213,17 @@ async def inject_property(
         fields or "all",
     )
 
-    # Track which enrichments completed (for logging/debug)
     enabled = set(fields) if fields else None
-
-    simon = TransitInfo(destination_label="Simon (London)", destination_postcode=postcode)
-    lorena = TransitInfo(destination_label="Lorena (London)", destination_postcode=postcode)
-    petrol = PetrolCost()
-    primary = None
-    secondary = None
-    town_desc = ""
-    walk_data: dict[str, Any] = {"walk_to_town_minutes": None, "amenities": ""}
-    epc = ""
-    breakdown = CommuteBreakdown()
-    approx_lat = None
-    approx_lng = None
-    station_crs = ""
-    station_name = ""
-
-    # Transit — TfL + NR fallback
-    if enabled is None or enabled & {"simon"}:
-        simon = await compute_simon_commute(lookup)
-    if enabled is None or enabled & {"lorena"}:
-        lorena = await compute_lorena_commute(lookup)
-
-    # Petrol — ORS driving-car
-    if enabled is None or enabled & {"petrol"}:
-        petrol = await compute_petrol_cost(postcode)
-
-    # Schools — GIAS lookup + bus routes
-    if enabled is None or enabled & {"schools"}:
-        primary = await find_nearest_boys_primary(postcode, payload.address)
-        secondary = await find_nearest_boys_secondary(postcode, payload.address)
-
-    # Walkability — needs coords, geocode the address first
-    if enabled is None or {"walk_time", "amenities"} & enabled:
-        coords = await _geocode_address(lookup)
-        if coords is None:
-            coords = await _geocode(postcode)
-        walk_data = (
-            await enrich_walkability(coords[0], coords[1], payload.address)
-            if coords
-            else {"walk_to_town_minutes": None, "amenities": ""}
-        )
-
-    # Town description — LLM
-    if enabled is None or enabled & {"town"}:
-        town_name = ""
-        if payload.address:
-            parts = [p.strip() for p in payload.address.split(",")]
-            outcode_re = re.compile(r"^[A-Z]{1,2}[0-9][A-Z0-9]?$")
-            postcode_re = re.compile(r"^[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}$", re.IGNORECASE)
-            candidates = [p for p in parts if p and not postcode_re.match(p) and not outcode_re.match(p)]
-            non_county = [p for p in candidates if p.lower().strip() not in _KNOWN_COUNTIES]
-            town_name = non_county[-1] if non_county else (candidates[-1] if candidates else "")
-        town_desc = await generate_town_description(town_name, postcode)
-
-    await _enrich_rail_fares(enabled, postcode, payload.address, simon, lorena)
-
-    if enabled is None or (enabled & {"simon"} and enabled & {"lorena"} and enabled & {"petrol"}):
-        breakdown = await compute_commute_breakdown(simon, lorena, petrol)
-
-    # EPC — requires an exact house number + street address
-    if enabled is None or enabled & {"epc"}:
-        has_street_addr = payload.address and payload.address[0].isdigit()
-        epc = await lookup_epc(postcode) if postcode and not _is_outcode(postcode) and has_street_addr else ""
-
-    council_tax = None
-    if (enabled is None or enabled & {"council_tax"}) and postcode and payload.address:
-        council_tax = await lookup_council_tax(postcode, payload.address)
-
-    # Geocode for approx cache fields
-    if enabled is None or enabled & {"geo"}:
-        actual_lat = payload.actual_latitude
-        actual_lng = payload.actual_longitude
-
-        if actual_lat is not None and actual_lng is not None:
-            approx_lat, approx_lng = actual_lat, actual_lng
-        else:
-            coords = await _geocode_address(lookup)
-            approx_lat, approx_lng = coords if coords else (None, None)
-
-        station_crs = ""
-        station_name = ""
-        if approx_lat is not None and approx_lng is not None:
-            station = nearest_station(approx_lat, approx_lng)
-            if station:
-                station_crs = station["crs"]
-                station_name = station["name"]
-
-    enriched = EnrichedProperty(
+    enriched = await _run_enrichment(
         url=payload.url,
-        address=payload.address,
+        address=address,
         postcode=postcode,
-        bedrooms=payload.bedrooms or 0,
-        price=payload.price or 0.0,
-        simon_commute=simon,
-        lorena_commute=lorena,
-        petrol=petrol,
-        commute_breakdown=breakdown,
-        primary_school=primary,
-        secondary_school=secondary,
-        town_description=town_desc,
-        walk_to_town_minutes=walk_data.get("walk_to_town_minutes"),
-        walkable_amenities=walk_data.get("amenities", ""),
-        primary_ofsted=primary.ofsted_rating if primary else "",
-        secondary_ofsted=secondary.ofsted_rating if secondary else "",
-        primary_inspection_year=primary.inspection_year if primary else "",
-        primary_inspection_summary=primary.inspection_summary if primary else "",
-        secondary_inspection_year=secondary.inspection_year if secondary else "",
-        secondary_inspection_summary=secondary.inspection_summary if secondary else "",
-        epc_rating=epc,
-        council_tax=council_tax,
-        approx_latitude=approx_lat,
-        approx_longitude=approx_lng,
-        approx_station_crs=station_crs,
-        approx_station_name=station_name,
+        lookup=lookup,
+        bedrooms=payload.bedrooms,
+        price=payload.price,
+        enabled=enabled,
+        actual_latitude=payload.actual_latitude,
+        actual_longitude=payload.actual_longitude,
     )
 
     row_url = None
@@ -436,7 +329,14 @@ async def backfill_view(
             if h not in user_cols:
                 enriched_col_indices[h] = i
 
-        user_fields = set(fields) if fields else None
+        user_fields: set[str] | None = None
+        if fields:
+            user_fields = set()
+            for f in fields:
+                for part in f.split(","):
+                    p = part.strip()
+                    if p:
+                        user_fields.add(p)
         target_rids: set[str] = {r.strip() for r in rids.split(",")} if rids else set()
         processed_rids: set[str] = set()
         total = len(view_data) - 1
@@ -697,14 +597,16 @@ def _json_line(data: dict) -> str:
     return json.dumps(data) + "\n"
 
 
-async def _run_backfill_enrichment(
+async def _run_enrichment(
     url: str,
     address: str,
     postcode: str,
     lookup: str,
-    bedrooms: int | None,
-    price: float | None,
-    enabled: set[str] | None,
+    bedrooms: int | None = None,
+    price: float | None = None,
+    enabled: set[str] | None = None,
+    actual_latitude: float | None = None,
+    actual_longitude: float | None = None,
 ) -> EnrichedProperty:
     """Run enrichment for the given set of fields and return an EnrichedProperty.
 
@@ -713,11 +615,17 @@ async def _run_backfill_enrichment(
 
     If ``address`` is empty, attempts to scrape the property details from
     Rightmove via Chrome CDP before running enrichment.
+
+    ``actual_latitude`` / ``actual_longitude`` are user-provided overrides that
+    take precedence over scraped or geocoded values for approx_lat/lng.
+
+    Geo enrichment always tries ``scrape_rightmove(url)`` first (cache-first),
+    falls back to geocoding, and respects ``actual_lat/lng`` override.
     """
     # ── Scrape Rightmove if address is missing ──
-    if not address or not postcode:
+    if not address:
         scraped = await scrape_rightmove(url)
-        if scraped.get("address") and not address:
+        if scraped.get("address"):
             address = scraped["address"]
         if scraped.get("postcode") and not postcode:
             postcode = scraped["postcode"]
@@ -772,15 +680,34 @@ async def _run_backfill_enrichment(
             non_county = [p for p in candidates if p.lower().strip() not in _KNOWN_COUNTIES]
             town_name = non_county[-1] if non_county else (candidates[-1] if candidates else "")
         town_desc = await generate_town_description(town_name, postcode)
-    if enabled is None or "epc" in enabled:
-        has_street_addr = address and address[0].isdigit()
-        epc = await lookup_epc(postcode) if postcode and not _is_outcode(postcode) and has_street_addr else ""
-    if (enabled is None or "council_tax" in enabled) and address:
-        council_tax = await lookup_council_tax(postcode, address)
+
     await _enrich_rail_fares(enabled, postcode, address, simon, lorena)
 
     if enabled is None or {"simon", "lorena", "petrol"} & enabled:
         breakdown = await compute_commute_breakdown(simon, lorena, petrol)
+
+    if enabled is None or "epc" in enabled:
+        epc = await lookup_epc(postcode, address) if postcode and not _is_outcode(postcode) else ""
+
+    if (enabled is None or "council_tax" in enabled) and postcode and not _is_outcode(postcode) and address:
+        council_tax = await lookup_council_tax(postcode, address)
+
+    if enabled is None or "geo" in enabled:
+        if actual_latitude is not None and actual_longitude is not None:
+            approx_lat, approx_lng = actual_latitude, actual_longitude
+        else:
+            scraped_geo = await scrape_rightmove(url)
+            if scraped_geo.get("latitude") is not None and scraped_geo.get("longitude") is not None:
+                approx_lat, approx_lng = scraped_geo["latitude"], scraped_geo["longitude"]
+            else:
+                coords = await _geocode_address(lookup)
+                approx_lat, approx_lng = coords if coords else (None, None)
+
+        if approx_lat is not None and approx_lng is not None:
+            station = nearest_station(approx_lat, approx_lng)
+            if station:
+                station_crs = station["crs"]
+                station_name = station["name"]
 
     return EnrichedProperty(
         url=url,
@@ -809,6 +736,26 @@ async def _run_backfill_enrichment(
         approx_longitude=approx_lng,
         approx_station_crs=station_crs,
         approx_station_name=station_name,
+    )
+
+
+async def _run_backfill_enrichment(
+    url: str,
+    address: str,
+    postcode: str,
+    lookup: str,
+    bedrooms: int | None,
+    price: float | None,
+    enabled: set[str] | None,
+) -> EnrichedProperty:
+    return await _run_enrichment(
+        url=url,
+        address=address,
+        postcode=postcode,
+        lookup=lookup,
+        bedrooms=bedrooms,
+        price=price,
+        enabled=enabled,
     )
 
 

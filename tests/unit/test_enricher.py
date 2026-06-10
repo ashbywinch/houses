@@ -753,8 +753,10 @@ class TestBusFareLookup:
         from houses.enricher import _lookup_bus_roundtrip_cost
 
         cost = _lookup_bus_roundtrip_cost(
-            "Unknown Stop", "Another Unknown",
-            {"lat": 51.3, "lon": -0.5}, {"lat": 51.31, "lon": -0.49},
+            "Unknown Stop",
+            "Another Unknown",
+            {"lat": 51.3, "lon": -0.5},
+            {"lat": 51.31, "lon": -0.49},
         )
         assert cost is None
 
@@ -869,8 +871,9 @@ class TestStopToZoneMapping:
 
         data = _load_bus_fares()
         scso = data.get("Stagecoach_South", {})
-        assert scso.get("stop_zones", {}).get("randolph close") == \
-               scso.get("stop_zones", {}).get("woking railway station")
+        assert scso.get("stop_zones", {}).get("randolph close") == scso.get("stop_zones", {}).get(
+            "woking railway station"
+        )
 
 
 class TestZonePairLookup:
@@ -960,18 +963,24 @@ class TestGoogleRouteFallback:
         from houses.models import TransitInfo
 
         no_bus = TransitInfo(
-            destination_label="L", destination_postcode="EC3A 7LP",
-            duration_minutes=116, daily_cost_gbp=None,
+            destination_label="L",
+            destination_postcode="EC3A 7LP",
+            duration_minutes=116,
+            daily_cost_gbp=None,
             route_summary="walk to Fleet (46m) → Train to Waterloo (42m) → Tube to Bank (4m) → walk (18m)",
         )
         with_bus = TransitInfo(
-            destination_label="L", destination_postcode="EC3A 7LP",
-            duration_minutes=116, daily_cost_gbp=None,
+            destination_label="L",
+            destination_postcode="EC3A 7LP",
+            duration_minutes=116,
+            daily_cost_gbp=None,
             route_summary="walk to Fleet (46m) → Train to Waterloo (42m) → Tube to Bank (4m) → walk (18m)",
         )
         google_bus = TransitInfo(
-            destination_label="L (Google)", destination_postcode="EC3A 7LP",
-            duration_minutes=55, daily_cost_gbp=3.8,
+            destination_label="L (Google)",
+            destination_postcode="EC3A 7LP",
+            duration_minutes=55,
+            daily_cost_gbp=3.8,
             route_summary="bus to Fleet → Train to Waterloo",
             bus_cost_gbp=3.8,
         )
@@ -999,18 +1008,24 @@ class TestGoogleRouteFallback:
         from houses.models import TransitInfo
 
         no_bus = TransitInfo(
-            destination_label="L", destination_postcode="EC3A 7LP",
-            duration_minutes=90, daily_cost_gbp=None,
+            destination_label="L",
+            destination_postcode="EC3A 7LP",
+            duration_minutes=90,
+            daily_cost_gbp=None,
             route_summary="walk to Fleet (46m) → Train to Waterloo (42m)",
         )
         with_bus = TransitInfo(
-            destination_label="L", destination_postcode="EC3A 7LP",
-            duration_minutes=90, daily_cost_gbp=None,
+            destination_label="L",
+            destination_postcode="EC3A 7LP",
+            duration_minutes=90,
+            daily_cost_gbp=None,
             route_summary="walk to Fleet (46m) → Train to Waterloo (42m)",
         )
         google_bus = TransitInfo(
-            destination_label="L (Google)", destination_postcode="EC3A 7LP",
-            duration_minutes=55, daily_cost_gbp=3.8,
+            destination_label="L (Google)",
+            destination_postcode="EC3A 7LP",
+            duration_minutes=55,
+            daily_cost_gbp=3.8,
             route_summary="bus to Fleet → Train to Waterloo",
             bus_cost_gbp=3.8,
         )
@@ -1036,13 +1051,17 @@ class TestGoogleRouteFallback:
         from houses.models import TransitInfo
 
         no_bus = TransitInfo(
-            destination_label="L", destination_postcode="EC3A 7LP",
-            duration_minutes=90, daily_cost_gbp=None,
+            destination_label="L",
+            destination_postcode="EC3A 7LP",
+            duration_minutes=90,
+            daily_cost_gbp=None,
             route_summary="walk to Fleet (3m) → Train to Waterloo (42m)",
         )
         with_bus = TransitInfo(
-            destination_label="L", destination_postcode="EC3A 7LP",
-            duration_minutes=70, daily_cost_gbp=2.8,
+            destination_label="L",
+            destination_postcode="EC3A 7LP",
+            duration_minutes=70,
+            daily_cost_gbp=2.8,
             route_summary="bus to Fleet → Train to Waterloo",
         )
 
@@ -1434,6 +1453,4 @@ class TestKnownWrongBehaviours:
         data = _load_bus_fares()
         scso = data.get("Stagecoach_South", {})
         coords = scso.get("stop_coords", [])
-        assert len(coords) > 0, (
-            "stop_coords empty — NaPTAN stop data not integrated or extraction needs re-run"
-        )
+        assert len(coords) > 0, "stop_coords empty — NaPTAN stop data not integrated or extraction needs re-run"

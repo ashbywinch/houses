@@ -257,6 +257,7 @@ class TestBackfillView:
     VIEW_HEADERS = [
         "Listing Address",
         "Rightmove Link",
+        "Map",
         "Rightmove ID",
         "Purchase Cost (£)",
         "EPC Rating",
@@ -291,6 +292,8 @@ class TestBackfillView:
         "Ashby Works Estimate (£)",
         "Group Notes / WhatsApp",
         "Ashby comments",
+        "Design Needed",
+        "Planning Needed",
         "Status",
         "Status Reason",
     ]
@@ -335,6 +338,9 @@ class TestBackfillView:
         "Secondary Bus Route",
         "Approx Latitude (est)",
         "Approx Longitude (est)",
+        "Best Latitude",
+        "Best Longitude",
+        "Map URL",
         "Approx Station CRS",
         "Approx Station Name",
         "Stamp Duty (£)",
@@ -450,7 +456,8 @@ class TestBackfillView:
         row = [""] * len(self.VIEW_HEADERS)
         row[0] = address  # Listing Address
         row[1] = url  # Rightmove Link
-        row[2] = rid or ""  # Rightmove ID
+        row[2] = ""  # Map (formula column)
+        row[3] = rid or ""  # Rightmove ID
         return row
 
     def test_view_tab_empty(self):
@@ -741,13 +748,12 @@ class TestBackfillView:
             settings.sheet_id = original_id
             settings.rightmove_sample_page = original_sample
 
-    def test_epc_skipped_without_house_number(self):
-        """EPC lookup requires a house-numbered street address.
+    def test_epc_lookup_guard_via_enrichment(self):
+        """_run_enrichment passes the address to lookup_epc.
 
-        Addresses like ``Nightingale Way, Denham Green`` (no number)
-        should skip EPC even with a full postcode. Only addresses
-        starting with a digit (e.g. ``7 Sandy Close, Woking``)
-        should trigger the lookup.
+        The decision to call the API (and match results) is now made inside
+        the lookup_epc function itself, so this test verifies the args are
+        forwarded correctly.
         """
         original_id = settings.sheet_id
         settings.sheet_id = "fake-id"
@@ -760,7 +766,7 @@ class TestBackfillView:
             ):
                 mock_epc.return_value = "C"
 
-                # Address WITH house number → EPC should be called
+                # Numbered address → lookup_epc called with address
                 result = asyncio.run(
                     _run_backfill_enrichment(
                         url="https://www.rightmove.co.uk/properties/123",
@@ -772,24 +778,8 @@ class TestBackfillView:
                         enabled={"epc"},
                     )
                 )
-                assert result.epc_rating == "C", "EPC should have been looked up"
-                mock_epc.assert_called()
-
-                # Address WITHOUT house number → EPC should NOT be called
-                mock_epc.reset_mock()
-                result2 = asyncio.run(
-                    _run_backfill_enrichment(
-                        url="https://www.rightmove.co.uk/properties/456",
-                        address="Nightingale Way, Denham Green",
-                        postcode="UB9 5JH",
-                        lookup="UB9 5JH",
-                        bedrooms=None,
-                        price=None,
-                        enabled={"epc"},
-                    )
-                )
-                assert result2.epc_rating == "", "EPC should NOT have been looked up"
-                mock_epc.assert_not_called()
+                assert result.epc_rating == "C"
+                mock_epc.assert_called_with("GU22 8BQ", "7 Sandy Close, Woking, GU22")
         finally:
             settings.sheet_id = original_id
 

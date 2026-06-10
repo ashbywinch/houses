@@ -1,5 +1,7 @@
 # Development Guide
 
+> **Production Sheet Access** — Never write one-off scripts that read or write the production Google Sheet directly. They duplicate auth logic, bypass the enrichment pipeline, and can't be reused. Instead, use existing scripts or endpoints. If existing tools can't do what you need, extend them or make new well designed tools — don't bodge a one-off.
+
 ## Setup
 
 ```bash
