@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from houses.models import EnrichedProperty
 from houses.server import app
-from houses.sheets import _row_values
+from houses.sheets import row_values
 
 client = TestClient(app)
 
@@ -36,9 +36,9 @@ class TestDryRun:
             "address": "20 High Street, Test Town, TE1 1ST",
         }
         resp1 = client.post("/inject-property?dry_run=true", json=payload)
-        row1 = _row_values(EnrichedProperty(**resp1.json()["data"]))
+        row1 = row_values(EnrichedProperty(**resp1.json()["data"]))
 
         resp2 = client.post("/inject-property?dry_run=true", json=payload)
-        row2 = _row_values(EnrichedProperty(**resp2.json()["data"]))
+        row2 = row_values(EnrichedProperty(**resp2.json()["data"]))
 
         assert row1 == row2, "dry_run should return identical data on repeated calls"

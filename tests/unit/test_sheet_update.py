@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from houses.models import EnrichedProperty
 from houses.server import app
-from houses.sheets import COLUMN_HEADERS, _build_full_row, _row_values
+from houses.sheets import COLUMN_HEADERS, _build_full_row, row_values
 
 client = TestClient(app)
 
@@ -49,8 +49,8 @@ class TestUpdateScriptLogic:
         ep1 = _make_enriched("https://rightmove.co.uk/properties/1", simon_cost=10.0)
         ep2 = _make_enriched("https://rightmove.co.uk/properties/1", simon_cost=25.0)
 
-        row1 = _row_values(ep1)
-        row2 = _row_values(ep2)
+        row1 = row_values(ep1)
+        row2 = row_values(ep2)
 
         # Simon London Cost column — accessed by header name, not index
         assert row1["Simon London Cost (£)"] == "10.00"
@@ -62,7 +62,7 @@ class TestUpdateScriptLogic:
     def test_empty_cells_do_not_become_zeros(self):
         """Missing data should leave cells empty, never '0' or '0.00'."""
         ep = _make_enriched("https://rightmove.co.uk/properties/1", simon_cost=None)
-        row = _row_values(ep)
+        row = row_values(ep)
         assert row["Simon London Cost (£)"] == "", (
             f"Expected empty string for None cost, got {row['Simon London Cost (£)']!r}"
         )
@@ -70,7 +70,7 @@ class TestUpdateScriptLogic:
     def test_cache_fields_present(self):
         """Cache columns are present in _row_values."""
         ep = _make_enriched("https://rightmove.co.uk/properties/1")
-        row = _row_values(ep)
+        row = row_values(ep)
         assert "Approx Latitude (est)" in row
         assert "Approx Longitude (est)" in row
         assert "Approx Station CRS" in row

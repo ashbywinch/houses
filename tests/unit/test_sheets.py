@@ -15,18 +15,18 @@ from houses.sheets import (
     _build_full_row,
     _const_range_name,
     _rightmove_id,
-    _row_values,
     _splt,
     col_index,
     col_letter,
     named_range_name,
+    row_values,
 )
 
 
 def test_row_values_contains_all_enriched_columns():
     """Every column header has a corresponding entry in _row_values."""
     ep = EnrichedProperty(url="https://www.rightmove.co.uk/properties/123")
-    enriched = _row_values(ep)
+    enriched = row_values(ep)
     for key in enriched:
         assert key in COLUMN_HEADERS, f"{key!r} not in COLUMN_HEADERS"
     # Non-user columns should all be present (excluding formula columns)
@@ -48,7 +48,7 @@ def test_row_values_includes_user_columns():
         actual_latitude=51.5,
         actual_longitude=-0.1,
     )
-    r = _row_values(ep)
+    r = row_values(ep)
     assert r["Rightmove URL"] == "https://www.rightmove.co.uk/properties/123"
     assert r["Address"] == "1 High Street, Test Town, TE1 1ST"
     assert r["Postcode"] == "TE1 1ST"
@@ -57,7 +57,7 @@ def test_row_values_includes_user_columns():
 
     # Empty property should produce empty strings for user columns
     empty_ep = EnrichedProperty(url="")
-    r2 = _row_values(empty_ep)
+    r2 = row_values(empty_ep)
     assert r2.get("Rightmove URL", "") == ""
     assert r2.get("Address", "") == ""
     assert r2.get("Bedrooms", "") == ""
@@ -98,7 +98,7 @@ def test_row_values_with_full_enrichment():
             urn=sec_urn,
         ),
     )
-    r = _row_values(ep)
+    r = row_values(ep)
 
     expected = {
         "Rightmove ID": "123",
@@ -166,14 +166,14 @@ def test_row_values_with_council_tax():
         url="https://www.rightmove.co.uk/properties/456",
         council_tax=CouncilTaxInfo(band="D", yearly_cost=1800.0),
     )
-    r = _row_values(ep)
+    r = row_values(ep)
     assert r["Council Tax Band"] == "D"
     assert r["Council Tax Cost (£)"] == "1800.00"
 
 
 def test_row_values_empty_schools():
     ep = EnrichedProperty(url="https://www.rightmove.co.uk/properties/123")
-    r = _row_values(ep)
+    r = row_values(ep)
     assert r["Primary Walk (min)"] == ""
     assert r["Primary School Link"] == ""
     assert r["Secondary Walk (min)"] == ""
@@ -208,7 +208,7 @@ def test_row_values_missing_commute_empty():
         simon_commute=TransitInfo(destination_label="S", destination_postcode="SW1V 2QQ"),
         lorena_commute=TransitInfo(destination_label="L", destination_postcode="EC3A 7LP"),
     )
-    r = _row_values(ep)
+    r = row_values(ep)
     assert r["Simon London (min)"] == ""
     assert r["Simon London Cost (£)"] == ""
     assert r["Simon London Route"] == ""
@@ -236,7 +236,7 @@ def test_row_values_includes_route_summary():
             route_summary="walk 3m → tube(Central) 15m → walk 2m",
         ),
     )
-    r = _row_values(ep)
+    r = row_values(ep)
     assert r["Simon London Route"] == "walk 5m → train(GWR) 20m → walk 5m"
     assert r["Lorena London Route"] == "walk 3m → tube(Central) 15m → walk 2m"
 
@@ -449,7 +449,7 @@ def test_data_formulas_use_named_ranges():
 def test_formula_cols_not_in_row_values():
     """Formula column headers should NOT appear in _row_values output."""
     ep = EnrichedProperty(url="https://www.rightmove.co.uk/properties/123")
-    enriched = _row_values(ep)
+    enriched = row_values(ep)
     for h in _FORMULA_COLUMNS:
         assert h not in enriched, f"Formula column {h!r} found in _row_values"
 

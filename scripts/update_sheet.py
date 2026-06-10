@@ -226,9 +226,9 @@ def main():
 
         # Build new row from server response
         from houses.models import EnrichedProperty
-        from houses.sheets import _row_values
+        from houses.sheets import row_values
 
-        new_row = _row_values(EnrichedProperty(**enriched))
+        new_row = row_values(EnrichedProperty(**enriched))
 
         update_cols = needed_cols
 

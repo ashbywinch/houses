@@ -18,7 +18,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from houses.server import _run_backfill_enrichment, _ENRICHMENT_FIELD_COLUMNS
-from houses.sheets import Tab, _row_values, col_letter, get_client
+from houses.sheets import Tab, row_values, col_letter, get_client
 from houses.config import settings
 
 
@@ -53,7 +53,7 @@ async def main():
             bedrooms=None, price=None, enabled=field_set,
         )
 
-        values = _row_values(enriched)
+        values = row_values(enriched)
 
         cells: list[dict] = []
         for header in headers_to_write:

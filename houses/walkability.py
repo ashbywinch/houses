@@ -31,7 +31,7 @@ _POSTCODE_OUTCODE_RE = re.compile(
 
 # UK ceremonial counties that sometimes appear in address lines.
 # Filtered out during town extraction so "Berkshire" doesn't win over "Maidenhead".
-_KNOWN_COUNTIES = frozenset(
+KNOWN_COUNTIES = frozenset(
     {
         "berkshire",
         "buckinghamshire",
@@ -83,7 +83,7 @@ _KNOWN_COUNTIES = frozenset(
 def _extract_town(address: str) -> str:
     parts = [p.strip() for p in address.split(",")]
     filtered = [p for p in parts if p and not _POSTCODE_FULL_RE.match(p) and not _POSTCODE_OUTCODE_RE.match(p)]
-    non_county = [p for p in filtered if p.lower().strip() not in _KNOWN_COUNTIES]
+    non_county = [p for p in filtered if p.lower().strip() not in KNOWN_COUNTIES]
     return non_county[-1] if non_county else (filtered[-1] if filtered else "")
 
 

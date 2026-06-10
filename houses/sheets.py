@@ -1119,7 +1119,7 @@ def _fmt_bus(s: SchoolInfo | None) -> str:
     return str(s.bus_time_minutes) if s and s.bus_time_minutes is not None else ""
 
 
-def _row_values(property_: EnrichedProperty) -> dict[str, str]:
+def row_values(property_: EnrichedProperty) -> dict[str, str]:
     """Values keyed by header name. Includes both enriched and user-owned columns."""
     result: dict[str, str] = {}
     r = result
@@ -1172,7 +1172,7 @@ def _row_values(property_: EnrichedProperty) -> dict[str, str]:
 
 def _build_full_row(property_: EnrichedProperty) -> list[str]:
     """Build a full positional row matching COLUMN_HEADERS order, for appending new rows."""
-    enriched = _row_values(property_)
+    enriched = row_values(property_)
     return [enriched.get(h, "") for h in COLUMN_HEADERS]
 
 
@@ -1196,7 +1196,7 @@ async def write_enriched_row(property_: EnrichedProperty, tab: str = DATA_TAB) -
         worksheet = sh.worksheet(tab)
 
         ensure_headers(worksheet)
-        enriched = _row_values(property_)
+        enriched = row_values(property_)
 
         # Find existing row by Rightmove ID (column H). Never append duplicates.
         existing = worksheet.get_all_values()
