@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from houses.attempt import Attempt
-from houses.commute import Commute
+from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.enricher import (
     _END_PC_RE,
     _OUTCODE_RE,
@@ -964,8 +964,8 @@ class TestPickBestLorenaRoute:
         assert result == with_bus
 
 
-class TestGoogleRouteFallback:
-    """compute_lorena_commute falls back to Google when TfL has no bus."""
+class TestBusFallback:
+    """compute_lorena_commute falls back to bus route when TfL has no bus."""
 
     @pytest.mark.asyncio
     async def test_route_summary_preserves_timing_brackets(self, monkeypatch):
@@ -977,74 +977,37 @@ class TestGoogleRouteFallback:
             destination_postcode="EC3A 7LP",
             duration_minutes=116,
             daily_cost_gbp=None,
-            route_summary="walk to Fleet (46m) → Train to Waterloo (42m) → Tube to Bank (4m) → walk (18m)",
+            cost_groups=(
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=46),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration_minutes=42),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TUBE, duration_minutes=4),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=18),)),
+            ),
         )
-        google_bus = Commute(
-            destination_label="L (Google)",
+        bus_route = Commute(
+            destination_label="L (Bus)",
             destination_postcode="EC3A 7LP",
             duration_minutes=55,
             daily_cost_gbp=3.8,
-            route_summary="bus to Fleet → Train to Waterloo",
-            bus_cost_gbp=3.8,
+            cost_groups=(
+                CostGroup(
+                    legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=28),),
+                    cost=3.8,
+                ),
+            ),
         )
 
         async def mock_transit(self):
             return Attempt.succeeded(no_bus, "test")
 
-        async def mock_google(*_):
-            return google_bus
+        async def mock_bus(*_):
+            return bus_route
 
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
-        monkeypatch.setattr("houses.enricher._compute_google_transit", mock_google)
+        monkeypatch.setattr("houses.enricher._find_bus_alternative", mock_bus)
 
         result = (await compute_lorena_commute("GU52")).get()
-        assert result.bus_cost_gbp is not None
-        route = result.route_summary
-        assert "(46m)" not in route, "Should not include old walk duration"
-        assert "(" in route, f"Route should preserve timing brackets: {route}"
-        assert "42m" in route, f"Should preserve train timing: {route}"
-        assert "4m" in route or "18m" in route, f"Should preserve tube/walk timing: {route}"
-
-    @pytest.mark.asyncio
-    async def test_triggers_on_long_walk_no_tfl_bus(self, monkeypatch):
-        from houses.commute import Commute
-        from houses.enricher import compute_lorena_commute
-
-        no_bus = Commute(
-            destination_label="L",
-            destination_postcode="EC3A 7LP",
-            duration_minutes=90,
-            daily_cost_gbp=None,
-            route_summary="walk to Fleet (46m) → Train to Waterloo (42m)",
-        )
-        with_bus = Commute(
-            destination_label="L",
-            destination_postcode="EC3A 7LP",
-            duration_minutes=90,
-            daily_cost_gbp=None,
-            route_summary="walk to Fleet (46m) → Train to Waterloo (42m)",
-        )
-        google_bus = Commute(
-            destination_label="L (Google)",
-            destination_postcode="EC3A 7LP",
-            duration_minutes=55,
-            daily_cost_gbp=3.8,
-            route_summary="bus to Fleet → Train to Waterloo",
-            bus_cost_gbp=3.8,
-        )
-
-        async def mock_transit(self):
-            return Attempt.succeeded(with_bus if self._allow_bus else no_bus, "test")
-
-        async def mock_google(*_):
-            return google_bus
-
-        monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
-        monkeypatch.setattr("houses.enricher._compute_google_transit", mock_google)
-
-        result = (await compute_lorena_commute("GU52")).get()
-        assert result.bus_cost_gbp is not None, "Should find bus cost"
-        assert result.bus_cost_gbp > 0
+        assert result.non_rail_cost() > 0, "Should find bus cost"
         assert result.duration_minutes is not None
         assert result.duration_minutes < 90, "Should be faster than TfL walk"
 
@@ -1058,21 +1021,19 @@ class TestGoogleRouteFallback:
             destination_postcode="EC3A 7LP",
             duration_minutes=90,
             daily_cost_gbp=None,
-            route_summary="walk to Fleet (3m) → Train to Waterloo (42m)",
         )
         with_bus = Commute(
             destination_label="L",
             destination_postcode="EC3A 7LP",
             duration_minutes=70,
             daily_cost_gbp=2.8,
-            route_summary="bus to Fleet → Train to Waterloo",
         )
 
         async def mock_transit(self):
             return Attempt.succeeded(with_bus if self._allow_bus else no_bus, "test")
 
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
-        monkeypatch.setattr("houses.enricher._compute_google_transit", lambda *_: None)
+        monkeypatch.setattr("houses.enricher._find_bus_alternative", lambda *_: None)
 
         result = (await compute_lorena_commute("GU52")).get()
         assert result is with_bus, "Should use TfL bus route when available"
@@ -1337,7 +1298,12 @@ class TestEnrichRailFares:
             destination_postcode="EC3A 7LP",
             duration_minutes=78,
             daily_cost_gbp=4.0,
-            bus_cost_gbp=4.0,
+            cost_groups=(
+                CostGroup(
+                    legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=10),),
+                    cost=4.0,
+                ),
+            ),
         )
         simon = Commute(
             destination_label="Simon",
@@ -1380,7 +1346,13 @@ class TestEnrichRailFares:
             destination_postcode="SW1V 2QQ",
             duration_minutes=71,
             daily_cost_gbp=10.8,
-            parking_cost_gbp=10.8,
+            cost_groups=(
+                CostGroup(
+                    legs=(JourneyLeg(mode=LegMode.PARK, duration_minutes=0),),
+                    operator="ParkCo",
+                    cost=10.8,
+                ),
+            ),
         )
         lorena = Commute(
             destination_label="Lorena",

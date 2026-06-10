@@ -1099,7 +1099,7 @@ def _fmt_duration(t: Commute | None) -> str:
 
 
 def _fmt_cost(val: float | None) -> str:
-    return f"{val:.2f}" if val is not None else ""
+    return f"{val:.2f}" if val else ""
 
 
 def _fmt_dist(s: SchoolInfo | None) -> str:
@@ -1132,15 +1132,15 @@ def row_values(property_: EnrichedProperty) -> dict[str, str]:
     r["Rightmove ID"] = _rightmove_id(property_.url)
     r["Simon London (min)"] = _fmt_duration(property_.simon_commute)
     r["Simon London Cost (£)"] = _fmt_cost(property_.simon_commute.daily_cost_gbp if property_.simon_commute else None)
-    r["Simon London Route"] = property_.simon_commute.route_summary if property_.simon_commute else ""
+    r["Simon London Route"] = property_.simon_commute.summary() if property_.simon_commute else ""
     r["Simon Parking Cost (£)"] = _fmt_cost(
-        property_.simon_commute.parking_cost_gbp if property_.simon_commute else None
+        property_.simon_commute.non_rail_cost() if property_.simon_commute else None
     )
     r["Lorena London (min)"] = _fmt_duration(property_.lorena_commute)
     r["Lorena London Cost (£)"] = _fmt_cost(
         property_.lorena_commute.daily_cost_gbp if property_.lorena_commute else None
     )  # noqa: E501
-    r["Lorena London Route"] = property_.lorena_commute.route_summary if property_.lorena_commute else ""
+    r["Lorena London Route"] = property_.lorena_commute.summary() if property_.lorena_commute else ""
     bt = property_.petrol.duration_minutes if property_.petrol else None
     r["Bracknell Time (min)"] = str(bt) if bt is not None else ""
     r["Bracknell Cost (£)"] = _fmt_cost(property_.petrol.daily_cost_gbp if property_.petrol else None)
