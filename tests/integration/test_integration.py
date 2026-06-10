@@ -2,7 +2,7 @@
 
 import httpx  # noqa: I001
 import pytest
-from houses.enricher import OUTCODES_IO_URL, POSTCODES_IO_URL
+from houses.location import OUTCODES_IO_URL, POSTCODES_IO_URL
 from houses.server import extract_postcode
 
 

@@ -27,21 +27,6 @@ from houses.retry import retry_async
 
 logger = logging.getLogger(__name__)
 
-
-# Per-process-run API exhaustion tracking.
-# Set when an API returns a usage-limit error so subsequent calls
-# skip straight to the fallback instead of hammering the dead endpoint.
-class _APIState:
-    places_exhausted: bool = False
-    ors_geo_exhausted: bool = False
-    nominatim_exhausted: bool = False
-    nominatim_last_call: float = 0.0
-
-
-_api_state = _APIState()
-
-POSTCODES_IO_URL = "https://api.postcodes.io/postcodes"
-OUTCODES_IO_URL = "https://api.postcodes.io/outcodes"
 TFL_JOURNEY_URL = "https://api.tfl.gov.uk/Journey/JourneyResults"
 GOOGLE_ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
 ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-car"
@@ -1107,215 +1092,24 @@ NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 
 
 async def _geocode_nominatim(query: str) -> Attempt[GeoPoint]:
-    """Geocode a place name via Nominatim (free, 1 req/sec max).
+    """Geocode a place name via Nominatim — delegates to location module."""
+    import houses.location as _loc
 
-    Respects Nominatim's usage policy by enforcing at least 1 second
-    between consecutive calls. If still rate-limited, sets exhaustion
-    flag and returns ``Attempt.impossible``.
-    """
-    if _api_state.nominatim_exhausted:
-        return Attempt.impossible("nominatim", "rate limit exhausted")
-    cache_key = f"nom::{query.strip().upper()}"
-    if cache_key in _geo_cache:
-        cached = _geo_cache[cache_key]
-        if cached is not None:
-            return Attempt.succeeded(cached, "nominatim")
-        return Attempt.impossible("nominatim", "not found (cached)")
-    # Strip trailing postcode so Nominatim doesn't choke on ", SL6" etc.
-    clean = _END_PC_RE.sub("", query).strip()
-    # Enforce 1 req/sec rate limit
-    now = asyncio.get_event_loop().time()
-    since_last = now - _api_state.nominatim_last_call
-    if since_last < 1.0:
-        await asyncio.sleep(1.0 - since_last)
-    params = {"q": f"{clean}, UK", "format": "json", "limit": 1}
-    cached = get_cached("GET", NOMINATIM_URL, params, None)
-    if cached is not None:
-        data = cached
-        if data:
-            lat = float(data[0]["lat"])
-            lng = float(data[0]["lon"])
-            gp = GeoPoint(lat, lng)
-            _geo_cache[cache_key] = gp
-            return Attempt.succeeded(gp, "nominatim")
-        return Attempt.impossible("nominatim", "no results")
-    else:
-        try:
-            async with cached_async_client(timeout=10.0) as client:
-                resp = await client.get(
-                    NOMINATIM_URL,
-                    params=params,
-                    headers={"User-Agent": "HousesApp/1.0"},
-                )
-                _api_state.nominatim_last_call = asyncio.get_event_loop().time()
-                resp.raise_for_status()
-                data = resp.json()
-                set_cached("GET", NOMINATIM_URL, params, None, data)
-                if data:
-                    lat = float(data[0]["lat"])
-                    lng = float(data[0]["lon"])
-                    gp = GeoPoint(lat, lng)
-                    _geo_cache[cache_key] = gp
-                    return Attempt.succeeded(gp, "nominatim")
-                return Attempt.impossible("nominatim", "no results")
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 429:
-                _api_state.nominatim_exhausted = True
-            logger.warning("Nominatim geocoding failed for %s (%s)", query, exc.response.status_code)
-            return Attempt.impossible("nominatim", f"HTTP {exc.response.status_code}", exc)
-        except Exception as exc:
-            logger.warning("Nominatim geocoding failed for: %s", query)
-            return Attempt.impossible("nominatim", "unexpected error", exc)
+    return await _loc._geocode_nominatim(query)
 
 
 async def _geocode_address(address: str) -> Attempt[GeoPoint]:
-    """Geocode a free-form UK address.
+    """Geocode a free-form UK address — delegates to location module."""
+    import houses.location as _loc
 
-    Tries Google Maps, ORS Pelias, then Nominatim as final fallback.
-    Used when postcodes.io can't resolve an outcode.
-    """
-    cache_key = f"addr::{address.strip().upper()}"
-    if cache_key in _geo_cache:
-        cached = _geo_cache[cache_key]
-        if cached is not None:
-            return Attempt.succeeded(cached, "geocode_address")
-        return Attempt.impossible("geocode_address", "not found (cached)")
-
-    # Try Google Maps Geocoding first (best accuracy for UK streets)
-    google_key = settings.google_maps_api_key
-    if google_key:
-        googlegeocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
-        params = {"address": f"{address}, UK", "key": google_key}
-        cached = get_cached("GET", googlegeocode_url, params, None)
-        if cached is not None:
-            data = cached
-            if data.get("status") == "OK" and data.get("results"):
-                loc = data["results"][0]["geometry"]["location"]
-                lat, lng = loc["lat"], loc["lng"]
-                gp = GeoPoint(lat, lng)
-                _geo_cache[cache_key] = gp
-                return Attempt.succeeded(gp, "google-maps")
-        else:
-            try:
-                async with cached_async_client(timeout=10.0) as client:
-                    resp = await client.get(
-                        googlegeocode_url,
-                        params=params,
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
-                    set_cached("GET", googlegeocode_url, params, None, data)
-                    if data.get("status") == "OK" and data.get("results"):
-                        loc = data["results"][0]["geometry"]["location"]
-                        lat, lng = loc["lat"], loc["lng"]
-                        gp = GeoPoint(lat, lng)
-                        _geo_cache[cache_key] = gp
-                        return Attempt.succeeded(gp, "google-maps")
-            except Exception:
-                logger.warning("Google Maps geocoding failed for %s", address)
-
-    # Fallback to ORS Pelias (skip if exhausted to avoid hammering)
-    api_key = settings.ors_api_key
-    if api_key and not _api_state.ors_geo_exhausted:
-        params = {"text": f"{address}, UK", "size": 1}
-        cached = get_cached("GET", ORS_GEOCODE_URL, params, None)
-        if cached is not None:
-            data = cached
-            features = data.get("features", [])
-            if features:
-                lng, lat = features[0]["geometry"]["coordinates"]
-                gp = GeoPoint(lat, lng)
-                _geo_cache[cache_key] = gp
-                return Attempt.succeeded(gp, "ors-pelias")
-        else:
-            try:
-                async with cached_async_client(timeout=10.0) as client:
-                    resp = await retry_async(
-                        lambda: client.get(
-                            ORS_GEOCODE_URL,
-                            params=params,
-                            headers={"Authorization": api_key},
-                        ),
-                        max_retries=2,
-                        base_delay=0.5,
-                        exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
-                    set_cached("GET", ORS_GEOCODE_URL, params, None, data)
-                    features = data.get("features", [])
-                    if features:
-                        lng, lat = features[0]["geometry"]["coordinates"]
-                        gp = GeoPoint(lat, lng)
-                        _geo_cache[cache_key] = gp
-                        return Attempt.succeeded(gp, "ors-pelias")
-            except httpx.HTTPStatusError as exc:
-                if exc.response.status_code in (403, 429):
-                    _api_state.ors_geo_exhausted = True
-                logger.warning("ORS geocoding failed for %s (%s)", address, exc.response.status_code)
-            except Exception:
-                logger.warning("ORS geocoding failed for %s", address)
-
-    # Final fallback: Nominatim (free, no key, works for UK)
-    return await _geocode_nominatim(address)
+    return await _loc._geocode_address(address)
 
 
 async def geocode(postcode: str) -> Attempt[GeoPoint]:
-    """Geocode a UK postcode via postcodes.io with in-memory caching.
+    """Geocode a UK postcode — delegates to location module."""
+    import houses.location as _loc
 
-    Supports both full postcodes ("SL6 1AA") and outcodes ("SL6").
-    Returns ``Attempt.succeeded(GeoPoint(lat, lng), "postcodes.io")`` on success,
-    or ``Attempt.impossible(...)`` if the postcode could not be resolved.
-    """
-    key = postcode.strip().upper()
-    if not key:
-        return Attempt.impossible("geocode", "empty postcode")
-    if key in _geo_cache:
-        cached = _geo_cache[key]
-        if cached is not None:
-            return Attempt.succeeded(cached, "geocode")
-        return Attempt.impossible("geocode", "postcode not found (cached)")
-
-    is_outcode = bool(_OUTCODE_RE.match(key))
-
-    url = f"{OUTCODES_IO_URL}/{key}" if is_outcode else f"{POSTCODES_IO_URL}/{key}"
-    cached = get_cached("GET", url, None, None)
-    if cached is not None:
-        data = cached
-        result = data.get("result")
-        if not result:
-            return Attempt.impossible("postcodes.io", "postcode not found")
-        gp = GeoPoint(result["latitude"], result["longitude"])
-        _geo_cache[key] = gp
-        return Attempt.succeeded(gp, "postcodes.io")
-    else:
-        try:
-            async with cached_async_client(timeout=10.0) as client:
-                resp = await retry_async(
-                    lambda: client.get(url),
-                    max_retries=2,
-                    base_delay=0.5,
-                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                set_cached("GET", url, None, None, data)
-                result = data.get("result")
-                if not result:
-                    return Attempt.impossible("postcodes.io", "postcode not found")
-                gp = GeoPoint(result["latitude"], result["longitude"])
-                _geo_cache[key] = gp
-                return Attempt.succeeded(gp, "postcodes.io")
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
-                _geo_cache[key] = None
-                set_cached("GET", url, None, None, {})  # cache empty dict for 404
-                return Attempt.impossible("postcodes.io", "postcode not found (404)")
-            logger.warning("Geocode HTTP error for %s: %s", key, e)
-            return Attempt.impossible("postcodes.io", f"HTTP {e.response.status_code}", e)
-        except Exception as exc:
-            logger.exception("Failed to geocode postcode: %s", key)
-            return Attempt.impossible("geocode", "unexpected error", exc)
+    return await _loc._geocode_postcode(postcode)
 
 
 def _load_schools() -> list[dict]:

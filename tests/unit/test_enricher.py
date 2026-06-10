@@ -1008,6 +1008,56 @@ class TestBusFallback:
 
         result = (await compute_lorena_commute("GU52")).get()
         assert result.non_rail_cost() > 0, "Should find bus cost"
+
+    @pytest.mark.asyncio
+    async def test_triggers_on_long_walk_no_tfl_bus(self, monkeypatch):
+        from houses.commute import Commute
+        from houses.enricher import compute_lorena_commute
+
+        no_bus = Commute(
+            destination_label="L",
+            destination_postcode="EC3A 7LP",
+            duration_minutes=90,
+            daily_cost_gbp=None,
+            cost_groups=(
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=46),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration_minutes=42),)),
+            ),
+        )
+        with_bus = Commute(
+            destination_label="L",
+            destination_postcode="EC3A 7LP",
+            duration_minutes=90,
+            daily_cost_gbp=None,
+            cost_groups=(
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=46),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration_minutes=42),)),
+            ),
+        )
+        bus_route = Commute(
+            destination_label="L (Bus)",
+            destination_postcode="EC3A 7LP",
+            duration_minutes=55,
+            daily_cost_gbp=3.8,
+            cost_groups=(
+                CostGroup(
+                    legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=28),),
+                    cost=3.8,
+                ),
+            ),
+        )
+
+        async def mock_transit(self):
+            return Attempt.succeeded(with_bus if self._allow_bus else no_bus, "test")
+
+        async def mock_bus(*_):
+            return bus_route
+
+        monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
+        monkeypatch.setattr("houses.enricher._find_bus_alternative", mock_bus)
+
+        result = (await compute_lorena_commute("GU52")).get()
+        assert result.non_rail_cost() > 0, "Should find bus cost"
         assert result.duration_minutes is not None
         assert result.duration_minutes < 90, "Should be faster than TfL walk"
 

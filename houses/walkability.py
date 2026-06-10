@@ -9,7 +9,6 @@ from typing import Any
 import httpx
 
 from houses.api_cache import cached_async_client, with_cache
-from houses.attempt import Attempt
 from houses.config import settings
 from houses.geo import GeoPoint
 from houses.retry import retry_async
@@ -88,76 +87,12 @@ def _extract_town(address: str) -> str:
     return non_county[-1] if non_county else (filtered[-1] if filtered else "")
 
 
-# Suffixes to strip from town names before geocoding, e.g. "Maidenhead Station Area" -> "Maidenhead"
-_TOWN_SUFFIXES = re.compile(
-    r"\s+(Station Area|Station|Area|Village|Town Centre|Centre|Villlage|Park|Business Park|Bottom)$",
-    re.IGNORECASE,
-)
+async def _extract_town_centre(lat: float, lng: float, town: str) -> GeoPoint | None:
+    """Resolve a town name to coordinates, used for walkability enrichment."""
+    from houses.location import PropertyLocation
 
-
-async def _geocode_town(town: str) -> Attempt[GeoPoint]:
-    key = town.strip().upper()
-    if not key:
-        return Attempt.impossible("geocode_town", "empty town name")
-
-    # ORS Pelias — disk-cached via with_cache
-    ors_params = {"text": f"{town}, UK", "size": 1}
-    try:
-        async with cached_async_client(timeout=10.0) as client:
-
-            async def _fetch_ors():
-                resp = await retry_async(
-                    lambda: client.get(
-                        ORS_GEOCODE_URL,
-                        params=ors_params,
-                        headers={"Authorization": settings.ors_api_key},
-                    ),
-                    max_retries=2,
-                    base_delay=1.0,
-                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-                )
-                resp.raise_for_status()
-                return resp.json()
-
-            data = await with_cache("GET", ORS_GEOCODE_URL, params=ors_params, fetch=_fetch_ors)
-            features = data.get("features", [])
-            if features:
-                lng, lat = features[0]["geometry"]["coordinates"]
-                return Attempt.succeeded(GeoPoint(lat, lng), "ors")
-    except httpx.HTTPStatusError as exc:
-        logger.warning("ORS geocoding failed for town: %s (%s)", town, exc.response.status_code)
-    except Exception:
-        logger.warning("ORS geocoding failed for town: %s", town)
-
-    # Fallback: Nominatim (free, no key) — disk-cached via with_cache
-    nom_params = {"q": f"{town}, UK", "format": "json", "limit": 1}
-    try:
-        async with cached_async_client(timeout=10.0) as client:
-
-            async def _fetch_nom():
-                resp = await client.get(
-                    "https://nominatim.openstreetmap.org/search",
-                    params=nom_params,
-                    headers={"User-Agent": "HousesApp/1.0"},
-                )
-                resp.raise_for_status()
-                return resp.json()
-
-            nom_url = "https://nominatim.openstreetmap.org/search"
-            data = await with_cache("GET", nom_url, params=nom_params, fetch=_fetch_nom)
-            if data:
-                return Attempt.succeeded(GeoPoint(float(data[0]["lat"]), float(data[0]["lon"])), "nominatim")
-    except httpx.HTTPStatusError as exc:
-        logger.warning("Nominatim geocoding failed for town: %s (%s)", town, exc.response.status_code)
-    except Exception:
-        logger.warning("Nominatim geocoding failed for town: %s", town)
-
-    # If exact town failed, try stripping suffixes like "Station Area" -> "Maidenhead"
-    stripped = _TOWN_SUFFIXES.sub("", town).strip()
-    if stripped and stripped.upper() != key:
-        return await _geocode_town(stripped)
-
-    return Attempt.impossible("geocode_town", "all geocoders failed")
+    loc = await PropertyLocation.from_town(town)
+    return loc.coordinates.value_or_none()
 
 
 async def _walk_duration(
@@ -341,7 +276,7 @@ async def enrich_walkability(
     town = _extract_town(address)
 
     if town:
-        town_centre = (await _geocode_town(town)).value_or_none()
+        town_centre = await _extract_town_centre(lat, lng, town)
         if town_centre:
             walk_to_town_minutes = await _walk_duration(lat, lng, town_centre)
         else:
