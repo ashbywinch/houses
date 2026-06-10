@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from httpx import AsyncClient, MockTransport, Response
 
-from houses.enricher import _geo_cache, _geocode
+from houses.enricher import _geo_cache, geocode
 
 
 @pytest.fixture(autouse=True)
@@ -35,9 +35,9 @@ async def test_geocode_full_postcode():
         original_init(self, **kwargs)
 
     with patch.object(AsyncClient, "__init__", patched_init):
-        result = await _geocode("RG14 1AA")
+        result = await geocode("RG14 1AA")
 
-    assert result == (51.4, -1.32)
+    assert result.value_or_none() == (51.4, -1.32)
 
 
 @pytest.mark.asyncio
@@ -61,9 +61,9 @@ async def test_geocode_outcode():
         original_init(self, **kwargs)
 
     with patch.object(AsyncClient, "__init__", patched_init):
-        result = await _geocode("SL6")
+        result = await geocode("SL6")
 
-    assert result == (51.5, -0.7)
+    assert result.value_or_none() == (51.5, -0.7)
 
 
 @pytest.mark.asyncio
@@ -90,11 +90,11 @@ async def test_geocode_caches_result():
         original_init(self, **kwargs)
 
     with patch.object(AsyncClient, "__init__", patched_init):
-        result1 = await _geocode("OX11 1AA")
-        result2 = await _geocode("OX11 1AA")
+        result1 = await geocode("OX11 1AA")
+        result2 = await geocode("OX11 1AA")
 
-    assert result1 == (51.4, -1.32)
-    assert result2 == (51.4, -1.32)
+    assert result1.value_or_none() == (51.4, -1.32)
+    assert result2.value_or_none() == (51.4, -1.32)
     assert call_count == 1, f"Expected 1 API call, got {call_count}"
 
 
@@ -116,11 +116,13 @@ async def test_geocode_404_caches_none():
         original_init(self, **kwargs)
 
     with patch.object(AsyncClient, "__init__", patched_init):
-        result1 = await _geocode("GU22 8BQ")
-        result2 = await _geocode("GU22 8BQ")
+        result1 = await geocode("GU22 8BQ")
+        result2 = await geocode("GU22 8BQ")
 
-    assert result1 is None
-    assert result2 is None
+    assert result1.value_or_none() is None
+    assert result1.is_impossible
+    assert result2.value_or_none() is None
+    assert result2.is_impossible
     # Only the first call hits the API; 404 is cached for subsequent calls
     assert call_count == 1
 
@@ -139,9 +141,10 @@ async def test_geocode_empty_postcode():
         original_init(self, **kwargs)
 
     with patch.object(AsyncClient, "__init__", patched_init):
-        result = await _geocode("")
+        result = await geocode("")
 
-    assert result is None
+    assert result.value_or_none() is None
+    assert result.is_impossible
 
 
 @pytest.mark.asyncio
@@ -165,6 +168,6 @@ async def test_geocode_normalises_case():
         original_init(self, **kwargs)
 
     with patch.object(AsyncClient, "__init__", patched_init):
-        result = await _geocode("rg14 1aa")
+        result = await geocode("rg14 1aa")
 
-    assert result == (51.4, -1.32)
+    assert result.value_or_none() == (51.4, -1.32)

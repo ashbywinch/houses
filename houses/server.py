@@ -12,7 +12,6 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from houses.config import settings
 from houses.council_tax import lookup_council_tax
 from houses.enricher import (
-    _geocode,
     _geocode_address,
     compute_commute_breakdown,
     compute_lorena_commute,
@@ -20,6 +19,7 @@ from houses.enricher import (
     compute_simon_commute,
     find_nearest_boys_primary,
     find_nearest_boys_secondary,
+    geocode,
 )
 from houses.epc import lookup_epc
 from houses.models import CommuteBreakdown, EnrichedProperty, PetrolCost, PropertyPayload, TransitInfo
@@ -663,7 +663,7 @@ async def _run_enrichment(
     if enabled is None or {"walk_time", "amenities"} & enabled:
         coords = await _geocode_address(lookup)
         if coords is None:
-            coords = await _geocode(postcode)
+            coords = (await geocode(postcode)).value_or_none()
         walk_data = (
             await enrich_walkability(coords[0], coords[1], address)
             if coords
@@ -794,7 +794,7 @@ async def _enrich_rail_fares(
     fare_pc = postcode or extract_postcode(address)
     if not fare_pc:
         return
-    fare_coords = await _geocode(fare_pc)
+    fare_coords = (await geocode(fare_pc)).value_or_none()
     if not fare_coords:
         return
     station = nearest_station(fare_coords[0], fare_coords[1])
