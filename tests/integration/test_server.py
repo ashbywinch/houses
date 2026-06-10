@@ -7,12 +7,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from httpx import AsyncClient, Client, MockTransport, Response
 
 from houses.config import settings
 from houses.models import EnrichedProperty, TransitInfo
 from houses.server import _run_backfill_enrichment, app
 from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS
+from tests.integration.conftest import mock_httpx
 
 client = TestClient(app)
 
@@ -110,7 +110,7 @@ class TestInjectProperty:
     def test_maidenhead_outcode_gets_full_enrichment(self):
         """Address with only outcode 'SL6' — server must use full street
         address for geocoding so transit/petrol/schools all return results."""
-        counter, async_patch, sync_patch = _mock_httpx()
+        counter, async_patch, sync_patch = mock_httpx()
         with async_patch, sync_patch:
             resp = client.post("/inject-property", json=self.MAIDENHEAD_PAYLOAD)
         assert resp.status_code == 200
@@ -126,88 +126,6 @@ class TestInjectProperty:
         assert petrol.get("cost_gbp") is not None, f"Petrol missing: {petrol}"
         assert data.get("primary_school") is not None, "No primary school"
         assert data.get("secondary_school") is not None, "No secondary school"
-
-
-def _mock_httpx():
-    """Context manager that patches both ``httpx.AsyncClient`` and
-    ``httpx.Client`` with a ``MockTransport`` that returns synthetic
-    responses for every external API the enrichment pipeline calls.
-
-    Yields the handler's call-count dict so tests can verify which
-    APIs were hit (or not hit).
-    """
-
-    class _Counter:
-        def __init__(self):
-            self.calls: list[str] = []
-
-        def handler(self, request):
-            url = str(request.url)
-            self.calls.append(url)
-
-            # TfL
-            if "tfl.gov.uk/Journey/JourneyResults" in url:
-                return Response(200, json={"journeys": [{"duration": 30, "fare": {"totalCost": 500}}]})
-            # postcodes.io
-            if "api.postcodes.io" in url:
-                return Response(200, json={"status": 200, "result": {"latitude": 51.5, "longitude": -0.1}})
-            # ORS Directions (driving or walking)
-            if "openrouteservice.org/v2/directions" in url:
-                return Response(200, json={"routes": [{"summary": {"distance": 50, "duration": 1800}}]})
-            # ORS Geocode
-            if "openrouteservice.org/geocode" in url:
-                return Response(200, json={"features": [{"geometry": {"coordinates": [-0.1, 51.5]}}]})
-            # Google Maps Geocode
-            if "maps.googleapis.com/maps/api/geocode" in url:
-                return Response(200, json={"results": [{"geometry": {"location": {"lat": 51.5, "lng": -0.1}}}]})
-            # Google Places
-            if "places.googleapis.com" in url:
-                return Response(200, json={"places": []})
-            # Google Routes
-            if "routes.googleapis.com" in url:
-                return Response(200, json={"routes": [{"legs": [{"duration": "1800s"}]}]})
-            # EPC
-            if "get-energy-performance-data" in url:
-                return Response(
-                    200,
-                    json={"data": [{"currentEnergyEfficiencyBand": "C", "registrationDate": "2023-01-01"}]},
-                )
-            # CivAccount
-            if "civaccount.co.uk" in url:
-                return Response(200, json={"band_d_rate": 1500.0})
-            # Nominatim
-            if "nominatim.openstreetmap.org" in url:
-                return Response(200, json=[{"lat": "51.5", "lon": "-0.1"}])
-            # OpenRouter LLM
-            if "openrouter.ai" in url:
-                return Response(200, json={"choices": [{"message": {"content": "A pleasant town."}}]})
-            # Overpass
-            if "overpass-api.de" in url:
-                return Response(200, json={"elements": []})
-            # VOA council tax band search
-            if "tax.service.gov.uk" in url or "voa" in url.lower() or "get-information-schools" in url:
-                return Response(200, json={})
-
-            _logger = __import__("logging").getLogger("test")
-            _logger.warning("Unhandled httpx request: %s %s", request.method, url)
-            return Response(404)
-
-    counter = _Counter()
-
-    def _patch_client(original_init, handler):
-        def patched_init(self, **kwargs):
-            kwargs["transport"] = MockTransport(handler)
-            original_init(self, **kwargs)
-
-        return patched_init
-
-    original_async_init = AsyncClient.__init__
-    original_sync_init = Client.__init__
-
-    async_patch = patch.object(AsyncClient, "__init__", _patch_client(original_async_init, counter.handler))
-    sync_patch = patch.object(Client, "__init__", _patch_client(original_sync_init, counter.handler))
-
-    return counter, async_patch, sync_patch
 
 
 class TestBackfillView:
@@ -483,7 +401,7 @@ class TestBackfillView:
             url = "https://www.rightmove.co.uk/properties/999999999"
             view_rows = [self._build_view_row("1 Test St, Test Town, TE1 1ST", url, "")]
             mock_client = self._mock_sheet(view_rows=view_rows)
-            counter, async_patch, sync_patch = _mock_httpx()
+            counter, async_patch, sync_patch = mock_httpx()
             with async_patch, sync_patch, patch("houses.server.get_client", return_value=mock_client):
                 resp = client.post("/backfill-view")
             assert resp.status_code == 200, resp.text
@@ -515,7 +433,7 @@ class TestBackfillView:
             url = "https://www.rightmove.co.uk/properties/888888888"
             view_rows = [self._build_view_row("2 Test St, Test Town, TE1 1ST", url, "")]
             mock_client = self._mock_sheet(view_rows=view_rows)
-            counter, async_patch, sync_patch = _mock_httpx()
+            counter, async_patch, sync_patch = mock_httpx()
             with async_patch, sync_patch, patch("houses.server.get_client", return_value=mock_client):
                 resp = client.post("/backfill-view?dry_run=true")
             assert resp.status_code == 200
@@ -700,7 +618,7 @@ class TestBackfillView:
             view_rows = [self._build_view_row("1 Test Road, TE1 1ST", url, "")]
             mock_client = self._mock_sheet(view_rows=view_rows)
 
-            counter, async_patch, sync_patch = _mock_httpx()
+            counter, async_patch, sync_patch = mock_httpx()
             with async_patch, sync_patch, patch("houses.server.get_client", return_value=mock_client):
                 resp = client.post("/backfill-view")
             assert resp.status_code == 200, resp.text
@@ -733,7 +651,7 @@ class TestBackfillView:
 
             mock_client = self._mock_sheet(view_rows=view_rows, data_rows=[data_row])
 
-            counter, async_patch, sync_patch = _mock_httpx()
+            counter, async_patch, sync_patch = mock_httpx()
             with async_patch, sync_patch, patch("houses.server.get_client", return_value=mock_client):
                 resp = client.post("/backfill-view")
             assert resp.status_code == 200, resp.text
@@ -758,7 +676,7 @@ class TestBackfillView:
         original_id = settings.sheet_id
         settings.sheet_id = "fake-id"
         try:
-            counter, async_patch, sync_patch = _mock_httpx()
+            counter, async_patch, sync_patch = mock_httpx()
             with (
                 async_patch,
                 sync_patch,

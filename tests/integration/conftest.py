@@ -1,11 +1,95 @@
 """Integration test configuration — isolated temp cache, no sheet writes, offline scraper."""
 
 import tempfile
+from unittest.mock import patch
 
 import pytest
+from httpx import AsyncClient, Client, MockTransport, Response
 
 from houses.api_cache import set_cache_dir
 from houses.config import settings
+
+
+def mock_httpx():
+    """Context manager that patches both ``httpx.AsyncClient`` and
+    ``httpx.Client`` with a ``MockTransport`` that returns synthetic
+    responses for every external API the enrichment pipeline calls.
+
+    Yields the handler's call-list so tests can verify which
+    APIs were hit (or not hit).
+    """
+
+    class _Counter:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        def handler(self, request):
+            url = str(request.url)
+            self.calls.append(url)
+
+            # TfL
+            if "tfl.gov.uk/Journey/JourneyResults" in url:
+                return Response(200, json={"journeys": [{"duration": 30, "fare": {"totalCost": 500}}]})
+            # postcodes.io
+            if "api.postcodes.io" in url:
+                return Response(200, json={"status": 200, "result": {"latitude": 51.5, "longitude": -0.1}})
+            # ORS Directions (driving or walking)
+            if "openrouteservice.org/v2/directions" in url:
+                return Response(200, json={"routes": [{"summary": {"distance": 50, "duration": 1800}}]})
+            # ORS Geocode
+            if "openrouteservice.org/geocode" in url:
+                return Response(200, json={"features": [{"geometry": {"coordinates": [-0.1, 51.5]}}]})
+            # Google Maps Geocode
+            if "maps.googleapis.com/maps/api/geocode" in url:
+                return Response(200, json={"results": [{"geometry": {"location": {"lat": 51.5, "lng": -0.1}}}]})
+            # Google Places
+            if "places.googleapis.com" in url:
+                return Response(200, json={"places": []})
+            # Google Routes
+            if "routes.googleapis.com" in url:
+                return Response(200, json={"routes": [{"legs": [{"duration": "1800s"}]}]})
+            # EPC
+            if "get-energy-performance-data" in url:
+                return Response(
+                    200,
+                    json={"data": [{"currentEnergyEfficiencyBand": "C", "registrationDate": "2023-01-01"}]},
+                )
+            # CivAccount
+            if "civaccount.co.uk" in url:
+                return Response(200, json={"band_d_rate": 1500.0})
+            # Nominatim
+            if "nominatim.openstreetmap.org" in url:
+                return Response(200, json=[{"lat": "51.5", "lon": "-0.1"}])
+            # OpenRouter LLM
+            if "openrouter.ai" in url:
+                return Response(200, json={"choices": [{"message": {"content": "A pleasant town."}}]})
+            # Overpass
+            if "overpass-api.de" in url:
+                return Response(200, json={"elements": []})
+            # VOA, council tax, school lookups
+            if "tax.service.gov.uk" in url or "voa" in url.lower() or "get-information-schools" in url:
+                return Response(200, json={})
+
+            logger = __import__("logging").getLogger("test")
+            logger.warning("Unhandled httpx request: %s %s", request.method, url)
+            return Response(404)
+
+    counter = _Counter()
+
+    def _patch_client(original_init, handler):
+        def patched_init(self, **kwargs):
+            kwargs["transport"] = MockTransport(handler)
+            original_init(self, **kwargs)
+
+        return patched_init
+
+    original_async_init = AsyncClient.__init__
+    original_sync_init = Client.__init__
+
+    async_patch = patch.object(AsyncClient, "__init__", _patch_client(original_async_init, counter.handler))
+    sync_patch = patch.object(Client, "__init__", _patch_client(original_sync_init, counter.handler))
+
+    return counter, async_patch, sync_patch
 
 
 @pytest.fixture(autouse=True)
