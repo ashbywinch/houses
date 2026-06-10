@@ -11,7 +11,6 @@ import contextlib
 import csv
 import json
 import logging
-import math
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -20,6 +19,7 @@ import httpx
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.config import settings
+from houses.geo import GeoPoint
 from houses.models import CommuteBreakdown, PetrolCost, SchoolInfo, TransitInfo
 from houses.retry import retry_async
 
@@ -480,10 +480,11 @@ def _nearest_bus_zone(
     radius_km: float = 0.05,
 ) -> str | None:
     """Find the zone of the nearest BODS stop within ``radius_km`` of (lat, lon)."""
+    origin = GeoPoint(lat, lon)
     best_dist = float("inf")
     best_zone = None
     for sc in stop_coords:
-        d = _haversine_km(lat, lon, sc["lat"], sc["lon"])
+        d = origin.distance_km_to(GeoPoint(sc["lat"], sc["lon"]))
         if d < best_dist:
             best_dist = d
             best_zone = sc.get("zone")
@@ -499,10 +500,11 @@ def _nearby_bus_zones(
     radius_km: float = 0.2,
 ) -> list[str]:
     """All distinct zone IDs within ``radius_km`` of (lat, lon), ordered by closest stop first."""
+    origin = GeoPoint(lat, lon)
     seen: set[str] = set()
     result: list[str] = []
-    for sc in sorted(stop_coords, key=lambda c: _haversine_km(lat, lon, c["lat"], c["lon"])):
-        d = _haversine_km(lat, lon, sc["lat"], sc["lon"])
+    for sc in sorted(stop_coords, key=lambda c: origin.distance_km_to(GeoPoint(c["lat"], c["lon"]))):
+        d = origin.distance_km_to(GeoPoint(sc["lat"], sc["lon"]))
         if d > radius_km:
             break
         z = sc.get("zone", "")
@@ -1463,14 +1465,6 @@ async def _geocode(postcode: str) -> tuple[float, float] | None:
             return None
 
 
-def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    r = 6371.0
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
-    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-
 def _load_schools() -> list[dict]:
     if not SCHOOLS_CSV_PATH.is_file():
         logger.warning("Schools CSV not found at %s", SCHOOLS_CSV_PATH)
@@ -1556,7 +1550,7 @@ async def _find_nearest_boys(
             if school_coords is None:
                 continue
 
-        dist = _haversine_km(origin_lat, origin_lon, school_coords[0], school_coords[1])
+        dist = GeoPoint(origin_lat, origin_lon).distance_km_to(GeoPoint(school_coords[0], school_coords[1]))
         if dist <= settings.school_search_radius_km:
             candidates.append((dist, school))
 

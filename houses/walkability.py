@@ -10,20 +10,10 @@ import httpx
 
 from houses.api_cache import cached_async_client, with_cache
 from houses.config import settings
+from houses.geo import GeoPoint
 from houses.retry import retry_async
 
 logger = logging.getLogger(__name__)
-
-
-def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Great-circle distance in km between two lat/lng points."""
-    import math
-
-    r = 6371.0
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
-    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 ORS_WALKING_URL = "https://api.openrouteservice.org/v2/directions/foot-walking"
@@ -292,6 +282,7 @@ def _format_places(data: dict, lat: float, lng: float) -> str:
     google_places = data.get("places", [])
     if not google_places:
         return ""
+    origin = GeoPoint(lat, lng)
     hits = []
     for p in google_places:
         p_types = set(p.get("types", []))
@@ -309,7 +300,7 @@ def _format_places(data: dict, lat: float, lng: float) -> str:
         place_lat = location.get("latitude")
         place_lng = location.get("longitude")
         if place_lat is not None and place_lng is not None:
-            dist_km = _haversine_km(lat, lng, place_lat, place_lng)
+            dist_km = origin.distance_km_to(GeoPoint(place_lat, place_lng))
             walk_min = max(1, round(dist_km / 5 * 60))
             hits.append((walk_min, f"{name} ({walk_min}m)"))
         else:
@@ -321,6 +312,7 @@ def _format_places(data: dict, lat: float, lng: float) -> str:
 def _format_overpass(data: dict, lat: float, lng: float) -> str:
     """Format Overpass API response into a human-readable string."""
     elements = data.get("elements", [])
+    origin = GeoPoint(lat, lng)
     hits = []
     for e in elements:
         tags = e.get("tags", {})
@@ -330,7 +322,7 @@ def _format_overpass(data: dict, lat: float, lng: float) -> str:
         e_lat = e.get("lat") or (e.get("center") or {}).get("lat")
         e_lng = e.get("lon") or (e.get("center") or {}).get("lon")
         if e_lat is not None and e_lng is not None:
-            dist_km = _haversine_km(lat, lng, e_lat, e_lng)
+            dist_km = origin.distance_km_to(GeoPoint(e_lat, e_lng))
             walk_min = max(1, round(dist_km / 5 * 60))
             hits.append((walk_min, f"{name} ({walk_min}m)"))
         else:

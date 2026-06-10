@@ -1,8 +1,9 @@
 import contextlib
 import csv
 import logging
-import math
 from pathlib import Path
+
+from houses.geo import GeoPoint
 
 logger = logging.getLogger(__name__)
 
@@ -18,22 +19,15 @@ def _load_stations() -> list[dict]:
         return list(csv.DictReader(f))
 
 
-def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    r = 6371.0
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
-    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-
 def nearest_station(lat: float, lng: float) -> dict | None:
     stations = _load_stations()
     if not stations:
         return None
+    origin = GeoPoint(lat, lng)
     best = None
     best_dist = float("inf")
     for s in stations:
-        d = _haversine_km(lat, lng, float(s["lat"]), float(s["long"]))
+        d = origin.distance_km_to(GeoPoint(float(s["lat"]), float(s["long"])))
         if d < best_dist:
             best_dist = d
             best = s
