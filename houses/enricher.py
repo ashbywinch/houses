@@ -401,10 +401,12 @@ def _lookup_bus_roundtrip_cost(
 
     # Token-set fuzzy fallback: normalise punctuation, strip area prefix, then compare token sets
     if dep_zone is None or arr_zone is None:
+
         def _norm(s: str) -> set[str]:
             core = s.split(", ", 1)[-1]
             no_punct = re.sub(r"[.,;:'\"!?()]", "", core)
             return set(no_punct.split())
+
         dep_tokens = _norm(dep_norm)
         arr_tokens = _norm(arr_norm)
         for op_key, op_data in fares_data.items():
@@ -979,7 +981,8 @@ async def _compute_google_transit(origin: str, destination: str) -> TransitInfo 
 
     steps = leg.get("steps", [])
     bus_legs = [
-        s for s in steps
+        s
+        for s in steps
         if s.get("travelMode") == "TRANSIT"
         and s.get("transitDetails", {}).get("transitLine", {}).get("vehicle", {}).get("type") == "BUS"
     ]
@@ -1012,11 +1015,13 @@ async def _compute_google_transit(origin: str, destination: str) -> TransitInfo 
                 known_arr = stop_zones.get(arr_name_norm)
                 for radius in (0.2, 0.5, 1.0, 2.0):
                     dep_zones: list[str] = (
-                        [known_dep] if known_dep
+                        [known_dep]
+                        if known_dep
                         else _nearby_bus_zones(dep_point["lat"], dep_point["lon"], stop_coords, radius_km=radius)
                     )
                     arr_zones: list[str] = (
-                        [known_arr] if known_arr
+                        [known_arr]
+                        if known_arr
                         else _nearby_bus_zones(arr_point["lat"], arr_point["lon"], stop_coords, radius_km=radius)
                     )
                     for dep_zone in dep_zones:
@@ -1025,8 +1030,13 @@ async def _compute_google_transit(origin: str, destination: str) -> TransitInfo 
                             fares = zone_fares.get(zk) or zone_fares.get(f"{arr_zone}:{dep_zone}")
                             if fares:
                                 leg_cost = _compute_bus_daily_cost(fares, data_all.get("_meta"))
-                                logger.info("Google bus fare (radius=%dm): %s -> %s = %s",
-                                            int(radius * 1000), dep_zone, arr_zone, leg_cost)
+                                logger.info(
+                                    "Google bus fare (radius=%dm): %s -> %s = %s",
+                                    int(radius * 1000),
+                                    dep_zone,
+                                    arr_zone,
+                                    leg_cost,
+                                )
                                 break
                         if leg_cost is not None:
                             break
@@ -1094,16 +1104,19 @@ async def compute_lorena_commute(property_postcode: str) -> TransitInfo:
                         new_cost = google_route.bus_cost_gbp
                     logger.info(
                         "Google bus overlay for %s: estimates bus %dm saves %dm over walk %dm, total=£%s",
-                        property_postcode, bus_time, savings, walk_to_station, new_cost,
+                        property_postcode,
+                        bus_time,
+                        savings,
+                        walk_to_station,
+                        new_cost,
                     )
                     after_walk = no_bus.route_summary
                     walk_m = re.search(r"walk.*?\(\d+m\).*?\u2192\s*", after_walk)
                     if walk_m:
-                        after_walk = after_walk[walk_m.end():]
+                        after_walk = after_walk[walk_m.end() :]
                     walk_bus = max(3, bus_time - 5)
                     route_summary = (
-                        f"walk to bus stop (~{walk_bus}m) \u2192 bus to station ({bus_time}m) \u2192 "
-                        f"{after_walk}"
+                        f"walk to bus stop (~{walk_bus}m) \u2192 bus to station ({bus_time}m) \u2192 {after_walk}"
                     )
                     result = TransitInfo(
                         destination_label="Lorena \u2014 Aldgate / City of London",

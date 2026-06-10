@@ -71,6 +71,8 @@ class _TestRecord:
     lorena_route: str = ""
     status: str = ""
     ashby_works_estimate: float = 0.0
+    approx_latitude: float = 0.0
+    approx_longitude: float = 0.0
 
     def to_data_row(self):
         ci = col_index
@@ -109,6 +111,8 @@ class _TestRecord:
         r[ci("Secondary Bus Route")] = self.bus_route
         r[ci("Council Tax Band")] = self.council_tax_band
         r[ci("Council Tax Cost (£)")] = str(self.council_tax_cost)
+        r[ci("Approx Latitude (est)")] = str(self.approx_latitude) if self.approx_latitude else ""
+        r[ci("Approx Longitude (est)")] = str(self.approx_longitude) if self.approx_longitude else ""
         return r
 
 
@@ -149,6 +153,8 @@ RECORDS = [
         council_tax_band="D",
         council_tax_cost=1800.00,
         ashby_works_estimate=5000,
+        approx_latitude=51.5,
+        approx_longitude=-0.1,
     ),
     _TestRecord(
         url="https://www.rightmove.co.uk/properties/22222222",
@@ -186,6 +192,8 @@ RECORDS = [
         bus_route="Bus 202",
         council_tax_band="E",
         council_tax_cost=2200.00,
+        approx_latitude=51.6,
+        approx_longitude=-0.2,
     ),
 ]
 
@@ -472,8 +480,8 @@ class TestViewFormulasOnTestSheet:
         row_data = sheet_data.get("data", [{}])[0].get("rowData", [{}])[0]
         cell_values = row_data.get("values", [])
 
-        # Zone boundary columns (last col of each zone): E=4, N=13, Y=24, AF=31
-        boundary_cols = {4, 13, 24, 31}
+        # Zone boundary columns (last col of each zone): F=5, O=14, Z=25, AG=32
+        boundary_cols = {5, 14, 25, 32}
         for col_idx, cell in enumerate(cell_values):
             if col_idx not in boundary_cols:
                 continue
@@ -493,7 +501,7 @@ class TestViewFormulasOnTestSheet:
             if sheet["properties"]["sheetId"] == sid:
                 groups = sheet.get("columnGroups", [])
                 # Must have exactly 5 independent groups — no merged [0,38)
-                zone_ranges = {(0, 5), (6, 14), (15, 25), (26, 32), (33, 38)}
+                zone_ranges = {(0, 6), (7, 15), (16, 26), (27, 33), (34, 41)}
                 found_zones = set()
                 for g in groups:
                     r = g["range"]

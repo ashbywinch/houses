@@ -66,14 +66,17 @@ COLUMN_HEADERS: list[str] = [
     "Secondary Bus Route",  # AK (36)
     "Approx Latitude (est)",  # AL (37)
     "Approx Longitude (est)",  # AM (38)
-    "Approx Station CRS",  # AN (39)
-    "Approx Station Name",  # AO (40)
+    "Best Latitude",  # AN (39) — formula: Actual if set, else Approx
+    "Best Longitude",  # AO (40) — formula: Actual if set, else Approx
+    "Map URL",  # AP (41) — formula: Google Maps link from Best Lat/Lng
+    "Approx Station CRS",  # AQ (42)
+    "Approx Station Name",  # AR (43)
     # Formula columns (server never writes these — populated by Google Sheets formulas)
-    "Stamp Duty (£)",  # AP (41)
-    "Net Ashby Contribution (£)",  # AQ (42)
-    "Mortgage Required (£)",  # AR (43)
-    "Monthly Mortgage Payment (£)",  # AS (44)
-    "Yearly Sinking Fund (£)",  # AT (45)
+    "Stamp Duty (£)",  # AS (44)
+    "Net Ashby Contribution (£)",  # AT (45)
+    "Mortgage Required (£)",  # AU (46)
+    "Monthly Mortgage Payment (£)",  # AV (47)
+    "Yearly Sinking Fund (£)",  # AW (48)
 ]
 
 # Conditional formatting colors (RGB 0-1 floats for Google Sheets API)
@@ -87,7 +90,8 @@ GREY_TEXT = {"red": 0.6, "green": 0.6, "blue": 0.6}
 VIEW_HEADERS: list[str] = [
     "Listing Address",  # A  (0)
     "Rightmove Link",  # B  (1)
-    "Rightmove ID",  # C  (2)
+    "Map",  # C  (2)
+    "Rightmove ID",  # D  (3)
     "Purchase Cost (£)",  # D  (3)
     "EPC Rating",  # E  (4)
     "",  # F  (5)  gap column
@@ -121,8 +125,10 @@ VIEW_HEADERS: list[str] = [
     "Ashby Works Estimate (£)",  # AH (33)
     "Group Notes / WhatsApp",  # AI (34)
     "Ashby comments",  # AJ (35)
-    "Status",  # AK (36)
-    "Status Reason",  # AL (37)
+    "Design Needed",  # AK (36) — yes/no dropdown
+    "Planning Needed",  # AL (37) — yes/no/yikes dropdown
+    "Status",  # AM (38)
+    "Status Reason",  # AN (39)
 ]
 
 # View tab columns that are manual (user-entered), never written by formulas
@@ -133,6 +139,8 @@ VIEW_MANUAL_COLUMNS: frozenset[str] = frozenset(
         "Ashby Works Estimate (£)",
         "Group Notes / WhatsApp",
         "Ashby comments",
+        "Design Needed",
+        "Planning Needed",
         "Status",
         "Status Reason",
     }
@@ -157,6 +165,9 @@ _FORMULA_COLUMNS: frozenset[str] = frozenset(
         "Mortgage Required (£)",
         "Monthly Mortgage Payment (£)",
         "Yearly Sinking Fund (£)",
+        "Best Latitude",
+        "Best Longitude",
+        "Map URL",
     }
 )
 
@@ -322,6 +333,7 @@ def ensure_constants_tab(spreadsheet: gspread.Spreadsheet) -> gspread.Worksheet:
 
 VIEW_FORMULA_COLS: dict[str, str] = {
     "listing address": f"=IFNA(INDEX({_nr('Address')},ROW()),)",
+    "map": f'=LET(url,IFNA(INDEX({_nr("Map URL")},ROW()),),IF(url="","",HYPERLINK(url,"Map")))',
     "rightmove id": f"=IFNA(INDEX({_nr('Rightmove ID')},ROW()),)",
     "purchase cost (£)": f"=IFNA(INDEX({_nr('Price (£)')},ROW()),)",
     "epc rating": f"=IFNA(INDEX({_nr('EPC Rating')},ROW()),)",
@@ -360,6 +372,9 @@ DATA_FORMULA_COLS: dict[str, str] = {
     "mortgage required (£)": f"=IFNA(INDEX({_nr('Price (£)')},ROW()),)-Const_Deposit-IFNA(INDEX({_nr('Net Ashby Contribution (£)')},ROW()),)",  # noqa: E501
     "monthly mortgage payment (£)": f'=IFNA(IF(AND(INDEX(View_AshbyWorksEstimate,ROW())="",INDEX(View_Status,ROW())<>"Current"),,PMT(Const_MortgageRate/12,Const_MortgageTermYears*12,-IFNA(INDEX({_nr("Mortgage Required (£)")},ROW()),0))),)',  # noqa: E501
     "yearly sinking fund (£)": f"=IFNA(INDEX({_nr('Price (£)')},ROW())*Const_SinkingFundRate,)",
+    "best latitude": f'=IFNA(LET(a,IFNA(INDEX({_nr("Actual Latitude")},ROW()),),IF(a<>"",a,IFNA(INDEX({_nr("Approx Latitude (est)")},ROW()),))),)',  # noqa: E501
+    "best longitude": f'=IFNA(LET(a,IFNA(INDEX({_nr("Actual Longitude")},ROW()),),IF(a<>"",a,IFNA(INDEX({_nr("Approx Longitude (est)")},ROW()),))),)',  # noqa: E501
+    "map url": f'=LET(lat,IFNA(INDEX({_nr("Best Latitude")},ROW()),0),lng,IFNA(INDEX({_nr("Best Longitude")},ROW()),0),IF(OR(lat=0,lng=0),"","https://www.google.com/maps?q="&lat&","&lng&"&t=k"))',  # noqa: E501
 }
 
 
@@ -605,6 +620,69 @@ def _add_status_data_validation(fmt_requests: list, sid: int, header_lookup: dic
         )
 
 
+def _add_design_data_validation(fmt_requests: list, sid: int, header_lookup: dict):
+    idx = header_lookup.get("design needed")
+    if idx is not None:
+        fmt_requests.append(
+            {
+                "setDataValidation": {
+                    "range": {"sheetId": sid, "startColumnIndex": idx, "endColumnIndex": idx + 1, "startRowIndex": 1},
+                    "rule": {
+                        "condition": {
+                            "type": "ONE_OF_LIST",
+                            "values": [{"userEnteredValue": "Yes"}, {"userEnteredValue": "No"}],
+                        },  # noqa: E501
+                        "showCustomUi": True,
+                        "strict": "true",
+                    },
+                }
+            }
+        )
+
+
+def _add_planning_data_validation(fmt_requests: list, sid: int, header_lookup: dict):
+    idx = header_lookup.get("planning needed")
+    if idx is not None:
+        fmt_requests.append(
+            {
+                "setDataValidation": {
+                    "range": {"sheetId": sid, "startColumnIndex": idx, "endColumnIndex": idx + 1, "startRowIndex": 1},
+                    "rule": {
+                        "condition": {
+                            "type": "ONE_OF_LIST",
+                            "values": [
+                                {"userEnteredValue": "Yes"},
+                                {"userEnteredValue": "No"},
+                                {"userEnteredValue": "Yikes"},
+                            ],
+                        },  # noqa: E501
+                        "showCustomUi": True,
+                        "strict": "true",
+                    },
+                }
+            }
+        )
+
+
+def _add_design_color_rules(fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn):
+    idx = header_lookup.get("design needed")
+    if idx is None:
+        return
+    letter = col_letter_fn(idx)
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, "design needed", f'=${letter}2="Yes"', ORANGE_BG)
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, "design needed", f'=${letter}2="No"', GREEN_BG)
+
+
+def _add_planning_color_rules(fmt_requests: list, sid: int, header_lookup: dict, col_letter_fn):
+    idx = header_lookup.get("planning needed")
+    if idx is None:
+        return
+    letter = col_letter_fn(idx)
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, "planning needed", f'=${letter}2="Yes"', ORANGE_BG)
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, "planning needed", f'=${letter}2="No"', GREEN_BG)
+    _add_rule(fmt_requests, sid, header_lookup, col_letter_fn, "planning needed", f'=${letter}2="Yikes"', RED_BG)
+
+
 def _add_color_rules(fmt_requests: list, sid: int, headers: list[str]) -> None:
     """Orchestrate conditional formatting rules and Status column validation."""
     header_lookup = {h.strip().lower(): i for i, h in enumerate(headers)}
@@ -615,8 +693,12 @@ def _add_color_rules(fmt_requests: list, sid: int, headers: list[str]) -> None:
     _add_walk_time_rules(fmt_requests, sid, header_lookup, col_letter_fn)
     _add_ofsted_rules(fmt_requests, sid, header_lookup, col_letter_fn)
     _add_inspection_year_rules(fmt_requests, sid, header_lookup, col_letter_fn)
+    _add_design_color_rules(fmt_requests, sid, header_lookup, col_letter_fn)
+    _add_planning_color_rules(fmt_requests, sid, header_lookup, col_letter_fn)
     _add_grey_text_row_rule(fmt_requests, sid, header_lookup, col_letter_fn, len(headers))
     _add_status_data_validation(fmt_requests, sid, header_lookup)
+    _add_design_data_validation(fmt_requests, sid, header_lookup)
+    _add_planning_data_validation(fmt_requests, sid, header_lookup)
 
 
 def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
@@ -805,7 +887,7 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
         spreadsheet.batch_update({"requests": extra_requests})
 
     # Visual zone separators — thick right borders between column groups
-    zone_boundaries = [4, 13, 24, 31]  # last column index of each zone (pre-gap)
+    zone_boundaries = [5, 14, 25, 32]  # last column index of each zone (pre-gap)
     border_requests: list = []
     for col in zone_boundaries:
         border_requests.append(
@@ -857,13 +939,13 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
         except Exception as exc:
             logger.warning("Failed to clear column groups: %s", exc)
 
-    gap_cols = {5, 14, 25, 32}
+    gap_cols = {6, 15, 26, 33}
     zones = [
-        (0, 5),
-        (6, 14),
-        (15, 25),
-        (26, 32),
-        (33, 38),
+        (0, 6),
+        (7, 15),
+        (16, 26),
+        (27, 33),
+        (34, 41),
     ]
     for start, end in zones:
         border_requests.append(
@@ -931,10 +1013,13 @@ def ensure_named_ranges(spreadsheet: gspread.Spreadsheet) -> None:
     sid_view = ws_view._properties["sheetId"]
     for name, col_idx in [
         ("View_RightmoveLink", 1),
-        ("View_RightmoveID", 2),
+        ("View_Map", 2),
+        ("View_RightmoveID", 3),
         ("View_ListingAddress", 0),
-        ("View_AshbyWorksEstimate", 33),
-        ("View_Status", 36),
+        ("View_AshbyWorksEstimate", 34),
+        ("View_DesignNeeded", 37),
+        ("View_PlanningNeeded", 38),
+        ("View_Status", 39),
     ]:
         current_names.add(name)
         range_spec = {"sheetId": sid_view, "startColumnIndex": col_idx, "endColumnIndex": col_idx + 1}
