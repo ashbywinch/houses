@@ -166,10 +166,7 @@ def _match_cert(certs: list[dict], building_id: str) -> str:
     candidates = certs
     if building_id:
         norm_id = _normalise(building_id)
-        candidates = [
-            c for c in certs
-            if norm_id in _normalise(c.get("addressLine1", ""))
-        ]
+        candidates = [c for c in certs if norm_id in _normalise(c.get("addressLine1", ""))]
         if not candidates:
             return ""
 

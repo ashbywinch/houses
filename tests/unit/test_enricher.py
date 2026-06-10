@@ -12,7 +12,6 @@ from houses.enricher import (
     _boys_eligible,
     _compute_petrol_from_distance_km,
     _format_route_summary,
-    _haversine_km,
     _next_weekday_date_params,
     _phase_filter,
     _pick_best_journey,
@@ -21,6 +20,7 @@ from houses.enricher import (
     _shorten_station,
     compute_commute_breakdown,
 )
+from houses.geo import GeoPoint
 from houses.models import PetrolCost, TransitInfo
 
 FIXTURES_DIR = Path("tests/fixtures/parking_tariffs")
@@ -69,17 +69,17 @@ class TestBoysEligible:
 class TestHaversine:
     def test_same_point_returns_zero(self):
         # Same lat/lng should be 0 km
-        dist = _haversine_km(51.5, -0.13, 51.5, -0.13)
+        dist = GeoPoint(51.5, -0.13).distance_km_to(GeoPoint(51.5, -0.13))
         assert dist == 0.0
 
     def test_known_distance(self):
         # London to Brighton ~75km
-        dist = _haversine_km(51.5, -0.13, 50.83, -0.14)
+        dist = GeoPoint(51.5, -0.13).distance_km_to(GeoPoint(50.83, -0.14))
         assert 70 < dist < 80
 
     def test_symmetric(self):
-        d1 = _haversine_km(51.5, -0.13, 52.0, 0.0)
-        d2 = _haversine_km(52.0, 0.0, 51.5, -0.13)
+        d1 = GeoPoint(51.5, -0.13).distance_km_to(GeoPoint(52.0, 0.0))
+        d2 = GeoPoint(52.0, 0.0).distance_km_to(GeoPoint(51.5, -0.13))
         assert abs(d1 - d2) < 0.001
 
 
