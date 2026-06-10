@@ -18,6 +18,7 @@ from pathlib import Path
 import httpx
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
+from houses.attempt import Attempt
 from houses.config import settings
 from houses.geo import GeoPoint
 from houses.models import CommuteBreakdown, PetrolCost, SchoolInfo, TransitInfo
@@ -628,7 +629,7 @@ async def _get_drive_minutes(origin_postcode: str, station_name: str) -> int | N
     Looks up station coordinates from ``data/stations.csv`` first (by name),
     falling back to geocoding the station name if not found.
     """
-    origin_coords = await _geocode(origin_postcode)
+    origin_coords = (await geocode(origin_postcode)).value_or_none()
     if origin_coords is None:
         origin_coords = await _geocode_address(origin_postcode)
     if origin_coords is None:
@@ -800,7 +801,7 @@ async def compute_transit(
                 # then fall back to postcode/outcode center
                 coords = await _geocode_address(origin_postcode)
                 if coords is None and pc:
-                    coords = await _geocode(pc)
+                    coords = (await geocode(pc)).value_or_none()
                 if coords:
                     latlng = f"{coords[0]},{coords[1]}"
                     url2 = f"{TFL_JOURNEY_URL}/{latlng}/to/{destination_postcode}"
@@ -1181,11 +1182,11 @@ async def compute_petrol_cost(origin_postcode: str) -> PetrolCost:
     try:
         # Use postcodes.io first (more reliable for UK), fall back to ORS
         origin_coords = None
-        coords = await _geocode(origin_postcode)
+        coords = (await geocode(origin_postcode)).value_or_none()
         if coords is None:
             coords = await _geocode_address(origin_postcode)
         if coords is not None:
-            # _geocode returns (lat, lng), ORS needs [lng, lat]
+            # geocode returns (lat, lng), ORS needs [lng, lat]
             origin_coords = [coords[1], coords[0]]
 
         if origin_coords is None:
@@ -1193,11 +1194,11 @@ async def compute_petrol_cost(origin_postcode: str) -> PetrolCost:
             return PetrolCost()
 
         # Geocode Bracknell via postcodes.io (more reliable), fall back to ORS
-        bracknell_coords = await _geocode(settings.bracknell_postcode)
+        bracknell_coords = (await geocode(settings.bracknell_postcode)).value_or_none()
         if bracknell_coords is None:
             logger.warning("Could not geocode Bracknell")
             return PetrolCost()
-        # _geocode returns (lat, lng), ORS needs [lng, lat]
+        # geocode returns (lat, lng), ORS needs [lng, lat]
         dest_coords = [bracknell_coords[1], bracknell_coords[0]]
 
         async with cached_async_client(timeout=15.0) as client:
@@ -1337,9 +1338,9 @@ async def _geocode_address(address: str) -> tuple[float, float] | None:
     # Try Google Maps Geocoding first (best accuracy for UK streets)
     google_key = settings.google_maps_api_key
     if google_key:
-        google_geocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
+        googlegeocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
         params = {"address": f"{address}, UK", "key": google_key}
-        cached = get_cached("GET", google_geocode_url, params, None)
+        cached = get_cached("GET", googlegeocode_url, params, None)
         if cached is not None:
             data = cached
             if data.get("status") == "OK" and data.get("results"):
@@ -1351,12 +1352,12 @@ async def _geocode_address(address: str) -> tuple[float, float] | None:
             try:
                 async with cached_async_client(timeout=10.0) as client:
                     resp = await client.get(
-                        google_geocode_url,
+                        googlegeocode_url,
                         params=params,
                     )
                     resp.raise_for_status()
                     data = resp.json()
-                    set_cached("GET", google_geocode_url, params, None, data)
+                    set_cached("GET", googlegeocode_url, params, None, data)
                     if data.get("status") == "OK" and data.get("results"):
                         loc = data["results"][0]["geometry"]["location"]
                         lat, lng = loc["lat"], loc["lng"]
@@ -1412,16 +1413,21 @@ async def _geocode_address(address: str) -> tuple[float, float] | None:
     return result
 
 
-async def _geocode(postcode: str) -> tuple[float, float] | None:
+async def geocode(postcode: str) -> Attempt[tuple[float, float]]:
     """Geocode a UK postcode via postcodes.io with in-memory caching.
 
     Supports both full postcodes ("SL6 1AA") and outcodes ("SL6").
+    Returns ``Attempt.succeeded((lat, lng), "postcodes.io")`` on success,
+    or ``Attempt.impossible(...)`` if the postcode could not be resolved.
     """
     key = postcode.strip().upper()
     if not key:
-        return None
+        return Attempt.impossible("geocode", "empty postcode")
     if key in _geo_cache:
-        return _geo_cache[key]
+        cached = _geo_cache[key]
+        if cached is not None:
+            return Attempt.succeeded(cached, "geocode")
+        return Attempt.impossible("geocode", "postcode not found (cached)")
 
     is_outcode = bool(_OUTCODE_RE.match(key))
 
@@ -1431,10 +1437,10 @@ async def _geocode(postcode: str) -> tuple[float, float] | None:
         data = cached
         result = data.get("result")
         if not result:
-            return None
+            return Attempt.impossible("postcodes.io", "postcode not found")
         latlng = result["latitude"], result["longitude"]
         _geo_cache[key] = latlng
-        return latlng
+        return Attempt.succeeded(latlng, "postcodes.io")
     else:
         try:
             async with cached_async_client(timeout=10.0) as client:
@@ -1449,20 +1455,20 @@ async def _geocode(postcode: str) -> tuple[float, float] | None:
                 set_cached("GET", url, None, None, data)
                 result = data.get("result")
                 if not result:
-                    return None
+                    return Attempt.impossible("postcodes.io", "postcode not found")
                 latlng = result["latitude"], result["longitude"]
                 _geo_cache[key] = latlng
-                return latlng
+                return Attempt.succeeded(latlng, "postcodes.io")
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 _geo_cache[key] = None
                 set_cached("GET", url, None, None, {})  # cache empty dict for 404
-            else:
-                logger.warning("Geocode HTTP error for %s: %s", key, e)
-            return None
-        except Exception:
+                return Attempt.impossible("postcodes.io", "postcode not found (404)")
+            logger.warning("Geocode HTTP error for %s: %s", key, e)
+            return Attempt.impossible("postcodes.io", f"HTTP {e.response.status_code}", e)
+        except Exception as exc:
             logger.exception("Failed to geocode postcode: %s", key)
-            return None
+            return Attempt.impossible("geocode", "unexpected error", exc)
 
 
 def _load_schools() -> list[dict]:
@@ -1526,7 +1532,7 @@ async def _find_nearest_boys(
     if not schools:
         return None
 
-    property_coords = await _geocode(postcode)
+    property_coords = (await geocode(postcode)).value_or_none()
     if property_coords is None and address:
         property_coords = await _geocode_address(address)
     if property_coords is None:
@@ -1546,7 +1552,7 @@ async def _find_nearest_boys(
             school_postcode = school.get(COL_POSTCODE, "")
             if not school_postcode:
                 continue
-            school_coords = await _geocode(school_postcode)
+            school_coords = (await geocode(school_postcode)).value_or_none()
             if school_coords is None:
                 continue
 
