@@ -493,7 +493,7 @@ async def backfill_view(
                         url=url,
                         address=addr,
                         postcode=pc,
-                        lookup=addr if _is_outcode(pc) else pc,
+                    lookup=addr,
                         bedrooms=None,
                         price=None,
                         enabled=set(),

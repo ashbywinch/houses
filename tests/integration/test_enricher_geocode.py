@@ -84,3 +84,53 @@ async def test_geocode_normalises_case():
     """Postcode should be uppercased before lookup."""
     result = await geocode("rg14 1aa")
     assert result.value_or_none() == GeoPoint(51.5, -0.1)
+
+
+class TestPropertyLocationOutcode:
+    """Regression: ``PropertyLocation`` must never receive an outcode as
+    ``address``.  The ORS Pelias geocoding API treats "SL6" as a
+    free-text placename and returns coordinates ~139 km from the actual
+    location.  Callers must always pass a full street address so the
+    geocoder finds the correct property.
+
+    This test verifies that when the full address is provided the
+    coordinates resolve within a sensible radius of the expected area.
+    """
+
+    @pytest.mark.asyncio
+    async def test_full_address_resolves_to_sensible_area(self, _mock_http_requests):
+        """Full address should resolve to coordinates near the property."""
+        from houses.location import PropertyLocation
+        from houses.geo import GeoPoint
+
+        # Register a custom handler returning Maidenhead coordinates
+        # for the full street address.
+        _mock_http_requests.add_rule(
+            lambda url: "Shoppenhangers" in str(url) and "geocode" in str(url),
+            lambda request: Response(
+                200,
+                json={
+                    "features": [{
+                        "geometry": {"coordinates": [-0.73, 51.52]},
+                        "properties": {"label": "Shoppenhangers Road, Maidenhead, UK"},
+                    }]
+                },
+            ),
+        )
+
+        loc = PropertyLocation(
+            postcode="SL6",
+            address="Shoppenhangers Road, Maidenhead, SL6",
+        )
+        loc = await loc.resolve()
+        coords = loc.coordinates.value_or_none()
+        assert coords is not None
+
+        maidenhead = GeoPoint(51.52, -0.73)
+        dist = maidenhead.distance_km_to(coords)
+        assert dist < 5, (
+            f"Full address resolved to ({coords.lat:.4f}, {coords.lon:.4f}), "
+            f"{dist:.0f} km from Maidenhead — should be < 5 km. "
+            f"This suggests an outcode was used instead of the full address, "
+            f"which would cause ORS Pelias to misinterpret it as a placename."
+        )
