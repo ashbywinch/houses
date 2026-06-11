@@ -11,6 +11,7 @@ import logging
 import re
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
+from houses.attempt import Attempt
 from houses.config import settings
 
 logger = logging.getLogger(__name__)
@@ -84,8 +85,9 @@ async def lookup_epc(postcode: str, address: str = "") -> str:
 
     When ``address`` is provided, filters the API results to match
     the building identifier (number or name) against ``addressLine1``
-    in each certificate. Only returns a band if exactly one certificate
-    matches.
+    in each certificate. Returns ``""`` when the address is ambiguous
+    (matches multiple properties), no certificate is found, or the API
+    fails — the underlying ``_match_cert`` carries the specific reason.
     """
     if not settings.epc_bearer_token:
         return ""
@@ -100,7 +102,10 @@ async def lookup_epc(postcode: str, address: str = "") -> str:
     cached = get_cached("GET", EPC_SEARCH_URL, params)
     if cached is not None:
         certs = cached.get("data", [])
-        return _match_cert(certs, building_id)
+        result = _match_cert(certs, building_id)
+        if result.is_impossible:
+            logger.debug("EPC: %s for %s", result.reason, postcode)
+        return result.value_or("")
 
     try:
         async with cached_async_client(timeout=10.0) as client:
@@ -119,7 +124,10 @@ async def lookup_epc(postcode: str, address: str = "") -> str:
             data = resp.json()
             set_cached("GET", EPC_SEARCH_URL, params, None, data)
             certs = data.get("data", [])
-            return _match_cert(certs, building_id)
+            result = _match_cert(certs, building_id)
+            if result.is_impossible:
+                logger.debug("EPC: %s for %s", result.reason, postcode)
+            return result.value_or("")
 
     except Exception as e:
         logger.warning("EPC lookup failed for %s: %s", postcode, e)
@@ -158,18 +166,32 @@ def _should_lookup_epc(address: str) -> tuple[bool, str]:
     return True, _extract_building_id(first)
 
 
-def _match_cert(certs: list[dict], building_id: str) -> str:
-    """Find the most recent certificate, optionally matching the building identifier."""
+def _match_cert(certs: list[dict], building_id: str) -> Attempt[str]:
+    """Find the most recent certificate, optionally matching the building identifier.
+
+    When *building_id* is provided, returns the band from the most recent
+    certificate if **all** matching candidates are for the **same** address.
+    If multiple different addresses match (ambiguous — e.g. "High Street"
+    could be any of several buildings), returns a failed Attempt with a
+    descriptive reason.
+    """
     if not certs:
-        return ""
+        return Attempt.impossible("epc", "no certificates found")
 
     candidates = certs
     if building_id:
         norm_id = _normalise(building_id)
         candidates = [c for c in certs if norm_id in _normalise(c.get("addressLine1", ""))]
         if not candidates:
-            return ""
+            return Attempt.impossible("epc", "no matching certificate for this address")
+        # Ambiguity check: more than one distinct address matches
+        unique_addresses = {c.get("addressLine1", "") for c in candidates}
+        if len(unique_addresses) > 1:
+            return Attempt.impossible("epc", "address matched multiple properties")
 
     candidates.sort(key=lambda c: c.get("registrationDate", ""), reverse=True)
     band = candidates[0].get("currentEnergyEfficiencyBand", "")
-    return band.strip() if band else ""
+    raw = band.strip() if band else ""
+    if not raw:
+        return Attempt.impossible("epc", "certificate has no energy band")
+    return Attempt.succeeded(raw, "epc")

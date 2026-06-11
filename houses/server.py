@@ -1,5 +1,6 @@
 """FastAPI app — /inject-property endpoint, startup/shutdown."""
 
+import dataclasses
 import json
 import logging
 import re
@@ -17,8 +18,6 @@ from houses.enricher import (
     compute_lorena_commute,
     compute_petrol_cost,
     compute_simon_commute,
-    find_nearest_boys_primary,
-    find_nearest_boys_secondary,
 )
 from houses.epc import lookup_epc
 from houses.location import PropertyLocation, geocode
@@ -26,6 +25,26 @@ from houses.property import EnrichedProperty, Property
 from houses.rail_fares import fare_between, nearest_station
 from houses.rightmove_scraper import scrape as scrape_rightmove
 from houses.rightmove_scraper import stop_chrome
+from houses.schools import SchoolGender, compute_school_commute, find_nearest
+
+
+def _asdict_serializable(obj: Any) -> Any:
+    """Recursively convert a dataclass tree to JSON-serializable dicts.
+
+    Like ``dataclasses.asdict()`` but also converts enums to their values.
+    """
+    import dataclasses
+    from enum import Enum
+
+    if isinstance(obj, Enum):
+        return obj.value
+    if dataclasses.is_dataclass(obj):
+        return {f.name: _asdict_serializable(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
+    if isinstance(obj, dict):
+        return {k: _asdict_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_asdict_serializable(v) for v in obj]
+    return obj
 from houses.sheets import (
     Tab,
     _rightmove_id,
@@ -231,7 +250,7 @@ async def inject_property(
     if not dry_run:
         row_url = await write_enriched_row(enriched, payload.tab)
 
-    dump = enriched.model_dump(mode="json")
+    dump = _asdict_serializable(enriched)
 
     extra: dict[str, Any] = {}
     if scrape_error:
@@ -472,9 +491,9 @@ async def backfill_view(
                     # Still write user columns if they're empty
                     enriched = await _run_backfill_enrichment(
                         url=url,
-                        address=address,
+                        address=addr,
                         postcode=pc,
-                        lookup=pc,
+                        lookup=addr if _is_outcode(pc) else pc,
                         bedrooms=None,
                         price=None,
                         enabled=set(),
@@ -515,18 +534,29 @@ async def backfill_view(
                 )
                 enriched = await _run_backfill_enrichment(
                     url=url,
-                    address=address,
+                    address=addr,
                     postcode=pc,
-                    lookup=pc,
+                    lookup=addr if _is_outcode(pc) else pc,
                     bedrooms=None,
                     price=None,
-                    enabled=needed,
+                    enabled=needed if needed else None,
                 )
 
                 if no_write:
+                    from houses.sheets import row_values
+
+                    flat = row_values(enriched)
                     yield (
                         json.dumps(
-                            {"type": "row", "row": row_idx, "rid": rid, "status": "cached", "fields": sorted(needed)}
+                            {
+                                "type": "row",
+                                "row": row_idx,
+                                "rid": rid,
+                                "status": "cached",
+                                "fields": sorted(needed),
+                                "enriched": _asdict_serializable(enriched),
+                                "flat": flat,
+                            }
                         )
                         + "\n"
                     )
@@ -563,7 +593,20 @@ async def backfill_view(
                 )
 
                 if no_write:
-                    yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "cached"}) + "\n"
+                    from houses.sheets import row_values
+
+                    flat = row_values(enriched)
+                    yield json.dumps(
+                        {
+                            "type": "row",
+                            "row": row_idx,
+                            "rid": rid,
+                            "status": "cached",
+                            "fields": sorted(needed),
+                            "enriched": _asdict_serializable(enriched),
+                            "flat": flat,
+                        }
+                    ) + "\n"
                 else:
                     await write_enriched_row(enriched)
                     yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "created"}) + "\n"
@@ -663,9 +706,29 @@ async def _run_enrichment(
         lorena = (await compute_lorena_commute(lookup)).value_or_none()
     if enabled is None or "petrol" in enabled:
         petrol = (await compute_petrol_cost(postcode)).value_or_none()
+
+    # School enrichment defaults (may be overridden below)
+    primary = None
+    primary_commute = None
+    primary_dist = None
+    secondary = None
+    secondary_commute = None
+    secondary_dist = None
+
     if enabled is None or "schools" in enabled:
-        primary = await find_nearest_boys_primary(postcode, address)
-        secondary = await find_nearest_boys_secondary(postcode, address)
+        loc_coords = location.coordinates.value_or_none()
+        primary = await find_nearest(postcode, child_age=7, address=address, requirement=SchoolGender.BOYS)
+        primary_commute = await compute_school_commute(postcode, primary) if primary else None
+        primary_dist = (
+            round(loc_coords.distance_km_to(primary.coords), 2)
+            if primary and primary.coords and loc_coords else None
+        )
+        secondary = await find_nearest(postcode, child_age=12, address=address, requirement=SchoolGender.BOYS)
+        secondary_commute = await compute_school_commute(postcode, secondary) if secondary else None
+        secondary_dist = (
+            round(loc_coords.distance_km_to(secondary.coords), 2)
+            if secondary and secondary.coords and loc_coords else None
+        )
     if enabled is None or {"walk_time", "amenities"} & enabled:
         coords = location.coordinates.value_or_none()
         walk_data = (
@@ -693,7 +756,10 @@ async def _run_enrichment(
         epc = await lookup_epc(postcode, address) if postcode and not _is_outcode(postcode) else ""
 
     if (enabled is None or "council_tax" in enabled) and postcode and not _is_outcode(postcode) and address:
-        council_tax = await lookup_council_tax(postcode, address)
+        result = await lookup_council_tax(postcode, address)
+        council_tax = result.value_or_none()
+        if result.is_impossible:
+            logger.debug("Council tax: %s for %s", result.reason, postcode)
 
     if enabled is None or "geo" in enabled:
         if actual_latitude is not None and actual_longitude is not None:
@@ -721,16 +787,18 @@ async def _run_enrichment(
         petrol=petrol,
         commute_breakdown=breakdown,
         primary_school=primary,
+        primary_school_commute=primary_commute,
+        primary_school_distance_km=primary_dist,
         secondary_school=secondary,
+        secondary_school_commute=secondary_commute,
+        secondary_school_distance_km=secondary_dist,
         town_description=town_desc,
         walk_to_town_minutes=walk_data.get("walk_to_town_minutes"),
         walkable_amenities=walk_data.get("amenities", ""),
         primary_ofsted=primary.ofsted_rating if primary else "",
         secondary_ofsted=secondary.ofsted_rating if secondary else "",
         primary_inspection_year=primary.inspection_year if primary else "",
-        primary_inspection_summary=primary.inspection_summary if primary else "",
         secondary_inspection_year=secondary.inspection_year if secondary else "",
-        secondary_inspection_summary=secondary.inspection_summary if secondary else "",
         epc_rating=epc,
         council_tax=council_tax,
         approx_latitude=approx_lat,

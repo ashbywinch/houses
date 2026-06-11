@@ -264,6 +264,34 @@ curl -X POST "http://127.0.0.1:8080/backfill-view?force=true"
 
 Output is streamed as newline-delimited JSON so progress is visible in real-time.
 
+### Enrichment Diff Verification
+
+After any refactoring that changes enrichment logic (commute calculation,
+school lookup, formatting), verify that the new code produces the expected
+output before writing to the sheet:
+
+```bash
+# Ensure the dev server is running
+make run
+
+# Run the diff: re-enriches every property (no-write) and compares
+# against the current live sheet
+uv run python scripts/enrichment-diff.py > /tmp/diff.tsv
+
+# Review differences
+less /tmp/diff.tsv
+```
+
+The diff output is a TSV with columns ``RID``, ``Field``, ``Old (sheet)``,
+``New (enriched)``.  Every difference must be understood:
+
+- **API rate limit** — new value is empty, old had a value.  Wait for
+  quota reset or check the API key.
+- **Walk time change** — expected: haversine was replaced by Google
+  Routes API (real path vs straight-line).
+- **New property enriched** — old was empty, new has a value.  Correct.
+- **Unexpected** — investigate: write a failing test, fix, re-run diff.
+
 ### Bus Fare Data Pipeline
 
 Bus fare data comes from the **BODS** (Bus Open Data Service) NeTEx fare datasets. The extraction script downloads fare data for commuter-belt operators, parses the NeTEx XML, and produces `data/bus_fares.json`.

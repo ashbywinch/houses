@@ -70,6 +70,16 @@ class Attempt(Generic[T]):
         return self._status is _Status.PENDING
 
     @property
+    def reason(self) -> str:
+        """Human-readable reason for failure (empty string if succeeded)."""
+        return self._reason
+
+    @property
+    def source(self) -> str:
+        """Source identifier for the attempt result."""
+        return self._source
+
+    @property
     def is_impossible(self) -> bool:
         return self._status is _Status.IMPOSSIBLE
 

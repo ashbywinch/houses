@@ -34,30 +34,30 @@ def _make_page(bands_or_bands):
 
 class TestLookupCouncilTax:
     @pytest.mark.asyncio
-    async def test_no_address_returns_none(self):
+    async def test_no_address_returns_impossible(self):
         result = await lookup_council_tax("RG14 1AA")
-        assert result is None
+        assert result.is_impossible
 
     @pytest.mark.asyncio
-    async def test_empty_results_returns_none(self):
+    async def test_empty_results_returns_impossible(self):
         with patch("uk_property_apis.voa.VOAClient") as mock_voa:
             instance = AsyncMock()
             mock_voa.return_value = instance
             instance.fetch_page = AsyncMock(return_value=_make_page([]))
             result = await lookup_council_tax("RG14 1AA", "94A Northbrook Street, Newbury, RG14 1AA")
-            assert result is None
+            assert result.is_impossible
 
     @pytest.mark.asyncio
-    async def test_only_deleted_returns_none(self):
+    async def test_only_deleted_returns_impossible(self):
         with patch("uk_property_apis.voa.VOAClient") as mock_voa:
             instance = AsyncMock()
             mock_voa.return_value = instance
             instance.fetch_page = AsyncMock(return_value=_make_page(_make_bands([("DELETED", "Some Address")])))
             result = await lookup_council_tax("RG14 1AA", "94A Northbrook Street, Newbury, RG14 1AA")
-            assert result is None
+            assert result.is_impossible
 
     @pytest.mark.asyncio
-    async def test_no_match_returns_none(self):
+    async def test_no_match_returns_impossible(self):
         with patch("uk_property_apis.voa.VOAClient") as mock_voa:
             instance = AsyncMock()
             mock_voa.return_value = instance
@@ -65,7 +65,7 @@ class TestLookupCouncilTax:
                 return_value=_make_page(_make_bands([("C", "123 OTHER STREET, NEWBURY, RG14 1AA")]))
             )
             result = await lookup_council_tax("RG14 1AA", "94A Northbrook Street, Newbury, RG14 1AA")
-            assert result is None
+            assert result.is_impossible
 
     @pytest.mark.asyncio
     async def test_match_returns_band(self):
@@ -87,10 +87,11 @@ class TestLookupCouncilTax:
                 )
             )
             result = await lookup_council_tax("RG14 1AA", "94A Northbrook Street, Newbury, RG14 1AA")
-            assert isinstance(result, CouncilTaxInfo)
-            assert result.band == "B"
-            assert result.yearly_cost == 1500.0
-            assert "west-berkshire" in result.evidence_url
+            assert result.is_succeeded
+            ct = result.value_or_none()
+            assert ct.band == "B"
+            assert ct.yearly_cost == 1500.0
+            assert "west-berkshire" in ct.evidence_url
 
     @pytest.mark.asyncio
     async def test_match_among_deleted_and_active(self):
@@ -112,8 +113,8 @@ class TestLookupCouncilTax:
                 )
             )
             result = await lookup_council_tax("RG14 1AA", "94A Northbrook Street, Newbury, RG14 1AA")
-            assert isinstance(result, CouncilTaxInfo)
-            assert result.band == "D"
+            assert result.is_succeeded
+            assert result.value_or_none().band == "D"
 
     @pytest.mark.asyncio
     async def test_match_partial_address(self):
@@ -135,30 +136,28 @@ class TestLookupCouncilTax:
                 )
             )
             result = await lookup_council_tax("SW1A 2AA", "10 Downing Street, London, SW1A 2AA")
-            assert isinstance(result, CouncilTaxInfo)
-            assert result.band == "H"
+            assert result.is_succeeded
+            assert result.value_or_none().band == "H"
 
     @pytest.mark.asyncio
     async def test_no_local_authority_still_returns_band(self):
         with patch("uk_property_apis.voa.VOAClient") as mock_voa:
             instance = AsyncMock()
             mock_voa.return_value = instance
-            instance.fetch_page = AsyncMock(
-                return_value=_make_page(_make_bands([("B", "94A NORTHBROOK STREET, NEWBURY, RG14 1AA")], la=None))
-            )
+            instance.fetch_page = AsyncMock(return_value=_make_page(_make_bands([("B", "94A NORTHBROOK STREET, NEWBURY, RG14 1AA")], la=None)))
             result = await lookup_council_tax("RG14 1AA", "94A Northbrook Street, Newbury, RG14 1AA")
-            assert isinstance(result, CouncilTaxInfo)
-            assert result.band == "B"
-            assert result.yearly_cost is None
-            assert result.evidence_url == ""
+            assert result.is_succeeded
+            ct = result.value_or_none()
+            assert ct.band == "B"
+            assert ct.yearly_cost is None
+            assert ct.evidence_url == ""
 
     @pytest.mark.asyncio
     async def test_import_error_graceful(self):
         import sys
-
         with patch.dict(sys.modules, {"uk_property_apis": None, "uk_property_apis.voa": None}, clear=False):
             result = await lookup_council_tax("RG14 1AA", "94A Northbrook Street, Newbury, RG14 1AA")
-            assert result is None
+            assert result.is_impossible
 
     @pytest.mark.asyncio
     async def test_voa_exception_graceful(self):
@@ -167,16 +166,16 @@ class TestLookupCouncilTax:
             mock_voa.return_value = instance
             instance.fetch_page = AsyncMock(side_effect=ConnectionError("VOA down"))
             result = await lookup_council_tax("RG14 1AA", "94A Northbrook Street, Newbury, RG14 1AA")
-            assert result is None
+            assert result.is_impossible
 
     @pytest.mark.asyncio
-    async def test_scottish_postcode_returns_none(self):
+    async def test_scottish_postcode_returns_impossible(self):
         with patch("uk_property_apis.voa.VOAClient") as mock_voa:
             instance = AsyncMock()
             mock_voa.return_value = instance
             instance.fetch_page = AsyncMock(return_value=_make_page([]))
             result = await lookup_council_tax("EH1 1AA", "1 Princes Street, Edinburgh, EH1 1AA")
-            assert result is None
+            assert result.is_impossible
 
     @pytest.mark.asyncio
     async def test_welsh_band_i(self):
@@ -190,11 +189,11 @@ class TestLookupCouncilTax:
                 return_value=_make_page(_make_bands([("I", "SOME ADDRESS, CARDIFF, CF10 1AA")], la="Cardiff"))
             )
             result = await lookup_council_tax("CF10 1AA", "Some Address, Cardiff, CF10 1AA")
-            assert isinstance(result, CouncilTaxInfo)
-            assert result.band == "I"
+            assert result.is_succeeded
+            assert result.value_or_none().band == "I"
 
     @pytest.mark.asyncio
-    async def test_no_building_identifier_returns_none(self):
+    async def test_no_building_identifier_returns_impossible(self):
         with patch("uk_property_apis.voa.VOAClient") as mock_voa:
             instance = AsyncMock()
             mock_voa.return_value = instance
@@ -202,7 +201,29 @@ class TestLookupCouncilTax:
                 return_value=_make_page(_make_bands([("D", "94A NORTHBROOK STREET, NEWBURY, RG14 1AA")]))
             )
             result = await lookup_council_tax("RG14 1AA", ", RG14 1AA")
-            assert result is None
+            assert result.is_impossible
+            assert result.reason == "could not extract building identifier"
+
+    @pytest.mark.asyncio
+    async def test_ambiguous_street_name_returns_impossible(self):
+        """Street-only address matching multiple VOA results must return impossible."""
+        with patch("uk_property_apis.voa.VOAClient") as mock_voa:
+            instance = AsyncMock()
+            mock_voa.return_value = instance
+            instance.fetch_page = AsyncMock(
+                return_value=_make_page(
+                    _make_bands(
+                        [
+                            ("D", "1 PADDOCK HEIGHTS, TWYFORD, RG10"),
+                            ("E", "2 PADDOCK HEIGHTS, TWYFORD, RG10"),
+                        ],
+                        la="Wokingham",
+                    )
+                )
+            )
+            result = await lookup_council_tax("RG10 0AP", "Paddock Heights, Twyford, RG10")
+            assert result.is_impossible
+            assert result.reason == "address matched multiple properties"
 
 
 class TestLookupYearlyCost:

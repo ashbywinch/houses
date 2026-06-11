@@ -11,6 +11,9 @@ class LegMode(Enum):
     TUBE = auto()
     BUS = auto()
     TRAIN = auto()
+    DLR = auto()
+    OVERGROUND = auto()
+    TRAM = auto()
     DRIVE = auto()
     CYCLE = auto()
     PARK = auto()
@@ -27,6 +30,10 @@ class JourneyLeg:
 
     mode: LegMode
     duration_minutes: int
+    description: str = ""  # e.g. "walk to Maidenhead" or "Bakerloo line to Oxford Circus"
+    start_station: str = ""  # departure point name from TfL
+    end_station: str = ""    # arrival point name from TfL
+    line_name: str = ""      # transit route name from TfL (e.g. "Bakerloo", "Great Western Railway")
 
 
 @dataclass(frozen=True)
@@ -43,7 +50,10 @@ class CostGroup:
 
     def leg_descriptions(self) -> tuple[str, ...]:
         """Return operator-appropriate descriptions for each leg."""
-        return tuple(leg.mode.name.lower() for leg in self.legs)
+        return tuple(
+            leg.description if leg.description else leg.mode.name.lower()
+            for leg in self.legs
+        )
 
 
 @dataclass(frozen=True)
@@ -60,9 +70,26 @@ class Commute:
     def summary(self) -> str:
         """Render as the sheet's route-summary string."""
         parts: list[str] = []
-        for group in self.cost_groups:
-            for leg, desc in zip(group.legs, group.leg_descriptions(), strict=True):
+        all_legs = [leg for group in self.cost_groups for leg in group.legs]
+        total = len(all_legs)
+
+        for idx, (group, leg, desc) in enumerate(
+            (g, l, d)
+            for g in self.cost_groups
+            for l, d in zip(g.legs, g.leg_descriptions(), strict=True)
+        ):
+            if leg.mode == LegMode.WALK:
+                if idx == total - 1:
+                    parts.append(f"walk {leg.duration_minutes}m")
+                elif leg.end_station:
+                    from houses.enricher import _shorten_station
+
+                    parts.append(f"walk to {_shorten_station(leg.end_station)} ({leg.duration_minutes}m)")
+                else:
+                    parts.append(f"{desc} ({leg.duration_minutes}m)")
+            else:
                 parts.append(f"{desc} ({leg.duration_minutes}m)")
+
         return " \u2192 ".join(parts)
 
     def non_rail_cost(self) -> float:

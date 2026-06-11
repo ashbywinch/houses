@@ -7,13 +7,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from httpx import Response
 
+from houses.attempt import Attempt
 from houses.commute import Commute
 from houses.config import settings
 from houses.property import EnrichedProperty
 from houses.server import _run_backfill_enrichment, app
 from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS
-from tests.integration.conftest import mock_httpx
 
 client = TestClient(app)
 
@@ -111,9 +112,7 @@ class TestInjectProperty:
     def test_maidenhead_outcode_gets_full_enrichment(self):
         """Address with only outcode 'SL6' — server must use full street
         address for geocoding so transit/petrol/schools all return results."""
-        counter, async_patch, sync_patch = mock_httpx()
-        with async_patch, sync_patch:
-            resp = client.post("/inject-property", json=self.MAIDENHEAD_PAYLOAD)
+        resp = client.post("/inject-property", json=self.MAIDENHEAD_PAYLOAD)
         assert resp.status_code == 200
         data = resp.json()["data"]
         assert data["url"] == self.MAIDENHEAD_PAYLOAD["url"]
@@ -298,8 +297,12 @@ class TestBackfillView:
                 "daily_cost_gbp": 12.50,
                 "mode": "drive",
             },
-            "primary_school": {"name": "Test Primary", "type": "primary", "distance_km": 0.5, "urn": "100001"},
-            "secondary_school": {"name": "Test Secondary", "type": "secondary", "distance_km": 1.2, "urn": "100002"},
+            "primary_school": None,
+            "primary_school_commute": None,
+            "primary_school_distance_km": None,
+            "secondary_school": None,
+            "secondary_school_commute": None,
+            "secondary_school_distance_km": None,
             "town_description": "A nice town.",
             "walk_to_town_minutes": 10,
             "walkable_amenities": "Shops, cafe",
@@ -408,8 +411,7 @@ class TestBackfillView:
             url = "https://www.rightmove.co.uk/properties/999999999"
             view_rows = [self._build_view_row("1 Test St, Test Town, TE1 1ST", url, "")]
             mock_client = self._mock_sheet(view_rows=view_rows)
-            counter, async_patch, sync_patch = mock_httpx()
-            with async_patch, sync_patch, patch("houses.server.get_client", return_value=mock_client):
+            with patch("houses.server.get_client", return_value=mock_client):
                 resp = client.post("/backfill-view")
             assert resp.status_code == 200, resp.text
             results = self._parse_rows(resp)
@@ -440,8 +442,7 @@ class TestBackfillView:
             url = "https://www.rightmove.co.uk/properties/888888888"
             view_rows = [self._build_view_row("2 Test St, Test Town, TE1 1ST", url, "")]
             mock_client = self._mock_sheet(view_rows=view_rows)
-            counter, async_patch, sync_patch = mock_httpx()
-            with async_patch, sync_patch, patch("houses.server.get_client", return_value=mock_client):
+            with patch("houses.server.get_client", return_value=mock_client):
                 resp = client.post("/backfill-view?dry_run=true")
             assert resp.status_code == 200
             results = self._parse_rows(resp)
@@ -625,8 +626,7 @@ class TestBackfillView:
             view_rows = [self._build_view_row("1 Test Road, TE1 1ST", url, "")]
             mock_client = self._mock_sheet(view_rows=view_rows)
 
-            counter, async_patch, sync_patch = mock_httpx()
-            with async_patch, sync_patch, patch("houses.server.get_client", return_value=mock_client):
+            with patch("houses.server.get_client", return_value=mock_client):
                 resp = client.post("/backfill-view")
             assert resp.status_code == 200, resp.text
 
@@ -658,8 +658,7 @@ class TestBackfillView:
 
             mock_client = self._mock_sheet(view_rows=view_rows, data_rows=[data_row])
 
-            counter, async_patch, sync_patch = mock_httpx()
-            with async_patch, sync_patch, patch("houses.server.get_client", return_value=mock_client):
+            with patch("houses.server.get_client", return_value=mock_client):
                 resp = client.post("/backfill-view")
             assert resp.status_code == 200, resp.text
 
@@ -683,12 +682,7 @@ class TestBackfillView:
         original_id = settings.sheet_id
         settings.sheet_id = "fake-id"
         try:
-            counter, async_patch, sync_patch = mock_httpx()
-            with (
-                async_patch,
-                sync_patch,
-                patch("houses.server.lookup_epc") as mock_epc,
-            ):
+            with patch("houses.server.lookup_epc") as mock_epc:
                 mock_epc.return_value = "C"
 
                 # Numbered address → lookup_epc called with address
@@ -707,6 +701,77 @@ class TestBackfillView:
                 mock_epc.assert_called_with("GU22 8BQ", "7 Sandy Close, Woking, GU22")
         finally:
             settings.sheet_id = original_id
+
+    @pytest.mark.asyncio
+    async def test_get_drive_minutes_with_geocode_fallback(self, _mock_http_requests, monkeypatch):
+        """_get_drive_minutes must handle GeoPoint from geocoding fallback.
+
+        When _lookup_station_coords fails (station not in CSV), the geocoding
+        fallback returns a GeoPoint. The function then tries ``dest_coords[1]``
+        which raises ``TypeError: 'GeoPoint' object is not subscriptable``.
+        """
+        from houses.enricher import _get_drive_minutes
+
+        result = await _get_drive_minutes("KT13 8XG", "Nonexistent Station XYZ")
+        # Should not crash — may return None if geocoding fails too
+        assert result is None or isinstance(result, (int, float))
+
+    @pytest.mark.asyncio
+    async def test_park_and_ride_does_not_crash(self, _mock_http_requests, monkeypatch):
+        """Park-and-ride's parking cost lookup must not crash with TypeError.
+
+        Regression test for missing ``await`` in ``_add_parking_cost``.
+        Before the fix, calling ``_add_parking_cost`` with a journey whose
+        first leg is "driving" raised::
+
+            TypeError: unsupported operand type(s) for: +'float' and 'coroutine'
+        """
+        from houses.transit_route import TransitRoute
+
+        # Create a TransitRoute instance with a mocked plan that calls
+        # _add_parking_cost directly with a "driving" first leg.
+        route = TransitRoute("SL6", "SW1V 2QQ", "test", park_and_ride=True)
+        cost = 5.0  # initial daily_cost_gbp
+
+        # _add_parking_cost checks if the first leg is "driving" and then
+        # calls _lookup_parking_cost (async) without await.
+        # The data must have a journey with a "driving" first leg that has
+        # an arrivalPoint with a station name we have a parking rate for.
+        data = {
+            "journeys": [
+                {
+                    "duration": 87,
+                    "legs": [
+                        {
+                            "mode": {"name": "driving"},
+                            "duration": 15,
+                            "isTimeline": True,
+                            "arrivalPoint": {"commonName": "Maidenhead Rail Station"},
+                        },
+                        {"mode": {"name": "train", "isTimeline": True}, "duration": 30},
+                    ],
+                    "fare": {"totalCost": 500, "singleFare": 250},
+                }
+            ]
+        }
+
+        # Monkeypatch the parking rates path to a known CSV
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            csv_path = Path(tmp) / "parking_rates.csv"
+            csv_path.write_text("station_name,crs,daily_cost_gbp\nMaidenhead Rail Station,MAI,8.50\n")
+            monkeypatch.setattr("houses.enricher._PARKING_RATES_PATH", csv_path)
+            monkeypatch.setattr("houses.enricher._parking_rates_cache", None)
+
+            # Call _add_parking_cost directly — this is what triggers the bug
+            result = await route._add_parking_cost(data, cost)
+
+        # Should return a tuple of (parking_cost, new_total_cost)
+        assert result is not None, "_add_parking_cost should not crash"
+        assert isinstance(result, tuple), f"Expected tuple, got {type(result)}"
+
 
     def test_lookup_derived_when_empty_with_address_and_postcode(self):
         """When lookup='' but address+postcode are provided, lookup should be

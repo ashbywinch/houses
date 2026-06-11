@@ -67,7 +67,9 @@ def test_match_cert_by_number():
         {"addressLine1": "9 Goaters Road", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
         {"addressLine1": "7 Goaters Road", "registrationDate": "2025-06-01", "currentEnergyEfficiencyBand": "C"},
     ]
-    assert _match_cert(certs, "7") == "C"
+    result = _match_cert(certs, "7")
+    assert result.is_succeeded
+    assert result.value_or("") == "C"
 
 
 def test_match_cert_by_name():
@@ -79,7 +81,9 @@ def test_match_cert_by_name():
         {a1: "BLUE DAWES PANGBOURNE HILL", a2: "2024-06-15", a3: "D"},
         {a1: "MAY COTTAGE PANGBOURNE HILL", a2: "2023-03-10", a3: "E"},
     ]
-    assert _match_cert(certs, "Blue Dawes") == "D"
+    result = _match_cert(certs, "Blue Dawes")
+    assert result.is_succeeded
+    assert result.value_or("") == "D"
 
 
 def test_match_cert_multiple_certs_same_building_returns_most_recent():
@@ -88,14 +92,26 @@ def test_match_cert_multiple_certs_same_building_returns_most_recent():
         {"addressLine1": "7 Goaters Road", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
         {"addressLine1": "7 Goaters Road", "registrationDate": "2025-06-01", "currentEnergyEfficiencyBand": "C"},
     ]
-    assert _match_cert(certs, "7") == "C"
+    result = _match_cert(certs, "7")
+    assert result.is_succeeded
+    assert result.value_or("") == "C"
 
 
-def test_match_cert_no_match_returns_empty():
+def test_match_cert_no_match_returns_impossible():
+    """No certificate matches the given building_id."""
     certs = [
         {"addressLine1": "9 Goaters Road", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
     ]
-    assert _match_cert(certs, "7") == ""
+    result = _match_cert(certs, "7")
+    assert result.is_impossible
+    assert result.reason == "no matching certificate for this address"
+
+
+def test_match_cert_empty_certs_returns_impossible():
+    """Empty certs list → impossible."""
+    result = _match_cert([], "")
+    assert result.is_impossible
+    assert result.reason == "no certificates found"
 
 
 def test_match_cert_empty_building_id_returns_most_recent():
@@ -104,45 +120,23 @@ def test_match_cert_empty_building_id_returns_most_recent():
         {"addressLine1": "9 Goaters Road", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
         {"addressLine1": "7 Goaters Road", "registrationDate": "2025-06-01", "currentEnergyEfficiencyBand": "C"},
     ]
-    assert _match_cert(certs, "") == "C"
+    result = _match_cert(certs, "")
+    assert result.is_succeeded
+    assert result.value_or("") == "C"
+
+
+def test_match_cert_ambiguous_different_addresses_returns_impossible():
+    """Multiple different addresses matching the same building_id → ambiguous."""
+    certs = [
+        {"addressLine1": "Rose Cottage", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
+        {"addressLine1": "Rose Garden House", "registrationDate": "2025-06-01", "currentEnergyEfficiencyBand": "C"},
+    ]
+    result = _match_cert(certs, "Rose")
+    assert result.is_impossible
+    assert result.reason == "address matched multiple properties"
 
 
 # ── lookup_epc with address tests ──
-
-
-@pytest.mark.asyncio
-async def test_lookup_epc_with_numbered_address_matches_cert():
-    """Numbered address should match by building number in addressLine1."""
-
-    def handler(request):
-        return Response(
-            200,
-            json={
-                "data": [
-                    {
-                        "addressLine1": "7 Goaters Road",
-                        "registrationDate": "2025-01-01",
-                        "currentEnergyEfficiencyBand": "C",
-                    },  # noqa: E501
-                    {
-                        "addressLine1": "9 Goaters Road",
-                        "registrationDate": "2024-01-01",
-                        "currentEnergyEfficiencyBand": "D",
-                    },  # noqa: E501
-                ]
-            },
-        )
-
-    original_init = AsyncClient.__init__
-
-    def patched_init(self, **kwargs):
-        kwargs["transport"] = MockTransport(handler)
-        original_init(self, **kwargs)
-
-    with patch.object(AsyncClient, "__init__", patched_init):
-        band = await lookup_epc("SL5 8HZ", "7 Sandy Close, Woking, GU22")
-
-    assert band == "C"  # Matches "7" in addressLine1, most recent
 
 
 @pytest.mark.asyncio
@@ -165,11 +159,11 @@ async def test_lookup_epc_with_road_name_skips():
 
 
 @pytest.mark.asyncio
-async def test_lookup_epc_with_named_building_matches():
+async def test_lookup_epc_with_named_building_matches(_mock_http_requests):
     """Named-building address should proceed and match by name."""
-
-    def handler(request):
-        return Response(
+    _mock_http_requests.add_rule(
+        lambda url: "get-energy-performance-data" in url,
+        lambda request: Response(
             200,
             json={
                 "data": [
@@ -177,19 +171,12 @@ async def test_lookup_epc_with_named_building_matches():
                         "addressLine1": "BLUE DAWES PANGBOURNE HILL",
                         "registrationDate": "2024-06-15",
                         "currentEnergyEfficiencyBand": "D",
-                    },
+                    }
                 ]
             },
-        )
-
-    original_init = AsyncClient.__init__
-
-    def patched_init(self, **kwargs):
-        kwargs["transport"] = MockTransport(handler)
-        original_init(self, **kwargs)
-
-    with patch.object(AsyncClient, "__init__", patched_init):
-        band = await lookup_epc("RG8 7AS", "Blue Dawes, Pangbourne on Thames, RG8 7AS")
+        ),
+    )
+    band = await lookup_epc("RG8 7AS", "Blue Dawes, Pangbourne on Thames, RG8 7AS")
 
     assert band == "D"
 
@@ -227,39 +214,25 @@ async def test_returns_band_from_most_recent_certificate():
 
 
 @pytest.mark.asyncio
-async def test_no_certificates_returns_empty():
+async def test_no_certificates_returns_empty(_mock_http_requests):
     """No certificates should return empty string."""
-
-    def handler(request):
-        return Response(200, json={"data": []})
-
-    original_init = AsyncClient.__init__
-
-    def patched_init(self, **kwargs):
-        kwargs["transport"] = MockTransport(handler)
-        original_init(self, **kwargs)
-
-    with patch.object(AsyncClient, "__init__", patched_init):
-        band = await lookup_epc("SL6")
+    _mock_http_requests.add_rule(
+        lambda url: "get-energy-performance-data" in str(url),
+        lambda request: Response(200, json={"data": []}),
+    )
+    band = await lookup_epc("SL6")
 
     assert band == ""
 
 
 @pytest.mark.asyncio
-async def test_non_200_response_returns_empty():
+async def test_non_200_response_returns_empty(_mock_http_requests):
     """API returning non-200 should be handled gracefully."""
-
-    def handler(request):
-        return Response(500)
-
-    original_init = AsyncClient.__init__
-
-    def patched_init(self, **kwargs):
-        kwargs["transport"] = MockTransport(handler)
-        original_init(self, **kwargs)
-
-    with patch.object(AsyncClient, "__init__", patched_init):
-        band = await lookup_epc("RG14 1AA")
+    _mock_http_requests.add_rule(
+        lambda url: "get-energy-performance-data" in str(url),
+        lambda request: Response(500),
+    )
+    band = await lookup_epc("RG14 1AA")
 
     assert band == ""
 

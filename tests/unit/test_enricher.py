@@ -10,19 +10,15 @@ from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.enricher import (
     _END_PC_RE,
     _OUTCODE_RE,
-    FEE_PAYING_TYPES,
-    _boys_eligible,
     _compute_petrol_from_distance_km,
     _format_route_summary,
     _next_weekday_date_params,
-    _phase_filter,
     _pick_best_journey,
-    _school_coords,
-    _school_to_info,
     _shorten_station,
     compute_commute_breakdown,
 )
 from houses.geo import GeoPoint
+from houses.schools import School, SchoolGender
 
 FIXTURES_DIR = Path("tests/fixtures/parking_tariffs")
 
@@ -50,21 +46,42 @@ class TestOutcodeDetection:
         assert not _OUTCODE_RE.match("not a postcode")
 
 
-class TestBoysEligible:
-    def test_mixed_gender_eligible(self):
-        assert _boys_eligible({"Gender (name)": "Mixed", "TypeOfEstablishment (name)": "Community School"})
+class TestSchoolAcceptsGender:
+    def test_mixed_school_accepts_boys(self):
+        s = School.from_GIAS_row({"Gender (name)": "Mixed", "TypeOfEstablishment (name)": "Community School"})
+        assert s.accepts(SchoolGender.BOYS)
 
-    def test_boys_gender_eligible(self):
-        assert _boys_eligible({"Gender (name)": "Boys", "TypeOfEstablishment (name)": "Academy Converter"})
+    def test_boys_school_accepts_boys(self):
+        s = School.from_GIAS_row({"Gender (name)": "Boys", "TypeOfEstablishment (name)": "Academy Converter"})
+        assert s.accepts(SchoolGender.BOYS)
 
-    def test_girls_gender_ineligible(self):
-        assert not _boys_eligible({"Gender (name)": "Girls", "TypeOfEstablishment (name)": "Community School"})
+    def test_girls_school_rejects_boys(self):
+        s = School.from_GIAS_row({"Gender (name)": "Girls", "TypeOfEstablishment (name)": "Community School"})
+        assert not s.accepts(SchoolGender.BOYS)
 
-    def test_independent_school_ineligible(self):
-        assert not _boys_eligible({"Gender (name)": "Mixed", "TypeOfEstablishment (name)": "Independent School"})
+    def test_independent_boys_still_accepts_boys(self):
+        """fee_paying is separate from gender — a fee-paying boys school still accepts boys."""
+        s = School.from_GIAS_row({"Gender (name)": "Boys", "TypeOfEstablishment (name)": "Independent School"})
+        assert s.accepts(SchoolGender.BOYS)
 
-    def test_missing_fields_returns_false(self):
-        assert not _boys_eligible({})
+    def test_mixed_school_accepts_girls(self):
+        s = School.from_GIAS_row({"Gender (name)": "Mixed"})
+        assert s.accepts(SchoolGender.GIRLS)
+
+    def test_mixed_required_for_both_genders(self):
+        s = School.from_GIAS_row({"Gender (name)": "Mixed"})
+        assert s.accepts(SchoolGender.BOYS) and s.accepts(SchoolGender.GIRLS)
+
+    def test_boys_school_rejects_girls(self):
+        s = School.from_GIAS_row({"Gender (name)": "Boys"})
+        assert not s.accepts(SchoolGender.GIRLS)
+
+    def test_unknown_gender_rejects_all(self):
+        s = School.from_GIAS_row({"Gender (name)": "Not applicable"})
+        assert s.gender == SchoolGender.UNKNOWN
+        assert not s.accepts(SchoolGender.BOYS)
+        assert not s.accepts(SchoolGender.GIRLS)
+        assert not s.accepts(SchoolGender.MIXED)
 
 
 class TestHaversine:
@@ -116,14 +133,22 @@ class TestCommuteBreakdown:
         assert result.yearly_total_gbp is None
 
 
-class TestFeePayingTypes:
-    def test_includes_known_private_types(self):
-        assert "independent school" in FEE_PAYING_TYPES
-        assert "other independent school" in FEE_PAYING_TYPES
+class TestSchoolFeePaying:
+    def test_independent_school_is_fee_paying(self):
+        s = School.from_GIAS_row({"TypeOfEstablishment (name)": "Independent School"})
+        assert s.fee_paying
 
-    def test_excludes_public_types(self):
-        assert "community school" not in FEE_PAYING_TYPES
-        assert "academy converter" not in FEE_PAYING_TYPES
+    def test_other_independent_is_fee_paying(self):
+        s = School.from_GIAS_row({"TypeOfEstablishment (name)": "Other independent school"})
+        assert s.fee_paying
+
+    def test_community_school_not_fee_paying(self):
+        s = School.from_GIAS_row({"TypeOfEstablishment (name)": "Community School"})
+        assert not s.fee_paying
+
+    def test_academy_converter_not_fee_paying(self):
+        s = School.from_GIAS_row({"TypeOfEstablishment (name)": "Academy Converter"})
+        assert not s.fee_paying
 
 
 class TestPetrolCalculation:
@@ -168,68 +193,157 @@ class TestPetrolCalculation:
         assert cost == round(cost, 2)
 
 
-class TestPhaseFilter:
-    """_phase_filter — checks a school's PhaseOfEducation matches the target."""
+class TestSchoolAcceptsAge:
+    """School.accepts_age — checks if a child of a given age can attend."""
 
-    def test_primary_phase_matches_primary(self):
-        assert _phase_filter({"PhaseOfEducation (name)": "Primary"}, "primary")
+    def test_primary_accepts_age_7(self):
+        s = School.from_GIAS_row({"PhaseOfEducation (name)": "Primary"})
+        assert s.accepts_age(7)
 
-    def test_secondary_phase_matches_secondary(self):
-        assert _phase_filter({"PhaseOfEducation (name)": "Secondary"}, "secondary")
+    def test_secondary_accepts_age_13(self):
+        s = School.from_GIAS_row({"PhaseOfEducation (name)": "Secondary"})
+        assert s.accepts_age(13)
 
-    def test_primary_does_not_match_secondary(self):
-        assert not _phase_filter({"PhaseOfEducation (name)": "Primary"}, "secondary")
+    def test_primary_rejects_teenager(self):
+        s = School.from_GIAS_row({"PhaseOfEducation (name)": "Primary"})
+        assert not s.accepts_age(13)
 
-    def test_not_available_does_not_match(self):
-        assert not _phase_filter({"PhaseOfEducation (name)": "Not applicable"}, "primary")
+    def test_secondary_rejects_young_child(self):
+        s = School.from_GIAS_row({"PhaseOfEducation (name)": "Secondary"})
+        assert not s.accepts_age(5)
 
-    def test_missing_phase_does_not_match(self):
-        assert not _phase_filter({}, "primary")
+    def test_all_through_accepts_all_ages(self):
+        s = School.from_GIAS_row({"PhaseOfEducation (name)": "All-through"})
+        assert s.accepts_age(5)
+        assert s.accepts_age(11)
+        assert s.accepts_age(17)
 
-    def test_case_insensitive_school_data(self):
-        """School's phase value is lowercased before matching; target is used as-is."""
-        assert _phase_filter({"PhaseOfEducation (name)": "PRIMARY"}, "primary")
-        assert _phase_filter({"PhaseOfEducation (name)": "Secondary"}, "secondary")
+    def test_not_applicable_falls_back_to_statutory_age(self):
+        """Not applicable phase uses StatutoryLowAge/HighAge when available."""
+        s = School.from_GIAS_row({
+            "PhaseOfEducation (name)": "Not applicable",
+            "StatutoryLowAge": "11",
+            "StatutoryHighAge": "16",
+        })
+        assert s.accepts_age(13)
+        assert not s.accepts_age(5)
 
-    def test_phase_contains_substring(self):
-        """_phase_filter uses 'in' for substring matching on phase."""
-        assert _phase_filter({"PhaseOfEducation (name)": "Primary"}, "prim")
-        assert not _phase_filter({"PhaseOfEducation (name)": "Not applicable"}, "primary")
+    def test_not_applicable_no_age_data(self):
+        """Without age data, 'Not applicable' schools are accepted (caller filters)."""
+        s = School.from_GIAS_row({"PhaseOfEducation (name)": "Not applicable"})
+        assert s.accepts_age(10)
 
 
 class TestSchoolCoords:
-    """_school_coords — parses Latitude/Longitude from a school row dict."""
+    """School.coords — parses Latitude/Longitude from a GIAS row."""
 
     def test_valid_coords(self):
-        coords = _school_coords({"Latitude": "51.5", "Longitude": "-0.13"})
-        assert coords == (51.5, -0.13)
+        s = School.from_GIAS_row({"Latitude": "51.5", "Longitude": "-0.13"})
+        assert s.coords == GeoPoint(51.5, -0.13)
 
     def test_missing_lat_returns_none(self):
-        assert _school_coords({"Longitude": "-0.13"}) is None
+        s = School.from_GIAS_row({"Longitude": "-0.13"})
+        assert s.coords is None
 
     def test_missing_lng_returns_none(self):
-        assert _school_coords({"Latitude": "51.5"}) is None
+        s = School.from_GIAS_row({"Latitude": "51.5"})
+        assert s.coords is None
 
     def test_empty_strings_returns_none(self):
-        assert _school_coords({"Latitude": "", "Longitude": ""}) is None
+        s = School.from_GIAS_row({"Latitude": "", "Longitude": ""})
+        assert s.coords is None
 
     def test_zero_coords(self):
-        """Zero lat/lng should still return (0.0, 0.0) since "0" is truthy."""
-        coords = _school_coords({"Latitude": "0", "Longitude": "0"})
-        assert coords == (0.0, 0.0)
+        """Zero lat/lng should still return GeoPoint(0, 0)."""
+        s = School.from_GIAS_row({"Latitude": "0", "Longitude": "0"})
+        assert s.coords == GeoPoint(0.0, 0.0)
 
-    def test_returns_floats(self):
-        coords = _school_coords({"Latitude": "52.2053", "Longitude": "0.1218"})
-        assert coords == (52.2053, 0.1218)
-        assert isinstance(coords[0], float)
-        assert isinstance(coords[1], float)
+    def test_returns_geopoint(self):
+        s = School.from_GIAS_row({"Latitude": "52.2053", "Longitude": "0.1218"})
+        assert s.coords == GeoPoint(52.2053, 0.1218)
 
 
-class TestSchoolToInfo:
-    """_school_to_info — converts a school dict (from CSV row) to a SchoolInfo object."""
+class TestFindNearestFilters:
+    """find_nearest must exclude fee-paying schools and schools with blank names."""
 
-    def test_basic_conversion(self):
-        school = {
+    @pytest.mark.asyncio
+    async def test_excludes_fee_paying_school(self, monkeypatch):
+        """A fee-paying school should be excluded even if it's the nearest."""
+        from houses.schools import find_nearest, _load_schools
+
+        # Mock _load_schools to return a known set
+        fee_paying = School.from_GIAS_row({
+            "EstablishmentName": "Expensive School",
+            "Gender (name)": "Mixed",
+            "PhaseOfEducation (name)": "Primary",
+            "TypeOfEstablishment (name)": "Independent School",
+            "Latitude": "51.5",
+            "Longitude": "-0.1",
+            "Postcode": "SL6 1AA",
+        })
+        non_fee = School.from_GIAS_row({
+            "EstablishmentName": "Free School",
+            "Gender (name)": "Mixed",
+            "PhaseOfEducation (name)": "Primary",
+            "TypeOfEstablishment (name)": "Community School",
+            "Latitude": "51.501",
+            "Longitude": "-0.101",
+            "Postcode": "SL6 2BB",
+        })
+        monkeypatch.setattr("houses.schools._load_schools", lambda: [fee_paying, non_fee])
+
+        # Mock geocode — property at midpoint (both schools within ~0.1° ≈ 7km,
+        # school_search_radius_km=5, but 0.001° ≈ 70m fits inside radius)
+        async def mock_geocode(*_, **__):
+            return Attempt.succeeded(GeoPoint(51.5005, -0.1005), "test")
+
+        monkeypatch.setattr("houses.schools.geocode", mock_geocode)
+        monkeypatch.setattr("houses.schools._geocode_address", mock_geocode)
+
+        result = await find_nearest("SL6 3CC", child_age=7, requirement=SchoolGender.BOYS)
+        assert result is not None, f"Expected a school, got None"
+        assert result.name == "Free School", f"Expected Free School, got {result.name}"
+
+    @pytest.mark.asyncio
+    async def test_excludes_empty_name_school(self, monkeypatch):
+        """A school with a blank name should be excluded."""
+        from houses.schools import find_nearest
+
+        unnamed = School.from_GIAS_row({
+            "EstablishmentName": "",
+            "Gender (name)": "Mixed",
+            "PhaseOfEducation (name)": "Primary",
+            "TypeOfEstablishment (name)": "Community School",
+            "Latitude": "51.5",
+            "Longitude": "-0.1",
+            "Postcode": "SL6 1AA",
+        })
+        named = School.from_GIAS_row({
+            "EstablishmentName": "Has A Name School",
+            "Gender (name)": "Mixed",
+            "PhaseOfEducation (name)": "Primary",
+            "TypeOfEstablishment (name)": "Community School",
+            "Latitude": "51.501",
+            "Longitude": "-0.101",
+            "Postcode": "SL6 2BB",
+        })
+        monkeypatch.setattr("houses.schools._load_schools", lambda: [unnamed, named])
+
+        async def mock_geocode(*_, **__):
+            return Attempt.succeeded(GeoPoint(51.5005, -0.1005), "test")
+
+        monkeypatch.setattr("houses.schools.geocode", mock_geocode)
+        monkeypatch.setattr("houses.schools._geocode_address", mock_geocode)
+
+        result = await find_nearest("SL6 3CC", child_age=7, requirement=SchoolGender.BOYS)
+        assert result is not None, f"Expected a school, got None"
+        assert result.name == "Has A Name School", f"Expected Has A Name, got {result.name}"
+
+class TestSchoolFromGIASRow:
+    """School.from_GIAS_row — parses a GIAS CSV row into a School dataclass."""
+
+    def test_basic_parse(self):
+        s = School.from_GIAS_row({
             "EstablishmentName": "Test Primary School",
             "Gender (name)": "Mixed",
             "TypeOfEstablishment (name)": "Community School",
@@ -237,47 +351,41 @@ class TestSchoolToInfo:
             "SchoolWebsite": "https://example.com",
             "OfstedRating (name)": "Good",
             "InspectionYear": "2023",
-        }
-        info = _school_to_info(school, dist_km=0.8, school_type="primary")
+            "PhaseOfEducation (name)": "Primary",
+            "Postcode": "SL6 1AA",
+        })
 
-        assert info.name == "Test Primary School"
-        assert info.type == "primary"
-        assert info.distance_km == 0.8
-        assert info.gender == "mixed"
-        assert info.fee_paying is False
-        assert info.urn == "123456"
-        assert info.website == "https://example.com"
-        assert info.ofsted_rating == "Good"
-        assert info.inspection_year == "2023"
+        assert s.name == "Test Primary School"
+        assert s.gender == SchoolGender.MIXED
+        assert s.type_of_establishment == "Community School"
+        assert not s.fee_paying
+        assert s.urn == "123456"
+        assert s.website == "https://example.com"
+        assert s.ofsted_rating == "Good"
+        assert s.inspection_year == "2023"
+        assert s.phase == "Primary"
+        assert s.postcode == "SL6 1AA"
 
-    def test_walk_time_from_distance(self):
-        """Walk time should be distance / 5 * 60 (5 km/h walking speed)."""
-        info = _school_to_info({}, dist_km=1.0, school_type="primary")
-        assert info.walking_time_minutes == 12  # 1.0 / 5 * 60 = 12
-
-    def test_zero_distance_walk_time(self):
-        """Zero distance should yield None walk time."""
-        info = _school_to_info({}, dist_km=0.0, school_type="primary")
-        assert info.walking_time_minutes is None
-
-    def test_none_distance(self):
-        """None distance should yield None walk time and None distance_km."""
-        info = _school_to_info({}, dist_km=None, school_type="primary")
-        assert info.walking_time_minutes is None
-        assert info.distance_km is None
-
-    def test_distance_rounded_to_2dp(self):
-        info = _school_to_info({}, dist_km=1.23456, school_type="primary")
-        assert info.distance_km == 1.23
+    def test_independent_school_is_fee_paying(self):
+        s = School.from_GIAS_row({"TypeOfEstablishment (name)": "Independent School"})
+        assert s.fee_paying
 
     def test_missing_name_defaults(self):
-        info = _school_to_info({}, dist_km=None, school_type="secondary")
-        assert info.name == "Unknown"
-        assert info.urn == ""
+        s = School.from_GIAS_row({})
+        assert s.name == ""
+        assert s.urn == ""
 
-    def test_type_preserved(self):
-        info = _school_to_info({}, dist_km=0.5, school_type="secondary")
-        assert info.type == "secondary"
+    def test_coords_from_lat_lng(self):
+        s = School.from_GIAS_row({"Latitude": "51.5", "Longitude": "-0.13"})
+        assert s.coords == GeoPoint(51.5, -0.13)
+
+    def test_missing_coords_is_none(self):
+        s = School.from_GIAS_row({})
+        assert s.coords is None
+
+    def test_gender_from_raw_string(self):
+        s = School.from_GIAS_row({"Gender (name)": "Boys"})
+        assert s.gender == SchoolGender.BOYS
 
 
 class TestEndPostcodePattern:
@@ -1086,7 +1194,9 @@ class TestBusFallback:
         monkeypatch.setattr("houses.enricher._find_bus_alternative", lambda *_: None)
 
         result = (await compute_lorena_commute("GU52")).get()
-        assert result is with_bus, "Should use TfL bus route when available"
+        assert result is not None
+        assert result.duration_minutes == with_bus.duration_minutes
+        assert result.daily_cost_gbp == with_bus.daily_cost_gbp
 
 
 class TestBusFaresDataLoaded:
@@ -1479,3 +1589,130 @@ class TestKnownWrongBehaviours:
         scso = data.get("Stagecoach_South", {})
         coords = scso.get("stop_coords", [])
         assert len(coords) > 0, "stop_coords empty — NaPTAN stop data not integrated or extraction needs re-run"
+
+
+class TestTfLRouteSummary:
+    """TransitRoute._build_cost_groups must preserve TfL station/line names."""
+
+    def test_summary_includes_station_names(self):
+        """JourneyLeg descriptions should contain station names and transit route info."""
+        from houses.transit_route import TransitRoute
+
+        route = TransitRoute("SL6", "SW1V 2QQ", "test")
+        tfl_data = {
+            "journeys": [
+                {
+                    "duration": 87,
+                    "legs": [
+                        {
+                            "mode": {"name": "walking"},
+                            "duration": 16,
+                            "instruction": {"summary": "walk to Maidenhead"},
+                            "arrivalPoint": {"commonName": "Maidenhead Rail Station"},
+                        },
+                        {
+                            "mode": {"name": "national-rail"},
+                            "duration": 22,
+                            "instruction": {"summary": "Train to Paddington"},
+                            "route": {"name": "Great Western Railway"},
+                            "departurePoint": {"commonName": "Maidenhead"},
+                            "arrivalPoint": {"commonName": "Paddington"},
+                        },
+                        {
+                            "mode": {"name": "tube"},
+                            "duration": 8,
+                            "instruction": {"summary": "Bakerloo line to Oxford Circus"},
+                            "route": {"name": "Bakerloo"},
+                            "departurePoint": {"commonName": "Paddington"},
+                            "arrivalPoint": {"commonName": "Oxford Circus"},
+                        },
+                    ],
+                    "fare": {"totalCost": 500, "singleFare": 250},
+                }
+            ]
+        }
+
+        groups = route._build_cost_groups(tfl_data)
+
+        all_descriptions = []
+        for g in groups:
+            for leg in g.legs:
+                all_descriptions.append(leg.description)
+
+        combined = " ".join(all_descriptions)
+        assert "Maidenhead" in combined, f"Should mention station name, got: {combined}"
+        assert "Paddington" in combined, f"Should mention arrival station, got: {combined}"
+        assert any("Bakerloo" in d or "Great Western" in d for d in all_descriptions), \
+            f"Should mention transit line name, got: {all_descriptions}"
+
+        # Check the new fields are populated
+        all_legs = [leg for g in groups for leg in g.legs]
+        tube_leg = next(leg for leg in all_legs if leg.mode.name == "TUBE")
+        assert tube_leg.line_name == "Bakerloo", f"Expected Bakerloo line, got {tube_leg.line_name}"
+        assert tube_leg.end_station == "Oxford Circus", f"Expected Oxford Circus, got {tube_leg.end_station}"
+        assert tube_leg.start_station == "Paddington", f"Expected Paddington, got {tube_leg.start_station}"
+        train_leg = next(leg for leg in all_legs if leg.mode.name == "TRAIN")
+        assert train_leg.line_name == "Great Western Railway"
+
+    def test_summary_for_bus_leg_does_not_crash(self):
+        """_build_cost_groups must handle bus legs (regression: _shorten_station scope)."""
+        from houses.transit_route import TransitRoute
+
+        route = TransitRoute("SL6", "SW1V 2QQ", "test")
+        tfl_data = {
+            "journeys": [
+                {
+                    "duration": 45,
+                    "legs": [
+                        {
+                            "mode": {"name": "walking"},
+                            "duration": 5,
+                            "arrivalPoint": {"commonName": "Maidenhead Bus Station"},
+                        },
+                        {
+                            "mode": {"name": "bus"},
+                            "duration": 20,
+                            "route": {"name": "7"},
+                            "departurePoint": {"commonName": "Maidenhead Bus Station"},
+                            "arrivalPoint": {"commonName": "Slough Bus Station"},
+                        },
+                    ],
+                    "fare": {"totalCost": 350, "singleFare": 175},
+                }
+            ]
+        }
+
+        groups = route._build_cost_groups(tfl_data)
+        descriptions = [leg.description for g in groups for leg in g.legs]
+        combined = " ".join(descriptions)
+        assert "bus(7) to" in combined, f"Expected bus(7) format, got: {descriptions}"
+
+    def test_tube_leg_without_line_name_falls_back_to_mode(self):
+        """Tube leg with no route.name extracts line from instruction text."""
+        from houses.transit_route import TransitRoute
+
+        route = TransitRoute("SL6", "SW1V 2QQ", "test")
+        tfl_data = {
+            "journeys": [
+                {
+                    "duration": 30,
+                    "legs": [
+                        {
+                            "mode": {"name": "tube"},
+                            "duration": 8,
+                            "route": {},  # no line name
+                            "departurePoint": {"commonName": "Paddington"},
+                            "arrivalPoint": {"commonName": "Oxford Circus"},
+                            "instruction": {"summary": "Bakerloo line to Oxford Circus"},
+                        },
+                    ],
+                    "fare": {"totalCost": 250, "singleFare": 125},
+                }
+            ]
+        }
+
+        groups = route._build_cost_groups(tfl_data)
+        descriptions = [leg.description for g in groups for leg in g.legs]
+        combined = " ".join(descriptions)
+        # Should extract tube line from instruction text, not use bare "line"
+        assert "Bakerloo line" in combined, f"Expected Bakerloo line from instruction, got: {descriptions}"

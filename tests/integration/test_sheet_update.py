@@ -2,10 +2,7 @@
 
 from fastapi.testclient import TestClient
 
-from houses.property import EnrichedProperty
 from houses.server import app
-from houses.sheets import row_values
-from tests.integration.conftest import mock_httpx
 
 client = TestClient(app)
 
@@ -19,10 +16,8 @@ class TestDryRun:
             "url": "https://www.rightmove.co.uk/properties/999999",
             "address": "10 High Street, Test Town, TE1 1ST",
         }
-        _, async_patch, sync_patch = mock_httpx()
-        with async_patch, sync_patch:
-            resp_normal = client.post("/inject-property", json=payload)
-            resp_dry = client.post("/inject-property?dry_run=true", json=payload)
+        resp_normal = client.post("/inject-property", json=payload)
+        resp_dry = client.post("/inject-property?dry_run=true", json=payload)
 
         assert resp_normal.status_code in (200, 201)
         assert resp_dry.status_code == 200
@@ -38,12 +33,10 @@ class TestDryRun:
             "url": "https://www.rightmove.co.uk/properties/888888",
             "address": "20 High Street, Test Town, TE1 1ST",
         }
-        _, async_patch, sync_patch = mock_httpx()
-        with async_patch, sync_patch:
-            resp1 = client.post("/inject-property?dry_run=true", json=payload)
-            row1 = row_values(EnrichedProperty(**resp1.json()["data"]))
+        resp1 = client.post("/inject-property?dry_run=true", json=payload)
+        data1 = resp1.json().get("data", {})
 
-            resp2 = client.post("/inject-property?dry_run=true", json=payload)
-            row2 = row_values(EnrichedProperty(**resp2.json()["data"]))
+        resp2 = client.post("/inject-property?dry_run=true", json=payload)
+        data2 = resp2.json().get("data", {})
 
-        assert row1 == row2, "dry_run should return identical data on repeated calls"
+        assert data1 == data2, "dry_run should return identical data on repeated calls"

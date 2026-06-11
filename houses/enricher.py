@@ -7,7 +7,6 @@ driving distances, and UK government GIAS school data.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import csv
 import json
 import logging
@@ -19,11 +18,10 @@ import httpx
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.attempt import Attempt
-from houses.commute import Commute, CommuteBreakdown, CommuteMode, CostGroup, JourneyLeg, LegMode
+from houses.commute import Commute, CommuteBreakdown, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.geo import GeoPoint
 from houses.location import _geocode_address, geocode
-from houses.property import SchoolInfo
 from houses.retry import retry_async
 
 logger = logging.getLogger(__name__)
@@ -628,8 +626,15 @@ async def _get_drive_minutes(origin_postcode: str, station_name: str) -> int | N
     if dest_coords is None:
         return None
 
+    # dest_coords can be tuple (lat, lng) from CSV or GeoPoint from geocoding
+    if hasattr(dest_coords, "lat"):
+        dest_lat = dest_coords.lat
+        dest_lng = dest_coords.lon
+    else:
+        dest_lat, dest_lng = dest_coords[0], dest_coords[1]
+
     body = {
-        "coordinates": [[origin_coords.lon, origin_coords.lat], [dest_coords[1], dest_coords[0]]],
+        "coordinates": [[origin_coords.lon, origin_coords.lat], [dest_lng, dest_lat]],
         "units": "km",
     }
     try:
@@ -712,79 +717,30 @@ async def _apply_park_and_ride_to_journeys(
 
 
 async def compute_simon_commute(property_postcode: str) -> Attempt[Commute]:
-    from houses.transit_route import TransitRoute
+    from houses.routing import _with_label, get_commute
 
-    route = TransitRoute(
-        property_postcode,
-        settings.simon_postcode,
-        "Simon — Pimlico / Victoria",
-        park_and_ride=True,
-    )
-    return await route.plan()
+    result = await get_commute(property_postcode, settings.simon_postcode, has_car=True, max_walk_minutes=15)
+    if result.is_succeeded:
+        commute = result.value_or_none()
+        return Attempt.succeeded(
+            _with_label(commute, "Simon — Pimlico / Victoria", settings.simon_postcode),
+            result.source,
+        )
+    # Propagate the failure reason from get_commute
+    return Attempt.impossible(result.source, result.reason)
 
 
 async def compute_lorena_commute(property_postcode: str) -> Attempt[Commute]:
-    from houses.transit_route import TransitRoute
+    from houses.routing import _with_label, get_commute
 
-    no_bus = await TransitRoute(
-        property_postcode,
-        settings.lorena_postcode,
-        "Lorena — Aldgate / City of London",
-    ).plan()
-    with_bus = await TransitRoute(
-        property_postcode,
-        settings.lorena_postcode,
-        "Lorena — Aldgate / City of London",
-        allow_bus=True,
-    ).plan()
-
-    if no_bus.is_impossible and with_bus.is_impossible:
-        return no_bus
-    empty = Commute(
-        destination_label="Lorena — Aldgate / City of London",
-        destination_postcode=settings.lorena_postcode,
-    )
-    no_bus_val = no_bus.value_or(empty)
-    with_bus_val = with_bus.value_or(empty)
-    result = _pick_best_lorena_route(no_bus_val, with_bus_val)
-
-    # Bus fallback: TfL picked no-bus because it has no bus data for this area.
-    if result is no_bus_val and no_bus_val.duration_minutes is not None:
-        m = re.search(r"walk.*?\((\d+)m\)", no_bus_val.summary()[:60])
-        walk_to_station = int(m.group(1)) if m else 0
-        if walk_to_station >= settings.bus_walk_penalty_minutes:
-            bus_route = await _find_bus_alternative(property_postcode, settings.lorena_postcode)
-            if bus_route and bus_route.non_rail_cost() > 0:
-                bus_time = min(15, walk_to_station - settings.bus_walk_penalty_minutes)
-                savings = walk_to_station - bus_time
-                if savings >= settings.bus_walk_penalty_minutes:
-                    new_duration = no_bus_val.duration_minutes - walk_to_station + bus_time
-                    new_cost = no_bus_val.daily_cost_gbp
-                    bus_cost = bus_route.non_rail_cost()
-                    new_cost = round(new_cost + bus_cost, 2) if new_cost is not None else bus_cost
-                    logger.info(
-                        "Bus overlay for %s: estimates bus %dm saves %dm over walk %dm, total=£%s",
-                        property_postcode,
-                        bus_time,
-                        savings,
-                        walk_to_station,
-                        new_cost,
-                    )
-                    result = Commute(
-                        destination_label="Lorena \u2014 Aldgate / City of London",
-                        destination_postcode=settings.lorena_postcode,
-                        duration_minutes=new_duration,
-                        daily_cost_gbp=new_cost,
-                        mode="transit",
-                        cost_groups=(
-                            CostGroup(
-                                legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=bus_time),),
-                                cost=bus_cost,
-                            ),
-                        ),
-                    )
-
-    return Attempt.succeeded(result, "tfl")
+    result = await get_commute(property_postcode, settings.lorena_postcode, has_car=False, max_walk_minutes=30)
+    if result.is_succeeded:
+        commute = result.value_or_none()
+        return Attempt.succeeded(
+            _with_label(commute, "Lorena — Aldgate / City of London", settings.lorena_postcode),
+            result.source,
+        )
+    return Attempt.impossible(result.source, result.reason)
 
 
 def _pick_best_lorena_route(no_bus: Commute, with_bus: Commute) -> Commute:
@@ -990,284 +946,21 @@ def _compute_petrol_from_distance_km(round_trip_km: float) -> float:
 
 
 async def compute_petrol_cost(origin_postcode: str) -> Attempt[Commute]:
-    try:
-        # Use postcodes.io first (more reliable for UK), fall back to ORS
-        origin_coords = None
-        last = await geocode(origin_postcode)
-        coords = last.value_or_none()
-        if coords is None:
-            last = await _geocode_address(origin_postcode)
-            coords = last.value_or_none()
-        if coords is not None:
-            # geocode returns (lat, lng), ORS needs [lng, lat]
-            origin_coords = [coords.lon, coords.lat]
+    """Bracknell commute — driving cost via ORS.
 
-        if origin_coords is None:
-            return Attempt.impossible("petrol", "could not geocode origin")
+    Note: This still exists as a separate function because the sheet
+    always shows a Bracknell cost, even when transit might be faster.
+    The ``get_commute`` function (in routing.py) handles the
+    transit-vs-driving comparison for other callers.
+    """
+    from houses.routing import _drive_commute, _with_label
 
-        bracknell_coords = (await geocode(settings.bracknell_postcode)).value_or_none()
-        if bracknell_coords is None:
-            return Attempt.impossible("petrol", "could not geocode Bracknell")
-        dest_coords = [bracknell_coords.lon, bracknell_coords.lat]
-
-        async with cached_async_client(timeout=15.0) as client:
-            body = {"coordinates": [origin_coords, dest_coords], "units": "km"}
-            cached = get_cached("POST", ORS_DIRECTIONS_URL, None, json.dumps(body, sort_keys=True))
-            if cached is not None:
-                dir_data = cached
-            else:
-                dir_resp = await retry_async(
-                    lambda: client.post(
-                        ORS_DIRECTIONS_URL,
-                        headers={
-                            "Authorization": settings.ors_api_key,
-                            "Content-Type": "application/json",
-                        },
-                        json=body,
-                    ),
-                    max_retries=2,
-                    base_delay=1.0,
-                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-                )
-                dir_resp.raise_for_status()
-                dir_data = dir_resp.json()
-                set_cached("POST", ORS_DIRECTIONS_URL, None, json.dumps(body, sort_keys=True), dir_data)
-
-        one_way_km = dir_data["routes"][0]["summary"]["distance"]
-        one_way_duration_sec = dir_data["routes"][0]["summary"]["duration"]
-        round_trip_km = round(one_way_km * 2, 1)
-        round_trip_minutes = round(one_way_duration_sec * 2 / 60)
-        cost = _compute_petrol_from_distance_km(round_trip_km)
-
-        commute = Commute(
-            destination_label="Bracknell Office (RG12 8YA)",
-            destination_postcode=settings.bracknell_postcode,
-            duration_minutes=round_trip_minutes,
-            daily_cost_gbp=cost,
-            mode=CommuteMode.DRIVE,
-            cost_groups=(
-                CostGroup(
-                    legs=(JourneyLeg(mode=LegMode.DRIVE, duration_minutes=round_trip_minutes),),
-                    cost=cost,
-                ),
-            ),
+    commute = await _drive_commute(origin_postcode, settings.bracknell_postcode)
+    if commute:
+        return Attempt.succeeded(
+            _with_label(commute, "Bracknell Office (RG12 8YA)", settings.bracknell_postcode),
+            "ors",
         )
-        return Attempt.succeeded(commute, "ors")
-    except (httpx.HTTPStatusError, httpx.RequestError, KeyError, IndexError) as e:
-        logger.error("Petrol cost failed for %s: %s", origin_postcode, e)
-        return Attempt.impossible("petrol", "driving route failed", e)
+    return Attempt.impossible("petrol", "could not route to Bracknell")
 
 
-# ---------------------------------------------------------------------------
-# Schools — GIAS CSV + postcodes.io geocoding
-# ---------------------------------------------------------------------------
-
-# GIAS column name mappings — the CSVs use "FieldName (name)" format
-COL_NAME = "EstablishmentName"
-COL_PHASE = "PhaseOfEducation (name)"
-COL_GENDER = "Gender (name)"
-COL_TYPE = "TypeOfEstablishment (name)"
-COL_POSTCODE = "Postcode"
-COL_URN = "URN"
-COL_WEBSITE = "SchoolWebsite"
-COL_OFSTED = "OfstedRating (name)"
-COL_INSPECTION_YEAR = "InspectionYear"
-
-# The enriched CSV — has Latitude/Longitude columns added via scripts/enrich_schools.py
-# Falls back to postcodes.io on-the-fly for any schools missing coordinates.
-SCHOOLS_CSV_PATH = Path("data/edubaseall_enriched.csv")
-
-FEE_PAYING_TYPES = frozenset(
-    {
-        "independent school",
-        "other independent school",
-        "independent special school",
-        "non-maintained special school",
-    }
-)
-
-# In-memory cache: postcode -> (lat, lng)
-_geo_cache: dict[str, GeoPoint | None] = {}
-ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-
-
-def _load_schools() -> list[dict]:
-    if not SCHOOLS_CSV_PATH.is_file():
-        logger.warning("Schools CSV not found at %s", SCHOOLS_CSV_PATH)
-        return []
-    with SCHOOLS_CSV_PATH.open(newline="", encoding="latin-1") as f:
-        return list(csv.DictReader(f))
-
-
-def _boys_eligible(school: dict) -> bool:
-    gender = (school.get(COL_GENDER) or "").strip().lower()
-    if gender not in ("mixed", "boys"):
-        return False
-    estab_type = (school.get(COL_TYPE) or "").strip().lower()
-    return estab_type not in FEE_PAYING_TYPES
-
-
-def _phase_filter(school: dict, target: str) -> bool:
-    phase = (school.get(COL_PHASE) or "").strip().lower()
-    return target in phase
-
-
-def _school_to_info(school: dict, dist_km: float, school_type: str) -> SchoolInfo:
-    walk_mins = round(dist_km / 5 * 60) if dist_km else None
-    # Bus time only makes sense when walking is impractical (> 20 min)
-    bus_mins = None
-    return SchoolInfo(
-        name=school.get(COL_NAME, "Unknown"),
-        type=school_type,
-        distance_km=round(dist_km, 2) if dist_km else None,
-        gender=(school.get(COL_GENDER) or "").strip().lower(),
-        fee_paying=False,
-        walking_time_minutes=walk_mins,
-        bus_time_minutes=bus_mins,
-        urn=school.get(COL_URN, ""),
-        website=school.get(COL_WEBSITE, ""),
-        ofsted_rating=school.get(COL_OFSTED, ""),
-        inspection_year=school.get(COL_INSPECTION_YEAR, ""),
-    )
-
-
-def _school_coords(school: dict) -> tuple[float, float] | None:
-    """Read lat/lng from the enriched CSV row."""
-    try:
-        lat = school.get("Latitude")
-        lng = school.get("Longitude")
-        if lat and lng:
-            return float(lat), float(lng)
-    except (ValueError, TypeError):
-        pass
-    return None
-
-
-async def _find_nearest_boys(
-    postcode: str,
-    target_phase: str,
-    address: str = "",
-) -> SchoolInfo | None:
-    schools = _load_schools()
-    if not schools:
-        return None
-
-    property_coords = (await geocode(postcode)).value_or_none()
-    if property_coords is None and address:
-        property_coords = (await _geocode_address(address)).value_or_none()
-    if property_coords is None:
-        return None
-
-    origin_lat, origin_lon = property_coords.lat, property_coords.lon
-    candidates: list[tuple[float, dict]] = []
-
-    for school in schools:
-        if not _phase_filter(school, target_phase):
-            continue
-        if not _boys_eligible(school):
-            continue
-
-        sc = _school_coords(school)
-        school_coords = GeoPoint(*sc) if sc else None
-        if school_coords is None:
-            school_postcode = school.get(COL_POSTCODE, "")
-            if not school_postcode:
-                continue
-            school_coords = (await geocode(school_postcode)).value_or_none()
-            if school_coords is None:
-                continue
-
-        dist = GeoPoint(origin_lat, origin_lon).distance_km_to(school_coords)
-        if dist <= settings.school_search_radius_km:
-            candidates.append((dist, school))
-
-    if not candidates:
-        return None
-
-    candidates.sort(key=lambda x: x[0])
-    _, best = candidates[0]
-    info = _school_to_info(best, candidates[0][0], target_phase)
-
-    if (
-        info.type == "secondary"
-        and info.walking_time_minutes
-        and info.walking_time_minutes > 20
-        and settings.google_maps_api_key
-    ):
-        sec_school_coords = _school_coords(best)
-        if sec_school_coords:
-            sec_gp = GeoPoint(*sec_school_coords)
-            routes_url = "https://routes.googleapis.com/directions/v2:computeRoutes"
-            body = {
-                "origin": {
-                    "location": {"latLng": {"latitude": origin_lat, "longitude": origin_lon}},
-                },
-                "destination": {
-                    "location": {"latLng": {"latitude": sec_gp.lat, "longitude": sec_gp.lon}},
-                },
-                "travelMode": "TRANSIT",
-            }
-            cached = get_cached("POST", routes_url, None, json.dumps(body, sort_keys=True))
-            if cached is not None:
-                data = cached
-                leg = data.get("routes", [{}])[0].get("legs", [{}])[0]
-                duration_s = leg.get("duration", "")
-                if duration_s and duration_s.endswith("s"):
-                    with contextlib.suppress(ValueError):
-                        info.bus_time_minutes = round(int(duration_s.rstrip("s")) / 60)
-                steps = leg.get("steps", [])
-                for s in steps:
-                    td = s.get("transitDetails")
-                    if td:
-                        line = td.get("transitLine", {}).get("nameShort", "")
-                        dep = td.get("stopDetails", {}).get("departureStop", {}).get("name", "")
-                        if line and dep:
-                            info.bus_route = f"{line} from {dep}"
-                            break
-            else:
-                try:
-                    async with cached_async_client(timeout=10.0) as c:
-                        resp = await c.post(
-                            routes_url,
-                            headers={
-                                "X-Goog-Api-Key": settings.google_maps_api_key,
-                                "X-Goog-FieldMask": "routes.legs.duration,routes.legs.steps.transitDetails",
-                                "Content-Type": "application/json",
-                            },
-                            json=body,
-                        )
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            set_cached("POST", routes_url, None, json.dumps(body, sort_keys=True), data)
-                            leg = data.get("routes", [{}])[0].get("legs", [{}])[0]
-                            duration_s = leg.get("duration", "")
-                            if duration_s and duration_s.endswith("s"):
-                                with contextlib.suppress(ValueError):
-                                    info.bus_time_minutes = round(int(duration_s.rstrip("s")) / 60)
-                            steps = leg.get("steps", [])
-                            for s in steps:
-                                td = s.get("transitDetails")
-                                if td:
-                                    line = td.get("transitLine", {}).get("nameShort", "")
-                                    dep = td.get("stopDetails", {}).get("departureStop", {}).get("name", "")
-                                    if line and dep:
-                                        info.bus_route = f"{line} from {dep}"
-                                        break
-                        else:
-                            logger.error(
-                                "Routes API returned %d — enable routes.googleapis.com",
-                                resp.status_code,
-                            )
-                except Exception as e:
-                    logger.error("Bus directions failed: %s", e)
-
-    return info
-
-
-async def find_nearest_boys_primary(postcode: str, address: str = "") -> SchoolInfo | None:
-    return await _find_nearest_boys(postcode, "primary", address)
-
-
-async def find_nearest_boys_secondary(postcode: str, address: str = "") -> SchoolInfo | None:
-    return await _find_nearest_boys(postcode, "secondary", address)

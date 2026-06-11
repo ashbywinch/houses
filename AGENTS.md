@@ -58,6 +58,8 @@ Houses is a local FastAPI server that acts as a webhook broker for property list
 | `houses/sheets.py` | gspread integration, canonical column headers |
 | `houses/retry.py` | Async retry with exponential backoff and jitter |
 | `scripts/setup_sheet.py` | Sheet tab creation and XLOOKUP formula templates |
+| `scripts/enrichment-diff.py` | Compare live sheet vs dry-run enrichment (TSV diff) |
+| `scripts/dump_sheet.py` | Dump both sheet tabs to stdout |
 
 ## Development Commands
 
@@ -67,6 +69,10 @@ make run      # Start dev server on :8080 (auto-reloads on code changes via --re
 make test     # Run unit tests
 make lint     # Ruff check
 make format   # Auto-fix formatting
+
+# After any refactoring that affects enrichment output:
+# See docs/development.md → "Enrichment Diff Verification"
+uv run python scripts/enrichment-diff.py > /tmp/diff.tsv
 ```
 
 ## Agent Rules

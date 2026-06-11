@@ -16,9 +16,10 @@ from typing import Any
 import gspread
 from google.oauth2.service_account import Credentials
 
-from houses.commute import Commute
+from houses.commute import Commute, LegMode
 from houses.config import settings
-from houses.property import EnrichedProperty, SchoolInfo
+from houses.property import EnrichedProperty
+from houses.schools import School
 
 logger = logging.getLogger(__name__)
 
@@ -174,11 +175,14 @@ _FORMULA_COLUMNS: frozenset[str] = frozenset(
 
 
 def col_index(header: str) -> int:
-    """Return the 0-based column index for a given header name."""
+    """Return the 0-based column index for the canonical header name."""
     for i, h in enumerate(COLUMN_HEADERS):
         if h == header:
             return i
     raise ValueError(f"Column '{header}' not found in COLUMN_HEADERS")
+
+
+
 
 
 # Index positions of user-owned columns (must never be written by the server)
@@ -1102,22 +1106,45 @@ def _fmt_cost(val: float | None) -> str:
     return f"{val:.2f}" if val else ""
 
 
-def _fmt_dist(s: SchoolInfo | None) -> str:
-    return f"{s.distance_km:.2f}" if s and s.distance_km is not None else ""
+def _fmt_dist(distance_km: float | None) -> str:
+    return f"{distance_km:.2f}" if distance_km is not None else ""
 
 
-def _fmt_walk(s: SchoolInfo | None) -> str:
-    return str(s.walking_time_minutes) if s and s.walking_time_minutes is not None else ""
-
-
-def _fmt_school_link(s: SchoolInfo | None) -> str:
-    if s and s.urn:
-        return f"https://get-information-schools.service.gov.uk/Establishments/Establishment/Details/{s.urn}"
+def _fmt_walk(commute: Commute | None) -> str:
+    if commute and commute.duration_minutes is not None and commute.cost_groups:
+        # Only show walk time for walking commutes
+        legs = commute.cost_groups[0].legs
+        if legs and legs[0].mode == LegMode.WALK:
+            return str(commute.duration_minutes)
     return ""
 
 
-def _fmt_bus(s: SchoolInfo | None) -> str:
-    return str(s.bus_time_minutes) if s and s.bus_time_minutes is not None else ""
+def _fmt_school_link(school: School | None) -> str:
+    if school and school.urn:
+        return f"https://get-information-schools.service.gov.uk/Establishments/Establishment/Details/{school.urn}"
+    return ""
+
+
+def _fmt_bus(commute: Commute | None) -> str:
+    if commute and commute.duration_minutes is not None and commute.cost_groups:
+        legs = commute.cost_groups[0].legs
+        if legs and legs[0].mode == LegMode.BUS:
+            return str(commute.duration_minutes)
+    return ""
+
+
+def _fmt_bus_route(commute: Commute | None) -> str:
+    """Extract bus route description from a commute, or empty string."""
+    if commute and commute.cost_groups:
+        for group in commute.cost_groups:
+            for leg in group.legs:
+                if leg.mode == LegMode.BUS and leg.description:
+                    return leg.description
+            # Fallback: summary of bus-containing groups
+            for _leg, desc in zip(group.legs, group.leg_descriptions(), strict=True):
+                if "bus" in desc.lower():
+                    return desc
+    return ""
 
 
 def row_values(property_: EnrichedProperty) -> dict[str, str]:
@@ -1145,14 +1172,14 @@ def row_values(property_: EnrichedProperty) -> dict[str, str]:
     r["Bracknell Time (min)"] = str(bt) if bt is not None else ""
     r["Bracknell Cost (£)"] = _fmt_cost(property_.petrol.daily_cost_gbp if property_.petrol else None)
     r["Primary School"] = property_.primary_school.name if property_.primary_school else ""
-    r["Primary Distance (km)"] = _fmt_dist(property_.primary_school)
-    r["Primary Walk (min)"] = _fmt_walk(property_.primary_school)
+    r["Primary Distance (km)"] = _fmt_dist(property_.primary_school_distance_km)
+    r["Primary Walk (min)"] = _fmt_walk(property_.primary_school_commute)
     r["Primary School Link"] = _fmt_school_link(property_.primary_school)
     r["Primary Ofsted"] = property_.primary_school.ofsted_rating if property_.primary_school else ""
     r["Primary Inspection Year"] = property_.primary_school.inspection_year if property_.primary_school else ""
     r["Secondary School"] = property_.secondary_school.name if property_.secondary_school else ""
-    r["Secondary Distance (km)"] = _fmt_dist(property_.secondary_school)
-    r["Secondary Walk (min)"] = _fmt_walk(property_.secondary_school)
+    r["Secondary Distance (km)"] = _fmt_dist(property_.secondary_school_distance_km)
+    r["Secondary Walk (min)"] = _fmt_walk(property_.secondary_school_commute)
     r["Secondary School Link"] = _fmt_school_link(property_.secondary_school)
     r["Secondary Ofsted"] = property_.secondary_school.ofsted_rating if property_.secondary_school else ""
     r["Secondary Inspection Year"] = property_.secondary_school.inspection_year if property_.secondary_school else ""
@@ -1162,8 +1189,8 @@ def row_values(property_: EnrichedProperty) -> dict[str, str]:
     r["EPC Rating"] = property_.epc_rating
     r["Council Tax Band"] = property_.council_tax.band if property_.council_tax else ""
     r["Council Tax Cost (£)"] = _fmt_cost(property_.council_tax.yearly_cost if property_.council_tax else None)
-    r["Secondary Bus (min)"] = _fmt_bus(property_.secondary_school)
-    r["Secondary Bus Route"] = property_.secondary_school.bus_route if property_.secondary_school else ""
+    r["Secondary Bus (min)"] = _fmt_bus(property_.secondary_school_commute)
+    r["Secondary Bus Route"] = _fmt_bus_route(property_.secondary_school_commute)
     r["Approx Latitude (est)"] = str(property_.approx_latitude) if property_.approx_latitude is not None else ""
     r["Approx Longitude (est)"] = str(property_.approx_longitude) if property_.approx_longitude is not None else ""
     r["Approx Station CRS"] = property_.approx_station_crs

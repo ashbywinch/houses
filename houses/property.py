@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from pydantic import BaseModel
-
 from houses.commute import Commute, CommuteBreakdown
+from houses.schools import School
 
 
-class Property(BaseModel):
+@dataclass(frozen=False)
+class Property:
     """Raw property listing extracted by Page Assist from a Rightmove page.
 
     Only ``url`` is required. The LLM should extract ``address`` (the street
@@ -30,25 +30,6 @@ class Property(BaseModel):
 
 
 @dataclass(frozen=True)
-class SchoolInfo:
-    """School details for a single school."""
-
-    name: str
-    type: str  # "primary" or "secondary"
-    distance_km: float | None = None
-    gender: str = "mixed"
-    fee_paying: bool = False
-    walking_time_minutes: int | None = None
-    bus_time_minutes: int | None = None
-    bus_route: str = ""
-    urn: str = ""
-    website: str = ""
-    ofsted_rating: str = ""
-    inspection_year: str = ""
-    inspection_summary: str = ""
-
-
-@dataclass(frozen=True)
 class CouncilTaxInfo:
     """Council tax band, cost, and evidence source."""
 
@@ -57,7 +38,8 @@ class CouncilTaxInfo:
     evidence_url: str = ""
 
 
-class EnrichedProperty(BaseModel):
+@dataclass
+class EnrichedProperty:
     """Full enriched property record written to the Google Sheet."""
 
     url: str
@@ -74,8 +56,12 @@ class EnrichedProperty(BaseModel):
     petrol: Commute | None = None
 
     # Schools
-    primary_school: SchoolInfo | None = None
-    secondary_school: SchoolInfo | None = None
+    primary_school: School | None = None
+    primary_school_commute: Commute | None = None
+    primary_school_distance_km: float | None = None
+    secondary_school: School | None = None
+    secondary_school_commute: Commute | None = None
+    secondary_school_distance_km: float | None = None
 
     town_description: str = ""
     walk_to_town_minutes: int | None = None
@@ -83,9 +69,7 @@ class EnrichedProperty(BaseModel):
     primary_ofsted: str = ""
     secondary_ofsted: str = ""
     primary_inspection_year: str = ""
-    primary_inspection_summary: str = ""
     secondary_inspection_year: str = ""
-    secondary_inspection_summary: str = ""
     epc_rating: str = ""
 
     council_tax: CouncilTaxInfo | None = None
