@@ -12,7 +12,9 @@ from httpx import Response
 from houses.attempt import Attempt
 from houses.commute import Commute
 from houses.config import settings
-from houses.property import EnrichedProperty
+from houses.attempt import Attempt
+from houses.commute import Commute, CommuteBreakdown
+from houses.property import CouncilTaxInfo, EnrichedProperty
 from houses.server import _run_backfill_enrichment, app
 from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS
 
@@ -34,7 +36,7 @@ class TestInjectProperty:
 
     @pytest.mark.integration
     def test_valid_payload_returns_data(self):
-        resp = client.post("/inject-property", json=self.VALID_PAYLOAD)
+        resp = client.post("/properties", json=self.VALID_PAYLOAD)
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] == "ok"
@@ -46,7 +48,7 @@ class TestInjectProperty:
         fixture_dir = Path(__file__).parent.parent / "fixtures"
         settings.rightmove_sample_page = str(fixture_dir / "rightmove_sample.html")
         try:
-            resp = client.post("/inject-property", json={"url": "https://www.rightmove.co.uk/properties/1"})
+            resp = client.post("/properties", json={"url": "https://www.rightmove.co.uk/properties/1"})
             assert resp.status_code == 200
             assert "url" in resp.json()["data"]
         finally:
@@ -55,7 +57,7 @@ class TestInjectProperty:
     @pytest.mark.integration
     def test_accepts_any_url(self):
         payload = {**self.VALID_PAYLOAD, "url": "https://example.com/"}
-        resp = client.post("/inject-property", json=payload)
+        resp = client.post("/properties", json=payload)
         assert resp.status_code == 200
 
     def test_rejects_existing_property_without_fields(self):
@@ -85,7 +87,7 @@ class TestInjectProperty:
         try:
             with patch("houses.server.get_client", return_value=mock_client):
                 resp = client.post(
-                    "/inject-property",
+                    "/properties",
                     json={"url": "https://www.rightmove.co.uk/properties/88375569"},
                 )
             assert resp.status_code == 400, f"Expected 400, got {resp.status_code}: {resp.text[:100]}"
@@ -97,7 +99,7 @@ class TestInjectProperty:
 
     @pytest.mark.integration
     def test_enrichment_fields_present(self):
-        resp = client.post("/inject-property", json=self.VALID_PAYLOAD)
+        resp = client.post("/properties", json=self.VALID_PAYLOAD)
         data = resp.json()["data"]
         assert "simon_commute" in data
         assert "lorena_commute" in data
@@ -112,7 +114,7 @@ class TestInjectProperty:
     def test_maidenhead_outcode_gets_full_enrichment(self):
         """Address with only outcode 'SL6' — server must use full street
         address for geocoding so transit/petrol/schools all return results."""
-        resp = client.post("/inject-property", json=self.MAIDENHEAD_PAYLOAD)
+        resp = client.post("/properties", json=self.MAIDENHEAD_PAYLOAD)
         assert resp.status_code == 200
         data = resp.json()["data"]
         assert data["url"] == self.MAIDENHEAD_PAYLOAD["url"]
@@ -129,7 +131,7 @@ class TestInjectProperty:
 
 
 class TestBackfillView:
-    """Tests for POST /backfill-view."""
+    """Tests for POST /properties."""
 
     @staticmethod
     def _parse_rows(resp) -> list[dict]:
@@ -269,19 +271,21 @@ class TestBackfillView:
     ]
 
     def _make_enriched(self, rid: str, **overrides: dict) -> dict:
-        """Return a minimal EnrichedProperty-compatible dict."""
-        simon = {
-            "destination_label": "Simon (London)",
-            "destination_postcode": "TE1 1ST",
-            "duration_minutes": 30,
-            "daily_cost_gbp": 10.0,
-        }
-        lorena = {
-            "destination_label": "Lorena (London)",
-            "destination_postcode": "TE1 1ST",
-            "duration_minutes": 45,
-            "daily_cost_gbp": 12.0,
-        }
+        """Return a minimal EnrichedProperty-compatible dict with real objects."""
+        from houses.commute import Commute
+
+        simon = Commute(
+            destination_label="Simon (London)",
+            destination_postcode="TE1 1ST",
+            duration_minutes=30,
+            daily_cost_gbp=10.0,
+        )
+        lorena = Commute(
+            destination_label="Lorena (London)",
+            destination_postcode="TE1 1ST",
+            duration_minutes=45,
+            daily_cost_gbp=12.0,
+        )
         base = {
             "url": f"https://www.rightmove.co.uk/properties/{rid}",
             "address": "1 High Street, Test Town, TE1 1ST",
@@ -290,13 +294,13 @@ class TestBackfillView:
             "price": 300000.0,
             "simon_commute": simon,
             "lorena_commute": lorena,
-            "petrol": {
-                "destination_label": "Bracknell Office (RG12 8YA)",
-                "destination_postcode": "RG12 8YA",
-                "duration_minutes": 90,
-                "daily_cost_gbp": 12.50,
-                "mode": "drive",
-            },
+            "petrol": Commute(
+                destination_label="Bracknell Office (RG12 8YA)",
+                destination_postcode="RG12 8YA",
+                duration_minutes=90,
+                daily_cost_gbp=12.50,
+                mode="drive",
+            ),
             "primary_school": None,
             "primary_school_commute": None,
             "primary_school_distance_km": None,
@@ -311,8 +315,8 @@ class TestBackfillView:
             "primary_inspection_year": "2023",
             "secondary_inspection_year": "2022",
             "epc_rating": "C",
-            "council_tax": {"band": "D", "yearly_cost": 1800.0},
-            "commute_breakdown": {"yearly_total_gbp": 4600.0},
+            "council_tax": CouncilTaxInfo(band="D", yearly_cost=1800.0),
+            "commute_breakdown": CommuteBreakdown(yearly_total_gbp=4600.0),
             "approx_latitude": 51.5,
             "approx_longitude": -0.1,
             "approx_station_crs": "TST",
@@ -395,7 +399,7 @@ class TestBackfillView:
         try:
             mock_client = self._mock_sheet(view_rows=[])
             with patch("houses.server.get_client", return_value=mock_client):
-                resp = client.post("/backfill-view")
+                resp = client.post("/properties")
             assert resp.status_code == 200
             assert self._parse_rows(resp) == []
         finally:
@@ -412,7 +416,7 @@ class TestBackfillView:
             view_rows = [self._build_view_row("1 Test St, Test Town, TE1 1ST", url, "")]
             mock_client = self._mock_sheet(view_rows=view_rows)
             with patch("houses.server.get_client", return_value=mock_client):
-                resp = client.post("/backfill-view")
+                resp = client.post("/properties")
             assert resp.status_code == 200, resp.text
             results = self._parse_rows(resp)
             assert len(results) >= 1
@@ -433,7 +437,7 @@ class TestBackfillView:
             settings.rightmove_sample_page = original_sample
 
     def test_new_property_dry_run(self):
-        """Dry run reports would_create without calling enrichment or sheet writes."""
+        """no_write runs enrichment but doesn't write to the sheet."""
         original_id = settings.sheet_id
         original_sample = settings.rightmove_sample_page
         settings.sheet_id = "fake-id"
@@ -443,15 +447,13 @@ class TestBackfillView:
             view_rows = [self._build_view_row("2 Test St, Test Town, TE1 1ST", url, "")]
             mock_client = self._mock_sheet(view_rows=view_rows)
             with patch("houses.server.get_client", return_value=mock_client):
-                resp = client.post("/backfill-view?dry_run=true")
+                resp = client.post("/properties?no_write=true")
             assert resp.status_code == 200
             results = self._parse_rows(resp)
             assert len(results) >= 1
             assert results[0]["status"] == "would_create"
-            assert self._parse_start(resp)["dry_run"] is True
-
-            # No enrichment or sheet writes happened
-            assert not mock_client.written_cells, "Cells were written despite dry_run"
+            # No sheet writes happened (no_write=true)
+            assert not mock_client.written_cells, "Cells were written despite no_write"
         finally:
             settings.sheet_id = original_id
             settings.rightmove_sample_page = original_sample
@@ -481,7 +483,7 @@ class TestBackfillView:
                 mock_enrich.return_value = EnrichedProperty(
                     **self._make_enriched(rid, address="3 Test St, Test Town, TE1 1ST"),
                 )
-                resp = client.post("/backfill-view")
+                resp = client.post("/properties")
             assert resp.status_code == 200
             results = self._parse_rows(resp)
             assert len(results) == 1
@@ -523,7 +525,7 @@ class TestBackfillView:
                 patch("houses.server._write_backfill_cells") as mock_write,
             ):
                 mock_enrich.return_value = EnrichedProperty(**self._make_enriched(rid))
-                resp = client.post("/backfill-view")
+                resp = client.post("/properties")
             assert resp.status_code == 200
             results = self._parse_rows(resp)
             assert len(results) == 1
@@ -551,7 +553,7 @@ class TestBackfillView:
             settings.sheet_id = original
 
     def test_existing_partial_dry_run(self):
-        """Dry run for an existing partial property reports would_update without enrichment."""
+        """no_write for an existing partial property enriches but doesn't write."""
         original = settings.sheet_id
         settings.sheet_id = "fake-id"
         try:
@@ -565,18 +567,19 @@ class TestBackfillView:
             data_row[self.DATA_HEADERS.index("Bracknell Cost (£)")] = "10.00"
 
             mock_client = self._mock_sheet(view_rows=view_rows, data_rows=[data_row])
+            enriched_fake = EnrichedProperty(
+                **self._make_enriched(rid, address="5 Test St, Test Town, TE1 1ST"),
+            )
             with (
                 patch("houses.server.get_client", return_value=mock_client),
-                patch("houses.server._run_backfill_enrichment") as mock_enrich,
+                patch("houses.server._run_backfill_enrichment", return_value=enriched_fake),
                 patch("houses.server._write_backfill_cells") as mock_write,
             ):
-                resp = client.post("/backfill-view?dry_run=true")
+                resp = client.post("/properties?no_write=true")
             assert resp.status_code == 200
             results = self._parse_rows(resp)
             assert len(results) == 1
             assert results[0]["status"] == "would_update"
-            assert self._parse_start(resp)["dry_run"] is True
-            mock_enrich.assert_not_called()
             mock_write.assert_not_called()
         finally:
             settings.sheet_id = original
@@ -600,7 +603,7 @@ class TestBackfillView:
                 patch("houses.server._write_backfill_cells") as mock_write,
             ):
                 mock_enrich.return_value = EnrichedProperty(**self._make_enriched(rid))
-                resp = client.post("/backfill-view?fields=epc&fields=council_tax")
+                resp = client.post("/properties?fields=epc&fields=council_tax")
             assert resp.status_code == 200
             results = self._parse_rows(resp)
             assert len(results) == 1
@@ -627,7 +630,7 @@ class TestBackfillView:
             mock_client = self._mock_sheet(view_rows=view_rows)
 
             with patch("houses.server.get_client", return_value=mock_client):
-                resp = client.post("/backfill-view")
+                resp = client.post("/properties")
             assert resp.status_code == 200, resp.text
 
             cells = mock_client.written_cells
@@ -659,7 +662,7 @@ class TestBackfillView:
             mock_client = self._mock_sheet(view_rows=view_rows, data_rows=[data_row])
 
             with patch("houses.server.get_client", return_value=mock_client):
-                resp = client.post("/backfill-view")
+                resp = client.post("/properties")
             assert resp.status_code == 200, resp.text
 
             # Verify user columns were written to the sheet

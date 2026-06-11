@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -211,10 +212,225 @@ async def upsert_property(
     writing to the sheet.
     """
     if payload:
-        # Single property mode — delegate to existing inject_property logic
-        return await inject_property(payload, dry_run=no_write, fields=fields)
-    # Batch mode — delegate to existing backfill_view logic
-    return await backfill_view(no_write=no_write, fields=fields, force=True, rids=rids)
+        # ── Single property mode ───────────────────────────────────
+        postcode = payload.postcode or extract_postcode(payload.address)
+        lookup = payload.address if _is_outcode(postcode) else postcode
+        address = payload.address
+
+        # Check for existing
+        rid_match = re.search(r"properties/(\d+)", payload.url)
+        rid = rid_match.group(1) if rid_match else ""
+        if not fields and rid:
+            gclient = get_client()
+            if gclient and settings.sheet_id:
+                try:
+                    sh = gclient.open_by_key(settings.sheet_id)
+                    ws = sh.worksheet("Properties Data")
+                    if any(
+                        row[col_index("Rightmove ID")].strip() == rid
+                        for row in ws.get_all_values()[1:]
+                    ):
+                        return JSONResponse(
+                            content={
+                                "status": "error",
+                                "error": f"Property {rid} already exists. Use fields= to re-enrich specific fields.",
+                            },
+                            status_code=400,
+                        )
+                except Exception:
+                    pass
+
+        scrape_error = None
+        if not address and payload.url:
+            try:
+                scraped = await scrape_rightmove(payload.url)
+                if scraped.get("address"):
+                    address = scraped["address"]
+                if scraped.get("postcode") and not payload.postcode:
+                    payload.postcode = scraped["postcode"]
+                if scraped.get("bedrooms") is not None and payload.bedrooms is None:
+                    payload.bedrooms = scraped["bedrooms"]
+                if scraped.get("price") is not None and payload.price is None:
+                    payload.price = scraped["price"]
+                postcode = payload.postcode or extract_postcode(address)
+                lookup = address if _is_outcode(postcode) else postcode
+            except Exception as e:
+                scrape_error = str(e)
+                logger.warning("Scrape failed for %s: %s", payload.url, e)
+
+        enabled = set(fields) if fields else None
+        enriched = await _run_enrichment(
+            url=payload.url, address=address, postcode=postcode, lookup=lookup,
+            bedrooms=payload.bedrooms, price=payload.price, enabled=enabled,
+            actual_latitude=payload.actual_latitude, actual_longitude=payload.actual_longitude,
+        )
+
+        row_url = None
+        if not no_write:
+            row_url = await write_enriched_row(enriched, payload.tab)
+
+        dump = _asdict_serializable(enriched)
+        extra: dict[str, Any] = {}
+        if scrape_error:
+            extra["scrape_warning"] = scrape_error
+            dump["_scrape_warning"] = scrape_error
+
+        if row_url:
+            return JSONResponse(content={"status": "ok", "row_url": row_url, "data": dump, **extra}, status_code=201)
+        return JSONResponse(
+            content={"status": "ok", "note": "Sheets not configured", "data": dump, **extra}, status_code=200
+        )
+
+    # ── Batch mode ────────────────────────────────────────────────
+    if not settings.sheet_id:
+        async def _empty():
+            yield json.dumps({"status": "ok", "note": "Sheets not configured", "results": []}) + "\n"
+        return StreamingResponse(_empty(), media_type="text/plain")
+
+    gclient = get_client()
+    if gclient is None:
+        async def _empty():
+            yield json.dumps({"status": "ok", "note": "Sheets not configured", "results": []}) + "\n"
+        return StreamingResponse(_empty(), media_type="text/plain")
+
+    return StreamingResponse(_batch_stream(gclient, no_write, fields, rids), media_type="text/plain")
+
+
+async def _batch_stream(
+    gclient: Any,
+    no_write: bool,
+    fields: list[str] | None,
+    rids: str | None,
+) -> AsyncGenerator[str, None]:
+    """Backfill enrichment: read View tab, enrich missing fields, yield NDJSON."""
+    try:
+        sh = gclient.open_by_key(settings.sheet_id)
+        view_ws = sh.worksheet("Properties View")
+        data_ws = sh.worksheet("Properties Data")
+    except Exception as exc:
+        logger.error("Failed to open sheet: %s", exc)
+        yield json.dumps({"status": "error", "error": str(exc)}) + "\n"
+        return
+
+    view_data = view_ws.get_all_values()
+    if len(view_data) < 2:
+        yield json.dumps({"status": "ok", "message": "View tab is empty", "results": []}) + "\n"
+        return
+
+    view_headers = view_data[0]
+    vh = {h.strip().lower(): i for i, h in enumerate(view_headers)}
+    url_col = vh.get("rightmove link")
+    id_col = vh.get("rightmove id")
+    addr_col = vh.get("listing address")
+
+    data_all = data_ws.get_all_values()
+    data_headers = data_all[0] if data_all else []
+
+    try:
+        data_rid_idx = data_headers.index("Rightmove ID")
+    except ValueError:
+        data_rid_idx = -1
+
+    user_cols = frozenset({"Actual Latitude", "Actual Longitude"})
+    enriched_col_indices: dict[str, int] = {}
+    for i, h in enumerate(data_headers):
+        if h not in user_cols:
+            enriched_col_indices[h] = i
+
+    user_fields: set[str] | None = None
+    if fields:
+        user_fields = set()
+        for f in fields:
+            for part in f.split(","):
+                p = part.strip()
+                if p:
+                    user_fields.add(p)
+    target_rids: set[str] = {r.strip() for r in rids.split(",")} if rids else set()
+    processed_rids: set[str] = set()
+    total = len(view_data) - 1
+
+    yield json.dumps({"type": "start", "total": total, "no_write": no_write, "force": True, "rids": rids}) + "\n"
+
+    from houses.sheets import row_values as _row_values
+
+    for row_idx, view_row in enumerate(view_data[1:], 2):
+        url_raw = view_row[url_col].strip() if url_col is not None and url_col < len(view_row) else ""
+        raw_id = view_row[id_col].strip() if id_col is not None and id_col < len(view_row) else ""
+        rid = _rightmove_id(raw_id) if raw_id else _rightmove_id(url_raw)
+        if not rid:
+            yield _json_line({"type": "row", "row": row_idx, "rid": None, "status": "skipped", "reason": "no RID"})
+            continue
+        if target_rids and rid not in target_rids:
+            yield _json_line({"type": "row", "row": row_idx, "rid": rid, "status": "skipped", "reason": "not in rids"})
+            continue
+        if rid in processed_rids:
+            yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "skipped", "reason": "duplicate"}) + "\n"
+            continue
+        processed_rids.add(rid)
+
+        url = url_raw if url_raw.startswith("http") else f"https://www.rightmove.co.uk/properties/{rid}"
+        address = view_row[addr_col].strip() if addr_col is not None and addr_col < len(view_row) else ""
+        data_row = data_all[row_idx - 1] if len(data_all) > row_idx - 1 else [""] * len(data_headers)
+        existing_rid = data_row[data_rid_idx].strip() if data_rid_idx >= 0 and len(data_row) > data_rid_idx else ""
+        data_row_num = row_idx if (existing_rid == rid or not existing_rid) else 0
+
+        if data_row_num == 0:
+            # New property
+            yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "enriching"}) + "\n"
+            new_pc = extract_postcode(address) or ""
+            enriched = await _run_backfill_enrichment(url=url, address=address, postcode=new_pc, lookup=new_pc, bedrooms=None, price=None, enabled=None)
+            flat = _row_values(enriched)
+            if no_write:
+                yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "would_create", "enriched": _asdict_serializable(enriched), "flat": flat}) + "\n"
+            else:
+                row_url_result = await write_enriched_row(enriched)
+                yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "created", "row_url": row_url_result}) + "\n"
+            continue
+
+        # Existing property
+        empty_headers = [h for h, ci in enriched_col_indices.items() if ci >= len(data_row) or not data_row[ci].strip()]
+
+        if user_fields:
+            forced = []
+            for h in data_headers:
+                ef = _HEADER_TO_ENRICHMENT_FIELD.get(h)
+                if ef and ef in user_fields:
+                    forced.append(h)
+            empty_headers = list(set(empty_headers) | set(forced))
+
+        if not empty_headers:
+            yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "skipped", "reason": "already fully enriched"}) + "\n"
+            continue
+
+        needed = set()
+        for h in empty_headers:
+            ef = _HEADER_TO_ENRICHMENT_FIELD.get(h)
+            if ef:
+                needed.add(ef)
+        if user_fields is not None:
+            needed &= user_fields
+
+        addr = data_row[1].strip() if len(data_row) > 1 and data_row[1].strip() else address
+        pc = data_row[2].strip() if len(data_row) > 2 and data_row[2].strip() else extract_postcode(addr)
+        if "epc" in needed and (not pc or _is_outcode(pc)):
+            needed.discard("epc")
+        if "council_tax" in needed and not addr:
+            needed.discard("council_tax")
+
+        if not needed:
+            yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "skipped", "reason": "no fields"}) + "\n"
+            continue
+
+        yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "enriching", "fields": sorted(needed)}) + "\n"
+        enriched = await _run_backfill_enrichment(url=url, address=addr, postcode=pc, lookup=addr if _is_outcode(pc) else pc, bedrooms=None, price=None, enabled=needed if needed else None)
+
+        if no_write:
+            flat = _row_values(enriched)
+            status = "would_create" if not existing_rid else "would_update"
+            yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": status, "fields": sorted(needed), "enriched": _asdict_serializable(enriched), "flat": flat}) + "\n"
+        else:
+            _write_backfill_cells(sh, data_ws, data_row_num, data_headers, data_row, enriched, empty_headers)
+            yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "updated", "fields": sorted(needed)}) + "\n"
 
 
 @app.post("/properties/compare", response_model=None)
@@ -287,462 +503,6 @@ async def compare_properties(
     result = output.getvalue()
 
     return StreamingResponse(iter([result]), media_type="text/tab-separated-values")
-
-
-@app.post("/inject-property")
-async def inject_property(
-    payload: Property,
-    dry_run: bool = False,
-    fields: list[str] | None = Query(default=None),  # noqa: B008
-) -> JSONResponse:
-    postcode = payload.postcode or extract_postcode(payload.address)
-
-    # TfL and ORS can geocode full street addresses, but choke on outcodes
-    # ("SL6" returns 300 Multiple Choices). When we only have an outcode,
-    # use the full address as the lookup location instead.
-    lookup = payload.address if _is_outcode(postcode) else postcode
-
-    # Check if this property already exists in the sheet. Full enrichment without
-    # explicit fields is only valid for new properties.
-    rid_match = re.search(r"properties/(\d+)", payload.url)
-    rid = rid_match.group(1) if rid_match else ""
-
-    if not fields and rid:
-        gclient = get_client()
-        if gclient and settings.sheet_id:
-            try:
-                sh = gclient.open_by_key(settings.sheet_id)
-                ws = sh.worksheet(payload.tab or "Properties Data")
-                existing = ws.get_all_values()
-                for r in existing[1:]:
-                    if len(r) > col_index("Rightmove ID") and r[col_index("Rightmove ID")].strip() == rid:
-                        return JSONResponse(
-                            content={
-                                "error": (
-                                    f"Property {rid} already exists in the sheet. "
-                                    "To update it you must specify which enrichment fields to re-run: "
-                                    "?fields=simon,lorena,petrol,schools,walk_time,amenities,town,epc,geo"
-                                )
-                            },
-                            status_code=400,
-                        )
-            except Exception:
-                pass  # If we can't check, proceed anyway
-
-    # ── Scrape Rightmove if address is missing ──
-    scrape_error: str | None = None
-    address = payload.address
-    if not address:
-        scraped = await scrape_rightmove(payload.url)
-        if scraped.get("_error") == "login_required":
-            scrape_error = (
-                "Rightmove returned a login/verification page. Open Chrome, sign in to Rightmove, then try again."
-            )
-        if scraped.get("address"):
-            address = scraped["address"]
-        if scraped.get("postcode") and not payload.postcode:
-            payload.postcode = scraped["postcode"]
-        if scraped.get("bedrooms") is not None and payload.bedrooms is None:
-            payload.bedrooms = scraped["bedrooms"]
-        if scraped.get("price") is not None and payload.price is None:
-            payload.price = scraped["price"]
-
-        # Re-derive postcode and lookup now that we have the address
-        postcode = payload.postcode or extract_postcode(address)
-        lookup = address if _is_outcode(postcode) else postcode
-
-    logger.info(
-        "Processing: %s | address=%s | postcode=%s | lookup=%s | beds=%s | price=%s | fields=%s",
-        payload.url,
-        address,
-        postcode,
-        lookup,
-        payload.bedrooms,
-        payload.price,
-        fields or "all",
-    )
-
-    enabled = set(fields) if fields else None
-    enriched = await _run_enrichment(
-        url=payload.url,
-        address=address,
-        postcode=postcode,
-        lookup=lookup,
-        bedrooms=payload.bedrooms,
-        price=payload.price,
-        enabled=enabled,
-        actual_latitude=payload.actual_latitude,
-        actual_longitude=payload.actual_longitude,
-    )
-
-    row_url = None
-    if not dry_run:
-        row_url = await write_enriched_row(enriched, payload.tab)
-
-    dump = _asdict_serializable(enriched)
-
-    extra: dict[str, Any] = {}
-    if scrape_error:
-        extra["scrape_warning"] = scrape_error
-        dump["_scrape_warning"] = scrape_error
-
-    # dry_run skips sheet write — returns data with 200
-    if dry_run:
-        return JSONResponse(content={"status": "ok", "data": dump, **extra}, status_code=200)
-
-    if row_url:
-        logger.info("Written to sheet: %s", row_url)
-        return JSONResponse(
-            content={"status": "ok", "row_url": row_url, "data": dump, **extra},
-            status_code=201,
-        )
-
-    return JSONResponse(
-        content={"status": "ok", "note": "Sheets not configured", "data": dump, **extra},
-        status_code=200,
-    )
-
-
-@app.post("/backfill-view")
-async def backfill_view(
-    dry_run: bool = Query(default=False),
-    no_write: bool = Query(default=False),
-    fields: list[str] | None = Query(default=None),  # noqa: B008
-    force: bool = Query(default=False),
-    rids: str | None = Query(default=None),
-) -> StreamingResponse:
-    """Read Properties View tab, find properties missing enrichment, and backfill.
-
-    For properties not yet in Properties Data: runs full enrichment and appends
-    a new row. For properties already in Data but with empty enrichment cells:
-    runs only the needed enrichment fields and writes only to empty cells
-    (never overwrites existing data).
-
-    Results are streamed as newline-delimited JSON so progress is visible
-    in real-time.
-
-    Query params:
-      dry_run  : bool — skip all enrichment and writes, return what would happen
-      no_write : bool — run enrichment (caching all API results) but skip sheet writes
-      fields   : list[str] — restrict enrichment to these field groups
-      force    : bool — re-run enrichment even for already-filled cells
-      rids     : str — comma-separated Rightmove IDs to process (others skipped)
-    """
-    if not settings.sheet_id:
-
-        async def _empty():
-            yield json.dumps({"status": "ok", "note": "Sheets not configured", "results": []}) + "\n"
-
-        return StreamingResponse(_empty(), media_type="text/plain")
-
-    gclient = get_client()
-    if gclient is None:
-
-        async def _empty():
-            yield json.dumps({"status": "ok", "note": "Sheets not configured", "results": []}) + "\n"
-
-        return StreamingResponse(_empty(), media_type="text/plain")
-
-    async def _stream():
-        try:
-            sh = gclient.open_by_key(settings.sheet_id)
-            view_ws = sh.worksheet("Properties View")
-            data_ws = sh.worksheet("Properties Data")
-        except Exception as exc:
-            logger.error("Failed to open sheet: %s", exc)
-            yield json.dumps({"status": "error", "error": str(exc)}) + "\n"
-            return
-
-        view_data = view_ws.get_all_values()
-        if len(view_data) < 2:
-            yield json.dumps({"status": "ok", "message": "View tab is empty", "results": []}) + "\n"
-            return
-
-        view_headers = view_data[0]
-        vh = {h.strip().lower(): i for i, h in enumerate(view_headers)}
-        url_col = vh.get("rightmove link")
-        id_col = vh.get("rightmove id")
-        addr_col = vh.get("listing address")
-
-        data_all = data_ws.get_all_values()
-        data_headers = data_all[0] if data_all else []
-
-        try:
-            data_rid_idx = data_headers.index("Rightmove ID")
-        except ValueError:
-            data_rid_idx = -1
-
-        user_cols = frozenset({"Actual Latitude", "Actual Longitude"})
-        enriched_col_indices: dict[str, int] = {}
-        for i, h in enumerate(data_headers):
-            if h not in user_cols:
-                enriched_col_indices[h] = i
-
-        user_fields: set[str] | None = None
-        if fields:
-            user_fields = set()
-            for f in fields:
-                for part in f.split(","):
-                    p = part.strip()
-                    if p:
-                        user_fields.add(p)
-        target_rids: set[str] = {r.strip() for r in rids.split(",")} if rids else set()
-        processed_rids: set[str] = set()
-        total = len(view_data) - 1
-
-        yield (
-            json.dumps(
-                {
-                    "type": "start",
-                    "total": total,
-                    "dry_run": dry_run,
-                    "no_write": no_write,
-                    "force": force,
-                    "rids": rids,
-                }
-            )
-            + "\n"
-        )
-
-        for row_idx, view_row in enumerate(view_data[1:], 2):
-            url_raw = view_row[url_col].strip() if url_col is not None and url_col < len(view_row) else ""
-            raw_id = view_row[id_col].strip() if id_col is not None and id_col < len(view_row) else ""
-            rid = _rightmove_id(raw_id) if raw_id else _rightmove_id(url_raw)
-
-            if not rid:
-                yield _json_line(
-                    {"type": "row", "row": row_idx, "rid": None, "status": "skipped", "reason": "no Rightmove ID"}
-                )
-                continue
-
-            if target_rids and rid not in target_rids:
-                yield _json_line(
-                    {"type": "row", "row": row_idx, "rid": rid, "status": "skipped", "reason": "not in rids filter"}
-                )
-                continue
-
-            if rid in processed_rids:
-                yield (
-                    json.dumps(
-                        {
-                            "type": "row",
-                            "row": row_idx,
-                            "rid": rid,
-                            "status": "skipped",
-                            "reason": "duplicate RID already processed",
-                        }
-                    )
-                    + "\n"
-                )
-                continue
-            processed_rids.add(rid)
-
-            url = url_raw if url_raw.startswith("http") else f"https://www.rightmove.co.uk/properties/{rid}"
-            address = view_row[addr_col].strip() if addr_col is not None and addr_col < len(view_row) else ""
-
-            data_row = data_all[row_idx - 1] if len(data_all) > row_idx - 1 else []
-            if not data_row or len(data_row) < len(data_headers):
-                data_row = [""] * len(data_headers)
-            existing_rid = data_row[data_rid_idx].strip() if data_rid_idx >= 0 and len(data_row) > data_rid_idx else ""
-
-            data_row_num = row_idx if (existing_rid == rid or not existing_rid) else 0
-
-            if data_row_num != 0:
-                empty_headers: list[str] = [
-                    h for h, ci in enriched_col_indices.items() if ci >= len(data_row) or not data_row[ci].strip()
-                ]
-
-                if force and user_fields:
-                    forced_headers: list[str] = []
-                    for h in data_headers:
-                        ef = _HEADER_TO_ENRICHMENT_FIELD.get(h)
-                        if ef and ef in user_fields:
-                            forced_headers.append(h)
-                    empty_headers = list(set(empty_headers) | set(forced_headers))
-
-                if not empty_headers:
-                    yield (
-                        json.dumps(
-                            {
-                                "type": "row",
-                                "row": row_idx,
-                                "rid": rid,
-                                "status": "skipped",
-                                "reason": "already fully enriched",
-                            }
-                        )
-                        + "\n"
-                    )
-                    continue
-
-                walk_col = data_headers.index("Secondary Walk (min)") if "Secondary Walk (min)" in data_headers else -1
-                if walk_col >= 0 and len(data_row) > walk_col and data_row[walk_col].strip():
-                    try:
-                        walk_mins = float(data_row[walk_col].strip())
-                        if walk_mins is not None and walk_mins <= 20:
-                            empty_headers = [
-                                h for h in empty_headers if h not in ("Secondary Bus (min)", "Secondary Bus Route")
-                            ]
-                    except ValueError:
-                        pass
-
-                needed: set[str] = set()
-                for h in empty_headers:
-                    ef = _HEADER_TO_ENRICHMENT_FIELD.get(h)
-                    if ef:
-                        needed.add(ef)
-
-                if user_fields is not None:
-                    needed &= user_fields
-
-                addr = data_row[1].strip() if len(data_row) > 1 and data_row[1].strip() else address
-                pc = data_row[2].strip() if len(data_row) > 2 and data_row[2].strip() else extract_postcode(addr)
-                if "epc" in needed and (not pc or _is_outcode(pc)):
-                    needed.discard("epc")
-                if "council_tax" in needed and not addr:
-                    needed.discard("council_tax")
-
-                if not needed:
-                    if no_write:
-                        yield (
-                            json.dumps(
-                                {
-                                    "type": "row",
-                                    "row": row_idx,
-                                    "rid": rid,
-                                    "status": "skipped",
-                                    "reason": "no enrichment fields needed",
-                                }
-                            )
-                            + "\n"
-                        )
-                        continue
-                    # Still write user columns if they're empty
-                    enriched = await _run_backfill_enrichment(
-                        url=url,
-                        address=addr,
-                        postcode=pc,
-                    lookup=addr,
-                        bedrooms=None,
-                        price=None,
-                        enabled=set(),
-                    )
-                    _write_backfill_cells(
-                        sh,
-                        data_ws,
-                        data_row_num,
-                        data_headers,
-                        data_row,
-                        enriched,
-                        empty_headers,
-                    )
-                    yield (
-                        json.dumps(
-                            {
-                                "type": "row",
-                                "row": row_idx,
-                                "rid": rid,
-                                "status": "user_columns_written",
-                            }
-                        )
-                        + "\n"
-                    )
-                    continue
-
-                if dry_run:
-                    status = "would_create" if not existing_rid else "would_update"
-                    r = {"type": "row", "row": row_idx, "rid": rid, "status": status, "fields": sorted(needed)}
-                    yield _json_line(r)
-                    continue
-
-                yield (
-                    json.dumps(
-                        {"type": "row", "row": row_idx, "rid": rid, "status": "enriching", "fields": sorted(needed)}
-                    )
-                    + "\n"
-                )
-                enriched = await _run_backfill_enrichment(
-                    url=url,
-                    address=addr,
-                    postcode=pc,
-                    lookup=addr if _is_outcode(pc) else pc,
-                    bedrooms=None,
-                    price=None,
-                    enabled=needed if needed else None,
-                )
-
-                if no_write:
-                    from houses.sheets import row_values
-
-                    flat = row_values(enriched)
-                    yield (
-                        json.dumps(
-                            {
-                                "type": "row",
-                                "row": row_idx,
-                                "rid": rid,
-                                "status": "cached",
-                                "fields": sorted(needed),
-                                "enriched": _asdict_serializable(enriched),
-                                "flat": flat,
-                            }
-                        )
-                        + "\n"
-                    )
-                else:
-                    _write_backfill_cells(
-                        sh,
-                        data_ws,
-                        data_row_num,
-                        data_headers,
-                        data_row,
-                        enriched,
-                        empty_headers,
-                        force=force,
-                    )
-                    status = "created" if not existing_rid else "updated"
-                    r = {"type": "row", "row": row_idx, "rid": rid, "status": status, "fields": sorted(needed)}
-                    yield _json_line(r)
-            else:
-                if dry_run:
-                    yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "would_create"}) + "\n"
-                    continue
-
-                yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "enriching"}) + "\n"
-                new_pc = extract_postcode(addr) if not data_row or len(data_row) <= 2 or not data_row[2].strip() else ""
-                postcode_arg = new_pc if new_pc else ""
-                enriched = await _run_backfill_enrichment(
-                    url=url,
-                    address=address,
-                    postcode=postcode_arg,
-                    lookup=postcode_arg,
-                    bedrooms=None,
-                    price=None,
-                    enabled=None,
-                )
-
-                if no_write:
-                    from houses.sheets import row_values
-
-                    flat = row_values(enriched)
-                    yield json.dumps(
-                        {
-                            "type": "row",
-                            "row": row_idx,
-                            "rid": rid,
-                            "status": "cached",
-                            "fields": sorted(needed),
-                            "enriched": _asdict_serializable(enriched),
-                            "flat": flat,
-                        }
-                    ) + "\n"
-                else:
-                    await write_enriched_row(enriched)
-                    yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "created"}) + "\n"
-
-        yield json.dumps({"type": "done", "dry_run": dry_run}) + "\n"
-
-    return StreamingResponse(_stream(), media_type="text/plain")
 
 
 @app.post("/sync-view-formulas")
