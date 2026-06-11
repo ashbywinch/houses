@@ -57,9 +57,11 @@ Houses is a local FastAPI server that acts as a webhook broker for property list
 | `houses/enricher.py` | Transit commute, petrol cost, and school lookup logic |
 | `houses/sheets.py` | gspread integration, canonical column headers |
 | `houses/retry.py` | Async retry with exponential backoff and jitter |
-| `scripts/setup_sheet.py` | Sheet tab creation and XLOOKUP formula templates |
-| `scripts/enrichment-diff.py` | Compare live sheet vs dry-run enrichment (TSV diff) |
-| `scripts/dump_sheet.py` | Dump both sheet tabs to stdout |
+| `POST /properties` | Upsert a property (enrich + write to sheet) |
+| `GET /properties` | List all properties with enrichment data |
+| `GET /properties/{rid}` | Get a single property by Rightmove ID |
+| `POST /properties/compare` | Compare sheet vs fresh enrichment (TSV diff) |
+| `POST /sheet/setup` | Setup sheet structure (tabs, headers, formulas) |
 
 ## Development Commands
 
@@ -70,9 +72,24 @@ make test     # Run unit tests
 make lint     # Ruff check
 make format   # Auto-fix formatting
 
-# After any refactoring that affects enrichment output:
+# Enrich a property
+curl -X POST http://localhost:8080/properties \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://www.rightmove.co.uk/properties/123"}'
+
+# Re-enrich existing properties
+curl -X POST "http://localhost:8080/properties?no_write=true&rids=88275093,173431283&fields=schools"
+
+# List all properties
+curl http://localhost:8080/properties
+
+# Get a specific property
+curl http://localhost:8080/properties/88275093
+
+# Compare enrichment (after making changes)
+curl -X POST http://localhost:8080/properties/compare > /tmp/diff.tsv
+
 # See docs/development.md → "Enrichment Diff Verification"
-uv run python scripts/enrichment-diff.py > /tmp/diff.tsv
 ```
 
 ## Agent Rules

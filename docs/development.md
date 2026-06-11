@@ -276,7 +276,7 @@ make run
 
 # Run the diff: re-enriches every property (no-write) and compares
 # against the current live sheet
-uv run python scripts/enrichment-diff.py > /tmp/diff.tsv
+curl -X POST http://localhost:8080/properties/compare > /tmp/diff.tsv
 
 # Review differences
 less /tmp/diff.tsv

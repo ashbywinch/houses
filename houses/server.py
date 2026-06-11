@@ -1,6 +1,5 @@
 """FastAPI app — /inject-property endpoint, startup/shutdown."""
 
-import dataclasses
 import json
 import logging
 import re
@@ -26,6 +25,20 @@ from houses.rail_fares import fare_between, nearest_station
 from houses.rightmove_scraper import scrape as scrape_rightmove
 from houses.rightmove_scraper import stop_chrome
 from houses.schools import SchoolGender, compute_school_commute, find_nearest
+from houses.sheets import (
+    Tab,
+    _rightmove_id,
+    col_index,
+    col_letter,
+    get_client,
+    row_values,
+    sync_view_formulas,
+    write_enriched_row,
+)
+from houses.town_desc import generate_town_description
+from houses.walkability import KNOWN_COUNTIES, enrich_walkability
+
+logger = logging.getLogger(__name__)
 
 
 def _asdict_serializable(obj: Any) -> Any:
@@ -45,20 +58,7 @@ def _asdict_serializable(obj: Any) -> Any:
     if isinstance(obj, (list, tuple)):
         return [_asdict_serializable(v) for v in obj]
     return obj
-from houses.sheets import (
-    Tab,
-    _rightmove_id,
-    col_index,
-    col_letter,
-    get_client,
-    row_values,
-    sync_view_formulas,
-    write_enriched_row,
-)
-from houses.town_desc import generate_town_description
-from houses.walkability import KNOWN_COUNTIES, enrich_walkability
 
-logger = logging.getLogger(__name__)
 
 # UK postcode patterns
 # Full: "RG14 1AA", "SW1A 1AA", "EC3A 7LP"
@@ -158,6 +158,135 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+def _get_properties_data() -> list[dict[str, str]]:
+    """Read all properties from the Data tab and return them as dicts."""
+    from houses.sheets import get_client
+
+    client = get_client()
+    if not client:
+        return []
+    try:
+        sh = client.open_by_key(settings.sheet_id)
+        ws = sh.worksheet("Properties Data")
+        all_rows = ws.get_all_values()
+        headers = all_rows[0]
+        return [dict(zip(headers, row, strict=False)) for row in all_rows[1:] if row and row[0].strip()]
+    except Exception as e:
+        logger.warning("Failed to read properties data: %s", e)
+        return []
+
+
+@app.get("/properties")
+async def list_properties():
+    """List all properties with their enrichment data."""
+    props = _get_properties_data()
+    return {"properties": props}
+
+
+@app.get("/properties/{rid}")
+async def get_property(rid: str):
+    """Get a single property by Rightmove ID."""
+    for p in _get_properties_data():
+        if p.get("Rightmove ID", "").strip() == rid:
+            return p
+    return JSONResponse({"error": "property not found"}, status_code=404)
+
+
+@app.post("/properties", response_model=None)
+async def upsert_property(
+    payload: Property | None = None,
+    no_write: bool = Query(default=False),
+    fields: list[str] | None = Query(default=None),
+    rids: str | None = Query(default=None),
+) -> JSONResponse | StreamingResponse:
+    """Upsert a property — enrich it and write to the sheet.
+
+    Two modes:
+    1. **Single property** — provide a JSON body with url/address/postcode.
+    2. **Batch re-enrich** — use query params ``rids``, ``fields``, ``no_write``.
+
+    Always runs enrichment. Use ``no_write=true`` to cache results without
+    writing to the sheet.
+    """
+    if payload:
+        # Single property mode — delegate to existing inject_property logic
+        return await inject_property(payload, dry_run=no_write, fields=fields)
+    # Batch mode — delegate to existing backfill_view logic
+    return await backfill_view(no_write=no_write, fields=fields, force=True, rids=rids)
+
+
+@app.post("/properties/compare", response_model=None)
+async def compare_properties(
+    rids: str | None = Query(default=None),
+    fields: list[str] | None = Query(default=None),
+) -> StreamingResponse:
+    """Compare current sheet data with a fresh no-write re-enrichment.
+
+    Returns a TSV diff with columns RID, Field, Old (sheet), New (enriched).
+    This is POST because it triggers enrichment (API calls, caching).
+    """
+
+    # Read sheet data first
+    props = _get_properties_data()
+
+    # Build enriched flat dicts by calling _run_backfill_enrichment per property
+    import csv
+    import io
+
+    # Run enrichment in no-write mode for each property
+    enriched_rows: dict[str, dict[str, str]] = {}
+    from houses.sheets import row_values
+
+    for view_row_idx, data_row in enumerate(
+        [list(p.values()) for p in props], 2
+    ):
+        rid = data_row[col_index("Rightmove ID")] if col_index("Rightmove ID") < len(data_row) else ""
+        if not rid:
+            continue
+        if rids and rid not in {r.strip() for r in rids.split(",")}:
+            continue
+
+        address = data_row[col_index("Address")] if col_index("Address") < len(data_row) else ""
+        postcode = data_row[col_index("Postcode")] if col_index("Postcode") < len(data_row) else ""
+        url = data_row[col_index("Rightmove URL")] if col_index("Rightmove URL") < len(data_row) else (
+            f"https://www.rightmove.co.uk/properties/{rid}"
+        )
+
+        enriched = await _run_backfill_enrichment(
+            url=url, address=address, postcode=postcode,
+            lookup=address, bedrooms=None, price=None,
+            enabled=set(fields) if fields else None,
+        )
+        enriched_rows[rid] = row_values(enriched)
+
+    # Build TSV diff
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter="\t", lineterminator="\n")
+    writer.writerow(["RID", "Field", "Old (sheet)", "New (enriched)"])
+
+    diff_count = 0
+    for p in props:
+        rid = p.get("Rightmove ID", "").strip()
+        if not rid or rid not in enriched_rows:
+            continue
+        new_data = enriched_rows[rid]
+        for header, old_val in p.items():
+            stripped = header.strip()
+            if not stripped or stripped in ("Rightmove ID",):
+                continue
+            new_val = new_data.get(stripped, "")
+            old_clean = old_val.strip() if old_val else ""
+            if old_clean != new_val:
+                diff_count += 1
+                writer.writerow([rid, stripped, old_clean, new_val])
+
+    writer.writerow([])
+    writer.writerow(["DIFF_COUNT", str(diff_count), "", ""])
+    result = output.getvalue()
+
+    return StreamingResponse(iter([result]), media_type="text/tab-separated-values")
 
 
 @app.post("/inject-property")
