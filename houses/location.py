@@ -341,7 +341,7 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
                         lambda: client.get(
                             ORS_GEOCODE_URL,
                             params=params,
-                            headers={"Authorization": api_key},
+                            headers={"Authorization": settings.ors_api_key},
                         ),
                         max_retries=2,
                         base_delay=0.5,
