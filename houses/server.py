@@ -515,7 +515,7 @@ async def _batch_stream(
                 }
             )
         else:
-            _write_backfill_cells(sh, data_ws, data_row_num, data_headers, data_row, enriched, empty_headers)
+            _write_backfill_cells(sh, data_ws, data_row_num, data_headers, data_row, enriched, empty_headers, rid=rid)
             yield _json_line({"type": "row", "row": row_idx, "rid": rid, "status": "updated", "fields": sorted(needed)})
             summary["updated"] += 1
         continue
@@ -939,6 +939,7 @@ def _write_backfill_cells(
     enriched: EnrichedProperty,
     allowed_headers: list[str],
     force: bool = False,
+    rid: str = "",
 ) -> None:
     """Write enriched values to a Data tab row.
 
@@ -969,15 +970,13 @@ def _write_backfill_cells(
     if cells:
         Tab(ws).batch_update(cells)
         logger.info(
-            "Wrote row %d (%s): %d cells [%s]",
-            row_num, enriched.rightmove_url.rsplit("/", 1)[-1],
-            len(cells), ", ".join(written),
+            "Wrote row %d (RID %s): %d cells [%s]",
+            row_num, rid, len(cells), ", ".join(written),
         )
     if skipped:
         logger.info(
-            "Skipped row %d (%s): %d cells already had data [%s]",
-            row_num, enriched.rightmove_url.rsplit("/", 1)[-1],
-            len(skipped), ", ".join(skipped),
+            "Skipped row %d (RID %s): %d cells already had data [%s]",
+            row_num, rid, len(skipped), ", ".join(skipped),
         )
 
 
