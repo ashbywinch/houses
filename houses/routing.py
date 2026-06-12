@@ -425,11 +425,10 @@ async def _google_transit_commute(origin_postcode: str, dest_postcode: str) -> C
 async def _drive_commute(origin_postcode: str, dest_postcode: str) -> Commute | None:
     """Driving route via ORS Directions API.
 
-    Raises:
-        ValueError: If the ORS API key is not configured.
+    Does NOT pre-check for the API key — just let the HTTP call fail if
+    the key is missing.  This keeps the fail-fast principle consistent:
+    don't check for failure before trying, just let the code fail.
     """
-    if not settings.ors_api_key:
-        raise ValueError("ORS API key not configured — cannot compute driving route")
 
     from houses.location import _geocode_address, geocode
 

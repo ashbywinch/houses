@@ -45,24 +45,6 @@ class TestGoogleTransitCommuteFailsFast:
             settings.google_maps_api_key = original
 
 
-class TestDriveCommuteFailsFast:
-    """_drive_commute must raise ValueError when ORS API key is missing."""
-
-    def test_raises_without_api_key(self):
-        import asyncio
-
-        from houses.config import settings
-        from houses.routing import _drive_commute
-
-        original = settings.ors_api_key
-        try:
-            settings.ors_api_key = ""
-            with pytest.raises(ValueError, match="ORS API key not configured"):
-                asyncio.run(_drive_commute("SW1V 2QQ", "EC3A 7LP"))
-        finally:
-            settings.ors_api_key = original
-
-
 # ── Congestion zone ─────────────────────────────────────────────────────
 
 

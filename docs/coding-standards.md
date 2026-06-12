@@ -69,16 +69,16 @@ behaviour, extract it to its own module.
 - Never read, log, print, echo, or store API keys in conversation
   context, files, or code.
 
-### Fail Fast on Missing API Keys
+### Fail Fast, Don't Pre-Check
 
-- When a required API key is missing, raise ``ValueError`` immediately.
-  Do not fall back to ``None`` or silently skip the operation. The caller
-  should see the failure and decide how to degrade.
-- API key checks happen before any HTTP call is attempted. Mocking the
-  HTTP transport does not bypass the key check — tests that need a key
-  must set a fake value in the fixture (e.g. ``settings.ors_api_key =
-  "fake"``). This is safe because HTTP is fully mocked in integration
-  tests.
+- Don't check for failure before trying an operation — just let the code
+  fail naturally. The shared coding standards call this principle explicitly:
+  "Don't silence errors with fallbacks BUT don't check for failure before
+  trying, just let the code fail."
+- A function should not pre-validate API keys before making the call.
+  The HTTP transport mock handles requests in tests regardless of the key
+  value. In production, a missing key causes a 403 which propagates as a
+  regular API error.
 
 ### Cache Key Hygiene
 
