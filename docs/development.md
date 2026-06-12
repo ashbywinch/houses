@@ -55,156 +55,54 @@ make format       # Auto-fix formatting issues
 
 Configuration in `pyproject.toml`: line length 120, target Python 3.12.
 
-## API Endpoints
+## Adding a New Enrichment Module
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/inject-property` | Submit a property for enrichment and sheet write |
-| GET | `/health` | Health check |
+1. Create the module in `houses/` (e.g., `houses/walkability.py`)
+2. Define any new models in `houses/models.py` (make fields optional/None by default)
+3. Add config fields to `houses/config.py` if new API keys or settings needed
+4. Wire the enrichment call into `houses/server.py`'s `inject_property` endpoint
+5. Add columns to `COLUMN_HEADERS` in `houses/sheets.py`
+6. Update `_row_values()` to format the new fields
+7. Update `scripts/setup_sheet.py` if the View tab needs new XLOOKUP formulas
+8. Add tests for the new module
+9. Update this document if the pattern differs
 
-### POST /inject-property
+All new enrichment should follow the existing pattern:
+- **Fail gracefully**: If the API is unavailable or returns an error, log a warning and return None/default
+- **In-memory cache**: Deduplicate API calls by postcode or town name within a session
+- **No new dependencies**: Justify any new Python dependencies in the PR
 
-**Request:**
-```json
-{
-  "url": "https://www.rightmove.co.uk/properties/123456789",
-  "address": "123 High Street, Maidenhead, SL6 1AA",
-  "postcode": "SL6 1AA",
-  "bedrooms": 3,
-  "price": 650000
-}
-```
+## Sheet Setup
 
-**Query parameters:**
-| Param | Type | Description |
-|-------|------|-------------|
-| `dry_run` | bool | Skip sheet write, return enriched data only |
-| `fields` | list | Re-enrich specific columns on an existing property. Bypasses the duplicate-property guard. Comma-separated: `simon,lorena,petrol,schools,walk_time,amenities,town,epc,council_tax,geo` |
-
-**Re-enriching a single column** — e.g. re-run only council tax on an existing row:
-```bash
-curl -X POST "http://127.0.0.1:8080/inject-property?fields=council_tax" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://www.rightmove.co.uk/properties/123456789",
-       "address": "123 High Street, Maidenhead, SL6 1AA",
-       "postcode": "SL6 1AA"}'
-```
-This skips the "property already exists" check and only writes the council tax columns to the existing row.
-
-**Response (200 — sheet not configured):**
-```json
-{
-  "status": "ok",
-  "note": "Sheets not configured",
-  "data": { "... enriched fields ..." }
-}
-```
-
-**Response (201 — sheet written):**
-```json
-{
-  "status": "ok",
-  "row_url": "https://docs.google.com/spreadsheets/..."
-}
-```
-
-### POST /reprocess
-
-Re-run enrichment for existing properties by Rightmove ID. Reads existing row data from the sheet, runs the specified fields, and writes only those columns back in-place.
-
-**Request:**
-
-```json
-{
-  "ids": ["162493277", "88375569"]
-}
-```
-
-Omit `ids` to reprocess every row in the sheet.
-
-**Query parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `fields` | list (required) | Comma-separated enrichment fields to re-run: `simon,lorena,petrol,schools,walk_time,amenities,town,epc,council_tax,geo` |
-
-**Examples:**
+After cloning, run the setup script to create the Properties Data and Properties View tabs:
 
 ```bash
-# Re-run council tax for specific properties
-curl -X POST "http://127.0.0.1:8080/reprocess?fields=council_tax" \
-  -H "Content-Type: application/json" \
-  -d '{"ids": ["162493277"]}'
-
-# Re-run EPC for all properties
-curl -X POST "http://127.0.0.1:8080/reprocess?fields=epc" \
-  -H "Content-Type: application/json" \
-  -d '{}'
+uv run python scripts/setup_sheet.py
 ```
 
-**Response:**
-```json
-{
-  "status": "ok",
-  "processed": 1,
-  "total_requested": 1,
-  "results": {
-    "162493277": "updated"
-  }
-}
-```
+This is idempotent — safe to run multiple times. The Properties Data tab is cleared once on first run, then never cleared again.
 
-### Backfill View (preferred for re-running enrichment)
+## Env File Template
 
-The `/backfill-view` endpoint is the primary way to re-run enrichment for existing properties. It reads from the Properties View tab, matches rows to Properties Data, and writes results.
+See `.env.example` for all configurable environment variables with comments.
+
+## API Reference
+>>>>>>> c9fb018 (Extract API docs to docs/api.md, link from development.md)
+
+All endpoint documentation has moved to `docs/api.md`. Key operations:
 
 ```bash
-# Re-run Lorena/Simon commute (including bus fares) for specific properties
-curl -X POST "http://127.0.0.1:8080/backfill-view?force=true&fields=lorena,simon&rids=89141142,88639800"
+# Force refresh Simon/Lorena commute for all rows
+curl -X POST "http://localhost:8080/properties?fields=simon,lorena&force=true"
 
-# Re-run all fields for all properties
-curl -X POST "http://127.0.0.1:8080/backfill-view?force=true"
-```
+# Fill blank cells for schools + walk_time
+curl -X POST "http://localhost:8080/properties?fields=schools&fields=walk_time"
 
-**Query parameters:**
-
-| Param | Type | Description |
-|-------|------|-------------|
-| `force` | bool | Overwrite existing values (default: only fill empty cells) |
-| `fields` | list | Restrict to specific enrichment groups: `simon,lorena,petrol,schools,walk_time,amenities,town,epc,council_tax,geo` |
-| `rids` | str | Comma-separated Rightmove IDs to process (others skipped) |
-| `dry_run` | bool | Report what would happen without doing it |
-| `no_write` | bool | Run enrichment (caching API results) but skip sheet writes |
-
-Output is streamed as newline-delimited JSON so progress is visible in real-time.
-
-### Enrichment Diff Verification
-
-After any refactoring that changes enrichment logic (commute calculation,
-school lookup, formatting), verify that the new code produces the expected
-output before writing to the sheet:
-
-```bash
-# Ensure the dev server is running
-make run
-
-# Run the diff: re-enriches every property (no-write) and compares
-# against the current live sheet
+# Compare sheet vs fresh enrichment (after refactoring)
 curl -X POST http://localhost:8080/properties/compare > /tmp/diff.tsv
-
-# Review differences
-less /tmp/diff.tsv
 ```
 
-The diff output is a TSV with columns ``RID``, ``Field``, ``Old (sheet)``,
-``New (enriched)``.  Every difference must be understood:
-
-- **API rate limit** — new value is empty, old had a value.  Wait for
-  quota reset or check the API key.
-- **Walk time change** — expected: haversine was replaced by Google
-  Routes API (real path vs straight-line).
-- **New property enriched** — old was empty, new has a value.  Correct.
-- **Unexpected** — investigate: write a failing test, fix, re-run diff.
+Read `docs/api.md` for full endpoint documentation.
 
 ### Bus Fare Data Pipeline
 
