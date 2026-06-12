@@ -87,7 +87,6 @@ This is idempotent — safe to run multiple times. The Properties Data tab is cl
 See `.env.example` for all configurable environment variables with comments.
 
 ## API Reference
->>>>>>> c9fb018 (Extract API docs to docs/api.md, link from development.md)
 
 All endpoint documentation has moved to `docs/api.md`. Key operations:
 
@@ -131,6 +130,6 @@ uv run python scripts/extract_bus_fares.py
 
 **To update the sheet with new bus fares:**
 1. Re-run extraction: `uv run python scripts/extract_bus_fares.py --cached-only`
-2. Restart the dev server (picks up new `bus_fares.json`)
-3. Trigger backfill for affected properties, e.g.:
-   `curl -X POST "http://127.0.0.1:8080/backfill-view?force=true&fields=lorena,simon"`
+2. The server picks up the new `bus_fares.json` on next restart.
+3. Trigger a batch refresh for affected properties, e.g.:
+   `curl -X POST "http://127.0.0.1:8080/properties?fields=simon,lorena&force=true"`
