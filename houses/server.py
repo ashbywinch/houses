@@ -147,6 +147,17 @@ async def lifespan(_app: FastAPI):
         level=level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    # Log the commit hash so we know what code is running.
+    # Gracefully handle environments without git.
+    try:
+        import subprocess as _sp
+
+        _hash = _sp.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=2)
+        if _hash.returncode == 0 and _hash.stdout.strip():
+            logger.info("Deploy: %s", _hash.stdout.strip())
+    except Exception:
+        logger.info("Deploy: unknown (no git)")
+
     if settings.trace:
         logging.getLogger("houses.enricher").setLevel(logging.DEBUG)
         logging.getLogger("houses.server").setLevel(logging.DEBUG)
@@ -362,6 +373,7 @@ async def _batch_stream(
     target_rids: set[str] = {r.strip() for r in rids.split(",")} if rids else set()
     processed_rids: set[str] = set()
     total = len(view_data) - 1
+    summary: dict[str, int] = {"updated": 0, "skipped": 0, "created": 0, "errors": 0}
 
     yield _json_line({"type": "start", "total": total, "no_write": no_write, "force": True, "rids": rids})
 
@@ -372,12 +384,15 @@ async def _batch_stream(
         raw_id = view_row[id_col].strip() if id_col is not None and id_col < len(view_row) else ""
         rid = _rightmove_id(raw_id) if raw_id else _rightmove_id(url_raw)
         if not rid:
+            summary["skipped"] += 1
             yield _json_line({"type": "row", "row": row_idx, "rid": None, "status": "skipped", "reason": "no RID"})
             continue
         if target_rids and rid not in target_rids:
+            summary["skipped"] += 1
             yield _json_line({"type": "row", "row": row_idx, "rid": rid, "status": "skipped", "reason": "not in rids"})
             continue
         if rid in processed_rids:
+            summary["skipped"] += 1
             yield _json_line({"type": "row", "row": row_idx, "rid": rid, "status": "skipped", "reason": "duplicate"})
             continue
         processed_rids.add(rid)
@@ -413,6 +428,7 @@ async def _batch_stream(
                 )
             else:
                 row_url_result = await write_enriched_row(enriched)
+                summary["created"] += 1
                 yield _json_line(
                     {
                         "type": "row",
@@ -446,6 +462,7 @@ async def _batch_stream(
             ]
 
         if not empty_headers:
+            summary["skipped"] += 1
             yield _json_line(
                 {"type": "row", "row": row_idx, "rid": rid, "status": "skipped", "reason": "already fully enriched"},
             )
@@ -467,6 +484,7 @@ async def _batch_stream(
             needed.discard("council_tax")
 
         if not needed:
+            summary["skipped"] += 1
             yield _json_line({"type": "row", "row": row_idx, "rid": rid, "status": "skipped", "reason": "no fields"})
             continue
 
@@ -484,6 +502,7 @@ async def _batch_stream(
         if no_write:
             flat = _row_values(enriched)
             status = "would_create" if not existing_rid else "would_update"
+            summary["skipped" if status == "would_update" else "created"] += 1
             yield _json_line(
                 {
                     "type": "row",
@@ -498,6 +517,15 @@ async def _batch_stream(
         else:
             _write_backfill_cells(sh, data_ws, data_row_num, data_headers, data_row, enriched, empty_headers)
             yield _json_line({"type": "row", "row": row_idx, "rid": rid, "status": "updated", "fields": sorted(needed)})
+            summary["updated"] += 1
+        continue
+
+    logger.info(
+        "Batch done: %d updated, %d skipped, %d created — %s",
+        summary["updated"], summary["skipped"], summary["created"],
+        "force" if force else "blanks only",
+    )
+    yield _json_line({"type": "summary", **summary})
 
 
 @app.post("/properties/compare", response_model=None)
