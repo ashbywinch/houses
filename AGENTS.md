@@ -10,46 +10,34 @@ The system consists of a local FastAPI server acting as a front end for a Google
 
 ## Decision Tree: What Do You Want to Do?
 
-### 1. Understand the Architecture
+### 1. Develop, Test, or Run the Server
+**Read**: [docs/development.md](docs/development.md)
+**Read**: [docs/coding-standards.md](docs/coding-standards.md)
+
+### 2. Understand the Architecture
 **Read**: [docs/architecture.md](docs/architecture.md)
 - System overview and data flow
 - Sheet architecture (Properties View / Properties Data)
 - Tech stack and key files
 
-### 2. Add or Modify a Column
+### 3. Add or Modify a Column
 **Read**: [docs/column-reference.md](docs/column-reference.md)
 - Complete column layout for both tabs
 - Data types and sources
 - XLOOKUP formulas in the View tab
 - Update process
 
-### 3. Add a New Enrichment Module
+### 4. Add a New Enrichment Module
 **Read**: [docs/enrichment-modules.md](docs/enrichment-modules.md)
 - Existing module patterns to follow
 - API details and graceful degradation
 - How to wire into the server
 - [docs/development.md](docs/development.md) — setup and testing
 
-### 4. Develop, Test, or Run the Server
-**Read**: [docs/development.md](docs/development.md)
-- Setup, configuration, env vars
-- Running the server
-- Testing and linting
-- API endpoint reference
-
 ### 5. Write Documentation
 **Read**: [docs/writing-documentation.md](docs/writing-documentation.md)
-- Context Efficiency Principle
-- Single source of truth
-- One topic per file
 
-### 6. Follow Coding Standards
-**Read**: [docs/coding-standards.md](docs/coding-standards.md)
-- Naming principles
-- Module structure and SRP
-- Fail fast, no over-abstraction
-
-### 7. Troubleshoot Batch Endpoints
+### 6. Troubleshoot Batch Endpoints
 **Read**: [docs/troubleshooting-endpoints.md](docs/troubleshooting-endpoints.md)
 - Before running batch operations
 - What to check when results don't appear
