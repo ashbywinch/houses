@@ -109,8 +109,10 @@ class _GoogleRoutesClient:
                 max_retries=3,
                 base_delay=2.0,
                 exceptions=(
-                    HttpError, httpx.HTTPStatusError, httpx.ConnectError,
-                    httpx.RemoteProtocolError, httpx.ReadTimeout,
+                    HttpError,  # only raised for 429 (rate limit — may recover)
+                    httpx.ConnectError,
+                    httpx.RemoteProtocolError,
+                    httpx.ReadTimeout,
                 ),
             )
             set_cached("POST", GOOGLE_ROUTES_URL, None, key, data)
@@ -508,16 +510,24 @@ async def _find_bus_alternative(origin: str, destination: str) -> Commute | None
         data = cached
     else:
         try:
-            async with cached_async_client(timeout=15.0) as client:
-                resp = await retry_async(
-                    lambda: client.post(GOOGLE_ROUTES_URL, json=body, headers=headers),
-                    max_retries=2,
-                    base_delay=1.0,
-                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                set_cached("POST", GOOGLE_ROUTES_URL, None, json.dumps(body, sort_keys=True), data)
+            async def _do_find_bus_post():
+                async with cached_async_client(timeout=15.0) as client:
+                    resp = await client.post(GOOGLE_ROUTES_URL, json=body, headers=headers)
+                    if resp.status_code == 429:
+                        raise HttpError(429, "rate limited", headers=dict(resp.headers))
+                    resp.raise_for_status()
+                    return resp.json()
+
+            data = await retry_async(
+                _do_find_bus_post,
+                max_retries=2,
+                base_delay=1.0,
+                exceptions=(HttpError, httpx.ConnectError, httpx.RemoteProtocolError, httpx.ReadTimeout),
+            )
+            set_cached("POST", GOOGLE_ROUTES_URL, None, json.dumps(body, sort_keys=True), data)
+        except (HttpError, httpx.HTTPStatusError) as e:
+            logger.warning("Routes API failed for %s → %s: %s", origin, destination, e)
+            return None
         except Exception as e:
             logger.warning("Routes API failed for %s → %s: %s", origin, destination, e)
             return None
