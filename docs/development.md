@@ -55,23 +55,6 @@ make format       # Auto-fix formatting issues
 
 Configuration in `pyproject.toml`: line length 120, target Python 3.12.
 
-## Adding a New Enrichment Module
-
-1. Create the module in `houses/` (e.g., `houses/walkability.py`)
-2. Define any new models in `houses/models.py` (make fields optional/None by default)
-3. Add config fields to `houses/config.py` if new API keys or settings needed
-4. Wire the enrichment call into `houses/server.py`'s `inject_property` endpoint
-5. Add columns to `COLUMN_HEADERS` in `houses/sheets.py`
-6. Update `_row_values()` to format the new fields
-7. Update `scripts/setup_sheet.py` if the View tab needs new XLOOKUP formulas
-8. Add tests for the new module
-9. Update this document if the pattern differs
-
-All new enrichment should follow the existing pattern:
-- **Fail gracefully**: If the API is unavailable or returns an error, log a warning and return None/default
-- **In-memory cache**: Deduplicate API calls by postcode or town name within a session
-- **No new dependencies**: Justify any new Python dependencies in the PR
-
 ## Sheet Setup
 
 After cloning, run the setup script to create the Properties Data and Properties View tabs:
@@ -88,20 +71,7 @@ See `.env.example` for all configurable environment variables with comments.
 
 ## API Reference
 
-All endpoint documentation has moved to `docs/api.md`. Key operations:
-
-```bash
-# Force refresh Simon/Lorena commute for all rows
-curl -X POST "http://localhost:8080/properties?fields=simon,lorena&force=true"
-
-# Fill blank cells for schools + walk_time
-curl -X POST "http://localhost:8080/properties?fields=schools&fields=walk_time"
-
-# Compare sheet vs fresh enrichment (after refactoring)
-curl -X POST http://localhost:8080/properties/compare > /tmp/diff.tsv
-```
-
-Read `docs/api.md` for full endpoint documentation.
+Read `docs/api.md` for full API documentation.
 
 ### Bus Fare Data Pipeline
 
