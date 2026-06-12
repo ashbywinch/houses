@@ -322,12 +322,20 @@ class _CostGroupBuilder:
         self.flush_bus()
         self._current_walk += self._ureg.Quantity(seconds, "seconds")
 
-    def flush_walk(self) -> None:
-        """Emit a walk cost group if enough time has accumulated."""
+    def flush_walk(self, end_station: str = "") -> None:
+        """Emit a walk cost group if enough time has accumulated.
+
+        Args:
+            end_station: The destination of this walk leg (e.g. the next
+                transit stop's name).  When set, ``_render_leg_description``
+                shows ``"walk to {station}"`` instead of bare ``"walk"``.
+        """
         sec = self._current_walk.to("seconds").magnitude
         if sec > self._MIN_WALK_SECONDS:
             dur_min = max(1, round(sec / 60))
-            self.cost_groups.append(CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=dur_min),)))
+            self.cost_groups.append(
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=dur_min, end_station=end_station),))
+            )
         self._current_walk = self._ureg.Quantity(0, "seconds")
 
     def add_bus_leg(self, leg: JourneyLeg, cost: float | None) -> None:
@@ -401,10 +409,10 @@ async def _google_transit_commute(
         if mode == "WALK":
             builder.add_walk(dur)
         elif mode == "TRANSIT":
-            builder.flush_walk()
             td = s.get("transitDetails", {})
-            vtype = td.get("transitLine", {}).get("vehicle", {}).get("type", "")
             dep_stop = td.get("stopDetails", {}).get("departureStop", {}).get("name", "")
+            builder.flush_walk(end_station=dep_stop)
+            vtype = td.get("transitLine", {}).get("vehicle", {}).get("type", "")
             arr_stop = td.get("stopDetails", {}).get("arrivalStop", {}).get("name", "")
             line = td.get("transitLine", {}).get("nameShort", "") or td.get("transitLine", {}).get("name", "")
 

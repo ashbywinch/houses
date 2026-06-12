@@ -843,6 +843,110 @@ class TestGoogleTransitMissingWalk:
         assert first.legs[0].mode.name == "WALK"
 
 
+class TestGoogleTransitWalkDestination:
+    """Walk legs preceding transit steps must include the destination stop.
+
+    The actual sheet data for rid 87974082 (Weybridge) shows the Simon
+    London Route as ``walk (13m) → South Western Railway to Vauxhall ...``
+    — the first walk leg has no destination.  This comes from Google's
+    transit path where ``_CostGroupBuilder.flush_walk()`` creates walk
+    ``JourneyLeg`` objects without ``end_station``.  Every walk leg that
+    feeds into a transit step should set ``end_station`` to the transit
+    step's departure stop so ``_render_leg_description`` shows ``"walk
+    to {station}"`` instead of bare ``"walk"``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_first_walk_has_end_station(self, monkeypatch):
+        """Walk leg before first transit step must have end_station set."""
+        from houses.routing import _google_transit_commute
+
+        async def mock_post(*_, **__):
+            return {
+                "routes": [
+                    {
+                        "duration": "900s",
+                        "legs": [
+                            {
+                                "steps": _fake_google_steps(
+                                    ("WALK", 780),     # walk to station
+                                    ("TRANSIT", 300),  # tube to End
+                                ),
+                            }
+                        ],
+                    }
+                ]
+            }
+
+        monkeypatch.setattr("houses.routing._google_routes_post", mock_post)
+        monkeypatch.setattr("houses.routing._bus_fare_for", lambda *_, **__: None)
+
+        result = await _google_transit_commute("KT13 8XG", "SW1V 2QQ")
+        assert result is not None
+
+        walk_legs = [leg for g in result.cost_groups for leg in g.legs if leg.mode == LegMode.WALK]
+        assert len(walk_legs) >= 1, "Expected at least one walk leg"
+
+        # The walk leg's end_station should be the transit departure stop
+        assert walk_legs[0].end_station == "Start", (
+            f"First walk leg should have end_station='Start' (departure stop of "
+            f"next transit step), got {walk_legs[0].end_station!r}"
+        )
+
+        summary = result.summary()
+        assert "walk to Start (13m)" in summary, (
+            f"Walk leg before transit should show destination in summary. "
+            f"Got: {summary}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_mid_route_walk_has_end_station(self, monkeypatch):
+        """Walk leg between two transit steps must also have end_station."""
+        from houses.routing import _google_transit_commute
+
+        async def mock_post(*_, **__):
+            # walk→train→walk→tube: the walk BETWEEN transit legs should
+            # also carry the next transit step's departure stop.
+            return {
+                "routes": [
+                    {
+                        "duration": "1200s",
+                        "legs": [
+                            {
+                                "steps": _fake_google_steps(
+                                    ("WALK", 600),       # walk to first station
+                                    ("TRANSIT", 300),    # first transit
+                                    ("WALK", 120),       # walk between platforms
+                                    ("TRANSIT", 240),    # second transit
+                                    ("WALK", 180),       # final walk
+                                ),
+                            }
+                        ],
+                    }
+                ]
+            }
+
+        monkeypatch.setattr("houses.routing._google_routes_post", mock_post)
+        monkeypatch.setattr("houses.routing._bus_fare_for", lambda *_, **__: None)
+
+        result = await _google_transit_commute("KT13 8XG", "SW1V 2QQ")
+        assert result is not None
+
+        walk_legs = [leg for g in result.cost_groups for leg in g.legs if leg.mode == LegMode.WALK]
+
+        # First walk → "Start" (first transit's departure)
+        assert walk_legs[0].end_station == "Start", (
+            f"First walk should go to 'Start', got {walk_legs[0].end_station!r}"
+        )
+        # Second walk → "Start" again (second transit's departure in _fake_google_steps)
+        assert walk_legs[1].end_station == "Start", (
+            f"Mid-route walk should go to next transit departure stop, "
+            f"got {walk_legs[1].end_station!r}"
+        )
+        # Third walk (final) — end_station can be empty (summary handles final leg)
+        # No assertion on final walk's end_station
+
+
 class TestGoogleTransitWalkGrouping:
     """_google_transit_commute merges consecutive walk segments."""
 
