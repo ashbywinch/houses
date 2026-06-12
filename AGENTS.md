@@ -27,11 +27,10 @@ The system consists of a local FastAPI server acting as a front end for a Google
 - XLOOKUP formulas in the View tab
 - Update process
 
-### 4. Add a New Enrichment Module
-**Read**: [docs/enrichment-modules.md](docs/enrichment-modules.md)
-- Existing module patterns to follow
-- API details and graceful degradation
-- How to wire into the server
+### 3. Add a New Enrichment Module
+**Read**: [docs/adding-a-new-enrichment-module.md](docs/adding-a-new-enrichment-module.md)
+- Step-by-step guide: module file → model → enricher → sheets → API → docs
+- [docs/enrichment-modules.md](docs/enrichment-modules.md) — existing module patterns to follow
 - [docs/development.md](docs/development.md) — setup and testing
 
 ### 5. Write Documentation
