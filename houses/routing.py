@@ -21,7 +21,6 @@ from houses.config import settings
 from houses.endpoint_client import EndpointClient
 from houses.http_error import HttpError
 from houses.retry import retry_async
-from houses.stations import Station
 
 logger = logging.getLogger(__name__)
 
@@ -368,7 +367,6 @@ async def _google_transit_commute(origin_postcode: str, dest_postcode: str) -> C
             dep_stop = td.get("stopDetails", {}).get("departureStop", {}).get("name", "")
             arr_stop = td.get("stopDetails", {}).get("arrivalStop", {}).get("name", "")
             line = td.get("transitLine", {}).get("nameShort", "") or td.get("transitLine", {}).get("name", "")
-            desc = f"{line} from {Station.short_name(dep_stop)}".strip() if line and dep_stop else ""
 
             if vtype == "BUS":
                 # Look up BODS bus fare
@@ -377,7 +375,13 @@ async def _google_transit_commute(origin_postcode: str, dest_postcode: str) -> C
                 dp = {"lat": dep_point.get("latitude"), "lon": dep_point.get("longitude")} if dep_point else None
                 ap = {"lat": arr_point.get("latitude"), "lon": arr_point.get("longitude")} if arr_point else None
                 leg_cost = _bus_fare_for(dep_stop, arr_stop, dep_point=dp, arr_point=ap)
-                builder.add_bus_leg(JourneyLeg(mode=LegMode.BUS, duration_minutes=dur_min, description=desc), leg_cost)
+                builder.add_bus_leg(
+                    JourneyLeg(
+                        mode=LegMode.BUS, duration_minutes=dur_min,
+                        line_name=line, end_station=arr_stop,
+                    ),
+                    leg_cost,
+                )
             else:
                 builder.flush_bus()
                 mode_enum = {
@@ -389,7 +393,12 @@ async def _google_transit_commute(origin_postcode: str, dest_postcode: str) -> C
                     "METRO": LegMode.TUBE,
                 }.get(vtype, LegMode.TRAIN)
                 builder.cost_groups.append(
-                    CostGroup(legs=(JourneyLeg(mode=mode_enum, duration_minutes=dur_min, description=desc),))
+                    CostGroup(legs=(
+                        JourneyLeg(
+                            mode=mode_enum, duration_minutes=dur_min,
+                            line_name=line, end_station=arr_stop,
+                        ),
+                    ))
                 )
         # Other modes (e.g. BICYCLE) — ignore
 

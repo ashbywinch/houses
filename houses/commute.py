@@ -66,22 +66,34 @@ class Commute:
     mode: str | CommuteMode = "transit"
     cost_groups: tuple[CostGroup, ...] = ()
 
+    def _leg_description(self, leg: JourneyLeg) -> str:
+        """Build a human-readable leg description from raw fields.
+
+        Uses the same format regardless of which API generated the leg,
+        so TfL and Google Routes routes look consistent.
+        """
+        if leg.mode == LegMode.WALK:
+            if leg.end_station:
+                return f"walk to {Station.short_name(leg.end_station)}"
+            return "walk"
+        if leg.line_name and leg.end_station:
+            return f"{leg.line_name} to {Station.short_name(leg.end_station)}"
+        if leg.line_name:
+            return leg.line_name
+        if leg.end_station:
+            return f"{leg.mode.name.lower()} to {Station.short_name(leg.end_station)}"
+        return leg.description or leg.mode.name.lower()
+
     def summary(self) -> str:
         """Render as the sheet's route-summary string."""
         parts: list[str] = []
         all_legs = [leg for group in self.cost_groups for leg in group.legs]
         total = len(all_legs)
 
-        for idx, (_group, leg, desc) in enumerate(
-            (g, _leg, d) for g in self.cost_groups for _leg, d in zip(g.legs, g.leg_descriptions(), strict=True)
-        ):
-            if leg.mode == LegMode.WALK:
-                if idx == total - 1:
-                    parts.append(f"walk {leg.duration_minutes}m")
-                elif leg.end_station:
-                    parts.append(f"walk to {Station.short_name(leg.end_station)} ({leg.duration_minutes}m)")
-                else:
-                    parts.append(f"{desc} ({leg.duration_minutes}m)")
+        for idx, leg in enumerate(all_legs):
+            desc = self._leg_description(leg)
+            if leg.mode == LegMode.WALK and idx == total - 1:
+                parts.append(f"walk {leg.duration_minutes}m")
             else:
                 parts.append(f"{desc} ({leg.duration_minutes}m)")
 
