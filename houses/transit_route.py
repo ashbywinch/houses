@@ -293,7 +293,17 @@ class TransitRoute:
             arr_station = leg.get("arrivalPoint", {}).get("commonName", "")
             dep_station = leg.get("departurePoint", {}).get("commonName", "")
             line_name = leg.get("route", {}).get("name", "")
+            dep_station = leg.get("departurePoint", {}).get("commonName", "")
+            arr_station = leg.get("arrivalPoint", {}).get("commonName", "")
+            duration = int(leg.get("duration", "0"))
             instr = leg.get("instruction", {}).get("summary", "")
+
+            # Fallback: extract line name from TfL instruction text when
+            # ``route.name`` is empty (some tube responses omit it).
+            if not line_name and mode_name == "tube" and instr:
+                line_from_instr = instr.split(" to ")[0].replace(" line", "").replace(" Line", "").strip()
+                if line_from_instr:
+                    line_name = line_from_instr
 
             if mode_name == "walking":
                 # Show destination station only if the next leg uses transit
@@ -349,7 +359,6 @@ class TransitRoute:
             jl = JourneyLeg(
                 mode=leg_mode,
                 duration_minutes=duration,
-                description=description,
                 start_station=dep_station,
                 end_station=arr_station,
                 line_name=line_name,

@@ -1135,8 +1135,8 @@ def _fmt_bus_route(commute: Commute | None) -> str:
     if commute and commute.cost_groups:
         for group in commute.cost_groups:
             for leg in group.legs:
-                if leg.mode == LegMode.BUS and leg.description:
-                    return leg.description
+                if leg.mode == LegMode.BUS:
+                    return leg.line_name or "bus"
             # Fallback: summary of bus-containing groups
             for _leg, desc in zip(group.legs, group.leg_descriptions(), strict=True):
                 if "bus" in desc.lower():

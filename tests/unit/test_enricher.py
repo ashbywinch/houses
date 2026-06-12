@@ -1533,11 +1533,12 @@ class TestTfLRouteSummary:
         }
 
         groups = route._build_cost_groups(tfl_data)
+        from houses.commute import _render_leg_description
 
         all_descriptions = []
         for g in groups:
             for leg in g.legs:
-                all_descriptions.append(leg.description)
+                all_descriptions.append(_render_leg_description(leg))
 
         combined = " ".join(all_descriptions)
         assert "Maidenhead" in combined, f"Should mention station name, got: {combined}"
@@ -1584,9 +1585,11 @@ class TestTfLRouteSummary:
         }
 
         groups = route._build_cost_groups(tfl_data)
-        descriptions = [leg.description for g in groups for leg in g.legs]
+        from houses.commute import _render_leg_description
+
+        descriptions = [_render_leg_description(leg) for g in groups for leg in g.legs]
         combined = " ".join(descriptions)
-        assert "bus(7) to" in combined, f"Expected bus(7) format, got: {descriptions}"
+        assert "7 to" in combined, f"Expected '7 to' format, got: {descriptions}"
 
     def test_tube_leg_without_line_name_falls_back_to_mode(self):
         """Tube leg with no route.name extracts line from instruction text."""
@@ -1613,7 +1616,9 @@ class TestTfLRouteSummary:
         }
 
         groups = route._build_cost_groups(tfl_data)
-        descriptions = [leg.description for g in groups for leg in g.legs]
+        from houses.commute import _render_leg_description
+
+        descriptions = [_render_leg_description(leg) for g in groups for leg in g.legs]
         combined = " ".join(descriptions)
         # Should extract tube line from instruction text, not use bare "line"
-        assert "Bakerloo line" in combined, f"Expected Bakerloo line from instruction, got: {descriptions}"
+        assert "Bakerloo" in combined, f"Expected Bakerloo line from instruction, got: {descriptions}"

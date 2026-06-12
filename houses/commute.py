@@ -8,6 +8,25 @@ from enum import Enum, auto
 from houses.stations import Station
 
 
+def _render_leg_description(leg: JourneyLeg) -> str:
+    """Build a human-readable leg description from raw fields.
+
+    Uses the same format regardless of which API generated the leg,
+    so TfL and Google Routes routes look consistent.
+    """
+    if leg.mode == LegMode.WALK:
+        if leg.end_station:
+            return f"walk to {Station.short_name(leg.end_station)}"
+        return "walk"
+    if leg.line_name and leg.end_station:
+        return f"{leg.line_name} to {Station.short_name(leg.end_station)}"
+    if leg.line_name:
+        return leg.line_name
+    if leg.end_station:
+        return f"{leg.mode.name.lower()} to {Station.short_name(leg.end_station)}"
+    return leg.mode.name.lower()
+
+
 class LegMode(Enum):
     WALK = auto()
     TUBE = auto()
@@ -32,7 +51,6 @@ class JourneyLeg:
 
     mode: LegMode
     duration_minutes: int
-    description: str = ""  # e.g. "walk to Maidenhead" or "Bakerloo line to Oxford Circus"
     start_station: str = ""  # departure point name from TfL
     end_station: str = ""  # arrival point name from TfL
     line_name: str = ""  # transit route name from TfL (e.g. "Bakerloo", "Great Western Railway")
@@ -52,7 +70,10 @@ class CostGroup:
 
     def leg_descriptions(self) -> tuple[str, ...]:
         """Return operator-appropriate descriptions for each leg."""
-        return tuple(leg.description if leg.description else leg.mode.name.lower() for leg in self.legs)
+        return tuple(
+            _render_leg_description(leg)
+            for leg in self.legs
+        )
 
 
 @dataclass(frozen=True)
@@ -67,22 +88,8 @@ class Commute:
     cost_groups: tuple[CostGroup, ...] = ()
 
     def _leg_description(self, leg: JourneyLeg) -> str:
-        """Build a human-readable leg description from raw fields.
-
-        Uses the same format regardless of which API generated the leg,
-        so TfL and Google Routes routes look consistent.
-        """
-        if leg.mode == LegMode.WALK:
-            if leg.end_station:
-                return f"walk to {Station.short_name(leg.end_station)}"
-            return "walk"
-        if leg.line_name and leg.end_station:
-            return f"{leg.line_name} to {Station.short_name(leg.end_station)}"
-        if leg.line_name:
-            return leg.line_name
-        if leg.end_station:
-            return f"{leg.mode.name.lower()} to {Station.short_name(leg.end_station)}"
-        return leg.description or leg.mode.name.lower()
+        """Build a human-readable leg description from raw fields."""
+        return _render_leg_description(leg)
 
     def summary(self) -> str:
         """Render as the sheet's route-summary string."""
