@@ -127,6 +127,13 @@ def _isolate_api_cache():
 
 
 @pytest.fixture(autouse=True)
+def _reset_geo_cache():
+    """Give each integration test its own geocode cache."""
+    import houses.location as _loc
+    _loc._geo_cache_var.set({})
+
+
+@pytest.fixture(autouse=True)
 def _mock_http_requests():
     """Every integration test must mock external HTTP APIs.
 
