@@ -111,7 +111,10 @@ class TestPropertyLocationOutcode:
                 200,
                 json={
                     "status": "OK",
-                    "results": [{"geometry": {"location": {"lat": 51.52, "lng": -0.73}}, "formatted_address": "Shoppenhangers Road, Maidenhead, UK"}],
+                    "results": [{
+                        "geometry": {"location": {"lat": 51.52, "lng": -0.73}},
+                        "formatted_address": "Shoppenhangers Road, Maidenhead, UK",
+                    }],
                 }
             ),
         )
