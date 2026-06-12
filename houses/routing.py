@@ -17,6 +17,7 @@ from houses.attempt import Attempt
 from houses.bus_journey import BusJourneyRegistry, cheapest_round_trip
 from houses.commute import Commute, CommuteMode, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
+from houses.endpoint_client import EndpointClient
 from houses.http_error import HttpError
 from houses.retry import retry_async
 from houses.stations import Station
@@ -57,77 +58,45 @@ GOOGLE_ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
 ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-car"
 
 
-class _GoogleRoutesClient:
-    """Client for Google Routes API with Retry-After support.
+_google_routes = EndpointClient("google-routes", max_retries=3, base_delay=2.0)
 
-    On 429 responses, the Retry-After header is extracted and the request
-    is retried using that delay.  No process-lifetime circuit breaker —
-    if the API recovers, subsequent calls work again.
+
+async def _google_routes_post(
+    body: dict,
+    field_mask: str,
+    *,
+    timeout: float = 10.0,
+) -> dict | None:
+    """POST to Google Routes API, caching responses and using EndpointClient retry.
+
+    Raises ``ValueError`` if the API key is not configured.
     """
+    google_key = settings.google_maps_api_key
+    if not google_key:
+        raise ValueError("Google Maps API key not configured")
 
-    @classmethod
-    async def request(
-        cls,
-        body: dict,
-        field_mask: str,
-        *,
-        timeout: float = 10.0,
-    ) -> dict | None:
-        """Make a request to the Google Routes API.
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": google_key,
+        "X-Goog-FieldMask": field_mask,
+    }
+    key = json.dumps(body, sort_keys=True)
+    cached = get_cached("POST", GOOGLE_ROUTES_URL, None, key)
+    if cached is not None:
+        return cached
 
-        Returns the JSON response dict on success, or ``None`` if the
-        request failed for a non-retryable reason (e.g. invalid key,
-        bad request).
+    async def _do_post() -> dict:
+        async with cached_async_client(timeout=timeout) as client:
+            resp = await client.post(GOOGLE_ROUTES_URL, json=body, headers=headers)
+            if resp.status_code == 429:
+                raise HttpError(429, "rate limited", headers=dict(resp.headers))
+            resp.raise_for_status()
+            return resp.json()
 
-        Raises ``ValueError`` if the API key is not configured.
-        """
-        google_key = settings.google_maps_api_key
-        if not google_key:
-            raise ValueError("Google Maps API key not configured")
-
-        headers = {
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": google_key,
-            "X-Goog-FieldMask": field_mask,
-        }
-        key = json.dumps(body, sort_keys=True)
-        cached = get_cached("POST", GOOGLE_ROUTES_URL, None, key)
-        if cached is not None:
-            return cached
-
-        async def _do_post() -> dict:
-            async with cached_async_client(timeout=timeout) as client:
-                resp = await client.post(GOOGLE_ROUTES_URL, json=body, headers=headers)
-                if resp.status_code == 429:
-                    raise HttpError(429, "rate limited", headers=dict(resp.headers))
-                resp.raise_for_status()
-                return resp.json()
-
-        try:
-            data = await retry_async(
-                _do_post,
-                max_retries=3,
-                base_delay=2.0,
-                exceptions=(
-                    HttpError,  # only raised for 429 (rate limit — may recover)
-                    httpx.ConnectError,
-                    httpx.RemoteProtocolError,
-                    httpx.ReadTimeout,
-                ),
-            )
-            set_cached("POST", GOOGLE_ROUTES_URL, None, key, data)
-            return data
-        except ValueError:
-            raise
-        except (HttpError, httpx.HTTPStatusError) as e:
-            logger.warning(
-                "Google Routes API error for %s: %s",
-                body.get("origin", {}).get("address", "?"), e,
-            )
-            return None
-        except Exception as e:
-            logger.warning("Google Routes API call failed: %s", e)
-            return None
+    data = await _google_routes.request(_do_post)
+    if data is not None:
+        set_cached("POST", GOOGLE_ROUTES_URL, None, key, data)
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +221,7 @@ async def _walk_commute(origin_postcode: str, dest_postcode: str) -> Commute | N
         "destination": {"address": dest_postcode},
         "travelMode": "WALK",
     }
-    data = await _GoogleRoutesClient.request(body, "routes.duration,routes.distanceMeters")
+    data = await _google_routes_post(body, "routes.duration,routes.distanceMeters")
     if data is None:
         return None
 
@@ -302,7 +271,7 @@ async def _google_transit_commute(origin_postcode: str, dest_postcode: str) -> C
         "routes.duration,routes.legs.steps.staticDuration,"
         "routes.legs.steps.travelMode,routes.legs.steps.transitDetails"
     )
-    data = await _GoogleRoutesClient.request(body, field_mask, timeout=15.0)
+    data = await _google_routes_post(body, field_mask, timeout=15.0)
     if data is None:
         return None
 
@@ -488,10 +457,6 @@ async def _find_bus_alternative(origin: str, destination: str) -> Commute | None
     Commute with bus fare looked up from BODS data, or None if the API
     also can't route the journey.
     """
-    google_key = settings.google_maps_api_key
-    if not google_key:
-        return None
-
     body = {
         "origin": {"address": origin},
         "destination": {"address": destination},
@@ -499,38 +464,10 @@ async def _find_bus_alternative(origin: str, destination: str) -> Commute | None
         "transitPreferences": {"routingPreference": "less_walking"},
         "computeAlternativeRoutes": False,
     }
-    headers = {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": google_key,
-        "X-Goog-FieldMask": "routes.duration,routes.legs",
-    }
 
-    cached = get_cached("POST", GOOGLE_ROUTES_URL, None, json.dumps(body, sort_keys=True))
-    if cached is not None:
-        data = cached
-    else:
-        try:
-            async def _do_find_bus_post():
-                async with cached_async_client(timeout=15.0) as client:
-                    resp = await client.post(GOOGLE_ROUTES_URL, json=body, headers=headers)
-                    if resp.status_code == 429:
-                        raise HttpError(429, "rate limited", headers=dict(resp.headers))
-                    resp.raise_for_status()
-                    return resp.json()
-
-            data = await retry_async(
-                _do_find_bus_post,
-                max_retries=2,
-                base_delay=1.0,
-                exceptions=(HttpError, httpx.ConnectError, httpx.RemoteProtocolError, httpx.ReadTimeout),
-            )
-            set_cached("POST", GOOGLE_ROUTES_URL, None, json.dumps(body, sort_keys=True), data)
-        except (HttpError, httpx.HTTPStatusError) as e:
-            logger.warning("Routes API failed for %s → %s: %s", origin, destination, e)
-            return None
-        except Exception as e:
-            logger.warning("Routes API failed for %s → %s: %s", origin, destination, e)
-            return None
+    data = await _google_routes_post(body, "routes.duration,routes.legs", timeout=15.0)
+    if data is None:
+        return None
 
     routes = data.get("routes", [])
     if not routes:
