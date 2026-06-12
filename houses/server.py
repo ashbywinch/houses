@@ -409,7 +409,7 @@ async def _batch_stream(
                 url=url,
                 address=address,
                 postcode=new_pc,
-                lookup=new_pc,
+                lookup=None,  # _run_enrichment computes best lookup
                 bedrooms=None,
                 price=None,
                 enabled=None,
@@ -493,7 +493,7 @@ async def _batch_stream(
             url=url,
             address=addr,
             postcode=pc,
-            lookup=addr if _is_outcode(pc) else pc,
+            lookup=None,  # _run_enrichment computes best lookup (address+postcode upgrade)
             bedrooms=None,
             price=None,
             enabled=needed if needed else None,
