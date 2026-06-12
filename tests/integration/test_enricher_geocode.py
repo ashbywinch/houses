@@ -99,18 +99,23 @@ class TestPropertyLocationOutcode:
 
         # Register a custom handler returning Maidenhead coordinates
         # for the full street address.
+        def _maidenhead_response(request):
+            url = str(request.url)
+            if "googleapis.com/maps/api/geocode" in url:
+                return Response(200, json={
+                    "status": "OK",
+                    "results": [{"geometry": {"location": {"lat": 51.52, "lng": -0.73}}}],
+                })
+            if "openrouteservice.org/geocode" in url:
+                return Response(200, json={
+                    "features": [{"geometry": {"coordinates": [-0.73, 51.52]}}],
+                })
+            # Nominatim
+            return Response(200, json=[{"lat": "51.52", "lon": "-0.73"}])
+
         _mock_http_requests.add_rule(
             lambda url: "Shoppenhangers" in str(url),
-            lambda request: Response(
-                200,
-                json={
-                    "status": "OK",
-                    "results": [{
-                        "geometry": {"location": {"lat": 51.52, "lng": -0.73}},
-                        "formatted_address": "Shoppenhangers Road, Maidenhead, UK",
-                    }],
-                }
-            ),
+            _maidenhead_response,
         )
 
         loc = PropertyLocation(
