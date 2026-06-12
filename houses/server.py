@@ -922,6 +922,8 @@ def _write_backfill_cells(
     allowed_set = set(allowed_headers)
 
     cells: list[dict[str, Any]] = []
+    written: list[str] = []
+    skipped: list[str] = []
     for name, val in enriched_dict.items():
         if not val or name not in allowed_set:
             continue
@@ -930,12 +932,25 @@ def _write_backfill_cells(
         except ValueError:
             continue
         if not force and col_idx < len(current_row) and current_row[col_idx].strip():
+            skipped.append(name)
             continue  # cell already has data — never overwrite unless force
         cl = col_letter(col_idx)
         cells.append({"range": f"{cl}{row_num}", "values": [[val]]})
+        written.append(name)
 
     if cells:
         Tab(ws).batch_update(cells)
+        logger.info(
+            "Wrote row %d (%s): %d cells [%s]",
+            row_num, enriched.rightmove_url.rsplit("/", 1)[-1],
+            len(cells), ", ".join(written),
+        )
+    if skipped:
+        logger.info(
+            "Skipped row %d (%s): %d cells already had data [%s]",
+            row_num, enriched.rightmove_url.rsplit("/", 1)[-1],
+            len(skipped), ", ".join(skipped),
+        )
 
 
 @app.get("/health")
