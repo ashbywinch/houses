@@ -76,11 +76,7 @@ class EndpointClient:
     @property
     def blocked(self) -> bool:
         """True if the client should skip the API without trying."""
-        return (
-            self._permanently_blocked
-            or self._cumulative_blocked
-            or time.time() < self._blocked_until
-        )
+        return self._permanently_blocked or self._cumulative_blocked or time.time() < self._blocked_until
 
     async def request(
         self,
@@ -121,17 +117,22 @@ class EndpointClient:
                     should_retry = attempt < self.max_retries
                     self._blocked_until = time.time() + delay
                     logger.warning(
-                        "%s: HTTP 429 on attempt %d/%d → %s. "
-                        "Blocked for %.1fs (%.1fs budget remaining)",
-                        self.name, attempt + 1, self.max_retries + 1,
-                        retry_reason, delay, self._remaining_budget,
+                        "%s: HTTP 429 on attempt %d/%d → %s. Blocked for %.1fs (%.1fs budget remaining)",
+                        self.name,
+                        attempt + 1,
+                        self.max_retries + 1,
+                        retry_reason,
+                        delay,
+                        self._remaining_budget,
                     )
                 elif 400 <= e.status < 500:
                     # 4xx (except 429) — won't self-resolve
                     self._permanently_blocked = True
                     logger.warning(
                         "%s: HTTP %d on attempt %d → permanently blocked",
-                        self.name, e.status, attempt + 1,
+                        self.name,
+                        e.status,
+                        attempt + 1,
                     )
                     return None
                 else:
@@ -140,15 +141,20 @@ class EndpointClient:
                     should_retry = attempt < self.max_retries
                     logger.warning(
                         "%s: HTTP %d on attempt %d/%d → retrying in %.1fs",
-                        self.name, e.status, attempt + 1,
-                        self.max_retries + 1, delay,
+                        self.name,
+                        e.status,
+                        attempt + 1,
+                        self.max_retries + 1,
+                        delay,
                     )
             except httpx.HTTPStatusError as e:
                 if 400 <= e.response.status_code < 500:
                     self._permanently_blocked = True
                     logger.warning(
                         "%s: HTTP %d on attempt %d → permanently blocked",
-                        self.name, e.response.status_code, attempt + 1,
+                        self.name,
+                        e.response.status_code,
+                        attempt + 1,
                     )
                     return None
                 else:
@@ -156,21 +162,29 @@ class EndpointClient:
                     should_retry = attempt < self.max_retries
                     logger.warning(
                         "%s: HTTP %d on attempt %d/%d → retrying in %.1fs",
-                        self.name, e.response.status_code, attempt + 1,
-                        self.max_retries + 1, delay,
+                        self.name,
+                        e.response.status_code,
+                        attempt + 1,
+                        self.max_retries + 1,
+                        delay,
                     )
             except (httpx.ConnectError, httpx.RemoteProtocolError, httpx.ReadTimeout) as e:
                 delay = self._backoff_delay(attempt)
                 should_retry = attempt < self.max_retries
                 logger.warning(
                     "%s: %s on attempt %d/%d → retrying in %.1fs",
-                    self.name, type(e).__name__, attempt + 1,
-                    self.max_retries + 1, delay,
+                    self.name,
+                    type(e).__name__,
+                    attempt + 1,
+                    self.max_retries + 1,
+                    delay,
                 )
             except Exception as e:
                 logger.warning(
                     "%s: %s on attempt %d — not retried",
-                    self.name, type(e).__name__, attempt + 1,
+                    self.name,
+                    type(e).__name__,
+                    attempt + 1,
                 )
                 return None
 
@@ -184,12 +198,16 @@ class EndpointClient:
         if self._cumulative_delay >= self.max_cumulative_delay:
             logger.warning(
                 "%s: cumulative retry delay %.1fs exceeds budget %.1fs — blocked",
-                self.name, self._cumulative_delay, self.max_cumulative_delay,
+                self.name,
+                self._cumulative_delay,
+                self.max_cumulative_delay,
             )
         else:
             logger.warning(
                 "%s: exhausted %d retries (%.1fs total delay) — blocked",
-                self.name, self.max_retries + 1, self._cumulative_delay,
+                self.name,
+                self.max_retries + 1,
+                self._cumulative_delay,
             )
         self._cumulative_blocked = True
         return None

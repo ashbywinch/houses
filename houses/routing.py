@@ -210,6 +210,26 @@ def _is_london_area(postcode: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+async def _walk_to_station_minutes(origin_postcode: str, lat: float, lng: float) -> int | None:
+    """Walking duration (minutes) from a postcode to a lat/lng point.
+
+    Uses Google Routes walking mode.  Returns ``None`` if the API call
+    fails or returns no route.
+    """
+    body = {
+        "origin": {"address": origin_postcode},
+        "destination": {"latLng": {"latitude": lat, "longitude": lng}},
+        "travelMode": "WALK",
+    }
+    data = await _google_routes_post(body, "routes.duration,routes.distanceMeters")
+    if data is None:
+        return None
+    routes = data.get("routes", [])
+    if not routes:
+        return None
+    return round(int(routes[0].get("duration", "0s").rstrip("s")) / 60)
+
+
 async def _walk_commute(origin_postcode: str, dest_postcode: str) -> Commute | None:
     """Try walking via Google Routes walking mode.
 
@@ -418,6 +438,30 @@ async def _google_transit_commute(
 
     builder.flush_walk()
     builder.flush_bus()
+
+    # ── Google may omit the walk to the first transit stop when the
+    # origin is near the station in Google's routing graph, even if
+    # the actual walking distance is non-trivial.  Detect this and
+    # compute the walking leg properly via the Google Routes walking API.
+    if steps and steps[0].get("travelMode") == "TRANSIT":
+        td = steps[0].get("transitDetails", {})
+        dep_stop = td.get("stopDetails", {}).get("departureStop", {})
+        dep_latlng = dep_stop.get("location", {}).get("latLng", {})
+        if dep_latlng.get("latitude") is not None and dep_latlng.get("longitude") is not None:
+            walk_time = await _walk_to_station_minutes(
+                origin_postcode,
+                dep_latlng["latitude"],
+                dep_latlng["longitude"],
+            )
+            if walk_time is not None and walk_time > 0:
+                dep_name = dep_stop.get("name", "station")
+                walk_leg = JourneyLeg(
+                    mode=LegMode.WALK,
+                    duration_minutes=walk_time,
+                    end_station=dep_name,
+                )
+                builder.cost_groups.insert(0, CostGroup(legs=(walk_leg,)))
+                duration_min += walk_time
 
     # Google's ``allowedTravelModes`` filter is a preference, not a strict
     # constraint — it may still return bus legs.  When bus is disallowed,

@@ -658,6 +658,109 @@ _GOOGLE_ROUTES_RESPONSE = {
 }
 
 
+class TestGoogleTransitMissingWalk:
+    """When Google omits the walk to the first transit stop, _google_transit_commute
+    computes it via the walking API and prepends a walk CostGroup."""
+
+    _GOOGLE_NO_WALK_RESPONSE = {
+        "routes": [
+            {
+                "duration": "3600s",
+                "legs": [
+                    {
+                        "steps": [
+                            {
+                                "travelMode": "TRANSIT",
+                                "staticDuration": "3000s",
+                                "transitDetails": {
+                                    "transitLine": {"nameShort": "South Western Railway", "vehicle": {"type": "RAIL"}},
+                                    "stopDetails": {
+                                        "departureStop": {
+                                            "name": "Ascot",
+                                            "location": {"latLng": {"latitude": 51.4063, "longitude": -0.6762}},
+                                        },
+                                        "arrivalStop": {"name": "Vauxhall"},
+                                    },
+                                },
+                            },
+                            {
+                                "travelMode": "WALK",
+                                "staticDuration": "120s",
+                            },
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+
+    @pytest.mark.asyncio
+    async def test_adds_walk_when_first_step_is_transit(self, monkeypatch):
+        """First step is TRANSIT → walk leg computed via _walk_to_station_minutes and prepended."""
+        from houses.routing import _google_transit_commute
+
+        async def mock_post(*_, **__):
+            return self._GOOGLE_NO_WALK_RESPONSE
+
+        async def mock_walk(*_, **__):
+            return 24  # 24 min walk to Ascot station
+
+        monkeypatch.setattr("houses.routing._google_routes_post", mock_post)
+        monkeypatch.setattr("houses.routing._walk_to_station_minutes", mock_walk)
+        monkeypatch.setattr("houses.routing._bus_fare_for", lambda *_, **__: None)
+
+        result = await _google_transit_commute("SL5", "SW1V 2QQ", allow_bus=True)
+        assert result is not None, "Expected a commute result"
+
+        # First cost group should be a walk
+        first = result.cost_groups[0]
+        assert first.legs[0].mode.name == "WALK", f"Expected first leg to be WALK, got {first.legs[0].mode.name}"
+        assert first.legs[0].duration_minutes == 24, f"Expected 24 min walk, got {first.legs[0].duration_minutes}"
+        assert first.legs[0].end_station == "Ascot", f"Expected walk to Ascot, got {first.legs[0].end_station}"
+
+    @pytest.mark.asyncio
+    async def test_duration_includes_walk_time(self, monkeypatch):
+        """Total duration_minutes includes the added walk time."""
+        from houses.routing import _google_transit_commute
+
+        async def mock_post(*_, **__):
+            return self._GOOGLE_NO_WALK_RESPONSE
+
+        async def mock_walk(*_, **__):
+            return 24
+
+        monkeypatch.setattr("houses.routing._google_routes_post", mock_post)
+        monkeypatch.setattr("houses.routing._walk_to_station_minutes", mock_walk)
+        monkeypatch.setattr("houses.routing._bus_fare_for", lambda *_, **__: None)
+
+        result = await _google_transit_commute("SL5", "SW1V 2QQ", allow_bus=True)
+        assert result is not None
+
+        # Original duration was 3600s = 60 min. Adding 24 min walk → 84 min.
+        assert result.duration_minutes == 84, f"Expected 84 min (60 + 24 walk), got {result.duration_minutes}"
+
+    @pytest.mark.asyncio
+    async def test_no_walk_added_when_first_step_is_walk(self, monkeypatch):
+        """First step is already WALK → no walk leg is added."""
+        from houses.routing import _google_transit_commute
+
+        # Reuse the standard Google transit response (starts with walk)
+        async def mock_post(*_, **__):
+            from tests.unit.test_routing import _GOOGLE_ROUTES_RESPONSE
+
+            return _GOOGLE_ROUTES_RESPONSE
+
+        monkeypatch.setattr("houses.routing._google_routes_post", mock_post)
+        monkeypatch.setattr("houses.routing._bus_fare_for", lambda *_, **__: None)
+
+        result = await _google_transit_commute("SW1V 2QQ", "EC3A 7LP", allow_bus=True)
+        assert result is not None
+
+        # First cost group was already a walk from the Google response
+        first = result.cost_groups[0]
+        assert first.legs[0].mode.name == "WALK"
+
+
 class TestGoogleTransitWalkGrouping:
     """_google_transit_commute merges consecutive walk segments."""
 

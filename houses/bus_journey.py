@@ -153,8 +153,7 @@ class BusJourneyRegistry:
                     if key.startswith("adult_"):
                         if key in seen:
                             raise ValueError(
-                                f"Duplicate fare product '{key}' for zone pair "
-                                f"'{zp}' in operator '{op_key}'"
+                                f"Duplicate fare product '{key}' for zone pair '{zp}' in operator '{op_key}'"
                             )
                         seen.add(key)
 
@@ -214,16 +213,20 @@ class BusJourneyRegistry:
         # ── Stage 3: Coordinate fallback ────────────────────────────
         if dep_point is not None and arr_point is not None:
             result = self._coord_match(
-                dep_stop_name, arr_stop_name,
-                dep_point["lat"], dep_point["lon"],
-                arr_point["lat"], arr_point["lon"],
+                dep_stop_name,
+                arr_stop_name,
+                dep_point["lat"],
+                dep_point["lon"],
+                arr_point["lat"],
+                arr_point["lon"],
             )
             if result:
                 return result
 
         logger.warning(
             "Bus fare zone pair not found for '%s' → '%s'",
-            dep_stop_name, arr_stop_name,
+            dep_stop_name,
+            arr_stop_name,
         )
         return {}
 
@@ -279,7 +282,9 @@ class BusJourneyRegistry:
                         dep_zone = zone
                         logger.warning(
                             "Bus fare fuzzy match dep='%s' -> '%s' zone=%s",
-                            dep_norm, bods_name, dep_zone,
+                            dep_norm,
+                            bods_name,
+                            dep_zone,
                         )
                         if arr_zone is not None:
                             break
@@ -292,7 +297,9 @@ class BusJourneyRegistry:
                         arr_zone = zone
                         logger.warning(
                             "Bus fare fuzzy match arr='%s' -> '%s' zone=%s",
-                            arr_norm, bods_name, arr_zone,
+                            arr_norm,
+                            bods_name,
+                            arr_zone,
                         )
                         if dep_zone is not None:
                             break
@@ -327,7 +334,10 @@ class BusJourneyRegistry:
                 if products:
                     logger.info(
                         "Bus fare by coords: dep=%s arr=%s = %s:%s",
-                        dep_stop_name, arr_stop_name, dep_zone, arr_zone,
+                        dep_stop_name,
+                        arr_stop_name,
+                        dep_zone,
+                        arr_zone,
                     )
                     return products
         return {}

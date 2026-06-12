@@ -102,14 +102,20 @@ class TestPropertyLocationOutcode:
         def _maidenhead_response(request):
             url = str(request.url)
             if "googleapis.com/maps/api/geocode" in url:
-                return Response(200, json={
-                    "status": "OK",
-                    "results": [{"geometry": {"location": {"lat": 51.52, "lng": -0.73}}}],
-                })
+                return Response(
+                    200,
+                    json={
+                        "status": "OK",
+                        "results": [{"geometry": {"location": {"lat": 51.52, "lng": -0.73}}}],
+                    },
+                )
             if "openrouteservice.org/geocode" in url:
-                return Response(200, json={
-                    "features": [{"geometry": {"coordinates": [-0.73, 51.52]}}],
-                })
+                return Response(
+                    200,
+                    json={
+                        "features": [{"geometry": {"coordinates": [-0.73, 51.52]}}],
+                    },
+                )
             # Nominatim
             return Response(200, json=[{"lat": "51.52", "lon": "-0.73"}])
 

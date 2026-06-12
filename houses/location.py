@@ -47,8 +47,7 @@ _TOWN_SUFFIXES = re.compile(
 
 # ── In-memory geocode cache (per-request via contextvars) ─────────
 
-_geo_cache_var: contextvars.ContextVar[dict[str, Attempt[GeoPoint]]] = \
-    contextvars.ContextVar('geo_cache', default=None)  # type: ignore[arg-type]
+_geo_cache_var: contextvars.ContextVar[dict[str, Attempt[GeoPoint]]] = contextvars.ContextVar("geo_cache", default=None)  # type: ignore[arg-type]
 
 
 def _cache_result(key: str, result: Attempt[GeoPoint]) -> None:
@@ -295,26 +294,30 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
             return result
         logger.warning(
             "Google Maps cached result for '%s' rejected: status=%s msg=%s",
-            address, data.get("status"), data.get("error_message", ""),
+            address,
+            data.get("status"),
+            data.get("error_message", ""),
         )
     else:
         try:
-                async with cached_async_client(timeout=10.0) as client:
-                    resp = await client.get(googlegeocode_url, params=params)
-                    resp.raise_for_status()
-                    data = resp.json()
-                    if data.get("status") == "OK" and data.get("results"):
-                        set_cached("GET", googlegeocode_url, cache_params, None, data)
-                        loc = data["results"][0]["geometry"]["location"]
-                        gp = GeoPoint(loc["lat"], loc["lng"])
-                        result = Attempt.succeeded(gp, "google-maps")
-                        _cache_result(cache_key, result)
-                        logger.info("Geocoded '%s' via google-maps", address)
-                        return result
-                    logger.warning(
-                        "Google Maps API response for '%s': status=%s msg=%s",
-                        address, data.get("status"), data.get("error_message", ""),
-                    )
+            async with cached_async_client(timeout=10.0) as client:
+                resp = await client.get(googlegeocode_url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("status") == "OK" and data.get("results"):
+                    set_cached("GET", googlegeocode_url, cache_params, None, data)
+                    loc = data["results"][0]["geometry"]["location"]
+                    gp = GeoPoint(loc["lat"], loc["lng"])
+                    result = Attempt.succeeded(gp, "google-maps")
+                    _cache_result(cache_key, result)
+                    logger.info("Geocoded '%s' via google-maps", address)
+                    return result
+                logger.warning(
+                    "Google Maps API response for '%s': status=%s msg=%s",
+                    address,
+                    data.get("status"),
+                    data.get("error_message", ""),
+                )
         except Exception as exc:
             logger.warning("Google Maps geocoding failed for '%s': %s", address, exc)
 
