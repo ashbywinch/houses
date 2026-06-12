@@ -42,16 +42,17 @@ behaviour, extract it to its own module.
 - Use `POST /properties?fields=...&force=true` to update specific
   columns that need refreshing.
 
-### Never Manipulate the Sheet Grid Directly
+### Column Migrations
 
-- Do not call `insert_cols`, `deleteDimension`, `add_cols`, or `clear`
-  to restructure columns. These operations are destructive and error-prone.
-- To add a column: add it to `COLUMN_HEADERS` in `sheets.py` and include
-  it in `_row_values()`. Run the batch refresh.
-- To rename or reorder: update `COLUMN_HEADERS` and `_row_values()`, then
-  run a full refresh.
-- If you must manipulate the grid, use `moveDimension` — it's atomic,
-  preserves data, and shifts surrounding columns automatically.
+- Use `scripts/sheet_tool.py` for column operations: `add`, `move`, `rename`,
+  `delete`. This is the only tool for grid manipulation. Do not call
+  `insert_cols`, `deleteDimension`, `add_cols`, or `clear` directly.
+- After a column change, refresh formulas and named ranges by calling the
+  setup functions in `sheets.py` (or the relevant endpoint/script).
+- Delete one-off migration scripts after they've been run. The git log
+  preserves the history.
+- Update `COLUMN_HEADERS` and `_row_values()` in `sheets.py` to match the
+  new column layout. Run a batch refresh to populate the new column.
 
 ### User Columns Are Never Overwritten
 
