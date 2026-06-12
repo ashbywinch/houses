@@ -742,94 +742,31 @@ class TestGoogleTransitMissingWalk:
     }
 
     @pytest.mark.asyncio
-    async def test_walk_to_ascot_with_partial_postcode_gives_2_min_not_19(self, monkeypatch):
-        """_run_enrichment receives postcode='SL5' from the sheet and passes
-        it to the routing APIs.  TfL geocodes 'SL5' near Ascot station and
-        returns a route with a 2 min walk to Ascot — impossible for 1.95 km."""
-        from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
-        from houses.server import _run_enrichment
+    async def test_walk_to_ascot_gives_2_min_not_19(self, monkeypatch):
+        """_walk_to_station_minutes('Sunningdale, Ascot, SL5', ...) returns
+        2 min because Google geocodes the full address near Ascot station.
+        The walk should be ~19 min for 1.95 km."""
+        from houses.routing import _walk_to_station_minutes
 
-        # TfL returns a route with a 2 min walk to Ascot — the "SL5" postcode
-        # geocodes near the station, so TfL thinks the walk is 2 min.
-        async def mock_tfl(*_, **__):
-            return Commute(
-                destination_label="",
-                destination_postcode="SW1V 2QQ",
-                duration_minutes=55,
-                daily_cost_gbp=None,
-                cost_groups=(
-                    CostGroup(
-                        legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=2, end_station="Ascot"),),
-                    ),
-                    CostGroup(
-                        legs=(
-                            JourneyLeg(
-                                mode=LegMode.TRAIN, duration_minutes=50, line_name="SWR", end_station="Vauxhall"
-                            ),
-                        ),
-                    ),
-                ),
-            )
-
-        monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_tfl)
-
-        async def mock_google(*_, **__):
+        # Mock the walking API to return 2 min for this address (matching
+        # what Google actually returns — it geocodes near Ascot station)
+        async def mock_post(body, *_, **__):
+            if body.get("travelMode") == "WALK":
+                origin = body.get("origin", {}).get("address", "")
+                if "Sunningdale" in origin or "SL5" in origin:
+                    return {"routes": [{"duration": "120s"}]}  # 2 min
+                return {"routes": [{"duration": "1140s"}]}  # 19 min for unknown
             return None
 
-        monkeypatch.setattr("houses.routing._google_transit_commute", mock_google)
+        monkeypatch.setattr("houses.routing._google_routes_post", mock_post)
 
-        async def mock_walk(*_, **__):
-            return Commute(
-                destination_label="", destination_postcode="SW1V 2QQ", duration_minutes=999, daily_cost_gbp=0.0
-            )
-
-        monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
-        monkeypatch.setattr("houses.routing._in_congestion_zone", lambda *_, **__: False)
-
-        async def mock_drive(*_, **__):
-            return None
-
-        monkeypatch.setattr("houses.routing._drive_commute", mock_drive)
-        from houses.attempt import Attempt
-        from houses.geo import GeoPoint
-
-        async def mock_geocode(*_, **__):
-            return Attempt.succeeded(GeoPoint(51.414, -0.700), "mock")
-
-        monkeypatch.setattr("houses.location._geocode_address", mock_geocode)
-
-        # _enrich_rail_fares calls geocode and nearest_station
-        async def mock_geocode2(*_, **__):
-            return Attempt.succeeded(GeoPoint(51.4, -0.67), "mock")
-
-        # geocode is imported as "from houses.location import geocode" in server.py
-        monkeypatch.setattr("houses.server.geocode", mock_geocode2)
-        monkeypatch.setattr(
-            "houses.rail_fares.nearest_station", lambda *_, **__: {"stationName": "Ascot", "crs": "ACT"}
-        )
-        monkeypatch.setattr("houses.rail_fares.fare_between", lambda *_, **__: 10.0)
-
-        # The enrichment receives postcode='SL5' (partial) and address=
-        # 'Sunningdale, Ascot, SL5' (full) from the sheet.  It passes the
-        # postcode through to the routing APIs.
-        enriched = await _run_enrichment(
-            url="https://www.rightmove.co.uk/properties/174660728",
-            address="Sunningdale, Ascot, SL5",
-            postcode="SL5",
-            lookup=None,
-            bedrooms=None,
-            price=None,
-            enabled={"simon"},
-        )
-        assert enriched.simon_commute is not None
-        summary = enriched.simon_commute.summary().lower()
-        assert "walk to ascot" in summary, f"No walk to Ascot in Simon commute. Got: {summary}"
-        dur_str = summary.split("walk to ascot (")[1].split("m")[0]
-        walk_min = int(dur_str)
-        assert walk_min >= 10, (
-            f"The enrichment received postcode='SL5' from the sheet. "
-            f"TfL returns a {walk_min} min walk to Ascot, but 1.95 km "
-            f"requires ~19 min. Got: {summary}"
+        result = await _walk_to_station_minutes("Sunningdale, Ascot, SL5", 51.4063, -0.6762)
+        assert result is not None
+        assert result >= 10, (
+            f"_walk_to_station_minutes('Sunningdale, Ascot, SL5', ...) "
+            f"returned {result} min, but 1.95 km requires ~19 min. "
+            f"Google geocodes the full address near Ascot station instead "
+            f"of the actual property location."
         )
 
     @pytest.mark.asyncio
