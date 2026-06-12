@@ -515,7 +515,10 @@ async def _batch_stream(
                 }
             )
         else:
-            _write_backfill_cells(sh, data_ws, data_row_num, data_headers, data_row, enriched, empty_headers, force=force, rid=rid)
+            _write_backfill_cells(
+                sh, data_ws, data_row_num, data_headers, data_row,
+                enriched, empty_headers, force=force, rid=rid,
+            )
             yield _json_line({"type": "row", "row": row_idx, "rid": rid, "status": "updated", "fields": sorted(needed)})
             summary["updated"] += 1
         continue

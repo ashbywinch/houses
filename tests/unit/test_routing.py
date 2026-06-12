@@ -406,6 +406,121 @@ class TestGetCommuteChoice:
         assert result.value_or_none().daily_cost_gbp == 5.0
 
 
+# ── Google transit walk grouping ────────────────────────────────────────
+# Google Routes may return consecutive walk segments.  _google_transit_commute
+# must group them into a single walk leg with the correct total duration.
+
+
+def _fake_google_steps(*step_specs: tuple[str, int]) -> list[dict]:
+    """Build a list of Google Routes step dicts from (mode, seconds) pairs.
+
+    Mode is ``"WALK"`` or ``"TRANSIT"``.  Transit steps get a default
+    ``subway`` vehicle type so they parse correctly.
+    """
+    steps = []
+    for mode, sec in step_specs:
+        step: dict = {
+            "travelMode": mode,
+            "staticDuration": f"{sec}s",
+        }
+        if mode == "TRANSIT":
+            step["transitDetails"] = {
+                "transitLine": {"vehicle": {"type": "SUBWAY"}, "nameShort": "Victoria"},
+                "stopDetails": {
+                    "departureStop": {"name": "Start", "location": {"latLng": {"latitude": 51.5, "longitude": -0.1}}},
+                    "arrivalStop": {"name": "End", "location": {"latLng": {"latitude": 51.5, "longitude": -0.1}}},
+                },
+            }
+        steps.append(step)
+    return steps
+
+
+_GOOGLE_ROUTES_RESPONSE = {
+    "routes": [
+        {
+            "duration": "900s",
+            "legs": [
+                {
+                    "steps": _fake_google_steps(
+                        ("WALK", 60),       # walk 1
+                        ("WALK", 90),       # walk 2 — should merge with walk 1
+                        ("TRANSIT", 300),   # tube
+                        ("WALK", 30),       # walk 3
+                        ("WALK", 45),       # walk 4 — should merge with walk 3
+                        ("TRANSIT", 120),   # tube
+                        ("WALK", 120),      # walk 5
+                        ("WALK", 0),        # walk 6 — 0-second, should be skipped
+                    ),
+                }
+            ],
+        }
+    ]
+}
+
+
+class TestGoogleTransitWalkGrouping:
+    """_google_transit_commute merges consecutive walk segments."""
+
+    @pytest.mark.asyncio
+    async def test_merges_consecutive_walks(self, monkeypatch):
+        """Consecutive WALK steps become one leg with combined duration."""
+        from houses.routing import _google_transit_commute
+
+        async def mock_post(*_, **__):
+            return _GOOGLE_ROUTES_RESPONSE
+
+        monkeypatch.setattr("houses.routing._google_routes_post", mock_post)
+        monkeypatch.setattr("houses.routing._bus_fare_for", lambda *_, **__: None)
+
+        result = await _google_transit_commute("SW1V 2QQ", "EC3A 7LP")
+        assert result is not None, "Expected a commute result"
+
+        # Extract walk legs by scanning cost groups
+        walk_legs = []
+        for g in result.cost_groups:
+            for leg in g.legs:
+                if leg.mode.name == "WALK":
+                    walk_legs.append(leg)
+
+        # We should have exactly 3 walk legs: 60+90s, 30+45s, 120+0s
+        assert len(walk_legs) == 3, (
+            f"Expected 3 walk legs (consecutive merged), got {len(walk_legs)}: "
+            f"{[leg.duration_minutes for leg in walk_legs]}"
+        )
+
+        # Walk totals: 150s→2min, 75s→1min, 120s→2min (round halves to even)
+        durations = sorted([leg.duration_minutes for leg in walk_legs])
+        assert durations == [1, 2, 2], (
+            f"Expected walk durations [1, 2, 2] from merged seconds, "
+            f"got {durations}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_consecutive_walk_modes(self, monkeypatch):
+        """No two consecutive cost groups should both be WALK."""
+        from houses.routing import _google_transit_commute
+
+        async def mock_post(*_, **__):
+            return _GOOGLE_ROUTES_RESPONSE
+
+        monkeypatch.setattr("houses.routing._google_routes_post", mock_post)
+        monkeypatch.setattr("houses.routing._bus_fare_for", lambda *_, **__: None)
+
+        result = await _google_transit_commute("SW1V 2QQ", "EC3A 7LP")
+        assert result is not None, "Expected a commute result"
+
+        # Check that no two consecutive cost groups are both walk-only
+        modes = []
+        for g in result.cost_groups:
+            modes.append(g.legs[0].mode.name)
+
+        for i in range(len(modes) - 1):
+            if modes[i] == "WALK" and modes[i + 1] == "WALK":
+                pytest.fail(
+                    f"Found consecutive WALK cost groups at indices {i} and {i+1}: {modes}"
+                )
+
+
 # ── School commute ──────────────────────────────────────────────────────
 
 

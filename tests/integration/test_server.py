@@ -533,10 +533,11 @@ class TestBackfillView:
             assert "schools" in results[0]["fields"]
             mock_enrich.assert_called_once()
             mock_write.assert_called_once()
-            # The enrichment must receive the postcode as lookup, not the address
+            # lookup=None means _run_enrichment computes the best string
+            # (address + full postcode when available)
             _, enrich_kwargs = mock_enrich.call_args
-            assert enrich_kwargs["lookup"] == "TE1 1ST", (
-                f"backfill passed lookup={enrich_kwargs['lookup']!r}, expected the postcode"
+            assert enrich_kwargs["lookup"] is None, (
+                f"backfill passed lookup={enrich_kwargs['lookup']!r}, expected None"
             )
             # Verify write call includes Simon Parking Cost (the only empty simon col)
             args, _ = mock_write.call_args

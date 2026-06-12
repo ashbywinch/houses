@@ -285,15 +285,23 @@ async def _google_transit_commute(origin_postcode: str, dest_postcode: str) -> C
     steps = leg.get("steps", [])
 
     # ── Build cost groups from ALL transit steps ───────────────────
+    import pint
+
+    _ureg = pint.UnitRegistry()
     cost_groups: list[CostGroup] = []
     total_bus_cost = 0.0
     current_bus_legs: list[JourneyLeg] = []
-    current_walk_legs: list[JourneyLeg] = []
+    current_walk_duration: pint.Quantity = _ureg.Quantity(0, "seconds")  # noqa: F841
 
     def _flush_walk():
-        if current_walk_legs:
-            cost_groups.append(CostGroup(legs=tuple(current_walk_legs)))
-            current_walk_legs.clear()
+        nonlocal current_walk_duration
+        if current_walk_duration.to("seconds").magnitude > 0:
+            dur_min = int(round(current_walk_duration.to("minutes").magnitude))
+            if dur_min:
+                cost_groups.append(
+                    CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=dur_min),))
+                )
+            current_walk_duration = _ureg.Quantity(0, "seconds")
 
     def _flush_bus():
         if current_bus_legs:
@@ -309,7 +317,7 @@ async def _google_transit_commute(origin_postcode: str, dest_postcode: str) -> C
 
         if mode == "WALK":
             _flush_bus()
-            current_walk_legs.append(JourneyLeg(mode=LegMode.WALK, duration_minutes=dur_min))
+            current_walk_duration += _ureg.Quantity(dur, "seconds")
         elif mode == "TRANSIT":
             _flush_walk()
             td = s.get("transitDetails", {})
