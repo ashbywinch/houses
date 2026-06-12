@@ -295,13 +295,13 @@ async def _google_transit_commute(origin_postcode: str, dest_postcode: str) -> C
 
     def _flush_walk():
         nonlocal current_walk_duration
-        if current_walk_duration.to("seconds").magnitude > 0:
-            dur_min = int(round(current_walk_duration.to("minutes").magnitude))
-            if dur_min:
-                cost_groups.append(
-                    CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=dur_min),))
-                )
-            current_walk_duration = _ureg.Quantity(0, "seconds")
+        sec = current_walk_duration.to("seconds").magnitude
+        if sec > 10:  # ignore sub-10-second walks (noise)
+            dur_min = max(1, round(sec / 60))
+            cost_groups.append(
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=dur_min),))
+            )
+        current_walk_duration = _ureg.Quantity(0, "seconds")
 
     def _flush_bus():
         if current_bus_legs:
