@@ -155,38 +155,15 @@ Marker convention:
   them across multiple files.
 - Each e2e test must test exactly one API contract. Do not combine multiple
   API assertions in one test.
-- E2E tests must never silently pass. Either assert the result or
-  `pytest.skip()` with the reason.
 - All e2e tests are always skipped by default
   (`addopts = ["-m", "not e2e"]` in `pyproject.toml`).
+- Unit and integration tests must never be skipped for any reason.
 
 ### Validate Test Data Against Production Constants
 
-When a test class defines data that mirrors a production constant (column
-headers, config values, enum-like sets), include a test that asserts the
-test data matches the canonical source:
-
-```python
-def test_column_headers_match_sheets(self):
-    assert self.DATA_HEADERS == COLUMN_HEADERS
-```
-
-This prevents silent drift: when the production constant changes, the test
-fails and reminds the developer to update the test data.
-
-### Test Invariants
-
-In addition to per-function tests, include invariant tests that catch
-regressions in cross-cutting concerns:
-
-- "Every column in COLUMN_HEADERS has a corresponding field in
-  `_row_values()`"
-- "All View headers have either a formula or are marked manual"
-- "`_build_full_row()` output has same length as `COLUMN_HEADERS`"
-- "No View formula uses hardcoded cross-sheet references or IFERROR"
-
-These tests enforce structural contracts that individual function tests
-might miss.
+When a test class defines data for all columns, include a test that asserts 
+that the length of the data matches the actual number of columns (in case new 
+columns are added).
 
 ## Documentation
 
