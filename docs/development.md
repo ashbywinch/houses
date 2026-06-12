@@ -75,12 +75,7 @@ Read `docs/api.md` for full API documentation.
 
 ### Bus Fare Data Pipeline
 
-The bus fare pipeline documentation has moved to `docs/bus-fares.md`.
-
-```bash
-# Quick extract from cached files
-uv run python scripts/extract_bus_fares.py --cached-only
-```
+To re-extract bus fare data or troubleshoot problems with it, see bus fare pipeline documentation: `docs/bus-fares.md`.
 
 See `docs/bus-fares.md` for full details on the extraction process, flags,
 and how to update the sheet with new fares.
