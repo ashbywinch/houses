@@ -47,6 +47,13 @@ Houses is a local FastAPI server that acts as a webhook broker for property list
 - Module structure and SRP
 - Fail fast, no over-abstraction
 
+### 7. Troubleshoot Batch Endpoints
+**Read**: [docs/troubleshooting-endpoints.md](docs/troubleshooting-endpoints.md)
+- Before running batch operations
+- What to check when results don't appear
+- How to verify a batch actually completed
+- Server reload pitfalls
+
 ## Key Files
 
 | File | Purpose |
@@ -54,7 +61,13 @@ Houses is a local FastAPI server that acts as a webhook broker for property list
 | `houses/server.py` | FastAPI app, `/inject-property` endpoint, startup/shutdown |
 | `houses/models.py` | Pydantic models for property payload and enriched data |
 | `houses/config.py` | Configuration — postcodes, API keys, sheet IDs |
-| `houses/enricher.py` | Transit commute, petrol cost, and school lookup logic |
+| `houses/enricher.py` | Enrichment coordinators (orchestrates routing → schools → etc) |
+| `houses/stations.py` | Station class + registry (name, CRS, GeoPoint) |
+| `houses/bus_journey.py` | Bus fare zone data and cheapest round-trip computation |
+| `houses/routing.py` | Transit/drive routing dispatch (Google Routes + TfL) |
+| `houses/commute.py` | Commute, CostGroup, JourneyLeg value objects |
+| `houses/endpoint_client.py` | Reusable API client with Retry-After support |
+| `houses/retry.py` | Async retry with exponential backoff and jitter |
 | `houses/sheets.py` | gspread integration, canonical column headers |
 | `houses/retry.py` | Async retry with exponential backoff and jitter |
 | `POST /properties` | Upsert a property (enrich + write to sheet) |
