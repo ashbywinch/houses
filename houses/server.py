@@ -195,20 +195,56 @@ def _get_properties_data() -> list[dict[str, str]]:
         return []
 
 
+VALID_TABS = {"view", "data"}
+
+
+def _resolve_tab(tab: str) -> str:
+    """Validate *tab* and return ``"Properties View"`` or ``"Properties Data"``."""
+    t = tab.strip().lower()
+    if t not in VALID_TABS:
+        raise ValueError(f"Invalid tab '{tab}'. Must be one of: {', '.join(sorted(VALID_TABS))}")
+    return "Properties View" if t == "view" else "Properties Data"
+
+
 @app.get("/properties")
-async def list_properties():
-    """List all properties with their enrichment data."""
+async def list_properties(tab: str = Query(description="Tab: 'view' or 'data'")):
+    """List all properties.
+
+    Query parameters:
+    - **tab** (required): ``"view"`` or ``"data"``.
+    """
+    _resolve_tab(tab)
     props = _get_properties_data()
-    return {"properties": props}
+    return {"tab": tab, "properties": props}
 
 
 @app.get("/properties/{rid}")
-async def get_property(rid: str):
-    """Get a single property by Rightmove ID."""
-    for p in _get_properties_data():
-        if p.get("Rightmove ID", "").strip() == rid:
-            return p
-    return JSONResponse({"error": "property not found"}, status_code=404)
+async def get_property(rid: str, tab: str = Query(description="Tab: 'view' or 'data'")):
+    """Get a single property by Rightmove ID.
+
+    Detects duplicate RIDs in the sheet and returns a clear error.
+
+    Query parameters:
+    - **tab** (required): ``"view"`` or ``"data"``.
+    """
+    _resolve_tab(tab)
+    matches = [p for p in _get_properties_data() if p.get("Rightmove ID", "").strip() == rid]
+    if not matches:
+        return JSONResponse({"error": "property not found", "rid": rid}, status_code=404)
+    if len(matches) > 1:
+        logger.warning(
+            "Duplicate RID %s found in %d rows — data may be inconsistent. "
+            "Delete the duplicate row from the sheet.",
+            rid, len(matches),
+        )
+        return JSONResponse({
+            "warning": "duplicate rows",
+            "rid": rid,
+            "count": len(matches),
+            "message": f"RID {rid} appears in {len(matches)} rows. "
+                       f"Delete the duplicate row(s) from the sheet and retry.",
+        }, status_code=409)
+    return {"tab": tab, **matches[0]}
 
 
 @app.post("/properties", response_model=None)
