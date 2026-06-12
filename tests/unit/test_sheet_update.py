@@ -58,8 +58,8 @@ class TestUpdateScriptLogic:
         row2 = row_values(ep2)
 
         # Simon London Cost column — accessed by header name, not index
-        assert row1["Simon London Cost (£)"] == "10.00"
-        assert row2["Simon London Cost (£)"] == "25.00"
+        assert row1["Simon London Cost (£)"] == "10.0"
+        assert row2["Simon London Cost (£)"] == "25.0"
 
         # Rightmove ID stays the same
         assert row1["Rightmove ID"] == row2["Rightmove ID"]

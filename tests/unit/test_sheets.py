@@ -145,12 +145,12 @@ def test_row_values_with_full_enrichment():
         "Simon London (min)": "22",
         "Simon London Cost (£)": "",
         "Simon London Route": "",
-        "Simon Parking Cost (£)": "",
+        "Simon Parking Cost (£)": "0.0",
         "Lorena London (min)": "38",
         "Lorena London Cost (£)": "",
         "Lorena London Route": "",
         "Bracknell Time (min)": "",
-        "Bracknell Cost (£)": "8.50",
+        "Bracknell Cost (£)": "8.5",
         "Primary School": "St Vincent School",
         "Primary Distance (km)": "0.65",
         "Primary Walk (min)": "8",
@@ -208,7 +208,7 @@ def test_row_values_with_council_tax():
     )
     r = row_values(ep)
     assert r["Council Tax Band"] == "D"
-    assert r["Council Tax Cost (£)"] == "1800.00"
+    assert r["Council Tax Cost (£)"] == "1800.0"
 
 
 def test_row_values_empty_schools():

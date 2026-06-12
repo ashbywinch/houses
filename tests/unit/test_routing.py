@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from houses.commute import Commute
+from houses.commute import Commute, JourneyLeg, LegMode
 
 # ── Fail-fast when API keys are missing ─────────────────────────────────
 
@@ -87,7 +87,10 @@ _SLOWER_HAS_COST = Commute(destination_label="", destination_postcode="", durati
 _FASTER_HAS_COST = Commute(destination_label="", destination_postcode="", duration_minutes=18, daily_cost_gbp=5.0)
 _SLOWER_NO_COST = Commute(destination_label="", destination_postcode="", duration_minutes=30, daily_cost_gbp=None)
 _SAME_DURATION_HAS_COST = Commute(
-    destination_label="", destination_postcode="", duration_minutes=20, daily_cost_gbp=5.0,
+    destination_label="",
+    destination_postcode="",
+    duration_minutes=20,
+    daily_cost_gbp=5.0,
 )
 
 
@@ -279,7 +282,7 @@ class TestGetCommuteChoice:
         async def mock_walk(*_):
             return _WALK_60
 
-        async def mock_google(*_):
+        async def mock_google(*_, **__):
             return _FASTER_NO_COST  # 20 min, cost=None
 
         async def mock_tfl(*_, **__):
@@ -302,7 +305,7 @@ class TestGetCommuteChoice:
         async def mock_walk(*_):
             return _WALK_60
 
-        async def mock_google(*_):
+        async def mock_google(*_, **__):
             return _FASTER_HAS_COST  # 18 min, cost=5.0
 
         async def mock_tfl(*_, **__):
@@ -324,7 +327,7 @@ class TestGetCommuteChoice:
         async def mock_walk(*_):
             return _WALK_60
 
-        async def mock_google(*_):
+        async def mock_google(*_, **__):
             return _FASTER_NO_COST  # 20 min, cost=None
 
         async def mock_tfl(*_, **__):
@@ -346,7 +349,7 @@ class TestGetCommuteChoice:
         async def mock_walk(*_):
             return _WALK_60
 
-        async def mock_google(*_):
+        async def mock_google(*_, **__):
             return _FASTER_NO_COST  # 20 min, cost=None
 
         async def mock_tfl(*_, **__):
@@ -370,7 +373,7 @@ class TestGetCommuteChoice:
         async def mock_walk(*_):
             return _WALK_60
 
-        async def mock_google(*_):
+        async def mock_google(*_, **__):
             return _FASTER_HAS_COST  # 18 min, cost=5.0
 
         async def mock_tfl(*_, **__):
@@ -386,6 +389,221 @@ class TestGetCommuteChoice:
         assert result.is_succeeded, f"Expected succeeded, got {result}"
         assert not tfl_called, "TfL was called even though Google had pricing"
         assert result.value_or_none().daily_cost_gbp == 5.0
+
+
+# ── TfL: no bus when has_car=True ────────────────────────────────────
+
+
+class TestTflNoBusWhenHasCar:
+    """_tfl_transit_commute skips with_bus when no_bus succeeds."""
+
+    @pytest.mark.asyncio
+    async def test_skips_with_bus_when_no_bus_succeeds(self, monkeypatch):
+        """has_car=True + no_bus succeeds → with_bus is not compared."""
+        from houses.attempt import Attempt
+        from houses.commute import Commute
+
+        no_bus = Commute(
+            destination_label="",
+            destination_postcode="SW1V 2QQ",
+            duration_minutes=90,
+            daily_cost_gbp=20.0,
+        )
+        with_bus = Commute(
+            destination_label="",
+            destination_postcode="SW1V 2QQ",
+            duration_minutes=70,
+            daily_cost_gbp=15.0,
+        )
+
+        call_count = 0
+
+        async def mock_plan(self):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return Attempt.succeeded(no_bus, "tfl")
+            return Attempt.succeeded(with_bus, "tfl")
+
+        from houses.routing import _tfl_transit_commute
+
+        monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_plan)
+
+        result = await _tfl_transit_commute("GU21 2NA", "EC3A 7LP", has_car=True)
+        assert result is not None
+        assert result.duration_minutes == 90, (
+            f"Expected no_bus (90 min), got {result.duration_minutes} — with_bus was compared when no_bus succeeded"
+        )
+
+    @pytest.mark.asyncio
+    async def test_uses_with_bus_when_no_bus_fails(self, monkeypatch):
+        """has_car=True + no_bus fails → with_bus is used as last resort."""
+        from houses.attempt import Attempt
+        from houses.commute import Commute
+
+        no_bus = Attempt.impossible("tfl", "no route found")
+        with_bus = Commute(
+            destination_label="",
+            destination_postcode="SW1V 2QQ",
+            duration_minutes=70,
+            daily_cost_gbp=15.0,
+        )
+
+        call_count = 0
+
+        async def mock_plan(self):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return no_bus
+            return Attempt.succeeded(with_bus, "tfl")
+
+        from houses.routing import _tfl_transit_commute
+
+        monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_plan)
+
+        result = await _tfl_transit_commute("GU21 2NA", "EC3A 7LP", has_car=True)
+        assert result is not None
+        assert result.duration_minutes == 70, f"Expected with_bus (70 min) as fallback, got {result.duration_minutes}"
+
+
+# ── Google transit: bus rejection when allow_bus=False ────────────────
+# Google Routes may return bus legs even when ``allowedTravelModes``
+# excludes BUS (it's a preference, not a strict filter).  When
+# ``allow_bus=False`` and the response still contains bus legs, the
+# route must be rejected so the caller falls back to TfL park-and-ride.
+
+
+def _fake_bus_step(seconds: int, line_name: str, dep: str, arr: str) -> dict:
+    """Build a Google Routes step dict for a BUS transit leg."""
+    return {
+        "travelMode": "TRANSIT",
+        "staticDuration": f"{seconds}s",
+        "transitDetails": {
+            "transitLine": {"vehicle": {"type": "BUS"}, "nameShort": line_name},
+            "stopDetails": {
+                "departureStop": {"name": dep, "location": {"latLng": {"latitude": 51.3, "longitude": -0.5}}},
+                "arrivalStop": {"name": arr, "location": {"latLng": {"latitude": 51.3, "longitude": -0.5}}},
+            },
+        },
+    }
+
+
+_GOOGLE_ROUTES_WITH_BUS = {
+    "routes": [
+        {
+            "duration": "3600s",
+            "legs": [
+                {
+                    "steps": [
+                        {"travelMode": "WALK", "staticDuration": "120s"},
+                        _fake_bus_step(600, "91", "Randolph Close", "Woking Station"),
+                        {
+                            "travelMode": "TRANSIT",
+                            "staticDuration": "2400s",
+                            "transitDetails": {
+                                "transitLine": {"vehicle": {"type": "RAIL"}, "nameShort": "SWR"},
+                                "stopDetails": {
+                                    "departureStop": {"name": "Woking"},
+                                    "arrivalStop": {"name": "Waterloo"},
+                                },
+                            },
+                        },
+                        {"travelMode": "WALK", "staticDuration": "300s"},
+                    ],
+                }
+            ],
+        }
+    ]
+}
+
+
+class TestGoogleTransitRejectsBusWhenDisabled:
+    """_google_transit_commute must reject bus-inclusive routes when allow_bus=False."""
+
+    @pytest.mark.asyncio
+    async def test_rejects_bus_route_when_disabled(self, monkeypatch):
+        """allow_bus=False + Google returns bus → return None so caller falls back to TfL."""
+        from houses.routing import _google_transit_commute
+
+        async def mock_post(*_, **__):
+            return _GOOGLE_ROUTES_WITH_BUS
+
+        monkeypatch.setattr("houses.routing._google_routes_post", mock_post)
+        monkeypatch.setattr("houses.routing._bus_fare_for", lambda *_, **__: 3.0)
+
+        result = await _google_transit_commute("GU21 2NA", "SW1V 2QQ", allow_bus=False)
+        assert result is None, (
+            f"Expected None (bus route rejected), got a commute with "
+            f"{sum(1 for cg in (result or {}).cost_groups or [] for leg in cg.legs if leg.mode.name == 'BUS')} bus legs"
+        )
+
+    @pytest.mark.asyncio
+    async def test_accepts_bus_route_when_enabled(self, monkeypatch):
+        """allow_bus=True + Google returns bus → route is accepted."""
+        from houses.routing import _google_transit_commute
+
+        async def mock_post(*_, **__):
+            return _GOOGLE_ROUTES_WITH_BUS
+
+        monkeypatch.setattr("houses.routing._google_routes_post", mock_post)
+        monkeypatch.setattr("houses.routing._bus_fare_for", lambda *_, **__: 3.0)
+
+        result = await _google_transit_commute("GU21 2NA", "SW1V 2QQ", allow_bus=True)
+        assert result is not None, "Expected a route with bus, got None"
+
+        bus_legs = [leg for cg in result.cost_groups for leg in cg.legs if leg.mode.name == "BUS"]
+        assert len(bus_legs) > 0, "Expected bus legs in the route"
+
+
+# ── Park-and-ride creates parking CostGroup ─────────────────────────
+
+
+class TestParkAndRideCostGroup:
+    """_add_parking_cost must return a CostGroup with parking cost so
+    ``Simon Parking Cost (£)`` (derived from ``non_rail_cost()``) shows
+    the real parking fee, not bus fares."""
+
+    @pytest.mark.asyncio
+    async def test_returns_parking_cost_group(self, monkeypatch, tmp_path):
+        """_add_parking_cost returns a parking CostGroup with cost, operator='ParkCo'."""
+        from money import Money
+
+        from houses.commute import LegMode
+        from houses.transit_route import TransitRoute
+
+        csv_path = tmp_path / "parking_rates.csv"
+        csv_path.write_text("station_name,crs,daily_cost_gbp\nFleet,FLE,10.90\n")
+        monkeypatch.setattr("houses.car_park._PARKING_RATES_PATH", csv_path)
+
+        route = TransitRoute("SL6", "SW1V 2QQ", "test", park_and_ride=True)
+        data = {
+            "journeys": [
+                {
+                    "duration": 87,
+                    "legs": [
+                        {
+                            "mode": {"name": "driving"},
+                            "duration": 15,
+                            "isTimeline": True,
+                            "arrivalPoint": {"commonName": "Fleet Rail Station"},
+                        },
+                        {"mode": {"name": "train", "isTimeline": True}, "duration": 30},
+                    ],
+                    "fare": {"totalCost": 500, "singleFare": 250},
+                }
+            ]
+        }
+
+        parking_cost, new_cost, parking_groups = await route._add_parking_cost(data, 30.0)
+
+        assert parking_cost == 10.90, f"Expected 10.90, got {parking_cost}"
+        assert new_cost == 40.90, f"Expected 40.90, got {new_cost}"
+        assert len(parking_groups) == 1, "Expected one parking CostGroup"
+        assert parking_groups[0].cost == Money("10.90", "GBP"), (
+            f"Parking CostGroup should have cost=Money('10.90', 'GBP'), got {parking_groups[0].cost}"
+        )
+        assert parking_groups[0].legs[0].mode == LegMode.PARK, "Parking CostGroup should have LegMode.PARK"
 
 
 # ── Google transit walk grouping ────────────────────────────────────────
@@ -424,14 +642,14 @@ _GOOGLE_ROUTES_RESPONSE = {
             "legs": [
                 {
                     "steps": _fake_google_steps(
-                        ("WALK", 60),       # walk 1
-                        ("WALK", 90),       # walk 2 — should merge with walk 1
-                        ("TRANSIT", 300),   # tube
-                        ("WALK", 30),       # walk 3
-                        ("WALK", 45),       # walk 4 — should merge with walk 3
-                        ("TRANSIT", 120),   # tube
-                        ("WALK", 120),      # walk 5
-                        ("WALK", 0),        # walk 6 — 0-second, should be skipped
+                        ("WALK", 60),  # walk 1
+                        ("WALK", 90),  # walk 2 — should merge with walk 1
+                        ("TRANSIT", 300),  # tube
+                        ("WALK", 30),  # walk 3
+                        ("WALK", 45),  # walk 4 — should merge with walk 3
+                        ("TRANSIT", 120),  # tube
+                        ("WALK", 120),  # walk 5
+                        ("WALK", 0),  # walk 6 — 0-second, should be skipped
                     ),
                 }
             ],
@@ -472,10 +690,7 @@ class TestGoogleTransitWalkGrouping:
 
         # Walk totals: 150s→2min, 75s→1min, 120s→2min (round halves to even)
         durations = sorted([leg.duration_minutes for leg in walk_legs])
-        assert durations == [1, 2, 2], (
-            f"Expected walk durations [1, 2, 2] from merged seconds, "
-            f"got {durations}"
-        )
+        assert durations == [1, 2, 2], f"Expected walk durations [1, 2, 2] from merged seconds, got {durations}"
 
     @pytest.mark.asyncio
     async def test_no_consecutive_walk_modes(self, monkeypatch):
@@ -498,9 +713,7 @@ class TestGoogleTransitWalkGrouping:
 
         for i in range(len(modes) - 1):
             if modes[i] == "WALK" and modes[i + 1] == "WALK":
-                pytest.fail(
-                    f"Found consecutive WALK cost groups at indices {i} and {i+1}: {modes}"
-                )
+                pytest.fail(f"Found consecutive WALK cost groups at indices {i} and {i + 1}: {modes}")
 
 
 class TestCostGroupBuilder:
@@ -508,7 +721,6 @@ class TestCostGroupBuilder:
 
     def test_short_walk_shows_one_minute(self):
         """A 22-second walk → "walk (1m)" — not dropped."""
-        from houses.commute import LegMode
         from houses.routing import _CostGroupBuilder
 
         b = _CostGroupBuilder()
@@ -540,7 +752,6 @@ class TestCostGroupBuilder:
 
     def test_bus_and_walk_grouping(self):
         """Flushing bus doesn't flush walk, and vice versa."""
-        from houses.commute import JourneyLeg, LegMode
         from houses.routing import _CostGroupBuilder
 
         b = _CostGroupBuilder()

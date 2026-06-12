@@ -1100,7 +1100,13 @@ def _fmt_duration(t: Commute | None) -> str:
 
 
 def _fmt_cost(val: float | None) -> str:
-    return f"{val:.2f}" if val else ""
+    """String representation for a cost value.
+
+    Returns the value as a string without forced decimal formatting —
+    the sheet handles display-level formatting.  ``None`` returns
+    ``""`` (unknown), even for 0.0.
+    """
+    return str(val) if val is not None else ""
 
 
 def _fmt_dist(distance_km: float | None) -> str:

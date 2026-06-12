@@ -6,13 +6,10 @@ driving distances, and UK government GIAS school data.
 
 from __future__ import annotations
 
-import asyncio
-import csv
 import json
 import logging
 import re
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import httpx
 
@@ -100,164 +97,6 @@ def _next_weekday_date_params() -> dict[str, str]:
     while target.weekday() >= 5:
         target += timedelta(days=1)
     return {"date": target.strftime("%Y%m%d"), "time": "0900"}
-
-
-
-_PARKING_RATES_PATH = Path("data/parking_rates.csv")
-_parking_rates_cache: dict[str, float | None] | None = None
-
-
-_ParkingRates = tuple[dict[str, float | None], dict[str, float | None]]
-
-
-def _load_parking_rates() -> _ParkingRates:
-    """Load parking rates from CSV into (name_keyed, crs_keyed) dicts."""
-    global _parking_rates_cache
-    if _parking_rates_cache is not None:
-        return _parking_rates_cache
-    by_name: dict[str, float | None] = {}
-    by_crs: dict[str, float | None] = {}
-    if not _PARKING_RATES_PATH.is_file():
-        logger.warning("Parking rates file not found at %s", _PARKING_RATES_PATH)
-        _parking_rates_cache = (by_name, by_crs)
-        return _parking_rates_cache
-    with _PARKING_RATES_PATH.open(newline="") as f:
-        for row in csv.DictReader(f):
-            name = (row.get("station_name", "") or "").strip().lower()
-            crs = (row.get("crs", "") or "").strip().upper()
-            raw = (row.get("daily_cost_gbp", "") or "").strip()
-            if not name and not crs:
-                continue
-            val: float | None = None
-            if raw:
-                try:
-                    val = float(raw)
-                except ValueError:
-                    val = None
-            if name:
-                by_name[name] = val
-            if crs:
-                by_crs[crs] = val
-    _parking_rates_cache = (by_name, by_crs)
-    return _parking_rates_cache
-
-
-def _add_parking_rate_to_csv(station_name: str, crs: str, cost: float | None) -> None:
-    """Add or update a parking rate in the CSV and refresh the cache."""
-    global _parking_rates_cache
-    rows: list[list[str]] = []
-    name_lower = station_name.strip().lower()
-    found = False
-    if _PARKING_RATES_PATH.is_file():
-        with _PARKING_RATES_PATH.open(newline="") as f:
-            for row in csv.DictReader(f):
-                existing_name = (row.get("station_name", "") or "").strip().lower()
-                existing_crs = (row.get("crs", "") or "").strip().upper()
-                if existing_name == name_lower or existing_crs == crs.upper():
-                    rows.append([station_name, crs.upper(), f"{cost:.2f}" if cost is not None else ""])
-                    found = True
-                else:
-                    rows.append([row.get("station_name", ""), existing_crs, row.get("daily_cost_gbp", "")])
-    if not found:
-        rows.append([station_name, crs.upper(), f"{cost:.2f}" if cost is not None else ""])
-    rows.sort(key=lambda r: r[1])
-    _PARKING_RATES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with _PARKING_RATES_PATH.open("w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["station_name", "crs", "daily_cost_gbp"])
-        writer.writerows(rows)
-    _parking_rates_cache = None
-
-
-async def _apcoa_prebook_lookup(station_name: str) -> float | None:
-    """Try to find a nearby APCOA car park via the prebook listing page.
-
-    Uses Playwright to render the JavaScript-dependent listing. Only called
-    as a fallback when the station isn't in the parking_rates.csv cache.
-    """
-    station = find_station(station_name)
-    if station is None:
-        return None
-    lat, lng = station.location.lat, station.location.lon
-
-    try:
-        from playwright.async_api import async_playwright
-
-        async with async_playwright() as pw:
-            async with await pw.chromium.launch(headless=True) as browser:
-                page = await browser.new_page()
-                url = (
-                    f"https://prebook.apcoa.co.uk/locationsearch/nearestcarparks"
-                    f"?latitude={lat}&longitude={lng}&placeName={station_name}&maximumDistance=3"
-                )
-                await page.goto(url, wait_until="domcontentloaded", timeout=15000)
-                await asyncio.sleep(3.5)
-
-                # Dismiss privacy dialog
-                await page.evaluate(
-                    """() => {
-                        const btns = [...document.querySelectorAll('button')];
-                        const a = btns.find(b => b.textContent.includes('Agree always'));
-                        if (a) a.click();
-                    }"""
-                )
-                await asyncio.sleep(1)
-
-                # Extract the first car park's price
-                rate_str = await page.evaluate(
-                    """() => {
-                        const text = document.body.innerText;
-                        const m = text.match(/From[\\s\\S]*?£(\\d+\\.\\d{2})/i);
-                        return m ? m[1] : null;
-                    }"""
-                )
-
-            if rate_str:
-                cost = float(rate_str)
-                if 0 <= cost <= 100:
-                    logger.info("APCOA prebook fallback for '%s': £%.2f", station_name, cost)
-                    return round(cost, 2)
-
-            logger.info("APCOA prebook fallback for '%s': no rate found", station_name)
-            return None
-    except Exception as e:
-        logger.warning("APCOA prebook lookup failed for '%s': %s", station_name, e)
-        return None
-
-
-async def _lookup_parking_cost(station_name: str) -> float | None:
-    """Daily parking cost at a station.
-
-    Tries the parking_rates.csv cache first. When the station isn't found,
-    falls back to searching the APCOA prebook listing page via Playwright.
-    Any newly discovered rate is cached to the CSV for future lookups.
-
-    Returns:
-        0.0 = known free parking
-        None = couldn't find cost
-        float = daily parking cost in GBP
-    """
-    by_name, by_crs = _load_parking_rates()
-    station = find_station(station_name)
-    clean = station.name.lower() if station else ""
-    val = by_name.get(clean) if station else None
-    if val is not None or (station and clean in by_name):
-        logger.debug("parking: '%s' -> '%s' = £%s (CSV hit)", station_name, clean, val)
-        return val
-    crs = station.crs if station else None
-    if crs and crs in by_crs:
-        logger.debug("parking: '%s' CRS=%s = £%s (CSV hit)", station_name, crs, by_crs[crs])
-        return by_crs[crs]
-
-    logger.debug("parking: '%s' not in CSV — trying APCOA prebook fallback", station_name)
-    cost = await _apcoa_prebook_lookup(station_name)
-    crs = crs or ""
-    if cost is not None or (crs and clean):
-        _add_parking_rate_to_csv(station_name, crs, cost)
-    logger.debug("parking: '%s' APCOA fallback = %s", station_name, f"£{cost:.2f}" if cost is not None else "None")
-    return cost
-
-
 
 
 def _format_route_summary(journey: dict) -> str:
@@ -498,7 +337,6 @@ def _pick_best_lorena_route(no_bus: Commute, with_bus: Commute) -> Commute:
     if no_bus_saves >= settings.bus_walk_penalty_minutes:
         return with_bus
     return no_bus
-
 
 
 async def compute_commute_breakdown(

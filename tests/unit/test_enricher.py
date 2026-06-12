@@ -24,9 +24,7 @@ from houses.stations import Station
 from houses.stations import find as find_station
 
 
-def _fares_from_dict(
-    products: dict[str, float], meta: dict | None = None
-) -> dict[FareProductType, FareProduct]:
+def _fares_from_dict(products: dict[str, float], meta: dict | None = None) -> dict[FareProductType, FareProduct]:
     """Convert old-style fare product dict to FareProduct dict for testing."""
     result = {}
     mapping = {
@@ -1025,7 +1023,7 @@ class TestBusFallback:
         async def mock_bus(*_):
             return bus_route
 
-        async def _disabled(*_):
+        async def _disabled(*_, **__):
             return None
 
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
@@ -1082,8 +1080,10 @@ class TestBusFallback:
 
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
         monkeypatch.setattr("houses.routing._find_bus_alternative", mock_bus)
-        async def _none(*_):
+
+        async def _none(*_, **__):
             return None
+
         monkeypatch.setattr("houses.routing._google_transit_commute", _none)
         monkeypatch.setattr("houses.routing._walk_commute", _none)
 
@@ -1115,8 +1115,10 @@ class TestBusFallback:
 
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
         monkeypatch.setattr("houses.routing._find_bus_alternative", lambda *_: None)
-        async def _none(*_):
+
+        async def _none(*_, **__):
             return None
+
         monkeypatch.setattr("houses.routing._google_transit_commute", _none)
         monkeypatch.setattr("houses.routing._walk_commute", _none)
 
@@ -1124,100 +1126,6 @@ class TestBusFallback:
         assert result is not None
         assert result.duration_minutes == with_bus.duration_minutes
         assert result.daily_cost_gbp == with_bus.daily_cost_gbp
-
-
-class TestParkingRates:
-    """_load_parking_rates and _lookup_parking_cost with CSV."""
-
-    def test_no_csv_file_returns_empty(self, monkeypatch):
-        from houses.enricher import _load_parking_rates
-
-        monkeypatch.setattr("houses.enricher._PARKING_RATES_PATH", Path("/tmp/nonexistent_parking_rates.csv"))
-        by_name, by_crs = _load_parking_rates()
-        assert by_name == {}
-        assert by_crs == {}
-
-    @pytest.mark.asyncio
-    async def test_lookup_known_station(self, tmp_path, monkeypatch):
-        csv_path = tmp_path / "parking_rates.csv"
-        csv_path.write_text("station_name,crs,daily_cost_gbp\nWoking,WOK,12.80\n")
-        monkeypatch.setattr("houses.enricher._PARKING_RATES_PATH", csv_path)
-        monkeypatch.setattr("houses.enricher._parking_rates_cache", None)
-
-        async def _noop(_):
-            return None
-
-        monkeypatch.setattr("houses.enricher._apcoa_prebook_lookup", _noop)
-        from houses.enricher import _lookup_parking_cost
-
-        cost = await _lookup_parking_cost("Woking Rail Station")
-        assert cost == 12.80
-
-    @pytest.mark.asyncio
-    async def test_lookup_free_station(self, tmp_path, monkeypatch):
-        csv_path = tmp_path / "parking_rates.csv"
-        csv_path.write_text("station_name,crs,daily_cost_gbp\nMarlow,MLW,0.0\n")
-        monkeypatch.setattr("houses.enricher._PARKING_RATES_PATH", csv_path)
-        monkeypatch.setattr("houses.enricher._parking_rates_cache", None)
-
-        async def _noop(_):
-            return None
-
-        monkeypatch.setattr("houses.enricher._apcoa_prebook_lookup", _noop)
-        from houses.enricher import _lookup_parking_cost
-
-        cost = await _lookup_parking_cost("Marlow Rail Station")
-        assert cost == 0.0
-
-    @pytest.mark.asyncio
-    async def test_lookup_unknown_station(self, tmp_path, monkeypatch):
-        csv_path = tmp_path / "parking_rates.csv"
-        csv_path.write_text("station_name,crs,daily_cost_gbp\nMarlow,MLW,0.0\n")
-        monkeypatch.setattr("houses.enricher._PARKING_RATES_PATH", csv_path)
-        monkeypatch.setattr("houses.enricher._parking_rates_cache", None)
-
-        async def _noop(_):
-            return None
-
-        monkeypatch.setattr("houses.enricher._apcoa_prebook_lookup", _noop)
-        from houses.enricher import _lookup_parking_cost
-
-        cost = await _lookup_parking_cost("Unknown Station")
-        assert cost is None
-
-    @pytest.mark.asyncio
-    async def test_lookup_blank_cost_returns_none(self, tmp_path, monkeypatch):
-        csv_path = tmp_path / "parking_rates.csv"
-        csv_path.write_text("station_name,crs,daily_cost_gbp\nMarlow,MLW,\n")
-        monkeypatch.setattr("houses.enricher._PARKING_RATES_PATH", csv_path)
-        monkeypatch.setattr("houses.enricher._parking_rates_cache", None)
-
-        async def _noop(_):
-            return None
-
-        monkeypatch.setattr("houses.enricher._apcoa_prebook_lookup", _noop)
-        from houses.enricher import _lookup_parking_cost
-
-        cost = await _lookup_parking_cost("Marlow Rail Station")
-        assert cost is None
-
-    @pytest.mark.asyncio
-    async def test_lookup_by_crs_fallback(self, tmp_path, monkeypatch):
-        """When name doesn't match, falls back to CRS lookup."""
-        csv_path = tmp_path / "parking_rates.csv"
-        csv_path.write_text("station_name,crs,daily_cost_gbp\nCobham & Stoke Dabernon,CSD,8.10\n")
-        monkeypatch.setattr("houses.enricher._PARKING_RATES_PATH", csv_path)
-        monkeypatch.setattr("houses.enricher._parking_rates_cache", None)
-
-        async def _noop(_):
-            return None
-
-        monkeypatch.setattr("houses.enricher._apcoa_prebook_lookup", _noop)
-        from houses.enricher import _lookup_parking_cost
-
-        # TfL returns "Cobham & Stoke D'Abernon Rail Station" — different from CSV name
-        cost = await _lookup_parking_cost("Cobham & Stoke D'Abernon Rail Station")
-        assert cost == 8.10
 
 
 class TestExtractDailyRateFromTariff:

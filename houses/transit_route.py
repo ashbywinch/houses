@@ -11,11 +11,11 @@ import httpx
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.attempt import Attempt
 from houses.bus_journey import BusJourneyRegistry, cheapest_round_trip
+from houses.car_park import CarParkRegistry
 from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.enricher import (
     _apply_park_and_ride_to_journeys,
-    _lookup_parking_cost,
     _next_weekday_date_params,
     _pick_best_journey,
     _tfl_auth_params,
@@ -23,6 +23,7 @@ from houses.enricher import (
 from houses.location import _geocode_address, geocode
 from houses.retry import retry_async
 from houses.stations import Station
+from houses.stations import find as find_station
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +160,8 @@ class TransitRoute:
 
         # Parking cost
         if self._park_and_ride and duration_minutes is not None and data is not None:
-            parking_cost_gbp, daily_cost_gbp = await self._add_parking_cost(data, daily_cost_gbp)
+            parking_cost_gbp, daily_cost_gbp, parking_groups = await self._add_parking_cost(data, daily_cost_gbp)
+            cost_groups.extend(parking_groups)
 
         result = Commute(
             destination_label=self._label,
@@ -224,14 +226,8 @@ class TransitRoute:
             arr = bus_leg.get("arrivalPoint", {}).get("commonName", "")
             dep_raw = bus_leg.get("departurePoint", {})
             arr_raw = bus_leg.get("arrivalPoint", {})
-            dep_point = (
-                {"lat": dep_raw["lat"], "lon": dep_raw["lon"]}
-                if dep_raw.get("lat") else None
-            )
-            arr_point = (
-                {"lat": arr_raw["lat"], "lon": arr_raw["lon"]}
-                if arr_raw.get("lat") else None
-            )
+            dep_point = {"lat": dep_raw["lat"], "lon": dep_raw["lon"]} if dep_raw.get("lat") else None
+            arr_point = {"lat": arr_raw["lat"], "lon": arr_raw["lon"]} if arr_raw.get("lat") else None
             fares = _bus_fares.fares_for_stops(dep, arr, dep_point=dep_point, arr_point=arr_point)
             daily = cheapest_round_trip(fares, _bus_fares.national_max_single)
             if daily is not None:
@@ -241,28 +237,59 @@ class TransitRoute:
             return round(tfl_non_bus_fare / 100 * 2 + total_bus_cost, 2)
         return current_cost
 
-    async def _add_parking_cost(self, data: dict, current_cost: float | None) -> tuple[float | None, float | None]:
-        """Look up parking costs when park-and-ride used a driving leg."""
+    async def _add_parking_cost(
+        self,
+        data: dict,
+        current_cost: float | None,
+    ) -> tuple[float | None, float | None, list[CostGroup]]:
+        """Look up parking costs when park-and-ride used a driving leg.
+
+        Returns ``(parking_cost, new_daily_cost, cost_groups)`` where
+        ``cost_groups`` contains a single ``CostGroup`` with the parking
+        fee (operator ``"ParkCo"``) so that ``non_rail_cost()`` on the
+        resulting commute reflects the parking cost.
+        """
         journeys = data.get("journeys", [])
         if not journeys:
-            return None, current_cost
+            return None, current_cost, []
         best = min(journeys, key=lambda j: j.get("duration", 9999))
         legs = best.get("legs", [])
         if not legs or legs[0].get("mode", {}).get("name") != "driving":
-            return None, current_cost
+            return None, current_cost, []
 
         station_name = legs[0].get("arrivalPoint", {}).get("commonName", "")
         if not station_name:
-            return None, current_cost
+            return None, current_cost, []
 
-        parking_cost = await _lookup_parking_cost(station_name)
-        if parking_cost is None:
-            return None, current_cost
+        station = find_station(station_name)
+        if station is None:
+            return None, current_cost, []
 
+        parking = CarParkRegistry()
+        car_park = parking.find_car_park(station)
+
+        if car_park is None:
+            result = await parking.add_nearest_car_park_for(station)
+            car_park = result.value_or_none() if result.is_succeeded else None
+        elif car_park.daily_cost is None:
+            result = await parking.load_costs(car_park, station)
+            if result.is_succeeded:
+                car_park = result.value_or_none()
+
+        if car_park is None or car_park.daily_cost is None:
+            return None, current_cost, []
+
+        parking_cost = float(car_park.daily_cost.amount)
         new_cost = current_cost
         if new_cost is not None:
             new_cost = round(new_cost + parking_cost, 2)
-        return parking_cost, new_cost
+
+        parking_group = CostGroup(
+            legs=(JourneyLeg(mode=LegMode.PARK, duration_minutes=0),),
+            operator="ParkCo",
+            cost=car_park.daily_cost,  # store Money, not float — avoids precision leaks
+        )
+        return parking_cost, new_cost, [parking_group]
 
     def _build_cost_groups(self, data: dict) -> list[CostGroup]:
         """Parse TfL response legs into CostGroup objects.
