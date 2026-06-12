@@ -218,7 +218,7 @@ async def _walk_to_station_minutes(origin_postcode: str, lat: float, lng: float)
     """
     body = {
         "origin": {"address": origin_postcode},
-        "destination": {"latLng": {"latitude": lat, "longitude": lng}},
+        "destination": {"location": {"latLng": {"latitude": lat, "longitude": lng}}},
         "travelMode": "WALK",
     }
     data = await _google_routes_post(body, "routes.duration,routes.distanceMeters")

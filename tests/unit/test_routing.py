@@ -662,6 +662,53 @@ class TestGoogleTransitMissingWalk:
     """When Google omits the walk to the first transit stop, _google_transit_commute
     computes it via the walking API and prepends a walk CostGroup."""
 
+    @pytest.mark.asyncio
+    async def test_walk_to_ascot_not_2_minutes(self, monkeypatch):
+        """Simon's commute from 174660728 (Ascot, SL5 → Pimlico) must include
+        a walk to Ascot station of ~19 min (1.95 km).  The route summary
+        must show 'walk to Ascot' with a duration >= 5 min, not ~2 min."""
+        import json
+        from pathlib import Path
+
+        from houses.routing import _google_transit_commute
+
+        # Google transit response that starts with TRANSIT at Ascot — no walk leg
+        google_transit_response = json.loads(Path("data/api_cache/a9ae12e7b0fb8e500cd7280b710d3e90.json").read_text())
+
+        async def mock_routes_post(body, field_mask, *, timeout=10.0):
+            if body.get("travelMode") == "WALK":
+                # _walk_to_station_minutes is calling for the walking duration.
+                # Validate that the body uses the correct Google Routes API v2 format:
+                # "destination": {"location": {"latLng": {...}}}
+                # If the format is wrong (just {"latLng": {...}}), the real API
+                # returns 400 INVALID_ARGUMENT.
+                dest = body.get("destination", {})
+                if "location" not in dest:
+                    # Wrong format — simulate the API error
+                    return None
+                return {"routes": [{"duration": "1140s"}]}  # 19 min
+            # Transit request
+            return google_transit_response
+
+        monkeypatch.setattr("houses.routing._google_routes_post", mock_routes_post)
+        monkeypatch.setattr("houses.routing._bus_fare_for", lambda *_, **__: None)
+
+        # Do NOT mock _walk_to_station_minutes — the real function calls
+        # _google_routes_post (which is mocked above) and returns the correct
+        # walking duration when the body format is right.
+
+        result = await _google_transit_commute("SL5", "SW1V 2QQ", allow_bus=True)
+        assert result is not None, "Expected a commute result"
+
+        summary = result.summary()
+        assert "walk to ascot" in summary.lower(), (
+            f"Simon's commute summary does not mention walking to Ascot station. "
+            f"Got: {summary}. Ascot station is 1.95 km from the property — "
+            f"Simon must walk, not teleport."
+        )
+        # The walk to Ascot should be ~19 min for 1.95 km, not 2 min
+        assert "(19m)" in summary, f"Walk to Ascot shows wrong duration. Expected ~19 min, got: {summary}"
+
     _GOOGLE_NO_WALK_RESPONSE = {
         "routes": [
             {
