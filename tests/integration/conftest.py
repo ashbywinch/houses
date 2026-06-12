@@ -133,10 +133,17 @@ def _mock_http_requests():
     This autouse fixture applies ``mock_httpx()`` to every test, so tests
     never hit real APIs.  Tests that need different mock responses can
     inspect or replace ``handler.calls``.
+
+    Sets a fake ORS key since ``_drive_commute`` checks for it before the
+    HTTP call.  The fake key is never used for real requests because HTTP
+    is fully mocked above.
     """
+    saved_ors = settings.ors_api_key
+    settings.ors_api_key = "fake-key-for-testing"
     counter, async_patch, sync_patch = mock_httpx()
     with async_patch, sync_patch:
         yield counter
+    settings.ors_api_key = saved_ors
 
 
 @pytest.fixture(autouse=True)

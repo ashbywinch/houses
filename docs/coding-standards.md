@@ -69,6 +69,17 @@ behaviour, extract it to its own module.
 - Never read, log, print, echo, or store API keys in conversation
   context, files, or code.
 
+### Fail Fast on Missing API Keys
+
+- When a required API key is missing, raise ``ValueError`` immediately.
+  Do not fall back to ``None`` or silently skip the operation. The caller
+  should see the failure and decide how to degrade.
+- API key checks happen before any HTTP call is attempted. Mocking the
+  HTTP transport does not bypass the key check — tests that need a key
+  must set a fake value in the fixture (e.g. ``settings.ors_api_key =
+  "fake"``). This is safe because HTTP is fully mocked in integration
+  tests.
+
 ### Cache Key Hygiene
 
 - Never include API keys in cache key parameters. Credential rotation
@@ -94,6 +105,18 @@ behaviour, extract it to its own module.
   writing data, call `POST /sync-view-formulas` if needed.
 
 ## Testing
+
+### Mock External APIs in Every Integration Test
+
+Integration tests must never hit real APIs. The conftest automates this with
+an autouse fixture that patches ``httpx.AsyncClient`` and ``httpx.Client``
+with a ``MockTransport``. Every test automatically gets mocked HTTP responses.
+
+If you need a different response for a specific test, add a custom rule to
+the handler via ``handler.add_rule(matcher, responder)``.
+
+Do not rely on real API availability or fixture cache files for integration
+test correctness. The mock transport is the source of truth.
 
 ### Fixture API Cache
 
