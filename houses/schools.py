@@ -36,6 +36,7 @@ class SchoolGender(StrEnum):
     SchoolGender.GIRLS  → "I need a school for my girl(s)"
     SchoolGender.MIXED  → "My children are a mix — I need a coeducational school"
     """
+
     BOYS = "boys"
     GIRLS = "girls"
     MIXED = "mixed"
@@ -66,12 +67,14 @@ class School:
     _COL_LOW_AGE: ClassVar[str] = "StatutoryLowAge"
     _COL_HIGH_AGE: ClassVar[str] = "StatutoryHighAge"
 
-    _FEE_PAYING_TYPES: ClassVar[frozenset] = frozenset({
-        "independent school",
-        "other independent school",
-        "independent special school",
-        "non-maintained special school",
-    })
+    _FEE_PAYING_TYPES: ClassVar[frozenset] = frozenset(
+        {
+            "independent school",
+            "other independent school",
+            "independent special school",
+            "non-maintained special school",
+        }
+    )
 
     # ── Inherent school properties ──────────────────────────────────
     urn: str
@@ -147,10 +150,10 @@ class School:
     def accepts(self, requirement: SchoolGender) -> bool:
         """Can this school satisfy the given requirement?
 
-            SchoolGender.BOYS   → school must accept boys   (BOYS or MIXED)
-            SchoolGender.GIRLS  → school must accept girls  (GIRLS or MIXED)
-            SchoolGender.MIXED  → school must be coeducational (MIXED only)
-            SchoolGender.UNKNOWN  → always False (can't verify)
+        SchoolGender.BOYS   → school must accept boys   (BOYS or MIXED)
+        SchoolGender.GIRLS  → school must accept girls  (GIRLS or MIXED)
+        SchoolGender.MIXED  → school must be coeducational (MIXED only)
+        SchoolGender.UNKNOWN  → always False (can't verify)
         """
         if self.gender == SchoolGender.UNKNOWN:
             return False

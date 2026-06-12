@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from houses.council_tax import lookup_council_tax
-from houses.property import CouncilTaxInfo
 
 MockBand = namedtuple("MockBand", ["band", "address", "postcode", "local_authority", "local_authority_url"])
 MockPage = namedtuple("MockPage", ["rows"])
@@ -144,7 +143,8 @@ class TestLookupCouncilTax:
         with patch("uk_property_apis.voa.VOAClient") as mock_voa:
             instance = AsyncMock()
             mock_voa.return_value = instance
-            instance.fetch_page = AsyncMock(return_value=_make_page(_make_bands([("B", "94A NORTHBROOK STREET, NEWBURY, RG14 1AA")], la=None)))
+            bands = _make_bands([("B", "94A NORTHBROOK STREET, NEWBURY, RG14 1AA")], la=None)
+            instance.fetch_page = AsyncMock(return_value=_make_page(bands))
             result = await lookup_council_tax("RG14 1AA", "94A Northbrook Street, Newbury, RG14 1AA")
             assert result.is_succeeded
             ct = result.value_or_none()
@@ -155,6 +155,7 @@ class TestLookupCouncilTax:
     @pytest.mark.asyncio
     async def test_import_error_graceful(self):
         import sys
+
         with patch.dict(sys.modules, {"uk_property_apis": None, "uk_property_apis.voa": None}, clear=False):
             result = await lookup_council_tax("RG14 1AA", "94A Northbrook Street, Newbury, RG14 1AA")
             assert result.is_impossible

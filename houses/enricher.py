@@ -18,16 +18,16 @@ import httpx
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.attempt import Attempt
-from houses.commute import Commute, CommuteBreakdown, CostGroup, JourneyLeg, LegMode
+from houses.commute import Commute, CommuteBreakdown
 from houses.config import settings
-from houses.geo import GeoPoint
 from houses.location import _geocode_address, geocode
 from houses.retry import retry_async
+from houses.stations import Station
+from houses.stations import find as find_station
 
 logger = logging.getLogger(__name__)
 
 TFL_JOURNEY_URL = "https://api.tfl.gov.uk/Journey/JourneyResults"
-GOOGLE_ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
 ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-car"
 
 # ---------------------------------------------------------------------------
@@ -102,65 +102,6 @@ def _next_weekday_date_params() -> dict[str, str]:
     return {"date": target.strftime("%Y%m%d"), "time": "0900"}
 
 
-_STATION_SUFFIXES = [" Rail Station", " Underground Station", " Rail Station", " Station"]
-
-
-def _shorten_station(name: str) -> str:
-    for suffix in _STATION_SUFFIXES:
-        if name.endswith(suffix):
-            name = name[: -len(suffix)]
-            break
-    if name.startswith("London "):
-        name = name[7:]
-    return name
-
-
-_STATIONS_CSV = Path("data/stations.csv")
-_BUS_FARES_PATH = Path("data/bus_fares.json")
-_bus_fares_data: dict | None = None
-
-
-def _load_bus_fares() -> dict | None:
-    global _bus_fares_data
-    if _bus_fares_data is not None:
-        return _bus_fares_data
-    if not _BUS_FARES_PATH.is_file():
-        logger.warning("Bus fares file not found at %s", _BUS_FARES_PATH)
-        _bus_fares_data = {}
-        return _bus_fares_data
-    with _BUS_FARES_PATH.open() as f:
-        _bus_fares_data = json.load(f)
-    return _bus_fares_data
-
-
-def _clean_station_name_for_matching(name: str) -> str:
-    """Strip station suffixes for CRS lookup. Does NOT strip 'London ' prefix."""
-    name = name.replace("'", "").replace("\u2019", "")
-    lower = name.lower()
-    for suffix in [" rail station", " underground station", " station"]:
-        if lower.endswith(suffix):
-            name = name[: -len(suffix)]
-            break
-    return name.strip()
-
-
-def _lookup_station_crs(station_name: str) -> str | None:
-    """Find CRS code for a station by exact case-insensitive match.
-
-    Returns CRS code or None if not found.
-    """
-    if not _STATIONS_CSV.is_file():
-        return None
-    clean = _clean_station_name_for_matching(station_name).strip().lower()
-    if not clean:
-        return None
-    with _STATIONS_CSV.open(newline="") as f:
-        for row in csv.DictReader(f):
-            if row.get("stationName", "").strip().lower() == clean:
-                return (row.get("crsCode", "") or "").strip() or None
-    logger.error("Station '%s' not found in stations.csv (cleaned: '%s')", station_name, clean)
-    return None
-
 
 _PARKING_RATES_PATH = Path("data/parking_rates.csv")
 _parking_rates_cache: dict[str, float | None] | None = None
@@ -234,10 +175,10 @@ async def _apcoa_prebook_lookup(station_name: str) -> float | None:
     Uses Playwright to render the JavaScript-dependent listing. Only called
     as a fallback when the station isn't in the parking_rates.csv cache.
     """
-    coords = _lookup_station_coords(station_name)
-    if coords is None:
+    station = find_station(station_name)
+    if station is None:
         return None
-    lat, lng = coords
+    lat, lng = station.location.lat, station.location.lon
 
     try:
         from playwright.async_api import async_playwright
@@ -297,12 +238,13 @@ async def _lookup_parking_cost(station_name: str) -> float | None:
         float = daily parking cost in GBP
     """
     by_name, by_crs = _load_parking_rates()
-    clean = _clean_station_name_for_matching(station_name).strip().lower()
-    val = by_name.get(clean)
-    if val is not None or clean in by_name:
+    station = find_station(station_name)
+    clean = station.name.lower() if station else ""
+    val = by_name.get(clean) if station else None
+    if val is not None or (station and clean in by_name):
         logger.debug("parking: '%s' -> '%s' = £%s (CSV hit)", station_name, clean, val)
         return val
-    crs = _lookup_station_crs(station_name)
+    crs = station.crs if station else None
     if crs and crs in by_crs:
         logger.debug("parking: '%s' CRS=%s = £%s (CSV hit)", station_name, crs, by_crs[crs])
         return by_crs[crs]
@@ -316,205 +258,6 @@ async def _lookup_parking_cost(station_name: str) -> float | None:
     return cost
 
 
-def _compute_bus_daily_cost(zone_fares: dict, meta: dict | None = None) -> float:
-    """Compute daily round-trip bus cost from zone fare products.
-
-    Returns the cheapest of adult_single × 2 (capped), adult_return,
-    or adult_day.  Falls back to adult_return then adult_day when
-    adult_single is missing.
-    """
-    adult_single = zone_fares.get("adult_single")
-    adult_return = zone_fares.get("adult_return")
-    adult_day = zone_fares.get("adult_day")
-
-    national_cap = (meta or {}).get("national_max_single_gbp") if meta else None
-
-    if adult_single is not None:
-        if national_cap is not None:
-            adult_single = min(adult_single, national_cap)
-        daily = adult_single * 2
-    elif adult_return is not None:
-        daily = adult_return
-    elif adult_day is not None:
-        daily = adult_day
-    else:
-        return 0.0
-
-    if adult_return is not None and adult_return < daily:
-        daily = adult_return
-    if adult_day is not None and adult_day < daily:
-        daily = adult_day
-
-    return round(daily, 2)
-
-
-def _lookup_bus_roundtrip_cost(
-    dep_stop_name: str,
-    arr_stop_name: str,
-    dep_point: dict | None = None,
-    arr_point: dict | None = None,
-) -> float | None:
-    """Look up daily bus fare from data file by stop name → zone → zone pair.
-
-    When name lookup fails, falls back to coordinate-based matching using
-    the TfL stop lat/lon (available from the journey response). Within 50m
-    of a known BODS stop the correct zone is returned regardless of name.
-
-    Returns daily round-trip cost in GBP, or None if lookup fails.
-    """
-    fares_data = _load_bus_fares()
-    if not fares_data:
-        return None
-
-    meta = fares_data.get("_meta")
-    dep_norm = dep_stop_name.strip().lower()
-    arr_norm = arr_stop_name.strip().lower()
-
-    dep_alt = dep_norm.split(", ", 1)[-1] if ", " in dep_norm else dep_norm
-    arr_alt = arr_norm.split(", ", 1)[-1] if ", " in arr_norm else arr_norm
-
-    for op_key, op_data in fares_data.items():
-        if op_key == "_meta":
-            continue
-        stop_zones = op_data.get("stop_zones", {})
-        dep_zone = stop_zones.get(dep_norm) or stop_zones.get(dep_alt)
-        arr_zone = stop_zones.get(arr_norm) or stop_zones.get(arr_alt)
-        if dep_zone and arr_zone:
-            zone_pair = f"{dep_zone}:{arr_zone}"
-            zone_fares = op_data.get("zone_fares", {}).get(zone_pair)
-            if zone_fares:
-                return _compute_bus_daily_cost(zone_fares, meta)
-
-    # Token-set fuzzy fallback: normalise punctuation, strip area prefix, then compare token sets
-    if dep_zone is None or arr_zone is None:
-
-        def _norm(s: str) -> set[str]:
-            core = s.split(", ", 1)[-1]
-            no_punct = re.sub(r"[.,;:'\"!?()]", "", core)
-            return set(no_punct.split())
-
-        dep_tokens = _norm(dep_norm)
-        arr_tokens = _norm(arr_norm)
-        for op_key, op_data in fares_data.items():
-            if op_key == "_meta":
-                continue
-            stop_zones = op_data.get("stop_zones", {})
-            if dep_zone is None:
-                for bods_name in stop_zones:
-                    bods_tokens = _norm(bods_name)
-                    inter = dep_tokens & bods_tokens
-                    union = dep_tokens | bods_tokens
-                    if union and len(inter) / len(union) >= 0.85:
-                        dep_zone = stop_zones[bods_name]
-                        logger.warning("Bus fare fuzzy match dep='%s' -> '%s' zone=%s", dep_norm, bods_name, dep_zone)
-                        if arr_zone is not None:
-                            break
-            if arr_zone is None:
-                for bods_name in stop_zones:
-                    bods_tokens = _norm(bods_name)
-                    inter = arr_tokens & bods_tokens
-                    union = arr_tokens | bods_tokens
-                    if union and len(inter) / len(union) >= 0.85:
-                        arr_zone = stop_zones[bods_name]
-                        logger.warning("Bus fare fuzzy match arr='%s' -> '%s' zone=%s", arr_norm, bods_name, arr_zone)
-                        if dep_zone is not None:
-                            break
-            if dep_zone and arr_zone:
-                zone_pair = f"{dep_zone}:{arr_zone}"
-                zone_fares = op_data.get("zone_fares", {}).get(zone_pair)
-                if zone_fares:
-                    return _compute_bus_daily_cost(zone_fares, meta)
-
-    # Name lookup failed — try coordinate fallback against stop_coords index
-    dep_coords = (dep_point.get("lat"), dep_point.get("lon")) if dep_point else (None, None)
-    arr_coords = (arr_point.get("lat"), arr_point.get("lon")) if arr_point else (None, None)
-    if dep_coords[0] is not None and arr_coords[0] is not None:
-        for op_key, op_data in fares_data.items():
-            if op_key == "_meta":
-                continue
-            stop_coords = op_data.get("stop_coords", [])
-            if not stop_coords:
-                continue
-            dep_zone = _nearest_bus_zone(dep_coords[0], dep_coords[1], stop_coords, radius_km=0.05)
-            arr_zone = _nearest_bus_zone(arr_coords[0], arr_coords[1], stop_coords, radius_km=0.05)
-            if dep_zone and arr_zone:
-                zone_pair = f"{dep_zone}:{arr_zone}"
-                zone_fares = op_data.get("zone_fares", {}).get(zone_pair)
-                if zone_fares:
-                    logger.info(
-                        "Bus fare by coords: dep=%s arr=%s = %s",
-                        dep_stop_name,
-                        arr_stop_name,
-                        zone_pair,
-                    )
-                    return _compute_bus_daily_cost(zone_fares, meta)
-
-    logger.warning(
-        "Bus fare zone pair not found for '%s' (lat=%s) → '%s' (lat=%s)",
-        dep_stop_name,
-        f"{dep_coords[0]:.4f}" if dep_coords[0] else "?",
-        arr_stop_name,
-        f"{arr_coords[0]:.4f}" if arr_coords[0] else "?",
-    )
-    return None
-
-
-def _nearest_bus_zone(
-    lat: float,
-    lon: float,
-    stop_coords: list[dict],
-    radius_km: float = 0.05,
-) -> str | None:
-    """Find the zone of the nearest BODS stop within ``radius_km`` of (lat, lon)."""
-    origin = GeoPoint(lat, lon)
-    best_dist = float("inf")
-    best_zone = None
-    for sc in stop_coords:
-        d = origin.distance_km_to(GeoPoint(sc["lat"], sc["lon"]))
-        if d < best_dist:
-            best_dist = d
-            best_zone = sc.get("zone")
-    if best_dist <= radius_km:
-        return best_zone
-    return None
-
-
-def _nearby_bus_zones(
-    lat: float,
-    lon: float,
-    stop_coords: list[dict],
-    radius_km: float = 0.2,
-) -> list[str]:
-    """All distinct zone IDs within ``radius_km`` of (lat, lon), ordered by closest stop first."""
-    origin = GeoPoint(lat, lon)
-    seen: set[str] = set()
-    result: list[str] = []
-    for sc in sorted(stop_coords, key=lambda c: origin.distance_km_to(GeoPoint(c["lat"], c["lon"]))):
-        d = origin.distance_km_to(GeoPoint(sc["lat"], sc["lon"]))
-        if d > radius_km:
-            break
-        z = sc.get("zone", "")
-        if z and z not in seen:
-            seen.add(z)
-            result.append(z)
-    return result
-
-
-def _lookup_station_coords(station_name: str) -> tuple[float, float] | None:
-    """Find station coordinates from stations.csv by matching name (suffix-stripped)."""
-    if not _STATIONS_CSV.is_file():
-        return None
-    clean = _shorten_station(station_name).strip().lower()
-    if not clean:
-        return None
-    with _STATIONS_CSV.open(newline="") as f:
-        for row in csv.DictReader(f):
-            if row.get("stationName", "").strip().lower() == clean:
-                try:
-                    return float(row["lat"]), float(row["long"])
-                except (ValueError, KeyError):
-                    return None
-    return None
 
 
 def _format_route_summary(journey: dict) -> str:
@@ -540,15 +283,15 @@ def _format_route_summary(journey: dict) -> str:
             if is_last:
                 parts.append(f"walk {duration}m")
             else:
-                clean_arr = _shorten_station(arr) if arr else ""
-                is_station = bool(arr) and any(arr.endswith(s) for s in _STATION_SUFFIXES if s)
+                clean_arr = Station.short_name(arr) if arr else ""
+                is_station = bool(arr) and Station.short_name(arr) != arr
                 if is_station and clean_arr:
                     parts.append(f"walk to {clean_arr} ({duration}m)")
                 else:
                     parts.append(f"walk {duration}m")
             continue
 
-        clean_arr = _shorten_station(arr) if arr else ""
+        clean_arr = Station.short_name(arr) if arr else ""
 
         if mode == "tube":
             line_from_instr = instr.split(" to ")[0] if " to " in instr else ""
@@ -620,18 +363,15 @@ async def _get_drive_minutes(origin_postcode: str, station_name: str) -> int | N
     if origin_coords is None:
         return None
 
-    dest_coords = _lookup_station_coords(station_name)
+    station = find_station(station_name)
+    dest_coords = station.location if station else None
     if dest_coords is None:
         dest_coords = (await _geocode_address(station_name)).value_or_none()
     if dest_coords is None:
         return None
 
-    # dest_coords can be tuple (lat, lng) from CSV or GeoPoint from geocoding
-    if hasattr(dest_coords, "lat"):
-        dest_lat = dest_coords.lat
-        dest_lng = dest_coords.lon
-    else:
-        dest_lat, dest_lng = dest_coords[0], dest_coords[1]
+    dest_lat = dest_coords.lat
+    dest_lng = dest_coords.lon
 
     body = {
         "coordinates": [[origin_coords.lon, origin_coords.lat], [dest_lng, dest_lat]],
@@ -760,146 +500,6 @@ def _pick_best_lorena_route(no_bus: Commute, with_bus: Commute) -> Commute:
     return no_bus
 
 
-async def _find_bus_alternative(origin: str, destination: str) -> Commute | None:
-    """Find a bus alternative via Google Routes API (for areas outside TfL coverage).
-
-    Used when TfL doesn't find a bus leg (out-of-London areas). Returns a
-    Commute with bus fare looked up from BODS data, or None if the API
-    also can't route the journey.
-    """
-    google_key = settings.google_maps_api_key
-    if not google_key:
-        return None
-
-    body = {
-        "origin": {"address": origin},
-        "destination": {"address": destination},
-        "travelMode": "TRANSIT",
-        "transitPreferences": {"routingPreference": "less_walking"},
-        "computeAlternativeRoutes": False,
-    }
-    headers = {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": google_key,
-        "X-Goog-FieldMask": "routes.duration,routes.legs",
-    }
-
-    cached = get_cached("POST", GOOGLE_ROUTES_URL, None, json.dumps(body, sort_keys=True))
-    if cached is not None:
-        data = cached
-    else:
-        try:
-            async with cached_async_client(timeout=15.0) as client:
-                resp = await retry_async(
-                    lambda: client.post(GOOGLE_ROUTES_URL, json=body, headers=headers),
-                    max_retries=2,
-                    base_delay=1.0,
-                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                set_cached("POST", GOOGLE_ROUTES_URL, None, json.dumps(body, sort_keys=True), data)
-        except Exception as e:
-            logger.warning("Routes API failed for %s → %s: %s", origin, destination, e)
-            return None
-
-    routes = data.get("routes", [])
-    if not routes:
-        return None
-
-    leg = routes[0].get("legs", [{}])[0]
-    duration_sec = int(routes[0].get("duration", "0s").rstrip("s"))
-    duration_min = round(duration_sec / 60)
-
-    steps = leg.get("steps", [])
-    bus_legs = [
-        s
-        for s in steps
-        if s.get("travelMode") == "TRANSIT"
-        and s.get("transitDetails", {}).get("transitLine", {}).get("vehicle", {}).get("type") == "BUS"
-    ]
-
-    total_bus_cost = 0.0
-    bus_cost_gbp = None
-    for bl in bus_legs:
-        transit = bl.get("transitDetails", {})
-        dep_stop = transit.get("stopDetails", {}).get("departureStop", {})
-        arr_stop = transit.get("stopDetails", {}).get("arrivalStop", {})
-        dep_name = dep_stop.get("name", "")
-        arr_name = arr_stop.get("name", "")
-        dep_coords = dep_stop.get("location", {}).get("latLng", {})
-        arr_coords = arr_stop.get("location", {}).get("latLng", {})
-        dep_point = {"lat": dep_coords.get("latitude"), "lon": dep_coords.get("longitude")} if dep_coords else None
-        arr_point = {"lat": arr_coords.get("latitude"), "lon": arr_coords.get("longitude")} if arr_coords else None
-        leg_cost = _lookup_bus_roundtrip_cost(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
-
-        if leg_cost is None and dep_point and arr_point:
-            data_all = _load_bus_fares()
-            for op_key, op_data in data_all.items():
-                if op_key == "_meta":
-                    continue
-                stop_zones = op_data.get("stop_zones", {})
-                stop_coords = op_data.get("stop_coords", [])
-                zone_fares = op_data.get("zone_fares", {})
-                dep_name_norm = re.sub(r"[.,;:'\"!?()]", "", dep_name.lower()).split(", ")[-1]
-                arr_name_norm = re.sub(r"[.,;:'\"!?()]", "", arr_name.lower()).split(", ")[-1]
-                known_dep = stop_zones.get(dep_name_norm)
-                known_arr = stop_zones.get(arr_name_norm)
-                for radius in (0.2, 0.5, 1.0, 2.0):
-                    dep_zones: list[str] = (
-                        [known_dep]
-                        if known_dep
-                        else _nearby_bus_zones(dep_point["lat"], dep_point["lon"], stop_coords, radius_km=radius)
-                    )
-                    arr_zones: list[str] = (
-                        [known_arr]
-                        if known_arr
-                        else _nearby_bus_zones(arr_point["lat"], arr_point["lon"], stop_coords, radius_km=radius)
-                    )
-                    for dep_zone in dep_zones:
-                        for arr_zone in arr_zones:
-                            zk = f"{dep_zone}:{arr_zone}"
-                            fares = zone_fares.get(zk) or zone_fares.get(f"{arr_zone}:{dep_zone}")
-                            if fares:
-                                leg_cost = _compute_bus_daily_cost(fares, data_all.get("_meta"))
-                                logger.info(
-                                    "Bus fare (radius=%dm): %s -> %s = %s",
-                                    int(radius * 1000),
-                                    dep_zone,
-                                    arr_zone,
-                                    leg_cost,
-                                )
-                                break
-                        if leg_cost is not None:
-                            break
-                    if leg_cost is not None:
-                        break
-
-        if leg_cost is not None:
-            total_bus_cost += leg_cost
-
-    if total_bus_cost > 0:
-        bus_cost_gbp = total_bus_cost
-        daily_cost_gbp = round(total_bus_cost, 2)
-    else:
-        daily_cost_gbp = None
-
-    return Commute(
-        destination_label="Lorena — Aldgate / City of London (Bus)",
-        destination_postcode=destination,
-        duration_minutes=duration_min,
-        daily_cost_gbp=daily_cost_gbp,
-        mode="transit",
-        cost_groups=(
-            CostGroup(
-                legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=duration_min or 0),),
-                cost=bus_cost_gbp,
-            ),
-        )
-        if bus_cost_gbp is not None
-        else (),
-    )
-
 
 async def compute_commute_breakdown(
     simon_transit: Commute,
@@ -962,5 +562,3 @@ async def compute_petrol_cost(origin_postcode: str) -> Attempt[Commute]:
             "ors",
         )
     return Attempt.impossible("petrol", "could not route to Bracknell")
-
-

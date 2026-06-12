@@ -111,9 +111,7 @@ def test_row_values_with_full_enrichment():
             duration_minutes=8,
             daily_cost_gbp=0.0,
             mode="walk",
-            cost_groups=(
-                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=8),)),
-            ),
+            cost_groups=(CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=8),)),),
         ),
         primary_school_distance_km=0.65,
         secondary_school=School(
@@ -136,9 +134,7 @@ def test_row_values_with_full_enrichment():
             duration_minutes=14,
             daily_cost_gbp=0.0,
             mode="walk",
-            cost_groups=(
-                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=14),)),
-            ),
+            cost_groups=(CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=14),)),),
         ),
         secondary_school_distance_km=1.2,
     )

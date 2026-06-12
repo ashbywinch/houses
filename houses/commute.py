@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, auto
 
+from houses.stations import Station
+
 
 class LegMode(Enum):
     WALK = auto()
@@ -32,8 +34,8 @@ class JourneyLeg:
     duration_minutes: int
     description: str = ""  # e.g. "walk to Maidenhead" or "Bakerloo line to Oxford Circus"
     start_station: str = ""  # departure point name from TfL
-    end_station: str = ""    # arrival point name from TfL
-    line_name: str = ""      # transit route name from TfL (e.g. "Bakerloo", "Great Western Railway")
+    end_station: str = ""  # arrival point name from TfL
+    line_name: str = ""  # transit route name from TfL (e.g. "Bakerloo", "Great Western Railway")
 
 
 @dataclass(frozen=True)
@@ -50,10 +52,7 @@ class CostGroup:
 
     def leg_descriptions(self) -> tuple[str, ...]:
         """Return operator-appropriate descriptions for each leg."""
-        return tuple(
-            leg.description if leg.description else leg.mode.name.lower()
-            for leg in self.legs
-        )
+        return tuple(leg.description if leg.description else leg.mode.name.lower() for leg in self.legs)
 
 
 @dataclass(frozen=True)
@@ -73,18 +72,14 @@ class Commute:
         all_legs = [leg for group in self.cost_groups for leg in group.legs]
         total = len(all_legs)
 
-        for idx, (group, leg, desc) in enumerate(
-            (g, l, d)
-            for g in self.cost_groups
-            for l, d in zip(g.legs, g.leg_descriptions(), strict=True)
+        for idx, (_group, leg, desc) in enumerate(
+            (g, _leg, d) for g in self.cost_groups for _leg, d in zip(g.legs, g.leg_descriptions(), strict=True)
         ):
             if leg.mode == LegMode.WALK:
                 if idx == total - 1:
                     parts.append(f"walk {leg.duration_minutes}m")
                 elif leg.end_station:
-                    from houses.enricher import _shorten_station
-
-                    parts.append(f"walk to {_shorten_station(leg.end_station)} ({leg.duration_minutes}m)")
+                    parts.append(f"walk to {Station.short_name(leg.end_station)} ({leg.duration_minutes}m)")
                 else:
                     parts.append(f"{desc} ({leg.duration_minutes}m)")
             else:

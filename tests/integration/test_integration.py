@@ -29,6 +29,7 @@ class TestPostcodesIO:
         assert lat == 51.5
         assert lng == -0.1
 
+
 class TestGeocodeAddress:
     @pytest.mark.asyncio
     async def test_geocode_address(self):

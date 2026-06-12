@@ -9,17 +9,45 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import ClassVar
 
 import httpx
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.attempt import Attempt
+from houses.bus_journey import BusJourneyRegistry, cheapest_round_trip
 from houses.commute import Commute, CommuteMode, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
+from houses.http_error import HttpError
 from houses.retry import retry_async
+from houses.stations import Station
 
 logger = logging.getLogger(__name__)
+
+# Module-level singleton for bus fare lookups
+_bus_fares = BusJourneyRegistry()
+
+
+def _bus_fare_for(
+    dep_name: str,
+    arr_name: str,
+    dep_point: dict[str, float] | None = None,
+    arr_point: dict[str, float] | None = None,
+) -> float | None:
+    """Look up daily round-trip bus cost between two stops.
+
+    Delegates to ``BusJourneyRegistry`` which handles direct name match,
+    fuzzy token match, and coordinate-based match (100m radius via spatial
+    index).  No expanding-radius search — the point of taking the bus is
+    to avoid long walks.
+
+    Returns the cost as a float, or ``None`` if no fare is found.
+    """
+    fares = _bus_fares.fares_for_stops(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
+    cheapest = cheapest_round_trip(fares, _bus_fares.national_max_single)
+    if cheapest is not None:
+        return float(cheapest.amount)
+    return None
+
 
 # ---------------------------------------------------------------------------
 # API URLs
@@ -30,27 +58,12 @@ ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-car
 
 
 class _GoogleRoutesClient:
-    """Client for Google Routes API with circuit breaker for 429 responses.
+    """Client for Google Routes API with Retry-After support.
 
-    Once a 429 is received, all subsequent calls return None without
-    hitting the network.  The blocked state resets when the process
-    restarts.
+    On 429 responses, the Retry-After header is extracted and the request
+    is retried using that delay.  No process-lifetime circuit breaker —
+    if the API recovers, subsequent calls work again.
     """
-
-    _blocked: ClassVar[bool] = False
-
-    @classmethod
-    def _is_blocked(cls) -> bool:
-        return cls._blocked
-
-    @classmethod
-    def _block(cls) -> None:
-        cls._blocked = True
-        logger.error(
-            "Google Routes API is rate-limited (429). "
-            "Skipping further calls until the process restarts. "
-            "Previously cached results will still be served."
-        )
 
     @classmethod
     async def request(
@@ -63,12 +76,11 @@ class _GoogleRoutesClient:
         """Make a request to the Google Routes API.
 
         Returns the JSON response dict on success, or ``None`` if the
-        request was blocked (429) or failed for a transient reason.
+        request failed for a non-retryable reason (e.g. invalid key,
+        bad request).
+
         Raises ``ValueError`` if the API key is not configured.
         """
-        if cls._is_blocked():
-            return None
-
         google_key = settings.google_maps_api_key
         if not google_key:
             raise ValueError("Google Maps API key not configured")
@@ -79,65 +91,126 @@ class _GoogleRoutesClient:
             "X-Goog-FieldMask": field_mask,
         }
         key = json.dumps(body, sort_keys=True)
-
         cached = get_cached("POST", GOOGLE_ROUTES_URL, None, key)
         if cached is not None:
             return cached
 
-        try:
+        async def _do_post() -> dict:
             async with cached_async_client(timeout=timeout) as client:
-                resp = await retry_async(
-                    lambda: client.post(GOOGLE_ROUTES_URL, json=body, headers=headers),
-                    max_retries=3,
-                    base_delay=2.0,
-                    exceptions=(httpx.ConnectError, httpx.RemoteProtocolError, httpx.ReadTimeout),
-                )
+                resp = await client.post(GOOGLE_ROUTES_URL, json=body, headers=headers)
                 if resp.status_code == 429:
-                    cls._block()
-                    return None
+                    raise HttpError(429, "rate limited", headers=dict(resp.headers))
                 resp.raise_for_status()
-                data = resp.json()
-                set_cached("POST", GOOGLE_ROUTES_URL, None, key, data)
-                return data
+                return resp.json()
+
+        try:
+            data = await retry_async(
+                _do_post,
+                max_retries=3,
+                base_delay=2.0,
+                exceptions=(
+                    HttpError, httpx.HTTPStatusError, httpx.ConnectError,
+                    httpx.RemoteProtocolError, httpx.ReadTimeout,
+                ),
+            )
+            set_cached("POST", GOOGLE_ROUTES_URL, None, key, data)
+            return data
         except ValueError:
             raise
-        except httpx.HTTPStatusError as e:
+        except (HttpError, httpx.HTTPStatusError) as e:
             logger.warning(
-                "Google Routes API error for %s: HTTP %s",
-                body.get("origin", {}).get("address", "?"),
-                e.response.status_code,
+                "Google Routes API error for %s: %s",
+                body.get("origin", {}).get("address", "?"), e,
             )
             return None
         except Exception as e:
             logger.warning("Google Routes API call failed: %s", e)
             return None
 
+
 # ---------------------------------------------------------------------------
 # Congestion zone — central London postcode outcodes never worth driving to
 # ---------------------------------------------------------------------------
 
-_CONGESTION_OUTCODES: frozenset[str] = frozenset({
-    # EC — all EC districts are inside the zone
-    "EC1A", "EC1N", "EC1R", "EC1V", "EC1Y",
-    "EC2A", "EC2N", "EC2R", "EC2V", "EC2Y",
-    "EC3A", "EC3N", "EC3R", "EC3V",
-    "EC4A", "EC4N", "EC4M", "EC4R", "EC4V", "EC4Y",
-    # WC — all WC districts are inside
-    "WC1A", "WC1B", "WC1E", "WC1H", "WC1N", "WC1R", "WC1V", "WC1X",
-    "WC2A", "WC2B", "WC2E", "WC2H", "WC2N", "WC2R",
-    # W1 — all W1 districts are inside
-    "W1A", "W1B", "W1C", "W1D", "W1F", "W1G", "W1H", "W1J",
-    "W1K", "W1M", "W1N", "W1P", "W1R", "W1S", "W1T", "W1U",
-    "W1V", "W1W", "W1X", "W1Y",
-    # SW1 — all SW1 districts are inside
-    "SW1A", "SW1E", "SW1H", "SW1P", "SW1V", "SW1W", "SW1X", "SW1Y",
-    # SE1 — some SE1 postcodes are inside
-    "SE1",
-    # N1 — some N1 postcodes are inside
-    "N1",
-    # E1, E2, E14 — some parts are inside
-    "E1", "E1W", "E2", "E14",
-})
+_CONGESTION_OUTCODES: frozenset[str] = frozenset(
+    {
+        # EC — all EC districts are inside the zone
+        "EC1A",
+        "EC1N",
+        "EC1R",
+        "EC1V",
+        "EC1Y",
+        "EC2A",
+        "EC2N",
+        "EC2R",
+        "EC2V",
+        "EC2Y",
+        "EC3A",
+        "EC3N",
+        "EC3R",
+        "EC3V",
+        "EC4A",
+        "EC4N",
+        "EC4M",
+        "EC4R",
+        "EC4V",
+        "EC4Y",
+        # WC — all WC districts are inside
+        "WC1A",
+        "WC1B",
+        "WC1E",
+        "WC1H",
+        "WC1N",
+        "WC1R",
+        "WC1V",
+        "WC1X",
+        "WC2A",
+        "WC2B",
+        "WC2E",
+        "WC2H",
+        "WC2N",
+        "WC2R",
+        # W1 — all W1 districts are inside
+        "W1A",
+        "W1B",
+        "W1C",
+        "W1D",
+        "W1F",
+        "W1G",
+        "W1H",
+        "W1J",
+        "W1K",
+        "W1M",
+        "W1N",
+        "W1P",
+        "W1R",
+        "W1S",
+        "W1T",
+        "W1U",
+        "W1V",
+        "W1W",
+        "W1X",
+        "W1Y",
+        # SW1 — all SW1 districts are inside
+        "SW1A",
+        "SW1E",
+        "SW1H",
+        "SW1P",
+        "SW1V",
+        "SW1W",
+        "SW1X",
+        "SW1Y",
+        # SE1 — some SE1 postcodes are inside
+        "SE1",
+        # N1 — some N1 postcodes are inside
+        "N1",
+        # E1, E2, E14 — some parts are inside
+        "E1",
+        "E1W",
+        "E2",
+        "E14",
+    }
+)
 
 _OUTCODE_RE = re.compile(r"^[A-Z]{1,2}[0-9][A-Z0-9]?")
 
@@ -207,9 +280,11 @@ async def _walk_commute(origin_postcode: str, dest_postcode: str) -> Commute | N
 
 
 async def _google_transit_commute(origin_postcode: str, dest_postcode: str) -> Commute | None:
-    """Transit routing via Google Routes API (for non-TfL areas).
+    """Transit routing via Google Routes API.
 
-    Includes BODS bus fare lookup for any bus legs in the route.
+    Parses all transit steps (walk, bus, train, tube) from the Google Routes
+    response into ``CostGroup`` / ``JourneyLeg`` objects so the route summary
+    is populated.  Also looks up BODS bus fares for any bus legs.
 
     Raises:
         ValueError: If the Google Maps API key is not configured.
@@ -221,7 +296,11 @@ async def _google_transit_commute(origin_postcode: str, dest_postcode: str) -> C
         "transitPreferences": {"routingPreference": "less_walking"},
         "computeAlternativeRoutes": False,
     }
-    data = await _GoogleRoutesClient.request(body, "routes.duration,routes.legs", timeout=15.0)
+    field_mask = (
+        "routes.duration,routes.legs.steps.staticDuration,"
+        "routes.legs.steps.travelMode,routes.legs.steps.transitDetails"
+    )
+    data = await _GoogleRoutesClient.request(body, field_mask, timeout=15.0)
     if data is None:
         return None
 
@@ -234,90 +313,71 @@ async def _google_transit_commute(origin_postcode: str, dest_postcode: str) -> C
     leg = routes[0].get("legs", [{}])[0]
     steps = leg.get("steps", [])
 
-    # Extract transit step details for fare lookup and route names
-    bus_legs = []
-    bus_route_name = ""
-    for s in steps:
-        if s.get("travelMode") == "TRANSIT":
-            td = s.get("transitDetails", {})
-            vehicle_type = td.get("transitLine", {}).get("vehicle", {}).get("type", "")
-            if vehicle_type == "BUS":
-                bus_legs.append(s)
-            # Capture first transit route name
-            if not bus_route_name:
-                line = td.get("transitLine", {}).get("nameShort", "") or td.get("transitLine", {}).get("name", "")
-                dep = td.get("stopDetails", {}).get("departureStop", {}).get("name", "")
-                if line and dep:
-                    bus_route_name = f"{line} from {dep}"
-
-    # ── Bus fare lookup (BODS data) ────────────────────────────────
+    # ── Build cost groups from ALL transit steps ───────────────────
+    cost_groups: list[CostGroup] = []
     total_bus_cost = 0.0
-    bus_cost_gbp = None
+    current_bus_legs: list[JourneyLeg] = []
+    current_walk_legs: list[JourneyLeg] = []
 
-    if bus_legs:
-        # Import lazily to avoid circular import with enricher.py
-        from houses.enricher import (
-            _compute_bus_daily_cost,
-            _load_bus_fares,
-            _lookup_bus_roundtrip_cost,
-            _nearby_bus_zones,
-        )
+    def _flush_walk():
+        if current_walk_legs:
+            cost_groups.append(CostGroup(legs=tuple(current_walk_legs)))
+            current_walk_legs.clear()
 
-        for bl in bus_legs:
-            transit = bl.get("transitDetails", {})
-            dep_stop = transit.get("stopDetails", {}).get("departureStop", {})
-            arr_stop = transit.get("stopDetails", {}).get("arrivalStop", {})
-            dep_name = dep_stop.get("name", "")
-            arr_name = arr_stop.get("name", "")
-            dep_coords = dep_stop.get("location", {}).get("latLng", {})
-            arr_coords = arr_stop.get("location", {}).get("latLng", {})
-            dep_point = {"lat": dep_coords.get("latitude"), "lon": dep_coords.get("longitude")} if dep_coords else None
-            arr_point = {"lat": arr_coords.get("latitude"), "lon": arr_coords.get("longitude")} if arr_coords else None
-            leg_cost = _lookup_bus_roundtrip_cost(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
+    def _flush_bus():
+        if current_bus_legs:
+            bus_cost = total_bus_cost if total_bus_cost > 0 else None
+            cost_groups.append(CostGroup(legs=tuple(current_bus_legs), cost=bus_cost))
+            current_bus_legs.clear()
 
-            if leg_cost is None and dep_point and arr_point:
-                data_all = _load_bus_fares()
-                for op_key, op_data in data_all.items():
-                    if op_key == "_meta":
-                        continue
-                    stop_zones = op_data.get("stop_zones", {})
-                    stop_coords = op_data.get("stop_coords", [])
-                    zone_fares = op_data.get("zone_fares", {})
-                    dep_name_norm = re.sub(r"[.,;:'\"!?()]", "", dep_name.lower()).split(", ")[-1]
-                    arr_name_norm = re.sub(r"[.,;:'\"!?()]", "", arr_name.lower()).split(", ")[-1]
-                    known_dep = stop_zones.get(dep_name_norm)
-                    known_arr = stop_zones.get(arr_name_norm)
-                    for radius in (0.2, 0.5, 1.0, 2.0):
-                        dep_zones: list[str] = (
-                            [known_dep]
-                            if known_dep
-                            else _nearby_bus_zones(dep_point["lat"], dep_point["lon"], stop_coords, radius_km=radius)
-                        )
-                        arr_zones: list[str] = (
-                            [known_arr]
-                            if known_arr
-                            else _nearby_bus_zones(arr_point["lat"], arr_point["lon"], stop_coords, radius_km=radius)
-                        )
-                        for dep_zone in dep_zones:
-                            for arr_zone in arr_zones:
-                                zk = f"{dep_zone}:{arr_zone}"
-                                fares = zone_fares.get(zk) or zone_fares.get(f"{arr_zone}:{dep_zone}")
-                                if fares:
-                                    leg_cost = _compute_bus_daily_cost(fares, data_all.get("_meta"))
-                                    break
-                            if leg_cost is not None:
-                                break
-                        if leg_cost is not None:
-                            break
+    for s in steps:
+        mode = s.get("travelMode", "WALK")
+        dur_raw: str = s.get("staticDuration", "0s")
+        dur = int(dur_raw.rstrip("s"))
+        dur_min = round(dur / 60)
 
-            if leg_cost is not None:
-                total_bus_cost += leg_cost
+        if mode == "WALK":
+            _flush_bus()
+            current_walk_legs.append(JourneyLeg(mode=LegMode.WALK, duration_minutes=dur_min))
+        elif mode == "TRANSIT":
+            _flush_walk()
+            td = s.get("transitDetails", {})
+            vtype = td.get("transitLine", {}).get("vehicle", {}).get("type", "")
+            dep_stop = td.get("stopDetails", {}).get("departureStop", {}).get("name", "")
+            arr_stop = td.get("stopDetails", {}).get("arrivalStop", {}).get("name", "")
+            line = td.get("transitLine", {}).get("nameShort", "") or td.get("transitLine", {}).get("name", "")
+            desc = f"{line} from {Station.short_name(dep_stop)}".strip() if line and dep_stop else ""
 
-    if total_bus_cost > 0:
-        bus_cost_gbp = total_bus_cost
-        daily_cost_gbp = round(total_bus_cost, 2)
-    else:
-        daily_cost_gbp = None
+            if vtype == "BUS":
+                # Look up BODS bus fare
+                dep_point = td.get("stopDetails", {}).get("departureStop", {}).get("location", {}).get("latLng", {})
+                arr_point = td.get("stopDetails", {}).get("arrivalStop", {}).get("location", {}).get("latLng", {})
+                dp = {"lat": dep_point.get("latitude"), "lon": dep_point.get("longitude")} if dep_point else None
+                ap = {"lat": arr_point.get("latitude"), "lon": arr_point.get("longitude")} if arr_point else None
+                leg_cost = _bus_fare_for(dep_stop, arr_stop, dep_point=dp, arr_point=ap)
+                if leg_cost is not None:
+                    total_bus_cost += leg_cost
+                current_bus_legs.append(JourneyLeg(mode=LegMode.BUS, duration_minutes=dur_min, description=desc))
+            else:
+                # Train / Tube / Tram — group with any preceding bus legs
+                _flush_bus()
+                mode_enum = {
+                    "RAIL": LegMode.TRAIN,
+                    "TRAIN": LegMode.TRAIN,
+                    "HEAVY_RAIL": LegMode.TRAIN,
+                    "TRAM": LegMode.TRAIN,
+                    "SUBWAY": LegMode.TUBE,
+                    "METRO": LegMode.TUBE,
+                }.get(vtype, LegMode.TRAIN)
+                cost_groups.append(
+                    CostGroup(legs=(JourneyLeg(mode=mode_enum, duration_minutes=dur_min, description=desc),))
+                )
+        # Other modes (e.g. BICYCLE) — ignore
+
+    _flush_walk()
+    _flush_bus()
+
+    daily_cost_gbp = round(total_bus_cost, 2) if total_bus_cost > 0 else None
 
     return Commute(
         destination_label="",
@@ -325,20 +385,7 @@ async def _google_transit_commute(origin_postcode: str, dest_postcode: str) -> C
         duration_minutes=duration_min,
         daily_cost_gbp=daily_cost_gbp,
         mode=CommuteMode.TRANSIT,
-        cost_groups=(
-            CostGroup(
-                legs=(
-                    JourneyLeg(
-                        mode=LegMode.BUS,
-                        duration_minutes=duration_min or 0,
-                        description=bus_route_name,
-                    ),
-                ),
-                cost=bus_cost_gbp,
-            ),
-        )
-        if bus_cost_gbp is not None
-        else (),
+        cost_groups=tuple(cost_groups),
     )
 
 
@@ -428,6 +475,109 @@ async def _drive_commute(origin_postcode: str, dest_postcode: str) -> Commute | 
 
 
 # ---------------------------------------------------------------------------
+# Bus alternative — Google Routes for non-TfL areas
+# ---------------------------------------------------------------------------
+
+
+async def _find_bus_alternative(origin: str, destination: str) -> Commute | None:
+    """Find a bus alternative via Google Routes API (for areas outside TfL coverage).
+
+    Used when TfL doesn't find a bus leg (out-of-London areas). Returns a
+    Commute with bus fare looked up from BODS data, or None if the API
+    also can't route the journey.
+    """
+    google_key = settings.google_maps_api_key
+    if not google_key:
+        return None
+
+    body = {
+        "origin": {"address": origin},
+        "destination": {"address": destination},
+        "travelMode": "TRANSIT",
+        "transitPreferences": {"routingPreference": "less_walking"},
+        "computeAlternativeRoutes": False,
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": google_key,
+        "X-Goog-FieldMask": "routes.duration,routes.legs",
+    }
+
+    cached = get_cached("POST", GOOGLE_ROUTES_URL, None, json.dumps(body, sort_keys=True))
+    if cached is not None:
+        data = cached
+    else:
+        try:
+            async with cached_async_client(timeout=15.0) as client:
+                resp = await retry_async(
+                    lambda: client.post(GOOGLE_ROUTES_URL, json=body, headers=headers),
+                    max_retries=2,
+                    base_delay=1.0,
+                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                set_cached("POST", GOOGLE_ROUTES_URL, None, json.dumps(body, sort_keys=True), data)
+        except Exception as e:
+            logger.warning("Routes API failed for %s → %s: %s", origin, destination, e)
+            return None
+
+    routes = data.get("routes", [])
+    if not routes:
+        return None
+
+    leg = routes[0].get("legs", [{}])[0]
+    duration_sec = int(routes[0].get("duration", "0s").rstrip("s"))
+    duration_min = round(duration_sec / 60)
+
+    steps = leg.get("steps", [])
+    bus_legs = [
+        s
+        for s in steps
+        if s.get("travelMode") == "TRANSIT"
+        and s.get("transitDetails", {}).get("transitLine", {}).get("vehicle", {}).get("type") == "BUS"
+    ]
+
+    total_bus_cost = 0.0
+    bus_cost_gbp = None
+    for bl in bus_legs:
+        transit = bl.get("transitDetails", {})
+        dep_stop = transit.get("stopDetails", {}).get("departureStop", {})
+        arr_stop = transit.get("stopDetails", {}).get("arrivalStop", {})
+        dep_name = dep_stop.get("name", "")
+        arr_name = arr_stop.get("name", "")
+        dep_coords = dep_stop.get("location", {}).get("latLng", {})
+        arr_coords = arr_stop.get("location", {}).get("latLng", {})
+        dep_point = {"lat": dep_coords.get("latitude"), "lon": dep_coords.get("longitude")} if dep_coords else None
+        arr_point = {"lat": arr_coords.get("latitude"), "lon": arr_coords.get("longitude")} if arr_coords else None
+        leg_cost = _bus_fare_for(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
+        if leg_cost is not None:
+            total_bus_cost += leg_cost
+
+    if total_bus_cost > 0:
+        bus_cost_gbp = total_bus_cost
+        daily_cost_gbp = round(total_bus_cost, 2)
+    else:
+        daily_cost_gbp = None
+
+    return Commute(
+        destination_label="Lorena — Aldgate / City of London (Bus)",
+        destination_postcode=destination,
+        duration_minutes=duration_min,
+        daily_cost_gbp=daily_cost_gbp,
+        mode="transit",
+        cost_groups=(
+            CostGroup(
+                legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=duration_min or 0),),
+                cost=bus_cost_gbp,
+            ),
+        )
+        if bus_cost_gbp is not None
+        else (),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Transit — TfL via TransitRoute (London area)
 # ---------------------------------------------------------------------------
 
@@ -443,9 +593,7 @@ async def _tfl_transit_commute(origin_postcode: str, dest_postcode: str, has_car
 
     label = f"{origin_postcode} → {dest_postcode}"
     no_bus = await TransitRoute(origin_postcode, dest_postcode, label, park_and_ride=has_car).plan()
-    with_bus = await TransitRoute(
-        origin_postcode, dest_postcode, label, park_and_ride=has_car, allow_bus=True
-    ).plan()
+    with_bus = await TransitRoute(origin_postcode, dest_postcode, label, park_and_ride=has_car, allow_bus=True).plan()
 
     if no_bus.is_impossible and with_bus.is_impossible:
         return None
@@ -461,8 +609,6 @@ async def _tfl_transit_commute(origin_postcode: str, dest_postcode: str, has_car
         m = re.search(r"walk.*?\((\d+)m\)", no_bus_val.summary()[:60])
         walk_to_station = int(m.group(1)) if m else 0
         if walk_to_station >= settings.bus_walk_penalty_minutes:
-            from houses.enricher import _find_bus_alternative
-
             bus = await _find_bus_alternative(origin_postcode, dest_postcode)
             if bus is not None and bus.non_rail_cost() > 0:
                 bus_time = min(15, walk_to_station - settings.bus_walk_penalty_minutes)
@@ -556,22 +702,30 @@ async def get_commute(
         candidates.append(walk)
 
     # ── 2. Transit ─────────────────────────────────────────────────
-    transit: Commute | None = None
-    if _is_london_area(dest_postcode):
-        transit = await _tfl_transit_commute(origin_postcode, dest_postcode, has_car)
-        if transit is None:
-            failures.append("transit: TfL returned no route")
-    else:
-        try:
-            transit = await _google_transit_commute(origin_postcode, dest_postcode)
-            if transit is None and _GoogleRoutesClient._is_blocked():
-                failures.append("transit: Google Routes API rate limited (429)")
-        except ValueError as e:
-            failures.append(f"transit: {e}")
-            transit = None
+    # Try Google Routes first (covers all UK buses, unlike TfL which only
+    # knows about London).  Also try TfL for London destinations as it
+    # sometimes has more detailed London-specific routing.
+    google: Commute | None = None
+    tfl: Commute | None = None
 
-    if transit is not None:
-        candidates.append(transit)
+    try:
+        google = await _google_transit_commute(origin_postcode, dest_postcode)
+    except ValueError as e:
+        logger.warning("Google transit skipped: %s", e)
+        failures.append(f"google_transit: {e}")
+
+    # Google Routes covers all UK buses and returns cost data when BODS
+    # fares are available.  If Google already returned a route with pricing,
+    # there's no need to also call TfL — we save an API call.
+    google_has_pricing = google is not None and google.daily_cost_gbp is not None and google.daily_cost_gbp > 0
+    if not google_has_pricing and _is_london_area(dest_postcode):
+        try:
+            tfl = await _tfl_transit_commute(origin_postcode, dest_postcode, has_car)
+        except Exception as e:
+            logger.warning("TfL transit failed for %s → %s: %s", origin_postcode, dest_postcode, e)
+            failures.append(f"tfl_transit: {e}")
+
+    candidates.extend(c for c in (google, tfl) if c is not None)
 
     # ── 3. Driving ─────────────────────────────────────────────────
     if has_car and not dest_in_congestion:
@@ -586,7 +740,19 @@ async def get_commute(
     # ── 4. Pick fastest ────────────────────────────────────────────
     valid = [c for c in candidates if c.duration_minutes is not None]
     if valid:
-        return Attempt.succeeded(min(valid, key=lambda c: c.duration_minutes), "routing")
+        # Prefer priced routes over faster non-priced ones.
+        # Priority:
+        #   1. Has real cost data (non-None, non-zero)
+        #   2. Faster duration
+        # Google Routes may return the fastest transit option but often
+        # lacks bus/rail fare data (cost=None).  TfL has accurate
+        # pricing for London.  When we have both, the priced result is
+        # more useful — the NR fare fallback (applied later) can only
+        # approximate a rail fare and won't capture bus costs.
+        def _tiebreak(c: Commute) -> tuple[int, float]:
+            no_cost = 1 if (c.daily_cost_gbp is None or c.daily_cost_gbp == 0.0) else 0
+            return (no_cost, c.duration_minutes or 0)
+        return Attempt.succeeded(min(valid, key=_tiebreak), "routing")
 
     reason = "; ".join(failures) if failures else "no route available"
     return Attempt.impossible("routing", reason)

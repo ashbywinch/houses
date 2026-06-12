@@ -7,13 +7,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from httpx import Response
 
-from houses.attempt import Attempt
-from houses.commute import Commute
-from houses.config import settings
-from houses.attempt import Attempt
 from houses.commute import Commute, CommuteBreakdown
+from houses.config import settings
 from houses.property import CouncilTaxInfo, EnrichedProperty
 from houses.server import _run_backfill_enrichment, app
 from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS
@@ -774,7 +770,6 @@ class TestBackfillView:
         # Should return a tuple of (parking_cost, new_total_cost)
         assert result is not None, "_add_parking_cost should not crash"
         assert isinstance(result, tuple), f"Expected tuple, got {type(result)}"
-
 
     def test_lookup_derived_when_empty_with_address_and_postcode(self):
         """When lookup='' but address+postcode are provided, lookup should be

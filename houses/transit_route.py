@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 
@@ -9,11 +10,11 @@ import httpx
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.attempt import Attempt
+from houses.bus_journey import BusJourneyRegistry, cheapest_round_trip
 from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.enricher import (
     _apply_park_and_ride_to_journeys,
-    _lookup_bus_roundtrip_cost,
     _lookup_parking_cost,
     _next_weekday_date_params,
     _pick_best_journey,
@@ -21,8 +22,11 @@ from houses.enricher import (
 )
 from houses.location import _geocode_address, geocode
 from houses.retry import retry_async
+from houses.stations import Station
 
 logger = logging.getLogger(__name__)
+
+_bus_fares = BusJourneyRegistry()
 
 TFL_JOURNEY_URL = "https://api.tfl.gov.uk/Journey/JourneyResults"
 OUTCODES_IO_URL = "https://api.postcodes.io/outcodes"
@@ -131,10 +135,8 @@ class TransitRoute:
                     # Cache the 300 response itself so we don't hammer the API
                     # on subsequent requests — the cache-hit path above knows
                     # how to handle disambiguation results.
-                    try:
+                    with contextlib.suppress(Exception):
                         set_cached("GET", url, cache_params, None, e.response.json())
-                    except Exception:
-                        pass
                     data = await self._geocode_fallback(params)
                 elif e.response.status_code != 404:
                     logger.error("TfL API HTTP error for %s: %s", self._label, e)
@@ -220,14 +222,20 @@ class TransitRoute:
         for bus_leg in bus_legs:
             dep = bus_leg.get("departurePoint", {}).get("commonName", "")
             arr = bus_leg.get("arrivalPoint", {}).get("commonName", "")
-            leg_cost = _lookup_bus_roundtrip_cost(
-                dep,
-                arr,
-                dep_point=bus_leg.get("departurePoint", {}),
-                arr_point=bus_leg.get("arrivalPoint", {}),
+            dep_raw = bus_leg.get("departurePoint", {})
+            arr_raw = bus_leg.get("arrivalPoint", {})
+            dep_point = (
+                {"lat": dep_raw["lat"], "lon": dep_raw["lon"]}
+                if dep_raw.get("lat") else None
             )
-            if leg_cost is not None:
-                total_bus_cost += leg_cost
+            arr_point = (
+                {"lat": arr_raw["lat"], "lon": arr_raw["lon"]}
+                if arr_raw.get("lat") else None
+            )
+            fares = _bus_fares.fares_for_stops(dep, arr, dep_point=dep_point, arr_point=arr_point)
+            daily = cheapest_round_trip(fares, _bus_fares.national_max_single)
+            if daily is not None:
+                total_bus_cost += float(daily.amount)
 
         if total_bus_cost > 0:
             return round(tfl_non_bus_fare / 100 * 2 + total_bus_cost, 2)
@@ -275,8 +283,6 @@ class TransitRoute:
         current_legs: list[JourneyLeg] = []
         in_transit = False
 
-        from houses.enricher import _shorten_station
-
         for leg_idx, leg in enumerate(tfl_legs):
             mode_name = leg.get("mode", {}).get("name", "?")
             duration = leg.get("duration", 0)
@@ -296,13 +302,13 @@ class TransitRoute:
                 if not is_last:
                     next_mode = tfl_legs[leg_idx + 1].get("mode", {}).get("name", "")
                     if next_mode in ("national-rail", "tube", "bus", "dlr", "overground", "tram"):
-                        description = f"walk to {_shorten_station(arr_station)}"
+                        description = f"walk to {Station.short_name(arr_station)}"
                     else:
                         description = "walk"
                 else:
                     description = "walk"
             elif mode_name == "national-rail":
-                description = f"Train to {_shorten_station(arr_station)}" if arr_station else "Train"
+                description = f"Train to {Station.short_name(arr_station)}" if arr_station else "Train"
             elif mode_name in ("tube", "dlr", "overground", "tram"):
                 display_mode = {"tube": "line", "dlr": "DLR", "overground": "Overground", "tram": "Tram"}.get(
                     mode_name, mode_name
@@ -313,27 +319,32 @@ class TransitRoute:
                     if tube_line:
                         description = f"{tube_line} line"
                         if arr_station:
-                            description += f" to {_shorten_station(arr_station)}"
+                            description += f" to {Station.short_name(arr_station)}"
                     elif arr_station:
-                        description = f"{display_mode} to {_shorten_station(arr_station)}"
+                        description = f"{display_mode} to {Station.short_name(arr_station)}"
                     else:
                         description = display_mode
                 elif line_name:
-                    description = f"{line_name} to {_shorten_station(arr_station)}" if arr_station else line_name
+                    description = f"{line_name} to {Station.short_name(arr_station)}" if arr_station else line_name
                 elif arr_station:
-                    description = f"{display_mode} to {_shorten_station(arr_station)}"
+                    description = f"{display_mode} to {Station.short_name(arr_station)}"
                 else:
                     description = display_mode
             elif mode_name == "bus":
                 description = (
-                    f"bus({line_name}) to {_shorten_station(arr_station)}" if line_name and arr_station
-                    else f"bus to {_shorten_station(arr_station)}" if arr_station
-                    else f"bus({line_name})" if line_name
+                    f"bus({line_name}) to {Station.short_name(arr_station)}"
+                    if line_name and arr_station
+                    else f"bus to {Station.short_name(arr_station)}"
+                    if arr_station
+                    else f"bus({line_name})"
+                    if line_name
                     else "bus"
                 )
             else:
-                description = instr if instr else (
-                    f"{mode_name} to {_shorten_station(arr_station)}" if arr_station else mode_name
+                description = (
+                    instr
+                    if instr
+                    else (f"{mode_name} to {Station.short_name(arr_station)}" if arr_station else mode_name)
                 )
             jl = JourneyLeg(
                 mode=leg_mode,

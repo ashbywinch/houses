@@ -100,8 +100,8 @@ class TestPropertyLocationOutcode:
     @pytest.mark.asyncio
     async def test_full_address_resolves_to_sensible_area(self, _mock_http_requests):
         """Full address should resolve to coordinates near the property."""
-        from houses.location import PropertyLocation
         from houses.geo import GeoPoint
+        from houses.location import PropertyLocation
 
         # Register a custom handler returning Maidenhead coordinates
         # for the full street address.
@@ -110,10 +110,12 @@ class TestPropertyLocationOutcode:
             lambda request: Response(
                 200,
                 json={
-                    "features": [{
-                        "geometry": {"coordinates": [-0.73, 51.52]},
-                        "properties": {"label": "Shoppenhangers Road, Maidenhead, UK"},
-                    }]
+                    "features": [
+                        {
+                            "geometry": {"coordinates": [-0.73, 51.52]},
+                            "properties": {"label": "Shoppenhangers Road, Maidenhead, UK"},
+                        }
+                    ]
                 },
             ),
         )

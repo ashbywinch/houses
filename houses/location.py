@@ -61,15 +61,49 @@ class PropertyLocation:
     address: str = ""
     coordinates: Attempt[GeoPoint] = Attempt.pending()
 
+    @staticmethod
+    def _upgrade_address(address: str, postcode: str) -> str:
+        """Replace a trailing outcode in *address* with the full *postcode*.
+
+        When the address ends with an outcode (e.g. ``"Grand Drive, London, SW20"``)
+        and we have a full postcode (e.g. ``"SW20 9NB"``), this returns the address
+        with the outcode replaced: ``"Grand Drive, London, SW20 9NB"``.
+        This prevents ambiguous street names from geocoding to the wrong location.
+
+        Returns the original address unchanged if:
+        - *postcode* is empty or itself an outcode
+        - The address doesn't end with what looks like a trailing postcode
+        - The trailing part is already a full postcode (not just an outcode)
+        """
+        if not address or not postcode or _OUTCODE_RE.match(postcode.strip().upper()):
+            return address
+        m = _END_PC_RE.search(address)
+        if not m:
+            return address
+        trailing = m.group(0).strip(", ").strip()
+        if not _OUTCODE_RE.match(trailing.upper()):
+            # Trailing part is already a full postcode or not a postcode at all
+            return address
+        base = _END_PC_RE.sub("", address).strip()
+        return f"{base}, {postcode}"
+
     async def resolve(self) -> PropertyLocation:
         """Resolve address first, then postcode.
+
+        When the address ends with an outcode but we have a full postcode,
+        the address is upgraded to include the full postcode before geocoding
+        (see ``_upgrade_address``).  This prevents ambiguous street names
+        (e.g. ``"Grand Drive, London, SW20"`` — there are many Grand Drives
+        across UK outcodes) from returning wrong coordinates.
 
         Only makes API calls when coordinates are still pending.
         Returns a new ``PropertyLocation`` with ``coordinates`` populated.
         """
         if not self.coordinates.is_pending:
             return self
-        result = await _geocode_address(self.address)
+
+        address = self._upgrade_address(self.address, self.postcode)
+        result = await _geocode_address(address)
         if result.is_succeeded:
             return replace(self, coordinates=result)
         result = await _geocode_postcode(self.postcode)
@@ -229,37 +263,46 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
             return Attempt.succeeded(cached, "geocode_address")
         return Attempt.impossible("geocode_address", "not found (cached)")
 
-    # Try Google Maps Geocoding first (best accuracy for UK streets)
+    # ── 1: Google Maps Geocoding ──────────────────────────────────
     google_key = settings.google_maps_api_key
     if google_key:
         googlegeocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
         params = {"address": f"{address}, UK", "key": google_key}
-        cached = get_cached("GET", googlegeocode_url, params, None)
+        cache_params = {"address": f"{address}, UK"}
+        cached = get_cached("GET", googlegeocode_url, cache_params, None)
         if cached is not None:
             data = cached
             if data.get("status") == "OK" and data.get("results"):
                 loc = data["results"][0]["geometry"]["location"]
-                lat, lng = loc["lat"], loc["lng"]
-                gp = GeoPoint(lat, lng)
+                gp = GeoPoint(loc["lat"], loc["lng"])
                 _geo_cache[cache_key] = gp
+                logger.info("Geocoded '%s' via google-maps (cached)", address)
                 return Attempt.succeeded(gp, "google-maps")
+            logger.warning(
+                "Google Maps cached result for '%s' rejected: status=%s msg=%s",
+                address, data.get("status"), data.get("error_message", ""),
+            )
         else:
             try:
-                async with cached_async_client(timeout=10.0) as client:
-                    resp = await client.get(googlegeocode_url, params=params)
-                    resp.raise_for_status()
-                    data = resp.json()
-                    set_cached("GET", googlegeocode_url, params, None, data)
-                    if data.get("status") == "OK" and data.get("results"):
-                        loc = data["results"][0]["geometry"]["location"]
-                        lat, lng = loc["lat"], loc["lng"]
-                        gp = GeoPoint(lat, lng)
-                        _geo_cache[cache_key] = gp
-                        return Attempt.succeeded(gp, "google-maps")
-            except Exception:
-                logger.warning("Google Maps geocoding failed for %s", address)
+                    async with cached_async_client(timeout=10.0) as client:
+                        resp = await client.get(googlegeocode_url, params=params)
+                        resp.raise_for_status()
+                        data = resp.json()
+                        if data.get("status") == "OK" and data.get("results"):
+                            set_cached("GET", googlegeocode_url, cache_params, None, data)
+                            loc = data["results"][0]["geometry"]["location"]
+                            gp = GeoPoint(loc["lat"], loc["lng"])
+                            _geo_cache[cache_key] = gp
+                            logger.info("Geocoded '%s' via google-maps", address)
+                            return Attempt.succeeded(gp, "google-maps")
+                        logger.warning(
+                            "Google Maps API response for '%s': status=%s msg=%s",
+                            address, data.get("status"), data.get("error_message", ""),
+                        )
+            except Exception as exc:
+                logger.warning("Google Maps geocoding failed for '%s': %s", address, exc)
 
-    # Fallback to ORS Pelias (skip if exhausted)
+    # ── 2: ORS Pelias ─────────────────────────────────────────────
     api_key = settings.ors_api_key
     if api_key and not _geo_state.ors_geo_exhausted:
         params = {"text": f"{address}, UK", "size": 1}
@@ -271,6 +314,7 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
                 lng, lat = features[0]["geometry"]["coordinates"]
                 gp = GeoPoint(lat, lng)
                 _geo_cache[cache_key] = gp
+                logger.info("Geocoded '%s' via ors-pelias (cached) → (%s, %s)", address, f"{lat:.4f}", f"{lng:.4f}")
                 return Attempt.succeeded(gp, "ors-pelias")
         else:
             try:
@@ -293,15 +337,18 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
                         lng, lat = features[0]["geometry"]["coordinates"]
                         gp = GeoPoint(lat, lng)
                         _geo_cache[cache_key] = gp
+                        logger.info("Geocoded '%s' via ors-pelias → (%s, %s)", address, f"{lat:.4f}", f"{lng:.4f}")
                         return Attempt.succeeded(gp, "ors-pelias")
+                    logger.warning("ORS returned no features for '%s'", address)
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code in (403, 429):
                     _geo_state.ors_geo_exhausted = True
-                logger.warning("ORS geocoding failed for %s (%s)", address, exc.response.status_code)
-            except Exception:
-                logger.warning("ORS geocoding failed for %s", address)
+                logger.warning("ORS geocoding failed for '%s': HTTP %s", address, exc.response.status_code)
+            except Exception as exc:
+                logger.warning("ORS geocoding failed for '%s': %s", address, exc)
 
-    # Final fallback: Nominatim (free, no key, works for UK)
+    # ── 3: Nominatim (free, no key, works for UK) ─────────────────
+    logger.info("Falling back to Nominatim for '%s'", address)
     return await _geocode_nominatim(address)
 
 

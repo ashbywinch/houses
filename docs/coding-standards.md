@@ -57,13 +57,6 @@ Name the class after the domain concept the clump represents, not after its shap
 
 Functionality that is tightly coupled to the contents of a class should be a member function of that class — serialization, computed properties, and validation are good candidates. Orchestration logic that coordinates across multiple data types still belongs in dedicated modules (e.g., `enricher.py` orchestrates transit + schools + petrol into an `EnrichedProperty`). The distinction is whether the logic changes when that class's structure changes, or when the pipeline between classes changes.
 
-### Prefer Flat Structure
-
-Keep modules flat in the `houses/` directory rather than nesting them in subdirectories. Deep nesting hides information and makes imports harder to follow.
-
-- `walkability.py` not `enrichment/walkability/walkability.py`
-- `town_desc.py` not `enrichment/town/town_desc.py`
-
 ## Principles
 
 ### Fail Fast

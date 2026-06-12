@@ -182,9 +182,6 @@ def col_index(header: str) -> int:
     raise ValueError(f"Column '{header}' not found in COLUMN_HEADERS")
 
 
-
-
-
 # Index positions of user-owned columns (must never be written by the server)
 _USER_COL_INDICES = frozenset(col_index(h) for h in _USER_COLUMNS)
 

@@ -5,7 +5,7 @@ import logging
 import re
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -72,6 +72,11 @@ _OUTCODE_RE = re.compile(
     r"\b[A-Z]{1,2}[0-9][A-Z0-9]?\b",
     re.IGNORECASE,
 )
+
+
+def _is_outcode(s: str) -> bool:
+    """True when *s* is a bare outcode (e.g. "SW20", not "SW20 9NB")."""
+    return bool(re.match(r"^[A-Z]{1,2}[0-9][A-Z0-9]?$", s.strip().upper()))
 
 
 def extract_postcode(address: str) -> str:
@@ -199,8 +204,8 @@ async def get_property(rid: str):
 async def upsert_property(
     payload: Property | None = None,
     no_write: bool = Query(default=False),
-    fields: list[str] | None = Query(default=None),
-    rids: str | None = Query(default=None),
+    fields: Annotated[list[str] | None, Query()] = None,
+    rids: Annotated[str | None, Query()] = None,
 ) -> JSONResponse | StreamingResponse:
     """Upsert a property — enrich it and write to the sheet.
 
@@ -226,10 +231,7 @@ async def upsert_property(
                 try:
                     sh = gclient.open_by_key(settings.sheet_id)
                     ws = sh.worksheet("Properties Data")
-                    if any(
-                        row[col_index("Rightmove ID")].strip() == rid
-                        for row in ws.get_all_values()[1:]
-                    ):
+                    if any(row[col_index("Rightmove ID")].strip() == rid for row in ws.get_all_values()[1:]):
                         return JSONResponse(
                             content={
                                 "status": "error",
@@ -260,9 +262,15 @@ async def upsert_property(
 
         enabled = set(fields) if fields else None
         enriched = await _run_enrichment(
-            url=payload.url, address=address, postcode=postcode, lookup=lookup,
-            bedrooms=payload.bedrooms, price=payload.price, enabled=enabled,
-            actual_latitude=payload.actual_latitude, actual_longitude=payload.actual_longitude,
+            url=payload.url,
+            address=address,
+            postcode=postcode,
+            lookup=lookup,
+            bedrooms=payload.bedrooms,
+            price=payload.price,
+            enabled=enabled,
+            actual_latitude=payload.actual_latitude,
+            actual_longitude=payload.actual_longitude,
         )
 
         row_url = None
@@ -283,14 +291,18 @@ async def upsert_property(
 
     # ── Batch mode ────────────────────────────────────────────────
     if not settings.sheet_id:
+
         async def _empty():
             yield json.dumps({"status": "ok", "note": "Sheets not configured", "results": []}) + "\n"
+
         return StreamingResponse(_empty(), media_type="text/plain")
 
     gclient = get_client()
     if gclient is None:
+
         async def _empty():
             yield json.dumps({"status": "ok", "note": "Sheets not configured", "results": []}) + "\n"
+
         return StreamingResponse(_empty(), media_type="text/plain")
 
     return StreamingResponse(_batch_stream(gclient, no_write, fields, rids), media_type="text/plain")
@@ -349,7 +361,7 @@ async def _batch_stream(
     processed_rids: set[str] = set()
     total = len(view_data) - 1
 
-    yield json.dumps({"type": "start", "total": total, "no_write": no_write, "force": True, "rids": rids}) + "\n"
+    yield _json_line({"type": "start", "total": total, "no_write": no_write, "force": True, "rids": rids})
 
     from houses.sheets import row_values as _row_values
 
@@ -364,7 +376,7 @@ async def _batch_stream(
             yield _json_line({"type": "row", "row": row_idx, "rid": rid, "status": "skipped", "reason": "not in rids"})
             continue
         if rid in processed_rids:
-            yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "skipped", "reason": "duplicate"}) + "\n"
+            yield _json_line({"type": "row", "row": row_idx, "rid": rid, "status": "skipped", "reason": "duplicate"})
             continue
         processed_rids.add(rid)
 
@@ -375,19 +387,41 @@ async def _batch_stream(
         data_row_num = row_idx if (existing_rid == rid or not existing_rid) else 0
 
         if data_row_num == 0:
-            # New property
-            yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "enriching"}) + "\n"
             new_pc = extract_postcode(address) or ""
-            enriched = await _run_backfill_enrichment(url=url, address=address, postcode=new_pc, lookup=new_pc, bedrooms=None, price=None, enabled=None)
+            enriched = await _run_backfill_enrichment(
+                url=url,
+                address=address,
+                postcode=new_pc,
+                lookup=new_pc,
+                bedrooms=None,
+                price=None,
+                enabled=None,
+            )
             flat = _row_values(enriched)
             if no_write:
-                yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "would_create", "enriched": _asdict_serializable(enriched), "flat": flat}) + "\n"
+                yield _json_line(
+                    {
+                        "type": "row",
+                        "row": row_idx,
+                        "rid": rid,
+                        "status": "would_create",
+                        "enriched": _asdict_serializable(enriched),
+                        "flat": flat,
+                    }
+                )
             else:
                 row_url_result = await write_enriched_row(enriched)
-                yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "created", "row_url": row_url_result}) + "\n"
+                yield _json_line(
+                    {
+                        "type": "row",
+                        "row": row_idx,
+                        "rid": rid,
+                        "status": "created",
+                        "row_url": row_url_result,
+                    }
+                )
             continue
 
-        # Existing property
         empty_headers = [h for h, ci in enriched_col_indices.items() if ci >= len(data_row) or not data_row[ci].strip()]
 
         if user_fields:
@@ -399,7 +433,9 @@ async def _batch_stream(
             empty_headers = list(set(empty_headers) | set(forced))
 
         if not empty_headers:
-            yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "skipped", "reason": "already fully enriched"}) + "\n"
+            yield _json_line(
+                {"type": "row", "row": row_idx, "rid": rid, "status": "skipped", "reason": "already fully enriched"},
+            )
             continue
 
         needed = set()
@@ -418,25 +454,43 @@ async def _batch_stream(
             needed.discard("council_tax")
 
         if not needed:
-            yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "skipped", "reason": "no fields"}) + "\n"
+            yield _json_line({"type": "row", "row": row_idx, "rid": rid, "status": "skipped", "reason": "no fields"})
             continue
 
-        yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "enriching", "fields": sorted(needed)}) + "\n"
-        enriched = await _run_backfill_enrichment(url=url, address=addr, postcode=pc, lookup=addr if _is_outcode(pc) else pc, bedrooms=None, price=None, enabled=needed if needed else None)
+        yield _json_line({"type": "row", "row": row_idx, "rid": rid, "status": "enriching", "fields": sorted(needed)})
+        enriched = await _run_backfill_enrichment(
+            url=url,
+            address=addr,
+            postcode=pc,
+            lookup=addr if _is_outcode(pc) else pc,
+            bedrooms=None,
+            price=None,
+            enabled=needed if needed else None,
+        )
 
         if no_write:
             flat = _row_values(enriched)
             status = "would_create" if not existing_rid else "would_update"
-            yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": status, "fields": sorted(needed), "enriched": _asdict_serializable(enriched), "flat": flat}) + "\n"
+            yield _json_line(
+                {
+                    "type": "row",
+                    "row": row_idx,
+                    "rid": rid,
+                    "status": status,
+                    "fields": sorted(needed),
+                    "enriched": _asdict_serializable(enriched),
+                    "flat": flat,
+                }
+            )
         else:
             _write_backfill_cells(sh, data_ws, data_row_num, data_headers, data_row, enriched, empty_headers)
-            yield json.dumps({"type": "row", "row": row_idx, "rid": rid, "status": "updated", "fields": sorted(needed)}) + "\n"
+            yield _json_line({"type": "row", "row": row_idx, "rid": rid, "status": "updated", "fields": sorted(needed)})
 
 
 @app.post("/properties/compare", response_model=None)
 async def compare_properties(
-    rids: str | None = Query(default=None),
-    fields: list[str] | None = Query(default=None),
+    rids: Annotated[str | None, Query()] = None,
+    fields: Annotated[list[str] | None, Query()] = None,
 ) -> StreamingResponse:
     """Compare current sheet data with a fresh no-write re-enrichment.
 
@@ -455,9 +509,7 @@ async def compare_properties(
     enriched_rows: dict[str, dict[str, str]] = {}
     from houses.sheets import row_values
 
-    for view_row_idx, data_row in enumerate(
-        [list(p.values()) for p in props], 2
-    ):
+    for _view_row_idx, data_row in enumerate([list(p.values()) for p in props], 2):
         rid = data_row[col_index("Rightmove ID")] if col_index("Rightmove ID") < len(data_row) else ""
         if not rid:
             continue
@@ -466,13 +518,19 @@ async def compare_properties(
 
         address = data_row[col_index("Address")] if col_index("Address") < len(data_row) else ""
         postcode = data_row[col_index("Postcode")] if col_index("Postcode") < len(data_row) else ""
-        url = data_row[col_index("Rightmove URL")] if col_index("Rightmove URL") < len(data_row) else (
-            f"https://www.rightmove.co.uk/properties/{rid}"
+        url = (
+            data_row[col_index("Rightmove URL")]
+            if col_index("Rightmove URL") < len(data_row)
+            else (f"https://www.rightmove.co.uk/properties/{rid}")
         )
 
         enriched = await _run_backfill_enrichment(
-            url=url, address=address, postcode=postcode,
-            lookup=address, bedrooms=None, price=None,
+            url=url,
+            address=address,
+            postcode=postcode,
+            lookup=None,  # _run_enrichment will compute best lookup
+            bedrooms=None,
+            price=None,
             enabled=set(fields) if fields else None,
         )
         enriched_rows[rid] = row_values(enriched)
@@ -566,7 +624,37 @@ async def _run_enrichment(
             price = scraped["price"]
 
     if not lookup:
-        lookup = address if _is_outcode(postcode) else postcode
+        # Choose the most specific location string for routing APIs.
+        #
+        # A full street address (e.g. "163 Grand Drive, London, SW20 9NB")
+        # is better than a bare postcode centroid because Google Routes and
+        # TfL can resolve it to the exact property, not just the centre of
+        # the postcode area.  This matters for first/last-leg walk distances.
+        #
+        # However, an address WITHOUT a postcode (e.g. "Some Road, Maidenhead")
+        # can be ambiguous — there could be a "Some Road" in many towns.  In
+        # that case the full postcode is more precise.
+        #
+        # Priority:
+        #   1. Address + full postcode (address ends with outcode → upgrade)
+        #   2. Full postcode (more precise than bare address without one)
+        #   3. Address as-is (fallback when only an outcode or no postcode)
+        #   4. Outcode or empty (last resort)
+        if address and postcode and not _is_outcode(postcode):
+            upgraded = PropertyLocation._upgrade_address(address, postcode)
+            lookup = upgraded if upgraded != address else postcode  # noqa: SIM108 — see comments below
+            # ^ When upgraded differs from the original address, it means the
+            # address had a trailing outcode (e.g. "Grand Drive, London, SW20"
+            # → "Grand Drive, London, SW20 9NB"), and the upgraded version is
+            # the most precise string for routing APIs.  When it doesn't differ
+            # (e.g. "Some Road, Maidenhead" has no postcode component at all),
+            # the full postcode is more precise than the bare street name.
+        elif address:
+            lookup = address
+        elif postcode:
+            lookup = postcode
+        else:
+            lookup = ""
 
     simon = Commute(destination_label="Simon (London)", destination_postcode=postcode)
     lorena = Commute(destination_label="Lorena (London)", destination_postcode=postcode)
@@ -609,14 +697,14 @@ async def _run_enrichment(
         primary = await find_nearest(postcode, child_age=7, address=address, requirement=SchoolGender.BOYS)
         primary_commute = await compute_school_commute(postcode, primary) if primary else None
         primary_dist = (
-            round(loc_coords.distance_km_to(primary.coords), 2)
-            if primary and primary.coords and loc_coords else None
+            round(loc_coords.distance_km_to(primary.coords), 2) if primary and primary.coords and loc_coords else None
         )
         secondary = await find_nearest(postcode, child_age=12, address=address, requirement=SchoolGender.BOYS)
         secondary_commute = await compute_school_commute(postcode, secondary) if secondary else None
         secondary_dist = (
             round(loc_coords.distance_km_to(secondary.coords), 2)
-            if secondary and secondary.coords and loc_coords else None
+            if secondary and secondary.coords and loc_coords
+            else None
         )
     if enabled is None or {"walk_time", "amenities"} & enabled:
         coords = location.coordinates.value_or_none()
