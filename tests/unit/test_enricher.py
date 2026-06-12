@@ -1028,7 +1028,6 @@ class TestBusFallback:
 
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
         monkeypatch.setattr("houses.routing._find_bus_alternative", mock_bus)
-        monkeypatch.setattr("houses.routing._google_transit_commute", _disabled)
         monkeypatch.setattr("houses.routing._walk_commute", _disabled)
 
         result = (await compute_lorena_commute("GU52")).get()
@@ -1078,13 +1077,11 @@ class TestBusFallback:
         async def mock_bus(*_):
             return bus_route
 
-        monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
-        monkeypatch.setattr("houses.routing._find_bus_alternative", mock_bus)
-
         async def _none(*_, **__):
             return None
 
-        monkeypatch.setattr("houses.routing._google_transit_commute", _none)
+        monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
+        monkeypatch.setattr("houses.routing._find_bus_alternative", mock_bus)
         monkeypatch.setattr("houses.routing._walk_commute", _none)
 
         result = (await compute_lorena_commute("GU52")).get()
@@ -1096,6 +1093,9 @@ class TestBusFallback:
     async def test_skips_bus_fallback_when_tfl_route_has_bus(self, monkeypatch):
         from houses.commute import Commute
         from houses.enricher import compute_lorena_commute
+
+        async def _none(*_, **__):
+            return None
 
         no_bus = Commute(
             destination_label="L",
@@ -1115,11 +1115,6 @@ class TestBusFallback:
 
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
         monkeypatch.setattr("houses.routing._find_bus_alternative", lambda *_: None)
-
-        async def _none(*_, **__):
-            return None
-
-        monkeypatch.setattr("houses.routing._google_transit_commute", _none)
         monkeypatch.setattr("houses.routing._walk_commute", _none)
 
         result = (await compute_lorena_commute("GU52")).get()

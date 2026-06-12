@@ -11,8 +11,6 @@ import logging
 import re
 
 import httpx
-import pint
-
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.attempt import Attempt
 from houses.bus_journey import BusJourneyRegistry, cheapest_round_trip
@@ -277,245 +275,8 @@ async def _walk_commute(origin_postcode: str, dest_postcode: str) -> Commute | N
     )
 
 
-# ---------------------------------------------------------------------------
-# Transit — Google Routes transit mode (non-London areas)
-# ---------------------------------------------------------------------------
-
-
-class _CostGroupBuilder:
-    """Builds ``CostGroup`` / ``JourneyLeg`` objects from Google Routes transit steps.
-
-    Accumulates consecutive walk seconds, groups bus legs with their fares,
-    and flushes them into cost groups when a non-walk/non-bus step is encountered.
-
-    Usage::
-
-        builder = _CostGroupBuilder()
-        for step in steps:
-            if mode == "WALK":
-                builder.add_walk(seconds)
-            elif mode == "TRANSIT" and bus:
-                builder.add_bus_leg(leg, cost)
-            elif mode == "TRANSIT" and train:
-                builder.flush_walk(); builder.flush_bus()
-                builder.cost_groups.append(CostGroup(...))
-        builder.flush_walk()
-        builder.flush_bus()
-        return Commute(cost_groups=tuple(builder.cost_groups), ...)
-    """
-
-    _MIN_WALK_SECONDS = 10  # ignore sub-10s walks (noise)
-
-    def __init__(self) -> None:
-        self._ureg = pint.UnitRegistry()
-        self.cost_groups: list[CostGroup] = []
-        self.total_bus_cost: float = 0.0
-        self.total_fare: float = 0.0  # non-bus transit fares from Google's transitFare
-        self._current_bus_legs: list[JourneyLeg] = []
-        self._current_walk: pint.Quantity = self._ureg.Quantity(0, "seconds")
-
-    # ------------------------------------------------------------------
-    # Public
-    # ------------------------------------------------------------------
-
-    def add_walk(self, seconds: int) -> None:
-        """Record a walk step.  Consecutive walks are accumulated."""
-        self.flush_bus()
-        self._current_walk += self._ureg.Quantity(seconds, "seconds")
-
-    def flush_walk(self, end_station: str = "") -> None:
-        """Emit a walk cost group if enough time has accumulated.
-
-        Args:
-            end_station: The destination of this walk leg (e.g. the next
-                transit stop's name).  When set, ``_render_leg_description``
-                shows ``"walk to {station}"`` instead of bare ``"walk"``.
-        """
-        sec = self._current_walk.to("seconds").magnitude
-        if sec > self._MIN_WALK_SECONDS:
-            dur_min = max(1, round(sec / 60))
-            self.cost_groups.append(
-                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=dur_min, end_station=end_station),))
-            )
-        self._current_walk = self._ureg.Quantity(0, "seconds")
-
-    def add_bus_leg(self, leg: JourneyLeg, cost: float | None) -> None:
-        """Record a bus leg with its fare.  Bus legs are grouped together."""
-        if cost is not None:
-            self.total_bus_cost += cost
-        self._current_bus_legs.append(leg)
-
-    def flush_bus(self) -> None:
-        """Emit a bus cost group with the accumulated fare."""
-        if self._current_bus_legs:
-            bus_cost = self.total_bus_cost if self.total_bus_cost > 0 else None
-            self.cost_groups.append(CostGroup(legs=tuple(self._current_bus_legs), cost=bus_cost))
-            self._current_bus_legs.clear()
-
-
-async def _google_transit_commute(
-    origin_postcode: str,
-    dest_postcode: str,
-    *,
-    allow_bus: bool = True,
-) -> Commute | None:
-    """Transit routing via Google Routes API.
-
-    Parses all transit steps (walk, bus, train, tube) from the Google Routes
-    response into ``CostGroup`` / ``JourneyLeg`` objects so the route summary
-    is populated.  Also looks up BODS bus fares for any bus legs.
-
-    When ``allow_bus=False``, the API is asked to exclude bus via
-    ``transitPreferences.allowedTravelModes`` — the result will use
-    rail/subway/tram/walking only.
-
-    Raises:
-        ValueError: If the Google Maps API key is not configured.
-    """
-    transit_prefs: dict = {"routingPreference": "less_walking"}
-    if not allow_bus:
-        transit_prefs["allowedTravelModes"] = ["SUBWAY", "TRAIN", "LIGHT_RAIL", "RAIL"]
-
-    body = {
-        "origin": {"address": origin_postcode},
-        "destination": {"address": dest_postcode},
-        "travelMode": "TRANSIT",
-        "transitPreferences": transit_prefs,
-        "computeAlternativeRoutes": False,
-    }
-    field_mask = (
-        "routes.duration,routes.legs.steps.staticDuration,routes.legs.steps.travelMode,routes.legs.steps.transitDetails"
-    )
-    data = await _google_routes_post(body, field_mask, timeout=15.0)
-    if data is None:
-        return None
-
-    routes = data.get("routes", [])
-    if not routes:
-        return None
-
-    duration_sec = int(routes[0].get("duration", "0s").rstrip("s"))
-    duration_min = round(duration_sec / 60)
-    leg = routes[0].get("legs", [{}])[0]
-    steps = leg.get("steps", [])
-
-    # ── Build cost groups from ALL transit steps ───────────────────
-    builder = _CostGroupBuilder()
-    for s in steps:
-        mode = s.get("travelMode", "WALK")
-        dur_raw: str = s.get("staticDuration", "0s")
-        dur = int(dur_raw.rstrip("s"))
-        dur_min = round(dur / 60)
-
-        if mode == "WALK":
-            builder.add_walk(dur)
-        elif mode == "TRANSIT":
-            td = s.get("transitDetails", {})
-            dep_stop = td.get("stopDetails", {}).get("departureStop", {}).get("name", "")
-            builder.flush_walk(end_station=dep_stop)
-            vtype = td.get("transitLine", {}).get("vehicle", {}).get("type", "")
-            arr_stop = td.get("stopDetails", {}).get("arrivalStop", {}).get("name", "")
-            line = td.get("transitLine", {}).get("nameShort", "") or td.get("transitLine", {}).get("name", "")
-
-            if vtype == "BUS":
-                # Look up BODS bus fare
-                dep_point = td.get("stopDetails", {}).get("departureStop", {}).get("location", {}).get("latLng", {})
-                arr_point = td.get("stopDetails", {}).get("arrivalStop", {}).get("location", {}).get("latLng", {})
-                dp = {"lat": dep_point.get("latitude"), "lon": dep_point.get("longitude")} if dep_point else None
-                ap = {"lat": arr_point.get("latitude"), "lon": arr_point.get("longitude")} if arr_point else None
-                leg_cost = _bus_fare_for(dep_stop, arr_stop, dep_point=dp, arr_point=ap)
-                builder.add_bus_leg(
-                    JourneyLeg(
-                        mode=LegMode.BUS,
-                        duration_minutes=dur_min,
-                        start_station=dep_stop,
-                        line_name=line,
-                        end_station=arr_stop,
-                    ),
-                    leg_cost,
-                )
-            else:
-                builder.flush_bus()
-                # Extract transit fare from Google response (tube/train)
-                fare_info = td.get("transitFare", {})
-                if fare_info:
-                    units = float(fare_info.get("units", 0))
-                    nanos = fare_info.get("nanos", 0) / 1_000_000_000
-                    builder.total_fare += round(units + nanos, 2)
-                mode_enum = {
-                    "RAIL": LegMode.TRAIN,
-                    "TRAIN": LegMode.TRAIN,
-                    "HEAVY_RAIL": LegMode.TRAIN,
-                    "TRAM": LegMode.TRAIN,
-                    "SUBWAY": LegMode.TUBE,
-                    "METRO": LegMode.TUBE,
-                }.get(vtype, LegMode.TRAIN)
-                builder.cost_groups.append(
-                    CostGroup(
-                        legs=(
-                            JourneyLeg(
-                                mode=mode_enum,
-                                duration_minutes=dur_min,
-                                start_station=dep_stop,
-                                line_name=line,
-                                end_station=arr_stop,
-                            ),
-                        )
-                    )
-                )
-        # Other modes (e.g. BICYCLE) — ignore
-
-    builder.flush_walk()
-    builder.flush_bus()
-
-    # ── Google may omit the walk to the first transit stop when the
-    # origin is near the station in Google's routing graph, even if
-    # the actual walking distance is non-trivial.  Detect this and
-    # compute the walking leg properly via the Google Routes walking API.
-    if steps and steps[0].get("travelMode") == "TRANSIT":
-        td = steps[0].get("transitDetails", {})
-        dep_stop = td.get("stopDetails", {}).get("departureStop", {})
-        dep_latlng = dep_stop.get("location", {}).get("latLng", {})
-        if dep_latlng.get("latitude") is not None and dep_latlng.get("longitude") is not None:
-            walk_time = await _walk_to_station_minutes(
-                origin_postcode,
-                dep_latlng["latitude"],
-                dep_latlng["longitude"],
-            )
-            if walk_time is not None and walk_time > 0:
-                dep_name = dep_stop.get("name", "station")
-                walk_leg = JourneyLeg(
-                    mode=LegMode.WALK,
-                    duration_minutes=walk_time,
-                    end_station=dep_name,
-                )
-                builder.cost_groups.insert(0, CostGroup(legs=(walk_leg,)))
-                duration_min += walk_time
-
-    # Google's ``allowedTravelModes`` filter is a preference, not a strict
-    # constraint — it may still return bus legs.  When bus is disallowed,
-    # reject the route so the caller falls back to TfL / driving.
-    if not allow_bus:
-        for cg in builder.cost_groups:
-            for leg in cg.legs:
-                if leg.mode == LegMode.BUS:
-                    logger.debug(
-                        "Google transit rejected: bus leg '%s' found despite allow_bus=False",
-                        leg.line_name or "?",
-                    )
-                    return None
-
-    total_cost = builder.total_bus_cost + builder.total_fare
-    daily_cost_gbp = round(total_cost, 2) if total_cost > 0 else None
-
-    return Commute(
-        destination_label="",
-        destination_postcode=dest_postcode,
-        duration_minutes=duration_min,
-        daily_cost_gbp=daily_cost_gbp,
-        mode=CommuteMode.TRANSIT,
-        cost_groups=tuple(builder.cost_groups),
-    )
+# (Google transit full routing removed — TfL covers London; bus augmentation
+# is handled by _find_bus_alternative below.)
 
 
 # ---------------------------------------------------------------------------
@@ -813,30 +574,19 @@ async def get_commute(
         candidates.append(walk)
 
     # ── 2. Transit ─────────────────────────────────────────────────
-    # Try Google Routes first (covers all UK transit).  When the
-    # traveler has a car we exclude bus — they can drive to the
-    # station instead (park-and-ride).
-    google: Commute | None = None
+    # TfL handles London transit with full pricing (tap-in/tap-out).
+    # For non-London areas, no transit API is available.
     tfl: Commute | None = None
 
-    try:
-        google = await _google_transit_commute(origin_postcode, dest_postcode, allow_bus=not has_car)
-    except ValueError as e:
-        logger.warning("Google transit skipped: %s", e)
-        failures.append(f"google_transit: {e}")
-
-    # Google Routes may return fare data for tube/train legs (via
-    # transitDetails.transitFare).  When Google has pricing (bus, transit
-    # fare, or parking), use it and skip TfL.
-    google_has_pricing = google is not None and google.daily_cost_gbp is not None and google.daily_cost_gbp > 0
-    if not google_has_pricing and _is_london_area(dest_postcode):
+    if _is_london_area(dest_postcode):
         try:
             tfl = await _tfl_transit_commute(origin_postcode, dest_postcode, has_car)
         except Exception as e:
             logger.warning("TfL transit failed for %s → %s: %s", origin_postcode, dest_postcode, e)
             failures.append(f"tfl_transit: {e}")
 
-    candidates.extend(c for c in (google, tfl) if c is not None)
+    if tfl is not None:
+        candidates.append(tfl)
 
     # ── 3. Driving ─────────────────────────────────────────────────
     if has_car and not dest_in_congestion:
