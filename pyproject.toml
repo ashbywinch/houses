@@ -48,6 +48,7 @@ markers = [
     "e2e: tests that hit real external APIs (skipped unless make test-all)",
 ]
 addopts = ["-m", "not e2e"]
+asyncio_mode = "auto"
 
 [tool.uv.sources]
 uk-property-apis = { git = "https://github.com/kubilay-yavuz/uk-property-intel.git", subdirectory = "packages/apis" }
