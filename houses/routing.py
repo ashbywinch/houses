@@ -210,14 +210,26 @@ def _is_london_area(postcode: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-async def _walk_to_station_minutes(origin_postcode: str, lat: float, lng: float) -> int | None:
-    """Walking duration (minutes) from a postcode to a lat/lng point.
+async def _walk_to_station_minutes(
+    origin_postcode: str,
+    lat: float,
+    lng: float,
+    *,
+    origin_latlng: tuple[float, float] | None = None,
+) -> int | None:
+    """Walking duration (minutes) from a postcode or coordinate to a lat/lng point.
 
-    Uses Google Routes walking mode.  Returns ``None`` if the API call
-    fails or returns no route.
+    Uses Google Routes walking mode.  When ``origin_latlng`` is provided, it is
+    used as the origin (a precise coordinate) instead of ``origin_postcode``
+    which relies on geocoding the address string.  Returns ``None`` if the
+    API call fails or returns no route.
     """
+    if origin_latlng is not None:
+        origin = {"location": {"latLng": {"latitude": origin_latlng[0], "longitude": origin_latlng[1]}}}
+    else:
+        origin = {"address": origin_postcode}
     body = {
-        "origin": {"address": origin_postcode},
+        "origin": origin,
         "destination": {"location": {"latLng": {"latitude": lat, "longitude": lng}}},
         "travelMode": "WALK",
     }

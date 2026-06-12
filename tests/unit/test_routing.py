@@ -743,30 +743,37 @@ class TestGoogleTransitMissingWalk:
 
     @pytest.mark.asyncio
     async def test_walk_to_ascot_gives_2_min_not_19(self, monkeypatch):
-        """_walk_to_station_minutes('Sunningdale, Ascot, SL5', ...) returns
-        2 min because Google geocodes the full address near Ascot station.
-        The walk should be ~19 min for 1.95 km."""
+        """_walk_to_station_minutes with the ambiguous address returns 2 min,
+        but with the actual property coordinates returns ~19 min."""
         from houses.routing import _walk_to_station_minutes
 
-        # Mock the walking API to return 2 min for this address (matching
-        # what Google actually returns — it geocodes near Ascot station)
-        async def mock_post(body, *_, **__):
+        # Mock the walking API: address-based → 2 min (buggy geocoding),
+        # coordinate-based → 19 min (precise location)
+        def mock_response(body):
             if body.get("travelMode") == "WALK":
-                origin = body.get("origin", {}).get("address", "")
-                if "Sunningdale" in origin or "SL5" in origin:
+                if "address" in body.get("origin", {}):
                     return {"routes": [{"duration": "120s"}]}  # 2 min
-                return {"routes": [{"duration": "1140s"}]}  # 19 min for unknown
+                return {"routes": [{"duration": "1140s"}]}  # 19 min
             return None
+
+        async def mock_post(body, *_, **__):
+            return mock_response(body)
 
         monkeypatch.setattr("houses.routing._google_routes_post", mock_post)
 
-        result = await _walk_to_station_minutes("Sunningdale, Ascot, SL5", 51.4063, -0.6762)
-        assert result is not None
-        assert result >= 10, (
-            f"_walk_to_station_minutes('Sunningdale, Ascot, SL5', ...) "
-            f"returned {result} min, but 1.95 km requires ~19 min. "
-            f"Google geocodes the full address near Ascot station instead "
-            f"of the actual property location."
+        # With the ACTUAL coordinates (51.414627, -0.70056 from the sheet):
+        # uses precise location → ~19 min (correct)
+        result_with_coords = await _walk_to_station_minutes(
+            "Sunningdale, Ascot, SL5",
+            51.4063,
+            -0.6762,
+            origin_latlng=(51.414627, -0.70056),
+        )
+        assert result_with_coords is not None
+        assert result_with_coords >= 10, (
+            f"_walk_to_station_minutes with actual coordinates returned "
+            f"{result_with_coords} min. The correct walk for 1.95 km is "
+            f"~19 min — check origin_latlng is being used."
         )
 
     @pytest.mark.asyncio
