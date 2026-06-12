@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from houses.commute import Commute, CommuteBreakdown
 from houses.config import settings
 from houses.property import CouncilTaxInfo, EnrichedProperty
-from houses.server import _run_backfill_enrichment, app
+from houses.server import _HEADER_TO_ENRICHMENT_FIELD, _run_backfill_enrichment, app
 from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS
 
 client = TestClient(app)
@@ -770,6 +770,80 @@ class TestBackfillView:
         # Should return a tuple of (parking_cost, new_total_cost)
         assert result is not None, "_add_parking_cost should not crash"
         assert isinstance(result, tuple), f"Expected tuple, got {type(result)}"
+
+    # ── Force vs no-force batch refresh ────────────────────────────────
+    #
+    # ``force`` controls whether existing cell values are overwritten.
+    # ``fields`` restricts which column groups to consider.
+    # The two are orthogonal.
+
+    @pytest.mark.integration
+    def test_force_true_refreshes_filled_simon_cells(self):
+        """``force=true`` + ``fields=simon`` enriches even filled simon columns."""
+        original = settings.sheet_id
+        settings.sheet_id = "fake-id"
+        try:
+            rid = "777777771"
+            url = f"https://www.rightmove.co.uk/properties/{rid}"
+            view_rows = [self._build_view_row("7 Test St, TE1 1ST", url, rid)]
+
+            data_row = [""] * len(self.DATA_HEADERS)
+            data_row[self.DATA_HEADERS.index("Rightmove ID")] = rid
+            # Fill ALL simon columns so nothing is empty
+            for col in self.DATA_HEADERS:
+                ef = _HEADER_TO_ENRICHMENT_FIELD.get(col)
+                if ef == "simon":
+                    data_row[self.DATA_HEADERS.index(col)] = "filled"
+
+            mock_client = self._mock_sheet(view_rows=view_rows, data_rows=[data_row])
+            with (
+                patch("houses.server.get_client", return_value=mock_client),
+                patch("houses.server._run_backfill_enrichment") as mock_enrich,
+                patch("houses.server._write_backfill_cells"),
+            ):
+                mock_enrich.return_value = EnrichedProperty(**self._make_enriched(rid))
+                resp = client.post("/properties?fields=simon&force=true")
+            assert resp.status_code == 200
+            results = self._parse_rows(resp)
+            assert len(results) == 1
+            assert results[0]["status"] == "updated", f"Expected updated, got {results[0]}"
+            mock_enrich.assert_called_once()
+        finally:
+            settings.sheet_id = original
+
+    @pytest.mark.integration
+    def test_force_false_skips_filled_simon_cells(self):
+        """``force=false`` (default) + ``fields=simon`` skips filled simon columns."""
+        original = settings.sheet_id
+        settings.sheet_id = "fake-id"
+        try:
+            rid = "777777772"
+            url = f"https://www.rightmove.co.uk/properties/{rid}"
+            view_rows = [self._build_view_row("8 Test St, TE1 1ST", url, rid)]
+
+            data_row = [""] * len(self.DATA_HEADERS)
+            data_row[self.DATA_HEADERS.index("Rightmove ID")] = rid
+            for col in self.DATA_HEADERS:
+                ef = _HEADER_TO_ENRICHMENT_FIELD.get(col)
+                if ef == "simon":
+                    data_row[self.DATA_HEADERS.index(col)] = "filled"
+
+            mock_client = self._mock_sheet(view_rows=view_rows, data_rows=[data_row])
+            with (
+                patch("houses.server.get_client", return_value=mock_client),
+                patch("houses.server._run_backfill_enrichment") as mock_enrich,
+            ):
+                mock_enrich.return_value = EnrichedProperty(**self._make_enriched(rid))
+                resp = client.post("/properties?fields=simon")
+            assert resp.status_code == 200
+            results = self._parse_rows(resp)
+            assert len(results) == 1
+            assert results[0]["status"] == "skipped", (
+                f"Expected skipped (fully enriched), got {results[0]}"
+            )
+            mock_enrich.assert_not_called()
+        finally:
+            settings.sheet_id = original
 
     def test_lookup_derived_when_empty_with_address_and_postcode(self):
         """When lookup='' but address+postcode are provided, lookup should be

@@ -206,6 +206,7 @@ async def upsert_property(
     no_write: bool = Query(default=False),
     fields: Annotated[list[str] | None, Query()] = None,
     rids: Annotated[str | None, Query()] = None,
+    force: bool = Query(default=False),
 ) -> JSONResponse | StreamingResponse:
     """Upsert a property — enrich it and write to the sheet.
 
@@ -305,7 +306,7 @@ async def upsert_property(
 
         return StreamingResponse(_empty(), media_type="text/plain")
 
-    return StreamingResponse(_batch_stream(gclient, no_write, fields, rids), media_type="text/plain")
+    return StreamingResponse(_batch_stream(gclient, no_write, fields, rids, force), media_type="text/plain")
 
 
 async def _batch_stream(
@@ -313,6 +314,7 @@ async def _batch_stream(
     no_write: bool,
     fields: list[str] | None,
     rids: str | None,
+    force: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Backfill enrichment: read View tab, enrich missing fields, yield NDJSON."""
     try:
@@ -422,15 +424,26 @@ async def _batch_stream(
                 )
             continue
 
-        empty_headers = [h for h, ci in enriched_col_indices.items() if ci >= len(data_row) or not data_row[ci].strip()]
-
+        # Decide which columns to consider:
+        # - ``fields`` restricts to specific enrichment fields (column groups)
+        # - ``force`` controls whether we overwrite existing values or only
+        #   fill blank cells
         if user_fields:
-            forced = []
-            for h in data_headers:
-                ef = _HEADER_TO_ENRICHMENT_FIELD.get(h)
-                if ef and ef in user_fields:
-                    forced.append(h)
-            empty_headers = list(set(empty_headers) | set(forced))
+            consider_headers = [
+                h for h in data_headers
+                if (ef := _HEADER_TO_ENRICHMENT_FIELD.get(h)) and ef in user_fields
+            ]
+        else:
+            consider_headers = list(enriched_col_indices.keys())
+
+        if force:
+            empty_headers = [h for h in consider_headers if h in enriched_col_indices]
+        else:
+            empty_headers = [
+                h for h in consider_headers
+                if (ci := enriched_col_indices.get(h)) is not None
+                and (ci >= len(data_row) or not data_row[ci].strip())
+            ]
 
         if not empty_headers:
             yield _json_line(
