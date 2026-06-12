@@ -521,6 +521,69 @@ class TestGoogleTransitWalkGrouping:
                 )
 
 
+class TestCostGroupBuilder:
+    """_CostGroupBuilder — walk merging, short-walk threshold, bus grouping."""
+
+    def test_short_walk_shows_one_minute(self):
+        """A 22-second walk → "walk (1m)" — not dropped."""
+        from houses.commute import LegMode
+        from houses.routing import _CostGroupBuilder
+
+        b = _CostGroupBuilder()
+        b.add_walk(22)
+        b.flush_walk()
+        assert len(b.cost_groups) == 1
+        assert b.cost_groups[0].legs[0].mode == LegMode.WALK
+        assert b.cost_groups[0].legs[0].duration_minutes == 1
+
+    def test_tiny_walk_dropped(self):
+        """A 5-second walk is below the 10s threshold → no walk leg."""
+        from houses.routing import _CostGroupBuilder
+
+        b = _CostGroupBuilder()
+        b.add_walk(5)
+        b.flush_walk()
+        assert len(b.cost_groups) == 0
+
+    def test_consecutive_walks_merged(self):
+        """Two short walks (8s + 8s = 16s) exceed the threshold → merged."""
+        from houses.routing import _CostGroupBuilder
+
+        b = _CostGroupBuilder()
+        b.add_walk(8)
+        b.add_walk(8)
+        b.flush_walk()
+        assert len(b.cost_groups) == 1
+        assert b.cost_groups[0].legs[0].duration_minutes == 1
+
+    def test_bus_and_walk_grouping(self):
+        """Flushing bus doesn't flush walk, and vice versa."""
+        from houses.commute import JourneyLeg, LegMode
+        from houses.routing import _CostGroupBuilder
+
+        b = _CostGroupBuilder()
+        b.add_walk(30)
+        b.flush_bus()  # no bus legs to flush — no-op
+        b.flush_walk()
+        assert len(b.cost_groups) == 1, "bus flush should not affect walk"
+
+        b2 = _CostGroupBuilder()
+        b2.add_bus_leg(JourneyLeg(mode=LegMode.BUS, duration_minutes=5), cost=2.0)
+        b2.add_walk(30)
+        # add_walk calls flush_bus, so the bus leg should be flushed
+        assert len(b2.cost_groups) == 1, "walk should flush bus"
+        assert b2.cost_groups[0].legs[0].mode == LegMode.BUS
+
+    def test_empty_no_crash(self):
+        """No steps added — no cost groups, no crash."""
+        from houses.routing import _CostGroupBuilder
+
+        b = _CostGroupBuilder()
+        b.flush_walk()
+        b.flush_bus()
+        assert len(b.cost_groups) == 0
+
+
 # ── School commute ──────────────────────────────────────────────────────
 
 

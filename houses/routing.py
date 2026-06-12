@@ -11,6 +11,7 @@ import logging
 import re
 
 import httpx
+import pint
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.attempt import Attempt
@@ -250,6 +251,72 @@ async def _walk_commute(origin_postcode: str, dest_postcode: str) -> Commute | N
 # ---------------------------------------------------------------------------
 
 
+class _CostGroupBuilder:
+    """Builds ``CostGroup`` / ``JourneyLeg`` objects from Google Routes transit steps.
+
+    Accumulates consecutive walk seconds, groups bus legs with their fares,
+    and flushes them into cost groups when a non-walk/non-bus step is encountered.
+
+    Usage::
+
+        builder = _CostGroupBuilder()
+        for step in steps:
+            if mode == "WALK":
+                builder.add_walk(seconds)
+            elif mode == "TRANSIT" and bus:
+                builder.add_bus_leg(leg, cost)
+            elif mode == "TRANSIT" and train:
+                builder.flush_walk(); builder.flush_bus()
+                builder.cost_groups.append(CostGroup(...))
+        builder.flush_walk()
+        builder.flush_bus()
+        return Commute(cost_groups=tuple(builder.cost_groups), ...)
+    """
+
+    _MIN_WALK_SECONDS = 10  # ignore sub-10s walks (noise)
+
+    def __init__(self) -> None:
+        self._ureg = pint.UnitRegistry()
+        self.cost_groups: list[CostGroup] = []
+        self.total_bus_cost: float = 0.0
+        self._current_bus_legs: list[JourneyLeg] = []
+        self._current_walk: pint.Quantity = self._ureg.Quantity(0, "seconds")
+
+    # ------------------------------------------------------------------
+    # Public
+    # ------------------------------------------------------------------
+
+    def add_walk(self, seconds: int) -> None:
+        """Record a walk step.  Consecutive walks are accumulated."""
+        self.flush_bus()
+        self._current_walk += self._ureg.Quantity(seconds, "seconds")
+
+    def flush_walk(self) -> None:
+        """Emit a walk cost group if enough time has accumulated."""
+        sec = self._current_walk.to("seconds").magnitude
+        if sec > self._MIN_WALK_SECONDS:
+            dur_min = max(1, round(sec / 60))
+            self.cost_groups.append(
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=dur_min),))
+            )
+        self._current_walk = self._ureg.Quantity(0, "seconds")
+
+    def add_bus_leg(self, leg: JourneyLeg, cost: float | None) -> None:
+        """Record a bus leg with its fare.  Bus legs are grouped together."""
+        if cost is not None:
+            self.total_bus_cost += cost
+        self._current_bus_legs.append(leg)
+
+    def flush_bus(self) -> None:
+        """Emit a bus cost group with the accumulated fare."""
+        if self._current_bus_legs:
+            bus_cost = self.total_bus_cost if self.total_bus_cost > 0 else None
+            self.cost_groups.append(
+                CostGroup(legs=tuple(self._current_bus_legs), cost=bus_cost)
+            )
+            self._current_bus_legs.clear()
+
+
 async def _google_transit_commute(origin_postcode: str, dest_postcode: str) -> Commute | None:
     """Transit routing via Google Routes API.
 
@@ -285,30 +352,7 @@ async def _google_transit_commute(origin_postcode: str, dest_postcode: str) -> C
     steps = leg.get("steps", [])
 
     # ── Build cost groups from ALL transit steps ───────────────────
-    import pint
-
-    _ureg = pint.UnitRegistry()
-    cost_groups: list[CostGroup] = []
-    total_bus_cost = 0.0
-    current_bus_legs: list[JourneyLeg] = []
-    current_walk_duration: pint.Quantity = _ureg.Quantity(0, "seconds")  # noqa: F841
-
-    def _flush_walk():
-        nonlocal current_walk_duration
-        sec = current_walk_duration.to("seconds").magnitude
-        if sec > 10:  # ignore sub-10-second walks (noise)
-            dur_min = max(1, round(sec / 60))
-            cost_groups.append(
-                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=dur_min),))
-            )
-        current_walk_duration = _ureg.Quantity(0, "seconds")
-
-    def _flush_bus():
-        if current_bus_legs:
-            bus_cost = total_bus_cost if total_bus_cost > 0 else None
-            cost_groups.append(CostGroup(legs=tuple(current_bus_legs), cost=bus_cost))
-            current_bus_legs.clear()
-
+    builder = _CostGroupBuilder()
     for s in steps:
         mode = s.get("travelMode", "WALK")
         dur_raw: str = s.get("staticDuration", "0s")
@@ -316,10 +360,9 @@ async def _google_transit_commute(origin_postcode: str, dest_postcode: str) -> C
         dur_min = round(dur / 60)
 
         if mode == "WALK":
-            _flush_bus()
-            current_walk_duration += _ureg.Quantity(dur, "seconds")
+            builder.add_walk(dur)
         elif mode == "TRANSIT":
-            _flush_walk()
+            builder.flush_walk()
             td = s.get("transitDetails", {})
             vtype = td.get("transitLine", {}).get("vehicle", {}).get("type", "")
             dep_stop = td.get("stopDetails", {}).get("departureStop", {}).get("name", "")
@@ -334,12 +377,9 @@ async def _google_transit_commute(origin_postcode: str, dest_postcode: str) -> C
                 dp = {"lat": dep_point.get("latitude"), "lon": dep_point.get("longitude")} if dep_point else None
                 ap = {"lat": arr_point.get("latitude"), "lon": arr_point.get("longitude")} if arr_point else None
                 leg_cost = _bus_fare_for(dep_stop, arr_stop, dep_point=dp, arr_point=ap)
-                if leg_cost is not None:
-                    total_bus_cost += leg_cost
-                current_bus_legs.append(JourneyLeg(mode=LegMode.BUS, duration_minutes=dur_min, description=desc))
+                builder.add_bus_leg(JourneyLeg(mode=LegMode.BUS, duration_minutes=dur_min, description=desc), leg_cost)
             else:
-                # Train / Tube / Tram — group with any preceding bus legs
-                _flush_bus()
+                builder.flush_bus()
                 mode_enum = {
                     "RAIL": LegMode.TRAIN,
                     "TRAIN": LegMode.TRAIN,
@@ -348,15 +388,15 @@ async def _google_transit_commute(origin_postcode: str, dest_postcode: str) -> C
                     "SUBWAY": LegMode.TUBE,
                     "METRO": LegMode.TUBE,
                 }.get(vtype, LegMode.TRAIN)
-                cost_groups.append(
+                builder.cost_groups.append(
                     CostGroup(legs=(JourneyLeg(mode=mode_enum, duration_minutes=dur_min, description=desc),))
                 )
         # Other modes (e.g. BICYCLE) — ignore
 
-    _flush_walk()
-    _flush_bus()
+    builder.flush_walk()
+    builder.flush_bus()
 
-    daily_cost_gbp = round(total_bus_cost, 2) if total_bus_cost > 0 else None
+    daily_cost_gbp = round(builder.total_bus_cost, 2) if builder.total_bus_cost > 0 else None
 
     return Commute(
         destination_label="",
@@ -364,7 +404,7 @@ async def _google_transit_commute(origin_postcode: str, dest_postcode: str) -> C
         duration_minutes=duration_min,
         daily_cost_gbp=daily_cost_gbp,
         mode=CommuteMode.TRANSIT,
-        cost_groups=tuple(cost_groups),
+            cost_groups=tuple(builder.cost_groups),
     )
 
 
