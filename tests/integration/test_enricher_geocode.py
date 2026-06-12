@@ -4,13 +4,7 @@ import pytest
 from httpx import Response
 
 from houses.geo import GeoPoint
-from houses.location import _geo_cache, geocode
-
-
-@pytest.fixture(autouse=True)
-def _clear_geo_cache():
-    """Clear the module-level geo cache between tests for isolation."""
-    _geo_cache.clear()
+from houses.location import geocode
 
 
 @pytest.mark.asyncio

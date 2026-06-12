@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import re
 from dataclasses import dataclass, replace
@@ -44,9 +45,19 @@ _TOWN_SUFFIXES = re.compile(
     re.IGNORECASE,
 )
 
-# ── In-memory geocode cache ──────────────────────────────────────
+# ── In-memory geocode cache (per-request via contextvars) ─────────
 
-_geo_cache: dict[str, GeoPoint | None] = {}
+_geo_cache_var: contextvars.ContextVar[dict[str, Attempt[GeoPoint]]] = \
+    contextvars.ContextVar('geo_cache', default=None)  # type: ignore[arg-type]
+
+
+def _cache_result(key: str, result: Attempt[GeoPoint]) -> None:
+    """Store a geocode result in the per-request cache."""
+    cache = _geo_cache_var.get()
+    if cache is None:
+        cache = {}
+        _geo_cache_var.set(cache)
+    cache[key] = result
 
 
 @dataclass(frozen=True)
@@ -204,11 +215,11 @@ async def _geocode_nominatim(query: str) -> Attempt[GeoPoint]:
     if _geo_state.nominatim_exhausted:
         return Attempt.impossible("nominatim", "rate limit exhausted")
     cache_key = f"nom::{query.strip().upper()}"
-    if cache_key in _geo_cache:
-        cached = _geo_cache[cache_key]
+    cache = _geo_cache_var.get()
+    if cache is not None:
+        cached = cache.get(cache_key)
         if cached is not None:
-            return Attempt.succeeded(cached, "nominatim")
-        return Attempt.impossible("nominatim", "not found (cached)")
+            return cached
     clean = _END_PC_RE.sub("", query).strip()
     now = asyncio.get_event_loop().time()
     since_last = now - _geo_state.nominatim_last_call
@@ -222,8 +233,9 @@ async def _geocode_nominatim(query: str) -> Attempt[GeoPoint]:
             lat = float(data[0]["lat"])
             lng = float(data[0]["lon"])
             gp = GeoPoint(lat, lng)
-            _geo_cache[cache_key] = gp
-            return Attempt.succeeded(gp, "nominatim")
+            result = Attempt.succeeded(gp, "nominatim")
+            _cache_result(cache_key, result)
+            return result
         return Attempt.impossible("nominatim", "no results")
     else:
         try:
@@ -241,8 +253,9 @@ async def _geocode_nominatim(query: str) -> Attempt[GeoPoint]:
                     lat = float(data[0]["lat"])
                     lng = float(data[0]["lon"])
                     gp = GeoPoint(lat, lng)
-                    _geo_cache[cache_key] = gp
-                    return Attempt.succeeded(gp, "nominatim")
+                    result = Attempt.succeeded(gp, "nominatim")
+                    _cache_result(cache_key, result)
+                    return result
                 return Attempt.impossible("nominatim", "no results")
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 429:
@@ -257,11 +270,11 @@ async def _geocode_nominatim(query: str) -> Attempt[GeoPoint]:
 async def _geocode_address(address: str) -> Attempt[GeoPoint]:
     """Geocode a free-form UK address via Google Maps, ORS, then Nominatim."""
     cache_key = f"addr::{address.strip().upper()}"
-    if cache_key in _geo_cache:
-        cached = _geo_cache[cache_key]
+    cache = _geo_cache_var.get()
+    if cache is not None:
+        cached = cache.get(cache_key)
         if cached is not None:
-            return Attempt.succeeded(cached, "geocode_address")
-        return Attempt.impossible("geocode_address", "not found (cached)")
+            return cached
 
     # ── 1: Google Maps Geocoding ──────────────────────────────────
     google_key = settings.google_maps_api_key
@@ -275,9 +288,10 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
             if data.get("status") == "OK" and data.get("results"):
                 loc = data["results"][0]["geometry"]["location"]
                 gp = GeoPoint(loc["lat"], loc["lng"])
-                _geo_cache[cache_key] = gp
+                result = Attempt.succeeded(gp, "google-maps")
+                _cache_result(cache_key, result)
                 logger.info("Geocoded '%s' via google-maps (cached)", address)
-                return Attempt.succeeded(gp, "google-maps")
+                return result
             logger.warning(
                 "Google Maps cached result for '%s' rejected: status=%s msg=%s",
                 address, data.get("status"), data.get("error_message", ""),
@@ -292,9 +306,10 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
                             set_cached("GET", googlegeocode_url, cache_params, None, data)
                             loc = data["results"][0]["geometry"]["location"]
                             gp = GeoPoint(loc["lat"], loc["lng"])
-                            _geo_cache[cache_key] = gp
+                            result = Attempt.succeeded(gp, "google-maps")
+                            _cache_result(cache_key, result)
                             logger.info("Geocoded '%s' via google-maps", address)
-                            return Attempt.succeeded(gp, "google-maps")
+                            return result
                         logger.warning(
                             "Google Maps API response for '%s': status=%s msg=%s",
                             address, data.get("status"), data.get("error_message", ""),
@@ -313,9 +328,10 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
             if features:
                 lng, lat = features[0]["geometry"]["coordinates"]
                 gp = GeoPoint(lat, lng)
-                _geo_cache[cache_key] = gp
+                result = Attempt.succeeded(gp, "ors-pelias")
+                _cache_result(cache_key, result)
                 logger.info("Geocoded '%s' via ors-pelias (cached) → (%s, %s)", address, f"{lat:.4f}", f"{lng:.4f}")
-                return Attempt.succeeded(gp, "ors-pelias")
+                return result
         else:
             try:
                 async with cached_async_client(timeout=10.0) as client:
@@ -336,9 +352,10 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
                     if features:
                         lng, lat = features[0]["geometry"]["coordinates"]
                         gp = GeoPoint(lat, lng)
-                        _geo_cache[cache_key] = gp
+                        result = Attempt.succeeded(gp, "ors-pelias")
+                        _cache_result(cache_key, result)
                         logger.info("Geocoded '%s' via ors-pelias → (%s, %s)", address, f"{lat:.4f}", f"{lng:.4f}")
-                        return Attempt.succeeded(gp, "ors-pelias")
+                        return result
                     logger.warning("ORS returned no features for '%s'", address)
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code in (403, 429):
@@ -357,23 +374,24 @@ async def _geocode_postcode(postcode: str) -> Attempt[GeoPoint]:
     key = postcode.strip().upper()
     if not key:
         return Attempt.impossible("geocode_postcode", "empty postcode")
-    if key in _geo_cache:
-        cached = _geo_cache[key]
+    cache = _geo_cache_var.get()
+    if cache is not None:
+        cached = cache.get(key)
         if cached is not None:
-            return Attempt.succeeded(cached, "geocode_postcode")
-        return Attempt.impossible("geocode_postcode", "postcode not found (cached)")
+            return cached
 
     is_outcode = bool(_OUTCODE_RE.match(key))
     url = f"{OUTCODES_IO_URL}/{key}" if is_outcode else f"{POSTCODES_IO_URL}/{key}"
-    cached = get_cached("GET", url, None, None)
-    if cached is not None:
-        data = cached
+    disk = get_cached("GET", url, None, None)
+    if disk is not None:
+        data = disk
         result = data.get("result")
         if not result:
             return Attempt.impossible("postcodes.io", "postcode not found")
         gp = GeoPoint(result["latitude"], result["longitude"])
-        _geo_cache[key] = gp
-        return Attempt.succeeded(gp, "postcodes.io")
+        attempt = Attempt.succeeded(gp, "postcodes.io")
+        _cache_result(key, attempt)
+        return attempt
     else:
         try:
             async with cached_async_client(timeout=10.0) as client:
@@ -390,11 +408,12 @@ async def _geocode_postcode(postcode: str) -> Attempt[GeoPoint]:
                 if not result:
                     return Attempt.impossible("postcodes.io", "postcode not found")
                 gp = GeoPoint(result["latitude"], result["longitude"])
-                _geo_cache[key] = gp
-                return Attempt.succeeded(gp, "postcodes.io")
+                attempt = Attempt.succeeded(gp, "postcodes.io")
+                _cache_result(key, attempt)
+                return attempt
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
-                _geo_cache[key] = None
+                _cache_result(key, Attempt.impossible("postcodes.io", "postcode not found (404)"))
                 set_cached("GET", url, None, None, {})
                 return Attempt.impossible("postcodes.io", "postcode not found (404)")
             logger.warning("Geocode HTTP error for %s: %s", key, e)

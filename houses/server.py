@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 
+import houses.location as _loc
 from houses.commute import Commute, CommuteBreakdown
 from houses.config import settings
 from houses.council_tax import lookup_council_tax
@@ -175,6 +176,15 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+@app.middleware("http")
+async def _geo_cache_per_request(request, call_next):
+    """Give each request its own geocode cache so tests are isolated."""
+    token = _loc._geo_cache_var.set({})
+    try:
+        return await call_next(request)
+    finally:
+        _loc._geo_cache_var.reset(token)
 
 
 def _get_properties_data() -> list[dict[str, str]]:
