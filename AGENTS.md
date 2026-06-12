@@ -4,7 +4,9 @@
 
 ## What This Project Does
 
-Houses is a local FastAPI server that acts as a webhook broker for property listing data. The user browses Rightmove in Firefox, extracts property details via a Page Assist sidepanel (BYOK LLM), and sends structured JSON to this server. The server enriches the data with transit commute times, petrol costs, local school info, walkability, town descriptions, and council tax data, then writes everything to a Google Sheet.
+Houses is a tool allowing users to compare a large number of properties for purchase. It enriches Rightmove property data with information about local schools, commutes, the local area, and the cost of purchase and ownership.
+
+The system consists of a local FastAPI server acting as a front end for a Google spreadsheet. The user identifies properties on Rightmove and uses API endpoints to add them to the system.
 
 ## Decision Tree: What Do You Want to Do?
 
@@ -58,14 +60,9 @@ Houses is a local FastAPI server that acts as a webhook broker for property list
 
 | File | Purpose |
 |------|---------|
-| `houses/server.py` | FastAPI app, `/inject-property` endpoint, startup/shutdown |
-| `houses/models.py` | Pydantic models for property payload and enriched data |
+| `houses/server.py` | FastAPI app |
 | `houses/config.py` | Configuration — postcodes, API keys, sheet IDs |
 | `houses/enricher.py` | Enrichment coordinators (orchestrates routing → schools → etc) |
-| `houses/stations.py` | Station class + registry (name, CRS, GeoPoint) |
-| `houses/bus_journey.py` | Bus fare zone data and cheapest round-trip computation |
-| `houses/routing.py` | Transit/drive routing dispatch (Google Routes + TfL) |
-| `houses/commute.py` | Commute, CostGroup, JourneyLeg value objects |
 | `houses/endpoint_client.py` | Reusable API client with Retry-After support |
 | `houses/retry.py` | Async retry with exponential backoff and jitter |
 | `houses/sheets.py` | gspread integration, canonical column headers |
@@ -76,42 +73,3 @@ Houses is a local FastAPI server that acts as a webhook broker for property list
 | `POST /properties/compare` | Compare sheet vs fresh enrichment (TSV diff) |
 | `POST /sheet/setup` | Setup sheet structure (tabs, headers, formulas) |
 
-## Development Commands
-
-```bash
-make setup    # Create venv, install deps
-make run      # Start dev server on :8080 (auto-reloads on code changes via --reload)
-make test     # Run unit tests
-make lint     # Ruff check
-make format   # Auto-fix formatting
-
-# Enrich a property
-curl -X POST http://localhost:8080/properties \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://www.rightmove.co.uk/properties/123"}'
-
-# Re-enrich existing properties
-curl -X POST "http://localhost:8080/properties?no_write=true&rids=88275093,173431283&fields=schools"
-
-# List all properties
-curl http://localhost:8080/properties
-
-# Get a specific property
-curl http://localhost:8080/properties/88275093
-
-# Compare enrichment (after making changes)
-curl -X POST http://localhost:8080/properties/compare > /tmp/diff.tsv
-
-# See docs/development.md → "Enrichment Diff Verification"
-```
-
-## Agent Rules
-
-1. **Never write to Properties View** — use XLOOKUP formulas for cross-reference
-2. **Primary key** is the Rightmove URL in Column A of Properties Data
-3. **School constraint**: all schools must accept boys, non-fee-paying
-4. **If closest secondary is girls-only**, substitute nearest co-ed/boys alternative
-5. **Transit** uses public transport baselines (not driving) for Simon/Lorena
-6. **Bracknell commute** uses petrol cost calculation (45mpg, £1.45/L)
-7. **All commute costs in Properties Data are daily (return trip)** — Simon daily = 2× single TfL fare, Lorena daily = 2× single TfL fare, Bracknell daily = round-trip petrol
-8. **Never archive deprecated files** — delete them. Obsolete content is a liability.
