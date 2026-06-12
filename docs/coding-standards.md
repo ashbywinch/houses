@@ -47,8 +47,8 @@ behaviour, extract it to its own module.
 - Use `scripts/sheet_tool.py` for column operations: `add`, `move`, `rename`,
   `delete`. This is the only tool for grid manipulation. Do not call
   `insert_cols`, `deleteDimension`, `add_cols`, or `clear` directly.
-- After a column change, refresh formulas and named ranges by calling the
-  setup functions in `sheets.py` (or the relevant endpoint/script).
+- After a column change, call `POST /sync-view-formulas` to refresh View tab
+  formulas and named ranges to match the new column positions.
 - Delete one-off migration scripts after they've been run. The git log
   preserves the history.
 - Update `COLUMN_HEADERS` and `_row_values()` in `sheets.py` to match the
