@@ -427,6 +427,7 @@ async def _google_transit_commute(
                     JourneyLeg(
                         mode=LegMode.BUS,
                         duration_minutes=dur_min,
+                        start_station=dep_stop,
                         line_name=line,
                         end_station=arr_stop,
                     ),
@@ -448,6 +449,7 @@ async def _google_transit_commute(
                             JourneyLeg(
                                 mode=mode_enum,
                                 duration_minutes=dur_min,
+                                start_station=dep_stop,
                                 line_name=line,
                                 end_station=arr_stop,
                             ),
