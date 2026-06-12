@@ -375,7 +375,7 @@ async def _batch_stream(
     total = len(view_data) - 1
     summary: dict[str, int] = {"updated": 0, "skipped": 0, "created": 0, "errors": 0}
 
-    yield _json_line({"type": "start", "total": total, "no_write": no_write, "force": True, "rids": rids})
+    yield _json_line({"type": "start", "total": total, "no_write": no_write, "force": force, "rids": rids})
 
     from houses.sheets import row_values as _row_values
 
