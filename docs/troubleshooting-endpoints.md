@@ -1,79 +1,104 @@
-# Troubleshooting Endpoints — What to Do
+# Troubleshooting Endpoints
 
 ## Before Running a Batch Operation
 
-1. **Wait for the server to stabilise.** After any code change, watch the
-   server logs for `Application startup complete.` before curling an endpoint.
-   If you see another `WatchFiles detected changes in...` right after, the
-   server is still catching up from your latest edit — wait for it to finish.
+Wait for the server to stabilise after code changes. Watch the server logs
+for `Application startup complete.` before curling an endpoint. If you see
+another `WatchFiles detected changes in...` immediately after, the server is
+still catching up — wait for it to finish.
 
-2. **Don't edit files or commit while a batch is running.** Every file change
-   triggers a `--reload` restart, which kills any in-progress HTTP request.
-   The request will return a truncated response and the sheet won't be updated.
+Don't edit files or commit while a batch is running. Every file change
+triggers a `--reload` restart that kills any in-progress HTTP request. The
+response will be truncated and the sheet won't be updated.
 
-3. **Verify the commit hash in the startup log.** The server logs
-   `Deploy: <short-hash>` on startup. If it doesn't match what you expect,
-   the server hasn't loaded your latest changes. Touch the file you changed
-   to force a reload: `touch houses/server.py && sleep 3`.
+## Verifying a Batch Completed
 
-## While Inspecting Results
+Don't trust 200 OK from a streaming endpoint. Uvicorn logs the status code
+when the response starts being sent. If the generator is interrupted by a
+server restart mid-stream, the log still says 200 OK but the body is
+incomplete.
 
-1. **Don't trust 200 OK from a streaming endpoint.** Uvicorn logs the status
-   code when the response **starts** being sent. If the streaming generator
-   is interrupted by a server restart mid-stream, the log still says 200 OK
-   but the body is incomplete.
+A completed batch always ends with:
+```json
+{"type": "summary", "updated": 40, "skipped": 1, "created": 0, "errors": 0}
+```
+If this line is absent, the request didn't finish.
 
-2. **Check for the summary line.** A completed batch always ends with:
-   ```json
-   {"type": "summary", "updated": 40, "skipped": 1, "created": 0, "errors": 0}
-   ```
-   If this line is absent, the request didn't finish. Try again without any
-   edits in between.
+Check the server logs. Successful writes produce:
+```
+Wrote row 42 (RID 173638931): 6 cells [...]
+```
+Skipped rows (no force, cells already have data):
+```
+Skipped row 25 (RID 174014342): 6 cells already had data [...]
+```
+If neither appears, the write function crashed or the request was killed.
 
-3. **Check the server logs.** Successful writes produce:
-   ```
-   Wrote row 42 (RID 173638931): 6 cells [Simon London (min), ...]
-   ```
-   Skipped rows produce:
-   ```
-   Skipped row 25 (RID 174014342): 6 cells already had data [...]
-   ```
-   If neither appears, the write function crashed or the request was killed.
+If you're running a `force=false` batch and rows are being skipped, that's
+the expected behaviour — `force=false` only fills blank cells. If you need
+to overwrite, use `force=true`.
 
-4. **Read `/properties/{rid}` to see what's actually in the sheet.** The
-   compare endpoint shows what the enrichment *would* write, not what's
-   already on the sheet. If they differ, you need to re-run with `force=true`.
+## Checking API Failures
 
-## When Using `force=true`
+Look for the API's own error messages in the server logs:
 
-The `force` query parameter must reach two places in the code:
-- `_batch_stream()` — uses `force` to decide which columns to consider
-- `_write_backfill_cells()` — uses `force` to decide whether to overwrite
+- **Google Maps Geocoding**: `"status=REQUEST_DENIED msg=..."` or
+  `"Google Maps API response for '...': status=..."`. If the API returns
+  results, it logs `"Geocoded '...' via google-maps"`.
+- **Google Routes**: `"google-routes: HTTP 403 on attempt 1"` or
+  `"Google Routes API error for ..."`. The EndpointClient logs the status
+  code and whether it's permanently blocked.
+- **TfL**: `"TfL transit failed for ..."` or TfL disambiguation warnings.
+  The TfL API itself returns error details in the response body.
+- **ORS**: `"ORS geocoding failed for ..."`. After repeated failures the
+  ORS client is marked exhausted for the session.
 
-Both must receive the parameter. If one is missed, the batch silently
-skips every cell. Verify by searching the call chain for `force=`.
+## Reading the Compare Output
 
-## Checking API Health
+The `/properties/compare` endpoint shows a TSV diff between the existing
+sheet values and a fresh enrichment. Each row has the format:
 
-- **Google Maps Geocoding**: Check the server log for
-  `"Geocoded '...' via google-maps"`. If you see `"ors-pelias"` instead,
-  Google Maps is unavailable (403/REQUEST_DENIED).
-- **Google Routes**: Check for `"google-routes: HTTP 4xx on attempt 1"`.
-  If 403, the API key doesn't have this endpoint enabled or IP is blocked.
-- **TfL**: Check for `"TfL transit failed"` or TfL disambiguation warnings.
-- **ORS**: Check for `"ORS geocoding failed"`. The `_geo_state.ors_geo_exhausted`
-  flag blocks further ORS calls after a 429/403.
+```
+RID    Field    Old (sheet)    New (enriched)
+```
+
+If the `New` column is empty but you expected a value, the enrichment was
+skipped (not requested, or the field doesn't map to any enrichment).
+If the `Old` value looks wrong and the `New` value looks correct, you
+need to re-run the batch with `force=true` to overwrite it.
+
+## The `force` Parameter
+
+`force=false` (default): only fill blank cells. Cells that already have
+data are left untouched. Use this for incremental enrichment.
+
+`force=true`: overwrite all cells in the requested fields, even if they
+already have values. Only use this when you know the new data is better
+than what's in the sheet.
+
+The `force` parameter must reach both `_batch_stream()` and
+`_write_backfill_cells()`. If the call chain drops it, every cell is
+treated as "already has data" and skipped regardless of the query param.
+Search the call sites for `force=` to verify.
+
+## If the Sheet Wasn't Updated
+
+1. Check the streaming response for the `"type": "summary"` line. If absent,
+   the request was killed by a server restart.
+2. Check the server logs for `Wrote row` messages. If absent, the write
+   function crashed or the request was killed.
+3. Re-run after the server stabilises (no file changes during the run).
+4. If comparing old vs new, use `/properties/{rid}` to read what's actually
+   on the sheet — the compare endpoint shows what *would* be written, not
+   what's already there.
 
 ## Use the Live Server Logs
 
-The server logs are accessible via the background process tool. Check them
-for warnings, errors, and Write/Skipped messages. If a batch seems stuck,
-read the log — the error is probably there.
-
-## Re-Running After Fixes
-
-After fixing a bug in the batch logic:
-1. Wait for the server to reload (watch for `Application startup complete.`).
-2. Run the curl again.
-3. Check both the streaming response tail AND the sheet via
-   `/properties/{rid}` — the compare endpoint alone isn't enough.
+Read the background process logs to see what's happening during a batch.
+Look for:
+- `Wrote row` — confirms data was written to the sheet
+- `Skipped row` — cells were skipped (already had data, no force)
+- `Batch done` — confirms the batch completed
+- `ERROR: Exception in ASGI application` — something crashed (check for
+  the underlying exception in the traceback)
+- API-specific error messages (see "Checking API Failures" above)
