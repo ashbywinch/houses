@@ -106,17 +106,12 @@ class TestPropertyLocationOutcode:
         # Register a custom handler returning Maidenhead coordinates
         # for the full street address.
         _mock_http_requests.add_rule(
-            lambda url: "Shoppenhangers" in str(url) and "geocode" in str(url),
+            lambda url: "Shoppenhangers" in str(url),
             lambda request: Response(
                 200,
                 json={
-                    "features": [
-                        {
-                            "geometry": {"coordinates": [-0.73, 51.52]},
-                            "properties": {"label": "Shoppenhangers Road, Maidenhead, UK"},
-                        }
-                    ]
-                },
+                    "results": [{"geometry": {"location": {"lat": 51.52, "lng": -0.73}}, "formatted_address": "Shoppenhangers Road, Maidenhead, UK"}],
+                }
             ),
         )
 
