@@ -1066,6 +1066,114 @@ class TestCostGroupBuilder:
         assert len(b.cost_groups) == 0
 
 
+# ── Google transit fare extraction ──────────────────────────────────────
+
+
+class TestGoogleTransitFare:
+    """Google transit fare must be extracted from transitDetails.transitFare."""
+
+    @pytest.mark.asyncio
+    async def test_extracts_non_bus_fare(self, monkeypatch):
+        """Non-bus transit leg with transitFare → daily_cost_gbp is set."""
+        from houses.routing import _google_transit_commute
+
+        response = {
+            "routes": [
+                {
+                    "duration": "600s",
+                    "legs": [
+                        {
+                            "steps": [
+                                {
+                                    "travelMode": "TRANSIT",
+                                    "staticDuration": "300s",
+                                    "transitDetails": {
+                                        "transitLine": {"vehicle": {"type": "RAIL"}, "nameShort": "SWR"},
+                                        "stopDetails": {
+                                            "departureStop": {"name": "Weybridge"},
+                                            "arrivalStop": {"name": "Vauxhall"},
+                                        },
+                                        "transitFare": {
+                                            "currencyCode": "GBP",
+                                            "units": "5",
+                                            "nanos": 500000000,
+                                        },
+                                    },
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        async def mock_post(*_, **__):
+            return response
+
+        monkeypatch.setattr("houses.routing._google_routes_post", mock_post)
+        monkeypatch.setattr("houses.routing._bus_fare_for", lambda *_, **__: None)
+
+        result = await _google_transit_commute("KT13 8XG", "SW1V 2QQ")
+        assert result is not None
+        assert result.daily_cost_gbp is not None, (
+            "Google returned transitFare but daily_cost_gbp was not set"
+        )
+        assert result.daily_cost_gbp > 0, f"Expected positive fare, got {result.daily_cost_gbp}"
+
+    @pytest.mark.asyncio
+    async def test_skips_tfl_when_google_has_non_bus_pricing(self, monkeypatch):
+        """Google with transitFare pricing → TfL should not be called."""
+        from houses.commute import CostGroup
+        from houses.routing import get_commute
+
+        tfl_called = False
+        drive_called = False
+
+        async def mock_walk(*_):
+            return None
+
+        async def mock_tfl(*_, **__):
+            nonlocal tfl_called
+            tfl_called = True
+            return None
+
+        async def mock_drive(*_, **__):
+            nonlocal drive_called
+            drive_called = True
+            return None
+
+        # Google returns a route with non-bus pricing
+        async def mock_google(*_, **__):
+            return Commute(
+                destination_label="",
+                destination_postcode="SW1V 2QQ",
+                duration_minutes=30,
+                daily_cost_gbp=5.50,
+                cost_groups=(
+                    CostGroup(
+                        legs=(
+                            JourneyLeg(
+                                mode=LegMode.TRAIN,
+                                duration_minutes=30,
+                                line_name="SWR",
+                                end_station="Vauxhall",
+                            ),
+                        ),
+                    ),
+                ),
+            )
+
+        monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
+        monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_tfl)
+        monkeypatch.setattr("houses.routing._drive_commute", mock_drive)
+        monkeypatch.setattr("houses.routing._google_transit_commute", mock_google)
+
+        result = await get_commute("KT13 8XG", "SW1V 2QQ", has_car=True, max_walk_minutes=15)
+        assert result.is_succeeded
+        assert not tfl_called, "TfL should not be called when Google has pricing"
+        assert not drive_called, "Driving should not be called (dest is congestion zone)"
+
+
 # ── School commute ──────────────────────────────────────────────────────
 
 

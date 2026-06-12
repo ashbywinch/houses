@@ -310,6 +310,7 @@ class _CostGroupBuilder:
         self._ureg = pint.UnitRegistry()
         self.cost_groups: list[CostGroup] = []
         self.total_bus_cost: float = 0.0
+        self.total_fare: float = 0.0  # non-bus transit fares from Google's transitFare
         self._current_bus_legs: list[JourneyLeg] = []
         self._current_walk: pint.Quantity = self._ureg.Quantity(0, "seconds")
 
@@ -435,6 +436,12 @@ async def _google_transit_commute(
                 )
             else:
                 builder.flush_bus()
+                # Extract transit fare from Google response (tube/train)
+                fare_info = td.get("transitFare", {})
+                if fare_info:
+                    units = float(fare_info.get("units", 0))
+                    nanos = fare_info.get("nanos", 0) / 1_000_000_000
+                    builder.total_fare += round(units + nanos, 2)
                 mode_enum = {
                     "RAIL": LegMode.TRAIN,
                     "TRAIN": LegMode.TRAIN,
@@ -498,7 +505,8 @@ async def _google_transit_commute(
                     )
                     return None
 
-    daily_cost_gbp = round(builder.total_bus_cost, 2) if builder.total_bus_cost > 0 else None
+    total_cost = builder.total_bus_cost + builder.total_fare
+    daily_cost_gbp = round(total_cost, 2) if total_cost > 0 else None
 
     return Commute(
         destination_label="",
@@ -817,10 +825,9 @@ async def get_commute(
         logger.warning("Google transit skipped: %s", e)
         failures.append(f"google_transit: {e}")
 
-    # Google Routes covers all UK transit and may return cost data from
-    # BODS bus fares.  Since we excluded bus when has_car=True, any
-    # pricing on Google's result is legitimate (non-bus).  If Google has
-    # real pricing, there's no need to also call TfL.
+    # Google Routes may return fare data for tube/train legs (via
+    # transitDetails.transitFare).  When Google has pricing (bus, transit
+    # fare, or parking), use it and skip TfL.
     google_has_pricing = google is not None and google.daily_cost_gbp is not None and google.daily_cost_gbp > 0
     if not google_has_pricing and _is_london_area(dest_postcode):
         try:
@@ -850,9 +857,10 @@ async def get_commute(
         #   2. Faster duration
         # Google Routes may return the fastest transit option but often
         # lacks bus/rail fare data (cost=None).  TfL has accurate
-        # pricing for London.  When we have both, the priced result is
-        # more useful — the NR fare fallback (applied later) can only
-        # approximate a rail fare and won't capture bus costs.
+        # pricing for London including park-and-ride.  When we have both,
+        # the priced result is more useful — the NR fare fallback
+        # (applied later) can only approximate a rail fare and won't
+        # capture bus or parking costs.
         def _tiebreak(c: Commute) -> tuple[int, float]:
             no_cost = 1 if (c.daily_cost_gbp is None or c.daily_cost_gbp == 0.0) else 0
             return (no_cost, c.duration_minutes or 0)
