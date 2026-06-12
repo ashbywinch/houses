@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 
@@ -9,11 +10,11 @@ import httpx
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.attempt import Attempt
+from houses.bus_journey import BusJourneyRegistry, cheapest_round_trip
 from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.enricher import (
     _apply_park_and_ride_to_journeys,
-    _lookup_bus_roundtrip_cost,
     _lookup_parking_cost,
     _next_weekday_date_params,
     _pick_best_journey,
@@ -21,8 +22,11 @@ from houses.enricher import (
 )
 from houses.location import _geocode_address, geocode
 from houses.retry import retry_async
+from houses.stations import Station
 
 logger = logging.getLogger(__name__)
+
+_bus_fares = BusJourneyRegistry()
 
 TFL_JOURNEY_URL = "https://api.tfl.gov.uk/Journey/JourneyResults"
 OUTCODES_IO_URL = "https://api.postcodes.io/outcodes"
@@ -36,9 +40,9 @@ _MODE_MAP: dict[str, LegMode] = {
     "tube": LegMode.TUBE,
     "bus": LegMode.BUS,
     "national-rail": LegMode.TRAIN,
-    "overground": LegMode.TRAIN,
-    "dlr": LegMode.TRAIN,
-    "tram": LegMode.TRAIN,
+    "overground": LegMode.OVERGROUND,
+    "dlr": LegMode.DLR,
+    "tram": LegMode.TRAM,
     "driving": LegMode.DRIVE,
     "cycle": LegMode.CYCLE,
 }
@@ -91,6 +95,9 @@ class TransitRoute:
             **_next_weekday_date_params(),
             **_tfl_auth_params(),
         }
+        # Cache key must NOT include API keys — TfL responses are identical
+        # regardless of which key is used.
+        cache_params = {k: v for k, v in params.items() if k != "app_key"}
 
         duration_minutes: int | None = None
         daily_cost_gbp: float | None = None
@@ -101,9 +108,16 @@ class TransitRoute:
         data: dict | None = None
 
         # Check cache first
-        cached = get_cached("GET", url, params)
+        cached = get_cached("GET", url, cache_params)
         if cached is not None:
-            data = cached
+            # Cache hit — if the cached response is a disambiguation, handle it
+            # the same way as a live 300 (triggers geocode fallback).
+            if "Disambiguation" in str(cached.get("$type", "")):
+                data = await self._geocode_fallback(params)
+                if data is None:
+                    logger.warning("TfL disambiguation from cache, fallback failed for %s", self._label)
+            else:
+                data = cached
         else:
             try:
                 async with cached_async_client(timeout=20.0) as client:
@@ -115,9 +129,14 @@ class TransitRoute:
                     )
                     resp.raise_for_status()
                     data = resp.json()
-                    set_cached("GET", url, params, None, data)
+                    set_cached("GET", url, cache_params, None, data)
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 300:
+                    # Cache the 300 response itself so we don't hammer the API
+                    # on subsequent requests — the cache-hit path above knows
+                    # how to handle disambiguation results.
+                    with contextlib.suppress(Exception):
+                        set_cached("GET", url, cache_params, None, e.response.json())
                     data = await self._geocode_fallback(params)
                 elif e.response.status_code != 404:
                     logger.error("TfL API HTTP error for %s: %s", self._label, e)
@@ -140,7 +159,7 @@ class TransitRoute:
 
         # Parking cost
         if self._park_and_ride and duration_minutes is not None and data is not None:
-            parking_cost_gbp, daily_cost_gbp = self._add_parking_cost(data, daily_cost_gbp)
+            parking_cost_gbp, daily_cost_gbp = await self._add_parking_cost(data, daily_cost_gbp)
 
         result = Commute(
             destination_label=self._label,
@@ -170,7 +189,8 @@ class TransitRoute:
                     r2 = await c2.get(url2, params=params)
                     r2.raise_for_status()
                     d2 = r2.json()
-                    set_cached("GET", url2, params, None, d2)
+                    cache_params2 = {k: v for k, v in params.items() if k != "app_key"}
+                    set_cached("GET", url2, cache_params2, None, d2)
                     return d2
             except Exception:
                 logger.warning("TfL geocode fallback failed for %s", self._label)
@@ -202,20 +222,26 @@ class TransitRoute:
         for bus_leg in bus_legs:
             dep = bus_leg.get("departurePoint", {}).get("commonName", "")
             arr = bus_leg.get("arrivalPoint", {}).get("commonName", "")
-            leg_cost = _lookup_bus_roundtrip_cost(
-                dep,
-                arr,
-                dep_point=bus_leg.get("departurePoint", {}),
-                arr_point=bus_leg.get("arrivalPoint", {}),
+            dep_raw = bus_leg.get("departurePoint", {})
+            arr_raw = bus_leg.get("arrivalPoint", {})
+            dep_point = (
+                {"lat": dep_raw["lat"], "lon": dep_raw["lon"]}
+                if dep_raw.get("lat") else None
             )
-            if leg_cost is not None:
-                total_bus_cost += leg_cost
+            arr_point = (
+                {"lat": arr_raw["lat"], "lon": arr_raw["lon"]}
+                if arr_raw.get("lat") else None
+            )
+            fares = _bus_fares.fares_for_stops(dep, arr, dep_point=dep_point, arr_point=arr_point)
+            daily = cheapest_round_trip(fares, _bus_fares.national_max_single)
+            if daily is not None:
+                total_bus_cost += float(daily.amount)
 
         if total_bus_cost > 0:
             return round(tfl_non_bus_fare / 100 * 2 + total_bus_cost, 2)
         return current_cost
 
-    def _add_parking_cost(self, data: dict, current_cost: float | None) -> tuple[float | None, float | None]:
+    async def _add_parking_cost(self, data: dict, current_cost: float | None) -> tuple[float | None, float | None]:
         """Look up parking costs when park-and-ride used a driving leg."""
         journeys = data.get("journeys", [])
         if not journeys:
@@ -229,7 +255,7 @@ class TransitRoute:
         if not station_name:
             return None, current_cost
 
-        parking_cost = _lookup_parking_cost(station_name)
+        parking_cost = await _lookup_parking_cost(station_name)
         if parking_cost is None:
             return None, current_cost
 
@@ -257,11 +283,86 @@ class TransitRoute:
         current_legs: list[JourneyLeg] = []
         in_transit = False
 
-        for leg in tfl_legs:
+        for leg_idx, leg in enumerate(tfl_legs):
             mode_name = leg.get("mode", {}).get("name", "?")
             duration = leg.get("duration", 0)
             leg_mode = _MODE_MAP.get(mode_name, LegMode.WALK)
-            jl = JourneyLeg(mode=leg_mode, duration_minutes=duration)
+            is_last = leg_idx == len(tfl_legs) - 1
+
+            # Extract TfL leg metadata
+            arr_station = leg.get("arrivalPoint", {}).get("commonName", "")
+            dep_station = leg.get("departurePoint", {}).get("commonName", "")
+            line_name = leg.get("route", {}).get("name", "")
+            dep_station = leg.get("departurePoint", {}).get("commonName", "")
+            arr_station = leg.get("arrivalPoint", {}).get("commonName", "")
+            duration = int(leg.get("duration", "0"))
+            instr = leg.get("instruction", {}).get("summary", "")
+
+            # Fallback: extract line name from TfL instruction text when
+            # ``route.name`` is empty (some tube responses omit it).
+            if not line_name and mode_name == "tube" and instr:
+                line_from_instr = instr.split(" to ")[0].replace(" line", "").replace(" Line", "").strip()
+                if line_from_instr:
+                    line_name = line_from_instr
+
+            if mode_name == "walking":
+                # Show destination station only if the next leg uses transit
+                # (TfL already encoded this — the walking leg's arrivalPoint
+                # is the station/stop where the transit leg begins).
+                if not is_last:
+                    next_mode = tfl_legs[leg_idx + 1].get("mode", {}).get("name", "")
+                    if next_mode in ("national-rail", "tube", "bus", "dlr", "overground", "tram"):
+                        description = f"walk to {Station.short_name(arr_station)}"
+                    else:
+                        description = "walk"
+                else:
+                    description = "walk"
+            elif mode_name == "national-rail":
+                description = f"Train to {Station.short_name(arr_station)}" if arr_station else "Train"
+            elif mode_name in ("tube", "dlr", "overground", "tram"):
+                display_mode = {"tube": "line", "dlr": "DLR", "overground": "Overground", "tram": "Tram"}.get(
+                    mode_name, mode_name
+                )
+                if mode_name == "tube":
+                    line_from_instr = instr.split(" to ")[0] if " to " in instr else ""
+                    tube_line = line_from_instr.replace(" line", "").replace(" Line", "").strip()
+                    if tube_line:
+                        description = f"{tube_line} line"
+                        if arr_station:
+                            description += f" to {Station.short_name(arr_station)}"
+                    elif arr_station:
+                        description = f"{display_mode} to {Station.short_name(arr_station)}"
+                    else:
+                        description = display_mode
+                elif line_name:
+                    description = f"{line_name} to {Station.short_name(arr_station)}" if arr_station else line_name
+                elif arr_station:
+                    description = f"{display_mode} to {Station.short_name(arr_station)}"
+                else:
+                    description = display_mode
+            elif mode_name == "bus":
+                description = (
+                    f"bus({line_name}) to {Station.short_name(arr_station)}"
+                    if line_name and arr_station
+                    else f"bus to {Station.short_name(arr_station)}"
+                    if arr_station
+                    else f"bus({line_name})"
+                    if line_name
+                    else "bus"
+                )
+            else:
+                description = (
+                    instr
+                    if instr
+                    else (f"{mode_name} to {Station.short_name(arr_station)}" if arr_station else mode_name)
+                )
+            jl = JourneyLeg(
+                mode=leg_mode,
+                duration_minutes=duration,
+                start_station=dep_station,
+                end_station=arr_station,
+                line_name=line_name,
+            )
 
             if mode_name == "walking":
                 if in_transit:

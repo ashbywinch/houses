@@ -1,7 +1,8 @@
 """Tests for data models."""
 
 from houses.commute import Commute, CommuteBreakdown
-from houses.property import CouncilTaxInfo, EnrichedProperty, Property, SchoolInfo
+from houses.property import CouncilTaxInfo, EnrichedProperty, Property
+from houses.schools import School, SchoolGender
 
 
 def test_property_payload() -> None:
@@ -53,10 +54,14 @@ def test_transit_info() -> None:
     assert t.mode == "transit"
 
 
-def test_school_info_defaults() -> None:
-    s = SchoolInfo(name="Test School", type="primary")
-    assert s.gender == "mixed"
-    assert s.fee_paying is False
+def test_school_defaults() -> None:
+    """School.from_GIAS_row should handle missing fields gracefully."""
+    school = School.from_GIAS_row({})
+    assert school.name == ""
+    assert school.urn == ""
+    assert school.gender == SchoolGender.UNKNOWN
+    assert not school.fee_paying
+    assert school.coords is None
 
 
 def test_bracknell_commute_defaults() -> None:

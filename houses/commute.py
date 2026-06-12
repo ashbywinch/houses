@@ -5,12 +5,36 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, auto
 
+from houses.stations import Station
+
+
+def _render_leg_description(leg: JourneyLeg) -> str:
+    """Build a human-readable leg description from raw fields.
+
+    Uses the same format regardless of which API generated the leg,
+    so TfL and Google Routes routes look consistent.
+    """
+    if leg.mode == LegMode.WALK:
+        if leg.end_station:
+            return f"walk to {Station.short_name(leg.end_station)}"
+        return "walk"
+    if leg.line_name and leg.end_station:
+        return f"{leg.line_name} to {Station.short_name(leg.end_station)}"
+    if leg.line_name:
+        return leg.line_name
+    if leg.end_station:
+        return f"{leg.mode.name.lower()} to {Station.short_name(leg.end_station)}"
+    return leg.mode.name.lower()
+
 
 class LegMode(Enum):
     WALK = auto()
     TUBE = auto()
     BUS = auto()
     TRAIN = auto()
+    DLR = auto()
+    OVERGROUND = auto()
+    TRAM = auto()
     DRIVE = auto()
     CYCLE = auto()
     PARK = auto()
@@ -27,6 +51,9 @@ class JourneyLeg:
 
     mode: LegMode
     duration_minutes: int
+    start_station: str = ""  # departure point name from TfL
+    end_station: str = ""  # arrival point name from TfL
+    line_name: str = ""  # transit route name from TfL (e.g. "Bakerloo", "Great Western Railway")
 
 
 @dataclass(frozen=True)
@@ -43,7 +70,10 @@ class CostGroup:
 
     def leg_descriptions(self) -> tuple[str, ...]:
         """Return operator-appropriate descriptions for each leg."""
-        return tuple(leg.mode.name.lower() for leg in self.legs)
+        return tuple(
+            _render_leg_description(leg)
+            for leg in self.legs
+        )
 
 
 @dataclass(frozen=True)
@@ -57,12 +87,23 @@ class Commute:
     mode: str | CommuteMode = "transit"
     cost_groups: tuple[CostGroup, ...] = ()
 
+    def _leg_description(self, leg: JourneyLeg) -> str:
+        """Build a human-readable leg description from raw fields."""
+        return _render_leg_description(leg)
+
     def summary(self) -> str:
         """Render as the sheet's route-summary string."""
         parts: list[str] = []
-        for group in self.cost_groups:
-            for leg, desc in zip(group.legs, group.leg_descriptions(), strict=True):
+        all_legs = [leg for group in self.cost_groups for leg in group.legs]
+        total = len(all_legs)
+
+        for idx, leg in enumerate(all_legs):
+            desc = self._leg_description(leg)
+            if leg.mode == LegMode.WALK and idx == total - 1:
+                parts.append(f"walk {leg.duration_minutes}m")
+            else:
                 parts.append(f"{desc} ({leg.duration_minutes}m)")
+
         return " \u2192 ".join(parts)
 
     def non_rail_cost(self) -> float:

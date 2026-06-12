@@ -4,17 +4,23 @@
 
 ## What This Project Does
 
-Houses is a local FastAPI server that acts as a webhook broker for property listing data. The user browses Rightmove in Firefox, extracts property details via a Page Assist sidepanel (BYOK LLM), and sends structured JSON to this server. The server enriches the data with transit commute times, petrol costs, local school info, walkability, town descriptions, and council tax data, then writes everything to a Google Sheet.
+Houses is a tool allowing users to compare a large number of properties for purchase. It enriches Rightmove property data with information about local schools, commutes, the local area, and the cost of purchase and ownership.
+
+The system consists of a local FastAPI server acting as a front end for a Google spreadsheet. The user identifies properties on Rightmove and uses API endpoints to add them to the system.
 
 ## Decision Tree: What Do You Want to Do?
 
-### 1. Understand the Architecture
+### 1. Develop, Test, or Run the Server
+**Read**: [docs/development.md](docs/development.md)
+**Read**: [docs/coding-standards.md](docs/coding-standards.md)
+
+### 2. Understand the Architecture
 **Read**: [docs/architecture.md](docs/architecture.md)
 - System overview and data flow
 - Sheet architecture (Properties View / Properties Data)
 - Tech stack and key files
 
-### 2. Add or Modify a Column
+### 3. Add or Modify a Column
 **Read**: [docs/column-reference.md](docs/column-reference.md)
 - Complete column layout for both tabs
 - Data types and sources
@@ -22,60 +28,35 @@ Houses is a local FastAPI server that acts as a webhook broker for property list
 - Update process
 
 ### 3. Add a New Enrichment Module
-**Read**: [docs/enrichment-modules.md](docs/enrichment-modules.md)
-- Existing module patterns to follow
-- API details and graceful degradation
-- How to wire into the server
+**Read**: [docs/adding-a-new-enrichment-module.md](docs/adding-a-new-enrichment-module.md)
+- Step-by-step guide: module file → model → enricher → sheets → API → docs
+- [docs/enrichment-modules.md](docs/enrichment-modules.md) — existing module patterns to follow
 - [docs/development.md](docs/development.md) — setup and testing
-
-### 4. Develop, Test, or Run the Server
-**Read**: [docs/development.md](docs/development.md)
-- Setup, configuration, env vars
-- Running the server
-- Testing and linting
-- API endpoint reference
 
 ### 5. Write Documentation
 **Read**: [docs/writing-documentation.md](docs/writing-documentation.md)
-- Context Efficiency Principle
-- Single source of truth
-- One topic per file
 
-### 6. Follow Coding Standards
-**Read**: [docs/coding-standards.md](docs/coding-standards.md)
-- Naming principles
-- Module structure and SRP
-- Fail fast, no over-abstraction
+### 6. Troubleshoot Batch Endpoints
+**Read**: [docs/troubleshooting-endpoints.md](docs/troubleshooting-endpoints.md)
+- Before running batch operations
+- What to check when results don't appear
+- How to verify a batch actually completed
+- Server reload pitfalls
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `houses/server.py` | FastAPI app, `/inject-property` endpoint, startup/shutdown |
-| `houses/models.py` | Pydantic models for property payload and enriched data |
+| `houses/server.py` | FastAPI app |
 | `houses/config.py` | Configuration — postcodes, API keys, sheet IDs |
-| `houses/enricher.py` | Transit commute, petrol cost, and school lookup logic |
+| `houses/enricher.py` | Enrichment coordinators (orchestrates routing → schools → etc) |
+| `houses/endpoint_client.py` | Reusable API client with Retry-After support |
+| `houses/retry.py` | Async retry with exponential backoff and jitter |
 | `houses/sheets.py` | gspread integration, canonical column headers |
 | `houses/retry.py` | Async retry with exponential backoff and jitter |
-| `scripts/setup_sheet.py` | Sheet tab creation and XLOOKUP formula templates |
+| `POST /properties` | Upsert a property (enrich + write to sheet) |
+| `GET /properties` | List all properties with enrichment data |
+| `GET /properties/{rid}` | Get a single property by Rightmove ID |
+| `POST /properties/compare` | Compare sheet vs fresh enrichment (TSV diff) |
+| `POST /sheet/setup` | Setup sheet structure (tabs, headers, formulas) |
 
-## Development Commands
-
-```bash
-make setup    # Create venv, install deps
-make run      # Start dev server on :8080 (auto-reloads on code changes via --reload)
-make test     # Run unit tests
-make lint     # Ruff check
-make format   # Auto-fix formatting
-```
-
-## Agent Rules
-
-1. **Never write to Properties View** — use XLOOKUP formulas for cross-reference
-2. **Primary key** is the Rightmove URL in Column A of Properties Data
-3. **School constraint**: all schools must accept boys, non-fee-paying
-4. **If closest secondary is girls-only**, substitute nearest co-ed/boys alternative
-5. **Transit** uses public transport baselines (not driving) for Simon/Lorena
-6. **Bracknell commute** uses petrol cost calculation (45mpg, £1.45/L)
-7. **All commute costs in Properties Data are daily (return trip)** — Simon daily = 2× single TfL fare, Lorena daily = 2× single TfL fare, Bracknell daily = round-trip petrol
-8. **Never archive deprecated files** — delete them. Obsolete content is a liability.

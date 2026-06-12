@@ -3,7 +3,9 @@
 import pytest
 
 from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
-from houses.property import EnrichedProperty, SchoolInfo
+from houses.geo import GeoPoint
+from houses.property import EnrichedProperty
+from houses.schools import School, SchoolGender
 from houses.sheets import (
     _FORMULA_COLUMNS,
     _USER_COLUMNS,
@@ -89,20 +91,52 @@ def test_row_values_with_full_enrichment():
             daily_cost_gbp=8.50,
             mode="drive",
         ),
-        primary_school=SchoolInfo(
-            name="St Vincent School",
-            type="primary",
-            distance_km=0.65,
-            walking_time_minutes=8,
+        primary_school=School(
             urn=prim_urn,
+            name="St Vincent School",
+            phase="Primary",
+            gender=SchoolGender.MIXED,
+            type_of_establishment="Community School",
+            postcode="RG14 1AA",
+            website="",
+            ofsted_rating="",
+            inspection_year="",
+            coords=GeoPoint(51.1, -0.5),
+            statutory_low_age=None,
+            statutory_high_age=None,
         ),
-        secondary_school=SchoolInfo(
-            name="Westminster School",
-            type="secondary",
-            distance_km=1.2,
-            walking_time_minutes=14,
+        primary_school_commute=Commute(
+            destination_label="School",
+            destination_postcode="RG14 1AA",
+            duration_minutes=8,
+            daily_cost_gbp=0.0,
+            mode="walk",
+            cost_groups=(CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=8),)),),
+        ),
+        primary_school_distance_km=0.65,
+        secondary_school=School(
             urn=sec_urn,
+            name="Westminster School",
+            phase="Secondary",
+            gender=SchoolGender.BOYS,
+            type_of_establishment="Academy Converter",
+            postcode="RG14 1AA",
+            website="",
+            ofsted_rating="",
+            inspection_year="",
+            coords=GeoPoint(51.1, -0.4),
+            statutory_low_age=None,
+            statutory_high_age=None,
         ),
+        secondary_school_commute=Commute(
+            destination_label="School",
+            destination_postcode="RG14 1AA",
+            duration_minutes=14,
+            daily_cost_gbp=0.0,
+            mode="walk",
+            cost_groups=(CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=14),)),),
+        ),
+        secondary_school_distance_km=1.2,
     )
     r = row_values(ep)
 
@@ -251,8 +285,8 @@ def test_row_values_includes_route_summary():
         ),
     )
     r = row_values(ep)
-    assert r["Simon London Route"] == "walk (5m) → train (20m) → walk (5m)"
-    assert r["Lorena London Route"] == "walk (3m) → tube (15m) → walk (2m)"
+    assert r["Simon London Route"] == "walk (5m) → train (20m) → walk 5m"
+    assert r["Lorena London Route"] == "walk (3m) → tube (15m) → walk 2m"
 
 
 def test_named_range_name_is_deterministic():

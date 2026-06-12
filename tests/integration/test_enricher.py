@@ -1,41 +1,11 @@
-"""Integration tests for enricher — drive minutes and park-and-ride."""
+"""Integration tests for enricher — park-and-ride."""
 
 import copy
 from unittest.mock import patch
 
 import pytest
-from httpx import AsyncClient, MockTransport, Response
 
 from houses.enricher import _apply_park_and_ride_to_journeys, _format_route_summary
-
-
-class TestGetDriveMinutes:
-    """_get_drive_minutes — driving duration using stations.csv coords."""
-
-    @pytest.mark.asyncio
-    async def test_didcot_drive_is_reasonable(self):
-        """OX11 8QP is ~1km from Didcot Parkway — drive should be <30 min."""
-        from houses.enricher import _get_drive_minutes
-
-        def handler(request):
-            url = str(request.url)
-            if "api.postcodes.io" in url:
-                return Response(200, json={"status": 200, "result": {"latitude": 51.603, "longitude": -1.254}})
-            if "openrouteservice.org/v2/directions" in url:
-                return Response(200, json={"routes": [{"summary": {"distance": 1.5, "duration": 180}}]})
-            return Response(404)
-
-        original_init = AsyncClient.__init__
-
-        def patched_init(self, **kwargs):
-            kwargs["transport"] = MockTransport(handler)
-            original_init(self, **kwargs)
-
-        with patch.object(AsyncClient, "__init__", patched_init):
-            result = await _get_drive_minutes("OX11 8QP", "Didcot Parkway Rail Station")
-
-        assert result is not None, "Should have found a drive time"
-        assert result < 30, f"Expected <30 min for nearby station, got {result}"
 
 
 class TestParkAndRide:

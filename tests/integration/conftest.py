@@ -1,6 +1,7 @@
 """Integration test configuration — isolated temp cache, no sheet writes, offline scraper."""
 
 import tempfile
+from collections.abc import Callable
 from unittest.mock import patch
 
 import pytest
@@ -19,15 +20,27 @@ def mock_httpx():
     APIs were hit (or not hit).
     """
 
-    class _Counter:
+    class _Handler:
+        """Mock HTTP handler that tests can extend with custom rules."""
+
         def __init__(self):
             self.calls: list[str] = []
+            self._rules: list[tuple[Callable[[str], bool], Callable] | None] = []
+
+        def add_rule(self, matcher: Callable[[str], bool], responder: Callable) -> None:
+            """Register a custom matcher/responder that takes priority."""
+            self._rules.insert(0, (matcher, responder))
 
         def handler(self, request):
             url = str(request.url)
             self.calls.append(url)
 
-            # TfL
+            # Custom rules (added by specific tests) take priority
+            for matcher, responder in self._rules:
+                if matcher(url):
+                    return responder(request)
+
+            # Default rules
             if "tfl.gov.uk/Journey/JourneyResults" in url:
                 return Response(200, json={"journeys": [{"duration": 30, "fare": {"totalCost": 500}}]})
             # postcodes.io
@@ -74,7 +87,7 @@ def mock_httpx():
             logger.warning("Unhandled httpx request: %s %s", request.method, url)
             return Response(404)
 
-    counter = _Counter()
+    counter = _Handler()
 
     def _patch_client(original_init, handler):
         def patched_init(self, **kwargs):
@@ -111,6 +124,27 @@ def _isolate_api_cache():
     with tempfile.TemporaryDirectory() as tmp:
         set_cache_dir(tmp)
         yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_geo_cache():
+    """Give each integration test its own geocode cache."""
+    import houses.location as _loc
+    _loc._geo_cache_var.set({})
+
+
+@pytest.fixture(autouse=True)
+def _mock_http_requests():
+    """Every integration test must mock external HTTP APIs.
+
+    This autouse fixture applies ``mock_httpx()`` to every test, so tests
+    never hit real APIs.  Tests that need different mock responses can
+    inspect or replace ``handler.calls``.
+
+    """
+    counter, async_patch, sync_patch = mock_httpx()
+    with async_patch, sync_patch:
+        yield counter
 
 
 @pytest.fixture(autouse=True)

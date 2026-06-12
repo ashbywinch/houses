@@ -1,4 +1,10 @@
-"""Async retry with exponential backoff and jitter."""
+"""Async retry with exponential backoff, jitter, and Retry-After support.
+
+If a caught exception has a ``retry_after`` attribute (e.g. from
+:class:`houses.http_error.HttpError`), that value is used as the delay
+instead of exponential backoff.  This allows rate-limited APIs to tell
+us exactly when to retry.
+"""
 
 from __future__ import annotations
 
@@ -21,7 +27,12 @@ async def retry_async(
 ) -> Awaitable:
     """Retry an async call with exponential backoff and jitter.
 
-    Usage inside a function body:
+    If the exception has a ``retry_after`` attribute (e.g.
+    :class:`houses.http_error.HttpError` with a Retry-After header), that
+    value is used as the delay instead of exponential backoff.
+
+    Usage inside a function body::
+
         result = await retry_async(
             lambda: client.post(url, ...),
             max_retries=3, base_delay=1.0,
@@ -34,9 +45,14 @@ async def retry_async(
         except exceptions as e:
             last_exc = e
             if attempt < max_retries:
-                delay = min(base_delay * (backoff**attempt), max_delay)
-                if jitter:
-                    delay *= 0.5 + random.random() * 0.5  # 50-100% of computed delay
+                # Use Retry-After if the API told us when to retry.
+                retry_after = getattr(e, "retry_after", None)
+                if retry_after is not None:
+                    delay = min(retry_after, max_delay)
+                else:
+                    delay = min(base_delay * (backoff**attempt), max_delay)
+                    if jitter:
+                        delay *= 0.5 + random.random() * 0.5
                 logger.warning(
                     "Attempt %d/%d failed: %s. Retrying in %.1fs...",
                     attempt + 1,

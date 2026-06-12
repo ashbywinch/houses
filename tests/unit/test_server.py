@@ -45,7 +45,7 @@ class TestInjectProperty:
 
     def test_rejects_invalid_types(self):
         payload = {**self.VALID_PAYLOAD, "bedrooms": "three"}
-        resp = client.post("/inject-property", json=payload)
+        resp = client.post("/properties", json=payload)
         assert resp.status_code == 422
 
 
@@ -54,7 +54,7 @@ class TestBackfillView:
         original = settings.sheet_id
         settings.sheet_id = ""
         try:
-            resp = client.post("/backfill-view")
+            resp = client.post("/properties")
             assert resp.status_code == 200
         finally:
             settings.sheet_id = original
@@ -76,7 +76,7 @@ class TestBackfillView:
             mock_client = MagicMock()
             mock_client.open_by_key.return_value = mock_sh
             with patch("houses.server.get_client", return_value=mock_client):
-                resp = client.post("/backfill-view")
+                resp = client.post("/properties")
             assert resp.status_code == 200
         finally:
             settings.sheet_id = original

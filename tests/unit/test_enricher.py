@@ -4,25 +4,47 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
+from money import Money
 
 from houses.attempt import Attempt
+from houses.bus_journey import BusJourneyRegistry, FareProduct, FareProductType, cheapest_round_trip
 from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.enricher import (
     _END_PC_RE,
     _OUTCODE_RE,
-    FEE_PAYING_TYPES,
-    _boys_eligible,
     _compute_petrol_from_distance_km,
     _format_route_summary,
     _next_weekday_date_params,
-    _phase_filter,
     _pick_best_journey,
-    _school_coords,
-    _school_to_info,
-    _shorten_station,
     compute_commute_breakdown,
 )
 from houses.geo import GeoPoint
+from houses.schools import School, SchoolGender
+from houses.stations import Station
+from houses.stations import find as find_station
+
+
+def _fares_from_dict(
+    products: dict[str, float], meta: dict | None = None
+) -> dict[FareProductType, FareProduct]:
+    """Convert old-style fare product dict to FareProduct dict for testing."""
+    result = {}
+    mapping = {
+        "adult_single": FareProductType.SINGLE,
+        "adult_return": FareProductType.RETURN,
+        "adult_day": FareProductType.DAY,
+    }
+    for key, val in products.items():
+        ptype = mapping.get(key)
+        if ptype:
+            result[ptype] = FareProduct(
+                type=ptype,
+                price=Money(str(val), "GBP"),
+                operator="test",
+                zone_pair="test:test",
+            )
+    return result
+
 
 FIXTURES_DIR = Path("tests/fixtures/parking_tariffs")
 
@@ -50,21 +72,42 @@ class TestOutcodeDetection:
         assert not _OUTCODE_RE.match("not a postcode")
 
 
-class TestBoysEligible:
-    def test_mixed_gender_eligible(self):
-        assert _boys_eligible({"Gender (name)": "Mixed", "TypeOfEstablishment (name)": "Community School"})
+class TestSchoolAcceptsGender:
+    def test_mixed_school_accepts_boys(self):
+        s = School.from_GIAS_row({"Gender (name)": "Mixed", "TypeOfEstablishment (name)": "Community School"})
+        assert s.accepts(SchoolGender.BOYS)
 
-    def test_boys_gender_eligible(self):
-        assert _boys_eligible({"Gender (name)": "Boys", "TypeOfEstablishment (name)": "Academy Converter"})
+    def test_boys_school_accepts_boys(self):
+        s = School.from_GIAS_row({"Gender (name)": "Boys", "TypeOfEstablishment (name)": "Academy Converter"})
+        assert s.accepts(SchoolGender.BOYS)
 
-    def test_girls_gender_ineligible(self):
-        assert not _boys_eligible({"Gender (name)": "Girls", "TypeOfEstablishment (name)": "Community School"})
+    def test_girls_school_rejects_boys(self):
+        s = School.from_GIAS_row({"Gender (name)": "Girls", "TypeOfEstablishment (name)": "Community School"})
+        assert not s.accepts(SchoolGender.BOYS)
 
-    def test_independent_school_ineligible(self):
-        assert not _boys_eligible({"Gender (name)": "Mixed", "TypeOfEstablishment (name)": "Independent School"})
+    def test_independent_boys_still_accepts_boys(self):
+        """fee_paying is separate from gender — a fee-paying boys school still accepts boys."""
+        s = School.from_GIAS_row({"Gender (name)": "Boys", "TypeOfEstablishment (name)": "Independent School"})
+        assert s.accepts(SchoolGender.BOYS)
 
-    def test_missing_fields_returns_false(self):
-        assert not _boys_eligible({})
+    def test_mixed_school_accepts_girls(self):
+        s = School.from_GIAS_row({"Gender (name)": "Mixed"})
+        assert s.accepts(SchoolGender.GIRLS)
+
+    def test_mixed_required_for_both_genders(self):
+        s = School.from_GIAS_row({"Gender (name)": "Mixed"})
+        assert s.accepts(SchoolGender.BOYS) and s.accepts(SchoolGender.GIRLS)
+
+    def test_boys_school_rejects_girls(self):
+        s = School.from_GIAS_row({"Gender (name)": "Boys"})
+        assert not s.accepts(SchoolGender.GIRLS)
+
+    def test_unknown_gender_rejects_all(self):
+        s = School.from_GIAS_row({"Gender (name)": "Not applicable"})
+        assert s.gender == SchoolGender.UNKNOWN
+        assert not s.accepts(SchoolGender.BOYS)
+        assert not s.accepts(SchoolGender.GIRLS)
+        assert not s.accepts(SchoolGender.MIXED)
 
 
 class TestHaversine:
@@ -116,14 +159,22 @@ class TestCommuteBreakdown:
         assert result.yearly_total_gbp is None
 
 
-class TestFeePayingTypes:
-    def test_includes_known_private_types(self):
-        assert "independent school" in FEE_PAYING_TYPES
-        assert "other independent school" in FEE_PAYING_TYPES
+class TestSchoolFeePaying:
+    def test_independent_school_is_fee_paying(self):
+        s = School.from_GIAS_row({"TypeOfEstablishment (name)": "Independent School"})
+        assert s.fee_paying
 
-    def test_excludes_public_types(self):
-        assert "community school" not in FEE_PAYING_TYPES
-        assert "academy converter" not in FEE_PAYING_TYPES
+    def test_other_independent_is_fee_paying(self):
+        s = School.from_GIAS_row({"TypeOfEstablishment (name)": "Other independent school"})
+        assert s.fee_paying
+
+    def test_community_school_not_fee_paying(self):
+        s = School.from_GIAS_row({"TypeOfEstablishment (name)": "Community School"})
+        assert not s.fee_paying
+
+    def test_academy_converter_not_fee_paying(self):
+        s = School.from_GIAS_row({"TypeOfEstablishment (name)": "Academy Converter"})
+        assert not s.fee_paying
 
 
 class TestPetrolCalculation:
@@ -168,116 +219,212 @@ class TestPetrolCalculation:
         assert cost == round(cost, 2)
 
 
-class TestPhaseFilter:
-    """_phase_filter — checks a school's PhaseOfEducation matches the target."""
+class TestSchoolAcceptsAge:
+    """School.accepts_age — checks if a child of a given age can attend."""
 
-    def test_primary_phase_matches_primary(self):
-        assert _phase_filter({"PhaseOfEducation (name)": "Primary"}, "primary")
+    def test_primary_accepts_age_7(self):
+        s = School.from_GIAS_row({"PhaseOfEducation (name)": "Primary"})
+        assert s.accepts_age(7)
 
-    def test_secondary_phase_matches_secondary(self):
-        assert _phase_filter({"PhaseOfEducation (name)": "Secondary"}, "secondary")
+    def test_secondary_accepts_age_13(self):
+        s = School.from_GIAS_row({"PhaseOfEducation (name)": "Secondary"})
+        assert s.accepts_age(13)
 
-    def test_primary_does_not_match_secondary(self):
-        assert not _phase_filter({"PhaseOfEducation (name)": "Primary"}, "secondary")
+    def test_primary_rejects_teenager(self):
+        s = School.from_GIAS_row({"PhaseOfEducation (name)": "Primary"})
+        assert not s.accepts_age(13)
 
-    def test_not_available_does_not_match(self):
-        assert not _phase_filter({"PhaseOfEducation (name)": "Not applicable"}, "primary")
+    def test_secondary_rejects_young_child(self):
+        s = School.from_GIAS_row({"PhaseOfEducation (name)": "Secondary"})
+        assert not s.accepts_age(5)
 
-    def test_missing_phase_does_not_match(self):
-        assert not _phase_filter({}, "primary")
+    def test_all_through_accepts_all_ages(self):
+        s = School.from_GIAS_row({"PhaseOfEducation (name)": "All-through"})
+        assert s.accepts_age(5)
+        assert s.accepts_age(11)
+        assert s.accepts_age(17)
 
-    def test_case_insensitive_school_data(self):
-        """School's phase value is lowercased before matching; target is used as-is."""
-        assert _phase_filter({"PhaseOfEducation (name)": "PRIMARY"}, "primary")
-        assert _phase_filter({"PhaseOfEducation (name)": "Secondary"}, "secondary")
+    def test_not_applicable_falls_back_to_statutory_age(self):
+        """Not applicable phase uses StatutoryLowAge/HighAge when available."""
+        s = School.from_GIAS_row(
+            {
+                "PhaseOfEducation (name)": "Not applicable",
+                "StatutoryLowAge": "11",
+                "StatutoryHighAge": "16",
+            }
+        )
+        assert s.accepts_age(13)
+        assert not s.accepts_age(5)
 
-    def test_phase_contains_substring(self):
-        """_phase_filter uses 'in' for substring matching on phase."""
-        assert _phase_filter({"PhaseOfEducation (name)": "Primary"}, "prim")
-        assert not _phase_filter({"PhaseOfEducation (name)": "Not applicable"}, "primary")
+    def test_not_applicable_no_age_data(self):
+        """Without age data, 'Not applicable' schools are accepted (caller filters)."""
+        s = School.from_GIAS_row({"PhaseOfEducation (name)": "Not applicable"})
+        assert s.accepts_age(10)
 
 
 class TestSchoolCoords:
-    """_school_coords — parses Latitude/Longitude from a school row dict."""
+    """School.coords — parses Latitude/Longitude from a GIAS row."""
 
     def test_valid_coords(self):
-        coords = _school_coords({"Latitude": "51.5", "Longitude": "-0.13"})
-        assert coords == (51.5, -0.13)
+        s = School.from_GIAS_row({"Latitude": "51.5", "Longitude": "-0.13"})
+        assert s.coords == GeoPoint(51.5, -0.13)
 
     def test_missing_lat_returns_none(self):
-        assert _school_coords({"Longitude": "-0.13"}) is None
+        s = School.from_GIAS_row({"Longitude": "-0.13"})
+        assert s.coords is None
 
     def test_missing_lng_returns_none(self):
-        assert _school_coords({"Latitude": "51.5"}) is None
+        s = School.from_GIAS_row({"Latitude": "51.5"})
+        assert s.coords is None
 
     def test_empty_strings_returns_none(self):
-        assert _school_coords({"Latitude": "", "Longitude": ""}) is None
+        s = School.from_GIAS_row({"Latitude": "", "Longitude": ""})
+        assert s.coords is None
 
     def test_zero_coords(self):
-        """Zero lat/lng should still return (0.0, 0.0) since "0" is truthy."""
-        coords = _school_coords({"Latitude": "0", "Longitude": "0"})
-        assert coords == (0.0, 0.0)
+        """Zero lat/lng should still return GeoPoint(0, 0)."""
+        s = School.from_GIAS_row({"Latitude": "0", "Longitude": "0"})
+        assert s.coords == GeoPoint(0.0, 0.0)
 
-    def test_returns_floats(self):
-        coords = _school_coords({"Latitude": "52.2053", "Longitude": "0.1218"})
-        assert coords == (52.2053, 0.1218)
-        assert isinstance(coords[0], float)
-        assert isinstance(coords[1], float)
+    def test_returns_geopoint(self):
+        s = School.from_GIAS_row({"Latitude": "52.2053", "Longitude": "0.1218"})
+        assert s.coords == GeoPoint(52.2053, 0.1218)
 
 
-class TestSchoolToInfo:
-    """_school_to_info — converts a school dict (from CSV row) to a SchoolInfo object."""
+class TestFindNearestFilters:
+    """find_nearest must exclude fee-paying schools and schools with blank names."""
 
-    def test_basic_conversion(self):
-        school = {
-            "EstablishmentName": "Test Primary School",
-            "Gender (name)": "Mixed",
-            "TypeOfEstablishment (name)": "Community School",
-            "URN": "123456",
-            "SchoolWebsite": "https://example.com",
-            "OfstedRating (name)": "Good",
-            "InspectionYear": "2023",
-        }
-        info = _school_to_info(school, dist_km=0.8, school_type="primary")
+    @pytest.mark.asyncio
+    async def test_excludes_fee_paying_school(self, monkeypatch):
+        """A fee-paying school should be excluded even if it's the nearest."""
+        from houses.schools import find_nearest
 
-        assert info.name == "Test Primary School"
-        assert info.type == "primary"
-        assert info.distance_km == 0.8
-        assert info.gender == "mixed"
-        assert info.fee_paying is False
-        assert info.urn == "123456"
-        assert info.website == "https://example.com"
-        assert info.ofsted_rating == "Good"
-        assert info.inspection_year == "2023"
+        # Mock _load_schools to return a known set
+        fee_paying = School.from_GIAS_row(
+            {
+                "EstablishmentName": "Expensive School",
+                "Gender (name)": "Mixed",
+                "PhaseOfEducation (name)": "Primary",
+                "TypeOfEstablishment (name)": "Independent School",
+                "Latitude": "51.5",
+                "Longitude": "-0.1",
+                "Postcode": "SL6 1AA",
+            }
+        )
+        non_fee = School.from_GIAS_row(
+            {
+                "EstablishmentName": "Free School",
+                "Gender (name)": "Mixed",
+                "PhaseOfEducation (name)": "Primary",
+                "TypeOfEstablishment (name)": "Community School",
+                "Latitude": "51.501",
+                "Longitude": "-0.101",
+                "Postcode": "SL6 2BB",
+            }
+        )
+        monkeypatch.setattr("houses.schools._load_schools", lambda: [fee_paying, non_fee])
 
-    def test_walk_time_from_distance(self):
-        """Walk time should be distance / 5 * 60 (5 km/h walking speed)."""
-        info = _school_to_info({}, dist_km=1.0, school_type="primary")
-        assert info.walking_time_minutes == 12  # 1.0 / 5 * 60 = 12
+        # Mock geocode — property at midpoint (both schools within ~0.1° ≈ 7km,
+        # school_search_radius_km=5, but 0.001° ≈ 70m fits inside radius)
+        async def mock_geocode(*_, **__):
+            return Attempt.succeeded(GeoPoint(51.5005, -0.1005), "test")
 
-    def test_zero_distance_walk_time(self):
-        """Zero distance should yield None walk time."""
-        info = _school_to_info({}, dist_km=0.0, school_type="primary")
-        assert info.walking_time_minutes is None
+        monkeypatch.setattr("houses.schools.geocode", mock_geocode)
+        monkeypatch.setattr("houses.schools._geocode_address", mock_geocode)
 
-    def test_none_distance(self):
-        """None distance should yield None walk time and None distance_km."""
-        info = _school_to_info({}, dist_km=None, school_type="primary")
-        assert info.walking_time_minutes is None
-        assert info.distance_km is None
+        result = await find_nearest("SL6 3CC", child_age=7, requirement=SchoolGender.BOYS)
+        assert result is not None, "Expected a school, got None"
+        assert result.name == "Free School", f"Expected Free School, got {result.name}"
 
-    def test_distance_rounded_to_2dp(self):
-        info = _school_to_info({}, dist_km=1.23456, school_type="primary")
-        assert info.distance_km == 1.23
+    @pytest.mark.asyncio
+    async def test_excludes_empty_name_school(self, monkeypatch):
+        """A school with a blank name should be excluded."""
+        from houses.schools import find_nearest
+
+        unnamed = School.from_GIAS_row(
+            {
+                "EstablishmentName": "",
+                "Gender (name)": "Mixed",
+                "PhaseOfEducation (name)": "Primary",
+                "TypeOfEstablishment (name)": "Community School",
+                "Latitude": "51.5",
+                "Longitude": "-0.1",
+                "Postcode": "SL6 1AA",
+            }
+        )
+        named = School.from_GIAS_row(
+            {
+                "EstablishmentName": "Has A Name School",
+                "Gender (name)": "Mixed",
+                "PhaseOfEducation (name)": "Primary",
+                "TypeOfEstablishment (name)": "Community School",
+                "Latitude": "51.501",
+                "Longitude": "-0.101",
+                "Postcode": "SL6 2BB",
+            }
+        )
+        monkeypatch.setattr("houses.schools._load_schools", lambda: [unnamed, named])
+
+        async def mock_geocode(*_, **__):
+            return Attempt.succeeded(GeoPoint(51.5005, -0.1005), "test")
+
+        monkeypatch.setattr("houses.schools.geocode", mock_geocode)
+        monkeypatch.setattr("houses.schools._geocode_address", mock_geocode)
+
+        result = await find_nearest("SL6 3CC", child_age=7, requirement=SchoolGender.BOYS)
+        assert result is not None, "Expected a school, got None"
+        assert result.name == "Has A Name School", f"Expected Has A Name, got {result.name}"
+
+
+class TestSchoolFromGIASRow:
+    """School.from_GIAS_row — parses a GIAS CSV row into a School dataclass."""
+
+    def test_basic_parse(self):
+        s = School.from_GIAS_row(
+            {
+                "EstablishmentName": "Test Primary School",
+                "Gender (name)": "Mixed",
+                "TypeOfEstablishment (name)": "Community School",
+                "URN": "123456",
+                "SchoolWebsite": "https://example.com",
+                "OfstedRating (name)": "Good",
+                "InspectionYear": "2023",
+                "PhaseOfEducation (name)": "Primary",
+                "Postcode": "SL6 1AA",
+            }
+        )
+
+        assert s.name == "Test Primary School"
+        assert s.gender == SchoolGender.MIXED
+        assert s.type_of_establishment == "Community School"
+        assert not s.fee_paying
+        assert s.urn == "123456"
+        assert s.website == "https://example.com"
+        assert s.ofsted_rating == "Good"
+        assert s.inspection_year == "2023"
+        assert s.phase == "Primary"
+        assert s.postcode == "SL6 1AA"
+
+    def test_independent_school_is_fee_paying(self):
+        s = School.from_GIAS_row({"TypeOfEstablishment (name)": "Independent School"})
+        assert s.fee_paying
 
     def test_missing_name_defaults(self):
-        info = _school_to_info({}, dist_km=None, school_type="secondary")
-        assert info.name == "Unknown"
-        assert info.urn == ""
+        s = School.from_GIAS_row({})
+        assert s.name == ""
+        assert s.urn == ""
 
-    def test_type_preserved(self):
-        info = _school_to_info({}, dist_km=0.5, school_type="secondary")
-        assert info.type == "secondary"
+    def test_coords_from_lat_lng(self):
+        s = School.from_GIAS_row({"Latitude": "51.5", "Longitude": "-0.13"})
+        assert s.coords == GeoPoint(51.5, -0.13)
+
+    def test_missing_coords_is_none(self):
+        s = School.from_GIAS_row({})
+        assert s.coords is None
+
+    def test_gender_from_raw_string(self):
+        s = School.from_GIAS_row({"Gender (name)": "Boys"})
+        assert s.gender == SchoolGender.BOYS
 
 
 class TestEndPostcodePattern:
@@ -316,26 +463,26 @@ class TestNextWeekdayDateParams:
 
 
 class TestShortenStation:
-    """_shorten_station — strip common station suffixes."""
+    """Station.short_name — strip common station suffixes."""
 
     def test_rail_station(self):
-        assert _shorten_station("Maidenhead Rail Station") == "Maidenhead"
+        assert Station.short_name("Maidenhead Rail Station") == "Maidenhead"
 
     def test_underground_station(self):
-        assert _shorten_station("Paddington Underground Station") == "Paddington"
+        assert Station.short_name("Paddington Underground Station") == "Paddington"
 
     def test_generic_station(self):
-        assert _shorten_station("Oxford Circus Station") == "Oxford Circus"
+        assert Station.short_name("Oxford Circus Station") == "Oxford Circus"
 
     def test_no_suffix(self):
-        assert _shorten_station("Some Street, Town") == "Some Street, Town"
+        assert Station.short_name("Some Street, Town") == "Some Street, Town"
 
     def test_strips_london_prefix(self):
-        assert _shorten_station("London Paddington Rail Station") == "Paddington"
-        assert _shorten_station("London Waterloo Rail Station") == "Waterloo"
+        assert Station.short_name("London Paddington Rail Station") == "Paddington"
+        assert Station.short_name("London Waterloo Rail Station") == "Waterloo"
 
     def test_empty_string(self):
-        assert _shorten_station("") == ""
+        assert Station.short_name("") == ""
 
 
 class TestFormatRouteSummary:
@@ -558,211 +705,138 @@ class TestPickBestJourney:
 
 
 class TestStationLookup:
-    """_lookup_station_coords — find station coords from CSV by name."""
+    """find_station — look up station coords from CSV by name."""
 
     def test_finds_didcot_parkway(self):
         """'Didcot Parkway Rail Station' should match 'Didcot Parkway' in stations.csv."""
-        from houses.enricher import _lookup_station_coords
-
-        coords = _lookup_station_coords("Didcot Parkway Rail Station")
-        assert coords is not None
+        station = find_station("Didcot Parkway Rail Station")
+        assert station is not None
         # Didcot Parkway is at ~51.611, -1.243 in stations.csv
-        assert abs(coords[0] - 51.611) < 0.02
-        assert abs(coords[1] + 1.243) < 0.02
+        assert abs(station.location.lat - 51.611) < 0.02
+        assert abs(station.location.lon + 1.243) < 0.02
 
     def test_returns_none_for_unknown(self):
-        from houses.enricher import _lookup_station_coords
-
-        assert _lookup_station_coords("Some Fake Station") is None
+        assert find_station("Some Fake Station") is None
 
     def test_strips_station_suffixes(self):
-        from houses.enricher import _lookup_station_coords
-
         # Should find Maidenhead in stations.csv (not "Maidenhead Rail Station")
-        coords = _lookup_station_coords("Maidenhead Rail Station")
-        assert coords is not None
-
-
-class TestCleanStationNameForMatching:
-    """_clean_station_name_for_matching — strip suffixes but NOT London prefix."""
-
-    def test_strips_rail_station(self):
-        from houses.enricher import _clean_station_name_for_matching
-
-        assert _clean_station_name_for_matching("Woking Rail Station") == "Woking"
-
-    def test_strips_underground_station(self):
-        from houses.enricher import _clean_station_name_for_matching
-
-        assert _clean_station_name_for_matching("Paddington Underground Station") == "Paddington"
-
-    def test_strips_generic_station(self):
-        from houses.enricher import _clean_station_name_for_matching
-
-        assert _clean_station_name_for_matching("Oxford Circus Station") == "Oxford Circus"
-
-    def test_keeps_london_prefix(self):
-        from houses.enricher import _clean_station_name_for_matching
-
-        assert _clean_station_name_for_matching("London Paddington Rail Station") == "London Paddington"
-
-    def test_no_suffix(self):
-        from houses.enricher import _clean_station_name_for_matching
-
-        assert _clean_station_name_for_matching("Some Street, Town") == "Some Street, Town"
+        station = find_station("Maidenhead Rail Station")
+        assert station is not None
 
 
 class TestStationCrsLookup:
-    """_lookup_station_crs — find CRS from stations.csv by exact match."""
+    """find_station — look up CRS from stations.csv by name."""
 
     def test_finds_woking(self):
-        from houses.enricher import _lookup_station_crs
-
-        crs = _lookup_station_crs("Woking Rail Station")
-        assert crs == "WOK"
+        station = find_station("Woking Rail Station")
+        assert station is not None
+        assert station.crs == "WOK"
 
     def test_finds_maidenhead(self):
-        from houses.enricher import _lookup_station_crs
-
-        crs = _lookup_station_crs("Maidenhead Rail Station")
-        assert crs == "MAI"
+        station = find_station("Maidenhead Rail Station")
+        assert station is not None
+        assert station.crs == "MAI"
 
     def test_case_insensitive(self):
-        from houses.enricher import _lookup_station_crs
-
-        crs = _lookup_station_crs("woking rail station")
-        assert crs == "WOK"
+        station = find_station("woking rail station")
+        assert station is not None
+        assert station.crs == "WOK"
 
     def test_not_found_returns_none(self):
-        from houses.enricher import _lookup_station_crs
-
-        crs = _lookup_station_crs("Some Fake Station")
-        assert crs is None
+        assert find_station("Some Fake Station") is None
 
 
 class TestBusFareDailyCost:
-    """_compute_bus_daily_cost — cheapest product covering two journeys."""
+    """cheapest_round_trip — cheapest product covering two journeys."""
 
     def test_uses_return_when_cheaper_than_2x_single(self):
-        from houses.enricher import _compute_bus_daily_cost
-
         # adult_return £4.00 vs 2×single £5.00 → £4.00
-        cost = _compute_bus_daily_cost({"adult_single": 2.50, "adult_return": 4.00})
-        assert cost == 4.00
+        cost = cheapest_round_trip(_fares_from_dict({"adult_single": 2.50, "adult_return": 4.00}))
+        assert cost == Money("4.00", "GBP")
 
     def test_uses_day_rider_when_cheapest(self):
-        from houses.enricher import _compute_bus_daily_cost
-
         # adult_day £4.50 < 2×single £5.00 → £4.50
-        cost = _compute_bus_daily_cost({"adult_single": 2.50, "adult_day": 4.50})
-        assert cost == 4.50
+        cost = cheapest_round_trip(_fares_from_dict({"adult_single": 2.50, "adult_day": 4.50}))
+        assert cost == Money("4.50", "GBP")
 
     def test_uses_2x_single_when_no_other_products(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        cost = _compute_bus_daily_cost({"adult_single": 2.50})
-        assert cost == 5.00
+        cost = cheapest_round_trip(_fares_from_dict({"adult_single": 2.50}))
+        assert cost == Money("5.00", "GBP")
 
     def test_national_cap_applied_to_single(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        meta = {"national_max_single_gbp": 3.00}
         # BODS single is £4.00, cap → £3.00, daily → £6.00
-        cost = _compute_bus_daily_cost({"adult_single": 4.00}, meta)
-        assert cost == 6.00
+        cost = cheapest_round_trip(_fares_from_dict({"adult_single": 4.00}), Money("3.00", "GBP"))
+        assert cost == Money("6.00", "GBP")
 
     def test_national_cap_below_cap(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        meta = {"national_max_single_gbp": 3.00}
         # BODS single £2.50 is below cap → used as-is
-        cost = _compute_bus_daily_cost({"adult_single": 2.50}, meta)
-        assert cost == 5.00
+        cost = cheapest_round_trip(_fares_from_dict({"adult_single": 2.50}), Money("3.00", "GBP"))
+        assert cost == Money("5.00", "GBP")
 
     def test_national_cap_not_set(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        # meta is None → BODS single used as-is
-        cost = _compute_bus_daily_cost({"adult_single": 4.00})
-        assert cost == 8.00
+        # national_max_single is None → BODS single used as-is
+        cost = cheapest_round_trip(_fares_from_dict({"adult_single": 4.00}))
+        assert cost == Money("8.00", "GBP")
 
 
 class TestBusFareLookup:
-    """_lookup_bus_roundtrip_cost — stop name → zone → zone pair → price."""
+    """BusJourneyRegistry.fares_for_stops + cheapest_round_trip — full pipeline."""
+
+    _registry = BusJourneyRegistry()
+
+    def _cost(self, dep: str, arr: str, dep_point=None, arr_point=None) -> Money | None:
+        fares = self._registry.fares_for_stops(dep, arr, dep_point, arr_point)
+        return cheapest_round_trip(fares, self._registry.national_max_single)
 
     def test_randolph_close_to_woking_station(self):
-        from houses.enricher import _lookup_bus_roundtrip_cost
-
-        cost = _lookup_bus_roundtrip_cost("randolph close", "woking railway station")
-        assert cost == 1.8
+        cost = self._cost("randolph close", "woking railway station")
+        assert cost == Money("1.80", "GBP")
 
     def test_case_insensitive_matching(self):
-        from houses.enricher import _lookup_bus_roundtrip_cost
-
-        cost = _lookup_bus_roundtrip_cost("RANDOLPH CLOSE", "WOKING RAILWAY STATION")
-        assert cost == 1.8
+        cost = self._cost("RANDOLPH CLOSE", "WOKING RAILWAY STATION")
+        assert cost == Money("1.80", "GBP")
 
     def test_tfl_area_prefix_dep_match(self):
-        from houses.enricher import _lookup_bus_roundtrip_cost
-
-        cost = _lookup_bus_roundtrip_cost("Knaphill, Randolph Close", "Woking, Woking Railway Station")
-        assert cost == 1.8
+        cost = self._cost("Knaphill, Randolph Close", "Woking, Woking Railway Station")
+        assert cost == Money("1.80", "GBP")
 
     def test_tfl_westfield_not_in_zone_fares(self):
-        from houses.enricher import _lookup_bus_roundtrip_cost
-
-        cost = _lookup_bus_roundtrip_cost("Westfield, Westfield Common", "Woking, Woking Railway Station")
-        assert cost is None, "Westfield->Woking has no zone pair in BODS data (data gap)"
+        cost = self._cost("Westfield, Westfield Common", "Woking, Woking Railway Station")
+        assert cost is not None, "Westfield->Woking should now match via fuzzy matching"
 
     def test_tfl_brookwood_to_woking(self):
-        from houses.enricher import _lookup_bus_roundtrip_cost
-
-        cost = _lookup_bus_roundtrip_cost("Brookwood, Brookwood Railway Station", "Woking, Woking Railway Station")
-        assert cost == 3.0
+        cost = self._cost("Brookwood, Brookwood Railway Station", "Woking, Woking Railway Station")
+        assert cost == Money("3.00", "GBP")
 
     def test_fuzzy_match_periods(self):
-        from houses.enricher import _lookup_bus_roundtrip_cost
-
-        cost = _lookup_bus_roundtrip_cost("St. Johns, St. James Close", "Woking, Woking Railway Station")
+        cost = self._cost("St. Johns, St. James Close", "Woking, Woking Railway Station")
         assert cost is not None
 
     def test_fuzzy_match_does_not_match_unrelated(self):
-        from houses.enricher import _lookup_bus_roundtrip_cost
-
-        cost = _lookup_bus_roundtrip_cost("Knaphill, Supermarket Car Park", "Woking, Woking Railway Station")
+        cost = self._cost("Knaphill, Supermarket Car Park", "Woking, Woking Railway Station")
         assert cost is None, "Should not match unrelated stop 'supermarket car park'"
 
-        cost2 = _lookup_bus_roundtrip_cost("North London Bus Stop", "Woking, Woking Railway Station")
+        cost2 = self._cost("North London Bus Stop", "Woking, Woking Railway Station")
         assert cost2 is None, "Should not match stop in entirely different area"
 
     def test_fuzzy_match_short_noise_words_rejected(self):
-        from houses.enricher import _lookup_bus_roundtrip_cost
-
-        cost = _lookup_bus_roundtrip_cost("Woking Station", "Woking, Woking Railway Station")
+        cost = self._cost("Woking Station", "Woking, Woking Railway Station")
         assert cost is None, "'Woking Station' should not match 'station' (a different stop)"
 
     def test_unknown_stops_return_none(self):
-        from houses.enricher import _lookup_bus_roundtrip_cost
-
-        cost = _lookup_bus_roundtrip_cost("Unknown Stop", "Another Unknown")
+        cost = self._cost("Unknown Stop", "Another Unknown")
         assert cost is None
 
     def test_same_stop_is_not_free(self):
-        from houses.enricher import _lookup_bus_roundtrip_cost
-
-        cost = _lookup_bus_roundtrip_cost("randolph close", "randolph close")
+        cost = self._cost("randolph close", "randolph close")
         assert cost is not None
 
     def test_reversed_direction(self):
-        from houses.enricher import _lookup_bus_roundtrip_cost
-
-        cost = _lookup_bus_roundtrip_cost("woking railway station", "randolph close")
-        assert cost == 1.8
+        cost = self._cost("woking railway station", "randolph close")
+        assert cost == Money("1.80", "GBP")
 
     def test_coord_fallback_without_coords_still_returns_none(self):
-        from houses.enricher import _lookup_bus_roundtrip_cost
-
-        cost = _lookup_bus_roundtrip_cost(
+        cost = self._cost(
             "Unknown Stop",
             "Another Unknown",
             {"lat": 51.3, "lon": -0.5},
@@ -772,156 +846,104 @@ class TestBusFareLookup:
 
 
 class TestComputeBusDailyCost:
-    """_compute_bus_daily_cost — cheapest product selection."""
+    """cheapest_round_trip — cheapest product selection."""
 
     def test_single_only_doubled(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        cost = _compute_bus_daily_cost({"adult_single": 1.5})
-        assert cost == 3.0
+        cost = cheapest_round_trip(_fares_from_dict({"adult_single": 1.5}))
+        assert cost == Money("3.00", "GBP")
 
     def test_single_with_return(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        cost = _compute_bus_daily_cost({"adult_single": 1.5, "adult_return": 2.5})
-        assert cost == 2.5
+        cost = cheapest_round_trip(_fares_from_dict({"adult_single": 1.5, "adult_return": 2.5}))
+        assert cost == Money("2.50", "GBP")
 
     def test_single_with_day_cheaper(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        cost = _compute_bus_daily_cost({"adult_single": 2.0, "adult_day": 3.5})
-        assert cost == 3.5
+        cost = cheapest_round_trip(_fares_from_dict({"adult_single": 2.0, "adult_day": 3.5}))
+        assert cost == Money("3.50", "GBP")
 
     def test_day_more_expensive_than_double(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        cost = _compute_bus_daily_cost({"adult_single": 0.9, "adult_day": 8.5})
-        assert cost == 1.8
+        cost = cheapest_round_trip(_fares_from_dict({"adult_single": 0.9, "adult_day": 8.5}))
+        assert cost == Money("1.80", "GBP")
 
     def test_national_cap_applied_before_doubling(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        cost = _compute_bus_daily_cost({"adult_single": 3.5}, {"national_max_single_gbp": 3.0})
-        assert cost == 6.0
+        cost = cheapest_round_trip(_fares_from_dict({"adult_single": 3.5}), Money("3.00", "GBP"))
+        assert cost == Money("6.00", "GBP")
 
     def test_return_cheaper_than_capped_double(self):
-        from houses.enricher import _compute_bus_daily_cost
+        cost = cheapest_round_trip(_fares_from_dict({"adult_single": 2.0, "adult_return": 3.8}), Money("3.00", "GBP"))
+        assert cost == Money("3.80", "GBP")
 
-        cost = _compute_bus_daily_cost({"adult_single": 2.0, "adult_return": 3.8}, {"national_max_single_gbp": 3.0})
-        assert cost == 3.8
+    def test_no_single_returns_none(self):
+        cost = cheapest_round_trip({})
+        assert cost is None
 
-    def test_no_single_returns_zero(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        cost = _compute_bus_daily_cost({})
-        assert cost == 0.0
-
-    def test_empty_fares_returns_zero(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        cost = _compute_bus_daily_cost({})
-        assert cost == 0.0
+    def test_empty_fares_returns_none(self):
+        cost = cheapest_round_trip({})
+        assert cost is None
 
     def test_return_more_expensive_than_single_double(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        cost = _compute_bus_daily_cost({"adult_single": 1.0, "adult_return": 2.5})
-        assert cost == 2.0
+        cost = cheapest_round_trip(_fares_from_dict({"adult_single": 1.0, "adult_return": 2.5}))
+        assert cost == Money("2.00", "GBP")
 
     def test_cap_makes_singles_cheaper_than_return(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        cost = _compute_bus_daily_cost({"adult_single": 3.5, "adult_return": 5.0}, {"national_max_single_gbp": 2.0})
-        assert cost == 4.0
+        cost = cheapest_round_trip(_fares_from_dict({"adult_single": 3.5, "adult_return": 5.0}), Money("2.00", "GBP"))
+        assert cost == Money("4.00", "GBP")
 
     def test_return_only_no_single(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        cost = _compute_bus_daily_cost({"adult_return": 4.0})
-        assert cost == 4.0
+        cost = cheapest_round_trip(_fares_from_dict({"adult_return": 4.0}))
+        assert cost == Money("4.00", "GBP")
 
     def test_day_only_no_single_or_return(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        cost = _compute_bus_daily_cost({"adult_day": 5.0})
-        assert cost == 5.0
+        cost = cheapest_round_trip(_fares_from_dict({"adult_day": 5.0}))
+        assert cost == Money("5.00", "GBP")
 
     def test_all_products_day_is_cheapest(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        cost = _compute_bus_daily_cost({"adult_single": 2.0, "adult_return": 3.5, "adult_day": 3.0})
-        assert cost == 3.0
+        cost = cheapest_round_trip(_fares_from_dict({"adult_single": 2.0, "adult_return": 3.5, "adult_day": 3.0}))
+        assert cost == Money("3.00", "GBP")
 
     def test_all_products_return_is_cheapest(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        cost = _compute_bus_daily_cost({"adult_single": 2.0, "adult_return": 2.5, "adult_day": 6.0})
-        assert cost == 2.5
+        cost = cheapest_round_trip(_fares_from_dict({"adult_single": 2.0, "adult_return": 2.5, "adult_day": 6.0}))
+        assert cost == Money("2.50", "GBP")
 
     def test_all_products_singles_cheapest_even_with_cap(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        cost = _compute_bus_daily_cost({"adult_single": 1.0, "adult_return": 3.0, "adult_day": 4.0})
-        assert cost == 2.0
+        cost = cheapest_round_trip(_fares_from_dict({"adult_single": 1.0, "adult_return": 3.0, "adult_day": 4.0}))
+        assert cost == Money("2.00", "GBP")
 
 
 class TestStopToZoneMapping:
-    """Zone lookup for stop names from the data file."""
+    """BusJourneyRegistry — stop name → zone lookup."""
+
+    _registry = BusJourneyRegistry()
 
     def test_randolph_close_maps_to_zone(self):
-        from houses.enricher import _load_bus_fares
-
-        data = _load_bus_fares()
-        scso = data.get("Stagecoach_South", {})
-        zone = scso.get("stop_zones", {}).get("randolph close")
-        assert zone is not None
+        fares = self._registry.fares_for_stops("randolph close", "woking railway station")
+        assert len(fares) > 0
 
     def test_woking_station_maps_to_same_zone(self):
-        from houses.enricher import _load_bus_fares
-
-        data = _load_bus_fares()
-        scso = data.get("Stagecoach_South", {})
-        assert scso.get("stop_zones", {}).get("randolph close") == scso.get("stop_zones", {}).get(
-            "woking railway station"
-        )
+        fares_rc = self._registry.fares_for_stops("randolph close", "woking railway station")
+        fares_ws = self._registry.fares_for_stops("woking railway station", "randolph close")
+        assert len(fares_rc) > 0
+        assert len(fares_ws) > 0
 
 
 class TestZonePairLookup:
-    """Zone pair -> fare products."""
+    """BusJourneyRegistry — zone pair → FareProduct."""
+
+    _registry = BusJourneyRegistry()
 
     def test_randolph_woking_station_has_single(self):
-        from houses.enricher import _load_bus_fares
-
-        data = _load_bus_fares()
-        scso = data.get("Stagecoach_South", {})
-        sz = scso.get("stop_zones", {})
-        dep_zone = sz.get("randolph close")
-        arr_zone = sz.get("woking railway station")
-        assert dep_zone is not None
-        assert arr_zone is not None
-        fares = scso.get("zone_fares", {}).get(f"{dep_zone}:{arr_zone}")
-        assert fares is not None
-        assert fares.get("adult_single") == 0.9
+        fares = self._registry.fares_for_stops("randolph close", "woking railway station")
+        assert FareProductType.SINGLE in fares
+        assert fares[FareProductType.SINGLE].price == Money("0.90", "GBP")
 
     def test_randolph_woking_has_adult_day(self):
-        from houses.enricher import _load_bus_fares
-
-        data = _load_bus_fares()
-        scso = data.get("Stagecoach_South", {})
-        sz = scso.get("stop_zones", {})
-        dep_zone = sz.get("randolph close")
-        arr_zone = sz.get("woking railway station")
-        fares = scso.get("zone_fares", {}).get(f"{dep_zone}:{arr_zone}")
-        assert fares is not None
-        assert fares.get("adult_day") == 8.5
+        fares = self._registry.fares_for_stops("randolph close", "woking railway station")
+        assert FareProductType.DAY in fares
+        assert fares[FareProductType.DAY].price == Money("8.50", "GBP")
 
     def test_reverse_zone_pair_has_same_fares(self):
-        from houses.enricher import _load_bus_fares
-
-        data = _load_bus_fares()
-        scso = data.get("Stagecoach_South", {})
-        fares_fwd = scso.get("zone_fares", {}).get("zone@510@17@boarding:zone@510@17@boarding", {})
-        assert fares_fwd.get("adult_single") == 0.9
+        fares = self._registry.fares_for_stops("woking railway station", "randolph close")
+        assert FareProductType.SINGLE in fares
+        assert fares[FareProductType.SINGLE].price == Money("0.90", "GBP")
 
 
 class TestPickBestLorenaRoute:
@@ -965,10 +987,10 @@ class TestPickBestLorenaRoute:
 
 
 class TestBusFallback:
-    """compute_lorena_commute falls back to bus route when TfL has no bus."""
+    """Bus cost added when TfL's route has a long walk that Google can shortcut."""
 
     @pytest.mark.asyncio
-    async def test_route_summary_preserves_timing_brackets(self, monkeypatch):
+    async def test_adds_bus_cost_when_tfl_route_has_long_walk(self, monkeypatch):
         from houses.commute import Commute
         from houses.enricher import compute_lorena_commute
 
@@ -1003,14 +1025,19 @@ class TestBusFallback:
         async def mock_bus(*_):
             return bus_route
 
+        async def _disabled(*_):
+            return None
+
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
-        monkeypatch.setattr("houses.enricher._find_bus_alternative", mock_bus)
+        monkeypatch.setattr("houses.routing._find_bus_alternative", mock_bus)
+        monkeypatch.setattr("houses.routing._google_transit_commute", _disabled)
+        monkeypatch.setattr("houses.routing._walk_commute", _disabled)
 
         result = (await compute_lorena_commute("GU52")).get()
         assert result.non_rail_cost() > 0, "Should find bus cost"
 
     @pytest.mark.asyncio
-    async def test_triggers_on_long_walk_no_tfl_bus(self, monkeypatch):
+    async def test_adds_bus_cost_when_tfl_route_no_bus(self, monkeypatch):
         from houses.commute import Commute
         from houses.enricher import compute_lorena_commute
 
@@ -1054,7 +1081,11 @@ class TestBusFallback:
             return bus_route
 
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
-        monkeypatch.setattr("houses.enricher._find_bus_alternative", mock_bus)
+        monkeypatch.setattr("houses.routing._find_bus_alternative", mock_bus)
+        async def _none(*_):
+            return None
+        monkeypatch.setattr("houses.routing._google_transit_commute", _none)
+        monkeypatch.setattr("houses.routing._walk_commute", _none)
 
         result = (await compute_lorena_commute("GU52")).get()
         assert result.non_rail_cost() > 0, "Should find bus cost"
@@ -1062,7 +1093,7 @@ class TestBusFallback:
         assert result.duration_minutes < 90, "Should be faster than TfL walk"
 
     @pytest.mark.asyncio
-    async def test_skips_when_tfl_already_has_bus(self, monkeypatch):
+    async def test_skips_bus_fallback_when_tfl_route_has_bus(self, monkeypatch):
         from houses.commute import Commute
         from houses.enricher import compute_lorena_commute
 
@@ -1083,30 +1114,16 @@ class TestBusFallback:
             return Attempt.succeeded(with_bus if self._allow_bus else no_bus, "test")
 
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
-        monkeypatch.setattr("houses.enricher._find_bus_alternative", lambda *_: None)
+        monkeypatch.setattr("houses.routing._find_bus_alternative", lambda *_: None)
+        async def _none(*_):
+            return None
+        monkeypatch.setattr("houses.routing._google_transit_commute", _none)
+        monkeypatch.setattr("houses.routing._walk_commute", _none)
 
         result = (await compute_lorena_commute("GU52")).get()
-        assert result is with_bus, "Should use TfL bus route when available"
-
-
-class TestBusFaresDataLoaded:
-    """data/bus_fares.json is loaded at runtime."""
-
-    def test_file_loaded(self):
-        from houses.enricher import _load_bus_fares
-
-        data = _load_bus_fares()
-        assert data is not None
-        assert "_meta" in data
-        assert data["_meta"]["national_max_single_gbp"] == 3.00
-
-    def test_has_stagecoach_south(self):
-        from houses.enricher import _load_bus_fares
-
-        data = _load_bus_fares()
-        assert "Stagecoach_South" in data
-        assert "stop_zones" in data["Stagecoach_South"]
-        assert "zone_fares" in data["Stagecoach_South"]
+        assert result is not None
+        assert result.duration_minutes == with_bus.duration_minutes
+        assert result.daily_cost_gbp == with_bus.daily_cost_gbp
 
 
 class TestParkingRates:
@@ -1454,28 +1471,154 @@ class TestKnownWrongBehaviours:
     """Tests for known bugs — these define expected correct behaviour."""
 
     def test_daily_cost_returns_return_when_no_single(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        cost = _compute_bus_daily_cost({"adult_return": 4.0})
-        assert cost == 4.0, "Should fall back to return price when single is missing"
+        cost = cheapest_round_trip(_fares_from_dict({"adult_return": 4.0}))
+        assert cost == Money("4.00", "GBP"), "Should fall back to return price when single is missing"
 
     def test_daily_cost_returns_day_when_no_single_no_return(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        cost = _compute_bus_daily_cost({"adult_day": 5.0})
-        assert cost == 5.0, "Should use day price when single and return are missing"
+        cost = cheapest_round_trip(_fares_from_dict({"adult_day": 5.0}))
+        assert cost == Money("5.00", "GBP"), "Should use day price when single and return are missing"
 
     def test_daily_cost_uses_return_when_missing_single(self):
-        from houses.enricher import _compute_bus_daily_cost
-
-        cost = _compute_bus_daily_cost({"adult_return": 8.0}, {"national_max_single_gbp": 3.0})
-        assert cost == 8.0, "Return is used as-is (national cap only applies to single)"
+        cost = cheapest_round_trip(_fares_from_dict({"adult_return": 8.0}), Money("3.00", "GBP"))
+        assert cost == Money("8.00", "GBP"), "Return is used as-is (national cap only applies to single)"
 
     def test_stop_coord_fallback_is_not_dead_code(self):
         """stop_coords should be populated from NaPTAN data during extraction."""
-        from houses.enricher import _load_bus_fares
-
-        data = _load_bus_fares()
-        scso = data.get("Stagecoach_South", {})
+        registry = BusJourneyRegistry()
+        _ = registry.national_max_single  # trigger lazy load
+        scso = registry._data.get("Stagecoach_South", {})
         coords = scso.get("stop_coords", [])
         assert len(coords) > 0, "stop_coords empty — NaPTAN stop data not integrated or extraction needs re-run"
+
+
+class TestTfLRouteSummary:
+    """TransitRoute._build_cost_groups must preserve TfL station/line names."""
+
+    def test_summary_includes_station_names(self):
+        """JourneyLeg descriptions should contain station names and transit route info."""
+        from houses.transit_route import TransitRoute
+
+        route = TransitRoute("SL6", "SW1V 2QQ", "test")
+        tfl_data = {
+            "journeys": [
+                {
+                    "duration": 87,
+                    "legs": [
+                        {
+                            "mode": {"name": "walking"},
+                            "duration": 16,
+                            "instruction": {"summary": "walk to Maidenhead"},
+                            "arrivalPoint": {"commonName": "Maidenhead Rail Station"},
+                        },
+                        {
+                            "mode": {"name": "national-rail"},
+                            "duration": 22,
+                            "instruction": {"summary": "Train to Paddington"},
+                            "route": {"name": "Great Western Railway"},
+                            "departurePoint": {"commonName": "Maidenhead"},
+                            "arrivalPoint": {"commonName": "Paddington"},
+                        },
+                        {
+                            "mode": {"name": "tube"},
+                            "duration": 8,
+                            "instruction": {"summary": "Bakerloo line to Oxford Circus"},
+                            "route": {"name": "Bakerloo"},
+                            "departurePoint": {"commonName": "Paddington"},
+                            "arrivalPoint": {"commonName": "Oxford Circus"},
+                        },
+                    ],
+                    "fare": {"totalCost": 500, "singleFare": 250},
+                }
+            ]
+        }
+
+        groups = route._build_cost_groups(tfl_data)
+        from houses.commute import _render_leg_description
+
+        all_descriptions = []
+        for g in groups:
+            for leg in g.legs:
+                all_descriptions.append(_render_leg_description(leg))
+
+        combined = " ".join(all_descriptions)
+        assert "Maidenhead" in combined, f"Should mention station name, got: {combined}"
+        assert "Paddington" in combined, f"Should mention arrival station, got: {combined}"
+        assert any("Bakerloo" in d or "Great Western" in d for d in all_descriptions), (
+            f"Should mention transit line name, got: {all_descriptions}"
+        )
+
+        # Check the new fields are populated
+        all_legs = [leg for g in groups for leg in g.legs]
+        tube_leg = next(leg for leg in all_legs if leg.mode.name == "TUBE")
+        assert tube_leg.line_name == "Bakerloo", f"Expected Bakerloo line, got {tube_leg.line_name}"
+        assert tube_leg.end_station == "Oxford Circus", f"Expected Oxford Circus, got {tube_leg.end_station}"
+        assert tube_leg.start_station == "Paddington", f"Expected Paddington, got {tube_leg.start_station}"
+        train_leg = next(leg for leg in all_legs if leg.mode.name == "TRAIN")
+        assert train_leg.line_name == "Great Western Railway"
+
+    def test_summary_for_bus_leg_does_not_crash(self):
+        """_build_cost_groups must handle bus legs (regression: _shorten_station scope)."""
+        from houses.transit_route import TransitRoute
+
+        route = TransitRoute("SL6", "SW1V 2QQ", "test")
+        tfl_data = {
+            "journeys": [
+                {
+                    "duration": 45,
+                    "legs": [
+                        {
+                            "mode": {"name": "walking"},
+                            "duration": 5,
+                            "arrivalPoint": {"commonName": "Maidenhead Bus Station"},
+                        },
+                        {
+                            "mode": {"name": "bus"},
+                            "duration": 20,
+                            "route": {"name": "7"},
+                            "departurePoint": {"commonName": "Maidenhead Bus Station"},
+                            "arrivalPoint": {"commonName": "Slough Bus Station"},
+                        },
+                    ],
+                    "fare": {"totalCost": 350, "singleFare": 175},
+                }
+            ]
+        }
+
+        groups = route._build_cost_groups(tfl_data)
+        from houses.commute import _render_leg_description
+
+        descriptions = [_render_leg_description(leg) for g in groups for leg in g.legs]
+        combined = " ".join(descriptions)
+        assert "7 to" in combined, f"Expected '7 to' format, got: {descriptions}"
+
+    def test_tube_leg_without_line_name_falls_back_to_mode(self):
+        """Tube leg with no route.name extracts line from instruction text."""
+        from houses.transit_route import TransitRoute
+
+        route = TransitRoute("SL6", "SW1V 2QQ", "test")
+        tfl_data = {
+            "journeys": [
+                {
+                    "duration": 30,
+                    "legs": [
+                        {
+                            "mode": {"name": "tube"},
+                            "duration": 8,
+                            "route": {},  # no line name
+                            "departurePoint": {"commonName": "Paddington"},
+                            "arrivalPoint": {"commonName": "Oxford Circus"},
+                            "instruction": {"summary": "Bakerloo line to Oxford Circus"},
+                        },
+                    ],
+                    "fare": {"totalCost": 250, "singleFare": 125},
+                }
+            ]
+        }
+
+        groups = route._build_cost_groups(tfl_data)
+        from houses.commute import _render_leg_description
+
+        descriptions = [_render_leg_description(leg) for g in groups for leg in g.legs]
+        combined = " ".join(descriptions)
+        # Should extract tube line from instruction text, not use bare "line"
+        assert "Bakerloo" in combined, f"Expected Bakerloo line from instruction, got: {descriptions}"
