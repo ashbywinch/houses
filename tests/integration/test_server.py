@@ -14,6 +14,7 @@ from houses.property import CouncilTaxInfo, EnrichedProperty
 from houses.server import _HEADER_TO_ENRICHMENT_FIELD, _run_backfill_enrichment, app
 from houses.services import Services
 from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS
+from tests.helpers import FakeCommuteRouter, FakeEPC
 
 client = TestClient(app)
 
@@ -672,23 +673,8 @@ class TestBackfillView:
             settings.rightmove_sample_page = original_sample
 
     def test_epc_lookup_guard_via_enrichment(self):
-        """_run_enrichment passes the address to the EPC service.
-
-        The decision to call the API (and match results) is now made inside
-        the lookup_epc function itself, so this test verifies the args are
-        forwarded correctly.
-        """
-
-        class _FakeEPC:
-            def __init__(self):
-                self.last_args = None
-                self.band = "C"
-
-            async def lookup(self, postcode, address=""):
-                self.last_args = (postcode, address)
-                return self.band
-
-        fake_epc = _FakeEPC()
+        """_run_enrichment passes the address to the EPC service."""
+        fake_epc = FakeEPC(band="C")
         services = Services(epc_service=fake_epc)
         result = asyncio.run(
             _run_backfill_enrichment(
@@ -703,7 +689,7 @@ class TestBackfillView:
             )
         )
         assert result.epc_rating == "C"
-        assert fake_epc.last_args == ("GU22 8BQ", "7 Sandy Close, Woking, GU22")
+        assert fake_epc.calls == [("GU22 8BQ", "7 Sandy Close, Woking, GU22")]
 
     @pytest.mark.asyncio
     async def test_get_drive_minutes_with_geocode_fallback(self, _mock_http_requests, monkeypatch):
@@ -849,30 +835,10 @@ class TestBackfillView:
     def test_lookup_derived_when_empty_with_address_and_postcode(self):
         """When lookup='' but address+postcode are provided, lookup should be
         derived from the postcode (not left as empty string)."""
-        from houses.attempt import Attempt
-
-        class _FakeCommuteRouter:
-            def __init__(self):
-                self.calls = []
-
-            async def simon_commute(self, postcode):
-                self.calls.append(("simon", postcode))
-                return Attempt.succeeded(
-                    Commute(destination_label="S", destination_postcode=postcode, duration_minutes=45),
-                    "test",
-                )
-
-            async def lorena_commute(self, postcode):
-                self.calls.append(("lorena", postcode))
-                return Attempt.succeeded(
-                    Commute(destination_label="L", destination_postcode=postcode, duration_minutes=30),
-                    "test",
-                )
-
-            async def petrol_cost(self, postcode):
-                return Attempt.impossible("test", "not needed")
-
-        fake_router = _FakeCommuteRouter()
+        fake_router = FakeCommuteRouter(
+            simon=Commute(destination_label="S", destination_postcode="SW1V 2QQ", duration_minutes=45),
+            lorena=Commute(destination_label="L", destination_postcode="EC3A 7LP", duration_minutes=30),
+        )
         services = Services(commute_router=fake_router)
 
         result = asyncio.run(
