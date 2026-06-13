@@ -19,8 +19,8 @@
    result = await svc.my_service.lookup(...)
    ```
 
-5. **Add columns** to `COLUMN_HEADERS` in `houses/sheets.py` and update
-   ``_row_values()`` to format the new fields.
+5. **Add columns** to `Row.HEADERS` in `houses/sheets/row.py` and update
+   ``Row.from_property()`` to format the new fields.
 
 6. **Run `POST /sync-view-formulas`** if the View tab needs new XLOOKUP
    formulas.

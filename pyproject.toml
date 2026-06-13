@@ -39,6 +39,11 @@ select = ["E", "F", "I", "UP", "B", "SIM", "N"]
 ignore = ["UP046", "UP047"]
 fixable = ["ALL"]
 
+[tool.ruff.lint.per-file-ignores]
+"houses/sheets/formulas.py" = ["E501"]  # Long Google Sheets formulas
+"houses/sheets/view.py" = ["E501"]      # Long API request structures
+"houses/sheets/row.py" = ["E501"]       # Long value formatting lines
+
 [tool.ruff.format]
 quote-style = "double"
 
