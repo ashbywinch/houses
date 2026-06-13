@@ -526,34 +526,85 @@ async def _tfl_transit_commute(origin_postcode: str, dest_postcode: str, has_car
 
     # Bus fallback: if the chosen route has a long walk to the first
     # transit leg, try Google Routes transit as an alternative.
+    # The bus only replaces the walking leg — the TfL route stays the same.
     if result is no_bus_val and no_bus_val.duration_minutes is not None:
         m = re.search(r"walk.*?\((\d+)m\)", no_bus_val.summary()[:60])
         walk_to_station = int(m.group(1)) if m else 0
         if walk_to_station >= settings.bus_walk_penalty_minutes:
-            bus = await _find_bus_alternative(origin_postcode, dest_postcode)
-            if bus is not None and bus.non_rail_cost() > 0:
-                bus_time = min(15, walk_to_station - settings.bus_walk_penalty_minutes)
-                savings = walk_to_station - bus_time
-                if savings >= settings.bus_walk_penalty_minutes:
-                    new_duration = no_bus_val.duration_minutes - walk_to_station + bus_time
-                    new_cost = no_bus_val.daily_cost_gbp
-                    bus_cost = bus.non_rail_cost()
-                    new_cost = round(new_cost + bus_cost, 2) if new_cost is not None else bus_cost
-                    result = Commute(
-                        destination_label=label,
-                        destination_postcode=dest_postcode,
-                        duration_minutes=new_duration,
-                        daily_cost_gbp=new_cost,
-                        mode="transit",
-                        cost_groups=(
-                            CostGroup(
-                                legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=bus_time),),
-                                cost=bus_cost,
-                            ),
-                        ),
-                    )
+            result = await _replace_walk_with_bus(
+                tfl_commute=result,
+                origin_postcode=origin_postcode,
+                dest_postcode=dest_postcode,
+                walk_to_station_minutes=walk_to_station,
+            )
 
     return result
+
+
+_SENTINEL = object()  # sentinel for _bus_alternative default
+
+
+async def _replace_walk_with_bus(
+    tfl_commute: Commute,
+    origin_postcode: str,
+    dest_postcode: str,
+    walk_to_station_minutes: int,
+    _bus_alternative: Commute | None | object = _SENTINEL,
+) -> Commute:
+    """Replace the walking leg of a TfL commute with a bus, if viable.
+
+    The bus only replaces the walk *to the first transit stop* — the rest
+    of the TfL route (train/tube legs) stays the same. This means the
+    total cost is *TfL cost + bus cost*, and the total time is
+    *TfL duration − walk + bus_time*.
+
+    Returns the original commute unchanged when:
+    * ``walk_to_station_minutes < bus_walk_penalty_minutes`` (walk is acceptable)
+    * no bus alternative is available
+    * the bus has no cost
+    * the time savings don't justify the bus detour
+
+    ``_bus_alternative`` — optional pre-resolved bus route (for test injection).
+    When omitted, the function calls ``_find_bus_alternative()``.
+    """
+    penalty = settings.bus_walk_penalty_minutes
+    if walk_to_station_minutes < penalty:
+        return tfl_commute
+
+    if _bus_alternative is _SENTINEL:
+        bus = await _find_bus_alternative(origin_postcode, dest_postcode)
+    else:
+        bus = _bus_alternative
+    if bus is None or bus.non_rail_cost() is None or bus.non_rail_cost() <= 0:
+        return tfl_commute
+
+    bus_cost = bus.non_rail_cost()
+    bus_time = min(15, walk_to_station_minutes - penalty)
+    savings = walk_to_station_minutes - bus_time
+    if savings < penalty:
+        return tfl_commute
+
+    new_duration = tfl_commute.duration_minutes - walk_to_station_minutes + bus_time
+    new_daily_cost = tfl_commute.daily_cost_gbp
+    if new_daily_cost is not None:
+        new_daily_cost = new_daily_cost + Money(str(bus_cost), "GBP")
+    else:
+        new_daily_cost = Money(str(bus_cost), "GBP")
+
+    return Commute(
+        destination_label=tfl_commute.destination_label,
+        destination_postcode=tfl_commute.destination_postcode,
+        duration_minutes=new_duration,
+        daily_cost_gbp=new_daily_cost,
+        mode=tfl_commute.mode,
+        cost_groups=tfl_commute.cost_groups
+        + (
+            CostGroup(
+                legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=bus_time),),
+                cost=bus_cost,
+            ),
+        ),
+    )
 
 
 def _pick_best_route(a: Commute, b: Commute) -> Commute:

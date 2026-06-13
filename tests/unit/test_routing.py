@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from money import Money
 
-from houses.commute import Commute, LegMode
+from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 
 # ── Fail-fast when API keys are missing ─────────────────────────────────
 
@@ -446,3 +446,87 @@ class TestSchoolCommute:
         assert captured["max_walk_minutes"] == 20
         assert captured["origin"] == "SL6 1AA"
         assert captured["dest"] == "SL6 1AA"
+
+
+# ── _replace_walk_with_bus ──────────────────────────────────────────────
+
+
+def _tfl_complete(duration=90, cost="12.50", walk=46) -> Commute:
+    """A TfL commute with walk + train + tube legs and full cost."""
+    return Commute(
+        destination_label="L",
+        destination_postcode="EC3A 7LP",
+        duration_minutes=duration,
+        daily_cost_gbp=Money(cost, "GBP"),
+        cost_groups=(
+            CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=walk),)),
+            CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration_minutes=42),)),
+            CostGroup(legs=(JourneyLeg(mode=LegMode.TUBE, duration_minutes=4),)),
+        ),
+    )
+
+
+def _bus_route() -> Commute:
+    """A bus route that saves 8 min of walking for £3.80."""
+    return Commute(
+        destination_label="L (Bus)",
+        destination_postcode="EC3A 7LP",
+        duration_minutes=55,
+        daily_cost_gbp=Money("3.80", "GBP"),
+        cost_groups=(
+            CostGroup(
+                legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=28),),
+                cost=3.80,
+            ),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_replace_walk_with_bus_short_walk():
+    """When walk is shorter than penalty, the TfL commute is returned unchanged."""
+    from houses.routing import _replace_walk_with_bus
+
+    original = _tfl_complete(walk=5)
+    result = await _replace_walk_with_bus(original, "GU22 8RU", "EC3A 7LP", 5)
+    assert result is original
+    assert result.daily_cost_gbp == Money("12.50", "GBP")
+
+
+@pytest.mark.asyncio
+async def test_replace_walk_with_bus_no_bus():
+    """When no bus is available, the TfL commute is returned unchanged."""
+    from houses.routing import _replace_walk_with_bus
+
+    original = _tfl_complete(walk=46)
+    result = await _replace_walk_with_bus(
+        original, "GU22 8RU", "EC3A 7LP", 46, _bus_alternative=None
+    )
+    assert result is original
+
+
+@pytest.mark.asyncio
+async def test_replace_walk_with_bus_replaces_walk():
+    """When the bus is viable, walking time is replaced and bus cost added."""
+    from houses.routing import _replace_walk_with_bus
+
+    original = _tfl_complete(duration=90, cost="12.50", walk=46)
+    result = await _replace_walk_with_bus(
+        original, "GU22 8RU", "EC3A 7LP", 46, _bus_alternative=_bus_route()
+    )
+    # Duration: 90 - 46 + min(15, 46-10=36) = 90 - 46 + 15 = 59
+    assert result.duration_minutes == 59
+    # Cost: TfL £12.50 + bus £3.80 = £16.30
+    assert result.daily_cost_gbp == Money("16.30", "GBP")
+
+
+@pytest.mark.asyncio
+async def test_replace_walk_with_bus_short_walk_no_replace():
+    """When walk is under the penalty threshold, no replacement is tried even with a bus."""
+    from houses.routing import _replace_walk_with_bus
+
+    original = _tfl_complete(duration=90, cost="12.50", walk=9)
+    result = await _replace_walk_with_bus(
+        original, "GU22 8RU", "EC3A 7LP", 9, _bus_alternative=_bus_route()
+    )
+    assert result is original

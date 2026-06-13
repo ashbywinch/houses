@@ -1088,6 +1088,47 @@ class TestBusFallback:
         assert result.duration_minutes < 90, "Should be faster than TfL walk"
 
     @pytest.mark.asyncio
+    async def test_bus_replaces_walk_cost_adds_to_tfl(self):
+        """When TfL already has a cost and bus replaces the walk, total = TfL + bus."""
+        from houses.routing import _replace_walk_with_bus
+
+        tfl = Commute(
+            destination_label="L",
+            destination_postcode="EC3A 7LP",
+            duration_minutes=116,
+            daily_cost_gbp=Money("12.50", "GBP"),
+            cost_groups=(
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=46),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration_minutes=42),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TUBE, duration_minutes=4),)),
+            ),
+        )
+        bus = Commute(
+            destination_label="L (Bus)",
+            destination_postcode="EC3A 7LP",
+            duration_minutes=55,
+            daily_cost_gbp=Money("3.80", "GBP"),
+            cost_groups=(
+                CostGroup(
+                    legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=28),),
+                    cost=3.80,
+                ),
+            ),
+        )
+
+        result = await _replace_walk_with_bus(
+            tfl_commute=tfl,
+            origin_postcode="GU52",
+            dest_postcode="EC3A 7LP",
+            walk_to_station_minutes=46,
+            _bus_alternative=bus,
+        )
+        # TfL £12.50 + bus £3.80 = £16.30
+        assert result.daily_cost_gbp == Money("16.30", "GBP")
+        # Duration: 116 - 46 + min(15, 46-10) = 116 - 46 + 15 = 85
+        assert result.duration_minutes == 85
+
+    @pytest.mark.asyncio
     async def test_skips_bus_fallback_when_tfl_route_has_bus(self, monkeypatch):
         from houses.commute import Commute
         from houses.enricher import compute_lorena_commute
