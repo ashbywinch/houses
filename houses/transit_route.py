@@ -432,6 +432,7 @@ class TransitRoute:
         self,
         data: dict,
         current_cost: float | None,
+        _registry: CarParkRegistry | None = None,
     ) -> tuple[float | None, float | None, list[CostGroup]]:
         """Look up parking costs when park-and-ride used a driving leg.
 
@@ -439,6 +440,10 @@ class TransitRoute:
         ``cost_groups`` contains a single ``CostGroup`` with the parking
         fee (operator ``"ParkCo"``) so that ``non_rail_cost()`` on the
         resulting commute reflects the parking cost.
+
+        ``_registry`` — optional ``CarParkRegistry`` instance.  When
+        omitted (production), a default registry loaded from CSV is used.
+        Tests pass a pre-populated registry via ``from_car_parks()``.
         """
         journeys = data.get("journeys", [])
         if not journeys:
@@ -456,7 +461,7 @@ class TransitRoute:
         if station is None:
             return None, current_cost, []
 
-        parking = CarParkRegistry()
+        parking = _registry or CarParkRegistry()
         car_park = parking.find_car_park(station)
 
         if car_park is None:
