@@ -11,6 +11,7 @@ import logging
 import re
 
 import httpx
+
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.attempt import Attempt
 from houses.bus_journey import BusJourneyRegistry, cheapest_round_trip

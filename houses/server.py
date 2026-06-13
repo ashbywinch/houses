@@ -24,7 +24,6 @@ from houses.epc import lookup_epc
 from houses.location import PropertyLocation, geocode
 from houses.property import EnrichedProperty, Property
 from houses.rail_fares import fare_between, nearest_station
-from houses.stations import Station, find as find_station
 from houses.rightmove_scraper import scrape as scrape_rightmove
 from houses.rightmove_scraper import stop_chrome
 from houses.schools import SchoolGender, compute_school_commute, find_nearest
@@ -38,6 +37,8 @@ from houses.sheets import (
     sync_view_formulas,
     write_enriched_row,
 )
+from houses.stations import Station
+from houses.stations import find as find_station
 from houses.town_desc import generate_town_description
 from houses.walkability import KNOWN_COUNTIES, enrich_walkability
 
@@ -970,7 +971,10 @@ async def _enrich_rail_fares(
     def _origin_station(commute: Commute) -> dict | None:
         for cg in commute.cost_groups:
             for leg in cg.legs:
-                if leg.mode in (LegMode.TRAIN, LegMode.TUBE, LegMode.DLR, LegMode.OVERGROUND, LegMode.TRAM) and leg.start_station:
+                if (
+                    leg.mode in (LegMode.TRAIN, LegMode.TUBE, LegMode.DLR, LegMode.OVERGROUND, LegMode.TRAM)
+                    and leg.start_station
+                ):
                     clean = Station.short_name(leg.start_station)
                     stn = find_station(clean)
                     if stn:

@@ -10,7 +10,6 @@ import httpx
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.attempt import Attempt
-from houses.routing import _bus_fare_for
 from houses.car_park import CarParkRegistry
 from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
@@ -22,7 +21,7 @@ from houses.enricher import (
 )
 from houses.location import _geocode_address, geocode
 from houses.retry import retry_async
-from houses.stations import Station
+from houses.routing import _bus_fare_for
 from houses.stations import find as find_station
 
 logger = logging.getLogger(__name__)

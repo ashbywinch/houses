@@ -350,7 +350,6 @@ class TestParkAndRideCostGroup:
         """_add_parking_cost returns a parking CostGroup with cost, operator='ParkCo'."""
         from money import Money
 
-        from houses.commute import LegMode
         from houses.transit_route import TransitRoute
 
         csv_path = tmp_path / "parking_rates.csv"
