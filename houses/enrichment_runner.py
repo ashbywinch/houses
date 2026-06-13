@@ -181,7 +181,8 @@ async def _enrich_rail_fares(
     if not simon_needs and not lorena_needs:
         return simon, lorena
 
-    tube_single = Money("2.80", "GBP")
+    from houses.transit_route import FALLBACK_TUBE_SINGLE_GBP, get_tube_leg_fare
+
     fare_pc = postcode or extract_postcode(address)
     if not fare_pc:
         return simon, lorena
@@ -213,6 +214,8 @@ async def _enrich_rail_fares(
         if dest:
             fare = registry.fare_between(origin, dest)
             if fare is not None:
+                tube_fare = await get_tube_leg_fare(dest, settings.simon_postcode)
+                tube_single = tube_fare or Money(FALLBACK_TUBE_SINGLE_GBP, "GBP")
                 rail_cost = (fare + tube_single) * 2
                 parking = Money(str(simon.non_rail_cost()), "GBP")
                 total = rail_cost + parking
@@ -223,10 +226,11 @@ async def _enrich_rail_fares(
                     daily_cost_gbp=total,
                 )
                 logger.info(
-                    "NR fare fallback for Simon: £%.2f (rail) + £%.2f (parking) = £%.2f",
-                    float((fare + tube_single).amount),
-                    float(parking.amount),
-                    float(total.amount),
+                    "NR fare fallback for Simon: %s (rail) + %s (tube) + %s (parking) = %s",
+                    str(fare.amount),
+                    str(tube_single.amount),
+                    str(parking.amount),
+                    str(total.amount),
                 )
 
     if lorena_needs:
@@ -234,6 +238,8 @@ async def _enrich_rail_fares(
         if dest:
             fare = registry.fare_between(origin, dest)
             if fare is not None:
+                tube_fare = await get_tube_leg_fare(dest, settings.lorena_postcode)
+                tube_single = tube_fare or Money(FALLBACK_TUBE_SINGLE_GBP, "GBP")
                 rail_cost = (fare + tube_single) * 2
                 bus = Money(str(lorena.non_rail_cost()), "GBP")
                 total = rail_cost + bus
@@ -246,10 +252,11 @@ async def _enrich_rail_fares(
                     cost_groups=lorena.cost_groups,
                 )
                 logger.info(
-                    "NR fare fallback for Lorena: £%.2f (rail) + £%.2f (bus) = £%.2f",
-                    float((fare + tube_single).amount),
-                    float(bus.amount),
-                    float(total.amount),
+                    "NR fare fallback for Lorena: %s (rail) + %s (tube) + %s (bus) = %s",
+                    str(fare.amount),
+                    str(tube_single.amount),
+                    str(bus.amount),
+                    str(total.amount),
                 )
 
     return simon, lorena
@@ -377,12 +384,13 @@ async def run_enrichment(
             else None
         )
     if enabled is None or {"walk_time", "amenities"} & enabled:
-        coords = location.coordinates.value_or_none()
-        walk_data = (
-            await svc.walkability_service.enrich(coords.lat, coords.lon, address)
-            if coords
-            else {"walk_to_town_minutes": None, "amenities": ""}
-        )
+        # Best coordinate priority: actual (user override) > geocoded > location
+        walk_lat = actual_latitude if actual_latitude is not None else approx_lat
+        walk_lng = actual_longitude if actual_longitude is not None else approx_lng
+        if walk_lat is not None and walk_lng is not None:
+            walk_data = await svc.walkability_service.enrich(walk_lat, walk_lng, address)
+        else:
+            walk_data = {"walk_to_town_minutes": None, "amenities": ""}
     if enabled is None or "town" in enabled:
         town_name = ""
         if address:

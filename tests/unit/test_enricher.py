@@ -1246,9 +1246,7 @@ class TestEnrichRailFares:
 
         stations_csv = tmp_path / "stations.csv"
         stations_csv.write_text(
-            "stationName,crsCode,lat,long\n"
-            "Woking,WOK,51.317,-0.556\n"
-            "Fenchurch Street,FST,51.511,-0.079\n"
+            "stationName,crsCode,lat,long\nWoking,WOK,51.317,-0.556\nFenchurch Street,FST,51.511,-0.079\n"
         )
         fares_csv = tmp_path / "fares.csv"
         fares_csv.write_text("origin_crs,dest_crs,single_fare_gbp\nWOK,FST,17.00\n")
@@ -1302,9 +1300,7 @@ class TestEnrichRailFares:
 
         stations_csv = tmp_path / "stations.csv"
         stations_csv.write_text(
-            "stationName,crsCode,lat,long\n"
-            "Brookwood,BKO,51.303,-0.636\n"
-            "Victoria Station,VIC,51.495,-0.144\n"
+            "stationName,crsCode,lat,long\nBrookwood,BKO,51.303,-0.636\nVictoria Station,VIC,51.495,-0.144\n"
         )
         fares_csv = tmp_path / "fares.csv"
         fares_csv.write_text("origin_crs,dest_crs,single_fare_gbp\nBKO,VIC,17.00\n")

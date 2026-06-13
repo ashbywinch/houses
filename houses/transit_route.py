@@ -25,6 +25,13 @@ from houses.stations import find as find_station
 logger = logging.getLogger(__name__)
 
 TFL_JOURNEY_URL = "https://api.tfl.gov.uk/Journey/JourneyResults"
+
+# Estimated off-peak contactless pay-as-you-go single fare for a zone 1
+# tube journey.  Used by the NR fallback (``_enrich_rail_fares``) to estimate
+# the onward tube cost from the NR terminus to the final destination when the
+# TfL API call fails or returns no data.
+# Peak: ~£3.40, Off-peak: ~£2.80 (TfL Jan 2025 fare scale).
+FALLBACK_TUBE_SINGLE_GBP = "2.80"
 OUTCODES_IO_URL = "https://api.postcodes.io/outcodes"
 POSTCODES_IO_URL = "https://api.postcodes.io/postcodes"
 ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
@@ -35,6 +42,68 @@ NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 # ---------------------------------------------------------------------------
 # TfL helper functions
 # ---------------------------------------------------------------------------
+
+
+async def get_tube_leg_fare(
+    from_station: Station,
+    to_postcode: str,
+    _data: dict | None = None,  # test injection
+) -> Money | None:
+    """Get the peak single fare for a tube journey between a station and a postcode.
+
+    Uses the TfL Journey API with a weekday morning peak departure time (09:00,
+    which is within the zone 1 peak window of 06:30–09:30 on weekdays).
+    Returns a ``Money`` single fare, or ``None`` if TfL can't route the
+    journey (walking distance from the NR terminus to the destination)
+    or if the API call fails.
+    """
+    if _data is not None:
+        return _parse_tube_fare(_data)
+
+    url = f"{TFL_JOURNEY_URL}/{from_station.name}/to/{to_postcode}"
+    params = _next_weekday_date_params()
+    params["nationalSearch"] = "false"
+    params.update(_tfl_auth_params())
+
+    cached = get_cached("GET", url, params)
+    if cached is not None:
+        return _parse_tube_fare(cached)
+
+    try:
+        async with cached_async_client(timeout=10.0) as client:
+            resp = await client.get(url, params=params)
+            if resp.status_code == 404:
+                logger.debug("TfL cannot route %s → %s (walking distance)", from_station.crs, to_postcode)
+                return None
+            resp.raise_for_status()
+            data = resp.json()
+            set_cached("GET", url, params, None, data)
+            return _parse_tube_fare(data)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            logger.debug("TfL cannot route %s → %s (walking distance)", from_station.crs, to_postcode)
+            return None
+        logger.warning("TfL tube leg fare failed for %s → %s: %s", from_station.crs, to_postcode, e)
+        return None
+    except Exception as e:
+        logger.debug("TfL tube leg fare failed for %s → %s: %s", from_station.crs, to_postcode, e)
+        return None
+
+
+def _parse_tube_fare(data: dict) -> Money | None:
+    """Extract the peak single fare from a TfL journey response.
+
+    TfL returns ``totalCost`` in pence (integer).  Divides by 100 to
+    get pounds, letting Money/Decimal handle the conversion.
+    """
+    journeys = data.get("journeys", [])
+    if not journeys:
+        return None
+    best = min(journeys, key=lambda j: j.get("duration", 9999))
+    fare = best.get("fare", {})
+    if fare and fare.get("totalCost") is not None:
+        return Money(str(fare["totalCost"] / 100), "GBP")
+    return None
 
 
 def _next_weekday_date_params() -> dict[str, str]:
