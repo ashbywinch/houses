@@ -13,20 +13,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import houses.location as _loc
 from houses.commute import Commute, CommuteBreakdown, LegMode
 from houses.config import settings
-from houses.council_tax import lookup_council_tax
-from houses.enricher import (
-    compute_commute_breakdown,
-    compute_lorena_commute,
-    compute_petrol_cost,
-    compute_simon_commute,
-)
-from houses.epc import lookup_epc
 from houses.location import PropertyLocation, geocode
 from houses.property import EnrichedProperty, Property
 from houses.rail_fares import fare_between, nearest_station
 from houses.rightmove_scraper import scrape as scrape_rightmove
 from houses.rightmove_scraper import stop_chrome
-from houses.schools import SchoolGender, compute_school_commute, find_nearest
+from houses.schools import SchoolGender
+from houses.services import Services
 from houses.sheets import (
     Tab,
     _rightmove_id,
@@ -39,8 +32,7 @@ from houses.sheets import (
 )
 from houses.stations import Station
 from houses.stations import find as find_station
-from houses.town_desc import generate_town_description
-from houses.walkability import KNOWN_COUNTIES, enrich_walkability
+from houses.walkability import KNOWN_COUNTIES
 
 logger = logging.getLogger(__name__)
 
@@ -717,6 +709,7 @@ async def _run_enrichment(
     enabled: set[str] | None = None,
     actual_latitude: float | None = None,
     actual_longitude: float | None = None,
+    services: Services | None = None,
 ) -> EnrichedProperty:
     """Run enrichment for the given set of fields and return an EnrichedProperty.
 
@@ -777,6 +770,8 @@ async def _run_enrichment(
         else:
             lookup = ""
 
+    svc = services or Services()
+
     simon = Commute(destination_label="Simon (London)", destination_postcode=postcode)
     lorena = Commute(destination_label="Lorena (London)", destination_postcode=postcode)
     petrol = Commute(destination_label="Bracknell Office (RG12 8YA)", destination_postcode=settings.bracknell_postcode)
@@ -799,11 +794,11 @@ async def _run_enrichment(
     approx_lng = location.coordinates.value_or_none().lon if location.coordinates.is_succeeded else None
 
     if enabled is None or "simon" in enabled:
-        simon = (await compute_simon_commute(lookup)).value_or_none()
+        simon = (await svc.commute_router.simon_commute(lookup)).value_or_none()
     if enabled is None or "lorena" in enabled:
-        lorena = (await compute_lorena_commute(lookup)).value_or_none()
+        lorena = (await svc.commute_router.lorena_commute(lookup)).value_or_none()
     if enabled is None or "petrol" in enabled:
-        petrol = (await compute_petrol_cost(postcode)).value_or_none()
+        petrol = (await svc.commute_router.petrol_cost(postcode)).value_or_none()
 
     # School enrichment defaults (may be overridden below)
     primary = None
@@ -815,13 +810,17 @@ async def _run_enrichment(
 
     if enabled is None or "schools" in enabled:
         loc_coords = location.coordinates.value_or_none()
-        primary = await find_nearest(postcode, child_age=7, address=address, requirement=SchoolGender.BOYS)
-        primary_commute = await compute_school_commute(postcode, primary) if primary else None
+        primary = await svc.school_lookup.find_nearest(
+            postcode, child_age=7, address=address, requirement=SchoolGender.BOYS
+        )
+        primary_commute = await svc.school_lookup.school_commute(postcode, primary) if primary else None
         primary_dist = (
             round(loc_coords.distance_km_to(primary.coords), 2) if primary and primary.coords and loc_coords else None
         )
-        secondary = await find_nearest(postcode, child_age=12, address=address, requirement=SchoolGender.BOYS)
-        secondary_commute = await compute_school_commute(postcode, secondary) if secondary else None
+        secondary = await svc.school_lookup.find_nearest(
+            postcode, child_age=12, address=address, requirement=SchoolGender.BOYS
+        )
+        secondary_commute = await svc.school_lookup.school_commute(postcode, secondary) if secondary else None
         secondary_dist = (
             round(loc_coords.distance_km_to(secondary.coords), 2)
             if secondary and secondary.coords and loc_coords
@@ -830,7 +829,7 @@ async def _run_enrichment(
     if enabled is None or {"walk_time", "amenities"} & enabled:
         coords = location.coordinates.value_or_none()
         walk_data = (
-            await enrich_walkability(coords.lat, coords.lon, address)
+            await svc.walkability_service.enrich(coords.lat, coords.lon, address)
             if coords
             else {"walk_to_town_minutes": None, "amenities": ""}
         )
@@ -843,18 +842,20 @@ async def _run_enrichment(
             candidates = [p for p in parts if p and not postcode_re.match(p) and not outcode_re.match(p)]
             non_county = [p for p in candidates if p.lower().strip() not in KNOWN_COUNTIES]
             town_name = non_county[-1] if non_county else (candidates[-1] if candidates else "")
-        town_desc = await generate_town_description(town_name, postcode)
+        town_desc = await svc.town_desc_service.describe(town_name, postcode)
 
-    simon, lorena = await _enrich_rail_fares(enabled, postcode, address, simon, lorena)
+    simon, lorena = await svc.rail_fare_service.enrich(enabled, postcode, address, simon, lorena)
 
     if simon and lorena and petrol and (enabled is None or {"simon", "lorena", "petrol"} & enabled):
+        from houses.enricher import compute_commute_breakdown
+
         breakdown = await compute_commute_breakdown(simon, lorena, petrol)
 
     if enabled is None or "epc" in enabled:
-        epc = await lookup_epc(postcode, address) if postcode and not _is_outcode(postcode) else ""
+        epc = await svc.epc_service.lookup(postcode, address) if postcode and not _is_outcode(postcode) else ""
 
     if (enabled is None or "council_tax" in enabled) and postcode and not _is_outcode(postcode) and address:
-        result = await lookup_council_tax(postcode, address)
+        result = await svc.council_tax_service.lookup(postcode, address)
         council_tax = result.value_or_none()
         if result.is_impossible:
             logger.debug("Council tax: %s for %s", result.reason, postcode)
@@ -914,6 +915,7 @@ async def _run_backfill_enrichment(
     bedrooms: int | None,
     price: float | None,
     enabled: set[str] | None,
+    services: Services | None = None,
 ) -> EnrichedProperty:
     return await _run_enrichment(
         url=url,
@@ -923,6 +925,7 @@ async def _run_backfill_enrichment(
         bedrooms=bedrooms,
         price=price,
         enabled=enabled,
+        services=services,
     )
 
 

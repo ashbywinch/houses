@@ -12,6 +12,7 @@ from houses.commute import Commute, CommuteBreakdown
 from houses.config import settings
 from houses.property import CouncilTaxInfo, EnrichedProperty
 from houses.server import _HEADER_TO_ENRICHMENT_FIELD, _run_backfill_enrichment, app
+from houses.services import Services
 from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS
 
 client = TestClient(app)
@@ -671,34 +672,38 @@ class TestBackfillView:
             settings.rightmove_sample_page = original_sample
 
     def test_epc_lookup_guard_via_enrichment(self):
-        """_run_enrichment passes the address to lookup_epc.
+        """_run_enrichment passes the address to the EPC service.
 
         The decision to call the API (and match results) is now made inside
         the lookup_epc function itself, so this test verifies the args are
         forwarded correctly.
         """
-        original_id = settings.sheet_id
-        settings.sheet_id = "fake-id"
-        try:
-            with patch("houses.server.lookup_epc") as mock_epc:
-                mock_epc.return_value = "C"
 
-                # Numbered address → lookup_epc called with address
-                result = asyncio.run(
-                    _run_backfill_enrichment(
-                        url="https://www.rightmove.co.uk/properties/123",
-                        address="7 Sandy Close, Woking, GU22",
-                        postcode="GU22 8BQ",
-                        lookup="GU22 8BQ",
-                        bedrooms=None,
-                        price=None,
-                        enabled={"epc"},
-                    )
-                )
-                assert result.epc_rating == "C"
-                mock_epc.assert_called_with("GU22 8BQ", "7 Sandy Close, Woking, GU22")
-        finally:
-            settings.sheet_id = original_id
+        class _FakeEPC:
+            def __init__(self):
+                self.last_args = None
+                self.band = "C"
+
+            async def lookup(self, postcode, address=""):
+                self.last_args = (postcode, address)
+                return self.band
+
+        fake_epc = _FakeEPC()
+        services = Services(epc_service=fake_epc)
+        result = asyncio.run(
+            _run_backfill_enrichment(
+                url="https://www.rightmove.co.uk/properties/123",
+                address="7 Sandy Close, Woking, GU22",
+                postcode="GU22 8BQ",
+                lookup="GU22 8BQ",
+                bedrooms=None,
+                price=None,
+                enabled={"epc"},
+                services=services,
+            )
+        )
+        assert result.epc_rating == "C"
+        assert fake_epc.last_args == ("GU22 8BQ", "7 Sandy Close, Woking, GU22")
 
     @pytest.mark.asyncio
     async def test_get_drive_minutes_with_geocode_fallback(self, _mock_http_requests, monkeypatch):
@@ -844,42 +849,45 @@ class TestBackfillView:
     def test_lookup_derived_when_empty_with_address_and_postcode(self):
         """When lookup='' but address+postcode are provided, lookup should be
         derived from the postcode (not left as empty string)."""
-        with (
-            patch("houses.server.compute_simon_commute") as mock_simon,
-            patch("houses.server.compute_lorena_commute") as mock_lorena,
-        ):
-            from houses.attempt import Attempt
+        from houses.attempt import Attempt
 
-            mock_simon.return_value = Attempt.succeeded(
-                Commute(
-                    destination_label="S",
-                    destination_postcode="SW1V 2QQ",
-                    duration_minutes=45,
-                ),
-                "test",
-            )
-            mock_lorena.return_value = Attempt.succeeded(
-                Commute(
-                    destination_label="L",
-                    destination_postcode="EC3A 7LP",
-                    duration_minutes=30,
-                ),
-                "test",
-            )
+        class _FakeCommuteRouter:
+            def __init__(self):
+                self.calls = []
 
-            result = asyncio.run(
-                _run_backfill_enrichment(
-                    url="https://www.rightmove.co.uk/properties/999",
-                    address="Some Road, Maidenhead",
-                    postcode="SL6 3YZ",
-                    lookup="",
-                    bedrooms=None,
-                    price=None,
-                    enabled={"simon", "lorena"},
+            async def simon_commute(self, postcode):
+                self.calls.append(("simon", postcode))
+                return Attempt.succeeded(
+                    Commute(destination_label="S", destination_postcode=postcode, duration_minutes=45),
+                    "test",
                 )
-            )
 
-            # Should have used the full postcode, not empty string
-            mock_simon.assert_called_once_with("SL6 3YZ")
-            mock_lorena.assert_called_once_with("SL6 3YZ")
-            assert result.simon_commute.duration_minutes == 45
+            async def lorena_commute(self, postcode):
+                self.calls.append(("lorena", postcode))
+                return Attempt.succeeded(
+                    Commute(destination_label="L", destination_postcode=postcode, duration_minutes=30),
+                    "test",
+                )
+
+            async def petrol_cost(self, postcode):
+                return Attempt.impossible("test", "not needed")
+
+        fake_router = _FakeCommuteRouter()
+        services = Services(commute_router=fake_router)
+
+        result = asyncio.run(
+            _run_backfill_enrichment(
+                url="https://www.rightmove.co.uk/properties/999",
+                address="Some Road, Maidenhead",
+                postcode="SL6 3YZ",
+                lookup="",
+                bedrooms=None,
+                price=None,
+                enabled={"simon", "lorena"},
+                services=services,
+            )
+        )
+
+        # Should have used the full postcode, not empty string
+        assert fake_router.calls == [("simon", "SL6 3YZ"), ("lorena", "SL6 3YZ")]
+        assert result.simon_commute.duration_minutes == 45
