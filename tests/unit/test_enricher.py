@@ -1255,11 +1255,11 @@ class TestEnrichRailFares:
         async def mock_geocode(_):
             return Attempt.succeeded(GeoPoint(51.317, -0.556), "test")
 
-        monkeypatch.setattr("houses.server.geocode", mock_geocode)
+        monkeypatch.setattr("houses.enrichment_runner.geocode", mock_geocode)
         # nearest_station and fare_between read from the temp CSVs above — they run for real
 
         from houses.commute import Commute
-        from houses.server import _enrich_rail_fares
+        from houses.enrichment_runner import _enrich_rail_fares
 
         lorena = Commute(
             destination_label="Lorena",
@@ -1304,10 +1304,10 @@ class TestEnrichRailFares:
         async def mock_geocode(_):
             return Attempt.succeeded(GeoPoint(51.303, -0.636), "test")
 
-        monkeypatch.setattr("houses.server.geocode", mock_geocode)
+        monkeypatch.setattr("houses.enrichment_runner.geocode", mock_geocode)
 
         from houses.commute import Commute
-        from houses.server import _enrich_rail_fares
+        from houses.enrichment_runner import _enrich_rail_fares
 
         simon = Commute(
             destination_label="Simon",
@@ -1343,7 +1343,7 @@ class TestEnrichRailFares:
     async def test_full_tfl_fare_skips_nr(self, monkeypatch):
         """When TfL already priced the journey, cost stays unchanged."""
         from houses.commute import Commute
-        from houses.server import _enrich_rail_fares
+        from houses.enrichment_runner import _enrich_rail_fares
 
         lorena = Commute(
             destination_label="Lorena",
