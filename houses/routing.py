@@ -368,6 +368,47 @@ async def _drive_commute(origin_postcode: str, dest_postcode: str) -> Commute | 
 # ---------------------------------------------------------------------------
 
 
+def _parse_google_steps(steps: list[dict]) -> list[JourneyLeg]:
+    """Parse Google Routes steps into JourneyLeg objects.
+
+    Every returned leg has ``start_station``, ``end_station``,
+    ``line_name``, ``duration_minutes``, and ``mode`` set from the
+    Google response fields.
+    """
+    legs: list[JourneyLeg] = []
+    for s in steps:
+        mode = s.get("travelMode", "WALK")
+        dur_raw: str = s.get("staticDuration", "0s")
+        dur = int(dur_raw.rstrip("s"))
+        dur_min = round(dur / 60)
+
+        if mode == "WALK":
+            legs.append(JourneyLeg(mode=LegMode.WALK, duration_minutes=dur_min))
+        elif mode == "TRANSIT":
+            td = s.get("transitDetails", {})
+            vtype = td.get("transitLine", {}).get("vehicle", {}).get("type", "")
+            dep_stop = td.get("stopDetails", {}).get("departureStop", {}).get("name", "")
+            arr_stop = td.get("stopDetails", {}).get("arrivalStop", {}).get("name", "")
+            line = td.get("transitLine", {}).get("nameShort", "") or td.get("transitLine", {}).get("name", "")
+
+            if vtype == "BUS":
+                legs.append(JourneyLeg(
+                    mode=LegMode.BUS, duration_minutes=dur_min,
+                    start_station=dep_stop, line_name=line, end_station=arr_stop,
+                ))
+            else:
+                mode_enum = {
+                    "RAIL": LegMode.TRAIN, "TRAIN": LegMode.TRAIN,
+                    "HEAVY_RAIL": LegMode.TRAIN, "TRAM": LegMode.TRAIN,
+                    "SUBWAY": LegMode.TUBE, "METRO": LegMode.TUBE,
+                }.get(vtype, LegMode.TRAIN)
+                legs.append(JourneyLeg(
+                    mode=mode_enum, duration_minutes=dur_min,
+                    start_station=dep_stop, line_name=line, end_station=arr_stop,
+                ))
+    return legs
+
+
 async def _find_bus_alternative(origin: str, destination: str) -> Commute | None:
     """Find a bus alternative via Google Routes API (for areas outside TfL coverage).
 
@@ -396,19 +437,17 @@ async def _find_bus_alternative(origin: str, destination: str) -> Commute | None
     duration_min = round(duration_sec / 60)
 
     steps = leg.get("steps", [])
-    bus_legs = [
-        s
-        for s in steps
-        if s.get("travelMode") == "TRANSIT"
-        and s.get("transitDetails", {}).get("transitLine", {}).get("vehicle", {}).get("type") == "BUS"
-    ]
 
     total_bus_cost = 0.0
     bus_cost_gbp = None
-    for bl in bus_legs:
-        transit = bl.get("transitDetails", {})
-        dep_stop = transit.get("stopDetails", {}).get("departureStop", {})
-        arr_stop = transit.get("stopDetails", {}).get("arrivalStop", {})
+    for s in steps:
+        if s.get("travelMode") != "TRANSIT":
+            continue
+        td = s.get("transitDetails", {})
+        if td.get("transitLine", {}).get("vehicle", {}).get("type") != "BUS":
+            continue
+        dep_stop = td.get("stopDetails", {}).get("departureStop", {})
+        arr_stop = td.get("stopDetails", {}).get("arrivalStop", {})
         dep_name = dep_stop.get("name", "")
         arr_name = arr_stop.get("name", "")
         dep_coords = dep_stop.get("location", {}).get("latLng", {})
