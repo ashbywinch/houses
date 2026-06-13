@@ -43,7 +43,6 @@ _FORMULA_COLUMNS = Row._FORMULA_COLUMNS
 col_index = Row.index_of
 col_letter = Row.letter_of
 _build_full_row = Row.to_list
-_rightmove_id = Row.rightmove_id
 row_values = Row.from_property
 
 # ── Public API ───────────────────────────────────────────────────────
@@ -66,7 +65,6 @@ __all__ = [
     # Row operations
     "row_values",
     "_build_full_row",
-    "_rightmove_id",
     "write_enriched_row",
     "ensure_headers",
     # View tab

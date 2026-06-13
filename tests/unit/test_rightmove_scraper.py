@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from houses.rightmove_scraper import CACHE_DIR as SCRAPER_CACHE
-from houses.rightmove_scraper import _parse_html, scrape
+from houses.rightmove_scraper import RightmoveProperty, _parse_html, scrape
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures"
 SAMPLE_HTML = FIXTURES / "rightmove_sample.html"
@@ -19,18 +19,20 @@ class TestParseHtml:
         html = SAMPLE_HTML.read_text(encoding="utf-8")
         result = _parse_html(html, SAMPLE_URL)
 
-        assert result["address"] == "Foxhall Road, Didcot, OX11"
-        assert result["postcode"] == "OX11 7EB"
-        assert result["bedrooms"] == 5
-        assert result["price"] == 650000.0
-        assert result["latitude"] == 51.61074
-        assert result["longitude"] == -1.25238
+        assert result is not None
+        assert result.address == "Foxhall Road, Didcot, OX11"
+        assert result.postcode == "OX11 7EB"
+        assert result.bedrooms == 5
+        assert result.price == 650000.0
+        assert result.latitude == 51.61074
+        assert result.longitude == -1.25238
+        assert result.rid == "123456789"
 
-    def test_returns_empty_dict_for_empty_html(self):
-        assert _parse_html("", SAMPLE_URL) == {}
+    def test_returns_none_for_empty_html(self):
+        assert _parse_html("", SAMPLE_URL) is None
 
-    def test_returns_empty_dict_for_garbage(self):
-        assert _parse_html("<html>garbage</html>", SAMPLE_URL) == {}
+    def test_returns_none_for_garbage(self):
+        assert _parse_html("<html>garbage</html>", SAMPLE_URL) is None
 
     def test_missing_json_ld_still_parses_preloaded_state(self):
         """When JSON-LD is removed, the preloaded state fallback still works."""
@@ -53,16 +55,17 @@ class TestParseHtml:
         </html>
         """
         result = _parse_html(html, SAMPLE_URL)
-        assert result["address"] == "456 Other Road, Other Town, OT1 1AA"
-        assert result["bedrooms"] == 3
-        assert result["price"] == 450000.0
-        assert result["latitude"] == 52.0
-        assert result["longitude"] == -1.0
+        assert result is not None
+        assert result.address == "456 Other Road, Other Town, OT1 1AA"
+        assert result.bedrooms == 3
+        assert result.price == 450000.0
+        assert result.latitude == 52.0
+        assert result.longitude == -1.0
 
     def test_invalid_json_in_ld_does_not_crash(self):
         html = '<script type="application/ld+json">{invalid</script>'
         result = _parse_html(html, SAMPLE_URL)
-        assert isinstance(result, dict)
+        assert result is None or isinstance(result, RightmoveProperty)
 
     def test_non_numeric_price_is_parsed(self):
         html = """
@@ -76,21 +79,24 @@ class TestParseHtml:
         </html>
         """
         result = _parse_html(html, SAMPLE_URL)
-        assert result["price"] == 425000.0
+        assert result is not None
+        assert result.price == 425000.0
 
 
 class TestScrapeWithSamplePage:
     @pytest.mark.asyncio
     async def test_uses_sample_page_when_configured(self):
         result = await scrape(SAMPLE_URL, _page_path=str(SAMPLE_HTML))
-        assert result["address"] == "Foxhall Road, Didcot, OX11"
-        assert result["bedrooms"] == 5
-        assert result["price"] == 650000.0
+        assert result is not None
+        assert result.address == "Foxhall Road, Didcot, OX11"
+        assert result.bedrooms == 5
+        assert result.price == 650000.0
+        assert result.rid == "123456789"
 
     @pytest.mark.asyncio
-    async def test_sample_page_not_found_returns_empty(self):
+    async def test_sample_page_not_found_returns_none(self):
         result = await scrape(SAMPLE_URL, _page_path="/nonexistent/file.html")
-        assert result == {}
+        assert result is None
 
     def test_scrape_uses_cache_when_present(self):
         """scrape() reads from the page cache, ignoring the sample page."""
@@ -99,18 +105,19 @@ class TestScrapeWithSamplePage:
         cache_file.write_text(SAMPLE_HTML.read_text(encoding="utf-8"))
         try:
             result = asyncio.run(scrape("https://www.rightmove.co.uk/properties/99999999"))
-            assert result["address"] == "Foxhall Road, Didcot, OX11"
+            assert result is not None
+            assert result.address == "Foxhall Road, Didcot, OX11"
         finally:
             if cache_file.exists():
                 cache_file.unlink()
 
-    def test_scrape_offline_returns_empty_for_uncached(self):
-        """scrape() returns empty for an uncached RID when offline mode is on.
+    def test_scrape_offline_returns_none_for_uncached(self):
+        """scrape() returns None for an uncached RID when offline mode is on.
         The conftest sets offline mode by default; this tests the fail-fast path."""
         result = asyncio.run(scrape("https://www.rightmove.co.uk/properties/00000000"))
-        assert result == {}, f"Expected empty dict, got {result}"
+        assert result is None, f"Expected None, got {result}"
 
     @pytest.mark.asyncio
-    async def test_unknown_url_rid_returns_empty(self):
+    async def test_unknown_url_rid_returns_none(self):
         result = await scrape("https://example.com/no-rid-here", _page_path=str(SAMPLE_HTML))
-        assert result == {}
+        assert result is None

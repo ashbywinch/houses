@@ -20,7 +20,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from houses.sheets import _rightmove_id, col_letter  # noqa: E402
+from houses.sheets import col_letter  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
@@ -144,7 +144,8 @@ def main() -> None:
 
         link_col = props_cols["rightmove link"]
         link = row[link_col] if link_col < len(row) else ""
-        rid = _rightmove_id(link)
+        m = re.search(r"properties/(\d+)", link)
+        rid = m.group(1) if m else ""
         if not rid:
             skipped += 1
             continue

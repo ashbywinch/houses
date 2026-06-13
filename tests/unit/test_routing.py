@@ -499,9 +499,7 @@ async def test_replace_walk_with_bus_no_bus():
     from houses.routing import _replace_walk_with_bus
 
     original = _tfl_complete(walk=46)
-    result = await _replace_walk_with_bus(
-        original, "GU22 8RU", "EC3A 7LP", 46, _bus_alternative=None
-    )
+    result = await _replace_walk_with_bus(original, "GU22 8RU", "EC3A 7LP", 46, _bus_alternative=None)
     assert result is original
 
 
@@ -511,9 +509,7 @@ async def test_replace_walk_with_bus_replaces_walk():
     from houses.routing import _replace_walk_with_bus
 
     original = _tfl_complete(duration=90, cost="12.50", walk=46)
-    result = await _replace_walk_with_bus(
-        original, "GU22 8RU", "EC3A 7LP", 46, _bus_alternative=_bus_route()
-    )
+    result = await _replace_walk_with_bus(original, "GU22 8RU", "EC3A 7LP", 46, _bus_alternative=_bus_route())
     # Duration: 90 - 46 + min(15, 46-10=36) = 90 - 46 + 15 = 59
     assert result.duration_minutes == 59
     # Cost: TfL £12.50 + bus £3.80 = £16.30
@@ -526,7 +522,5 @@ async def test_replace_walk_with_bus_short_walk_no_replace():
     from houses.routing import _replace_walk_with_bus
 
     original = _tfl_complete(duration=90, cost="12.50", walk=9)
-    result = await _replace_walk_with_bus(
-        original, "GU22 8RU", "EC3A 7LP", 9, _bus_alternative=_bus_route()
-    )
+    result = await _replace_walk_with_bus(original, "GU22 8RU", "EC3A 7LP", 9, _bus_alternative=_bus_route())
     assert result is original

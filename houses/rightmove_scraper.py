@@ -18,6 +18,7 @@ import logging
 import random
 import re
 import socket
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -25,11 +26,42 @@ from houses.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass
+class RightmoveProperty:
+    """Property data extracted from a Rightmove page.
+
+    Owns the extraction of the numeric Rightmove ID from the property URL.
+    """
+
+    url: str
+    address: str = ""
+    postcode: str = ""
+    bedrooms: int | None = None
+    price: float | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+
+    _RID_RE = re.compile(r"properties/(\d+)")
+
+    def __post_init__(self) -> None:
+        self.rid = self._extract_rid()
+
+    def _extract_rid(self) -> str:
+        m = self._RID_RE.search(self.url)
+        return m.group(1) if m else ""
+
+    @classmethod
+    def rid_from_url(cls, url: str) -> str:
+        """Extract the numeric Rightmove ID from a URL without constructing the full object."""
+        m = cls._RID_RE.search(url)
+        return m.group(1) if m else ""
+
+
 CACHE_DIR = Path("data/rightmove_pages")
 _CHROME_DATA_DIR = Path("/tmp/houses-chrome")
 _CHROME_PROCESS: asyncio.subprocess.Process | None = None
 _WE_STARTED_CHROME: bool = False
-_RID_RE = re.compile(r"properties/(\d+)")
 _LD_JSON_RE = re.compile(
     r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>',
     re.DOTALL,
@@ -49,11 +81,6 @@ _PAGE_MODEL_RE = re.compile(
     r"window\.__PAGE_MODEL\s*=\s*({.*?});",
     re.DOTALL,
 )
-
-
-def _rid_from_url(url: str) -> str:
-    m = _RID_RE.search(url)
-    return m.group(1) if m else ""
 
 
 async def _human_delay():
@@ -219,7 +246,7 @@ def _parse_page_model(html: str) -> dict[str, Any]:
     return result
 
 
-def _parse_html(html: str, url: str) -> dict[str, Any]:
+def _parse_html(html: str, url: str) -> RightmoveProperty | None:
     """Extract property data from a Rightmove page HTML.
 
     Tries data sources in order of preference:
@@ -230,10 +257,11 @@ def _parse_html(html: str, url: str) -> dict[str, Any]:
       5. DOM extraction fallback
 
     Merges results across sources — e.g. lat/lon from preloaded state
-    may fill gaps left by JSON-LD.
+    may fill gaps left by JSON-LD.  Returns ``None`` when no data can be
+    extracted from the HTML.
     """
     if not html.strip():
-        return {}
+        return None
 
     result: dict[str, Any] = {}
 
@@ -268,7 +296,17 @@ def _parse_html(html: str, url: str) -> dict[str, Any]:
         if beds is not None:
             result["bedrooms"] = beds
 
-    return result
+    if not result:
+        return None
+    return RightmoveProperty(
+        url=url,
+        address=result.get("address", ""),
+        postcode=result.get("postcode", ""),
+        bedrooms=result.get("bedrooms"),
+        price=result.get("price"),
+        latitude=result.get("latitude"),
+        longitude=result.get("longitude"),
+    )
 
 
 def _extract_by_testid(html: str, testid: str) -> str:
@@ -429,10 +467,10 @@ async def _fetch_via_chrome(url: str) -> str:
 _EXPECTED_FIELDS = ("address", "postcode", "bedrooms", "price", "latitude", "longitude")
 
 
-def _report_missing(result: dict[str, Any], rid: str) -> None:
-    missing = [k for k in _EXPECTED_FIELDS if k not in result]
+def _report_missing(result: RightmoveProperty, rid: str) -> None:
+    missing = [k for k in _EXPECTED_FIELDS if not getattr(result, k, None)]
     if missing:
-        found = [k for k in _EXPECTED_FIELDS if k in result]
+        found = [k for k in _EXPECTED_FIELDS if getattr(result, k, None)]
         logger.warning(
             "Rightmove scraper for %s: partial extraction — missing %s, found %s",
             rid,
@@ -441,7 +479,7 @@ def _report_missing(result: dict[str, Any], rid: str) -> None:
         )
 
 
-async def scrape(url: str, _page_path: str | None = None) -> dict[str, Any]:
+async def scrape(url: str, _page_path: str | None = None) -> RightmoveProperty | None:
     """Return property details for a Rightmove URL.
 
     ``_page_path`` — optional path to a sample HTML file (for tests).
@@ -450,16 +488,15 @@ async def scrape(url: str, _page_path: str | None = None) -> dict[str, Any]:
     Cache is checked first. On a cache miss:
       * **Normal mode** — fetches the page via Chrome CDP, caches it, returns
         parsed data. Applies randomised back-off.
-      * **Offline mode** (``rightmove_scraper_offline=True``) — returns an
-        empty dict with a warning. Tests must pre-populate the cache.
+      * **Offline mode** (``rightmove_scraper_offline=True``) — returns
+        ``None`` with a warning. Tests must pre-populate the cache.
 
-    Returns a dict with keys: address, postcode, bedrooms, price,
-    latitude, longitude (or ``{"_error": "login_required"}``).
+    Returns a ``RightmoveProperty`` or ``None``.
     """
-    rid = _rid_from_url(url)
+    rid = RightmoveProperty.rid_from_url(url)
     if not rid:
         logger.warning("Could not extract Rightmove ID from URL: %s", url)
-        return {}
+        return None
 
     # 1. Page cache
     cache_file = CACHE_DIR / f"{rid}.html"
@@ -467,7 +504,8 @@ async def scrape(url: str, _page_path: str | None = None) -> dict[str, Any]:
         logger.info("Using cached Rightmove page for %s", rid)
         html = cache_file.read_text(encoding="utf-8")
         result = _parse_html(html, url)
-        _report_missing(result, rid)
+        if result:
+            _report_missing(result, rid)
         return result
 
     # 2. Sample page (development / tests)
@@ -476,11 +514,12 @@ async def scrape(url: str, _page_path: str | None = None) -> dict[str, Any]:
         path = Path(sample)
         if not path.exists():
             logger.warning("Rightmove sample page not found: %s", path)
-            return {}
+            return None
         logger.info("Using Rightmove sample page: %s", path)
         html = path.read_text(encoding="utf-8")
         result = _parse_html(html, url)
-        _report_missing(result, rid)
+        if result:
+            _report_missing(result, rid)
         return result
 
     # 3. Offline mode — fail fast instead of starting Chrome
@@ -489,7 +528,7 @@ async def scrape(url: str, _page_path: str | None = None) -> dict[str, Any]:
             "No cached Rightmove page for %s and offline mode is enabled. Pre-populate the cache before running tests.",
             rid,
         )
-        return {}
+        return None
 
     # 4. Normal mode — fetch via Chrome CDP
     await _human_delay()
@@ -504,32 +543,31 @@ async def scrape(url: str, _page_path: str | None = None) -> dict[str, Any]:
             "Rightmove and sign in, then try again.",
             url,
         )
-        return {"_error": "login_required"}
+        return None
 
     if html:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         cache_file.write_text(html, encoding="utf-8")
         logger.info("Cached Rightmove page to %s", cache_file)
 
-    result = _parse_html(html, url) if html else {}
+    result = _parse_html(html, url) if html else None
     if result:
         _report_missing(result, rid)
     return result
 
 
-async def scrape_live(url: str) -> dict[str, Any]:
+async def scrape_live(url: str) -> RightmoveProperty | None:
     """Fetch a Rightmove page via Chrome CDP, cache it, and return parsed data.
 
     Only call this when the user has explicitly opted in to live Rightmove
     access. Applies randomised back-off and caches the HTML on success.
 
-    If Rightmove returns a login/verification wall, returns
-    ``{"_error": "login_required"}``.
+    Returns a ``RightmoveProperty`` or ``None`` if the page cannot be parsed.
     """
-    rid = _rid_from_url(url)
+    rid = RightmoveProperty.rid_from_url(url)
     if not rid:
         logger.warning("Could not extract Rightmove ID from URL: %s", url)
-        return {}
+        return None
 
     await _human_delay()
     html = await _fetch_via_chrome(url)
@@ -544,7 +582,7 @@ async def scrape_live(url: str) -> dict[str, Any]:
             "Rightmove and sign in, then try again.",
             url,
         )
-        return {"_error": "login_required"}
+        return None
 
     if html:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -552,7 +590,7 @@ async def scrape_live(url: str) -> dict[str, Any]:
         cache_file.write_text(html, encoding="utf-8")
         logger.info("Cached Rightmove page to %s", cache_file)
 
-    result = _parse_html(html, url) if html else {}
+    result = _parse_html(html, url) if html else None
     if result:
         _report_missing(result, rid)
     return result

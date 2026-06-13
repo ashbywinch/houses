@@ -18,7 +18,6 @@ from houses.sheets import (
     VIEW_MANUAL_COLUMNS,
     _build_full_row,
     _const_range_name,
-    _rightmove_id,
     col_index,
     col_letter,
     named_range_name,
@@ -80,6 +79,7 @@ def test_row_values_with_full_enrichment():
 
     ep = EnrichedProperty(
         url="https://www.rightmove.co.uk/properties/123",
+        rid="123",
         address="High Street, Some Town, RG14 1AA",
         postcode="RG14 1AA",
         bedrooms=3,
@@ -229,7 +229,14 @@ def test_build_full_row_includes_rid():
     causing duplicate rows on subsequent runs."""
     rid = "987654321"
     url = f"https://www.rightmove.co.uk/properties/{rid}"
-    ep = EnrichedProperty(url=url, address="1 Test Road, TE1 1ST", postcode="TE1 1ST", bedrooms=3, price=500000.0)
+    ep = EnrichedProperty(
+        url=url,
+        rid=rid,
+        address="1 Test Road, TE1 1ST",
+        postcode="TE1 1ST",
+        bedrooms=3,
+        price=500000.0,
+    )
     row = _build_full_row(ep)
     rid_idx = COLUMN_HEADERS.index("Rightmove ID")
     assert row[rid_idx] == rid, (
@@ -374,34 +381,6 @@ def test_xlookup_key_is_typed_as_number():
         assert "VALUE(" in formula, f"Missing VALUE() wrapping in: {formula[:80]}"
         assert "!$" not in formula
         assert "IFERROR" not in formula
-
-
-class TestRightmoveID:
-    """_rightmove_id — extract numeric ID from Rightmove URLs and text."""
-
-    def test_standard_url(self):
-        assert _rightmove_id("https://www.rightmove.co.uk/properties/123456789") == "123456789"
-
-    def test_url_with_extra_params(self):
-        assert _rightmove_id("https://www.rightmove.co.uk/properties/98765432?queryParam=value") == "98765432"
-
-    def test_bare_id_number(self):
-        """Fallback: any 8+ digit number counts as an ID."""
-        assert _rightmove_id("88375569") == "88375569"
-
-    def test_short_number_not_id(self):
-        """Less than 8 digits should not match the fallback."""
-        assert _rightmove_id("123") == ""
-
-    def test_no_id_returns_empty(self):
-        assert _rightmove_id("not a url") == ""
-
-    def test_empty_string(self):
-        assert _rightmove_id("") == ""
-
-    def test_url_with_non_numeric_id(self):
-        """URL with no numeric segment should fall through to empty."""
-        assert _rightmove_id("https://example.com/properties/abc") == ""
 
 
 class TestColLetter:

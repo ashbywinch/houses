@@ -413,7 +413,7 @@ class TestBackfillView:
         settings.rightmove_sample_page = ""
         try:
             url = "https://www.rightmove.co.uk/properties/999999999"
-            view_rows = [self._build_view_row("1 Test St, Test Town, TE1 1ST", url, "")]
+            view_rows = [self._build_view_row("1 Test St, Test Town, TE1 1ST", url, "999999999")]
             mock_client = self._mock_sheet(view_rows=view_rows)
             with patch("houses.server.get_client", return_value=mock_client):
                 resp = client.post("/properties")
@@ -444,7 +444,7 @@ class TestBackfillView:
         settings.rightmove_sample_page = ""
         try:
             url = "https://www.rightmove.co.uk/properties/888888888"
-            view_rows = [self._build_view_row("2 Test St, Test Town, TE1 1ST", url, "")]
+            view_rows = [self._build_view_row("2 Test St, Test Town, TE1 1ST", url, "888888888")]
             mock_client = self._mock_sheet(view_rows=view_rows)
             with patch("houses.server.get_client", return_value=mock_client):
                 resp = client.post("/properties?no_write=true")
@@ -478,7 +478,7 @@ class TestBackfillView:
             mock_client = self._mock_sheet(view_rows=view_rows, data_rows=[data_row])
             with (
                 patch("houses.server.get_client", return_value=mock_client),
-                patch("houses.server.run_backfill_enrichment") as mock_enrich,
+                patch("houses.sheets.backfill.run_backfill_enrichment") as mock_enrich,
             ):
                 mock_enrich.return_value = EnrichedProperty(
                     **self._make_enriched(rid, address="3 Test St, Test Town, TE1 1ST"),
@@ -521,8 +521,8 @@ class TestBackfillView:
             mock_client = self._mock_sheet(view_rows=view_rows, data_rows=[data_row])
             with (
                 patch("houses.server.get_client", return_value=mock_client),
-                patch("houses.server.run_backfill_enrichment") as mock_enrich,
-                patch("houses.server._write_backfill_cells") as mock_write,
+                patch("houses.sheets.backfill.run_backfill_enrichment") as mock_enrich,
+                patch("houses.sheets.backfill._write_backfill_cells") as mock_write,
             ):
                 mock_enrich.return_value = EnrichedProperty(**self._make_enriched(rid))
                 resp = client.post("/properties")
@@ -572,7 +572,7 @@ class TestBackfillView:
             with (
                 patch("houses.server.get_client", return_value=mock_client),
                 patch("houses.server.run_backfill_enrichment", return_value=enriched_fake),
-                patch("houses.server._write_backfill_cells") as mock_write,
+                patch("houses.sheets.backfill._write_backfill_cells") as mock_write,
             ):
                 resp = client.post("/properties?no_write=true")
             assert resp.status_code == 200
@@ -598,8 +598,8 @@ class TestBackfillView:
             mock_client = self._mock_sheet(view_rows=view_rows, data_rows=[data_row])
             with (
                 patch("houses.server.get_client", return_value=mock_client),
-                patch("houses.server.run_backfill_enrichment") as mock_enrich,
-                patch("houses.server._write_backfill_cells") as mock_write,
+                patch("houses.sheets.backfill.run_backfill_enrichment") as mock_enrich,
+                patch("houses.sheets.backfill._write_backfill_cells") as mock_write,
             ):
                 mock_enrich.return_value = EnrichedProperty(**self._make_enriched(rid))
                 resp = client.post("/properties?fields=epc&fields=council_tax")
@@ -625,7 +625,7 @@ class TestBackfillView:
         settings.rightmove_sample_page = str(fixture_dir / "rightmove_sample.html")
         try:
             url = "https://www.rightmove.co.uk/properties/555555555"
-            view_rows = [self._build_view_row("1 Test Road, TE1 1ST", url, "")]
+            view_rows = [self._build_view_row("1 Test Road, TE1 1ST", url, "555555555")]
             mock_client = self._mock_sheet(view_rows=view_rows)
 
             with patch("houses.server.get_client", return_value=mock_client):
@@ -789,8 +789,8 @@ class TestBackfillView:
             mock_client = self._mock_sheet(view_rows=view_rows, data_rows=[data_row])
             with (
                 patch("houses.server.get_client", return_value=mock_client),
-                patch("houses.server.run_backfill_enrichment") as mock_enrich,
-                patch("houses.server._write_backfill_cells"),
+                patch("houses.sheets.backfill.run_backfill_enrichment") as mock_enrich,
+                patch("houses.sheets.backfill._write_backfill_cells"),
             ):
                 mock_enrich.return_value = EnrichedProperty(**self._make_enriched(rid))
                 resp = client.post("/properties?fields=simon&force=true")
@@ -822,7 +822,7 @@ class TestBackfillView:
             mock_client = self._mock_sheet(view_rows=view_rows, data_rows=[data_row])
             with (
                 patch("houses.server.get_client", return_value=mock_client),
-                patch("houses.server.run_backfill_enrichment") as mock_enrich,
+                patch("houses.sheets.backfill.run_backfill_enrichment") as mock_enrich,
             ):
                 mock_enrich.return_value = EnrichedProperty(**self._make_enriched(rid))
                 resp = client.post("/properties?fields=simon")
