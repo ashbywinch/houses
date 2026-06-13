@@ -384,11 +384,29 @@ async def run_enrichment(
             else None
         )
     if enabled is None or {"walk_time", "amenities"} & enabled:
-        # Best coordinate priority: actual (user override) > geocoded > location
-        walk_lat = actual_latitude if actual_latitude is not None else approx_lat
-        walk_lng = actual_longitude if actual_longitude is not None else approx_lng
-        if walk_lat is not None and walk_lng is not None:
-            walk_data = await svc.walkability_service.enrich(walk_lat, walk_lng, address)
+        # Coordinate source for walk to town — exact priority:
+        # 1. Address + full postcode (geocode the combined string) if full postcode exists
+        # 2. Best lat/lon from the data sheet (actual > approx)
+        # 3. Address only (geocode just the address string)
+        coords = None
+
+        if postcode and not is_outcode(postcode) and address:
+            loc = PropertyLocation(postcode=postcode, address=address)
+            loc = await loc.resolve()
+            coords = loc.coordinates.value_or_none()
+
+        if coords is None and actual_latitude is not None and actual_longitude is not None:
+            coords = GeoPoint(actual_latitude, actual_longitude)
+        if coords is None and approx_lat is not None and approx_lng is not None:
+            coords = GeoPoint(approx_lat, approx_lng)
+
+        if coords is None and address:
+            loc = PropertyLocation(postcode="", address=address)
+            loc = await loc.resolve()
+            coords = loc.coordinates.value_or_none()
+
+        if coords is not None:
+            walk_data = await svc.walkability_service.enrich(coords.lat, coords.lon, address)
         else:
             walk_data = {"walk_to_town_minutes": None, "amenities": ""}
     if enabled is None or "town" in enabled:
