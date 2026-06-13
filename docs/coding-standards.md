@@ -107,76 +107,19 @@ behaviour, extract it to its own module.
 
 ## Dependency Injection
 
-Three DI patterns, use the simplest one that works:
+The shared coding standards describe three DI patterns: local `_kwarg`
+injection, `Services` composition root, and context vars. This project
+uses all three — see how each is applied here:
 
-### 1. Services Container — for API-level dependencies
+| Pattern | Houses implementation | When to use |
+|---------|----------------------|-------------|
+| **`Services` container** | `houses/services.py` — `Services` dataclass with every enrichment service and real defaults. `_run_enrichment` accepts optional `services` param. | Replace an entire enrichment module (EPC, council tax, commute) |
+| **Context vars** | `houses/context.py` — `get_services()`, `get_bus_fare_reader()`, `get_sheets_client()`. Server middleware initialises per-request state. | Per-request singletons (bus fares, sheets client, geo state) |
+| **Local `_kwarg`** | `_registry` on `_add_parking_cost`, `_page_path` on `scrape()`, etc. | Leaf-level data objects (car park data, HTML fixtures) |
 
-`houses/services.py` defines `Services`, a dataclass bundling every
-enrichment service (geocoder, commute router, EPC lookup, etc.) with
-real defaults.  ``_run_enrichment`` accepts an optional ``services``
-parameter.
-
-**Production**: ``services=None`` → ``Services()`` with real implementations.
-**Tests**: ``services=FakeServices(epc_service=FakeEPC(band="C"))``.
-
-Use this when you need to replace an entire enrichment service (real API
-→ fake canned data) at the ``_run_enrichment`` level.
-
-### 2. ContextVar + Middleware — for per-request state
-
-`houses/context.py` holds ``ContextVar`` instances for:
-- ``Services`` (so ``get_services()`` works without threading a parameter)
-- ``BusJourneyRegistry`` (shared across ``routing.py`` and ``transit_route.py``)
-- ``_GeoState`` (rate-limit tracking in ``location.py``)
-- Sheets client (so ``get_client()`` returns a mock in tests)
-
-Each getter auto-creates production defaults when the context variable
-is unset (e.g. from a script that doesn't go through the FastAPI middleware).
-
-**Tests**: set the context var directly:
-
-```python
-import houses.context as ctx
-from houses.car_park import CarParkRegistry
-from tests.helpers import make_services
-
-token = ctx._request_services.set(make_services())
-try:
-    ...
-finally:
-    ctx._request_services.reset(token)
-```
-
-### 3. Local ``_kwarg`` — for leaf-level data objects
-
-For functions that consume a specific data object (not a whole service),
-add an optional ``_param`` with a default of ``None`` → real implementation.
-
-```python
-async def _add_parking_cost(self, data, current_cost, _registry=None):
-    parking = _registry or CarParkRegistry()
-    ...
-```
-
-**Tests**: pass the object directly:
-
-```python
-registry = CarParkRegistry.from_car_parks(
-    [CarPark(name="Fleet", daily_cost=Money("10.90", "GBP"))],
-    station_map={"fleet rail station": "Fleet"},
-)
-cost = await route._add_parking_cost(data, 30.0, _registry=registry)
-```
-
-### Choosing Between Them
-
-| Situation | Pattern |
-|-----------|---------|
-| Replace an entire enrichment module (EPC, council tax) | ``Services`` |
-| Replace the bus fare lookup for a whole test session | ``ContextVar`` |
-| Pass a pre-built CarParkRegistry with specific data | ``_kwarg`` |
-| Provide a mock sheets client without 14 ``patch()`` calls | ``ContextVar`` |
-| Point ``scrape_rightmove`` at a fixture HTML file | ``_kwarg`` (``_page_path``) |
+Reusable fakes live in `tests/helpers.py`. Use `make_services()` to build a
+`Services` with all fakes at sensible defaults, or construct a custom
+`Fake*` for individual service overrides.
 
 ## Testing
 
