@@ -11,7 +11,7 @@ from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 
 import houses.location as _loc
-from houses.commute import Commute, CommuteBreakdown
+from houses.commute import Commute, CommuteBreakdown, LegMode
 from houses.config import settings
 from houses.council_tax import lookup_council_tax
 from houses.enricher import (
@@ -24,6 +24,7 @@ from houses.epc import lookup_epc
 from houses.location import PropertyLocation, geocode
 from houses.property import EnrichedProperty, Property
 from houses.rail_fares import fare_between, nearest_station
+from houses.stations import Station, find as find_station
 from houses.rightmove_scraper import scrape as scrape_rightmove
 from houses.rightmove_scraper import stop_chrome
 from houses.schools import SchoolGender, compute_school_commute, find_nearest
@@ -963,7 +964,25 @@ async def _enrich_rail_fares(
     fare_coords = (await geocode(fare_pc)).value_or_none()
     if not fare_coords:
         return simon, lorena
+
+    # Try to get the origin station from the actual route's first rail leg,
+    # rather than from the geometric nearest station (which may be wrong).
+    def _origin_station(commute: Commute) -> dict | None:
+        for cg in commute.cost_groups:
+            for leg in cg.legs:
+                if leg.mode in (LegMode.TRAIN, LegMode.TUBE, LegMode.DLR, LegMode.OVERGROUND, LegMode.TRAM) and leg.start_station:
+                    clean = Station.short_name(leg.start_station)
+                    stn = find_station(clean)
+                    if stn:
+                        return {"crs": stn.crs, "name": stn.name}
+                    break
+        return nearest_station(fare_coords.lat, fare_coords.lon)
+
     station = nearest_station(fare_coords.lat, fare_coords.lon)
+    if simon_needs and simon is not None:
+        station = _origin_station(simon) or station
+    if lorena_needs and lorena is not None:
+        station = _origin_station(lorena) or station
     if not station:
         return simon, lorena
     if simon_needs:
