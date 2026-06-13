@@ -10,7 +10,7 @@ import httpx
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.attempt import Attempt
-from houses.bus_journey import BusJourneyRegistry, cheapest_round_trip
+from houses.routing import _bus_fare_for
 from houses.car_park import CarParkRegistry
 from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
@@ -26,8 +26,6 @@ from houses.stations import Station
 from houses.stations import find as find_station
 
 logger = logging.getLogger(__name__)
-
-_bus_fares = BusJourneyRegistry()
 
 TFL_JOURNEY_URL = "https://api.tfl.gov.uk/Journey/JourneyResults"
 OUTCODES_IO_URL = "https://api.postcodes.io/outcodes"
@@ -228,10 +226,9 @@ class TransitRoute:
             arr_raw = bus_leg.get("arrivalPoint", {})
             dep_point = {"lat": dep_raw["lat"], "lon": dep_raw["lon"]} if dep_raw.get("lat") else None
             arr_point = {"lat": arr_raw["lat"], "lon": arr_raw["lon"]} if arr_raw.get("lat") else None
-            fares = _bus_fares.fares_for_stops(dep, arr, dep_point=dep_point, arr_point=arr_point)
-            daily = cheapest_round_trip(fares, _bus_fares.national_max_single)
-            if daily is not None:
-                total_bus_cost += float(daily.amount)
+            leg_cost = _bus_fare_for(dep, arr, dep_point=dep_point, arr_point=arr_point)
+            if leg_cost is not None:
+                total_bus_cost += leg_cost
 
         if total_bus_cost > 0:
             return round(tfl_non_bus_fare / 100 * 2 + total_bus_cost, 2)
