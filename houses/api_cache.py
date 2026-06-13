@@ -136,11 +136,12 @@ class CachingTransport(httpx.AsyncBaseTransport):
             return httpx.Response(200, json=cached)
 
         response = await self._inner.handle_async_request(request)
-        try:
-            data = response.json()
-            set_cached(request.method, url_path, params, body, data)
-        except Exception:
-            pass
+        if response.is_success:
+            try:
+                data = response.json()
+                set_cached(request.method, url_path, params, body, data)
+            except Exception:
+                pass
         return response
 
 

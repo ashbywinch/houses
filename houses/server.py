@@ -11,7 +11,7 @@ from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 
 import houses.location as _loc
-from houses.commute import Commute, CommuteBreakdown
+from houses.commute import Commute, CommuteBreakdown, LegMode
 from houses.config import settings
 from houses.council_tax import lookup_council_tax
 from houses.enricher import (
@@ -37,6 +37,8 @@ from houses.sheets import (
     sync_view_formulas,
     write_enriched_row,
 )
+from houses.stations import Station
+from houses.stations import find as find_station
 from houses.town_desc import generate_town_description
 from houses.walkability import KNOWN_COUNTIES, enrich_walkability
 
@@ -177,6 +179,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
 @app.middleware("http")
 async def _geo_cache_per_request(request, call_next):
     """Give each request its own geocode cache so tests are isolated."""
@@ -243,17 +246,20 @@ async def get_property(rid: str, tab: str = Query(description="Tab: 'view' or 'd
         return JSONResponse({"error": "property not found", "rid": rid}, status_code=404)
     if len(matches) > 1:
         logger.warning(
-            "Duplicate RID %s found in %d rows — data may be inconsistent. "
-            "Delete the duplicate row from the sheet.",
-            rid, len(matches),
+            "Duplicate RID %s found in %d rows — data may be inconsistent. Delete the duplicate row from the sheet.",
+            rid,
+            len(matches),
         )
-        return JSONResponse({
-            "warning": "duplicate rows",
-            "rid": rid,
-            "count": len(matches),
-            "message": f"RID {rid} appears in {len(matches)} rows. "
-                       f"Delete the duplicate row(s) from the sheet and retry.",
-        }, status_code=409)
+        return JSONResponse(
+            {
+                "warning": "duplicate rows",
+                "rid": rid,
+                "count": len(matches),
+                "message": f"RID {rid} appears in {len(matches)} rows. "
+                f"Delete the duplicate row(s) from the sheet and retry.",
+            },
+            status_code=409,
+        )
     return {"tab": tab, **matches[0]}
 
 
@@ -492,8 +498,7 @@ async def _batch_stream(
         #   fill blank cells
         if user_fields:
             consider_headers = [
-                h for h in data_headers
-                if (ef := _HEADER_TO_ENRICHMENT_FIELD.get(h)) and ef in user_fields
+                h for h in data_headers if (ef := _HEADER_TO_ENRICHMENT_FIELD.get(h)) and ef in user_fields
             ]
         else:
             consider_headers = list(enriched_col_indices.keys())
@@ -502,9 +507,9 @@ async def _batch_stream(
             empty_headers = [h for h in consider_headers if h in enriched_col_indices]
         else:
             empty_headers = [
-                h for h in consider_headers
-                if (ci := enriched_col_indices.get(h)) is not None
-                and (ci >= len(data_row) or not data_row[ci].strip())
+                h
+                for h in consider_headers
+                if (ci := enriched_col_indices.get(h)) is not None and (ci >= len(data_row) or not data_row[ci].strip())
             ]
 
         if not empty_headers:
@@ -562,8 +567,15 @@ async def _batch_stream(
             )
         else:
             _write_backfill_cells(
-                sh, data_ws, data_row_num, data_headers, data_row,
-                enriched, empty_headers, force=force, rid=rid,
+                sh,
+                data_ws,
+                data_row_num,
+                data_headers,
+                data_row,
+                enriched,
+                empty_headers,
+                force=force,
+                rid=rid,
             )
             yield _json_line({"type": "row", "row": row_idx, "rid": rid, "status": "updated", "fields": sorted(needed)})
             summary["updated"] += 1
@@ -571,7 +583,9 @@ async def _batch_stream(
 
     logger.info(
         "Batch done: %d updated, %d skipped, %d created — %s",
-        summary["updated"], summary["skipped"], summary["created"],
+        summary["updated"],
+        summary["skipped"],
+        summary["created"],
         "force" if force else "blanks only",
     )
     yield _json_line({"type": "summary", **summary})
@@ -586,16 +600,31 @@ async def compare_properties(
 
     Returns a TSV diff with columns RID, Field, Old (sheet), New (enriched).
     This is POST because it triggers enrichment (API calls, caching).
+
+    ``fields`` is a list of column header names to compare (e.g.
+    ``["Simon Parking Cost (£)"]``).  Each column header is mapped to
+    its enrichment group so only the required API calls are made.
+    If omitted, all enrichment columns are compared.
     """
+    import csv
+    import io
+
+    # Map column headers to enrichment field groups
+    enabled_groups: set[str] | None = None
+    compare_columns: set[str] | None = None
+    if fields:
+        enabled_groups = set()
+        compare_columns = set()
+        for col in fields:
+            compare_columns.add(col.strip())
+            group = _HEADER_TO_ENRICHMENT_FIELD.get(col.strip())
+            if group:
+                enabled_groups.add(group)
 
     # Read sheet data first
     props = _get_properties_data()
 
     # Build enriched flat dicts by calling _run_backfill_enrichment per property
-    import csv
-    import io
-
-    # Run enrichment in no-write mode for each property
     enriched_rows: dict[str, dict[str, str]] = {}
     from houses.sheets import row_values
 
@@ -621,7 +650,7 @@ async def compare_properties(
             lookup=None,  # _run_enrichment will compute best lookup
             bedrooms=None,
             price=None,
-            enabled=set(fields) if fields else None,
+            enabled=enabled_groups,
         )
         enriched_rows[rid] = row_values(enriched)
 
@@ -639,6 +668,8 @@ async def compare_properties(
         for header, old_val in p.items():
             stripped = header.strip()
             if not stripped or stripped in ("Rightmove ID",):
+                continue
+            if compare_columns is not None and stripped not in compare_columns:
                 continue
             new_val = new_data.get(stripped, "")
             old_clean = old_val.strip() if old_val else ""
@@ -934,7 +965,28 @@ async def _enrich_rail_fares(
     fare_coords = (await geocode(fare_pc)).value_or_none()
     if not fare_coords:
         return simon, lorena
+
+    # Try to get the origin station from the actual route's first rail leg,
+    # rather than from the geometric nearest station (which may be wrong).
+    def _origin_station(commute: Commute) -> dict | None:
+        for cg in commute.cost_groups:
+            for leg in cg.legs:
+                if (
+                    leg.mode in (LegMode.TRAIN, LegMode.TUBE, LegMode.DLR, LegMode.OVERGROUND, LegMode.TRAM)
+                    and leg.start_station
+                ):
+                    clean = Station.short_name(leg.start_station)
+                    stn = find_station(clean)
+                    if stn:
+                        return {"crs": stn.crs, "name": stn.name}
+                    break
+        return nearest_station(fare_coords.lat, fare_coords.lon)
+
     station = nearest_station(fare_coords.lat, fare_coords.lon)
+    if simon_needs and simon is not None:
+        station = _origin_station(simon) or station
+    if lorena_needs and lorena is not None:
+        station = _origin_station(lorena) or station
     if not station:
         return simon, lorena
     if simon_needs:
@@ -946,7 +998,7 @@ async def _enrich_rail_fares(
                 destination_label=simon.destination_label,
                 destination_postcode=simon.destination_postcode,
                 duration_minutes=simon.duration_minutes,
-                daily_cost_gbp=rail_cost + parking,
+                daily_cost_gbp=round(rail_cost + parking, 2),
                 mode=simon.mode,
                 cost_groups=simon.cost_groups,
             )
@@ -965,7 +1017,7 @@ async def _enrich_rail_fares(
                 destination_label=lorena.destination_label,
                 destination_postcode=lorena.destination_postcode,
                 duration_minutes=lorena.duration_minutes,
-                daily_cost_gbp=rail_cost + bus,
+                daily_cost_gbp=round(rail_cost + bus, 2),
                 mode=lorena.mode,
                 cost_groups=lorena.cost_groups,
             )
@@ -1020,12 +1072,18 @@ def _write_backfill_cells(
         Tab(ws).batch_update(cells)
         logger.info(
             "Wrote row %d (RID %s): %d cells [%s]",
-            row_num, rid, len(cells), ", ".join(written),
+            row_num,
+            rid,
+            len(cells),
+            ", ".join(written),
         )
     if skipped:
         logger.info(
             "Skipped row %d (RID %s): %d cells already had data [%s]",
-            row_num, rid, len(skipped), ", ".join(skipped),
+            row_num,
+            rid,
+            len(skipped),
+            ", ".join(skipped),
         )
 
 

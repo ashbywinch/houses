@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, auto
 
+from money import Money
+
 from houses.stations import Station
 
 
@@ -66,14 +68,11 @@ class CostGroup:
 
     legs: tuple[JourneyLeg, ...]
     operator: str = ""
-    cost: float | None = None  # None = free (walking)
+    cost: Money | float | None = None  # None = free (walking).  Parking CostGroups use Money.
 
     def leg_descriptions(self) -> tuple[str, ...]:
         """Return operator-appropriate descriptions for each leg."""
-        return tuple(
-            _render_leg_description(leg)
-            for leg in self.legs
-        )
+        return tuple(_render_leg_description(leg) for leg in self.legs)
 
 
 @dataclass(frozen=True)
@@ -107,11 +106,18 @@ class Commute:
         return " \u2192 ".join(parts)
 
     def non_rail_cost(self) -> float:
-        """Sum of costs from non-TfL cost groups (bus, parking, etc.)."""
+        """Sum of costs from non-TfL cost groups (bus, parking, etc.).
+
+        Parking costs are stored as ``Money`` objects to avoid float
+        precision artifacts; bus and TfL costs are stored as plain floats.
+        """
         total = 0.0
         for cg in self.cost_groups:
             if cg.cost is not None and cg.operator != "TfL":
-                total += cg.cost
+                if isinstance(cg.cost, Money):
+                    total += float(cg.cost.amount)
+                else:
+                    total += cg.cost
         return total
 
 

@@ -130,6 +130,7 @@ def _isolate_api_cache():
 def _reset_geo_cache():
     """Give each integration test its own geocode cache."""
     import houses.location as _loc
+
     _loc._geo_cache_var.set({})
 
 

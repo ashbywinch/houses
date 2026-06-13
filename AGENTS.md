@@ -27,7 +27,7 @@ The system consists of a local FastAPI server acting as a front end for a Google
 - XLOOKUP formulas in the View tab
 - Update process
 
-### 3. Add a New Enrichment Module
+### 4. Add a New Enrichment Module
 **Read**: [docs/adding-a-new-enrichment-module.md](docs/adding-a-new-enrichment-module.md)
 - Step-by-step guide: module file → model → enricher → sheets → API → docs
 - [docs/enrichment-modules.md](docs/enrichment-modules.md) — existing module patterns to follow
@@ -36,7 +36,11 @@ The system consists of a local FastAPI server acting as a front end for a Google
 ### 5. Write Documentation
 **Read**: [docs/writing-documentation.md](docs/writing-documentation.md)
 
-### 6. Troubleshoot Batch Endpoints
+### 6. Use the API
+**Read**: [docs/api.md](docs/api.md)
+- Endpoints, query parameters, examples for `POST /properties` batch refresh, compare, etc.
+
+### 7. Troubleshoot Batch Endpoints
 **Read**: [docs/troubleshooting-endpoints.md](docs/troubleshooting-endpoints.md)
 - Before running batch operations
 - What to check when results don't appear
@@ -59,4 +63,6 @@ The system consists of a local FastAPI server acting as a front end for a Google
 | `GET /properties/{rid}` | Get a single property by Rightmove ID |
 | `POST /properties/compare` | Compare sheet vs fresh enrichment (TSV diff) |
 | `POST /sheet/setup` | Setup sheet structure (tabs, headers, formulas) |
+| `.kilo/command/update-pr.md` | **Use this command** (`/update-pr`) to update PR bodies — `gh pr edit --body` silently fails on this repo. Pass PR number and body file path. |
+| `.kilo/command/dump-sheet.md` | Dump sheet data to local files for inspection / test fixtures. |
 

@@ -26,7 +26,8 @@ class TestLegDescription:
         """Final walk leg should just show 'walk {min}' in summary, not 'walk to nowhere'."""
         leg = JourneyLeg(mode=LegMode.WALK, duration_minutes=5)
         c = Commute(
-            destination_label="", destination_postcode="",
+            destination_label="",
+            destination_postcode="",
             cost_groups=(CostGroup(legs=(leg,)),),
         )
         assert c.summary() == "walk 5m"
@@ -41,8 +42,10 @@ class TestLegDescription:
     def test_train_with_line_and_destination(self):
         """Train leg with line_name + end_station → '{line} to {station}'."""
         leg = JourneyLeg(
-            mode=LegMode.TRAIN, duration_minutes=28,
-            line_name="South Western Railway", end_station="Waterloo",
+            mode=LegMode.TRAIN,
+            duration_minutes=28,
+            line_name="South Western Railway",
+            end_station="Waterloo",
         )
         c = Commute(destination_label="", destination_postcode="")
         desc = c._leg_description(leg)
@@ -82,15 +85,18 @@ class TestRouteSummary:
             JourneyLeg(mode=LegMode.WALK, duration_minutes=2, end_station="Greenway"),
             JourneyLeg(mode=LegMode.BUS, duration_minutes=9, line_name="163", end_station="Raynes Park"),
             JourneyLeg(
-                mode=LegMode.TRAIN, duration_minutes=16,
-                line_name="South Western Railway", end_station="Vauxhall",
+                mode=LegMode.TRAIN,
+                duration_minutes=16,
+                line_name="South Western Railway",
+                end_station="Vauxhall",
             ),
             JourneyLeg(mode=LegMode.WALK, duration_minutes=7, end_station="Vauxhall Bus Station"),
             JourneyLeg(mode=LegMode.BUS, duration_minutes=3, line_name="36", end_station="Pimlico"),
             JourneyLeg(mode=LegMode.WALK, duration_minutes=2),
         )
         commute = Commute(
-            destination_label="", destination_postcode="",
+            destination_label="",
+            destination_postcode="",
             duration_minutes=39,
             cost_groups=(CostGroup(legs=legs),),
         )
@@ -107,14 +113,17 @@ class TestRouteSummary:
         legs = (
             JourneyLeg(mode=LegMode.WALK, duration_minutes=19),
             JourneyLeg(
-                mode=LegMode.TRAIN, duration_minutes=23,
-                line_name="South Western Railway", end_station="Waterloo",
+                mode=LegMode.TRAIN,
+                duration_minutes=23,
+                line_name="South Western Railway",
+                end_station="Waterloo",
             ),
             JourneyLeg(mode=LegMode.TUBE, duration_minutes=4, line_name="Waterloo & City", end_station="Bank"),
             JourneyLeg(mode=LegMode.WALK, duration_minutes=18),
         )
         commute = Commute(
-            destination_label="", destination_postcode="",
+            destination_label="",
+            destination_postcode="",
             duration_minutes=64,
             cost_groups=(CostGroup(legs=legs),),
         )

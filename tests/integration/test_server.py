@@ -536,9 +536,7 @@ class TestBackfillView:
             # lookup=None means _run_enrichment computes the best string
             # (address + full postcode when available)
             _, enrich_kwargs = mock_enrich.call_args
-            assert enrich_kwargs["lookup"] is None, (
-                f"backfill passed lookup={enrich_kwargs['lookup']!r}, expected None"
-            )
+            assert enrich_kwargs["lookup"] is None, f"backfill passed lookup={enrich_kwargs['lookup']!r}, expected None"
             # Verify write call includes Simon Parking Cost (the only empty simon col)
             args, _ = mock_write.call_args
             allowed = args[6]  # allowed_headers positional arg
@@ -734,7 +732,7 @@ class TestBackfillView:
         cost = 5.0  # initial daily_cost_gbp
 
         # _add_parking_cost checks if the first leg is "driving" and then
-        # calls _lookup_parking_cost (async) without await.
+        # uses CarParkRegistry to look up the cost via CRS fallback.
         # The data must have a journey with a "driving" first leg that has
         # an arrivalPoint with a station name we have a parking rate for.
         data = {
@@ -762,8 +760,7 @@ class TestBackfillView:
         with tempfile.TemporaryDirectory() as tmp:
             csv_path = Path(tmp) / "parking_rates.csv"
             csv_path.write_text("station_name,crs,daily_cost_gbp\nMaidenhead Rail Station,MAI,8.50\n")
-            monkeypatch.setattr("houses.enricher._PARKING_RATES_PATH", csv_path)
-            monkeypatch.setattr("houses.enricher._parking_rates_cache", None)
+            monkeypatch.setattr("houses.car_park._PARKING_RATES_PATH", csv_path)
 
             # Call _add_parking_cost directly — this is what triggers the bug
             result = await route._add_parking_cost(data, cost)
@@ -839,9 +836,7 @@ class TestBackfillView:
             assert resp.status_code == 200
             results = self._parse_rows(resp)
             assert len(results) == 1
-            assert results[0]["status"] == "skipped", (
-                f"Expected skipped (fully enriched), got {results[0]}"
-            )
+            assert results[0]["status"] == "skipped", f"Expected skipped (fully enriched), got {results[0]}"
             mock_enrich.assert_not_called()
         finally:
             settings.sheet_id = original
