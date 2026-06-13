@@ -14,6 +14,7 @@ import re
 from typing import ClassVar
 
 import gspread
+from money import Money
 
 from houses.commute import Commute, LegMode
 from houses.config import settings
@@ -162,14 +163,17 @@ class Row:
         return str(t.duration_minutes) if t and t.duration_minutes is not None else ""
 
     @classmethod
-    def _fmt_cost(cls, val: float | None) -> str:
+    def _fmt_cost(cls, val: Money | float | None) -> str:
         """String representation for a cost value.
 
-        Returns the value as a string without forced decimal formatting —
-        the sheet handles display-level formatting.  ``None`` returns
-        ``""`` (unknown), even for 0.0.
+        Extracts the amount from ``Money`` objects; passes ``float`` through
+        as-is (backward compat).  ``None`` returns ``""``.
         """
-        return str(val) if val is not None else ""
+        if val is None:
+            return ""
+        if isinstance(val, Money):
+            return str(val.amount)
+        return str(val)
 
     @classmethod
     def _fmt_dist(cls, distance_km: float | None) -> str:
@@ -229,7 +233,9 @@ class Row:
         r["Price (£)"] = str(property_.price) if property_.price else ""
         r["Rightmove ID"] = cls.rightmove_id(property_.url)
         r["Simon London (min)"] = cls._fmt_duration(property_.simon_commute)
-        r["Simon London Cost (£)"] = cls._fmt_cost(property_.simon_commute.daily_cost_gbp if property_.simon_commute else None)
+        r["Simon London Cost (£)"] = cls._fmt_cost(
+            property_.simon_commute.daily_cost_gbp if property_.simon_commute else None
+        )
         r["Simon London Route"] = property_.simon_commute.summary() if property_.simon_commute else ""
         r["Simon Parking Cost (£)"] = cls._fmt_cost(
             property_.simon_commute.non_rail_cost() if property_.simon_commute else None
@@ -253,9 +259,13 @@ class Row:
         r["Secondary Walk (min)"] = cls._fmt_walk(property_.secondary_school_commute)
         r["Secondary School Link"] = cls._fmt_school_link(property_.secondary_school)
         r["Secondary Ofsted"] = property_.secondary_school.ofsted_rating if property_.secondary_school else ""
-        r["Secondary Inspection Year"] = property_.secondary_school.inspection_year if property_.secondary_school else ""
+        r["Secondary Inspection Year"] = (
+            property_.secondary_school.inspection_year if property_.secondary_school else ""
+        )
         r["Area Description"] = property_.town_description
-        r["Walk to Town (min)"] = str(property_.walk_to_town_minutes) if property_.walk_to_town_minutes is not None else ""
+        r["Walk to Town (min)"] = (
+            str(property_.walk_to_town_minutes) if property_.walk_to_town_minutes is not None else ""
+        )
         r["Walkable Amenities"] = property_.walkable_amenities
         r["EPC Rating"] = property_.epc_rating
         r["Council Tax Band"] = property_.council_tax.band if property_.council_tax else ""

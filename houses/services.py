@@ -178,7 +178,7 @@ class _DefaultRailFare:
         simon: Commute | None,
         lorena: Commute | None,
     ) -> tuple[Commute | None, Commute | None]:
-        from houses.server import _enrich_rail_fares
+        from houses.enrichment_runner import _enrich_rail_fares
 
         return await _enrich_rail_fares(enabled, postcode, address, simon, lorena)
 

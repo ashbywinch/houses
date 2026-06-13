@@ -1,6 +1,7 @@
 """Tests for sheet update logic — never hits the real spreadsheet."""
 
 from fastapi.testclient import TestClient
+from money import Money
 
 from houses.property import EnrichedProperty
 from houses.server import app
@@ -32,7 +33,7 @@ def _make_enriched(url: str, simon_cost: float = 10.0) -> EnrichedProperty:
         petrol=Commute(
             destination_label="Bracknell",
             destination_postcode="RG12 8YA",
-            daily_cost_gbp=8.50,
+            daily_cost_gbp=Money("8.50", "GBP"),
             mode="drive",
         ),
     )

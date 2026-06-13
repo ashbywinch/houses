@@ -437,3 +437,86 @@ async def _geocode_postcode(postcode: str) -> Attempt[GeoPoint]:
         except Exception as exc:
             logger.exception("Failed to geocode postcode: %s", key)
             return Attempt.impossible("geocode_postcode", "unexpected error", exc)
+
+
+# ── Postcode helpers ────────────────────────────────────────────────────
+
+
+# Full postcode regex (e.g. "SW20 9NB") — uses word boundaries so it doesn't
+# match longer strings that happen to contain a postcode pattern.
+_FULL_POSTCODE_RE = re.compile(
+    r"[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}",
+    re.IGNORECASE,
+)
+# Outcode-within-address regex (e.g. "SW20" inside a longer address string) —
+# uses word boundaries to avoid matching partial words.
+_ADDR_OUTCODE_RE = re.compile(
+    r"\b[A-Z]{1,2}[0-9][A-Z0-9]?\b",
+    re.IGNORECASE,
+)
+
+
+def is_outcode(s: str) -> bool:
+    """True if the string is a partial postcode (outcode) like 'SL6' or 'SW1E'."""
+    return bool(re.match(r"^[A-Z]{1,2}[0-9][A-Z0-9]?$", s))
+
+
+def extract_postcode(address: str) -> str:
+    """Extract the best postcode from an address string.
+
+    Tries full postcode first (e.g. "SL6 1AA"), then falls back to
+    outcode only (e.g. "SL6"). Returns empty string if nothing found.
+    """
+    m = _FULL_POSTCODE_RE.search(address)
+    if m:
+        return m.group(0).strip().upper()
+    m = _ADDR_OUTCODE_RE.search(address)
+    if m:
+        return m.group(0).strip().upper()
+    return ""
+
+
+# ── House location resolution ───────────────────────────────────────────
+
+
+async def resolve_house_location(
+    postcode: str,
+    address: str,
+    actual_latitude: float | None,
+    actual_longitude: float | None,
+    approx_lat: float | None,
+    approx_lng: float | None,
+) -> GeoPoint | None:
+    """Resolve the property's physical location, best source first.
+
+    Priority:
+    1. **Address + full postcode** — geocode the combined string (most precise
+       when a full postcode like ``"SW20 9NB"`` is available, as opposed to
+       an outcode like ``"SW20"`` which maps to a large area centroid).
+    2. **Best lat/lon from the data sheet** — ``actual_latitude/longitude``
+       (user-provided site measurement) if available, then ``approx_lat/lng``
+       from a prior geocoding step.
+    3. **Address only** — geocode just the street address without a postcode
+       (least precise, but better than nothing).
+    """
+    coords: GeoPoint | None = None
+
+    # 1. Address + full postcode
+    if postcode and not is_outcode(postcode) and address:
+        loc = PropertyLocation(postcode=postcode, address=address)
+        loc = await loc.resolve()
+        coords = loc.coordinates.value_or_none()
+
+    # 2. Best lat/lon from the data sheet
+    if coords is None and actual_latitude is not None and actual_longitude is not None:
+        coords = GeoPoint(actual_latitude, actual_longitude)
+    if coords is None and approx_lat is not None and approx_lng is not None:
+        coords = GeoPoint(approx_lat, approx_lng)
+
+    # 3. Address only
+    if coords is None and address:
+        loc = PropertyLocation(postcode="", address=address)
+        loc = await loc.resolve()
+        coords = loc.coordinates.value_or_none()
+
+    return coords

@@ -17,7 +17,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from houses.server import _run_backfill_enrichment, _ENRICHMENT_FIELD_COLUMNS
+from houses.enrichment_runner import ENRICHMENT_FIELD_COLUMNS, run_backfill_enrichment
 from houses.sheets import Tab, row_values, col_letter, get_client
 from houses.config import settings
 
@@ -48,7 +48,7 @@ async def main():
             print(f"[{row_idx}/{total}] Skipping — no url or postcode")
             continue
 
-        enriched = await _run_backfill_enrichment(
+        enriched = await run_backfill_enrichment(
             url=url, address=addr, postcode=pc, lookup="",
             bedrooms=None, price=None, enabled=field_set,
         )

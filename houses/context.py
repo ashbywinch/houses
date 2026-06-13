@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from houses.bus_journey import BusJourneyRegistry
+    from houses.rail_fares import RailFareRegistry
     from houses.services import Services
 
 # ── Context variables ─────────────────────────────────────────────
@@ -38,6 +39,10 @@ _request_services: contextvars.ContextVar[Services | None] = contextvars.Context
 
 _request_bus_fares: contextvars.ContextVar[BusJourneyRegistry | None] = contextvars.ContextVar(
     "_request_bus_fares", default=None
+)
+
+_request_rail_fares: contextvars.ContextVar[RailFareRegistry | None] = contextvars.ContextVar(
+    "_request_rail_fares", default=None
 )
 
 _request_sheets_client: contextvars.ContextVar[Any | None] = contextvars.ContextVar(
@@ -56,6 +61,17 @@ def get_services():
         svc = Services()
         _request_services.set(svc)
     return svc
+
+
+def get_rail_fare_registry() -> RailFareRegistry:
+    """Return the per-request RailFareRegistry, creating a default if unset."""
+    from houses.rail_fares import RailFareRegistry as _RailFareRegistry
+
+    reg = _request_rail_fares.get()
+    if reg is None:
+        reg = _RailFareRegistry()
+        _request_rail_fares.set(reg)
+    return reg
 
 
 def get_bus_fare_reader():

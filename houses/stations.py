@@ -65,9 +65,10 @@ class StationRegistry:
     " Underground Station", " Station").
     """
 
-    def __init__(self) -> None:
+    def __init__(self, _stations_csv: Path | None = None) -> None:
         self._stations: dict[str, Station] | None = None
         self._by_crs: dict[str, Station] | None = None
+        self._csv_path = _stations_csv or _STATIONS_CSV
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -90,12 +91,12 @@ class StationRegistry:
             return
         stations: dict[str, Station] = {}
         by_crs: dict[str, Station] = {}
-        if not _STATIONS_CSV.is_file():
-            logger.warning("Stations CSV not found at %s", _STATIONS_CSV)
+        if not self._csv_path.is_file():
+            logger.warning("Stations CSV not found at %s", self._csv_path)
             self._stations = stations
             self._by_crs = by_crs
             return
-        with _STATIONS_CSV.open(newline="") as f:
+        with self._csv_path.open(newline="") as f:
             for row in csv.DictReader(f):
                 raw_name = (row.get("stationName") or "").strip()
                 crs = (row.get("crsCode") or "").strip().upper()
@@ -131,6 +132,20 @@ class StationRegistry:
         """Look up a station by CRS code (case-insensitive)."""
         self._load()
         return self._by_crs.get(crs.upper()) if self._by_crs else None  # type: ignore[return-value]
+
+    def nearest(self, point: GeoPoint) -> Station | None:
+        """Return the station nearest to *point*."""
+        self._load()
+        if not self._stations:
+            return None
+        best = None
+        best_dist = float("inf")
+        for station in self._stations.values():
+            d = point.distance_km_to(station.location)
+            if d < best_dist:
+                best_dist = d
+                best = station
+        return best
 
 
 # Module-level convenience — single shared instance.

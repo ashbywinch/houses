@@ -7,11 +7,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from money import Money
 
 from houses.commute import Commute, CommuteBreakdown
 from houses.config import settings
+from houses.enrichment_runner import header_to_enrichment_field, run_backfill_enrichment
 from houses.property import CouncilTaxInfo, EnrichedProperty
-from houses.server import _HEADER_TO_ENRICHMENT_FIELD, _run_backfill_enrichment, app
+from houses.server import app
 from houses.services import Services
 from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS
 from tests.helpers import FakeCommuteRouter, FakeEPC
@@ -276,13 +278,13 @@ class TestBackfillView:
             destination_label="Simon (London)",
             destination_postcode="TE1 1ST",
             duration_minutes=30,
-            daily_cost_gbp=10.0,
+            daily_cost_gbp=Money("10.0", "GBP"),
         )
         lorena = Commute(
             destination_label="Lorena (London)",
             destination_postcode="TE1 1ST",
             duration_minutes=45,
-            daily_cost_gbp=12.0,
+            daily_cost_gbp=Money("12.0", "GBP"),
         )
         base = {
             "url": f"https://www.rightmove.co.uk/properties/{rid}",
@@ -296,7 +298,7 @@ class TestBackfillView:
                 destination_label="Bracknell Office (RG12 8YA)",
                 destination_postcode="RG12 8YA",
                 duration_minutes=90,
-                daily_cost_gbp=12.50,
+                daily_cost_gbp=Money("12.50", "GBP"),
                 mode="drive",
             ),
             "primary_school": None,
@@ -476,7 +478,7 @@ class TestBackfillView:
             mock_client = self._mock_sheet(view_rows=view_rows, data_rows=[data_row])
             with (
                 patch("houses.server.get_client", return_value=mock_client),
-                patch("houses.server._run_backfill_enrichment") as mock_enrich,
+                patch("houses.server.run_backfill_enrichment") as mock_enrich,
             ):
                 mock_enrich.return_value = EnrichedProperty(
                     **self._make_enriched(rid, address="3 Test St, Test Town, TE1 1ST"),
@@ -519,7 +521,7 @@ class TestBackfillView:
             mock_client = self._mock_sheet(view_rows=view_rows, data_rows=[data_row])
             with (
                 patch("houses.server.get_client", return_value=mock_client),
-                patch("houses.server._run_backfill_enrichment") as mock_enrich,
+                patch("houses.server.run_backfill_enrichment") as mock_enrich,
                 patch("houses.server._write_backfill_cells") as mock_write,
             ):
                 mock_enrich.return_value = EnrichedProperty(**self._make_enriched(rid))
@@ -569,7 +571,7 @@ class TestBackfillView:
             )
             with (
                 patch("houses.server.get_client", return_value=mock_client),
-                patch("houses.server._run_backfill_enrichment", return_value=enriched_fake),
+                patch("houses.server.run_backfill_enrichment", return_value=enriched_fake),
                 patch("houses.server._write_backfill_cells") as mock_write,
             ):
                 resp = client.post("/properties?no_write=true")
@@ -596,7 +598,7 @@ class TestBackfillView:
             mock_client = self._mock_sheet(view_rows=view_rows, data_rows=[data_row])
             with (
                 patch("houses.server.get_client", return_value=mock_client),
-                patch("houses.server._run_backfill_enrichment") as mock_enrich,
+                patch("houses.server.run_backfill_enrichment") as mock_enrich,
                 patch("houses.server._write_backfill_cells") as mock_write,
             ):
                 mock_enrich.return_value = EnrichedProperty(**self._make_enriched(rid))
@@ -677,7 +679,7 @@ class TestBackfillView:
         fake_epc = FakeEPC(band="C")
         services = Services(epc_service=fake_epc)
         result = asyncio.run(
-            _run_backfill_enrichment(
+            run_backfill_enrichment(
                 url="https://www.rightmove.co.uk/properties/123",
                 address="7 Sandy Close, Woking, GU22",
                 postcode="GU22 8BQ",
@@ -780,14 +782,14 @@ class TestBackfillView:
             data_row[self.DATA_HEADERS.index("Rightmove ID")] = rid
             # Fill ALL simon columns so nothing is empty
             for col in self.DATA_HEADERS:
-                ef = _HEADER_TO_ENRICHMENT_FIELD.get(col)
+                ef = header_to_enrichment_field(col)
                 if ef == "simon":
                     data_row[self.DATA_HEADERS.index(col)] = "filled"
 
             mock_client = self._mock_sheet(view_rows=view_rows, data_rows=[data_row])
             with (
                 patch("houses.server.get_client", return_value=mock_client),
-                patch("houses.server._run_backfill_enrichment") as mock_enrich,
+                patch("houses.server.run_backfill_enrichment") as mock_enrich,
                 patch("houses.server._write_backfill_cells"),
             ):
                 mock_enrich.return_value = EnrichedProperty(**self._make_enriched(rid))
@@ -813,14 +815,14 @@ class TestBackfillView:
             data_row = [""] * len(self.DATA_HEADERS)
             data_row[self.DATA_HEADERS.index("Rightmove ID")] = rid
             for col in self.DATA_HEADERS:
-                ef = _HEADER_TO_ENRICHMENT_FIELD.get(col)
+                ef = header_to_enrichment_field(col)
                 if ef == "simon":
                     data_row[self.DATA_HEADERS.index(col)] = "filled"
 
             mock_client = self._mock_sheet(view_rows=view_rows, data_rows=[data_row])
             with (
                 patch("houses.server.get_client", return_value=mock_client),
-                patch("houses.server._run_backfill_enrichment") as mock_enrich,
+                patch("houses.server.run_backfill_enrichment") as mock_enrich,
             ):
                 mock_enrich.return_value = EnrichedProperty(**self._make_enriched(rid))
                 resp = client.post("/properties?fields=simon")
@@ -842,7 +844,7 @@ class TestBackfillView:
         services = Services(commute_router=fake_router)
 
         result = asyncio.run(
-            _run_backfill_enrichment(
+            run_backfill_enrichment(
                 url="https://www.rightmove.co.uk/properties/999",
                 address="Some Road, Maidenhead",
                 postcode="SL6 3YZ",

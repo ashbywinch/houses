@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from money import Money
+
 from houses.attempt import Attempt
 from houses.commute import Commute
 from houses.geo import GeoPoint
@@ -47,19 +49,19 @@ _DEFAULT_SIMON = Commute(
     destination_label="Simon (London)",
     destination_postcode="SW1V 2QQ",
     duration_minutes=30,
-    daily_cost_gbp=10.0,
+    daily_cost_gbp=Money("10.0", "GBP"),
 )
 _DEFAULT_LORENA = Commute(
     destination_label="Lorena (London)",
     destination_postcode="EC3A 7LP",
     duration_minutes=45,
-    daily_cost_gbp=12.0,
+    daily_cost_gbp=Money("12.0", "GBP"),
 )
 _DEFAULT_PETROL = Commute(
     destination_label="Bracknell Office (RG12 8YA)",
     destination_postcode="RG12 8YA",
     duration_minutes=90,
-    daily_cost_gbp=12.50,
+    daily_cost_gbp=Money("12.50", "GBP"),
 )
 
 

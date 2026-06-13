@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from money import Money
 
-from houses.commute import Commute, LegMode
+from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 
 # ── Fail-fast when API keys are missing ─────────────────────────────────
 
@@ -38,9 +39,9 @@ class TestCongestionZone:
         [
             ("SW1V 2QQ", True),  # Simon — Pimlico
             ("EC3A 7LP", True),  # Lorena — Aldgate
-            ("N1 9GU", True),  # Islington
-            ("SE1 7PB", True),  # Southwark
-            ("E1 6AN", True),  # Whitechapel
+            ("N1 9GU", False),  # Islington — outside zone (only Angel is inside)
+            ("SE1 7PB", False),  # Southwark — large parts outside zone
+            ("E1 6AN", False),  # Whitechapel — outside zone
             ("RG12 8YA", False),  # Bracknell
             ("SW19 5AE", False),  # Wimbledon (outer London — NOT in zone)
             ("KT13 8XG", False),  # Weybridge
@@ -58,13 +59,23 @@ class TestCongestionZone:
 
 # ── get_commute decision logic (backends mocked) ────────────────────────
 
-_WALK_60 = Commute(destination_label="", destination_postcode="", duration_minutes=60, daily_cost_gbp=0.0)
-_WALK_20 = Commute(destination_label="", destination_postcode="", duration_minutes=20, daily_cost_gbp=0.0)
-_TRANSIT_30 = Commute(destination_label="", destination_postcode="", duration_minutes=30, daily_cost_gbp=8.0)
-_DRIVE_25 = Commute(destination_label="", destination_postcode="", duration_minutes=25, daily_cost_gbp=5.0)
+_WALK_60 = Commute(
+    destination_label="", destination_postcode="", duration_minutes=60, daily_cost_gbp=Money("0.0", "GBP")
+)
+_WALK_20 = Commute(
+    destination_label="", destination_postcode="", duration_minutes=20, daily_cost_gbp=Money("0.0", "GBP")
+)
+_TRANSIT_30 = Commute(
+    destination_label="", destination_postcode="", duration_minutes=30, daily_cost_gbp=Money("8.0", "GBP")
+)
+_DRIVE_25 = Commute(
+    destination_label="", destination_postcode="", duration_minutes=25, daily_cost_gbp=Money("5.0", "GBP")
+)
 
 # Tiebreak fixture — route with cost, used by test_returns_cost_when_tfl_has_cost
-_SLOWER_HAS_COST = Commute(destination_label="", destination_postcode="", duration_minutes=25, daily_cost_gbp=5.0)
+_SLOWER_HAS_COST = Commute(
+    destination_label="", destination_postcode="", duration_minutes=25, daily_cost_gbp=Money("5.0", "GBP")
+)
 
 
 class TestGetCommuteChoice:
@@ -256,7 +267,7 @@ class TestGetCommuteChoice:
         result = await get_commute("GU21 7QF", "EC3A 7LP", has_car=False, max_walk_minutes=30)
         assert result.is_succeeded, f"Expected succeeded, got {result}"
         best = result.value_or_none()
-        assert best.daily_cost_gbp == 5.0, "Should return the route with a real cost"
+        assert best.daily_cost_gbp == Money("5.0", "GBP"), "Should return the route with a real cost"
 
 
 # ── TfL: no bus when has_car=True ────────────────────────────────────
@@ -275,13 +286,13 @@ class TestTflNoBusWhenHasCar:
             destination_label="",
             destination_postcode="SW1V 2QQ",
             duration_minutes=90,
-            daily_cost_gbp=20.0,
+            daily_cost_gbp=Money("20.0", "GBP"),
         )
         with_bus = Commute(
             destination_label="",
             destination_postcode="SW1V 2QQ",
             duration_minutes=70,
-            daily_cost_gbp=15.0,
+            daily_cost_gbp=Money("15.0", "GBP"),
         )
 
         call_count = 0
@@ -314,7 +325,7 @@ class TestTflNoBusWhenHasCar:
             destination_label="",
             destination_postcode="SW1V 2QQ",
             duration_minutes=70,
-            daily_cost_gbp=15.0,
+            daily_cost_gbp=Money("15.0", "GBP"),
         )
 
         call_count = 0
@@ -407,7 +418,7 @@ class TestSchoolCommute:
                 destination_label="",
                 destination_postcode=dest,
                 duration_minutes=10,
-                daily_cost_gbp=0.0,
+                daily_cost_gbp=Money("0.0", "GBP"),
             )
             return Attempt.succeeded(commute, "test")
 
@@ -435,3 +446,87 @@ class TestSchoolCommute:
         assert captured["max_walk_minutes"] == 20
         assert captured["origin"] == "SL6 1AA"
         assert captured["dest"] == "SL6 1AA"
+
+
+# ── _replace_walk_with_bus ──────────────────────────────────────────────
+
+
+def _tfl_complete(duration=90, cost="12.50", walk=46) -> Commute:
+    """A TfL commute with walk + train + tube legs and full cost."""
+    return Commute(
+        destination_label="L",
+        destination_postcode="EC3A 7LP",
+        duration_minutes=duration,
+        daily_cost_gbp=Money(cost, "GBP"),
+        cost_groups=(
+            CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=walk),)),
+            CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration_minutes=42),)),
+            CostGroup(legs=(JourneyLeg(mode=LegMode.TUBE, duration_minutes=4),)),
+        ),
+    )
+
+
+def _bus_route() -> Commute:
+    """A bus route that saves 8 min of walking for £3.80."""
+    return Commute(
+        destination_label="L (Bus)",
+        destination_postcode="EC3A 7LP",
+        duration_minutes=55,
+        daily_cost_gbp=Money("3.80", "GBP"),
+        cost_groups=(
+            CostGroup(
+                legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=28),),
+                cost=3.80,
+            ),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_replace_walk_with_bus_short_walk():
+    """When walk is shorter than penalty, the TfL commute is returned unchanged."""
+    from houses.routing import _replace_walk_with_bus
+
+    original = _tfl_complete(walk=5)
+    result = await _replace_walk_with_bus(original, "GU22 8RU", "EC3A 7LP", 5)
+    assert result is original
+    assert result.daily_cost_gbp == Money("12.50", "GBP")
+
+
+@pytest.mark.asyncio
+async def test_replace_walk_with_bus_no_bus():
+    """When no bus is available, the TfL commute is returned unchanged."""
+    from houses.routing import _replace_walk_with_bus
+
+    original = _tfl_complete(walk=46)
+    result = await _replace_walk_with_bus(
+        original, "GU22 8RU", "EC3A 7LP", 46, _bus_alternative=None
+    )
+    assert result is original
+
+
+@pytest.mark.asyncio
+async def test_replace_walk_with_bus_replaces_walk():
+    """When the bus is viable, walking time is replaced and bus cost added."""
+    from houses.routing import _replace_walk_with_bus
+
+    original = _tfl_complete(duration=90, cost="12.50", walk=46)
+    result = await _replace_walk_with_bus(
+        original, "GU22 8RU", "EC3A 7LP", 46, _bus_alternative=_bus_route()
+    )
+    # Duration: 90 - 46 + min(15, 46-10=36) = 90 - 46 + 15 = 59
+    assert result.duration_minutes == 59
+    # Cost: TfL £12.50 + bus £3.80 = £16.30
+    assert result.daily_cost_gbp == Money("16.30", "GBP")
+
+
+@pytest.mark.asyncio
+async def test_replace_walk_with_bus_short_walk_no_replace():
+    """When walk is under the penalty threshold, no replacement is tried even with a bus."""
+    from houses.routing import _replace_walk_with_bus
+
+    original = _tfl_complete(duration=90, cost="12.50", walk=9)
+    result = await _replace_walk_with_bus(
+        original, "GU22 8RU", "EC3A 7LP", 9, _bus_alternative=_bus_route()
+    )
+    assert result is original

@@ -9,6 +9,7 @@ import re
 from datetime import datetime, timedelta
 
 import httpx
+from money import Money
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.attempt import Attempt
@@ -24,6 +25,13 @@ from houses.stations import find as find_station
 logger = logging.getLogger(__name__)
 
 TFL_JOURNEY_URL = "https://api.tfl.gov.uk/Journey/JourneyResults"
+
+# Estimated off-peak contactless pay-as-you-go single fare for a zone 1
+# tube journey.  Used by the NR fallback (``_enrich_rail_fares``) to estimate
+# the onward tube cost from the NR terminus to the final destination when the
+# TfL API call fails or returns no data.
+# Peak: ~£3.40, Off-peak: ~£2.80 (TfL Jan 2025 fare scale).
+FALLBACK_TUBE_SINGLE_GBP = "2.80"
 OUTCODES_IO_URL = "https://api.postcodes.io/outcodes"
 POSTCODES_IO_URL = "https://api.postcodes.io/postcodes"
 ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
@@ -34,6 +42,68 @@ NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 # ---------------------------------------------------------------------------
 # TfL helper functions
 # ---------------------------------------------------------------------------
+
+
+async def get_tube_leg_fare(
+    from_station: Station,
+    to_postcode: str,
+    _data: dict | None = None,  # test injection
+) -> Money | None:
+    """Get the peak single fare for a tube journey between a station and a postcode.
+
+    Uses the TfL Journey API with a weekday morning peak departure time (09:00,
+    which is within the zone 1 peak window of 06:30–09:30 on weekdays).
+    Returns a ``Money`` single fare, or ``None`` if TfL can't route the
+    journey (walking distance from the NR terminus to the destination)
+    or if the API call fails.
+    """
+    if _data is not None:
+        return _parse_tube_fare(_data)
+
+    url = f"{TFL_JOURNEY_URL}/{from_station.name}/to/{to_postcode}"
+    params = _next_weekday_date_params()
+    params["nationalSearch"] = "false"
+    params.update(_tfl_auth_params())
+
+    cached = get_cached("GET", url, params)
+    if cached is not None:
+        return _parse_tube_fare(cached)
+
+    try:
+        async with cached_async_client(timeout=10.0) as client:
+            resp = await client.get(url, params=params)
+            if resp.status_code == 404:
+                logger.debug("TfL cannot route %s → %s (walking distance)", from_station.crs, to_postcode)
+                return None
+            resp.raise_for_status()
+            data = resp.json()
+            set_cached("GET", url, params, None, data)
+            return _parse_tube_fare(data)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            logger.debug("TfL cannot route %s → %s (walking distance)", from_station.crs, to_postcode)
+            return None
+        logger.warning("TfL tube leg fare failed for %s → %s: %s", from_station.crs, to_postcode, e)
+        return None
+    except Exception as e:
+        logger.debug("TfL tube leg fare failed for %s → %s: %s", from_station.crs, to_postcode, e)
+        return None
+
+
+def _parse_tube_fare(data: dict) -> Money | None:
+    """Extract the peak single fare from a TfL journey response.
+
+    TfL returns ``totalCost`` in pence (integer).  Divides by 100 to
+    get pounds, letting Money/Decimal handle the conversion.
+    """
+    journeys = data.get("journeys", [])
+    if not journeys:
+        return None
+    best = min(journeys, key=lambda j: j.get("duration", 9999))
+    fare = best.get("fare", {})
+    if fare and fare.get("totalCost") is not None:
+        return Money(str(fare["totalCost"] / 100), "GBP")
+    return None
 
 
 def _next_weekday_date_params() -> dict[str, str]:
@@ -293,7 +363,7 @@ class TransitRoute:
         cache_params = {k: v for k, v in params.items() if k != "app_key"}
 
         duration_minutes: int | None = None
-        daily_cost_gbp: float | None = None
+        daily_cost_gbp: Money | None = None
         route_summary = ""
         parking_cost_gbp: float | None = None
         bus_cost_gbp: float | None = None
@@ -342,17 +412,22 @@ class TransitRoute:
             data = await _apply_park_and_ride_to_journeys(data, self._origin, settings.max_walk_to_station_minutes)
 
         if data is not None:
-            duration_minutes, daily_cost_gbp, route_summary = _pick_best_journey(data)
+            dur, raw_cost, route_summary = _pick_best_journey(data)
+            duration_minutes = dur
+            daily_cost_gbp = Money(str(raw_cost), "GBP") if raw_cost is not None else None
             cost_groups = self._build_cost_groups(data)
 
         # Bus fare
         if self._allow_bus and duration_minutes is not None and data is not None:
-            bus_cost_gbp = self._add_bus_fare(data, daily_cost_gbp)
-            daily_cost_gbp = bus_cost_gbp
+            raw_cost = float(daily_cost_gbp.amount) if daily_cost_gbp is not None else None
+            bus_cost_gbp = self._add_bus_fare(data, raw_cost)
+            daily_cost_gbp = Money(str(bus_cost_gbp), "GBP") if bus_cost_gbp is not None else None
 
         # Parking cost
         if self._park_and_ride and duration_minutes is not None and data is not None:
-            parking_cost_gbp, daily_cost_gbp, parking_groups = await self._add_parking_cost(data, daily_cost_gbp)
+            raw_cost = float(daily_cost_gbp.amount) if daily_cost_gbp is not None else None
+            parking_cost_gbp, new_cost, parking_groups = await self._add_parking_cost(data, raw_cost)
+            daily_cost_gbp = Money(str(new_cost), "GBP") if new_cost is not None else None
             cost_groups.extend(parking_groups)
 
         result = Commute(
