@@ -13,15 +13,13 @@ from houses.enricher import (
     _END_PC_RE,
     _OUTCODE_RE,
     _compute_petrol_from_distance_km,
-    _format_route_summary,
-    _next_weekday_date_params,
-    _pick_best_journey,
     compute_commute_breakdown,
 )
 from houses.geo import GeoPoint
 from houses.schools import School, SchoolGender
 from houses.stations import Station
 from houses.stations import find as find_station
+from houses.transit_route import _format_route_summary, _next_weekday_date_params, _pick_best_journey
 
 
 def _fares_from_dict(products: dict[str, float], meta: dict | None = None) -> dict[FareProductType, FareProduct]:

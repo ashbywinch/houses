@@ -86,7 +86,6 @@ class TestGetCommuteChoice:
 
         monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
-        
 
         result = await get_commute("GU21 7QF", "SW1V 2QQ", has_car=False, max_walk_minutes=30)
         assert result.is_succeeded, f"Expected succeeded, got {result}"
@@ -108,7 +107,6 @@ class TestGetCommuteChoice:
 
         monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
-        
 
         result = await get_commute("GU21 7QF", "SW1V 2QQ", has_car=False, max_walk_minutes=30)
         assert result.is_succeeded, f"Expected succeeded, got {result}"
@@ -136,7 +134,7 @@ class TestGetCommuteChoice:
 
         monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
-        
+
         monkeypatch.setattr("houses.routing._drive_commute", mock_drive)
         monkeypatch.setattr("houses.routing._in_congestion_zone", mock_cz)
 
@@ -166,7 +164,7 @@ class TestGetCommuteChoice:
 
         monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
-        
+
         monkeypatch.setattr("houses.routing._drive_commute", mock_drive)
         monkeypatch.setattr("houses.routing._in_congestion_zone", mock_cz)
 
@@ -196,7 +194,7 @@ class TestGetCommuteChoice:
 
         monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
-        
+
         monkeypatch.setattr("houses.routing._drive_commute", mock_drive)
         monkeypatch.setattr("houses.routing._in_congestion_zone", mock_cz)
 
@@ -226,7 +224,7 @@ class TestGetCommuteChoice:
 
         monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
-        
+
         monkeypatch.setattr("houses.routing._drive_commute", mock_drive)
         monkeypatch.setattr("houses.routing._in_congestion_zone", mock_cz)
 

@@ -708,7 +708,7 @@ class TestBackfillView:
         fallback returns a GeoPoint. The function then tries ``dest_coords[1]``
         which raises ``TypeError: 'GeoPoint' object is not subscriptable``.
         """
-        from houses.enricher import _get_drive_minutes
+        from houses.transit_route import _get_drive_minutes
 
         result = await _get_drive_minutes("KT13 8XG", "Nonexistent Station XYZ")
         # Should not crash — may return None if geocoding fails too

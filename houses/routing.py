@@ -393,20 +393,33 @@ def _parse_google_steps(steps: list[dict]) -> list[JourneyLeg]:
             line = td.get("transitLine", {}).get("nameShort", "") or td.get("transitLine", {}).get("name", "")
 
             if vtype == "BUS":
-                legs.append(JourneyLeg(
-                    mode=LegMode.BUS, duration_minutes=dur_min,
-                    start_station=dep_stop, line_name=line, end_station=arr_stop,
-                ))
+                legs.append(
+                    JourneyLeg(
+                        mode=LegMode.BUS,
+                        duration_minutes=dur_min,
+                        start_station=dep_stop,
+                        line_name=line,
+                        end_station=arr_stop,
+                    )
+                )
             else:
                 mode_enum = {
-                    "RAIL": LegMode.TRAIN, "TRAIN": LegMode.TRAIN,
-                    "HEAVY_RAIL": LegMode.TRAIN, "TRAM": LegMode.TRAIN,
-                    "SUBWAY": LegMode.TUBE, "METRO": LegMode.TUBE,
+                    "RAIL": LegMode.TRAIN,
+                    "TRAIN": LegMode.TRAIN,
+                    "HEAVY_RAIL": LegMode.TRAIN,
+                    "TRAM": LegMode.TRAIN,
+                    "SUBWAY": LegMode.TUBE,
+                    "METRO": LegMode.TUBE,
                 }.get(vtype, LegMode.TRAIN)
-                legs.append(JourneyLeg(
-                    mode=mode_enum, duration_minutes=dur_min,
-                    start_station=dep_stop, line_name=line, end_station=arr_stop,
-                ))
+                legs.append(
+                    JourneyLeg(
+                        mode=mode_enum,
+                        duration_minutes=dur_min,
+                        start_station=dep_stop,
+                        line_name=line,
+                        end_station=arr_stop,
+                    )
+                )
     return legs
 
 
