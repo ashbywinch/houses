@@ -10,7 +10,7 @@ houses/
 ├── server.py          # HTTP endpoint, request handling
 ├── models.py          # Pydantic data models
 ├── enricher.py        # Enrichment coordinators
-├── sheets.py          # Google Sheets write
+├── sheets/            # Google Sheets write (package: Tab, Row, View, formulas)
 ├── retry.py           # Async retry with backoff
 ├── routing.py         # Transit/drive routing dispatch
 ├── stations.py        # Station class + registry
@@ -51,14 +51,14 @@ behaviour, extract it to its own module.
   formulas and named ranges to match the new column positions.
 - Delete one-off migration scripts after they've been run. The git log
   preserves the history.
-- Update `COLUMN_HEADERS` and `_row_values()` in `sheets.py` to match the
+- Update `Row.HEADERS` and `Row.from_property()` in `houses/sheets/row.py` to match the
   new column layout. Run a batch refresh to populate the new column.
 
 ### User Columns Are Never Overwritten
 
 - User-provided columns (Rightmove URL, Address, Postcode, Bedrooms,
   Price, Actual Latitude, Actual Longitude, Actual Postcode) must never
-  be written by the server. `_row_values()` returns `""` for all of them.
+  be written by the server. `Row.from_property()` returns `""` for all of them.
 - The Rightmove ID column is the server's stable lookup key.
 - `write_enriched_row` uses the Rightmove ID column to find existing rows.
   It only writes non-empty cells to avoid blanking user data.

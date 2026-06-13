@@ -80,7 +80,7 @@ The primary key linking both tabs is the **Rightmove URL** (Column A in Properti
 | `houses/routing.py` | Commute decision logic — walking, TfL transit, driving |
 | `houses/transit_route.py` | TfL API wrapper, park-and-ride, parking costs |
 | `houses/location.py` | Geocoding — postcodes.io, Google Maps, ORS, Nominatim |
-| `houses/sheets.py` | gspread integration, column headers |
+| `houses/sheets/` | gspread integration, column headers (`Row` class), View tab sync (`View` class) |
 | `houses/endpoint_client.py` | Reusable API client with Retry-After + budget tracking |
 | `houses/services.py` | Service protocols + `Services` DI container |
 | `houses/context.py` | ContextVar per-request state (bus fares, geo state, sheets) |
@@ -124,7 +124,7 @@ Leaf-level functions accept optional underscore-prefixed parameters
 defaults that fall back to the real implementation.  Tests pass pre-built
 objects directly, avoiding monkeypatch.
 | `houses/enricher.py` | Transit commute, petrol cost, school lookup |
-| `houses/sheets.py` | Service account auth, gspread integration, column headers (canonical), row formatting |
+| `houses/sheets/` | Service account auth, gspread integration, column schema (`Row`), View tab sync (`View`), named ranges, formulas |
 | `houses/retry.py` | Async retry with exponential backoff and jitter |
 | `houses/walkability.py` | Google Maps Places + ORS walking (planned) |
 | `houses/town_desc.py` | LLM-generated town descriptions (planned) |

@@ -28,5 +28,5 @@ make test-integration           # Integration tests
 | `houses/services.py` | Service protocols + `Services` DI container (real/fake) |
 | `houses/context.py` | ContextVar per-request state (bus fares, geo state, sheets client) |
 | `houses/config.py` | Env-var configuration |
-| `houses/sheets.py` | gspread integration, column headers |
+| `houses/sheets/` | gspread integration, column schema (`Row`), View tab sync (`View`), formulas |
 | `tests/helpers.py` | Reusable fakes: `FakeCommuteRouter`, `FakeEPC`, `make_services()` |

@@ -1,12 +1,12 @@
 # Column Reference
 
-> The canonical `COLUMN_HEADERS`, `VIEW_HEADERS`, and `VIEW_FORMULA_COLS` lists in `houses/sheets.py` are the single source of truth for column definitions.
-> To add or remove a column, edit `sheets.py` first, then run `make lint` and `make test` to verify alignment.
+> The canonical `COLUMN_HEADERS` list lives on the `Row` class (`houses/sheets/row.py`). `VIEW_HEADERS` and `VIEW_FORMULA_COLS` are in `houses/sheets/formulas.py`. These are the single source of truth for column definitions.
+> To add or remove a column, edit `Row.HEADERS` in `houses/sheets/row.py` first, then run `make lint` and `make test` to verify alignment.
 > To deploy structural changes to the real sheet, run `uv run python scripts/sheet_tool.py migrate-view` (with `--dry-run` first).
 
 ## Properties Data Tab (Bot / Server-Written)
 
-45 columns (A–AT). The server writes enriched rows via `sheets.py:_row_values()`. Columns AP–AT are formula-driven (never written by the server).
+45 columns (A–AT). The server writes enriched rows via `Row.from_property()` in `houses/sheets/row.py`. Columns AP–AT are formula-driven (never written by the server).
 
 Key conventions:
 - **Primary key**: Rightmove URL (col A). Stable lookup key: Rightmove ID (col H).
@@ -58,4 +58,4 @@ The View tab uses conditional formatting to color-code cells as a shorthand for 
 - **Inspection years**: >=2023 green, <=2022 orange
 - **Grey text row**: entire row grey when Status = "No"
 
-Thresholds and rules are defined in `houses/sheets.py:sync_view_formulas()`.
+Thresholds and rules are defined in `houses/sheets/view.py:View.sync()` and `houses/sheet_presentation.py`.
