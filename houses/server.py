@@ -173,13 +173,24 @@ app = FastAPI(
 
 
 @app.middleware("http")
-async def _geo_cache_per_request(request, call_next):
-    """Give each request its own geocode cache so tests are isolated."""
-    token = _loc._geo_cache_var.set({})
+async def _request_context(request, call_next):
+    """Set up per-request context (geo cache, geo state, services, bus fares)."""
+    import houses.context as _ctx
+    from houses.bus_journey import BusJourneyRegistry
+    from houses.location import _geo_state_var, _GeoState
+    from houses.services import Services
+
+    geo_cache_token = _loc._geo_cache_var.set({})
+    geo_state_token = _geo_state_var.set(_GeoState())
+    svc_token = _ctx._request_services.set(Services())
+    bus_token = _ctx._request_bus_fares.set(BusJourneyRegistry())
     try:
         return await call_next(request)
     finally:
-        _loc._geo_cache_var.reset(token)
+        _ctx._request_bus_fares.reset(bus_token)
+        _ctx._request_services.reset(svc_token)
+        _geo_state_var.reset(geo_state_token)
+        _loc._geo_cache_var.reset(geo_cache_token)
 
 
 def _get_properties_data() -> list[dict[str, str]]:

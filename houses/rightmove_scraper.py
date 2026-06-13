@@ -441,8 +441,11 @@ def _report_missing(result: dict[str, Any], rid: str) -> None:
         )
 
 
-async def scrape(url: str) -> dict[str, Any]:
+async def scrape(url: str, _page_path: str | None = None) -> dict[str, Any]:
     """Return property details for a Rightmove URL.
+
+    ``_page_path`` — optional path to a sample HTML file (for tests).
+    When omitted, falls back to ``settings.rightmove_sample_page``.
 
     Cache is checked first. On a cache miss:
       * **Normal mode** — fetches the page via Chrome CDP, caches it, returns
@@ -467,9 +470,10 @@ async def scrape(url: str) -> dict[str, Any]:
         _report_missing(result, rid)
         return result
 
-    # 2. Sample page (development)
-    if settings.rightmove_sample_page:
-        path = Path(settings.rightmove_sample_page)
+    # 2. Sample page (development / tests)
+    sample = _page_path or settings.rightmove_sample_page
+    if sample:
+        path = Path(sample)
         if not path.exists():
             logger.warning("Rightmove sample page not found: %s", path)
             return {}
