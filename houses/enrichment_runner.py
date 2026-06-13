@@ -142,6 +142,52 @@ def header_to_enrichment_field(header: str) -> str | None:
     return _HEADER_TO_ENRICHMENT_FIELD.get(header)
 
 
+# ── House location resolution ─────────────────────────────────────────
+
+
+async def resolve_house_location(
+    postcode: str,
+    address: str,
+    actual_latitude: float | None,
+    actual_longitude: float | None,
+    approx_lat: float | None,
+    approx_lng: float | None,
+) -> GeoPoint | None:
+    """Resolve the property's physical location, best source first.
+
+    Priority:
+    1. **Address + full postcode** — geocode the combined string (most precise
+       when a full postcode like ``"SW20 9NB"`` is available, as opposed to
+       an outcode like ``"SW20"`` which maps to a large area centroid).
+    2. **Best lat/lon from the data sheet** — ``actual_latitude/longitude``
+       (user-provided site measurement) if available, then ``approx_lat/lng``
+       from a prior geocoding step.
+    3. **Address only** — geocode just the street address without a postcode
+       (least precise, but better than nothing).
+    """
+    coords: GeoPoint | None = None
+
+    # 1. Address + full postcode
+    if postcode and not is_outcode(postcode) and address:
+        loc = PropertyLocation(postcode=postcode, address=address)
+        loc = await loc.resolve()
+        coords = loc.coordinates.value_or_none()
+
+    # 2. Best lat/lon from the data sheet
+    if coords is None and actual_latitude is not None and actual_longitude is not None:
+        coords = GeoPoint(actual_latitude, actual_longitude)
+    if coords is None and approx_lat is not None and approx_lng is not None:
+        coords = GeoPoint(approx_lat, approx_lng)
+
+    # 3. Address only
+    if coords is None and address:
+        loc = PropertyLocation(postcode="", address=address)
+        loc = await loc.resolve()
+        coords = loc.coordinates.value_or_none()
+
+    return coords
+
+
 # ── Enrichment pipeline ────────────────────────────────────────────────
 
 
@@ -384,27 +430,9 @@ async def run_enrichment(
             else None
         )
     if enabled is None or {"walk_time", "amenities"} & enabled:
-        # Coordinate source for walk to town — exact priority:
-        # 1. Address + full postcode (geocode the combined string) if full postcode exists
-        # 2. Best lat/lon from the data sheet (actual > approx)
-        # 3. Address only (geocode just the address string)
-        coords = None
-
-        if postcode and not is_outcode(postcode) and address:
-            loc = PropertyLocation(postcode=postcode, address=address)
-            loc = await loc.resolve()
-            coords = loc.coordinates.value_or_none()
-
-        if coords is None and actual_latitude is not None and actual_longitude is not None:
-            coords = GeoPoint(actual_latitude, actual_longitude)
-        if coords is None and approx_lat is not None and approx_lng is not None:
-            coords = GeoPoint(approx_lat, approx_lng)
-
-        if coords is None and address:
-            loc = PropertyLocation(postcode="", address=address)
-            loc = await loc.resolve()
-            coords = loc.coordinates.value_or_none()
-
+        coords = await resolve_house_location(
+            postcode, address, actual_latitude, actual_longitude, approx_lat, approx_lng
+        )
         if coords is not None:
             walk_data = await svc.walkability_service.enrich(coords.lat, coords.lon, address)
         else:
