@@ -402,9 +402,7 @@ async def _batch_stream(
         # - ``force`` controls whether we overwrite existing values or only
         #   fill blank cells
         if user_fields:
-            consider_headers = [
-                h for h in data_headers if (ef := header_to_enrichment_field(h)) and ef in user_fields
-            ]
+            consider_headers = [h for h in data_headers if (ef := header_to_enrichment_field(h)) and ef in user_fields]
         else:
             consider_headers = list(enriched_col_indices.keys())
 
@@ -610,7 +608,6 @@ async def sync_view_formulas_endpoint() -> JSONResponse:
 def _json_line(data: dict) -> str:
     """Pretty-print JSON for streaming output lines."""
     return json.dumps(data) + "\n"
-
 
 
 def _write_backfill_cells(

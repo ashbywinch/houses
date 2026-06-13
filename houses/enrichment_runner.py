@@ -16,12 +16,13 @@ import re
 from enum import Enum
 from typing import Any
 
-from houses.commute import Commute, CommuteBreakdown, LegMode
-from houses.config import settings
 from money import Money
 
+from houses.commute import Commute, CommuteBreakdown, LegMode
+from houses.config import settings
 from houses.context import get_rail_fare_registry
 from houses.enricher import compute_commute_breakdown
+from houses.geo import GeoPoint
 from houses.location import PropertyLocation, geocode
 from houses.property import EnrichedProperty
 from houses.rail_fares import RailFareRegistry
@@ -40,8 +41,11 @@ logger = logging.getLogger(__name__)
 def asdict_serializable(obj: Any) -> Any:
     """Recursively convert a dataclass tree to JSON-serializable dicts.
 
-    Like ``dataclasses.asdict()`` but also converts enums to their values.
+    Like ``dataclasses.asdict()`` but also converts enums and Money to
+    their values.
     """
+    if isinstance(obj, Money):
+        return float(obj.amount)
     if isinstance(obj, Enum):
         return obj.value
     if dataclasses.is_dataclass(obj):
@@ -414,10 +418,10 @@ async def run_enrichment(
             # else: approx_lat/lng already set from shared PropertyLocation above
 
         if approx_lat is not None and approx_lng is not None:
-            station = nearest_station(approx_lat, approx_lng)
+            station = get_rail_fare_registry().nearest_station(GeoPoint(approx_lat, approx_lng))
             if station:
-                station_crs = station["crs"]
-                station_name = station["name"]
+                station_crs = station.crs
+                station_name = station.name
 
     return EnrichedProperty(
         url=url,

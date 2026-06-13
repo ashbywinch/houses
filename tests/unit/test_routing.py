@@ -39,9 +39,9 @@ class TestCongestionZone:
         [
             ("SW1V 2QQ", True),  # Simon — Pimlico
             ("EC3A 7LP", True),  # Lorena — Aldgate
-            ("N1 9GU", True),  # Islington
-            ("SE1 7PB", True),  # Southwark
-            ("E1 6AN", True),  # Whitechapel
+            ("N1 9GU", False),  # Islington — outside zone (only Angel is inside)
+            ("SE1 7PB", False),  # Southwark — large parts outside zone
+            ("E1 6AN", False),  # Whitechapel — outside zone
             ("RG12 8YA", False),  # Bracknell
             ("SW19 5AE", False),  # Wimbledon (outer London — NOT in zone)
             ("KT13 8XG", False),  # Weybridge

@@ -92,11 +92,7 @@ def test_nearest_station_returns_station(tmp_path):
 
 def test_nearest_station_returns_closest(tmp_path):
     csv = tmp_path / "stations.csv"
-    csv.write_text(
-        "stationName,crsCode,lat,long\n"
-        "Woking,WOK,51.317,-0.556\n"
-        "Brookwood,BKO,51.303,-0.636\n"
-    )
+    csv.write_text("stationName,crsCode,lat,long\nWoking,WOK,51.317,-0.556\nBrookwood,BKO,51.303,-0.636\n")
     fares = tmp_path / "fares.csv"
     fares.write_text("origin_crs,dest_crs,single_fare_gbp\nWOK,VIC,0.00\n")
 

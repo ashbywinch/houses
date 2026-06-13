@@ -127,12 +127,12 @@ class TestCommuteBreakdown:
     @pytest.mark.asyncio
     async def test_yearly_formula_with_all_costs(self):
         """46wk x (10 + 15 + 2*24) = 46 x 73 = 3358"""
-        simon = Commute(destination_label="S", destination_postcode="SW1V 2QQ", daily_cost_gbp=15.0)
-        lorena = Commute(destination_label="L", destination_postcode="EC3A 7LP", daily_cost_gbp=24.0)
+        simon = Commute(destination_label="S", destination_postcode="SW1V 2QQ", daily_cost_gbp=Money("15.0", "GBP"))
+        lorena = Commute(destination_label="L", destination_postcode="EC3A 7LP", daily_cost_gbp=Money("24.0", "GBP"))
         petrol = Commute(
             destination_label="Bracknell",
             destination_postcode="RG12 8YA",
-            daily_cost_gbp=10.0,
+            daily_cost_gbp=Money("10.0", "GBP"),
             mode="drive",
         )
         result = await compute_commute_breakdown(simon, lorena, petrol)
@@ -144,11 +144,11 @@ class TestCommuteBreakdown:
         from houses.enricher import compute_commute_breakdown
 
         simon = Commute(destination_label="S", destination_postcode="SW1V 2QQ", daily_cost_gbp=None)
-        lorena = Commute(destination_label="L", destination_postcode="EC3A 7LP", daily_cost_gbp=24.0)
+        lorena = Commute(destination_label="L", destination_postcode="EC3A 7LP", daily_cost_gbp=Money("24.0", "GBP"))
         petrol = Commute(
             destination_label="Bracknell",
             destination_postcode="RG12 8YA",
-            daily_cost_gbp=10.0,
+            daily_cost_gbp=Money("10.0", "GBP"),
             mode="drive",
         )
         result = await compute_commute_breakdown(simon, lorena, petrol)
@@ -1239,24 +1239,27 @@ class TestEnrichRailFares:
     """_enrich_rail_fares — adds NR fares when the cost is only bus/parking."""
 
     @pytest.mark.asyncio
-    async def test_lorena_bus_cost_adds_rail_fare(self, monkeypatch, tmp_path):
+    async def test_lorena_bus_cost_adds_rail_fare(self, tmp_path):
         """Lorena with bus cost only (£4.00) gets rail fare (£37.20) added → £41.20."""
-        # Point at fixture data files so nearest_station and fare_between work
+        from houses.rail_fares import RailFareRegistry
+        from houses.stations import StationRegistry
+
         stations_csv = tmp_path / "stations.csv"
-        stations_csv.write_text("stationName,crsCode,lat,long\nWoking,WOK,51.317,-0.556\n")
-        monkeypatch.setattr("houses.rail_fares._STATIONS_CSV", stations_csv)
+        stations_csv.write_text(
+            "stationName,crsCode,lat,long\n"
+            "Woking,WOK,51.317,-0.556\n"
+            "Fenchurch Street,FST,51.511,-0.079\n"
+        )
+        fares_csv = tmp_path / "fares.csv"
+        fares_csv.write_text("origin_crs,dest_crs,single_fare_gbp\nWOK,FST,17.00\n")
 
-        rail_csv = tmp_path / "rail_fares.csv"
-        rail_csv.write_text("origin_crs,dest_crs,single_fare_gbp\nWOK,WAT,17.00\n")
-        monkeypatch.setattr("houses.rail_fares._FARES_CSV", rail_csv)
+        reg = RailFareRegistry(
+            station_registry=StationRegistry(_stations_csv=stations_csv),
+            _fares_csv=fares_csv,
+        )
 
-        # Mock only the HTTP boundary: geocode returns synthetic coords.
-        # nearest_station and fare_between run for real against tmp CSVs.
         async def mock_geocode(_):
             return Attempt.succeeded(GeoPoint(51.317, -0.556), "test")
-
-        monkeypatch.setattr("houses.enrichment_runner.geocode", mock_geocode)
-        # nearest_station and fare_between read from the temp CSVs above — they run for real
 
         from houses.commute import Commute
         from houses.enrichment_runner import _enrich_rail_fares
@@ -1265,7 +1268,7 @@ class TestEnrichRailFares:
             destination_label="Lorena",
             destination_postcode="EC3A 7LP",
             duration_minutes=78,
-            daily_cost_gbp=4.0,
+            daily_cost_gbp=Money("4.0", "GBP"),
             cost_groups=(
                 CostGroup(
                     legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=10),),
@@ -1277,34 +1280,42 @@ class TestEnrichRailFares:
             destination_label="Simon",
             destination_postcode="SW1V 2QQ",
             duration_minutes=71,
-            daily_cost_gbp=40.4,
+            daily_cost_gbp=Money("40.4", "GBP"),
         )
-        _simon, lorena = await _enrich_rail_fares(
+        _simon, lorena_result = await _enrich_rail_fares(
             enabled={"lorena"},
             postcode="GU21 7QF",
             address="St James Close",
             simon=simon,
             lorena=lorena,
+            _registry=reg,
+            _geocode=mock_geocode,
         )
         # rail: (17.00 + 2.80) × 2 = 39.60. existing bus: 4.00. total: 43.60
-        expected = 39.60 + 4.00
-        assert lorena.daily_cost_gbp == pytest.approx(expected, rel=1e-2)
+        assert lorena_result.daily_cost_gbp == Money("43.60", "GBP")
 
     @pytest.mark.asyncio
-    async def test_simon_parking_cost_adds_rail_fare(self, monkeypatch, tmp_path):
+    async def test_simon_parking_cost_adds_rail_fare(self, tmp_path):
         """Simon with parking cost only (£10.80) gets rail fare added → £50.40."""
-        stations_csv = tmp_path / "stations.csv"
-        stations_csv.write_text("stationName,crsCode,lat,long\nBrookwood,BKO,51.303,-0.636\n")
-        monkeypatch.setattr("houses.rail_fares._STATIONS_CSV", stations_csv)
+        from houses.rail_fares import RailFareRegistry
+        from houses.stations import StationRegistry
 
-        rail_csv = tmp_path / "rail_fares.csv"
-        rail_csv.write_text("origin_crs,dest_crs,single_fare_gbp\nBKO,VIC,17.00\n")
-        monkeypatch.setattr("houses.rail_fares._FARES_CSV", rail_csv)
+        stations_csv = tmp_path / "stations.csv"
+        stations_csv.write_text(
+            "stationName,crsCode,lat,long\n"
+            "Brookwood,BKO,51.303,-0.636\n"
+            "Victoria Station,VIC,51.495,-0.144\n"
+        )
+        fares_csv = tmp_path / "fares.csv"
+        fares_csv.write_text("origin_crs,dest_crs,single_fare_gbp\nBKO,VIC,17.00\n")
+
+        reg = RailFareRegistry(
+            station_registry=StationRegistry(_stations_csv=stations_csv),
+            _fares_csv=fares_csv,
+        )
 
         async def mock_geocode(_):
             return Attempt.succeeded(GeoPoint(51.303, -0.636), "test")
-
-        monkeypatch.setattr("houses.enrichment_runner.geocode", mock_geocode)
 
         from houses.commute import Commute
         from houses.enrichment_runner import _enrich_rail_fares
@@ -1313,7 +1324,7 @@ class TestEnrichRailFares:
             destination_label="Simon",
             destination_postcode="SW1V 2QQ",
             duration_minutes=71,
-            daily_cost_gbp=10.8,
+            daily_cost_gbp=Money("10.8", "GBP"),
             cost_groups=(
                 CostGroup(
                     legs=(JourneyLeg(mode=LegMode.PARK, duration_minutes=0),),
@@ -1328,19 +1339,20 @@ class TestEnrichRailFares:
             duration_minutes=90,
             daily_cost_gbp=None,
         )
-        simon, _lorena = await _enrich_rail_fares(
+        simon_result, _lorena_result = await _enrich_rail_fares(
             enabled={"simon"},
             postcode="GU21 2NA",
             address="Robin Hood Road, Knaphill",
             simon=simon,
             lorena=lorena,
+            _registry=reg,
+            _geocode=mock_geocode,
         )
         # rail: (17.00 + 2.80) × 2 = 39.60. existing parking: 10.80. total: 50.40
-        expected = 39.60 + 10.80
-        assert simon.daily_cost_gbp == pytest.approx(expected, rel=1e-2)
+        assert simon_result.daily_cost_gbp == Money("50.40", "GBP")
 
     @pytest.mark.asyncio
-    async def test_full_tfl_fare_skips_nr(self, monkeypatch):
+    async def test_full_tfl_fare_skips_nr(self):
         """When TfL already priced the journey, cost stays unchanged."""
         from houses.commute import Commute
         from houses.enrichment_runner import _enrich_rail_fares
@@ -1349,23 +1361,23 @@ class TestEnrichRailFares:
             destination_label="Lorena",
             destination_postcode="EC3A 7LP",
             duration_minutes=90,
-            daily_cost_gbp=36.0,
+            daily_cost_gbp=Money("36.0", "GBP"),
         )
         simon = Commute(
             destination_label="Simon",
             destination_postcode="SW1V 2QQ",
             duration_minutes=71,
-            daily_cost_gbp=40.4,
+            daily_cost_gbp=Money("40.4", "GBP"),
         )
-        simon, lorena = await _enrich_rail_fares(
+        simon_result, lorena_result = await _enrich_rail_fares(
             enabled={"simon", "lorena"},
             postcode="GU22 8RU",
             address="Test",
             simon=simon,
             lorena=lorena,
         )
-        assert simon.daily_cost_gbp == 40.4
-        assert lorena.daily_cost_gbp == 36.0
+        assert simon_result.daily_cost_gbp == Money("40.4", "GBP")
+        assert lorena_result.daily_cost_gbp == Money("36.0", "GBP")
 
 
 class TestKnownWrongBehaviours:

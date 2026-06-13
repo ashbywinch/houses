@@ -171,15 +171,10 @@ _CONGESTION_OUTCODES: frozenset[str] = frozenset(
         "SW1W",
         "SW1X",
         "SW1Y",
-        # SE1 — some SE1 postcodes are inside
-        "SE1",
-        # N1 — some N1 postcodes are inside
-        "N1",
-        # E1, E2, E14 — some parts are inside
-        "E1",
-        "E1W",
-        "E2",
-        "E14",
+        # SE1, N1, E1, E2, E14 — excluded because large parts are outside
+        # the zone boundary (Bermondsey, Angel, Bethnal Green, Canary Wharf).
+        # The tiebreak in get_commute() will prefer TfL transit for these
+        # destinations anyway, but driving remains a valid option.
     }
 )
 
