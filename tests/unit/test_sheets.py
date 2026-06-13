@@ -18,12 +18,12 @@ from houses.sheets import (
     _build_full_row,
     _const_range_name,
     _rightmove_id,
-    _splt,
     col_index,
     col_letter,
     named_range_name,
     row_values,
 )
+from houses.stamp_duty import stamp_duty_land_tax
 
 
 def test_row_values_contains_all_enriched_columns():
@@ -478,12 +478,12 @@ def test_data_formula_count():
 
 
 def test_stamp_duty_known_values():
-    assert _splt(250000) == 0.0
-    assert _splt(350000) == 5000.0
-    assert _splt(550000) == 15000.0
-    assert _splt(925000) == 33750.0
-    assert _splt(1500000) == 91250.0
-    assert _splt(2000000) == 151250.0
+    assert stamp_duty_land_tax(250000) == 0.0
+    assert stamp_duty_land_tax(350000) == 5000.0
+    assert stamp_duty_land_tax(550000) == 15000.0
+    assert stamp_duty_land_tax(925000) == 33750.0
+    assert stamp_duty_land_tax(1500000) == 91250.0
+    assert stamp_duty_land_tax(2000000) == 151250.0
 
 
 def test_data_formulas_use_named_ranges():
@@ -523,7 +523,7 @@ def test_net_ashby_formula_checks_status():
 
 
 def test_stamp_duty_formula_uses_splt():
-    """Stamp Duty formula implements the same SDLT bands as _splt."""
+    """Stamp Duty formula implements the same SDLT bands as stamp_duty_land_tax."""
     formula = DATA_FORMULA_COLS["stamp duty (£)"]
     assert "250000" in formula, "Stamp Duty must have 250k threshold"
     assert "925000" in formula, "Stamp Duty must have 925k threshold"
