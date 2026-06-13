@@ -126,18 +126,22 @@ async def compute_commute_breakdown(
     lorena_transit: Commute,
     bracknell: Commute,
 ) -> CommuteBreakdown:
-    simon_daily = simon_transit.daily_cost_gbp
-    lorena_daily = lorena_transit.daily_cost_gbp
-    bracknell_daily = bracknell.daily_cost_gbp
+    # Convert Money → float for CommuteBreakdown compatibility
+    simon_daily = float(simon_transit.daily_cost_gbp.amount) if simon_transit.daily_cost_gbp is not None else None
+    lorena_daily = float(lorena_transit.daily_cost_gbp.amount) if lorena_transit.daily_cost_gbp is not None else None
+    bracknell_daily = float(bracknell.daily_cost_gbp.amount) if bracknell.daily_cost_gbp is not None else None
 
     yearly_total = None
     formula = ""
 
     if simon_daily is not None and lorena_daily is not None and bracknell_daily is not None:
-        yearly_total = settings.working_weeks_per_year * (
-            bracknell_daily + simon_daily + lorena_daily * settings.weekly_lorena_trips
+        yearly_total = round(
+            float(
+                settings.working_weeks_per_year
+                * (bracknell_daily + simon_daily + lorena_daily * settings.weekly_lorena_trips)
+            ),
+            2,
         )
-        yearly_total = round(yearly_total, 2)
         formula = (
             f"{settings.working_weeks_per_year}wk x "
             f"({settings.weekly_bracknell_trips}xBracknell_daily + "

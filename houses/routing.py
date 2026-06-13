@@ -11,6 +11,7 @@ import logging
 import re
 
 import httpx
+from money import Money
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.attempt import Attempt
@@ -266,7 +267,7 @@ async def _walk_commute(origin_postcode: str, dest_postcode: str) -> Commute | N
         destination_label="",
         destination_postcode=dest_postcode,
         duration_minutes=duration_min,
-        daily_cost_gbp=0.0,
+        daily_cost_gbp=Money("0", "GBP"),
         mode=LegMode.WALK,
         cost_groups=(
             CostGroup(
@@ -350,7 +351,7 @@ async def _drive_commute(origin_postcode: str, dest_postcode: str) -> Commute | 
             destination_label="",
             destination_postcode=dest_postcode,
             duration_minutes=duration_minutes,
-            daily_cost_gbp=cost,
+            daily_cost_gbp=Money(str(cost), "GBP"),
             mode=CommuteMode.DRIVE,
             cost_groups=(
                 CostGroup(
@@ -474,7 +475,7 @@ async def _find_bus_alternative(origin: str, destination: str) -> Commute | None
 
     if total_bus_cost > 0:
         bus_cost_gbp = total_bus_cost
-        daily_cost_gbp = round(total_bus_cost, 2)
+        daily_cost_gbp = Money(str(round(total_bus_cost, 2)), "GBP")
     else:
         daily_cost_gbp = None
 
@@ -665,7 +666,7 @@ async def get_commute(
         # (applied later) can only approximate a rail fare and won't
         # capture bus or parking costs.
         def _tiebreak(c: Commute) -> tuple[int, float]:
-            no_cost = 1 if (c.daily_cost_gbp is None or c.daily_cost_gbp == 0.0) else 0
+            no_cost = 1 if (c.daily_cost_gbp is None or c.daily_cost_gbp == Money("0", "GBP")) else 0
             return (no_cost, c.duration_minutes or 0)
 
         return Attempt.succeeded(min(valid, key=_tiebreak), "routing")

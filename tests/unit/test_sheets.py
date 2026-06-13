@@ -1,6 +1,7 @@
 """Tests for sheet integration — column alignment invariant."""
 
 import pytest
+from money import Money
 
 from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.geo import GeoPoint
@@ -88,7 +89,7 @@ def test_row_values_with_full_enrichment():
         petrol=Commute(
             destination_label="Bracknell",
             destination_postcode="RG12 8YA",
-            daily_cost_gbp=8.50,
+            daily_cost_gbp=Money("8.50", "GBP"),
             mode="drive",
         ),
         primary_school=School(
@@ -109,7 +110,7 @@ def test_row_values_with_full_enrichment():
             destination_label="School",
             destination_postcode="RG14 1AA",
             duration_minutes=8,
-            daily_cost_gbp=0.0,
+            daily_cost_gbp=Money("0.0", "GBP"),
             mode="walk",
             cost_groups=(CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=8),)),),
         ),
@@ -132,7 +133,7 @@ def test_row_values_with_full_enrichment():
             destination_label="School",
             destination_postcode="RG14 1AA",
             duration_minutes=14,
-            daily_cost_gbp=0.0,
+            daily_cost_gbp=Money("0.0", "GBP"),
             mode="walk",
             cost_groups=(CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=14),)),),
         ),
@@ -150,7 +151,7 @@ def test_row_values_with_full_enrichment():
         "Lorena London Cost (£)": "",
         "Lorena London Route": "",
         "Bracknell Time (min)": "",
-        "Bracknell Cost (£)": "8.5",
+        "Bracknell Cost (£)": "8.50",
         "Primary School": "St Vincent School",
         "Primary Distance (km)": "0.65",
         "Primary Walk (min)": "8",

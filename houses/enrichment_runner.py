@@ -18,15 +18,17 @@ from typing import Any
 
 from houses.commute import Commute, CommuteBreakdown, LegMode
 from houses.config import settings
+from money import Money
+
+from houses.context import get_rail_fare_registry
 from houses.enricher import compute_commute_breakdown
 from houses.location import PropertyLocation, geocode
 from houses.property import EnrichedProperty
-from houses.rail_fares import fare_between, nearest_station
+from houses.rail_fares import RailFareRegistry
 from houses.rightmove_scraper import scrape as scrape_rightmove
 from houses.schools import SchoolGender
 from houses.services import Services
 from houses.stations import Station
-from houses.stations import find as find_station
 from houses.walkability import KNOWN_COUNTIES
 
 logger = logging.getLogger(__name__)
@@ -145,24 +147,28 @@ async def _enrich_rail_fares(
     address: str,
     simon: Commute,
     lorena: Commute,
+    _registry: RailFareRegistry | None = None,
+    _geocode=None,
 ) -> tuple[Commute, Commute]:
-    """Fallback: look up National Rail fares when TfL didn't return a cost."""
+    """Fallback: look up National Rail fares when TfL didn't return a cost.
+
+    ``_registry`` — optional ``RailFareRegistry`` instance (created via context var if not provided).
+    ``_geocode`` — optional async geocode function (default: ``houses.location.geocode``).
+    """
+    registry = _registry or get_rail_fare_registry()
+    geo_fn = _geocode or geocode
+
     needs_rail = enabled is None or enabled & {"simon"} or enabled & {"lorena"}
     if not needs_rail:
         return simon, lorena
 
-    # Determine which commutes need NR fare lookup:
-    # - No TfL cost at all (daily_cost_gbp is None)
-    # - OR the cost is only the bus/parking component (no rail fare added yet)
+    # Determine which commutes need NR fare lookup
     def _has_rail_fare(commute: Commute) -> bool:
-        """True when ``daily_cost_gbp`` is explicitly set and includes more than
-        just the bus or parking component — meaning rail is already priced."""
         if commute.daily_cost_gbp is None:
             return False
         non_rail = commute.non_rail_cost()
         if non_rail > 0:
-            # If daily_cost_gbp == non-rail cost alone, rail is missing
-            return commute.daily_cost_gbp != non_rail
+            return abs(float(commute.daily_cost_gbp.amount) - non_rail) > 0.01
         return True
 
     simon_needs = simon is not None and simon.duration_minutes is not None and not _has_rail_fare(simon)
@@ -171,75 +177,76 @@ async def _enrich_rail_fares(
     if not simon_needs and not lorena_needs:
         return simon, lorena
 
-    tube_single = 2.80
+    tube_single = Money("2.80", "GBP")
     fare_pc = postcode or extract_postcode(address)
     if not fare_pc:
         return simon, lorena
-    fare_coords = (await geocode(fare_pc)).value_or_none()
+    fare_coords = (await geo_fn(fare_pc)).value_or_none()
     if not fare_coords:
         return simon, lorena
 
-    # Try to get the origin station from the actual route's first rail leg,
-    # rather than from the geometric nearest station (which may be wrong).
-    def _origin_station(commute: Commute) -> dict | None:
+    # Try to get the origin station from the actual route's first rail leg
+    def _origin_station(commute: Commute) -> Station | None:
         for cg in commute.cost_groups:
             for leg in cg.legs:
                 if (
                     leg.mode in (LegMode.TRAIN, LegMode.TUBE, LegMode.DLR, LegMode.OVERGROUND, LegMode.TRAM)
                     and leg.start_station
                 ):
-                    clean = Station.short_name(leg.start_station)
-                    stn = find_station(clean)
-                    if stn:
-                        return {"crs": stn.crs, "name": stn.name}
-                    break
-        return nearest_station(fare_coords.lat, fare_coords.lon)
+                    return registry.find_station_by_crs(Station.short_name(leg.start_station))
+        return None
 
-    station = nearest_station(fare_coords.lat, fare_coords.lon)
+    origin = registry.nearest_station(fare_coords)
     if simon_needs and simon is not None:
-        station = _origin_station(simon) or station
+        origin = _origin_station(simon) or origin
     if lorena_needs and lorena is not None:
-        station = _origin_station(lorena) or station
-    if not station:
+        origin = _origin_station(lorena) or origin
+    if not origin:
         return simon, lorena
+
     if simon_needs:
-        f = fare_between(station["crs"], settings.simon_station_crs)
-        if f is not None:
-            rail_cost = round((f + tube_single) * 2, 2)
-            parking = simon.non_rail_cost()
-            simon = Commute(
-                destination_label=simon.destination_label,
-                destination_postcode=simon.destination_postcode,
-                duration_minutes=simon.duration_minutes,
-                daily_cost_gbp=round(rail_cost + parking, 2),
-                mode=simon.mode,
-                cost_groups=simon.cost_groups,
-            )
-            logger.info(
-                "NR fare fallback for Simon: £%.2f (rail) + £%.2f (parking) = £%.2f",
-                rail_cost,
-                parking,
-                rail_cost + parking,
-            )
+        dest = registry.find_station_by_crs(settings.simon_station_crs)
+        if dest:
+            fare = registry.fare_between(origin, dest)
+            if fare is not None:
+                rail_cost = (fare + tube_single) * 2
+                parking = Money(str(simon.non_rail_cost()), "GBP")
+                total = rail_cost + parking
+                simon = Commute(
+                    destination_label=simon.destination_label,
+                    destination_postcode=simon.destination_postcode,
+                    duration_minutes=simon.duration_minutes,
+                    daily_cost_gbp=total,
+                )
+                logger.info(
+                    "NR fare fallback for Simon: £%.2f (rail) + £%.2f (parking) = £%.2f",
+                    float((fare + tube_single).amount),
+                    float(parking.amount),
+                    float(total.amount),
+                )
+
     if lorena_needs:
-        f = fare_between(station["crs"], settings.lorena_station_crs)
-        if f is not None:
-            rail_cost = round((f + tube_single) * 2, 2)
-            bus = lorena.non_rail_cost()
-            lorena = Commute(
-                destination_label=lorena.destination_label,
-                destination_postcode=lorena.destination_postcode,
-                duration_minutes=lorena.duration_minutes,
-                daily_cost_gbp=round(rail_cost + bus, 2),
-                mode=lorena.mode,
-                cost_groups=lorena.cost_groups,
-            )
-            logger.info(
-                "NR fare fallback for Lorena: £%.2f (rail) + £%.2f (bus) = £%.2f",
-                rail_cost,
-                bus,
-                rail_cost + bus,
-            )
+        dest = registry.find_station_by_crs(settings.lorena_station_crs)
+        if dest:
+            fare = registry.fare_between(origin, dest)
+            if fare is not None:
+                rail_cost = (fare + tube_single) * 2
+                bus = Money(str(lorena.non_rail_cost()), "GBP")
+                total = rail_cost + bus
+                lorena = Commute(
+                    destination_label=lorena.destination_label,
+                    destination_postcode=lorena.destination_postcode,
+                    duration_minutes=lorena.duration_minutes,
+                    daily_cost_gbp=total,
+                    mode=lorena.mode,
+                    cost_groups=lorena.cost_groups,
+                )
+                logger.info(
+                    "NR fare fallback for Lorena: £%.2f (rail) + £%.2f (bus) = £%.2f",
+                    float((fare + tube_single).amount),
+                    float(bus.amount),
+                    float(total.amount),
+                )
 
     return simon, lorena
 
