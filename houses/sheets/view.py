@@ -119,7 +119,9 @@ class View:
                     {
                         "repeatCell": {
                             "range": {"sheetId": self._sid, "startColumnIndex": ci, "endColumnIndex": ci + 1},
-                            "cell": {"userEnteredFormat": {"numberFormat": {"type": "CURRENCY", "pattern": "£#,##0.00"}}},
+                            "cell": {
+                                "userEnteredFormat": {"numberFormat": {"type": "CURRENCY", "pattern": "£#,##0.00"}}
+                            },
                             "fields": "userEnteredFormat.numberFormat",
                         }
                     }

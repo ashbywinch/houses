@@ -82,7 +82,7 @@ class Commute:
     destination_label: str
     destination_postcode: str
     duration_minutes: int | None = None
-    daily_cost_gbp: float | None = None
+    daily_cost_gbp: Money | None = None
     mode: str | CommuteMode = "transit"
     cost_groups: tuple[CostGroup, ...] = ()
 

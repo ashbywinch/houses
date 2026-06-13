@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from money import Money
 
 from houses.commute import Commute, LegMode
 
@@ -58,13 +59,23 @@ class TestCongestionZone:
 
 # ── get_commute decision logic (backends mocked) ────────────────────────
 
-_WALK_60 = Commute(destination_label="", destination_postcode="", duration_minutes=60, daily_cost_gbp=0.0)
-_WALK_20 = Commute(destination_label="", destination_postcode="", duration_minutes=20, daily_cost_gbp=0.0)
-_TRANSIT_30 = Commute(destination_label="", destination_postcode="", duration_minutes=30, daily_cost_gbp=8.0)
-_DRIVE_25 = Commute(destination_label="", destination_postcode="", duration_minutes=25, daily_cost_gbp=5.0)
+_WALK_60 = Commute(
+    destination_label="", destination_postcode="", duration_minutes=60, daily_cost_gbp=Money("0.0", "GBP")
+)
+_WALK_20 = Commute(
+    destination_label="", destination_postcode="", duration_minutes=20, daily_cost_gbp=Money("0.0", "GBP")
+)
+_TRANSIT_30 = Commute(
+    destination_label="", destination_postcode="", duration_minutes=30, daily_cost_gbp=Money("8.0", "GBP")
+)
+_DRIVE_25 = Commute(
+    destination_label="", destination_postcode="", duration_minutes=25, daily_cost_gbp=Money("5.0", "GBP")
+)
 
 # Tiebreak fixture — route with cost, used by test_returns_cost_when_tfl_has_cost
-_SLOWER_HAS_COST = Commute(destination_label="", destination_postcode="", duration_minutes=25, daily_cost_gbp=5.0)
+_SLOWER_HAS_COST = Commute(
+    destination_label="", destination_postcode="", duration_minutes=25, daily_cost_gbp=Money("5.0", "GBP")
+)
 
 
 class TestGetCommuteChoice:
@@ -256,7 +267,7 @@ class TestGetCommuteChoice:
         result = await get_commute("GU21 7QF", "EC3A 7LP", has_car=False, max_walk_minutes=30)
         assert result.is_succeeded, f"Expected succeeded, got {result}"
         best = result.value_or_none()
-        assert best.daily_cost_gbp == 5.0, "Should return the route with a real cost"
+        assert best.daily_cost_gbp == Money("5.0", "GBP"), "Should return the route with a real cost"
 
 
 # ── TfL: no bus when has_car=True ────────────────────────────────────
@@ -275,13 +286,13 @@ class TestTflNoBusWhenHasCar:
             destination_label="",
             destination_postcode="SW1V 2QQ",
             duration_minutes=90,
-            daily_cost_gbp=20.0,
+            daily_cost_gbp=Money("20.0", "GBP"),
         )
         with_bus = Commute(
             destination_label="",
             destination_postcode="SW1V 2QQ",
             duration_minutes=70,
-            daily_cost_gbp=15.0,
+            daily_cost_gbp=Money("15.0", "GBP"),
         )
 
         call_count = 0
@@ -314,7 +325,7 @@ class TestTflNoBusWhenHasCar:
             destination_label="",
             destination_postcode="SW1V 2QQ",
             duration_minutes=70,
-            daily_cost_gbp=15.0,
+            daily_cost_gbp=Money("15.0", "GBP"),
         )
 
         call_count = 0
@@ -407,7 +418,7 @@ class TestSchoolCommute:
                 destination_label="",
                 destination_postcode=dest,
                 duration_minutes=10,
-                daily_cost_gbp=0.0,
+                daily_cost_gbp=Money("0.0", "GBP"),
             )
             return Attempt.succeeded(commute, "test")
 

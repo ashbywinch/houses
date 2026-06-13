@@ -1,14 +1,17 @@
 """FastAPI app — /inject-property endpoint, startup/shutdown."""
 
+import dataclasses
 import json
 import logging
 import re
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from enum import Enum
 from typing import Annotated, Any
 
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, StreamingResponse
+from money import Money
 
 import houses.location as _loc
 from houses.commute import Commute, CommuteBreakdown, LegMode
@@ -40,11 +43,11 @@ logger = logging.getLogger(__name__)
 def _asdict_serializable(obj: Any) -> Any:
     """Recursively convert a dataclass tree to JSON-serializable dicts.
 
-    Like ``dataclasses.asdict()`` but also converts enums to their values.
+    Like ``dataclasses.asdict()`` but also converts enums and Money to
+    their values.
     """
-    import dataclasses
-    from enum import Enum
-
+    if isinstance(obj, Money):
+        return float(obj.amount)
     if isinstance(obj, Enum):
         return obj.value
     if dataclasses.is_dataclass(obj):
@@ -963,7 +966,7 @@ async def _enrich_rail_fares(
         non_rail = commute.non_rail_cost()
         if non_rail > 0:
             # If daily_cost_gbp == non-rail cost alone, rail is missing
-            return commute.daily_cost_gbp != non_rail
+            return abs(float(commute.daily_cost_gbp.amount) - non_rail) > 0.01
         return True
 
     simon_needs = simon is not None and simon.duration_minutes is not None and not _has_rail_fare(simon)
@@ -1012,16 +1015,9 @@ async def _enrich_rail_fares(
                 destination_label=simon.destination_label,
                 destination_postcode=simon.destination_postcode,
                 duration_minutes=simon.duration_minutes,
-                daily_cost_gbp=round(rail_cost + parking, 2),
-                mode=simon.mode,
-                cost_groups=simon.cost_groups,
+                daily_cost_gbp=Money(str(round(rail_cost + parking, 2)), "GBP"),
             )
-            logger.info(
-                "NR fare fallback for Simon: £%.2f (rail) + £%.2f (parking) = £%.2f",
-                rail_cost,
-                parking,
-                rail_cost + parking,
-            )
+
     if lorena_needs:
         f = fare_between(station["crs"], settings.lorena_station_crs)
         if f is not None:
@@ -1031,7 +1027,7 @@ async def _enrich_rail_fares(
                 destination_label=lorena.destination_label,
                 destination_postcode=lorena.destination_postcode,
                 duration_minutes=lorena.duration_minutes,
-                daily_cost_gbp=round(rail_cost + bus, 2),
+                daily_cost_gbp=Money(str(round(rail_cost + bus, 2)), "GBP"),
                 mode=lorena.mode,
                 cost_groups=lorena.cost_groups,
             )

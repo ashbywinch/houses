@@ -9,6 +9,7 @@ import re
 from datetime import datetime, timedelta
 
 import httpx
+from money import Money
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.attempt import Attempt
@@ -293,7 +294,7 @@ class TransitRoute:
         cache_params = {k: v for k, v in params.items() if k != "app_key"}
 
         duration_minutes: int | None = None
-        daily_cost_gbp: float | None = None
+        daily_cost_gbp: Money | None = None
         route_summary = ""
         parking_cost_gbp: float | None = None
         bus_cost_gbp: float | None = None
@@ -342,17 +343,22 @@ class TransitRoute:
             data = await _apply_park_and_ride_to_journeys(data, self._origin, settings.max_walk_to_station_minutes)
 
         if data is not None:
-            duration_minutes, daily_cost_gbp, route_summary = _pick_best_journey(data)
+            dur, raw_cost, route_summary = _pick_best_journey(data)
+            duration_minutes = dur
+            daily_cost_gbp = Money(str(raw_cost), "GBP") if raw_cost is not None else None
             cost_groups = self._build_cost_groups(data)
 
         # Bus fare
         if self._allow_bus and duration_minutes is not None and data is not None:
-            bus_cost_gbp = self._add_bus_fare(data, daily_cost_gbp)
-            daily_cost_gbp = bus_cost_gbp
+            raw_cost = float(daily_cost_gbp.amount) if daily_cost_gbp is not None else None
+            bus_cost_gbp = self._add_bus_fare(data, raw_cost)
+            daily_cost_gbp = Money(str(bus_cost_gbp), "GBP") if bus_cost_gbp is not None else None
 
         # Parking cost
         if self._park_and_ride and duration_minutes is not None and data is not None:
-            parking_cost_gbp, daily_cost_gbp, parking_groups = await self._add_parking_cost(data, daily_cost_gbp)
+            raw_cost = float(daily_cost_gbp.amount) if daily_cost_gbp is not None else None
+            parking_cost_gbp, new_cost, parking_groups = await self._add_parking_cost(data, raw_cost)
+            daily_cost_gbp = Money(str(new_cost), "GBP") if new_cost is not None else None
             cost_groups.extend(parking_groups)
 
         result = Commute(

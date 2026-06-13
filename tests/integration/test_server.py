@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from money import Money
 
 from houses.commute import Commute, CommuteBreakdown
 from houses.config import settings
@@ -276,13 +277,13 @@ class TestBackfillView:
             destination_label="Simon (London)",
             destination_postcode="TE1 1ST",
             duration_minutes=30,
-            daily_cost_gbp=10.0,
+            daily_cost_gbp=Money("10.0", "GBP"),
         )
         lorena = Commute(
             destination_label="Lorena (London)",
             destination_postcode="TE1 1ST",
             duration_minutes=45,
-            daily_cost_gbp=12.0,
+            daily_cost_gbp=Money("12.0", "GBP"),
         )
         base = {
             "url": f"https://www.rightmove.co.uk/properties/{rid}",
@@ -296,7 +297,7 @@ class TestBackfillView:
                 destination_label="Bracknell Office (RG12 8YA)",
                 destination_postcode="RG12 8YA",
                 duration_minutes=90,
-                daily_cost_gbp=12.50,
+                daily_cost_gbp=Money("12.50", "GBP"),
                 mode="drive",
             ),
             "primary_school": None,
