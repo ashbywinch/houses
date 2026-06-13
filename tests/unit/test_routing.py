@@ -86,7 +86,6 @@ class TestGetCommuteChoice:
 
         monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
-        
 
         result = await get_commute("GU21 7QF", "SW1V 2QQ", has_car=False, max_walk_minutes=30)
         assert result.is_succeeded, f"Expected succeeded, got {result}"
@@ -108,7 +107,6 @@ class TestGetCommuteChoice:
 
         monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
-        
 
         result = await get_commute("GU21 7QF", "SW1V 2QQ", has_car=False, max_walk_minutes=30)
         assert result.is_succeeded, f"Expected succeeded, got {result}"
@@ -136,7 +134,7 @@ class TestGetCommuteChoice:
 
         monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
-        
+
         monkeypatch.setattr("houses.routing._drive_commute", mock_drive)
         monkeypatch.setattr("houses.routing._in_congestion_zone", mock_cz)
 
@@ -166,7 +164,7 @@ class TestGetCommuteChoice:
 
         monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
-        
+
         monkeypatch.setattr("houses.routing._drive_commute", mock_drive)
         monkeypatch.setattr("houses.routing._in_congestion_zone", mock_cz)
 
@@ -196,7 +194,7 @@ class TestGetCommuteChoice:
 
         monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
-        
+
         monkeypatch.setattr("houses.routing._drive_commute", mock_drive)
         monkeypatch.setattr("houses.routing._in_congestion_zone", mock_cz)
 
@@ -226,7 +224,7 @@ class TestGetCommuteChoice:
 
         monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
-        
+
         monkeypatch.setattr("houses.routing._drive_commute", mock_drive)
         monkeypatch.setattr("houses.routing._in_congestion_zone", mock_cz)
 
@@ -346,15 +344,17 @@ class TestParkAndRideCostGroup:
     the real parking fee, not bus fares."""
 
     @pytest.mark.asyncio
-    async def test_returns_parking_cost_group(self, monkeypatch, tmp_path):
+    async def test_returns_parking_cost_group(self):
         """_add_parking_cost returns a parking CostGroup with cost, operator='ParkCo'."""
         from money import Money
 
+        from houses.car_park import CarPark, CarParkRegistry
         from houses.transit_route import TransitRoute
 
-        csv_path = tmp_path / "parking_rates.csv"
-        csv_path.write_text("station_name,crs,daily_cost_gbp\nFleet,FLE,10.90\n")
-        monkeypatch.setattr("houses.car_park._PARKING_RATES_PATH", csv_path)
+        registry = CarParkRegistry.from_car_parks(
+            car_parks=[CarPark(name="Fleet", daily_cost=Money("10.90", "GBP"))],
+            station_map={"fleet rail station": "Fleet"},
+        )
 
         route = TransitRoute("SL6", "SW1V 2QQ", "test", park_and_ride=True)
         data = {
@@ -375,7 +375,7 @@ class TestParkAndRideCostGroup:
             ]
         }
 
-        parking_cost, new_cost, parking_groups = await route._add_parking_cost(data, 30.0)
+        parking_cost, new_cost, parking_groups = await route._add_parking_cost(data, 30.0, _registry=registry)
 
         assert parking_cost == 10.90, f"Expected 10.90, got {parking_cost}"
         assert new_cost == 40.90, f"Expected 40.90, got {new_cost}"

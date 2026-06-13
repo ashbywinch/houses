@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from houses.enricher import _apply_park_and_ride_to_journeys, _format_route_summary
+from houses.transit_route import _apply_park_and_ride_to_journeys, _format_route_summary
 
 
 class TestParkAndRide:
@@ -64,7 +64,7 @@ class TestParkAndRide:
     @pytest.mark.asyncio
     async def test_replaces_long_walk_with_drive(self):
         data = copy.deepcopy(self.LONG_WALK_DATA)
-        with patch("houses.enricher._get_drive_minutes", return_value=10):
+        with patch("houses.transit_route._get_drive_minutes", return_value=10):
             result = await _apply_park_and_ride_to_journeys(data, "SL6 3YZ", max_walk_minutes=20)
         legs = result["journeys"][0]["legs"]
         assert legs[0]["mode"]["name"] == "driving"
@@ -73,7 +73,7 @@ class TestParkAndRide:
     @pytest.mark.asyncio
     async def test_skips_short_walk(self):
         data = copy.deepcopy(self.SHORT_WALK_DATA)
-        with patch("houses.enricher._get_drive_minutes", return_value=3):
+        with patch("houses.transit_route._get_drive_minutes", return_value=3):
             result = await _apply_park_and_ride_to_journeys(data, "KT13 0TD", max_walk_minutes=20)
         legs = result["journeys"][0]["legs"]
         assert legs[0]["mode"]["name"] == "walking"
@@ -82,7 +82,7 @@ class TestParkAndRide:
     @pytest.mark.asyncio
     async def test_skips_non_walking_first_leg(self):
         data = {"journeys": [{"duration": 45, "legs": [{"mode": {"name": "national-rail"}, "duration": 20}]}]}
-        with patch("houses.enricher._get_drive_minutes") as mock_drive:
+        with patch("houses.transit_route._get_drive_minutes") as mock_drive:
             result = await _apply_park_and_ride_to_journeys(data, "SL6", 20)
         mock_drive.assert_not_called()
         assert result["journeys"][0]["legs"][0]["mode"]["name"] == "national-rail"
@@ -90,7 +90,7 @@ class TestParkAndRide:
     @pytest.mark.asyncio
     async def test_skips_when_drive_lookup_fails(self):
         data = copy.deepcopy(self.LONG_WALK_DATA)
-        with patch("houses.enricher._get_drive_minutes", return_value=None):
+        with patch("houses.transit_route._get_drive_minutes", return_value=None):
             result = await _apply_park_and_ride_to_journeys(data, "SL6 3YZ", max_walk_minutes=20)
         legs = result["journeys"][0]["legs"]
         assert legs[0]["mode"]["name"] == "walking"
@@ -99,7 +99,7 @@ class TestParkAndRide:
     @pytest.mark.asyncio
     async def test_format_includes_drive_in_route_after_park_and_ride(self):
         data = copy.deepcopy(self.LONG_WALK_DATA)
-        with patch("houses.enricher._get_drive_minutes", return_value=10):
+        with patch("houses.transit_route._get_drive_minutes", return_value=10):
             result = await _apply_park_and_ride_to_journeys(data, "SL6 3YZ", max_walk_minutes=20)
         best = min(result["journeys"], key=lambda j: j.get("duration", 9999))
         summary = _format_route_summary(best)

@@ -184,6 +184,32 @@ class CarParkRegistry:
     def __init__(self) -> None:
         self._by_name: dict[str, CarPark] | None = None
         self._by_crs: dict[str, CarPark] | None = None
+        self._station_map: dict[str, str] = {}
+
+    @classmethod
+    def from_car_parks(cls, car_parks: list[CarPark], station_map: dict[str, str] | None = None) -> CarParkRegistry:
+        """Create a registry pre-populated with ``CarPark`` objects.
+
+        ``station_map`` maps station names (lowercase) to the car park
+        name they should resolve to.  When omitted, each car park's
+        own ``name`` is used as the station lookup key.
+
+        Usage::
+
+            registry = CarParkRegistry.from_car_parks(
+                car_parks=[CarPark(name="Fleet", daily_cost=Money("10.90", "GBP"))],
+                station_map={"fleet rail station": "Fleet"},
+            )
+        """
+        by_name: dict[str, CarPark] = {}
+        by_crs: dict[str, CarPark] = {}
+        for cp in car_parks:
+            by_name[cp.name.lower()] = cp
+        reg = cls.__new__(cls)
+        reg._by_name = by_name
+        reg._by_crs = by_crs
+        reg._station_map = station_map or {}
+        return reg
 
     # ── Loading ────────────────────────────────────────────────────
 
@@ -250,7 +276,8 @@ class CarParkRegistry:
             return None
 
         clean = station.name.lower() if station else ""
-        car_park = self._by_name.get(clean) if clean else None
+        mapped = self._station_map.get(clean, clean)
+        car_park = self._by_name.get(mapped) if mapped else None
         if car_park is not None:
             return car_park
 

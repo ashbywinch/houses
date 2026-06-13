@@ -14,7 +14,7 @@ import httpx
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.attempt import Attempt
-from houses.bus_journey import BusJourneyRegistry, cheapest_round_trip
+from houses.bus_journey import cheapest_round_trip
 from houses.commute import Commute, CommuteMode, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.endpoint_client import EndpointClient
@@ -22,9 +22,6 @@ from houses.http_error import HttpError
 from houses.retry import retry_async
 
 logger = logging.getLogger(__name__)
-
-# Module-level singleton for bus fare lookups
-_bus_fares = BusJourneyRegistry()
 
 
 def _bus_fare_for(
@@ -42,8 +39,11 @@ def _bus_fare_for(
 
     Returns the cost as a float, or ``None`` if no fare is found.
     """
-    fares = _bus_fares.fares_for_stops(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
-    cheapest = cheapest_round_trip(fares, _bus_fares.national_max_single)
+    from houses.context import get_bus_fare_reader
+
+    fares_r = get_bus_fare_reader()
+    fares = fares_r.fares_for_stops(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
+    cheapest = cheapest_round_trip(fares, fares_r.national_max_single)
     if cheapest is not None:
         return float(cheapest.amount)
     return None
@@ -393,20 +393,33 @@ def _parse_google_steps(steps: list[dict]) -> list[JourneyLeg]:
             line = td.get("transitLine", {}).get("nameShort", "") or td.get("transitLine", {}).get("name", "")
 
             if vtype == "BUS":
-                legs.append(JourneyLeg(
-                    mode=LegMode.BUS, duration_minutes=dur_min,
-                    start_station=dep_stop, line_name=line, end_station=arr_stop,
-                ))
+                legs.append(
+                    JourneyLeg(
+                        mode=LegMode.BUS,
+                        duration_minutes=dur_min,
+                        start_station=dep_stop,
+                        line_name=line,
+                        end_station=arr_stop,
+                    )
+                )
             else:
                 mode_enum = {
-                    "RAIL": LegMode.TRAIN, "TRAIN": LegMode.TRAIN,
-                    "HEAVY_RAIL": LegMode.TRAIN, "TRAM": LegMode.TRAIN,
-                    "SUBWAY": LegMode.TUBE, "METRO": LegMode.TUBE,
+                    "RAIL": LegMode.TRAIN,
+                    "TRAIN": LegMode.TRAIN,
+                    "HEAVY_RAIL": LegMode.TRAIN,
+                    "TRAM": LegMode.TRAIN,
+                    "SUBWAY": LegMode.TUBE,
+                    "METRO": LegMode.TUBE,
                 }.get(vtype, LegMode.TRAIN)
-                legs.append(JourneyLeg(
-                    mode=mode_enum, duration_minutes=dur_min,
-                    start_station=dep_stop, line_name=line, end_station=arr_stop,
-                ))
+                legs.append(
+                    JourneyLeg(
+                        mode=mode_enum,
+                        duration_minutes=dur_min,
+                        start_station=dep_stop,
+                        line_name=line,
+                        end_station=arr_stop,
+                    )
+                )
     return legs
 
 

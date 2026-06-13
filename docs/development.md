@@ -36,15 +36,32 @@ make coverage                # Test with coverage report
 
 ```
 tests/
-├── test_server.py           # HTTP endpoint tests (TestClient)
-├── test_sheets.py           # Row formatting, column alignment
-├── test_enricher.py         # Enrichment logic (mocked APIs)
-├── test_models.py           # Pydantic model validation
-└── conftest.py              # Shared fixtures
+├── helpers.py               # Reusable fakes + make_services() factory
+├── conftest.py
+├── unit/                    # Pure function tests, _kwarg injection
+│   ├── test_routing.py
+│   ├── test_enricher.py
+│   └── ...
+├── integration/              # Full pipeline with fakes or MockTransport
+│   ├── test_server.py        # HTTP endpoint tests (TestClient)
+│   └── conftest.py           # MockTransport, cache isolation
+└── e2e/                      # Real API calls (skipped by default)
 ```
 
+### DI Patterns for Tests
+
+See `docs/coding-standards.md` → *Dependency Injection* for the three
+patterns and when to use each:
+
+| Pattern | When |
+|---------|------|
+| `Services` container | Replace an entire enrichment module |
+| `ContextVar` | Set per-request state (bus fares, sheets client) |
+| `_kwarg` | Pass a specific data object to a leaf function |
+
 **Test markers:**
-- `@pytest.mark.integration` — tests that hit real external APIs (excluded from `make test`)
+- No marker — unit tests (fast, no external calls)
+- `@pytest.mark.integration` — full pipeline tests (excluded from `make test`)
 
 ## Linting and Formatting
 

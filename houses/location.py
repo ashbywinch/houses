@@ -18,7 +18,7 @@ from houses.retry import retry_async
 
 logger = logging.getLogger(__name__)
 
-# ── Geocoding API state ──────────────────────────────────────────
+# ── Geocoding API state (per-request via contextvars) ─────────────
 
 
 class _GeoState:
@@ -27,7 +27,18 @@ class _GeoState:
     nominatim_last_call: float = 0.0
 
 
-_geo_state = _GeoState()
+_GEO_STATE_SENTINEL: _GeoState = _GeoState()
+
+_geo_state_var: contextvars.ContextVar[_GeoState] = contextvars.ContextVar("geo_state", default=_GEO_STATE_SENTINEL)
+
+
+def _get_geo_state() -> _GeoState:
+    state = _geo_state_var.get()
+    if state is _GEO_STATE_SENTINEL:
+        state = _GeoState()
+        _geo_state_var.set(state)
+    return state
+
 
 # ── URL constants ────────────────────────────────────────────────
 
@@ -211,7 +222,7 @@ async def geocode(postcode: str) -> Attempt[GeoPoint]:
 
 async def _geocode_nominatim(query: str) -> Attempt[GeoPoint]:
     """Geocode a place name via Nominatim (free, 1 req/sec max)."""
-    if _geo_state.nominatim_exhausted:
+    if _get_geo_state().nominatim_exhausted:
         return Attempt.impossible("nominatim", "rate limit exhausted")
     cache_key = f"nom::{query.strip().upper()}"
     cache = _geo_cache_var.get()
@@ -221,7 +232,7 @@ async def _geocode_nominatim(query: str) -> Attempt[GeoPoint]:
             return cached
     clean = _END_PC_RE.sub("", query).strip()
     now = asyncio.get_event_loop().time()
-    since_last = now - _geo_state.nominatim_last_call
+    since_last = now - _get_geo_state().nominatim_last_call
     if since_last < 1.0:
         await asyncio.sleep(1.0 - since_last)
     params = {"q": f"{clean}, UK", "format": "json", "limit": 1}
@@ -244,7 +255,7 @@ async def _geocode_nominatim(query: str) -> Attempt[GeoPoint]:
                     params=params,
                     headers={"User-Agent": "HousesApp/1.0"},
                 )
-                _geo_state.nominatim_last_call = asyncio.get_event_loop().time()
+                _get_geo_state().nominatim_last_call = asyncio.get_event_loop().time()
                 resp.raise_for_status()
                 data = resp.json()
                 set_cached("GET", NOMINATIM_URL, params, None, data)
@@ -258,7 +269,7 @@ async def _geocode_nominatim(query: str) -> Attempt[GeoPoint]:
                 return Attempt.impossible("nominatim", "no results")
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 429:
-                _geo_state.nominatim_exhausted = True
+                _get_geo_state().nominatim_exhausted = True
             logger.warning("Nominatim geocoding failed for %s (%s)", query, exc.response.status_code)
             return Attempt.impossible("nominatim", f"HTTP {exc.response.status_code}", exc)
         except Exception as exc:
@@ -324,7 +335,7 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
     # ── 2: ORS Pelias ─────────────────────────────────────────────
     # Note: No pre-check for the API key (same reason as Google Maps).
     # The exhausted flag is kept to stop hammering a rate-limited API.
-    if not _geo_state.ors_geo_exhausted:
+    if not _get_geo_state().ors_geo_exhausted:
         params = {"text": f"{address}, UK", "size": 1}
         cached = get_cached("GET", ORS_GEOCODE_URL, params, None)
         if cached is not None:
@@ -364,7 +375,7 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
                     logger.warning("ORS returned no features for '%s'", address)
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code in (403, 429):
-                    _geo_state.ors_geo_exhausted = True
+                    _get_geo_state().ors_geo_exhausted = True
                 logger.warning("ORS geocoding failed for '%s': HTTP %s", address, exc.response.status_code)
             except Exception as exc:
                 logger.warning("ORS geocoding failed for '%s': %s", address, exc)

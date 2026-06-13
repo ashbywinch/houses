@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from houses.config import settings
 from houses.rightmove_scraper import CACHE_DIR as SCRAPER_CACHE
 from houses.rightmove_scraper import _parse_html, scrape
 
@@ -83,59 +82,35 @@ class TestParseHtml:
 class TestScrapeWithSamplePage:
     @pytest.mark.asyncio
     async def test_uses_sample_page_when_configured(self):
-        original = settings.rightmove_sample_page
-        settings.rightmove_sample_page = str(SAMPLE_HTML)
-        try:
-            result = await scrape(SAMPLE_URL)
-            assert result["address"] == "Foxhall Road, Didcot, OX11"
-            assert result["bedrooms"] == 5
-            assert result["price"] == 650000.0
-        finally:
-            settings.rightmove_sample_page = original
+        result = await scrape(SAMPLE_URL, _page_path=str(SAMPLE_HTML))
+        assert result["address"] == "Foxhall Road, Didcot, OX11"
+        assert result["bedrooms"] == 5
+        assert result["price"] == 650000.0
 
     @pytest.mark.asyncio
     async def test_sample_page_not_found_returns_empty(self):
-        original = settings.rightmove_sample_page
-        settings.rightmove_sample_page = "/nonexistent/file.html"
-        try:
-            result = await scrape(SAMPLE_URL)
-            assert result == {}
-        finally:
-            settings.rightmove_sample_page = original
+        result = await scrape(SAMPLE_URL, _page_path="/nonexistent/file.html")
+        assert result == {}
 
     def test_scrape_uses_cache_when_present(self):
         """scrape() reads from the page cache, ignoring the sample page."""
-        original = settings.rightmove_sample_page
+        SCRAPER_CACHE.mkdir(parents=True, exist_ok=True)
+        cache_file = SCRAPER_CACHE / "99999999.html"
+        cache_file.write_text(SAMPLE_HTML.read_text(encoding="utf-8"))
         try:
-            SCRAPER_CACHE.mkdir(parents=True, exist_ok=True)
-            cache_file = SCRAPER_CACHE / "99999999.html"
-            cache_file.write_text(SAMPLE_HTML.read_text(encoding="utf-8"))
-            settings.rightmove_sample_page = ""
-
             result = asyncio.run(scrape("https://www.rightmove.co.uk/properties/99999999"))
             assert result["address"] == "Foxhall Road, Didcot, OX11"
         finally:
-            settings.rightmove_sample_page = original
             if cache_file.exists():
                 cache_file.unlink()
 
     def test_scrape_offline_returns_empty_for_uncached(self):
         """scrape() returns empty for an uncached RID when offline mode is on.
         The conftest sets offline mode by default; this tests the fail-fast path."""
-        original = settings.rightmove_sample_page
-        settings.rightmove_sample_page = ""
-        try:
-            result = asyncio.run(scrape("https://www.rightmove.co.uk/properties/00000000"))
-            assert result == {}, f"Expected empty dict, got {result}"
-        finally:
-            settings.rightmove_sample_page = original
+        result = asyncio.run(scrape("https://www.rightmove.co.uk/properties/00000000"))
+        assert result == {}, f"Expected empty dict, got {result}"
 
     @pytest.mark.asyncio
     async def test_unknown_url_rid_returns_empty(self):
-        original = settings.rightmove_sample_page
-        settings.rightmove_sample_page = str(SAMPLE_HTML)
-        try:
-            result = await scrape("https://example.com/no-rid-here")
-            assert result == {}
-        finally:
-            settings.rightmove_sample_page = original
+        result = await scrape("https://example.com/no-rid-here", _page_path=str(SAMPLE_HTML))
+        assert result == {}
