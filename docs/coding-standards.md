@@ -105,65 +105,165 @@ behaviour, extract it to its own module.
 - The View tab has XLOOKUP formulas that reference the Data tab. After
   writing data, call `POST /sync-view-formulas` if needed.
 
+## Dependency Injection
+
+Three DI patterns, use the simplest one that works:
+
+### 1. Services Container — for API-level dependencies
+
+`houses/services.py` defines `Services`, a dataclass bundling every
+enrichment service (geocoder, commute router, EPC lookup, etc.) with
+real defaults.  ``_run_enrichment`` accepts an optional ``services``
+parameter.
+
+**Production**: ``services=None`` → ``Services()`` with real implementations.
+**Tests**: ``services=FakeServices(epc_service=FakeEPC(band="C"))``.
+
+Use this when you need to replace an entire enrichment service (real API
+→ fake canned data) at the ``_run_enrichment`` level.
+
+### 2. ContextVar + Middleware — for per-request state
+
+`houses/context.py` holds ``ContextVar`` instances for:
+- ``Services`` (so ``get_services()`` works without threading a parameter)
+- ``BusJourneyRegistry`` (shared across ``routing.py`` and ``transit_route.py``)
+- ``_GeoState`` (rate-limit tracking in ``location.py``)
+- Sheets client (so ``get_client()`` returns a mock in tests)
+
+Each getter auto-creates production defaults when the context variable
+is unset (e.g. from a script that doesn't go through the FastAPI middleware).
+
+**Tests**: set the context var directly:
+
+```python
+import houses.context as ctx
+from houses.car_park import CarParkRegistry
+from tests.helpers import make_services
+
+token = ctx._request_services.set(make_services())
+try:
+    ...
+finally:
+    ctx._request_services.reset(token)
+```
+
+### 3. Local ``_kwarg`` — for leaf-level data objects
+
+For functions that consume a specific data object (not a whole service),
+add an optional ``_param`` with a default of ``None`` → real implementation.
+
+```python
+async def _add_parking_cost(self, data, current_cost, _registry=None):
+    parking = _registry or CarParkRegistry()
+    ...
+```
+
+**Tests**: pass the object directly:
+
+```python
+registry = CarParkRegistry.from_car_parks(
+    [CarPark(name="Fleet", daily_cost=Money("10.90", "GBP"))],
+    station_map={"fleet rail station": "Fleet"},
+)
+cost = await route._add_parking_cost(data, 30.0, _registry=registry)
+```
+
+### Choosing Between Them
+
+| Situation | Pattern |
+|-----------|---------|
+| Replace an entire enrichment module (EPC, council tax) | ``Services`` |
+| Replace the bus fare lookup for a whole test session | ``ContextVar`` |
+| Pass a pre-built CarParkRegistry with specific data | ``_kwarg`` |
+| Provide a mock sheets client without 14 ``patch()`` calls | ``ContextVar`` |
+| Point ``scrape_rightmove`` at a fixture HTML file | ``_kwarg`` (``_page_path``) |
+
 ## Testing
 
-### Mock External APIs in Every Integration Test
+### Three Mocking Layers
 
-Integration tests must never hit real APIs. The conftest automates this with
-an autouse fixture that patches ``httpx.AsyncClient`` and ``httpx.Client``
-with a ``MockTransport``. Every test automatically gets mocked HTTP responses.
+Tests run at three boundaries, from simplest to most thorough:
 
-If you need a different response for a specific test, add a custom rule to
-the handler via ``handler.add_rule(matcher, responder)``.
+**1. Pure functions** — no mocking at all. Test real logic with real inputs
+and assert output values. (Most of ``tests/unit/`` works this way.)
 
-Do not rely on real API availability or fixture cache files for integration
-test correctness. The mock transport is the source of truth.
+**2. Function-parameter injection** — pass a fake service or data object
+via the ``_kwarg`` pattern. No monkeypatch, no MockTransport.
 
-### Fixture API Cache
+```python
+result = await route._add_parking_cost(data, 30.0, _registry=registry)
+```
 
-Integration tests that exercise HTTP-transport code should never need
-live API credentials. The `api_cache` module provides disk-backed caching.
-`tests/integration/conftest.py` isolates each test to a temporary copy of
-`tests/fixtures/api_cache/` — pre-seeded fixture cache files. During
-development, run the test once with real API keys to populate the cache;
-commit the resulting `.json` files as permanent fixtures.
+**3. ``Services`` container** — build a ``Services`` with fakes and pass
+to ``_run_enrichment``.
 
-When bootstrapping new fixtures:
-```bash
-uv run pytest tests/integration/test_sheet_update.py -k test_dry_run
-cp data/api_cache/*.json tests/fixtures/api_cache/
-git add tests/fixtures/api_cache/
-git commit -m "Add api_cache fixtures for new integration test"
+```python
+from tests.helpers import make_services
+
+services = make_services(
+    epc_service=FakeEPC(band="C"),
+    commute_router=FakeCommuteRouter(simon=None),
+)
+result = await _run_enrichment(..., services=services)
+```
+
+**4. ``ContextVar``** — set per-request state for the test scope.
+
+```python
+import houses.context as ctx
+
+token = ctx._request_bus_fares.set(my_registry)
+try:
+    result = await get_commute(...)
+finally:
+    ctx._request_bus_fares.reset(token)
+```
+
+**5. MockTransport** (legacy) — the integration conftest patches httpx at
+the transport layer.  Works for tests that need fine-grained HTTP response
+control. Defined in ``tests/integration/conftest.py``.
+
+### Reusable Fakes
+
+``tests/helpers.py`` provides ready-made fakes for every service:
+
+| Fake | Overrides |
+|------|-----------|
+| ``FakeGeocoder`` | ``result``, ``postcode_override`` |
+| ``FakeCommuteRouter`` | ``simon``, ``lorena``, ``petrol`` |
+| ``FakeEPC`` | ``band`` |
+| ``FakeCouncilTax`` | ``band``, ``cost`` |
+| ``FakeWalkability`` | ``walk_to_town_minutes``, ``amenities`` |
+| ``FakeTownDesc`` | ``description`` |
+| ``FakeSchoolLookup`` | returns ``None`` for all lookups |
+| ``FakeRailFare`` | passes simon/lorena through unchanged |
+
+Use ``make_services()`` for a ``Services`` with all fakes at sensible
+defaults:
+
+```python
+services = make_services(epc_service=FakeEPC(band="B"))
 ```
 
 ### Test Organization
 
 - **Unit tests** (`tests/unit/`): Test one function or module in isolation.
-  Mock only the boundary (HTTP, I/O). No real API calls.
-- **Integration tests** (`tests/integration/`): Test the full pipeline with
-  synthetic (mocked) HTTP responses.
-- **E2E tests** (marked `@pytest.mark.e2e`): Verify that real external APIs
-  behave as expected. **One consolidated suite per external API.**
+  No real API calls. Prefer ``_kwarg`` injection or pure-function tests.
+- **Integration tests** (`tests/integration/`): Test the full pipeline.
+  Can use ``Services`` fakes, ``ContextVar``, or MockTransport.
+- **E2E tests** (marked ``@pytest.mark.e2e``): Verify real external APIs.
+  **One consolidated suite per external API.** Skipped by default.
 
-Marker convention:
-- `@pytest.mark.integration` — full pipeline with mocked transport
-- `@pytest.mark.e2e` — real API calls (skipped by default)
+### MockTransport (Legacy — For Migration Only)
 
-### E2E Discipline
+The integration conftest patches ``httpx.AsyncClient`` and ``httpx.Client``
+with a ``MockTransport``. New tests should prefer ``Services`` or
+``ContextVar`` DI instead. When converting a MockTransport test to DI:
 
-- Consolidate all e2e tests into a single location rather than scattering
-  them across multiple files.
-- Each e2e test must test exactly one API contract. Do not combine multiple
-  API assertions in one test.
-- All e2e tests are always skipped by default
-  (`addopts = ["-m", "not e2e"]` in `pyproject.toml`).
-- Unit and integration tests must never be skipped for any reason.
-
-### Validate Test Data Against Production Constants
-
-When a test class defines data for all columns, include a test that asserts 
-that the length of the data matches the actual number of columns (in case new 
-columns are added).
+1. Identify which enrichment services the test exercises.
+2. Create fakes via ``tests/helpers.py``.
+3. Pass ``services=make_services(...)`` to ``_run_enrichment``.
+4. Remove the test from ``_mock_http_requests`` dependency.
 
 ## Documentation
 

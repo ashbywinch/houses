@@ -76,8 +76,53 @@ The primary key linking both tabs is the **Rightmove URL** (Column A in Properti
 | File | Responsibility |
 |------|----------------|
 | `houses/server.py` | FastAPI app, `/inject-property` endpoint, startup/shutdown |
-| `houses/models.py` | Pydantic models for property payload and enriched data |
+| `houses/enricher.py` | Commute computation, petrol cost, commute breakdown |
+| `houses/routing.py` | Commute decision logic — walking, TfL transit, driving |
+| `houses/transit_route.py` | TfL API wrapper, park-and-ride, parking costs |
+| `houses/location.py` | Geocoding — postcodes.io, Google Maps, ORS, Nominatim |
+| `houses/sheets.py` | gspread integration, column headers |
+| `houses/endpoint_client.py` | Reusable API client with Retry-After + budget tracking |
+| `houses/services.py` | Service protocols + `Services` DI container |
+| `houses/context.py` | ContextVar per-request state (bus fares, geo state, sheets) |
+| `houses/attempt.py` | `Attempt[T]` result monad |
 | `houses/config.py` | Configuration — postcodes, API keys, constants |
+| `tests/helpers.py` | Reusable fakes: `FakeCommuteRouter`, `FakeEPC`, `make_services()` |
+
+## Dependency Injection Architecture
+
+The codebase uses three DI patterns:
+
+### Services Container (`houses/services.py`)
+
+`Services` is a dataclass bundling every enrichment service with real defaults.
+`_run_enrichment` accepts an optional ``services`` parameter. In production
+``None`` → ``Services()`` with real implementations. In tests, pass fakes
+from ``tests/helpers.py``.
+
+Protocols in ``houses/services.py`` document every module boundary: ``GeocodingService``,
+``CommuteRoutingService``, ``EPCLookupService``, ``CouncilTaxService``, etc.
+Agents read this file to understand what each module depends on.
+
+### ContextVar + Middleware (`houses/context.py` + `server.py` middleware)
+
+Per-request state that auto-creates production defaults when unset:
+
+| Variable | Purpose |
+|----------|---------|
+| `_request_services` | Active `Services` instance for the request |
+| `_request_bus_fares` | `BusJourneyRegistry` (shared across routing + transit_route) |
+| `_request_sheets_client` | Mock sheets client (set by test fixtures) |
+
+The `_geo_state` (rate-limit tracking) and `_geo_cache_var` (in-memory
+geocode cache) are also per-request via context vars, initialized by the
+same middleware.
+
+### Local `_kwarg` Injection
+
+Leaf-level functions accept optional underscore-prefixed parameters
+(e.g. ``_registry``, ``_page_path``, ``_page_template``) with ``None``
+defaults that fall back to the real implementation.  Tests pass pre-built
+objects directly, avoiding monkeypatch.
 | `houses/enricher.py` | Transit commute, petrol cost, school lookup |
 | `houses/sheets.py` | Service account auth, gspread integration, column headers (canonical), row formatting |
 | `houses/retry.py` | Async retry with exponential backoff and jitter |
