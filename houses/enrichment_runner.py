@@ -23,7 +23,13 @@ from houses.config import settings
 from houses.context import get_rail_fare_registry
 from houses.enricher import compute_commute_breakdown
 from houses.geo import GeoPoint
-from houses.location import PropertyLocation, geocode
+from houses.location import (
+    PropertyLocation,
+    extract_postcode,
+    geocode,
+    is_outcode,
+    resolve_house_location,
+)
 from houses.property import EnrichedProperty
 from houses.rail_fares import RailFareRegistry
 from houses.rightmove_scraper import scrape as scrape_rightmove
@@ -55,42 +61,6 @@ def asdict_serializable(obj: Any) -> Any:
     if isinstance(obj, (list, tuple)):
         return [asdict_serializable(v) for v in obj]
     return obj
-
-
-# ── Postcode helpers ───────────────────────────────────────────────────
-
-
-# UK postcode patterns
-# Full: "RG14 1AA", "SW1A 1AA", "EC3A 7LP"
-# Outcode (partial): "RG14", "SW1A", "SL6"
-_FULL_POSTCODE_RE = re.compile(
-    r"[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}",
-    re.IGNORECASE,
-)
-_OUTCODE_RE = re.compile(
-    r"\b[A-Z]{1,2}[0-9][A-Z0-9]?\b",
-    re.IGNORECASE,
-)
-
-
-def is_outcode(s: str) -> bool:
-    """True if the string is a partial postcode (outcode) like 'SL6' or 'SW1E'."""
-    return bool(re.match(r"^[A-Z]{1,2}[0-9][A-Z0-9]?$", s))
-
-
-def extract_postcode(address: str) -> str:
-    """Extract the best postcode from an address string.
-
-    Tries full postcode first (e.g. "SL6 1AA"), then falls back to
-    outcode only (e.g. "SL6"). Returns empty string if nothing found.
-    """
-    m = _FULL_POSTCODE_RE.search(address)
-    if m:
-        return m.group(0).strip().upper()
-    m = _OUTCODE_RE.search(address)
-    if m:
-        return m.group(0).strip().upper()
-    return ""
 
 
 # ── Enrichment field ↔ column mapping ──────────────────────────────────
@@ -140,52 +110,6 @@ for _field, _headers in ENRICHMENT_FIELD_COLUMNS.items():
 def header_to_enrichment_field(header: str) -> str | None:
     """Return the enrichment field name for a column header, or ``None``."""
     return _HEADER_TO_ENRICHMENT_FIELD.get(header)
-
-
-# ── House location resolution ─────────────────────────────────────────
-
-
-async def resolve_house_location(
-    postcode: str,
-    address: str,
-    actual_latitude: float | None,
-    actual_longitude: float | None,
-    approx_lat: float | None,
-    approx_lng: float | None,
-) -> GeoPoint | None:
-    """Resolve the property's physical location, best source first.
-
-    Priority:
-    1. **Address + full postcode** — geocode the combined string (most precise
-       when a full postcode like ``"SW20 9NB"`` is available, as opposed to
-       an outcode like ``"SW20"`` which maps to a large area centroid).
-    2. **Best lat/lon from the data sheet** — ``actual_latitude/longitude``
-       (user-provided site measurement) if available, then ``approx_lat/lng``
-       from a prior geocoding step.
-    3. **Address only** — geocode just the street address without a postcode
-       (least precise, but better than nothing).
-    """
-    coords: GeoPoint | None = None
-
-    # 1. Address + full postcode
-    if postcode and not is_outcode(postcode) and address:
-        loc = PropertyLocation(postcode=postcode, address=address)
-        loc = await loc.resolve()
-        coords = loc.coordinates.value_or_none()
-
-    # 2. Best lat/lon from the data sheet
-    if coords is None and actual_latitude is not None and actual_longitude is not None:
-        coords = GeoPoint(actual_latitude, actual_longitude)
-    if coords is None and approx_lat is not None and approx_lng is not None:
-        coords = GeoPoint(approx_lat, approx_lng)
-
-    # 3. Address only
-    if coords is None and address:
-        loc = PropertyLocation(postcode="", address=address)
-        loc = await loc.resolve()
-        coords = loc.coordinates.value_or_none()
-
-    return coords
 
 
 # ── Enrichment pipeline ────────────────────────────────────────────────

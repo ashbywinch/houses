@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from houses.commute import Commute, CommuteBreakdown
 from houses.schools import School
+
+if TYPE_CHECKING:
+    from houses.geo import GeoPoint
 
 
 @dataclass(frozen=False)
@@ -27,6 +31,21 @@ class Property:
     actual_latitude: float | None = None
     actual_longitude: float | None = None
     actual_postcode: str = ""
+
+    # ── Location resolution ─────────────────────────────────────────
+
+    async def location(self) -> GeoPoint | None:
+        """Return the best spatial coordinate for this property."""
+        from houses.location import resolve_house_location
+
+        return await resolve_house_location(
+            postcode=self.postcode,
+            address=self.address,
+            actual_latitude=self.actual_latitude,
+            actual_longitude=self.actual_longitude,
+            approx_lat=None,
+            approx_lng=None,
+        )
 
 
 @dataclass(frozen=True)
