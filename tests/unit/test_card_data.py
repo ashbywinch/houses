@@ -8,12 +8,9 @@ from __future__ import annotations
 
 from unittest import mock
 
-import pytest
-
 from houses.sheets.formulas import VIEW_HEADERS
 from houses.sheets.row import Row
-from houses.web.card_data import _build_card, get_all_cards, commute_colour, ofsted_colour, walk_colour
-
+from houses.web.card_data import _build_card, commute_colour, get_all_cards, ofsted_colour, walk_colour
 
 # ── Test data helpers ────────────────────────────────────────────────────
 
