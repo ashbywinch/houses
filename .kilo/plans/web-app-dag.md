@@ -1,257 +1,400 @@
-# Web App — Property Dashboard with Provenance
+# Web App — Property Dashboard
 
 ## Problem
 
-The enrichment engine works, but we're stuck:
+The enrichment engine works, but:
 
-**Adding a module** requires touching 7+ files (EnrichedProperty, Row.HEADERS, from_property, enrichment function, run_enrichment, View tab formulas, migrate-view). The ceremony discourages iteration.
+**Adding a module requires touching 7+ files** (EnrichedProperty, Row.HEADERS, from_property, enrichment function, run_enrichment, View tab formulas, migrate-view). The ceremony discourages iteration.
 
-**Computation logic is trapped in Google Sheets formulas** — stamp duty brackets, mortgage PMT, commute annualisation, total monthly cost. Raw strings, untestable, invisible to the type system.
+**Provenance is impossible.** When a value is wrong, there's no way to trace "this stamp duty came from price £450k using the 5% bracket" back to "price came from Rightmove scrape at 10:30." The agent digs through unstructured logs and often can't figure out what happened.
 
-**Provenance is impossible.** When a value is wrong, there's no way to trace: "this stamp duty was computed from price £XXX using bracket Y, and price came from Rightmove scrape at 10:30." The agent has to dig through unstructured logs to diagnose anything.
+**Caching is coarse.** Changing one input (lat/lng) should only recompute the affected subtree (commute, schools, map URL), not re-run everything. Currently it does.
 
-**Caching is coarse.** If the user corrects the latitude, the whole enrichment pipeline re-runs. There's no node-level cache that only recomputes the subtree affected by the change (commute, schools, walkability, station, map URL all depend on location).
-
-**The UI is a spreadsheet** — 40-column grid designed for formula debugging, not for glancing at a property.
+**The UI is a 40-column spreadsheet** — hard for non-technical users to glance at.
 
 ## Solution
 
-A directed acyclic graph (DAG) of computation nodes. Each property value is a node with explicit dependencies. Nodes know their provenance (source API, timestamp, status, intermediate values).
+A home-rolled DAG resolver. ~150 lines total. Every value is a node with explicit dependencies. Every node result carries provenance metadata so agents and humans can trace from any displayed value back to its source.
 
-The DAG's real value is **provenance and cache granularity**, not formula organisation. The formula extraction is a side effect.
+No external DAG library. No Rust. Just a node registry, a topological sort, and a compute loop.
 
-### What provenance looks like
+---
 
-```json
-{
-  "id": "stamp_duty",
-  "value": 10000,
-  "status": "ok",
-  "deps": {
-    "price": {
-      "value": 450000,
-      "status": "ok",
-      "source": "rightmove_scraper",
-      "source_time": "2026-06-14T10:30:00Z"
-    },
-    "status": {
-      "value": "For Sale",
-      "status": "ok",
-      "source": "manual_input",
-      "source_time": "2026-06-13T15:00:00Z"
-    }
-  },
-  "compute": {
-    "formula": "stamp_duty_band(price)",
-    "intermediate": {
-      "band": "5% on £200k above £250k threshold",
-      "raw": "max(0, min(200000, 450000-250000)) * 0.05"
-    }
-  }
-}
-```
+## What makes this easy to reason about
 
-An agent can GET `/properties/{rid}/graph?node=stamp_duty` and follow the dependency tree all the way to source APIs, without reading a single log line.
+**The node registry is one file.** All ~40 nodes declared in a single dict, top to bottom. You can read `houses/model/nodes.py` and see every value the system knows about, what it depends on, and how it's computed.
 
-### What granular caching means
+**Compute functions are pure Python.** No decorators, no registration machinery, no meta-programming. A function like `_calc_stamp_duty(price, status) → float` is called directly by the resolver with its dependency values already resolved. Testable in isolation.
 
-```
-Enrichment (runs once, caches per node):
-  rightmove_scraper ──→ price, address, postcode, bedrooms
-  epc_api            ──→ epc_rating, floor_area, age_band, heating_fuel
-  tfl_api            ──→ simon_commute, lorena_commute
+**The graph endpoint shows the whole chain.** For any displayed value, an agent can GET `?node=stamp_duty&depth=3` and get back a JSON tree showing that value, its dependencies recursively, and the status/source/intermediates of each. No log parsing, no guesswork.
 
-User corrects lat/lng:
-  DAG invalidates: best_lat, best_lng (direct deps)
-  ↳ also invalidates: map_url, simon_commute (walk legs), lorena_commute, schools (distances)
-  Everything else stays cached.
+---
 
-Web UI loads:
-  DAG resolver walks all nodes, hits cache for everything, returns in ~0ms.
-  No API calls, no JSON re-parsing.
-```
-
-### Core types
+## Core types
 
 ```python
-class NodeResult:
-    """Result of computing one node for one property."""
-    value: Any = None
-    status: Literal["ok", "missing", "error", "stale"]
-    error: str | None = None           # traceback or message
-    source: str = ""                   # "epc_api", "rightmove_scraper", "formula:stamp_duty"
-    source_time: datetime | None = None
-    source_status_code: int | None = None  # for API sources
-    deps: dict[str, NodeResult] = {}   # recursive dependency results
-    compute_info: dict | None = None   # formula name, intermediate values for derived nodes
-```
-
-```python
-class ValueNode:
+@dataclass
+class NodeDef:
+    """Schema for one node in the computation graph."""
     id: str
     label: str
     kind: Literal["source", "derived", "manual"]
-    deps: list[str]                # node IDs this depends on
-
-    # For derived nodes: compute(dep_values) → value
-    compute: Callable | None = None
-    # For source nodes: which field in EnrichedProperty carries this value
-    enrich_field: str | None = None
-
-    value_type: type = str
+    deps: list[str] = []              # node IDs this depends on
+    compute: Callable | None = None   # for derived nodes
+    enrich_field: str | None = None   # for source nodes — which EnrichedProperty field
     display: Literal["currency", "duration", "percent", "text", "badge"] = "text"
-    rating_fn: Callable | None = None   # value → "good" | "warn" | "bad" | None
+    rating_fn: Callable | None = None # value → "good" | "warn" | "bad" | None
     group_id: str = ""
+    description: str = ""             # what this value means, for the agent
 ```
-
-### Node registry
-
-A single file `houses/model/nodes.py` that declares every node. This is the canonical list of every value the system knows about. Adding a module means adding nodes here (and writing the enrichment function, which was already needed).
-
-### Resolver (~50 lines of orchestration)
 
 ```python
-def resolve(
-    property_id: str,
-    enriched: EnrichedProperty | None,
-    manual_inputs: dict[str, Any] | None,
-    cache: NodeCache | None = None,
-) -> dict[str, NodeResult]:
-    """Topological-sort the DAG, compute each node in order.
+@dataclass
+class NodeResult:
+    """Result of computing one node for one property.
 
-    1. Build a full node dict from NODES + enriched + manual inputs
-    2. Topological sort by deps
-    3. Walk in order:
-       - Check cache (hit → skip)
-       - Check if all deps are cached (no → skip or mark stale)
-       - For source nodes: value from enriched or manual_inputs
-       - For derived nodes: call compute(dep_values)
-       - For manual nodes: value from manual_inputs
-       - Store result in cache
-    4. Return flat dict of NodeResults
+    Every field is optional — a node might not have a value yet (missing source),
+    might have errored, or might be pending. The agent can inspect *any* field
+    to understand what happened.
     """
+    # The value
+    value: Any = None
+
+    # What happened
+    status: Literal["ok", "missing", "error"] = "missing"
+    error: str | None = None           # full traceback or message
+
+    # Where it came from
+    source: str = ""                   # "epc_api", "rightmove_scraper", "formula:stamp_duty"
+    source_time: datetime | None = None
+    source_status_code: int | None = None
+
+    # How it was computed (for derived nodes)
+    compute_info: dict | None = None   # formula name, input values, intermediate steps
+
+    # Dependencies — recursive. This is what lets agents traverse the graph.
+    deps: dict[str, "NodeResult"] = field(default_factory=dict)
 ```
 
-### Provenance endpoint
+---
 
-`GET /properties/{rid}/graph?node=stamp_duty&depth=2`
+## Node registry
 
-Returns the `NodeResult` tree for that node, recursively including dependencies up to `depth`. An agent can start from any value and walk the tree to find root cause.
+Single file. Every node the system knows about.
 
-Without `node` parameter, returns the full graph for all nodes (like a schema, not values — the DAG structure itself).
+```python
+# houses/model/nodes.py
+
+NODES: dict[str, NodeDef] = {}
+
+def node(
+    id: str, label: str, kind: str, *,
+    deps: list[str] | None = None,
+    compute: Callable | None = None,
+    enrich_field: str | None = None,
+    display: str = "text",
+    rating_fn: Callable | None = None,
+    group_id: str = "",
+    description: str = "",
+):
+    NODES[id] = NodeDef(id=id, label=label, kind=kind, deps=deps or [],
+                        compute=compute, enrich_field=enrich_field,
+                        display=display, rating_fn=rating_fn,
+                        group_id=group_id, description=description)
+
+# ── Source nodes (from enrichment) ──
+
+node("price", "Purchase Price", "source",
+     enrich_field="price", display="currency", group_id="key_info",
+     description="From Rightmove listing or manual entry")
+
+node("epc_rating", "EPC Rating", "source",
+     enrich_field="epc_rating", display="badge", group_id="key_info",
+     rating_fn=_epc_colour,
+     description="A-G band from the Energy Performance Certificate")
+
+node("floor_area", "Floor Area (m²)", "source",
+     enrich_field="floor_area", display="text", group_id="key_info",
+     description="Total floor area from EPC. Not always present.")
+
+node("simon_commute_time", "Simon Commute (min)", "source",
+     enrich_field="simon_commute.duration_minutes", display="duration",
+     group_id="commute",
+     description="Door-to-door transit time from property to Simon's office")
+
+# ... all ~25 source nodes
+
+# ── Derived nodes (computed from source nodes) ──
+
+node("stamp_duty", "Stamp Duty", "derived",
+     deps=["price", "status"],
+     compute=lambda price, status: 0 if status == "Current" else _calc_stamp_duty(price),
+     display="currency", group_id="affordability",
+     description="UK stamp duty based on purchase price. Zero for current properties.")
+
+node("total_monthly_housing", "Total Monthly Housing Cost", "derived",
+     deps=["mortgage_payment", "sinking_fund", "commute_cost", "council_tax", "status"],
+     compute=_total_housing_cost,
+     display="currency", group_id="affordability",
+     description="Mortgage + sinking fund + commute + council tax + insurance. "
+                 "Subtracts rental income for 'Current' properties.")
+
+# ... all ~15 derived nodes
+
+# ── Manual input nodes ──
+
+node("status", "Status", "manual",
+     display="badge", group_id="user_inputs",
+     description="Current, For Sale, Offer Accepted, No, etc.")
+
+node("ashby_works_estimate", "Ashby Works Estimate (£)", "manual",
+     display="currency", group_id="user_inputs",
+     description="Estimated contribution from Ashby Works toward this property")
+
+# ... manual nodes
+```
+
+---
+
+## Resolver (~90 lines)
+
+```python
+# houses/model/resolver.py
+
+def resolve(
+    enriched: EnrichedProperty,
+    manual_inputs: dict[str, Any] | None = None,
+    cache: dict[str, NodeResult] | None = None,
+    invalidated: set[str] | None = None,
+) -> dict[str, NodeResult]:
+    """Compute all nodes in dependency order, with caching and provenance.
+
+    Args:
+        enriched: the raw enrichment result (source values)
+        manual_inputs: user-supplied overrides (status, notes, coordinates, etc.)
+        cache: previous NodeResults, keyed by node_id
+        invalidated: set of node_ids that need recomputation (dirty set)
+
+    Returns:
+        dict of node_id → NodeResult for all nodes
+    """
+    cache = {} if cache is None else dict(cache)
+    results: dict[str, NodeResult] = {}
+
+    # Topological sort (Kahn's algorithm)
+    in_degree = {nid: 0 for nid in NODES}
+    for nid, ndef in NODES.items():
+        for dep in ndef.deps:
+            in_degree[nid] += 1
+
+    queue = [nid for nid, deg in in_degree.items() if deg == 0]
+    order = []
+    while queue:
+        nid = queue.pop(0)
+        order.append(nid)
+        for nid2, ndef in NODES.items():
+            if nid in ndef.deps:
+                in_degree[nid2] -= 1
+                if in_degree[nid2] == 0:
+                    queue.append(nid2)
+
+    # Compute in topological order
+    for nid in order:
+        ndef = NODES[nid]
+        needs_recompute = (invalidated and nid in invalidated) or nid not in cache
+
+        if not needs_recompute:
+            # Check if any dependency was recomputed
+            for dep in ndef.deps:
+                if dep in results or (invalidated and dep in invalidated):
+                    needs_recompute = True
+                    break
+
+        if needs_recompute:
+            # Gather dependency results
+            dep_results = {}
+            for dep in ndef.deps:
+                if dep in results:
+                    dep_results[dep] = results[dep]
+                elif dep in cache:
+                    dep_results[dep] = cache[dep]
+
+            # Check for missing deps
+            missing_deps = [d for d in ndef.deps if d not in dep_results]
+            if missing_deps:
+                results[nid] = NodeResult(
+                    status="missing",
+                    error=f"missing dependencies: {missing_deps}",
+                    deps=dep_results,
+                )
+                cache[nid] = results[nid]
+                continue
+
+            # Compute
+            try:
+                if ndef.kind == "source":
+                    val = _extract_source(ndef, enriched)
+                    results[nid] = NodeResult(
+                        value=val,
+                        status="ok" if val is not None else "missing",
+                        source=ndef.enrich_field or ndef.id,
+                        source_time=datetime.now(timezone.utc),
+                        deps=dep_results,
+                    )
+                elif ndef.kind == "derived":
+                    dep_values = {d: r.value for d, r in dep_results.items()}
+                    result = ndef.compute(**dep_values)
+                    results[nid] = NodeResult(
+                        value=result,
+                        status="ok",
+                        source=f"formula:{ndef.id}",
+                        source_time=datetime.now(timezone.utc),
+                        compute_info={
+                            "function": ndef.compute.__name__,
+                            "inputs": {d: r.value for d, r in dep_results.items()},
+                        },
+                        deps=dep_results,
+                    )
+                elif ndef.kind == "manual":
+                    val = manual_inputs.get(nid) if manual_inputs else None
+                    results[nid] = NodeResult(
+                        value=val,
+                        status="ok" if val is not None else "missing",
+                        source="manual_input",
+                        source_time=datetime.now(timezone.utc),
+                        deps=dep_results,
+                    )
+            except Exception as e:
+                results[nid] = NodeResult(
+                    status="error",
+                    error=traceback.format_exc(),
+                    deps=dep_results,
+                )
+        else:
+            results[nid] = cache[nid]
+
+        cache[nid] = results[nid]
+
+    return results
+```
+
+This is ~90 lines. The provenance is built-in: every `NodeResult` carries its deps, source, timestamp, and compute_info. Agents don't need to reconstruct anything.
+
+---
+
+## Provenance endpoint
+
+```
+GET /properties/{rid}/graph
+GET /properties/{rid}/graph?node=stamp_duty&depth=2
+```
+
+Returns the `NodeResult` tree. Without `node`, returns the full DAG structure (schema — what nodes exist, their types, dependencies, group assignments).
+
+With `node` and `depth`, returns the result for that node and its dependencies recursively up to `depth`. The agent walks this tree to find root causes.
+
+Example agent interaction:
+
+```
+> GET /properties/{rid}/graph?node=stamp_duty&depth=2
+→ {value: 10000, status: "ok", deps: {
+    price: {value: 450000, status: "ok", source: "rightmove_scraper", ...},
+    status: {value: "For Sale", status: "ok", source: "manual_input", ...}
+  }, compute_info: {function: "_calc_stamp_duty", inputs: {price: 450000, ...}}
+}
+
+> "why is stamp duty 0?"
+→ agent checks node=stamp_duty, sees deps.status.value = "Current",
+  knows the formula returns 0 for "Current". Root cause found.
+```
+
+For human readability, the endpoint also accepts `?format=mermaid` or `?format=tree` to return a text diagram instead of JSON.
+
+---
+
+## Caching
+
+Simple dict cache, keyed by `property_id/node_id`. On enrichment completion, cache all node results. On manual input change (lat/lng, status), pass `invalidated={node_id}` to `resolve()` which recomputes only the affected subtree.
+
+Cache storage: in-memory for development, SQLite for persistence (a single table: `property_id, node_id, result_json, updated_at`).
 
 ---
 
 ## Phases
 
-### Phase 1 — DAG foundation (estimated: 1.5–2 weeks)
+### Phase 1 — DAG foundation (estimated: 1–1.5 weeks)
 
-Stage 1.1 — Define core types: `ValueNode`, `NodeResult`, `NodeCache`
-Stage 1.2 — Port all sheet formulas to pure Python functions with unit tests
-Stage 1.3 — Build the node registry (`houses/model/nodes.py`) declaring:
-  - All enrichment fields as source nodes
-  - All derived values (stamp duty, mortgage, etc.) with compute functions
-  - All manual inputs (status, notes, Ashby works, actual coordinates)
-  - All rating functions mapped to nodes
-Stage 1.4 — Build the resolver + cache layer
-Stage 1.5 — Wire into the enrichment pipeline: `run_enrichment()` → populate source nodes → `resolve()` → cache
-Stage 1.6 — Build the provenance endpoint `GET /properties/{rid}/graph`
+| Stage | What | Files |
+|-------|------|-------|
+| 1.1 | Core types: `NodeDef`, `NodeResult` | `houses/model/__init__.py` |
+| 1.2 | Port sheet formulas to pure Python functions + unit tests | `houses/model/formulas.py` |
+| 1.3 | Build node registry | `houses/model/nodes.py` |
+| 1.4 | Build resolver + cache | `houses/model/resolver.py` |
+| 1.5 | Wire into enrichment pipeline: `run_enrichment()` → `resolve()` → cache | `houses/enrichment_runner.py` (minimal changes) |
+| 1.6 | Provenance endpoint `GET /properties/{rid}/graph` | `houses/server.py` |
 
 ### Phase 2 — UX design (estimated: 0.5–1 week)
 
-Before any frontend code, design the card layout:
+Wireframes for the card dashboard:
+- 5 zones: Key Info, Commute & Area, Schools, Affordability, User Inputs
+- Headline values with colour indicators
+- Drill-down provenance: click a value → see its dependency chain
+- Error states: missing values, failed API calls, stale data
+- How manual inputs get edited
 
-- **Wireframes** for the property overview card showing all 5 zones (Key Info, Commute & Area, Schools, Affordability, User Inputs)
-- **Information hierarchy** — which values are headline indicators vs supporting detail vs diagnostic deep-dive
-- **Drill-down interaction** — click/tap a value to see its provenance: where it came from, what formula, intermediate values, source API status
-- **Scoring/glanceability** — how colour indicators work for each value type
-- **Error states** — how missing/errored values render (important: the provenance layer means you know *exactly* what failed)
-- **Responsive breakpoints** — desktop first, mobile support for on-site viewing
-
-Design artefacts: HTML mockups or lightweight Figma. Follow the convention from chronic-wellness `design/`.
-
-Key questions to resolve:
-- One property at a time (detail page) or scrollable list of summary cards?
-- How does drill-down provenance look? Modal? Expand-in-page?
-- How do manual inputs (status, notes, coordinates) get edited?
-- How does a new property get added? (Keep existing browser extension flow?)
+Design artefacts: HTML mockups, following the chronic-wellness `design/` convention.
 
 ### Phase 3 — Web UI (estimated: 2–3 weeks)
 
-Stage 3.1 — Backend: `GET /properties/{rid}/card` endpoint that:
-  - Loads cached node results
-  - Runs resolver for any uncached nodes
-  - Returns grouped by `group_id` with rating/colour metadata
-  - Returns provenance on request (`?include_provenance=true`)
-
-Stage 3.2 — Frontend:
-  - Property list page with summary cards
-  - Property detail page with grouped zones and drill-down provenance
-  - Manual input editing (PATCH back to the sheet)
-  - Error states rendered inline (not silently swallowed)
-
-Stage 3.3 — Validation: compare DAG output against sheet output for all existing properties. Every derived value must match.
-
-### Sheet migration
-
-The sheet stays. The DAG is additive:
-- **Data tab**: still written by enrichment (unchanged)
-- **View tab**: still updated by formula sync (legacy)
-- **Web UI**: reads from DAG cache, not from sheet
-- New properties enriched and written to sheet + cached via DAG
+- `GET /properties/{rid}/card` — grouped node results with rating colours and optional provenance
+- Frontend: property list + detail card with expandable provenance
+- Manual input editing (PATCH → sheet or cache)
+- Validation: compare DAG output against sheet for all existing properties
 
 ---
 
 ## Adding a module in the new model
 
-1. Add source node(s) to `NODES` registry
+1. Add `node(...)` entry to `houses/model/nodes.py` for each new value
 2. Write the enrichment function (same as today)
 3. Wire into `run_enrichment()` (same as today)
 4. If there are derived values from the new data, add derived nodes with compute functions
-5. Assign to a `group_id` for UI placement
-6. Done — no sheet columns, no formula sync, no view migration
+5. Done — no sheet columns, no formula sync, no view migration
 
 ---
 
-## Caching strategy
+## How this helps agents debug
 
-| Layer | What | Invalidates when |
-|-------|------|-----------------|
-| **API cache** (existing) | Raw API responses (EPC JSON, TfL routes) | TTL-based or manual clear |
-| **Node result cache** | Computed node values per property | Dependency change (new lat/lng → commute nodes invalidate) |
-| **Session cache** | Full property card response | Property data changes |
+**Before:** "The stamp duty is wrong. Let me read the logs to see what price was used. Actually let me try running the server locally. The logs are noisy. I can't find the right line."
 
-The node cache is a simple key-value store (`{property_id}_{node_id}` → `NodeResult`). On resolution, the resolver checks if any dependency has changed since the node was cached. If not, returns cached value. If yes, recomputes.
+**After:**
+```
+GET /properties/{rid}/graph?node=stamp_duty&depth=2
+→ sees price=450000, status="For Sale"
+→ formula: _calc_stamp_duty(450000, "For Sale")
+→ result: 10000
 
-This means: after the initial enrichment, loading the web UI is cache hits only. Modifying a manual input (lat/lng, status) recomputes only the affected subtree.
+# If something is missing:
+GET /properties/{rid}/graph?node=simon_commute_time
+→ status: "missing"
+→ error: "TfL API returned 429 at 2026-06-14T10:30:00Z"
+→ source_time: 2026-06-14T10:30:00Z
 
----
+# If an error:
+GET /properties/{rid}/graph?node=epc_rating
+→ status: "error"
+→ error: "Traceback: ... KeyError: 'currentEnergyEfficiencyBand'"
+→ source: "epc_api"
+```
 
-## Risks
-
-| Risk | Mitigation |
-|------|------------|
-| **Formula porting mis-matches** — derived values differ from sheet | Test against all existing properties. Use `/properties/compare` endpoint as oracle. |
-| **Over-engineering** — too much machinery for ~8 modules | The resolver is ~50 lines. The registry is one file. The value is in provenance and caching, not in the abstraction. |
-| **UX scope creep** — building a complex frontend | Limit V1 to property card + provenance drill-down. No comparison views, no cross-property dashboards. |
-| **Provenance data is expensive to store** | It's computed at resolution time and served on-demand. Not persisted (except cache). |
-| **Agent can't use the provenance endpoint** | The endpoint returns JSON. An agent can GET it and traverse the tree just like it reads any other API. Much easier than log parsing. |
+No log parsing. No server restart. One HTTP call per node, walking the dependency tree.
 
 ---
 
 ## Not in scope (V1)
 
-- Property comparison views (side-by-side)
-- Cross-property dashboards or charts
+- Property comparison views
+- Cross-property dashboards
 - Automated "Ashby works" scoring
 - Mobile app
-- Real-time updates (poll or push)
-
----
-
-## Decision points
-
-Before starting Phase 2 (UX), decide:
-- **Frontend stack**: server-rendered (Jinja/HTMX) vs SPA (React/Svelte)? The UX design will influence this — heavy drill-down interactivity leans SPA.
-- **Where do enrichment results live?** The DAG cache could be in-memory (simple, lost on restart), SQLite (persistent, needs a sync step), or the sheet remains the source and we rebuild cache on read. SQLite is probably the sweet spot.
-- **Deployment**: same FastAPI process? Separate process? Same process during development.
+- Real-time updates
