@@ -33,7 +33,7 @@ A web app with three information levels:
 
 2. **Property summary** — one page per house with high-level groupings of the data (commute, affordability, schools, area, etc.). Each group shows a summary indicator (good/middling/bad, or a key number) with the option to expand for details.
 
-3. **Group drill-down** — within any group, see the full data including how each value was calculated and how reliable it is. For example: "Simon's commute time is 45 min, calculated from the postcode centroid because we only have the outcode — actual walk time may differ." Or: "EPC band B, from a 2019 certificate."
+3. **Group drill-down** — within any group, see the full data including how each value was calculated and how reliable it is. Each value has a description (declared on its `NodeDef`), a source (which API or formula), and diagnostic metadata from the `NodeResult` (status, error, intermediate values, fallback path). No LLM-generated prose — the UI renders the structured provenance data directly.
 
 Other success criteria:
 - Ashby's agent can GET `/properties/12345/graph?node=stamp_duty` and get back a JSON tree showing exactly how that value was computed, what APIs were called, and whether anything went wrong.
@@ -77,7 +77,7 @@ class NodeDef:
     display: Literal["currency", "duration", "percent", "text", "badge"] = "text"
     rating_fn: Callable | None = None # value → "good" | "warn" | "bad" | None
     group_id: str = ""
-    description: str = ""             # what this value means, what could go wrong
+    description: str = ""             # what this value means, rendered verbatim in UI provenance
 ```
 
 ```python
