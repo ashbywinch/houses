@@ -10,7 +10,7 @@
 
 **Lorena** — non-technical co-buyer (Simon's partner). Commutes to Aldgate/City of London (no car). Shares finances with Simon.
 
-**Ashby's AI agents** — need to debug why a value is what it is, trace it back to its source API, understand fallback logic, and extend the system with new modules. Do not use the spreadsheet.
+**Ashby's AI agents** — need to debug why a value is what it is, trace it back to its source API, understand fallback logic, check the progress of an enrichment job, and extend the system with new modules. Do not use the spreadsheet.
 
 ### What are they trying to do?
 
@@ -40,6 +40,7 @@ Other success criteria:
 - Ashby's agent can GET `/properties/12345/graph?node=stamp_duty` and get back a JSON tree showing exactly how that value was computed, what APIs were called, and whether anything went wrong.
 - Adding a new enrichment module means writing the enrichment function and declaring what it produces — no spreadsheet columns, no formula sync, no view migration.
 - User-specific config (office locations, car ownership, trip frequencies, deposit shares) lives in a config file, not hardcoded in Python modules.
+- Eventually: Simon can paste a Rightmove link into the web app, enrichment runs in the background, and anyone can check progress or debug failures via the graph endpoint.
 
 ---
 
@@ -233,6 +234,10 @@ Walkability, town description, council tax, geo, formulas (stamp duty, mortgage,
 ### Slice 7 (optional) — Sheet as legacy archive
 
 If every field is in SQLite and the UI handles manual edits, the sheet becomes a readable backup.
+
+### Slice 8 — Background enrichment + property submission (future)
+
+Simon adds houses by pasting Rightmove links into the web app. Enrichment runs as a background task (not blocking the HTTP response). A job/task table tracks status: `pending → enriching → complete | failed`. The graph endpoint serves as the progress/debug view — agents and humans can check which nodes have been computed, which are pending, and which failed and why. This builds naturally on the DAG model: enrichment is just running the resolver for a new property.
 
 ---
 
