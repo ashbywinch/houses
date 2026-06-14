@@ -20,9 +20,14 @@ class Property:
     address line) and ``postcode`` (the full UK postcode if visible on the
     page) separately. If no full postcode is found, the server will try
     to extract it from the address.
+
+    ``rid`` is the numeric Rightmove ID, set by the caller from the
+    ``RightmoveProperty`` returned by ``scrape()``, or explicitly by the
+    client.
     """
 
     url: str
+    rid: str = ""
     address: str = ""
     postcode: str = ""
     bedrooms: int | None = None
@@ -62,6 +67,7 @@ class EnrichedProperty:
     """Full enriched property record written to the Google Sheet."""
 
     url: str
+    rid: str = ""
     address: str = ""
     postcode: str = ""
     bedrooms: int = 0

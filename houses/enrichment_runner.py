@@ -261,14 +261,15 @@ async def run_enrichment(
     # ── Scrape Rightmove if address is missing ──
     if not address:
         scraped = await scrape_rightmove(url)
-        if scraped.get("address"):
-            address = scraped["address"]
-        if scraped.get("postcode") and not postcode:
-            postcode = scraped["postcode"]
-        if scraped.get("bedrooms") is not None and bedrooms is None:
-            bedrooms = scraped["bedrooms"]
-        if scraped.get("price") is not None and price is None:
-            price = scraped["price"]
+        if scraped:
+            if scraped.address:
+                address = scraped.address
+            if scraped.postcode and not postcode:
+                postcode = scraped.postcode
+            if scraped.bedrooms is not None and bedrooms is None:
+                bedrooms = scraped.bedrooms
+            if scraped.price is not None and price is None:
+                price = scraped.price
 
     if not lookup:
         # Choose the most specific location string for routing APIs.
@@ -391,8 +392,8 @@ async def run_enrichment(
             approx_lat, approx_lng = actual_latitude, actual_longitude
         else:
             scraped_geo = await scrape_rightmove(url)
-            if scraped_geo.get("latitude") is not None and scraped_geo.get("longitude") is not None:
-                approx_lat, approx_lng = scraped_geo["latitude"], scraped_geo["longitude"]
+            if scraped_geo and scraped_geo.latitude is not None and scraped_geo.longitude is not None:
+                approx_lat, approx_lng = scraped_geo.latitude, scraped_geo.longitude
             # else: approx_lat/lng already set from shared PropertyLocation above
 
         if approx_lat is not None and approx_lng is not None:

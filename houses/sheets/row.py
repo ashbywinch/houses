@@ -10,7 +10,6 @@ The ``Row`` class owns:
 from __future__ import annotations
 
 import logging
-import re
 from typing import ClassVar
 
 import gspread
@@ -118,8 +117,6 @@ class Row:
         }
     )
 
-    _RIGHTMOVE_ID_RE: ClassVar[re.Pattern] = re.compile(r"properties/(\d+)")
-
     # ── Column lookup ───────────────────────────────────────────────
 
     @classmethod
@@ -146,15 +143,6 @@ class Row:
     def is_formula_column(cls, header: str) -> bool:
         """Return True if *header* is a formula-only column (never written by the server)."""
         return header in cls._FORMULA_COLUMNS
-
-    @classmethod
-    def rightmove_id(cls, url_or_text: str) -> str:
-        """Extract the numeric Rightmove property ID from a URL or text."""
-        m = cls._RIGHTMOVE_ID_RE.search(url_or_text)
-        if m:
-            return m.group(1)
-        m = re.search(r"(\d{8,})", url_or_text)
-        return m.group(1) if m else ""
 
     # ── Value formatting helpers ────────────────────────────────────
 
@@ -231,7 +219,7 @@ class Row:
         r["Postcode"] = property_.postcode
         r["Bedrooms"] = str(property_.bedrooms) if property_.bedrooms else ""
         r["Price (£)"] = str(property_.price) if property_.price else ""
-        r["Rightmove ID"] = cls.rightmove_id(property_.url)
+        r["Rightmove ID"] = property_.rid
         r["Simon London (min)"] = cls._fmt_duration(property_.simon_commute)
         r["Simon London Cost (£)"] = cls._fmt_cost(
             property_.simon_commute.daily_cost_gbp if property_.simon_commute else None
@@ -320,7 +308,7 @@ async def write_enriched_row(property_: EnrichedProperty, tab: str = DATA_TAB) -
         # Find existing row by Rightmove ID (column H). Never append duplicates.
         existing = worksheet.get_all_values()
         target_row = None
-        rid = Row.rightmove_id(property_.url)
+        rid = property_.rid
         sheet_headers = existing[0]
         try:
             rid_col = sheet_headers.index("Rightmove ID")
