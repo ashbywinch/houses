@@ -21,7 +21,7 @@ The three of us are buying a house together. Simon and Lorena are a couple with 
 The spreadsheet works but it's the only interface:
 - **Not glanceable.** 40 columns, dense grid. You can't quickly see what a house is like.
 - **Not mobile-friendly.** Spreadsheet on a phone is unusable.
-- **No provenance.** When a value looks wrong, there's no way to see where it came from, what API was called, what fallback was taken.
+- **No provenance.** When looking at a value, there's no way to gauge how reliable it is — was the commute calculated from an exact address or a postcode centroid? Is the EPC current or 10 years old? When something looks wrong, you can't find where it came from or what fallback was taken.
 - **Adding a new data module requires touching 7+ files** (EnrichedProperty, Row.HEADERS, Row.from_property, enrichment function, run_enrichment, View tab formulas, migrate-view deployment). The ceremony discourages adding useful data.
 - **User-specific config** (office locations, car ownership, trip frequencies) is hardcoded.
 
@@ -29,7 +29,7 @@ The spreadsheet works but it's the only interface:
 
 A web app where:
 - Any of us opens a property page on their phone and immediately sees: price, EPC rating (colour-coded), commute times for all three routes (Simon London, Lorena London, Simon Bracknell), schools, and total monthly cost. Glanceable, no spreadsheet scrolling.
-- Tapping any value shows how it was calculated and where the data came from.
+- Tapping any value shows how it was calculated and where the data came from — including how reliable it is. For example: "Simon's commute was calculated from the postcode centroid because we only have the outcode. The actual walk time may differ by up to 10 minutes." Or: "EPC data came from a 2019 certificate, not a current one."
 - Ashby's agent can GET `/properties/12345/graph?node=stamp_duty` and get back a JSON tree showing exactly how that value was computed, what APIs were called, and whether anything went wrong.
 - Adding a new enrichment module (crime stats, planning applications) means writing the enrichment function and declaring what it produces — no spreadsheet columns, no formula sync, no view migration.
 - User-specific config (office locations, car ownership, trip frequencies, deposit shares) lives in a config file, not hardcoded in Python modules.
