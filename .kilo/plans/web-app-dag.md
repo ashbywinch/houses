@@ -27,11 +27,17 @@ The spreadsheet works but it's the only interface:
 
 ### What does success look like?
 
-A web app where:
-- Any of us opens a property page on their phone and immediately sees: price, EPC rating (colour-coded), commute times for all three routes (Simon London, Lorena London, Simon Bracknell), schools, and total monthly cost. Glanceable, no spreadsheet scrolling.
-- Tapping any value shows how it was calculated and where the data came from — including how reliable it is. For example: "Simon's commute was calculated from the postcode centroid because we only have the outcode. The actual walk time may differ by up to 10 minutes." Or: "EPC data came from a 2019 certificate, not a current one."
+A web app with three information levels:
+
+1. **List overview** — a glanceable page showing every house in the system, with enough summary info to pick which ones to look into further. Think headline figures and visual indicators, not a dense table.
+
+2. **Property summary** — one page per house with high-level groupings of the data (commute, affordability, schools, area, etc.). Each group shows a summary indicator (good/middling/bad, or a key number) with the option to expand for details.
+
+3. **Group drill-down** — within any group, see the full data including how each value was calculated and how reliable it is. For example: "Simon's commute time is 45 min, calculated from the postcode centroid because we only have the outcode — actual walk time may differ." Or: "EPC band B, from a 2019 certificate."
+
+Other success criteria:
 - Ashby's agent can GET `/properties/12345/graph?node=stamp_duty` and get back a JSON tree showing exactly how that value was computed, what APIs were called, and whether anything went wrong.
-- Adding a new enrichment module (crime stats, planning applications) means writing the enrichment function and declaring what it produces — no spreadsheet columns, no formula sync, no view migration.
+- Adding a new enrichment module means writing the enrichment function and declaring what it produces — no spreadsheet columns, no formula sync, no view migration.
 - User-specific config (office locations, car ownership, trip frequencies, deposit shares) lives in a config file, not hardcoded in Python modules.
 
 ---
