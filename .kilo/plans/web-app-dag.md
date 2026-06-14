@@ -4,11 +4,24 @@
 
 ### Who are the users?
 
-**Primary user:** Ashby (me). Non-technical house hunter. Currently bribses a 40-column Google Sheet with conditional formatting, tries to view it on a phone, and gives up. Wants to glance at a property card and immediately understand whether it's worth pursuing.
+**Ashby (me)** — technical, system author. Needs to add new enrichment modules, debug when things go wrong, and maintain the system. Uses the web UI on desktop and phone.
 
-**Secondary user:** Lorena (partner). Also non-technical. Needs to see commute info, schools, and affordability at a glance without understanding the spreadsheet structure.
+**Simon** — non-technical housemate. Often adds new houses he's found on Rightmove. Needs to see commute to his office (Pimlico/Victoria, has a car), schools for his son, and his share of the financial impact. Uses the web UI on phone.
 
-**Tertiary user:** Simon (agent, both AI and future human). Needs to debug why a particular value is what it is, trace it back to its source API, and understand what fallback logic was applied — without reading log files or re-running enrichment.
+**Lorena** — non-technical housemate (Simon's partner). Needs to see her commute to Aldgate/City of London (no car), and her share of the financial impact. Uses the web UI on phone.
+
+**Ashby's AI agents** — need to debug why a value is what it is, trace it back to its source API, understand fallback logic, and extend the system with new modules. Do not use the spreadsheet.
+
+### What are they trying to do?
+
+The three of us are buying a house together. Simon and Lorena share finances; Ashby has separate finances. We all need to understand the financial impact (monthly costs, deposit contribution, stamp duty split). We add properties to a shared spreadsheet, enrich them with data (commute, schools, EPC, council tax, affordability calculations), discuss and add comments, and decide what to do next for each house: decide against, book a viewing, or wait.
+
+Currently the spreadsheet works but:
+- It's not glanceable — 40 columns, you can't quickly see what a house is like
+- It's not mobile-friendly — unusable on a phone
+- Adding a new data module requires touching 7+ files (ceremony, discourages improvement)
+- When a value looks wrong, there's no way to see where it came from or what API was called
+- User-specific config (office locations, car ownership, trip frequencies) is hardcoded
 
 ### What's the problem?
 
@@ -21,11 +34,13 @@
 ### What does success look like?
 
 A web app where:
-- Ashby opens a property page on their phone and immediately sees: price, EPC rating (colour-coded), commute times, total monthly cost. All glanceable.
+- Simon opens a property page on his phone and immediately sees his commute, his son's school options, his share of the monthly cost. Glanceable, no spreadsheet scrolling.
+- Lorena opens the same page and sees her commute and her share, without Simon's details getting in the way.
+- Ashby opens it on desktop and sees the full picture, including affordability breakdown and which properties need action.
 - Tapping any value shows how it was calculated and where the data came from.
-- Lorena can check commute info without opening the spreadsheet.
-- An AI agent can GET `https://houses/properties/12345/graph?node=stamp_duty` and get back a JSON tree showing exactly how that value was computed, what APIs were called, and whether anything went wrong.
-- Adding a new data source (crime stats, planning applications) means writing the enrichment function and declaring what it produces — no spreadsheet columns, no formula sync, no view migration.
+- Ashby's agent can GET `/properties/12345/graph?node=stamp_duty` and get back a JSON tree showing exactly how that value was computed, what APIs were called, and whether anything went wrong.
+- Adding a new enrichment module (crime stats, planning applications) means writing the enrichment function and declaring what it produces — no spreadsheet columns, no formula sync, no view migration.
+- User-specific config (office locations, car ownership, trip frequencies, deposit shares) lives in a config file or env vars, not hardcoded in Python modules.
 
 ---
 
