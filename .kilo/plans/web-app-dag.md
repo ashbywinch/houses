@@ -16,20 +16,14 @@
 
 The three of us are buying a house together. Simon and Lorena are a couple with joint finances; Ashby has separate finances. We all need to understand the overall financial impact (monthly costs, deposit contribution, stamp duty split). We add properties to a shared spreadsheet, enrich them with data (commute, schools, EPC, council tax, affordability calculations), discuss and add comments, and decide what to do next for each house: decide against, book a viewing, or wait. All three of us are interested in all the information — commute, schools, area, affordability, condition — even if some details are more relevant to one person than another.
 
-Currently the spreadsheet works but:
-- It's not glanceable — 40 columns, you can't quickly see what a house is like
-- It's not mobile-friendly — unusable on a phone
-- Adding a new data module requires touching 7+ files (ceremony, discourages improvement)
-- When a value looks wrong, there's no way to see where it came from or what API was called
-- User-specific config (office locations, car ownership, trip frequencies) is hardcoded
+### What's wrong with the current system?
 
-### What's the problem?
-
-**The spreadsheet is the only interface.** It's powerful but:
-- **Not glanceable.** 40 columns, dense grid. You can't see what a property is like without reading every cell.
+The spreadsheet works but it's the only interface:
+- **Not glanceable.** 40 columns, dense grid. You can't quickly see what a house is like.
 - **Not mobile-friendly.** Spreadsheet on a phone is unusable.
-- **No provenance.** When a value looks wrong, there's no way to see where it came from, what API was called, what it returned, or what fallback was taken.
+- **No provenance.** When a value looks wrong, there's no way to see where it came from, what API was called, what fallback was taken.
 - **Adding a new data module requires touching 7+ files** (EnrichedProperty, Row.HEADERS, Row.from_property, enrichment function, run_enrichment, View tab formulas, migrate-view deployment). The ceremony discourages adding useful data.
+- **User-specific config** (office locations, car ownership, trip frequencies) is hardcoded.
 
 ### What does success look like?
 
