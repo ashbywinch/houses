@@ -24,6 +24,7 @@ The spreadsheet works but it's the only interface:
 - **No provenance.** When looking at a value, there's no way to gauge how reliable it is — was the commute calculated from an exact address or a postcode centroid? Is the EPC current or 10 years old? When something looks wrong, you can't find where it came from or what fallback was taken.
 - **Adding a new data module requires touching 7+ files** (EnrichedProperty, Row.HEADERS, Row.from_property, enrichment function, run_enrichment, View tab formulas, migrate-view deployment). The ceremony discourages adding useful data.
 - **User-specific config** (office locations, car ownership, trip frequencies) is hardcoded.
+- **The "Current" status is a spreadsheet bodge.** It flags the house they currently live in to skip stamp duty, show rental income instead of mortgage, and handle the fact that Ashby isn't a co-owner but pays rent. This needs proper modelling — a property-level `is_current_home` flag and different financial logic, not a hack on the status column.
 
 ### What does success look like?
 
@@ -77,7 +78,7 @@ class NodeDef:
     display: Literal["currency", "duration", "percent", "text", "badge"] = "text"
     rating_fn: Callable | None = None # value → "good" | "warn" | "bad" | None
     group_id: str = ""
-    description: str = ""             # what this value means, rendered verbatim in UI provenance
+    calculation_description: str = ""             # description of how value was calculated, rendered verbatim in UI provenance
 ```
 
 ```python
