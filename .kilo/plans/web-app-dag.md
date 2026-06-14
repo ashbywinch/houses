@@ -338,13 +338,42 @@ This means:
 
 ## Why not a graph DB?
 
-A graph DB (Neo4j, Dgraph, etc.) would be wrong here. The DAG structure is **static** — it's the `NODES` dict in Python code. It doesn't change per property. What gets stored per property is just computed values with metadata, which is a flat key-value mapping:
+This IS a graph — directed, node-attributed, with parent references. Graph DBs exist for exactly this pattern. But the complexity doesn't pay at our scale:
 
-```
-(property_id, node_id) → NodeResult JSON
+**What a graph DB adds:** separate server process, query language (Cypher/DQL), connection pool, backup strategy, schema management. That's ~500 lines of ops code before one query.
+
+**What we actually need:** load all node results for a property (keyed by node_id), then walk the `deps` tree in memory via dict lookups. For 40 nodes × 100 properties = 4000 rows, this takes ~2ms.
+
+### Two approaches that avoid a graph DB
+
+**A. Store deps as a JSON list in the NodeResult.** `dep_ids: list[str]` instead of recursive `deps: dict[str, NodeResult]`. Query all rows for a property, build the tree in Python:
+
+```python
+rows = db.execute("SELECT node_id, result_json FROM node_results WHERE property_id = ?", (pid,))
+results = {row[0]: NodeResult.from_json(row[1]) for row in rows}
+
+def subtree(nid: str, depth: int) -> dict:
+    result = results[nid]
+    if depth > 0:
+        result = replace(result, deps={
+            dep: subtree(dep, depth - 1) for dep in result.dep_ids if dep in results
+        })
+    return result
 ```
 
-That's a primary key, two columns. A graph DB adds a server process, a query language, migration tools, and connection management — for what a SQLite row handles. The "graph" in "DAG" is the code, not the database.
+**B. Same flat table, use SQLite recursive CTE for traversal.** No recursive Python — the traversal happens in the database:
+
+```sql
+WITH RECURSIVE dep_tree(node_id) AS (
+    SELECT 'stamp_duty'
+    UNION
+    SELECT value FROM node_results, json_each(node_results.dep_ids)
+    WHERE node_results.property_id = ? AND node_results.node_id = dep_tree.node_id
+)
+SELECT * FROM node_results WHERE property_id = ? AND node_id IN dep_tree;
+```
+
+Either way: flat SQLite table, no graph DB server, no new query language, no migration tooling. The "graph" part is handled by Python dict lookups or a `WITH RECURSIVE` query — both trivial at our data volume.
 
 ## What happens when the DAG changes in code
 
