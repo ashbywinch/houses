@@ -4,17 +4,17 @@
 
 ### Who are the users?
 
-**Ashby (me)** — technical, system author. Needs to add new enrichment modules, debug when things go wrong, and maintain the system. Uses the web UI on desktop and phone.
+**Ashby (me)** — technical, system author, co-buyer. Needs to add enrichment modules, debug issues, and maintain the system. Also needs to see the full picture on desktop and phone just like everyone else. Has separate finances.
 
-**Simon** — non-technical housemate. Often adds new houses he's found on Rightmove. Needs to see commute to his office (Pimlico/Victoria, has a car), schools for his son, and his share of the financial impact. Uses the web UI on phone.
+**Simon** — non-technical co-buyer. Often adds new houses he's found on Rightmove. Commutes to Pimlico/Victoria (has a car) and also to a Bracknell office some days. Has a son, so school data matters. Shares finances with Lorena.
 
-**Lorena** — non-technical housemate (Simon's partner). Needs to see her commute to Aldgate/City of London (no car), and her share of the financial impact. Uses the web UI on phone.
+**Lorena** — non-technical co-buyer (Simon's partner). Commutes to Aldgate/City of London (no car). Shares finances with Simon.
 
 **Ashby's AI agents** — need to debug why a value is what it is, trace it back to its source API, understand fallback logic, and extend the system with new modules. Do not use the spreadsheet.
 
 ### What are they trying to do?
 
-The three of us are buying a house together. Simon and Lorena share finances; Ashby has separate finances. We all need to understand the financial impact (monthly costs, deposit contribution, stamp duty split). We add properties to a shared spreadsheet, enrich them with data (commute, schools, EPC, council tax, affordability calculations), discuss and add comments, and decide what to do next for each house: decide against, book a viewing, or wait.
+The three of us are buying a house together. Simon and Lorena are a couple with joint finances; Ashby has separate finances. We all need to understand the overall financial impact (monthly costs, deposit contribution, stamp duty split). We add properties to a shared spreadsheet, enrich them with data (commute, schools, EPC, council tax, affordability calculations), discuss and add comments, and decide what to do next for each house: decide against, book a viewing, or wait. All three of us are interested in all the information — commute, schools, area, affordability, condition — even if some details are more relevant to one person than another.
 
 Currently the spreadsheet works but:
 - It's not glanceable — 40 columns, you can't quickly see what a house is like
@@ -34,13 +34,11 @@ Currently the spreadsheet works but:
 ### What does success look like?
 
 A web app where:
-- Simon opens a property page on his phone and immediately sees his commute, his son's school options, his share of the monthly cost. Glanceable, no spreadsheet scrolling.
-- Lorena opens the same page and sees her commute and her share, without Simon's details getting in the way.
-- Ashby opens it on desktop and sees the full picture, including affordability breakdown and which properties need action.
+- Any of us opens a property page on their phone and immediately sees: price, EPC rating (colour-coded), commute times for all three routes (Simon London, Lorena London, Simon Bracknell), schools, and total monthly cost. Glanceable, no spreadsheet scrolling.
 - Tapping any value shows how it was calculated and where the data came from.
 - Ashby's agent can GET `/properties/12345/graph?node=stamp_duty` and get back a JSON tree showing exactly how that value was computed, what APIs were called, and whether anything went wrong.
 - Adding a new enrichment module (crime stats, planning applications) means writing the enrichment function and declaring what it produces — no spreadsheet columns, no formula sync, no view migration.
-- User-specific config (office locations, car ownership, trip frequencies, deposit shares) lives in a config file or env vars, not hardcoded in Python modules.
+- User-specific config (office locations, car ownership, trip frequencies, deposit shares) lives in a config file, not hardcoded in Python modules.
 
 ---
 
