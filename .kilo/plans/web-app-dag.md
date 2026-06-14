@@ -312,11 +312,29 @@ For human readability, the endpoint also accepts `?format=mermaid` or `?format=t
 
 ---
 
-## Caching
+## Persistence (provenance must survive restarts)
 
-Simple dict cache, keyed by `property_id/node_id`. On enrichment completion, cache all node results. On manual input change (lat/lng, status), pass `invalidated={node_id}` to `resolve()` which recomputes only the affected subtree.
+The `NodeResult` cache **must be persistent**. The debugging scenario depends on it — the user reports a bug hours later, the agent queries the graph endpoint, and the enrichment-time state is still there.
 
-Cache storage: in-memory for development, SQLite for persistence (a single table: `property_id, node_id, result_json, updated_at`).
+Storage: SQLite, single table:
+
+```sql
+CREATE TABLE node_results (
+    property_id TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    result_json TEXT NOT NULL,     -- serialized NodeResult
+    updated_at TEXT NOT NULL,      -- ISO 8601
+    PRIMARY KEY (property_id, node_id)
+);
+```
+
+On enrichment completion, upsert all node results. On manual input change, invalidate+recompute the affected subtree and upsert those nodes. The graph endpoint reads directly from this table (or from an in-memory cache that's a read-through to SQLite).
+
+This means:
+- Server restart → data survives
+- Bug report hours/days later → agent queries graph, gets exact enrichment-time state
+- Multiple properties → each has its own independent graph
+- Re-enrichment → overwrites node results, previous state is replaced
 
 ---
 
@@ -363,31 +381,62 @@ Design artefacts: HTML mockups, following the chronic-wellness `design/` convent
 
 ---
 
-## How this helps agents debug
+## Retrospective debugging — the real agent use case
 
-**Before:** "The stamp duty is wrong. Let me read the logs to see what price was used. Actually let me try running the server locally. The logs are noisy. I can't find the right line."
+**The scenario:** The user reports "the total monthly cost on property X looks wrong." The agent has no idea when the user was looking. The enrichment might have taken a fallback path because an API was out of credits. The agent can't reproduce it because today that API works fine, or the user won't re-trigger enrichment on a property they already corrected.
 
-**After:**
+**Logs don't help.** The agent doesn't know the timestamp. Even if they did, the relevant information (which API path was taken, what the fallback was, what intermediate values were) is spread across multiple log lines in a noisy stream.
+
+**The graph endpoint solves this because provenance is captured at compute time and persisted.** The agent doesn't reconstruct what happened — they read what *did* happen:
+
 ```
-GET /properties/{rid}/graph?node=stamp_duty&depth=2
-→ sees price=450000, status="For Sale"
-→ formula: _calc_stamp_duty(450000, "For Sale")
-→ result: 10000
+User: "The total monthly cost on 123 Rightmove is wrong."
 
-# If something is missing:
-GET /properties/{rid}/graph?node=simon_commute_time
-→ status: "missing"
-→ error: "TfL API returned 429 at 2026-06-14T10:30:00Z"
-→ source_time: 2026-06-14T10:30:00Z
+Agent:
+→ GET /properties/{rid}/graph?node=total_monthly_housing&depth=3
+→ Returns:
+  total_monthly_housing: {
+    value: 4500,
+    deps: {
+      commute_cost: {
+        value: 320,
+        deps: {
+          simon_cost: {
+            value: 0,
+            source: "nr_fare_fallback",
+            source_time: "2026-06-13T15:30:00Z",
+            compute_info: {
+              path: "TfL returned 402 (out of credits) → NR fare fallback"
+            }
+          },
+          lorena_cost: { ... }
+        }
+      },
+      mortgage_payment: { value: 2800, ... },
+      council_tax: { value: 200, ... }
+    }
+  }
 
-# If an error:
-GET /properties/{rid}/graph?node=epc_rating
-→ status: "error"
-→ error: "Traceback: ... KeyError: 'currentEnergyEfficiencyBand'"
-→ source: "epc_api"
+Agent: "Simon's commute cost is 0 because the TfL API was out of credits
+when this property was enriched. The fallback produced no result for
+Simon's station. That's the root cause."
 ```
 
-No log parsing. No server restart. One HTTP call per node, walking the dependency tree.
+The agent **did not need to know** when the enrichment happened. The `source_time` on each `NodeResult` tells them. The **fallback path** is captured in `compute_info.path`. The **error** is in the `status`/`error` fields. Everything they need was captured when the value was computed and stored alongside it.
+
+**Key requirement: provenance must be persisted, not ephemeral.** The `NodeResult` cache must survive server restarts (SQLite). When the user reports a bug hours or days later, the agent hits the graph endpoint and gets the exact state at enrichment time.
+
+**What the agent *can't* do anymore:**
+- Ask "when did you look at it?"
+- Try to re-run enrichment and hope it fails the same way
+- Read 500 lines of logs to find the relevant entries
+- Parse unstructured text to understand what fallback was taken
+
+**What the agent *can* do:**
+- `GET /properties/{rid}/graph?node=total_monthly_housing&depth=10`
+- Walk the JSON tree from the symptom back to the root cause
+- Read `source`, `source_time`, `compute_info`, `status`, `error` on every node
+- Find the exact API call that failed and why
 
 ---
 
