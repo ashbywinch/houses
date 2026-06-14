@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 375 640" width="375" height="640">
+  <defs>
+    <!-- Spinner animation for in-progress state -->
+    <style>
+      @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      .spinner-arc {
+        animation: spin 1s linear infinite;
+        transform-origin: 6px 6px;
+      }
+      .pulse {
+        animation: pulse 1.5s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 0.6; }
+        50% { opacity: 1; }
+      }
+    </style>
+    <filter id="cardShadow" x="-4%" y="-2%" width="108%" height="112%">
+      <feDropShadow dx="0" dy="1" stdDeviation="3" flood-color="#000" flood-opacity="0.08"/>
+    </filter>
+    <filter id="headerShadow" x="0" y="0" width="100%" height="120%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#000" flood-opacity="0.15"/>
+    </filter>
+    <!-- Clip for spinner arc -->
+    <clipPath id="spinnerClip">
+      <rect x="0" y="0" width="12" height="12"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <rect width="375" height="640" fill="#f4f5f7"/>
+
+  <!-- ========== HEADER ========== -->
+  <rect width="375" height="56" fill="#1a2a3a" filter="url(#headerShadow)"/>
+  <!-- Back arrow -->
+  <g transform="translate(16, 20)">
+    <polyline points="8,0 0,8 8,16" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="34" y="34" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="15" fill="#ffffff" font-weight="500">Houses</text>
+  <!-- Title centred -->
+  <text x="187.5" y="34" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="17" fill="#ffffff" font-weight="600" text-anchor="middle">Add Property</text>
+
+  <!-- ========== STATE LABEL: FORM ========== -->
+  <text x="16" y="80" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" fill="#999" font-weight="600" letter-spacing="0.5" text-transform="uppercase">STATE 1 — FORM</text>
+
+  <!-- ========== FORM CARD ========== -->
+  <rect x="16" y="92" width="343" height="240" rx="12" ry="12" fill="#ffffff" filter="url(#cardShadow)"/>
+
+  <!-- Rightmove Link Label -->
+  <text x="32" y="116" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="13" fill="#1a1a1a" font-weight="600">Rightmove Link</text>
+
+  <!-- Rightmove Link Input -->
+  <rect x="32" y="124" width="311" height="40" rx="8" ry="8" fill="#f8f8f8" stroke="#ddd" stroke-width="1"/>
+  <text x="44" y="149" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="13" fill="#999">https://www.rightmove.co.uk/...</text>
+
+  <!-- Divider text -->
+  <text x="187.5" y="184" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="12" fill="#999" text-anchor="middle">Or fill in manually:</text>
+
+  <!-- Postcode -->
+  <text x="32" y="208" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="13" fill="#1a1a1a" font-weight="600">Postcode</text>
+  <rect x="32" y="216" width="95" height="36" rx="8" ry="8" fill="#f8f8f8" stroke="#ddd" stroke-width="1"/>
+
+  <!-- Price -->
+  <text x="143" y="208" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="13" fill="#1a1a1a" font-weight="600">Price</text>
+  <rect x="143" y="216" width="95" height="36" rx="8" ry="8" fill="#f8f8f8" stroke="#ddd" stroke-width="1"/>
+
+  <!-- Beds -->
+  <text x="254" y="208" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="13" fill="#1a1a1a" font-weight="600">Beds</text>
+  <rect x="254" y="216" width="89" height="36" rx="8" ry="8" fill="#f8f8f8" stroke="#ddd" stroke-width="1"/>
+
+  <!-- Add House Button -->
+  <rect x="32" y="268" width="311" height="44" rx="8" ry="8" fill="#1a2a3a"/>
+  <text x="187.5" y="295" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="15" fill="#ffffff" font-weight="600" text-anchor="middle">Add House</text>
+
+  <!-- ========== DIVIDER ========== -->
+  <line x1="16" y1="356" x2="359" y2="356" stroke="#ddd" stroke-width="1" stroke-dasharray="4,3"/>
+  <rect x="135" y="350" width="105" height="16" rx="4" fill="#f4f5f7"/>
+  <text x="187.5" y="361" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="10" fill="#999" text-anchor="middle" font-weight="600">ENRICHMENT</text>
+
+  <!-- ========== STATE 2: PROGRESS CARD ========== -->
+  <text x="16" y="384" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" fill="#999" font-weight="600" letter-spacing="0.5">STATE 2 — PROGRESS</text>
+
+  <rect x="16" y="394" width="343" height="236" rx="12" ry="12" fill="#ffffff" filter="url(#cardShadow)"/>
+
+  <!-- Progress card title -->
+  <text x="32" y="420" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="15" fill="#1a1a1a" font-weight="600">Enriching 48 Acacia Avenue...</text>
+
+  <!-- Progress bar background -->
+  <rect x="32" y="430" width="311" height="4" rx="2" fill="#eee"/>
+  <!-- Progress bar fill (2 of 6 done = ~33%) -->
+  <rect x="32" y="430" width="104" height="4" rx="2" fill="#1a2a3a"/>
+
+  <!-- ===== Item 1: Done ===== -->
+  <!-- Green checkmark circle -->
+  <circle cx="44" cy="456" r="8" fill="#2e7d32"/>
+  <polyline points="40,456 43,459 49,453" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="60" y="454" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="13" fill="#1a1a1a" font-weight="500">Scraping Rightmove page</text>
+  <text x="60" y="467" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" fill="#999">Extracted price, images, description</text>
+
+  <!-- ===== Item 2: In Progress (spinning arc) ===== -->
+  <g transform="translate(38, 482)">
+    <!-- Spinning partial circle -->
+    <circle cx="6" cy="6" r="5.5" fill="none" stroke="#ddd" stroke-width="1"/>
+    <path d="M6,0.5 A5.5,5.5 0 1,1 1.8,9.3" fill="none" stroke="#1a2a3a" stroke-width="1.5" stroke-linecap="round" class="spinner-arc"/>
+  </g>
+  <text x="60" y="491" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="13" fill="#1a1a1a" font-weight="500">Geocoding address</text>
+  <text x="60" y="504" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" fill="#999" class="pulse">Resolving coordinates via postcodes.io...</text>
+
+  <!-- ===== Item 3: Pending ===== -->
+  <circle cx="44" cy="522" r="6" fill="none" stroke="#ccc" stroke-width="1.5"/>
+  <text x="60" y="526" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="13" fill="#999" font-weight="500">Computing commutes</text>
+  <text x="60" y="539" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" fill="#ccc">Transit times to pinned locations</text>
+
+  <!-- ===== Item 4: Pending ===== -->
+  <circle cx="44" cy="552" r="6" fill="none" stroke="#ccc" stroke-width="1.5"/>
+  <text x="60" y="556" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="13" fill="#999" font-weight="500">Looking up schools</text>
+  <text x="60" y="569" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" fill="#ccc">Ofsted ratings within catchment</text>
+
+  <!-- ===== Item 5: Pending ===== -->
+  <circle cx="44" cy="582" r="6" fill="none" stroke="#ccc" stroke-width="1.5"/>
+  <text x="60" y="586" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="13" fill="#999" font-weight="500">Checking EPC</text>
+  <text x="60" y="599" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" fill="#ccc">Energy performance certificate</text>
+
+  <!-- ===== Item 6: Pending ===== -->
+  <circle cx="44" cy="612" r="6" fill="none" stroke="#ccc" stroke-width="1.5"/>
+  <text x="60" y="616" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="13" fill="#999" font-weight="500">Council tax lookup</text>
+  <text x="60" y="629" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" fill="#ccc">Band and annual cost</text>
+
+  <!-- Bottom safe area padding -->
+  <rect x="0" y="630" width="375" height="10" fill="#f4f5f7"/>
+</svg>

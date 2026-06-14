@@ -9,6 +9,7 @@ from typing import Annotated, Any
 
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 import houses.location as _loc
 from houses.config import settings
@@ -32,6 +33,7 @@ from houses.sheets import (
 )
 from houses.sheets.backfill import batch_stream
 from houses.sheets.reader import get_properties_data, resolve_tab
+from houses.web.router import web_router
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +73,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+app.mount("/static", StaticFiles(directory="houses/static"), name="static")
+app.include_router(web_router)
 
 
 @app.middleware("http")

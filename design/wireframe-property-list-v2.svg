@@ -1,0 +1,178 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 375 1000" width="375" height="1000" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <defs>
+    <filter id="shadow" x="-4%" y="-4%" width="112%" height="112%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000" flood-opacity="0.06"/>
+    </filter>
+  </defs>
+
+  <!-- Page bg -->
+  <rect width="375" height="1000" fill="#f4f5f7"/>
+
+  <!-- Header -->
+  <rect width="375" height="56" fill="#1a2a3a"/>
+  <text x="16" y="36" fill="#fff" font-size="20" font-weight="700">Houses</text>
+
+  <!-- + button -->
+  <circle cx="337" cy="28" r="14" fill="rgba(255,255,255,0.12)"/>
+  <line x1="337" y1="21" x2="337" y2="35" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+  <line x1="330" y1="28" x2="344" y2="28" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Show dismissed link -->
+  <text x="290" y="13" fill="rgba(255,255,255,0.65)" font-size="11" text-anchor="end">Show dismissed (3) ▾</text>
+
+  <!-- CARD 1 — 48 Acacia Avenue (Maybe, full data) -->
+  <g filter="url(#shadow)">
+    <rect x="12" y="72" width="351" height="170" rx="12" fill="#fff"/>
+
+    <!-- Status dot ◇ blue -->
+    <circle cx="339" cy="92" r="5" fill="#1565c0"/>
+
+    <!-- Address + Price -->
+    <text x="28" y="96" fill="#1a1a1a" font-size="15" font-weight="600">48 Acacia Avenue, SW1</text>
+    <text x="330" y="96" fill="#1a1a1a" font-size="15" font-weight="700" text-anchor="end">£450,000</text>
+
+    <!-- Specs -->
+    <text x="28" y="118" fill="#666" font-size="13">3 bed · 1 bath · SW1</text>
+
+    <!-- Divider -->
+    <line x1="28" y1="130" x2="347" y2="130" stroke="#eee" stroke-width="1"/>
+
+    <!-- Commute pills -->
+    <text x="28" y="150" fill="#666" font-size="12" font-weight="500">Simon</text>
+    <rect x="68" y="138" width="42" height="22" rx="11" fill="#2e7d32"/>
+    <text x="89" y="153" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">32m</text>
+
+    <text x="128" y="150" fill="#d0d0d0" font-size="13">·</text>
+    <text x="140" y="150" fill="#666" font-size="12" font-weight="500">Lorena</text>
+    <rect x="182" y="138" width="42" height="22" rx="11" fill="#e65100"/>
+    <text x="203" y="153" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">45m</text>
+
+    <text x="242" y="150" fill="#d0d0d0" font-size="13">·</text>
+    <text x="254" y="150" fill="#666" font-size="12" font-weight="500">Bracknell</text>
+    <rect x="312" y="138" width="42" height="22" rx="11" fill="#2e7d32"/>
+    <text x="333" y="153" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">22m</text>
+
+    <!-- Divider -->
+    <line x1="28" y1="172" x2="347" y2="172" stroke="#eee" stroke-width="1"/>
+
+    <!-- Schools line -->
+    <text x="28" y="192" fill="#1a1a1a" font-size="13" font-weight="600">St Mary's Primary</text>
+    <!-- Ofsted dot (green = Outstanding) -->
+    <circle cx="142" cy="186" r="6" fill="#2e7d32"/>
+    <text x="142" y="193" fill="#fff" font-size="9" font-weight="700" text-anchor="middle" dominant-baseline="central">O</text>
+    <!-- Walk dot (green = <15m) -->
+    <circle cx="156" cy="186" r="6" fill="#2e7d32"/>
+    <text x="156" y="193" fill="#fff" font-size="9" font-weight="700" text-anchor="middle" dominant-baseline="central">W</text>
+
+    <text x="172" y="192" fill="#d0d0d0" font-size="13">·</text>
+
+    <text x="184" y="192" fill="#1a1a1a" font-size="13" font-weight="600">The Academy</text>
+    <!-- Ofsted dot (orange = Good) -->
+    <circle cx="280" y="186" r="6" fill="#e65100"/>
+    <text x="280" y="193" fill="#fff" font-size="9" font-weight="700" text-anchor="middle" dominant-baseline="central">G</text>
+    <!-- Walk dot (green = <15m) -->
+    <circle cx="294" y="186" r="6" fill="#2e7d32"/>
+    <text x="294" y="193" fill="#fff" font-size="9" font-weight="700" text-anchor="middle" dominant-baseline="central">W</text>
+
+    <!-- Divider -->
+    <line x1="28" y1="204" x2="347" y2="204" stroke="#eee" stroke-width="1"/>
+
+    <!-- Financial line -->
+    <text x="28" y="224" fill="#1a1a1a" font-size="14" font-weight="700">~£2,850/mo</text>
+    <text x="130" y="224" fill="#666" font-size="13">· +£800 vs now</text>
+    <text x="262" y="224" fill="#666" font-size="13">·</text>
+    <rect x="274" y="211" width="42" height="22" rx="11" fill="#e8f5e9"/>
+    <text x="295" y="226" fill="#2e7d32" font-size="11" font-weight="600" text-anchor="middle">Walk 12m</text>
+  </g>
+
+  <!-- CARD 2 — Current home (green left border) -->
+  <g filter="url(#shadow)">
+    <!-- Green left border strip -->
+    <rect x="12" y="258" width="4" height="158" rx="2" fill="#2e7d32"/>
+    <rect x="16" y="258" width="347" height="158" rx="12" fill="#fff"/>
+
+    <!-- 🏠 icon -->
+    <text x="335" y="282" fill="#2e7d32" font-size="16">🏠</text>
+
+    <text x="32" y="282" fill="#1a1a1a" font-size="15" font-weight="600">12 Maple Road, NW5</text>
+    <text x="324" y="282" fill="#1a1a1a" font-size="15" font-weight="700" text-anchor="end">£525,000</text>
+
+    <text x="32" y="304" fill="#666" font-size="13">4 bed · 2 bath</text>
+
+    <line x1="32" y1="316" x2="347" y2="316" stroke="#eee" stroke-width="1"/>
+
+    <!-- Commutes (only 2 persons for current home) -->
+    <text x="32" y="336" fill="#666" font-size="12" font-weight="500">Simon</text>
+    <rect x="72" y="324" width="42" height="22" rx="11" fill="#e65100"/>
+    <text x="93" y="339" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">55m</text>
+
+    <text x="132" y="336" fill="#d0d0d0" font-size="13">·</text>
+    <text x="144" y="336" fill="#666" font-size="12" font-weight="500">Lorena</text>
+    <rect x="186" y="324" width="42" height="22" rx="11" fill="#2e7d32"/>
+    <text x="207" y="339" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">38m</text>
+
+    <!-- No schools line for current home -->
+
+    <line x1="32" y1="358" x2="347" y2="358" stroke="#eee" stroke-width="1"/>
+
+    <!-- Absolute total (no delta) -->
+    <text x="32" y="390" fill="#1a1a1a" font-size="14" font-weight="700">Total monthly: £3,100/mo</text>
+  </g>
+
+  <!-- CARD 3 — 7 Oak Lane (unenriched, compact) -->
+  <g filter="url(#shadow)">
+    <rect x="12" y="432" width="351" height="110" rx="12" fill="#fff"/>
+
+    <!-- Status dot unset (grey outline) -->
+    <circle cx="339" cy="452" r="5" stroke="#ccc" stroke-width="1.5" fill="none"/>
+
+    <text x="28" y="456" fill="#1a1a1a" font-size="15" font-weight="600">7 Oak Lane, SE15</text>
+    <text x="330" y="456" fill="#1a1a1a" font-size="15" font-weight="700" text-anchor="end">£380,000</text>
+
+    <text x="28" y="478" fill="#666" font-size="13">3 bed · 1 bath · SE15</text>
+
+    <line x1="28" y1="490" x2="347" y2="490" stroke="#eee" stroke-width="1"/>
+
+    <!-- No commutes, no schools — not enriched -->
+
+    <!-- Price as proxy -->
+    <text x="28" y="520" fill="#1a1a1a" font-size="14" font-weight="700">£380,000</text>
+    <text x="115" y="520" fill="#999" font-size="13">· Walk to town pending</text>
+  </g>
+
+  <!-- Section header for dismissed -->
+  <rect x="12" y="562" width="351" height="36" rx="8" fill="rgba(198,40,40,0.06)"/>
+  <text x="28" y="585" fill="#c62828" font-size="13" font-weight="600">⏴ Dismissed (3)</text>
+  <text x="345" y="585" fill="#c62828" font-size="12" text-anchor="end">Hide ▾</text>
+
+  <!-- CARD 4 — Dismissed (red left border, dimmed) -->
+  <g filter="url(#shadow)" opacity="0.5">
+    <!-- Red left border strip -->
+    <rect x="12" y="606" width="4" height="146" rx="2" fill="#c62828"/>
+    <rect x="16" y="606" width="347" height="146" rx="12" fill="#fff"/>
+
+    <text x="32" y="630" fill="#1a1a1a" font-size="15" font-weight="600">15 Victoria Road, E8</text>
+    <text x="324" y="630" fill="#1a1a1a" font-size="15" font-weight="700" text-anchor="end">£325,000</text>
+
+    <text x="32" y="652" fill="#666" font-size="13">2 bed · 1 bath · E8</text>
+
+    <line x1="32" y1="664" x2="347" y2="664" stroke="#eee" stroke-width="1"/>
+
+    <text x="32" y="684" fill="#666" font-size="12" font-weight="500">Simon</text>
+    <rect x="72" y="672" width="42" height="22" rx="11" fill="#2e7d32"/>
+    <text x="93" y="687" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">32m</text>
+
+    <text x="132" y="684" fill="#d0d0d0" font-size="13">·</text>
+    <text x="144" y="684" fill="#666" font-size="12" font-weight="500">Lorena</text>
+    <rect x="186" y="672" width="42" height="22" rx="11" fill="#e65100"/>
+    <text x="207" y="687" fill="#fff" font-size="11" font-weight="700" text-anchor="middle">55m</text>
+
+    <line x1="32" y1="706" x2="347" y2="706" stroke="#eee" stroke-width="1"/>
+
+    <text x="32" y="728" fill="#1a1a1a" font-size="14" font-weight="700">~£2,400/mo</text>
+    <text x="134" y="728" fill="#666" font-size="13">· +£400 vs now</text>
+  </g>
+
+  <!-- Dismissed indicator text -->
+  <text x="28" y="777" fill="#999" font-size="11" font-style="italic">Dismissed · tap to reactivate</text>
+</svg>

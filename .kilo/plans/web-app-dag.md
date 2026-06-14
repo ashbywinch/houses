@@ -52,7 +52,7 @@ Two parallel tracks:
 
 **Track B — DAG data model (behind the scenes).** Define every enrichment value as a node in a computation graph. Nodes know their dependencies, their compute logic, and their provenance. Results are cached in SQLite. The UI reads from SQLite when available, falls back to the sheet. Modules are migrated from sheet → DAG one at a time. New modules go directly on the DAG.
 
-The sheet stays the source of truth until every module is migrated. Enrichment always writes to the sheet (unchanged). Dual-write to SQLite is added alongside.
+The sheet remains in use until every module is migrated. Enrichment always writes to the sheet (unchanged). Dual-write to SQLite is added alongside. The web app uses the DAG for migrated modules and the sheet for unmigrated modules.
 
 ### Why a DAG?
 
@@ -94,15 +94,17 @@ class NodeResult:
     status: Literal["ok", "missing", "error"] = "missing"
     error: str | None = None          # traceback or message
     source: str = ""                  # "epc_api", "rightmove_scraper", "formula:stamp_duty"
+    source_detail: str = ""           # e.g. full json API response
     source_time: datetime | None = None
     source_status_code: int | None = None
     dep_ids: list[str] = field(default_factory=list)  # references to deps (not recursive)
-    compute_info: dict | None = None  # formula name, input values, intermediate steps, fallback path
+    compute_info: list | None = None  # user-understandable list of steps taken to calculate this value from immediate deps
 ```
 
 ### Node registry
 
-A single file `houses/model/nodes.py`. Every node the system knows about, declared top to bottom. Adding a module means adding nodes here.
+One file per data group in view `houses/model/[group].py` (e.g affordability, schools). Every node the system knows about, declared top to bottom. Adding a module means adding nodes here.
+One file for common nodes used by multiple groups.
 
 ```python
 NODES: dict[str, NodeDef] = {}
@@ -147,7 +149,8 @@ node("total_monthly_housing", "Total Monthly Housing Cost", "derived",
 ~90 lines. Topological sort (Kahn's), then walk in order. For each node:
 - Check cache (hit → skip)
 - Check if all deps are cached (no → mark stale)
-- Source nodes: extract from EnrichedProperty
+- User entered nodes: extract from sheet in early version, read from DB once module migrated, user will enter in web app.
+- Source nodes via API: queue API query if not cached, we need a way to make sure deps recalculate when it comes back.
 - Derived nodes: call compute function with resolved dep values
 - Manual nodes: value from user input
 - Wrap in NodeResult with provenance (source, timestamp, status, compute_info, error on failure)
@@ -169,6 +172,7 @@ CREATE TABLE node_results (
 ```
 
 All node results for a property are loaded at once and traversed via Python dict lookups (40 nodes × 100 properties = 4000 rows, ~2ms load time). No graph database needed.
+Keep past outdated results for debugging purposes (just only use latest in the UI).
 
 ### Graph endpoint
 
@@ -180,7 +184,7 @@ Returns the NodeResult for that node, with dependencies recursively resolved up 
 Agent: → GET /properties/123/graph?node=total_monthly_housing&depth=3
        → sees commute_cost.deps.simon_cost.source = "nr_fare_fallback"
          and compute_info.path = "TfL returned 402 → NR fare fallback"
-       "That's why Simon's cost is 0. TfL was out of credits."
+       "That's why Simon's cost is blank. TfL was out of credits."
 ```
 
 ### Retrospective debugging
@@ -196,8 +200,8 @@ The agent doesn't know when the user looked at a property. Logs by timestamp are
 Build a web app that reads from the existing Google Sheet via `houses/sheets/reader.py`.
 
 **Pages:**
-- Property list: scrollable summary cards with price, bedrooms, EPC (coloured), commute summary, status
-- Property detail: full card with 5 zones (Key Info, Commute, Schools, Affordability, User Inputs)
+- Property list: scrollable summary cards with visual overview of each data group
+- Property detail: full card for one house with 5 zones (Key Info, Commute, Schools, Affordability, User Inputs)
 - Mobile-responsive (this is the main win over the spreadsheet)
 
 **Delivers:** glanceable, mobile-friendly view. Zero backend changes. The sheet stays the source of truth.
@@ -233,9 +237,7 @@ Walkability, town description, council tax, geo, formulas (stamp duty, mortgage,
 
 ### Slice 7 (optional) — Sheet as legacy archive
 
-If every field is in SQLite and the UI handles manual edits, the sheet becomes a readable backup.
-
-### Slice 8 — Background enrichment + property submission (future)
+Allow adding new property rightmove links via the web app. Sheet is now legacy archive and unused.
 
 Simon adds houses by pasting Rightmove links into the web app. Enrichment runs as a background task (not blocking the HTTP response). A job/task table tracks status: `pending → enriching → complete | failed`. The graph endpoint serves as the progress/debug view — agents and humans can check which nodes have been computed, which are pending, and which failed and why. This builds naturally on the DAG model: enrichment is just running the resolver for a new property.
 
