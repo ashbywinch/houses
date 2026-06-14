@@ -1,0 +1,166 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 375 1000" width="375" height="1000">
+  <defs>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+    </style>
+    <!-- Subtle card shadow -->
+    <filter id="cardShadow" x="-2%" y="-1%" width="104%" height="106%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#000" flood-opacity="0.06"/>
+    </filter>
+    <filter id="headerShadow" x="0" y="0" width="100%" height="120%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#000" flood-opacity="0.12"/>
+    </filter>
+    <filter id="summaryShadow" x="0" y="-2%" width="100%" height="110%">
+      <feDropShadow dx="0" dy="1" stdDeviation="1.5" flood-color="#000" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="375" height="1000" fill="#f4f5f7"/>
+
+  <!-- ==================== HEADER BAR ==================== -->
+  <rect width="375" height="56" fill="#1a2a3a" filter="url(#headerShadow)"/>
+  <!-- Back arrow -->
+  <path d="M16 28 L24 20 M16 28 L24 36" stroke="#ffffff" stroke-width="2" stroke-linecap="round" fill="none"/>
+  <!-- Back label -->
+  <text x="32" y="33" fill="#ffffff" font-size="15" font-weight="400">Properties</text>
+  <!-- Title (truncated with ellipsis) -->
+  <text x="187.5" y="33" fill="#ffffff" font-size="15" font-weight="600" text-anchor="middle">48 Acacia Avenue</text>
+
+  <!-- ==================== SUMMARY BAR ==================== -->
+  <rect y="56" width="375" height="64" fill="#ffffff" filter="url(#summaryShadow)"/>
+  <!-- EPC Badge -->
+  <rect x="16" y="72" width="28" height="28" rx="6" fill="#2e7d32"/>
+  <text x="30" y="91" fill="#ffffff" font-size="13" font-weight="700" text-anchor="middle">B</text>
+  <!-- Status pill -->
+  <rect x="52" y="76" width="52" height="22" rx="11" fill="#e3f2fd"/>
+  <text x="78" y="91" fill="#1565c0" font-size="11" font-weight="600" text-anchor="middle">Maybe</text>
+  <!-- Price / beds / baths -->
+  <text x="116" y="91" fill="#1a1a1a" font-size="14" font-weight="500">£450,000 · 3 bed · 1 bath</text>
+  <!-- Thin bottom divider -->
+  <line x1="0" y1="120" x2="375" y2="120" stroke="#eeeeee" stroke-width="0.5"/>
+
+  <!-- ==================== SECTION 1: KEY INFO (EXPANDED) ==================== -->
+  <!-- Card background -->
+  <rect x="12" y="128" width="351" height="232" rx="12" fill="#ffffff" filter="url(#cardShadow)"/>
+  <!-- Section header bg -->
+  <rect x="12" y="128" width="351" height="40" rx="12" fill="#fafafa"/>
+  <rect x="12" y="148" width="351" height="20" fill="#fafafa"/>
+  <!-- Chevron down -->
+  <path d="M339 144 L345 150 L351 144" stroke="#999" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+  <!-- Section title -->
+  <text x="28" y="153" fill="#1a1a1a" font-size="13" font-weight="600">Key Info</text>
+
+  <!-- Row: Price -->
+  <text x="28" y="192" fill="#666666" font-size="13">Price</text>
+  <text x="347" y="192" fill="#1a1a1a" font-size="13" font-weight="500" text-anchor="end">£450,000</text>
+  <line x1="28" y1="204" x2="347" y2="204" stroke="#eeeeee" stroke-width="0.5"/>
+
+  <!-- Row: Bedrooms -->
+  <text x="28" y="228" fill="#666666" font-size="13">Bedrooms</text>
+  <text x="347" y="228" fill="#1a1a1a" font-size="13" font-weight="500" text-anchor="end">3</text>
+  <line x1="28" y1="240" x2="347" y2="240" stroke="#eeeeee" stroke-width="0.5"/>
+
+  <!-- Row: Council Tax -->
+  <text x="28" y="264" fill="#666666" font-size="13">Council Tax</text>
+  <text x="347" y="264" fill="#1a1a1a" font-size="13" font-weight="500" text-anchor="end">Band D · £1,800/yr</text>
+  <line x1="28" y1="276" x2="347" y2="276" stroke="#eeeeee" stroke-width="0.5"/>
+
+  <!-- Row: EPC -->
+  <text x="28" y="300" fill="#666666" font-size="13">EPC</text>
+  <text x="347" y="300" fill="#2e7d32" font-size="13" font-weight="600" text-anchor="end">B (good)</text>
+  <line x1="28" y1="312" x2="347" y2="312" stroke="#eeeeee" stroke-width="0.5"/>
+
+  <!-- Google Maps link -->
+  <text x="28" y="340" fill="#1565c0" font-size="13" font-weight="500">📍 View on Google Maps</text>
+
+  <!-- ==================== SECTION 2: COMMUTE & AREA (EXPANDED) ==================== -->
+  <!-- Card background -->
+  <rect x="12" y="368" width="351" height="460" rx="12" fill="#ffffff" filter="url(#cardShadow)"/>
+  <!-- Section header bg -->
+  <rect x="12" y="368" width="351" height="40" rx="12" fill="#fafafa"/>
+  <rect x="12" y="388" width="351" height="20" fill="#fafafa"/>
+  <!-- Chevron down -->
+  <path d="M339 384 L345 390 L351 384" stroke="#999" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+  <!-- Section title -->
+  <text x="28" y="393" fill="#1a1a1a" font-size="13" font-weight="600">Commute &amp; Area</text>
+
+  <!-- Simon block -->
+  <text x="28" y="430" fill="#1a1a1a" font-size="13" font-weight="700">Simon → Victoria</text>
+  <!-- Duration pill (green) -->
+  <rect x="28" y="442" width="56" height="22" rx="11" fill="#e8f5e9"/>
+  <text x="56" y="457" fill="#2e7d32" font-size="11" font-weight="600" text-anchor="middle">32 min</text>
+  <!-- Cost -->
+  <text x="94" y="457" fill="#666666" font-size="12">£4.50/day</text>
+  <!-- Leg breakdown -->
+  <text x="28" y="480" fill="#999999" font-size="11">🚶 Walk to station (12m) → 🚇 Bakerloo (8m) → 🚇 Victoria (5m)</text>
+  <!-- Source -->
+  <text x="28" y="498" fill="#999999" font-size="11">ⓘ Source: TfL API</text>
+
+  <!-- Divider -->
+  <line x1="28" y1="512" x2="347" y2="512" stroke="#eeeeee" stroke-width="0.5"/>
+
+  <!-- Lorena block -->
+  <text x="28" y="536" fill="#1a1a1a" font-size="13" font-weight="700">Lorena → Aldgate</text>
+  <!-- Duration pill (orange) -->
+  <rect x="28" y="548" width="56" height="22" rx="11" fill="#fff3e0"/>
+  <text x="56" y="563" fill="#e65100" font-size="11" font-weight="600" text-anchor="middle">45 min</text>
+  <!-- Cost -->
+  <text x="94" y="563" fill="#666666" font-size="12">£2.80/day</text>
+  <!-- Leg breakdown -->
+  <text x="28" y="586" fill="#999999" font-size="11">🚶 Walk to station (8m) → 🚇 Central (22m) → 🚇 Aldgate (5m)</text>
+  <!-- Source -->
+  <text x="28" y="604" fill="#999999" font-size="11">ⓘ Source: TfL API</text>
+
+  <!-- Divider -->
+  <line x1="28" y1="618" x2="347" y2="618" stroke="#eeeeee" stroke-width="0.5"/>
+
+  <!-- Bracknell block -->
+  <text x="28" y="642" fill="#1a1a1a" font-size="13" font-weight="700">Bracknell</text>
+  <!-- Duration pill (green) -->
+  <rect x="28" y="654" width="56" height="22" rx="11" fill="#e8f5e9"/>
+  <text x="56" y="669" fill="#2e7d32" font-size="11" font-weight="600" text-anchor="middle">22 min</text>
+  <!-- Cost -->
+  <text x="94" y="669" fill="#666666" font-size="12">£6.00/day</text>
+
+  <!-- Divider -->
+  <line x1="28" y1="690" x2="347" y2="690" stroke="#eeeeee" stroke-width="0.5"/>
+
+  <!-- Area section -->
+  <text x="28" y="714" fill="#666666" font-size="11" font-weight="500">What the area is like</text>
+  <text x="28" y="736" fill="#1a1a1a" font-size="12">Family-friendly neighbourhood with parks, shops,</text>
+  <text x="28" y="752" fill="#1a1a1a" font-size="12">and good transport links. Close to the high street.</text>
+  <!-- Walk to town -->
+  <rect x="28" y="764" width="8" height="8" rx="4" fill="#2e7d32"/>
+  <text x="42" y="773" fill="#666666" font-size="12">Walk to town: 12 min</text>
+  <!-- Amenities -->
+  <text x="28" y="796" fill="#999999" font-size="12">Amenities: Co-op, GP surgery, park, library</text>
+
+  <!-- ==================== SECTION 3: SCHOOLS (COLLAPSED) ==================== -->
+  <rect x="12" y="836" width="351" height="44" rx="12" fill="#ffffff" filter="url(#cardShadow)"/>
+  <!-- Chevron right -->
+  <path d="M339 854 L345 858 L339 862" stroke="#999" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+  <!-- Section title -->
+  <text x="28" y="862" fill="#1a1a1a" font-size="13" font-weight="600">Schools</text>
+  <!-- Summary -->
+  <text x="82" y="862" fill="#666666" font-size="12">Primary: Outstanding ✓</text>
+
+  <!-- ==================== SECTION 4: AFFORDABILITY (COLLAPSED) ==================== -->
+  <rect x="12" y="888" width="351" height="44" rx="12" fill="#ffffff" filter="url(#cardShadow)"/>
+  <!-- Chevron right -->
+  <path d="M339 906 L345 910 L339 914" stroke="#999" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+  <!-- Section title -->
+  <text x="28" y="914" fill="#1a1a1a" font-size="13" font-weight="600">Affordability</text>
+  <!-- Summary -->
+  <text x="128" y="914" fill="#666666" font-size="12">£2,850/mo</text>
+
+  <!-- ==================== SECTION 5: NOTES & INPUTS (COLLAPSED) ==================== -->
+  <rect x="12" y="940" width="351" height="44" rx="12" fill="#ffffff" filter="url(#cardShadow)"/>
+  <!-- Chevron right -->
+  <path d="M339 958 L345 962 L339 966" stroke="#999" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+  <!-- Section title -->
+  <text x="28" y="966" fill="#1a1a1a" font-size="13" font-weight="600">Notes &amp; Inputs</text>
+  <!-- Summary -->
+  <text x="146" y="966" fill="#666666" font-size="12">2 fields set</text>
+
+</svg>
