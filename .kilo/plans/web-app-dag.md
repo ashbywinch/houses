@@ -336,9 +336,38 @@ This means:
 - Multiple properties → each has its own independent graph
 - Re-enrichment → overwrites node results, previous state is replaced
 
----
+## Why not a graph DB?
 
-## Phases
+A graph DB (Neo4j, Dgraph, etc.) would be wrong here. The DAG structure is **static** — it's the `NODES` dict in Python code. It doesn't change per property. What gets stored per property is just computed values with metadata, which is a flat key-value mapping:
+
+```
+(property_id, node_id) → NodeResult JSON
+```
+
+That's a primary key, two columns. A graph DB adds a server process, a query language, migration tools, and connection management — for what a SQLite row handles. The "graph" in "DAG" is the code, not the database.
+
+## What happens when the DAG changes in code
+
+The `NODES` dict is code. When it changes (new node, removed node, changed compute function, changed dependencies), the SQLite cache becomes stale. How to handle it depends on the change:
+
+| Change | Effect on cache | Handling |
+|--------|----------------|----------|
+| **New node added** | No row for it in SQLite | `resolve()` skips cache for unknown nodes — computed fresh on next call. No migration needed. |
+| **Node removed from NODES** | Orphan row in SQLite (references a node_id that no longer exists in `NODES`) | Harmless. `resolve()` ignores it. Could clean up with a one-shot script, or leave it — 40 bytes per property. |
+| **Compute function changed** (e.g. stamp duty brackets updated) | SQLite still has the old result. The resolver doesn't know the function changed. | Simplest: re-enrich the property. The user already does this when they want fresh data. Alternatively: add a `version` field to `NodeDef`, hash it into the cache key, or store a DAG version in SQLite and invalidate on mismatch. |
+| **Dependency changed** (e.g. `stamp_duty` now also depends on `is_first_time_buyer`) | Old cache has no `is_first_time_buyer` dep. Resolver sees missing deps → marks node as stale → recomputes. Handled automatically. |
+
+**For V1, the simplest approach:** don't worry about cache invalidation on code changes. When the user changes code AND wants to see updated values for existing properties, they re-enrich (which they already do today). The SQLite rows get overwritten with fresh results. No migration tooling needed.
+
+If stale data becomes a real problem later, add a DAG version constant:
+
+```python
+DAG_VERSION = 2  # bump when compute functions change
+```
+
+Store it in a `dag_meta` table. On server start, if the version doesn't match, truncate all `node_results`. Simple, no migration scripts needed.
+
+---
 
 ### Phase 1 — DAG foundation (estimated: 1–1.5 weeks)
 
