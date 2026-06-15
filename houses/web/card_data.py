@@ -1,20 +1,21 @@
+"""Card view model assembly.
+
+Pure functions that convert domain data (sheet rows, PropertyData) into
+CardData view models for the property list page.
+
+This module does NOT seed the DAG, resolve nodes, or call enrichment modules.
+It reads already-resolved data and formats it for display.
+"""
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
 
-from houses.config import settings
 from houses.geo import GeoPoint
-from houses.sheets import get_client
 from houses.walkability import _extract_town
 from houses.web.geo_utils import valid_location
 
 logger = logging.getLogger(__name__)
-
-VIEW_TAB = "Properties View"
-
-
-# ── Colour helpers ──────────────────────────────────────────────────────
 
 
 def commute_colour(minutes: int | None, bracknell: bool = False) -> str:
@@ -41,59 +42,43 @@ def walk_colour(minutes: int | None) -> str:
     return "good" if minutes < 15 else "warn" if minutes <= 30 else "bad"
 
 
-# ── Value helpers ───────────────────────────────────────────────────────
-
-
 def _clean_number(val: str) -> str:
-    """Strip currency symbols, commas, whitespace."""
-    if not val:
-        return ""
-    return val.replace("£", "").replace(",", "").replace(" ", "").strip()
+    return val.replace(",", "").replace("£", "").strip()
 
 
 def _try_float(val: str) -> float | None:
-    cleaned = _clean_number(val)
+    if not val:
+        return None
     try:
-        return float(cleaned) if cleaned else None
+        return float(_clean_number(val))
     except (ValueError, TypeError):
         return None
 
 
 def _try_int(val: str) -> int | None:
-    cleaned = _clean_number(val)
+    if val is None:
+        return None
     try:
-        return int(float(cleaned)) if cleaned else None
+        return int(float(_clean_number(val)))
     except (ValueError, TypeError):
         return None
 
 
 def _postcode_district(postcode: str) -> str:
-    if not postcode:
-        return ""
-    parts = postcode.strip().split()
-    if parts:
-        outcode = parts[0]
-        i = 0
-        while i < len(outcode) and outcode[i].isalpha():
-            i += 1
-        j = i
-        while j < len(outcode) and outcode[j].isdigit():
-            j += 1
-        return outcode[:j]
-    return ""
-
-
-# ── Card data model ─────────────────────────────────────────────────────
+    return postcode.split()[0] if " " in postcode else postcode
 
 
 @dataclass
 class CardData:
     rid: str = ""
+    rightmove_url: str = ""
+    map_url: str = ""
     address: str = ""
+    best_location: GeoPoint | None = None
+    total_monthly_cost: float | None = None
     price: float | None = None
     bedrooms: int | None = None
     postcode_district: str = ""
-
     simon_minutes: int | None = None
     simon_dur: str = ""
     simon_cost: float | None = None
@@ -103,93 +88,73 @@ class CardData:
     bracknell_minutes: int | None = None
     bracknell_dur: str = ""
     bracknell_cost: float | None = None
-
     primary_name: str = ""
     primary_ofsted: str = ""
     primary_walk_minutes: int | None = None
     primary_inspection_year: str = ""
-
     secondary_name: str = ""
     secondary_ofsted: str = ""
     secondary_walk_minutes: int | None = None
     secondary_bus_minutes: int | None = None
     secondary_inspection_year: str = ""
-
-    rightmove_url: str = ""
-    map_url: str = ""
-    best_location: GeoPoint | None = None
-    total_monthly_cost: float | None = None
     walk_to_town_minutes: int | None = None
     town_name: str = ""
-    status: str = ""
-
-    primary_url: str = ""
-    secondary_url: str = ""
-
-    # Direction links
-    walk_dir_url: str = ""
     simon_dir_url: str = ""
     lorena_dir_url: str = ""
     bracknell_dir_url: str = ""
     primary_dir_url: str = ""
     secondary_dir_url: str = ""
-
-    # Computed colours
-    simon_colour: str = "muted"
-    lorena_colour: str = "muted"
-    bracknell_colour: str = "muted"
-    primary_ofsted_colour: str = "muted"
+    walk_dir_url: str = ""
+    primary_url: str = ""
+    secondary_url: str = ""
+    status: str = ""
+    simon_colour: str = ""
+    lorena_colour: str = ""
+    bracknell_colour: str = ""
+    primary_ofsted_colour: str = ""
     primary_ofsted_label: str = ""
-    primary_walk_colour: str = "muted"
+    primary_walk_colour: str = ""
     primary_walk_label: str = ""
-    secondary_ofsted_colour: str = "muted"
+    secondary_ofsted_colour: str = ""
     secondary_ofsted_label: str = ""
-    secondary_walk_colour: str = "muted"
+    secondary_walk_colour: str = ""
     secondary_walk_label: str = ""
-    walk_colour: str = "muted"
+    walk_colour: str = ""
     score: int = 0
     is_enriched: bool = False
 
 
-# ── Sheet readers ────────────────────────────────────────────────────────
+# ── Sheet I/O ──────────────────────────────────────────────────────────
 
 
 def get_data_rows() -> list[dict[str, str]]:
-    client = get_client()
-    if not client:
-        return []
+    """Read all rows from the Data tab."""
+    from houses.sheets.reader import get_properties_data, resolve_tab
+
     try:
-        sh = client.open_by_key(settings.sheet_id)
-        ws = sh.worksheet("Properties Data")
-        all_rows = ws.get_all_values()
-        headers = all_rows[0]
-        return [dict(zip(headers, row, strict=False)) for row in all_rows[1:] if row and row[0].strip()]
-    except Exception as e:
-        logger.warning("Failed to read Data tab: %s", e)
+        resolve_tab("data")
+        return get_properties_data()
+    except Exception:
+        logger.warning("Failed to read property data from sheet")
         return []
 
 
 def get_view_rows() -> list[dict[str, str]]:
-    client = get_client()
-    if not client:
-        return []
+    """Read all rows from the View tab."""
+    from houses.sheets.reader import get_properties_data as gpd
+    from houses.sheets.reader import resolve_tab as rt
+
     try:
-        sh = client.open_by_key(settings.sheet_id)
-        ws = sh.worksheet(VIEW_TAB)
-        all_rows = ws.get_all_values()
-        headers = all_rows[0]
-        return [dict(zip(headers, row, strict=False)) for row in all_rows[1:] if row and row[0].strip()]
-    except Exception as e:
-        logger.warning("Failed to read View tab: %s", e)
+        rt("view")
+        return gpd()
+    except Exception:
+        logger.warning("Failed to read view data from sheet")
         return []
 
 
-# ── Transform ────────────────────────────────────────────────────────────
+# ── URL helpers ─────────────────────────────────────────────────────────
 
 
-# Mapping of postcode area prefixes to lat/lng bounding boxes.
-# Covers the postcode areas currently in the system (London + South East).
-# Coordinates outside these bounds are likely wrong and rejected.
 def _dir_url(loc: GeoPoint | None, dest: str) -> str:
     if loc is None:
         return ""
@@ -203,6 +168,7 @@ def _map_url(loc: GeoPoint | None) -> str:
 
 
 def _set_dir_urls(card: CardData, loc: GeoPoint) -> None:
+    """Set all direction URLs on a card for the given coordinate."""
     card.map_url = _map_url(loc)
     card.simon_dir_url = _dir_url(loc, "SW1V+2QQ")
     card.lorena_dir_url = _dir_url(loc, "EC3A+7LP")
@@ -217,12 +183,21 @@ def _set_dir_urls(card: CardData, loc: GeoPoint) -> None:
         card.secondary_dir_url = _dir_url(loc, sn.replace(" ", "+"))
 
 
+def _valid_location(lat: float, lng: float, postcode: str) -> bool:
+    if not postcode:
+        return True
+    area = postcode.strip().split()[0] if " " in postcode else postcode
+    return valid_location(lat, lng, area)
+
+
 def _card_address(data: dict[str, str]) -> str:
+    """Best display address from sheet data, upgraded with postcode."""
     address = (data.get("Address") or "").strip()
     postcode = (data.get("Postcode") or "").strip()
     if address and postcode and postcode not in address:
         try:
             from houses.location import PropertyLocation
+
             upgraded = PropertyLocation._upgrade_address(address, postcode)
             return upgraded if upgraded != address else f"{address}, {postcode}"
         except Exception:
@@ -231,6 +206,11 @@ def _card_address(data: dict[str, str]) -> str:
 
 
 def _build_card(data: dict[str, str], view: dict[str, str]) -> CardData:
+    """Build a CardData from raw sheet row + View row.
+
+    The card is populated with sheet data only. Direction URLs are set
+    later by _set_dir_urls once the DAG location is resolved.
+    """
     price = _try_float(data.get("Price (£)", ""))
     bedrooms = _try_int(data.get("Bedrooms", ""))
     simon_m = _try_int(data.get("Simon London (min)", ""))
@@ -250,7 +230,7 @@ def _build_card(data: dict[str, str], view: dict[str, str]) -> CardData:
     postcode = data.get("Postcode", "")
     best_location = (
         GeoPoint(lat=bl, lon=blng)
-        if bl is not None and blng is not None and valid_location(bl, blng, postcode)
+        if bl is not None and blng is not None and _valid_location(bl, blng, postcode)
         else None
     )
 
@@ -295,9 +275,7 @@ def _build_card(data: dict[str, str], view: dict[str, str]) -> CardData:
 
     p_label = first_word(raw_ofsted_p)
     s_label = first_word(raw_ofsted_s)
-
     is_enriched = simon_m is not None or lorena_m is not None or bracknell_m is not None
-
     secondary_walk_val = secondary_bus or secondary_walk
 
     colour_values = [
@@ -368,71 +346,14 @@ def _build_card(data: dict[str, str], view: dict[str, str]) -> CardData:
     )
 
 
-def _seed_dag_from_row(rid: str, row: dict[str, str]) -> bool:
-    """Insert source values from a sheet row into the DAG for a property that
-    hasn't been imported yet. Returns True if any values were inserted."""
-    from houses.geo import GeoPoint
-    from houses.model.persistence import insert_source_value, insert_user_input
-
-    imported = False
-    address = (row.get("Address") or "").strip()
-    postcode = (row.get("Postcode") or "").strip()
-    url = (row.get("Rightmove URL") or "").strip()
-    bedrooms = (row.get("Bedrooms") or "").strip()
-    price = (row.get("Price (£)") or "").strip()
-    approx_lat = (row.get("Approx Latitude (est)") or "").strip()
-    approx_lng = (row.get("Approx Longitude (est)") or "").strip()
-
-    insert_source_value(rid, "rid", rid, "Derived")
-    if url:
-        insert_source_value(rid, "rightmove_url", url, "Browser extension")
-        imported = True
-    if address:
-        insert_source_value(rid, "rightmove_address", address, "Rightmove")
-        imported = True
-    if bedrooms:
-        insert_source_value(rid, "rightmove_bedrooms", bedrooms, "Rightmove")
-        imported = True
-    if price:
-        insert_source_value(rid, "rightmove_price", price, "Rightmove")
-        imported = True
-    if approx_lat and approx_lng:
-        try:
-            flat, flng = float(approx_lat), float(approx_lng)
-            if valid_location(flat, flng, postcode):
-                insert_source_value(rid, "rightmove_location", GeoPoint(flat, flng), "Rightmove map")
-                imported = True
-        except (ValueError, TypeError):
-            pass
-    if address and postcode and postcode not in address:
-        try:
-            from houses.location import PropertyLocation
-
-            upgraded = PropertyLocation._upgrade_address(address, postcode)
-            corrected = upgraded if upgraded != address else f"{address}, {postcode}"
-            insert_user_input(rid, "corrected_address", corrected)
-            imported = True
-        except Exception:
-            pass
-    return imported
-
-
-def _enrich_from_dag(card: CardData) -> CardData:
-    """Check if DAG data exists for this card."""
-    if not card.rid:
-        return card
-    try:
-        from houses.model.persistence import load_property_data
-
-        data = load_property_data(card.rid)
-    except Exception:
-        return card
-    if "best_address" in data.derived and data.derived["best_address"].value:
-        card.address = data.derived["best_address"].value
-    return card
-
-
 async def get_all_cards() -> list[CardData]:
+    """Build all cards for the property list page.
+
+    Orchestrates sheet I/O, DAG sync, and view model assembly.
+    The DAG sync step is delegated to sync.sync_property.
+    """
+    from houses.sync import sync_property
+
     data_rows = get_data_rows()
     if not data_rows:
         return []
@@ -451,34 +372,22 @@ async def get_all_cards() -> list[CardData]:
             continue
         vr = view_by_rid.get(rid, {})
         card = _build_card(dr, vr)
-        cards.append(_enrich_from_dag(card))
+        cards.append(card)
 
     for card in cards:
         if not card.rid:
             continue
         try:
-            from houses.model.persistence import load_property_data
-
-            data = load_property_data(card.rid)
-            has_location = "best_location" in data.derived
-        except Exception:
-            has_location = False
-
-        if not has_location:
-            dr = next((r for r in data_rows if (r.get("Rightmove ID") or "").strip() == card.rid), None)
-            if dr:
-                _seed_dag_from_row(card.rid, dr)
-
-        try:
-            from houses.model.resolver import resolve_property
-
-            results = await resolve_property(card.rid, node_ids=["best_address", "best_location"])
+            results = await sync_property(card.rid, next(
+                (r for r in data_rows if (r.get("Rightmove ID") or "").strip() == card.rid),
+                None,
+            ))
         except Exception:
             continue
 
         bl = results.get("best_location")
         if bl and bl.value and isinstance(bl.value, GeoPoint):
-            if not valid_location(bl.value.lat, bl.value.lon, card.postcode_district):
+            if not _valid_location(bl.value.lat, bl.value.lon, card.postcode_district):
                 card.best_location = None
             else:
                 card.best_location = bl.value
