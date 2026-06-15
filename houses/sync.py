@@ -51,6 +51,17 @@ def seed_dag_from_row(rid: str, row: dict[str, str]) -> bool:
                 imported = True
         except (ValueError, TypeError):
             pass
+
+    actual_lat = (row.get("Actual Latitude") or "").strip()
+    actual_lng = (row.get("Actual Longitude") or "").strip()
+    if actual_lat and actual_lng:
+        try:
+            aflat, aflng = float(actual_lat), float(actual_lng)
+            if valid_location(aflat, aflng, postcode):
+                insert_user_input(rid, "precise_location", GeoPoint(aflat, aflng))
+                imported = True
+        except (ValueError, TypeError):
+            pass
     if address and postcode and postcode not in address:
         try:
             from houses.location import PropertyLocation

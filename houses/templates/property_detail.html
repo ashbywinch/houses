@@ -43,7 +43,12 @@
     </div>
 
     {% if best_location is not none %}
-    <div id="detail-map" class="detail__map" data-lat="{{ best_location.lat }}" data-lng="{{ best_location.lon }}" data-url="{{ map_url }}"></div>
+    <div class="detail__map-container">
+      <div id="detail-map" class="detail__map" data-lat="{{ best_location.lat }}" data-lng="{{ best_location.lon }}" data-url="{{ map_url }}"></div>
+      <noscript>
+        <a href="{{ map_url }}" class="btn btn--sm" target="_blank" rel="noopener">Open in Google Maps ↗</a>
+      </noscript>
+    </div>
     {% endif %}
 
     <div class="detail__actions">
