@@ -1,0 +1,9 @@
+<div class="detail__field" id="field-address">
+  <div class="detail__field-label">Address</div>
+  <form hx-post="/properties/{{ rid }}/enhance" hx-swap="outerHTML" class="detail__edit-form">
+    <input type="hidden" name="action" value="address">
+    <input type="text" name="corrected_address" value="{{ current_value or '' }}" class="detail__edit-input">
+    <button type="submit" class="btn btn--sm">Save</button>
+    <button type="button" class="btn btn--sm btn--ghost" hx-get="/properties/{{ rid }}/field/address" hx-target="#field-address" hx-swap="outerHTML">Cancel</button>
+  </form>
+</div>

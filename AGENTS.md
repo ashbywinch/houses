@@ -16,6 +16,7 @@ make test-integration           # Integration tests
 - **Architecture overview**: [docs/architecture.md](docs/architecture.md)
 - **Add a column**: [docs/column-reference.md](docs/column-reference.md)
 - **Add an enrichment module**: [docs/adding-a-new-enrichment-module.md](docs/adding-a-new-enrichment-module.md)
+- **Add a DAG node**: [docs/dag-model.md](docs/dag-model.md)
 - **Write docs**: [docs/writing-documentation.md](docs/writing-documentation.md)
 - **Use the API**: [docs/api.md](docs/api.md)
 - **Troubleshoot batch endpoints**: [docs/troubleshooting-endpoints.md](docs/troubleshooting-endpoints.md)
@@ -30,3 +31,4 @@ make test-integration           # Integration tests
 | `houses/config.py` | Env-var configuration |
 | `houses/sheets/` | gspread integration, column schema (`Row`), View tab sync (`View`), formulas |
 | `tests/helpers.py` | Reusable fakes: `FakeCommuteRouter`, `FakeEPC`, `make_services()` |
+| `houses/model/` | DAG node declarations, resolver, persistence (SQLite) |

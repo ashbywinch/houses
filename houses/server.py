@@ -7,11 +7,15 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 import houses.location as _loc
+import houses.model  # noqa: F401 — core types
+import houses.model.property  # noqa: F401 — registers Property nodes
+import houses.model.rightmove  # noqa: F401 — registers RightmoveProperty nodes
 from houses.config import settings
 from houses.enrichment_runner import (
     asdict_serializable,
@@ -21,6 +25,8 @@ from houses.enrichment_runner import (
     run_backfill_enrichment,
     run_enrichment,
 )
+from houses.model.persistence import init_db, insert_source_value
+from houses.model.resolver import resolve_property
 from houses.property import Property
 from houses.rightmove_scraper import RightmoveProperty, stop_chrome
 from houses.rightmove_scraper import scrape as scrape_rightmove
@@ -62,6 +68,7 @@ async def lifespan(_app: FastAPI):
     # httpx logs full URLs including query params — suppress to avoid
     # leaking API keys in the server log
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    init_db()
     logger.info("Houses server starting" + (" (TRACE enabled)" if settings.trace else ""))
     yield
     logger.info("Houses server shutting down")
@@ -73,6 +80,40 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+_error_templates = Jinja2Templates(directory="houses/templates")
+
+
+@app.exception_handler(404)
+async def not_found_html(request: Request, _):
+    if "text/html" in request.headers.get("accept", ""):
+        return _error_templates.TemplateResponse(
+            request,
+            "error.html",
+            {
+                "status_code": 404,
+                "message": "Not Found",
+                "detail": "This property doesn't exist or hasn't been enriched yet.",
+            },
+            status_code=404,
+        )
+    return JSONResponse({"error": "not found"}, status_code=404)
+
+
+@app.exception_handler(500)
+@app.exception_handler(Exception)
+async def server_error(request: Request, exc: Exception):
+    logger.exception("Unhandled error: %s", exc)
+    if "text/html" in request.headers.get("accept", ""):
+        return _error_templates.TemplateResponse(
+            request,
+            "error.html",
+            {"status_code": 500, "message": "Server Error", "detail": "Something went wrong loading this property."},
+            status_code=500,
+        )
+    return JSONResponse({"error": "internal server error"}, status_code=500)
+
 
 app.mount("/static", StaticFiles(directory="houses/static"), name="static")
 app.include_router(web_router)
@@ -109,38 +150,6 @@ async def list_properties(tab: str = Query(description="Tab: 'view' or 'data'"))
     resolve_tab(tab)
     props = get_properties_data()
     return {"tab": tab, "properties": props}
-
-
-@app.get("/properties/{rid}")
-async def get_property(rid: str, tab: str = Query(description="Tab: 'view' or 'data'")):
-    """Get a single property by Rightmove ID.
-
-    Detects duplicate RIDs in the sheet and returns a clear error.
-
-    Query parameters:
-    - **tab** (required): ``"view"`` or ``"data"``.
-    """
-    resolve_tab(tab)
-    matches = [p for p in get_properties_data() if p.get("Rightmove ID", "").strip() == rid]
-    if not matches:
-        return JSONResponse({"error": "property not found", "rid": rid}, status_code=404)
-    if len(matches) > 1:
-        logger.warning(
-            "Duplicate RID %s found in %d rows — data may be inconsistent. Delete the duplicate row from the sheet.",
-            rid,
-            len(matches),
-        )
-        return JSONResponse(
-            {
-                "warning": "duplicate rows",
-                "rid": rid,
-                "count": len(matches),
-                "message": f"RID {rid} appears in {len(matches)} rows. "
-                f"Delete the duplicate row(s) from the sheet and retry.",
-            },
-            status_code=409,
-        )
-    return {"tab": tab, **matches[0]}
 
 
 @app.post("/properties", response_model=None)
@@ -220,6 +229,27 @@ async def upsert_property(
         row_url = None
         if not no_write:
             row_url = await write_enriched_row(enriched, payload.tab)
+
+        # ── Dual-write to SQLite ───────────────────────────────────
+        rid2 = rid or enriched.rid
+        if rid2:
+            try:
+                from houses.geo import GeoPoint
+
+                insert_source_value(rid2, "rid", rid2, "Derived")
+                insert_source_value(rid2, "rightmove_url", enriched.url, "Browser extension")
+                insert_source_value(rid2, "rightmove_address", enriched.address, "Rightmove")
+                insert_source_value(rid2, "rightmove_bedrooms", str(enriched.bedrooms), "Rightmove")
+                insert_source_value(rid2, "rightmove_price", str(enriched.price), "Rightmove")
+                if enriched.approx_latitude is not None and enriched.approx_longitude is not None:
+                    gp = GeoPoint(lat=enriched.approx_latitude, lon=enriched.approx_longitude)
+                    insert_source_value(rid2, "rightmove_location", gp, "Rightmove map")
+                if enriched.geocode_latitude is not None and enriched.geocode_longitude is not None:
+                    gp = GeoPoint(lat=enriched.geocode_latitude, lon=enriched.geocode_longitude)
+                    insert_source_value(rid2, "geocode_location", gp, f"Geocoded ({enriched.geo_provenance})")
+                await resolve_property(rid2, ["best_address", "best_location", "map_url"])
+            except Exception as e:
+                logger.warning("Failed to write source values for %s: %s", rid2, e)
 
         dump = asdict_serializable(enriched)
         extra: dict[str, Any] = {}

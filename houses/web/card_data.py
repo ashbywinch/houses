@@ -4,8 +4,10 @@ import logging
 from dataclasses import dataclass
 
 from houses.config import settings
+from houses.geo import GeoPoint
 from houses.sheets import get_client
 from houses.walkability import _extract_town
+from houses.web.geo_utils import valid_location
 
 logger = logging.getLogger(__name__)
 
@@ -115,8 +117,7 @@ class CardData:
 
     rightmove_url: str = ""
     map_url: str = ""
-    best_lat: float | None = None
-    best_lng: float | None = None
+    best_location: GeoPoint | None = None
     total_monthly_cost: float | None = None
     walk_to_town_minutes: int | None = None
     town_name: str = ""
@@ -186,6 +187,49 @@ def get_view_rows() -> list[dict[str, str]]:
 # ── Transform ────────────────────────────────────────────────────────────
 
 
+# Mapping of postcode area prefixes to lat/lng bounding boxes.
+# Covers the postcode areas currently in the system (London + South East).
+# Coordinates outside these bounds are likely wrong and rejected.
+def _dir_url(loc: GeoPoint | None, dest: str) -> str:
+    if loc is None:
+        return ""
+    return f"https://www.google.com/maps/dir/{loc.lat},{loc.lon}/{dest}"
+
+
+def _map_url(loc: GeoPoint | None) -> str:
+    if loc is None:
+        return ""
+    return f"https://www.google.com/maps?q={loc.lat},{loc.lon}"
+
+
+def _set_dir_urls(card: CardData, loc: GeoPoint) -> None:
+    card.map_url = _map_url(loc)
+    card.simon_dir_url = _dir_url(loc, "SW1V+2QQ")
+    card.lorena_dir_url = _dir_url(loc, "EC3A+7LP")
+    card.bracknell_dir_url = _dir_url(loc, "RG12+8YA")
+    if card.town_name:
+        card.walk_dir_url = _dir_url(loc, card.town_name.replace(" ", "+"))
+    if card.primary_name:
+        sn = card.primary_name.split(",")[0].strip()
+        card.primary_dir_url = _dir_url(loc, sn.replace(" ", "+"))
+    if card.secondary_name:
+        sn = card.secondary_name.split(",")[0].strip()
+        card.secondary_dir_url = _dir_url(loc, sn.replace(" ", "+"))
+
+
+def _card_address(data: dict[str, str]) -> str:
+    address = (data.get("Address") or "").strip()
+    postcode = (data.get("Postcode") or "").strip()
+    if address and postcode and postcode not in address:
+        try:
+            from houses.location import PropertyLocation
+            upgraded = PropertyLocation._upgrade_address(address, postcode)
+            return upgraded if upgraded != address else f"{address}, {postcode}"
+        except Exception:
+            return f"{address}, {postcode}"
+    return address or ""
+
+
 def _build_card(data: dict[str, str], view: dict[str, str]) -> CardData:
     price = _try_float(data.get("Price (£)", ""))
     bedrooms = _try_int(data.get("Bedrooms", ""))
@@ -201,8 +245,14 @@ def _build_card(data: dict[str, str], view: dict[str, str]) -> CardData:
     walk_town = _try_int(data.get("Walk to Town (min)", ""))
     total_cost = _try_float(view.get("Total Monthly Housing Cost (£)", ""))
 
-    best_lat = _try_float(data.get("Best Latitude", ""))
-    best_lng = _try_float(data.get("Best Longitude", ""))
+    bl = _try_float(data.get("Best Latitude", ""))
+    blng = _try_float(data.get("Best Longitude", ""))
+    postcode = data.get("Postcode", "")
+    best_location = (
+        GeoPoint(lat=bl, lon=blng)
+        if bl is not None and blng is not None and valid_location(bl, blng, postcode)
+        else None
+    )
 
     def _sn(raw: str) -> str:
         return raw.split(",")[0].strip() if raw else ""
@@ -216,20 +266,16 @@ def _build_card(data: dict[str, str], view: dict[str, str]) -> CardData:
         r = m % 60
         return f"{h}h{r}" if r else f"{h}h"
 
-    def _dir_url(lat: float | None, lng: float | None, dest: str) -> str:
-        if lat is None or lng is None:
-            return ""
-        return f"https://www.google.com/maps/dir/{lat},{lng}/{dest}"
-
-    simon_dir = _dir_url(best_lat, best_lng, "SW1V+2QQ")
-    lorena_dir = _dir_url(best_lat, best_lng, "EC3A+7LP")
-    bracknell_dir = _dir_url(best_lat, best_lng, "RG12+8YA")
+    card_addr = _card_address(data)
+    simon_dir = _dir_url(best_location, "SW1V+2QQ")
+    lorena_dir = _dir_url(best_location, "EC3A+7LP")
+    bracknell_dir = _dir_url(best_location, "RG12+8YA")
     town = _extract_town(data.get("Address", ""))
-    walk_dir = _dir_url(best_lat, best_lng, town.replace(" ", "+")) if town else ""
+    walk_dir = _dir_url(best_location, town.replace(" ", "+")) if town else ""
     primary_raw = data.get("Primary School", "")
     secondary_raw = data.get("Secondary School", "")
-    primary_dir = _dir_url(best_lat, best_lng, _sn(primary_raw).replace(" ", "+")) if primary_raw else ""
-    secondary_dir = _dir_url(best_lat, best_lng, _sn(secondary_raw).replace(" ", "+")) if secondary_raw else ""
+    primary_dir = _dir_url(best_location, _sn(primary_raw).replace(" ", "+")) if primary_raw else ""
+    secondary_dir = _dir_url(best_location, _sn(secondary_raw).replace(" ", "+")) if secondary_raw else ""
 
     status = (view.get("Status", "") or "").strip()
     raw_ofsted_p = data.get("Primary Ofsted", "")
@@ -270,7 +316,7 @@ def _build_card(data: dict[str, str], view: dict[str, str]) -> CardData:
         rid=data.get("Rightmove ID", ""),
         rightmove_url=data.get("Rightmove URL", ""),
         map_url=data.get("Map URL", ""),
-        address=data.get("Address", ""),
+        address=card_addr,
         price=price,
         bedrooms=bedrooms,
         postcode_district=_postcode_district(data.get("Postcode", "")),
@@ -295,8 +341,7 @@ def _build_card(data: dict[str, str], view: dict[str, str]) -> CardData:
         total_monthly_cost=total_cost,
         walk_to_town_minutes=walk_town,
         town_name=_extract_town(data.get("Address", "")),
-        best_lat=best_lat,
-        best_lng=best_lng,
+        best_location=best_location,
         primary_url=data.get("Primary School Link", ""),
         secondary_url=data.get("Secondary School Link", ""),
         walk_dir_url=walk_dir,
@@ -323,7 +368,71 @@ def _build_card(data: dict[str, str], view: dict[str, str]) -> CardData:
     )
 
 
-def get_all_cards() -> list[CardData]:
+def _seed_dag_from_row(rid: str, row: dict[str, str]) -> bool:
+    """Insert source values from a sheet row into the DAG for a property that
+    hasn't been imported yet. Returns True if any values were inserted."""
+    from houses.geo import GeoPoint
+    from houses.model.persistence import insert_source_value, insert_user_input
+
+    imported = False
+    address = (row.get("Address") or "").strip()
+    postcode = (row.get("Postcode") or "").strip()
+    url = (row.get("Rightmove URL") or "").strip()
+    bedrooms = (row.get("Bedrooms") or "").strip()
+    price = (row.get("Price (£)") or "").strip()
+    approx_lat = (row.get("Approx Latitude (est)") or "").strip()
+    approx_lng = (row.get("Approx Longitude (est)") or "").strip()
+
+    insert_source_value(rid, "rid", rid, "Derived")
+    if url:
+        insert_source_value(rid, "rightmove_url", url, "Browser extension")
+        imported = True
+    if address:
+        insert_source_value(rid, "rightmove_address", address, "Rightmove")
+        imported = True
+    if bedrooms:
+        insert_source_value(rid, "rightmove_bedrooms", bedrooms, "Rightmove")
+        imported = True
+    if price:
+        insert_source_value(rid, "rightmove_price", price, "Rightmove")
+        imported = True
+    if approx_lat and approx_lng:
+        try:
+            flat, flng = float(approx_lat), float(approx_lng)
+            if valid_location(flat, flng, postcode):
+                insert_source_value(rid, "rightmove_location", GeoPoint(flat, flng), "Rightmove map")
+                imported = True
+        except (ValueError, TypeError):
+            pass
+    if address and postcode and postcode not in address:
+        try:
+            from houses.location import PropertyLocation
+
+            upgraded = PropertyLocation._upgrade_address(address, postcode)
+            corrected = upgraded if upgraded != address else f"{address}, {postcode}"
+            insert_user_input(rid, "corrected_address", corrected)
+            imported = True
+        except Exception:
+            pass
+    return imported
+
+
+def _enrich_from_dag(card: CardData) -> CardData:
+    """Check if DAG data exists for this card."""
+    if not card.rid:
+        return card
+    try:
+        from houses.model.persistence import load_property_data
+
+        data = load_property_data(card.rid)
+    except Exception:
+        return card
+    if "best_address" in data.derived and data.derived["best_address"].value:
+        card.address = data.derived["best_address"].value
+    return card
+
+
+async def get_all_cards() -> list[CardData]:
     data_rows = get_data_rows()
     if not data_rows:
         return []
@@ -341,7 +450,43 @@ def get_all_cards() -> list[CardData]:
         if not rid:
             continue
         vr = view_by_rid.get(rid, {})
-        cards.append(_build_card(dr, vr))
+        card = _build_card(dr, vr)
+        cards.append(_enrich_from_dag(card))
+
+    for card in cards:
+        if not card.rid:
+            continue
+        try:
+            from houses.model.persistence import load_property_data
+
+            data = load_property_data(card.rid)
+            has_location = "best_location" in data.derived
+        except Exception:
+            has_location = False
+
+        if not has_location:
+            dr = next((r for r in data_rows if (r.get("Rightmove ID") or "").strip() == card.rid), None)
+            if dr:
+                _seed_dag_from_row(card.rid, dr)
+
+        try:
+            from houses.model.resolver import resolve_property
+
+            results = await resolve_property(card.rid, node_ids=["best_address", "best_location"])
+        except Exception:
+            continue
+
+        bl = results.get("best_location")
+        if bl and bl.value and isinstance(bl.value, GeoPoint):
+            if not valid_location(bl.value.lat, bl.value.lon, card.postcode_district):
+                card.best_location = None
+            else:
+                card.best_location = bl.value
+                _set_dir_urls(card, bl.value)
+
+        ba = results.get("best_address")
+        if ba and ba.value:
+            card.address = ba.value
 
     cards.sort(key=lambda c: c.score, reverse=True)
     return cards

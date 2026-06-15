@@ -71,6 +71,142 @@ The primary key linking both tabs is the **Rightmove URL** (Column A in Properti
 | Town descriptions | OpenRouter (BYOK LLM) | LLM-generated descriptions |
 | Council tax | VOA scraper + CivAccount | Live — scrapes public gov.uk page |
 
+## Architectural Pattern
+
+The codebase follows a **Layered Architecture with a Domain Model core**
+(a variant of the **Hexagonal / Ports & Adapters** pattern). The diagram
+below shows the four layers and how data flows through them:
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  PRESENTATION LAYER  (houses/web/, houses/templates/)                │
+│                                                                      │
+│  What it is:  FastAPI route handlers + Jinja2 templates.             │
+│               The "what buttons do" and "what the page looks like."  │
+│  Rules:       Never import from infrastructure.                      │
+│               Never implement business logic (priority chains,       │
+│               validation, staleness).                                │
+│               Reads resolved data from the Application Layer.        │
+│  Files:       server.py, web/router.py, web/card_data.py,            │
+│               templates/*.html, static/*                              │
+│                                                                      │
+├──────────────────────────────────────────────────────────────────────┤
+│  APPLICATION LAYER  (houses/server.py enrichment flow,               │
+│                      houses/web/card_data.py assembly)               │
+│                                                                      │
+│  What it is:  Orchestration. Decides WHEN to enrich, WHEN to         │
+│               resolve, WHAT to display. Coordinates the sequence:    │
+│               enrich → write source_values → resolve → read results. │
+│  Rules:       Calls enrichment modules (infrastructure) to get raw   │
+│               data, calls insert_source_value (domain persistence)   │
+│               to store it, calls resolve_property (domain) to        │
+│               compute derived values, reads results for display.     │
+│               Never re-implements DAG rules.                         │
+│  Files:       enrichment_runner.py, server.py, web/card_data.py,     │
+│               web/router.py (import logic)                           │
+│                                                                      │
+├──────────────────────────────────────────────────────────────────────┤
+│  DOMAIN MODEL  (houses/model/)                                       │
+│                                                                      │
+│  What it is:  The DAG. Node definitions, priority chains,            │
+│               staleness rules, resolution logic. The "what is true"  │
+│               about a property — independent of how it got there.    │
+│  Rules:       No HTTP, no API calls, no sheets, no I/O.              │
+│               Pure business logic. Persistence boundary is at         │
+│               model/persistence.py (the SQLite repository).          │
+│               External code reads derived values via resolve_property │
+│               or load_property_data — never by querying the DB       │
+│               directly.                                              │
+│  Files:       model/__init__.py, model/registry.py, model/nodes.py,  │
+│               model/resolver.py, model/persistence.py                │
+│                                                                      │
+├──────────────────────────────────────────────────────────────────────┤
+│  INFRASTRUCTURE LAYER                                                │
+│                                                                      │
+│  What it is:  Everything that talks to the outside world.            │
+│               External APIs, the Google Sheet, file I/O.             │
+│  Rules:       Implements service protocols from services.py          │
+│               (ports → adapters).                                    │
+│               Called by the Application Layer during enrichment;     │
+│               never called by the Domain Model.                      │
+│  Files:       services.py (protocols + default adapters),            │
+│               sheets/, location.py, transit_route.py,                │
+│               endpoint_client.py, council_tax.py, etc.               │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow
+
+```
+Browser request  →  Route handler (Presentation)
+  →  get_all_cards()  (Application)
+    →  get_data_rows()  (Infrastructure: Sheet read)
+    →  insert_source_value()  (Domain: persistence)
+    →  resolve_property()  (Domain: resolver)
+    →  read derived_value  (Domain: persistence)
+  →  render template  (Presentation)
+```
+
+Every enrichment cycle follows the same pattern:
+
+1. **Application layer** calls an enrichment module (infrastructure)
+2. **Enrichment module** returns raw data
+3. **Application layer** stores it as a source_value (domain persistence)
+4. **Application layer** calls `resolve_property()` (domain resolver)
+5. **Resolver** checks staleness, runs compute functions, saves derived
+6. **Application layer** reads the resolved derived values
+7. **Application layer** writes to sheet or renders template
+
+The DAG knows nothing about steps 1, 2, or 7. It receives inputs as
+`source_values` and produces outputs as `derived_values`.
+
+### Proposed Improvements
+
+**1. Introduce `sync_property()`.**
+A single Application-layer function that replaces the ad-hoc enrichment →
+write → resolve → display scatter:
+
+```python
+async def sync_property(rid: str, trigger_enrichment: bool = True) -> PropertyData:
+    if trigger_enrichment:
+        enriched = await _run_enrichment(rid, ...)
+        # enrichment modules write source_values internally
+    return await resolve_property(rid)
+```
+
+`get_all_cards()` calls `sync_property()` for each RID. The card
+assembler reads from the returned `PropertyData` — it never reads the
+sheet or the DB directly. This eliminates the current scatter of
+`_seed_dag_from_row` + `_enrich_from_dag` + inline `resolve_property`
+in `get_all_cards()`.
+
+**2. Move all enrichment output through the DAG.**
+Today, enrichment modules write directly to the sheet OR to
+`source_values`. Every module should write to `source_values` first,
+then a single sheet-write step reads from `derived_values`. This gives
+the DAG full version history of every recomputation.
+
+**3. Extract sheet import to a dedicated infrastructure module.**
+`_try_import_from_sheet()` lives in `router.py` today, mixing
+presentation with infrastructure. It should move to a module like
+`sheets/importer.py` that the Application layer calls. The route
+handler just delegates.
+
+**4. Split `card_data.py`.**
+- `sheets/reader.py` — raw sheet reading (already exists)
+- `web/view_models.py` — pure ViewModel assembly, no I/O, takes
+  `PropertyData` + sheet metadata and returns `CardData`
+- The DAG sync/enrichment step stays in the Application layer
+  (`get_all_cards` or a new `houses/sync.py`)
+
+**5. Register all enrichment fields as DAG nodes.**
+Today only address/location are nodes. Every future field (commute,
+schools, EPC, council tax) should have source + derived node
+declarations. This ensures consistent staleness tracking, re-computation,
+and priority across the entire property data model.
+
+### Current Violations
+
 ## Key Files
 
 | File | Responsibility |
@@ -87,6 +223,7 @@ The primary key linking both tabs is the **Rightmove URL** (Column A in Properti
 | `houses/attempt.py` | `Attempt[T]` result monad |
 | `houses/config.py` | Configuration — postcodes, API keys, constants |
 | `tests/helpers.py` | Reusable fakes: `FakeCommuteRouter`, `FakeEPC`, `make_services()` |
+| `houses/model/` | DAG node registry (`registry.py`), node declarations (`nodes.py`), resolver (`resolver.py`), persistence (`persistence.py`) |
 
 ## Dependency Injection Architecture
 

@@ -90,6 +90,20 @@ class RailFareService(Protocol):
     ) -> tuple[Commute | None, Commute | None]: ...
 
 
+class PersistenceService(Protocol):
+    """Persistence operations for the DAG node store."""
+
+    def init_db(self) -> None: ...
+
+    def insert_source_value(self, property_id: str, node_id: str, value: Any, source: str) -> int: ...
+
+    def insert_user_input(self, property_id: str, node_id: str, value: Any) -> int: ...
+
+    def load_property_data(self, rid: str) -> Any: ...
+
+    async def resolve_property(self, rid: str, node_ids: list[str] | None = None) -> dict[str, Any]: ...
+
+
 # ── Default implementations (thin wrappers around real modules) ────────
 
 
@@ -183,6 +197,37 @@ class _DefaultRailFare:
         return await _enrich_rail_fares(enabled, postcode, address, simon, lorena)
 
 
+class _DefaultPersistence:
+    def init_db(self) -> None:
+        from houses.model.persistence import init_db as _init_db
+
+        _init_db()
+
+    def insert_source_value(self, property_id: str, node_id: str, value: Any, source: str) -> int:
+        from houses.model.persistence import insert_source_value as _ins
+
+        return _ins(property_id, node_id, value, source)
+
+    def insert_user_input(self, property_id: str, node_id: str, value: Any) -> int:
+        from houses.model.persistence import insert_user_input as _ins
+
+        return _ins(property_id, node_id, value)
+
+    def load_property_data(self, rid: str) -> Any:
+        from houses.model.persistence import load_property_data as _load
+
+        return _load(rid)
+
+    async def resolve_property(self, rid: str, node_ids: list[str] | None = None) -> dict[str, Any]:
+        from houses.model.resolver import resolve_property as _resolve
+
+        result = await _resolve(rid, node_ids)
+        return {
+            nid: {"node_id": nr.node_id, "value": nr.value, "source": nr.source, "row_id": nr.row_id}
+            for nid, nr in result.items()
+        }
+
+
 # ── DI Container ──────────────────────────────────────────────────────
 
 
@@ -208,3 +253,4 @@ class Services:
     epc_service: EPCLookupService = dataclasses.field(default_factory=_DefaultEPCLookup)
     council_tax_service: CouncilTaxService = dataclasses.field(default_factory=_DefaultCouncilTax)
     rail_fare_service: RailFareService = dataclasses.field(default_factory=_DefaultRailFare)
+    persistence: PersistenceService = dataclasses.field(default_factory=_DefaultPersistence)

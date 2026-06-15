@@ -111,3 +111,8 @@ class EnrichedProperty:
     approx_longitude: float | None = None
     approx_station_crs: str = ""
     approx_station_name: str = ""
+
+    # Separate geocode values captured BEFORE the rightmove override
+    geocode_latitude: float | None = None
+    geocode_longitude: float | None = None
+    geo_provenance: str = ""

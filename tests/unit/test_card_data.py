@@ -158,9 +158,25 @@ class TestWalkColour:
 
 
 class TestCardBuild:
+    def test_address_includes_postcode_from_sheet(self):
+        card = _build_card(_data(), _view())
+        assert "UB2 5AD" in card.address
+
+    def test_direction_urls_empty_when_lat_lng_mismatches_postcode(self):
+        """Coordinates that are miles from the postcode area are rejected."""
+        card = _build_card(
+            _data({
+                "Best Latitude": "54.75844",
+                "Best Longitude": "-2.69531",
+                "Postcode": "UB2 4GN",
+            }),
+            _view(),
+        )
+        assert card.best_location is None
+        assert card.simon_dir_url == ""
+
     def test_address_and_price(self):
         card = _build_card(_data(), _view())
-        assert card.address == "48 Acacia Avenue, Southall, UB2"
         assert card.price == 450000.0
 
     def test_bedrooms_and_postcode_district(self):
@@ -326,7 +342,7 @@ class TestCardBuild:
 
 
 class TestCardSorting:
-    def test_cards_sorted_by_score_descending(self):
+    async def test_cards_sorted_by_score_descending(self):
         data_best = _data({"Rightmove ID": "best", "Simon London (min)": "20"})
         data_worst = _data({"Rightmove ID": "worst", "Simon London (min)": "95"})
         data_rows = [data_worst, data_best]
@@ -334,7 +350,7 @@ class TestCardSorting:
 
         with mock.patch("houses.web.card_data.get_data_rows", return_value=data_rows), \
              mock.patch("houses.web.card_data.get_view_rows", return_value=view_rows):
-            cards = get_all_cards()
+            cards = await get_all_cards()
 
         assert len(cards) == 2
         assert cards[0].rid == "best"

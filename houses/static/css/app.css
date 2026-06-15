@@ -109,7 +109,10 @@ button { font: inherit; cursor: pointer; border: none; background: none; }
 .card__border--dismissed { background: var(--red); }
 
 .card__body {
-  padding: 10px 14px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 /* Card states */
@@ -148,6 +151,12 @@ button { font: inherit; cursor: pointer; border: none; background: none; }
 .card__address:hover {
   text-decoration-color: #1565c0;
 }
+.card {
+  transition: box-shadow 0.15s;
+}
+.card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
 .card__map-link {
   font-size: 14px;
   text-decoration: none;
@@ -157,6 +166,16 @@ button { font: inherit; cursor: pointer; border: none; background: none; }
 }
 .card__map-link:hover {
   opacity: 1;
+}
+.card__external-link {
+  font-size: 13px;
+  text-decoration: none;
+  color: var(--text-muted);
+  line-height: 1;
+  padding: 2px;
+}
+.card__external-link:hover {
+  color: var(--text);
 }
 .card__price {
   font-size: 15px;
@@ -338,4 +357,17 @@ a.school__name:hover {
   .card-list {
     grid-template-columns: 1fr 1fr 1fr;
   }
+}
+
+.header__inner--spread {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5em;
+}
+
+.header__price {
+  font-size: 1.1em;
+  font-weight: 700;
+  white-space: nowrap;
 }

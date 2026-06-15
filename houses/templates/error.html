@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="header">
+  <div class="header__inner">
+    <a href="/" class="header__back">&larr; Properties</a>
+    <h1 class="header__title">Error</h1>
+  </div>
+</header>
+
+<main class="page">
+  <div class="error-page">
+    <div class="error-page__icon">⚠</div>
+    <h2 class="error-page__title">{{ status_code }} — {{ message or "Something went wrong" }}</h2>
+    <p class="error-page__description">{{ detail or "An unexpected error occurred. Try going back or refreshing the page." }}</p>
+    <a href="/" class="btn btn--primary">Back to Properties</a>
+  </div>
+</main>
+{% endblock %}

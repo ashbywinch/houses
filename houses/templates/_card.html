@@ -15,10 +15,9 @@
 
     {# ── Line 1: Address (link) + Map link + Price + Status dot ── #}
     <div class="card__row card__header-row">
+      <a href="/properties/{{ card.rid }}" class="card__address">{{ card.address or "Unknown" }}</a>
       {% if card.rightmove_url %}
-      <a href="{{ card.rightmove_url }}" class="card__address" target="_blank" rel="noopener">{{ card.address or "Unknown" }}</a>
-      {% else %}
-      <span class="card__address">{{ card.address or "Unknown" }}</span>
+      <a href="{{ card.rightmove_url }}" class="card__external-link" target="_blank" rel="noopener" title="View on Rightmove">↗</a>
       {% endif %}
       {% if card.map_url %}
       <a href="{{ card.map_url }}" class="card__map-link" target="_blank" rel="noopener" title="View on Google Maps">🌐</a>
@@ -36,8 +35,6 @@
     {# ── Line 2: Specs ── #}
     <div class="card__row card__specs">
       {% if card.bedrooms is not none %}{{ card.bedrooms }} bed{% endif %}
-      {% if card.bedrooms is not none and card.postcode_district %} · {% endif %}
-      {% if card.postcode_district %}{{ card.postcode_district }}{% endif %}
     </div>
 
     {# ── Line 3: Walk to town ── #}

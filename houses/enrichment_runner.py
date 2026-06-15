@@ -320,6 +320,9 @@ async def run_enrichment(
     location = await location.resolve()
     approx_lat = location.coordinates.value_or_none().lat if location.coordinates.is_succeeded else None
     approx_lng = location.coordinates.value_or_none().lon if location.coordinates.is_succeeded else None
+    geocode_lat = approx_lat
+    geocode_lng = approx_lng
+    geo_source = location.coordinates.source if location.coordinates.is_succeeded else ""
 
     if enabled is None or "simon" in enabled:
         simon = (await svc.commute_router.simon_commute(lookup)).value_or_none()
@@ -431,6 +434,9 @@ async def run_enrichment(
         approx_longitude=approx_lng,
         approx_station_crs=station_crs,
         approx_station_name=station_name,
+        geocode_latitude=geocode_lat,
+        geocode_longitude=geocode_lng,
+        geo_provenance=geo_source,
     )
 
 

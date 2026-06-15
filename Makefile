@@ -34,7 +34,7 @@ setup:
 
 run: setup
 	@echo "${YELLOW}Starting houses server on http://127.0.0.1:8080${NC}"
-	@$(UV) run uvicorn houses.server:app --host 127.0.0.1 --port 8080 --reload
+	@$(UV) run uvicorn houses.server:app --host 0.0.0.0 --port 8080 --reload
 
 test: setup lint
 	@$(PYTEST) tests/unit/ tests/integration/ -q 
