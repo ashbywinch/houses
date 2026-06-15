@@ -43,20 +43,7 @@
     </div>
 
     {% if best_location is not none %}
-    <div class="detail__map-container">
-      <iframe
-        class="detail__map"
-        id="detail-map"
-        src="https://www.google.com/maps?q={{ best_location.lat }},{{ best_location.lon }}&amp;z=15&amp;output=embed"
-        allowfullscreen
-        loading="lazy"
-        referrerpolicy="no-referrer-when-downgrade"
-      ></iframe>
-      <div class="detail__map-controls">
-        <a href="{{ map_url }}" class="btn btn--sm" target="_blank" rel="noopener">Pop out ↗</a>
-        <button class="btn btn--sm" id="map-satellite-toggle" data-map-id="detail-map">Satellite</button>
-      </div>
-    </div>
+    <div id="detail-map" class="detail__map" data-lat="{{ best_location.lat }}" data-lng="{{ best_location.lon }}" data-url="{{ map_url }}"></div>
     {% endif %}
 
     <div class="detail__actions">
