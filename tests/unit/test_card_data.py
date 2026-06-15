@@ -263,11 +263,13 @@ class TestCardBuild:
         assert card.simon_minutes is None
         assert card.simon_colour == "muted"
 
-    def test_direction_urls_present_when_coords_known(self):
+    def test_direction_urls_empty_before_dag_sync(self):
+        """Direction URLs come from DAG sync, not from _build_card."""
         card = _build_card(_data(), _view())
-        assert card.simon_dir_url.startswith("https://www.google.com/maps/dir/51.5,-0.4/")
-        assert card.walk_dir_url.startswith("https://www.google.com/maps/dir/51.5,-0.4/")
-        assert card.primary_dir_url.startswith("https://www.google.com/maps/dir/51.5,-0.4/")
+        assert card.simon_dir_url == ""
+        assert card.walk_dir_url == ""
+        assert card.primary_dir_url == ""
+        assert card.best_location is None
 
     def test_direction_urls_empty_when_no_coords(self):
         card = _build_card(_data({"Best Latitude": "", "Best Longitude": ""}), _view())

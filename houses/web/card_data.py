@@ -183,13 +183,6 @@ def _set_dir_urls(card: CardData, loc: GeoPoint) -> None:
         card.secondary_dir_url = _dir_url(loc, sn.replace(" ", "+"))
 
 
-def _valid_location(lat: float, lng: float, postcode: str) -> bool:
-    if not postcode:
-        return True
-    area = postcode.strip().split()[0] if " " in postcode else postcode
-    return valid_location(lat, lng, area)
-
-
 def _card_address(data: dict[str, str]) -> str:
     """Best display address from sheet data, upgraded with postcode."""
     address = (data.get("Address") or "").strip()
@@ -225,14 +218,9 @@ def _build_card(data: dict[str, str], view: dict[str, str]) -> CardData:
     walk_town = _try_int(data.get("Walk to Town (min)", ""))
     total_cost = _try_float(view.get("Total Monthly Housing Cost (£)", ""))
 
-    bl = _try_float(data.get("Best Latitude", ""))
-    blng = _try_float(data.get("Best Longitude", ""))
-    postcode = data.get("Postcode", "")
-    best_location = (
-        GeoPoint(lat=bl, lon=blng)
-        if bl is not None and blng is not None and _valid_location(bl, blng, postcode)
-        else None
-    )
+    # Location is resolved from the DAG by get_all_cards, not from sheet data.
+    # _build_card is called before DAG sync, so best_location starts as None.
+    best_location = None
 
     def _sn(raw: str) -> str:
         return raw.split(",")[0].strip() if raw else ""
@@ -387,7 +375,7 @@ async def get_all_cards() -> list[CardData]:
 
         bl = results.get("best_location")
         if bl and bl.value and isinstance(bl.value, GeoPoint):
-            if not _valid_location(bl.value.lat, bl.value.lon, card.postcode_district):
+            if not valid_location(bl.value.lat, bl.value.lon, card.postcode_district):
                 card.best_location = None
             else:
                 card.best_location = bl.value
