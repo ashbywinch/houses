@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Houses</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="stylesheet" href="/static/css/detail.css">
+  <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF5qkTDsXd0PvbIo3ScSQS0iGsT2I2A1oR1kHj4MkYMB5aqTTl4" crossorigin="anonymous"></script>
+  <link rel="stylesheet" href="/static/css/leaflet.css" />
+  <script src="/static/js/leaflet.js"></script>
+</head>
+<body>
+  
+<header class="header">
+  <div class="header__inner header__inner--spread">
+    <h1 class="header__title">Pembroke Avenue, Hersham, KT12 4NT</h1>
+    
+    <span class="header__price">£600,000</span>
+    
+  </div>
+</header>
+
+<main class="page detail-page">
+  
+
+  
+
+  
+  <div class="detail__summary-bar">
+    <span class="detail__bedrooms">4 bed</span>
+  </div>
+  
+
+  <section class="detail__section" id="section-location">
+    <div class="detail__section-header">
+      <span>Location</span>
+    </div>
+
+    <div class="detail__field-provenance">
+      <span class="provenance-badge provenance-badge--">
+        rightmove_map
+      </span>
+    </div>
+
+    
+    <div id="detail-map" class="detail__map" data-lat="51.369808" data-lng="-0.393937" data-url="None"></div>
+    
+
+    <div class="detail__actions">
+      <button class="btn btn--outline" hx-get="/properties/174762200/map-picker" hx-target="#map-picker-container" hx-swap="innerHTML">Set precise location</button>
+    </div>
+    <div id="map-picker-container"></div>
+  </section>
+
+  <section class="detail__section">
+    <div class="detail__section-header">
+      <span>Commute &amp; Area</span>
+    </div>
+    <p class="detail__placeholder">Sheet data loaded separately.</p>
+  </section>
+
+  
+</main>
+
+  <script src="/static/js/app.js"></script>
+  <script src="/static/js/detail.js"></script>
+</body>
+</html>

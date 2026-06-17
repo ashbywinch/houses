@@ -79,3 +79,4 @@ data/bods_stops.csv
 .sisyphus/
 .code-review-graph/
 .ropeproject/
+data/houses.db*
