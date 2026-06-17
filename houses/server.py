@@ -70,6 +70,14 @@ async def lifespan(_app: FastAPI):
     # leaking API keys in the server log
     logging.getLogger("httpx").setLevel(logging.WARNING)
     init_db()
+
+    try:
+        from houses.nodes.bootstrap import seed_registry_from_sheet
+
+        seed_registry_from_sheet()
+    except Exception:
+        logger.info("Sheet not available yet — registry seeding deferred")
+
     logger.info("Houses server starting" + (" (TRACE enabled)" if settings.trace else ""))
     yield
     logger.info("Houses server shutting down")

@@ -112,3 +112,36 @@ def bootstrap_from_row(row: dict[str, Any],
         pushed += 1
 
     return pushed
+
+
+def seed_registry_from_sheet() -> int:
+    """Read all properties from the sheet and populate the new DAG registry.
+
+    Returns the number of properties seeded.
+    """
+    from houses.nodes.property import PropertyNodes
+    from houses.sheets.reader import get_properties_data
+    from houses.web.api_router import register_property
+
+    rows = get_properties_data()
+    count = 0
+    for row in rows:
+        raw_rid = (row.get("Rightmove ID") or "").strip()
+        if not raw_rid:
+            continue
+        prop = PropertyNodes(raw_rid)
+        source_dict = {
+            "rightmove_address": prop.rightmove_address,
+            "rightmove_url": prop.rightmove_url,
+            "rightmove_bedrooms": prop.rightmove_bedrooms,
+            "rightmove_price": prop.rightmove_price,
+            "rightmove_location": prop.rightmove_location,
+            "precise_location": prop.precise_location,
+            "corrected_address": prop.corrected_address,
+        }
+        bootstrap_from_row(row, source_dict)
+        register_property(raw_rid, prop)
+        count += 1
+
+    logger.info("Seeded %d properties from sheet", count)
+    return count
