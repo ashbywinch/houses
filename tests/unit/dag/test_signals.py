@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pytest
 from dag.signals import Signal
 
 
@@ -60,7 +59,6 @@ class TestSignal:
 
 class TestSlot:
     def test_slot_receives_signal(self):
-        received = []
         sig = Signal()
 
         class Receiver:

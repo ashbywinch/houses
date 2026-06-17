@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import weakref
-from typing import Any, Callable
+from collections.abc import Callable
 
 
 class Connection:

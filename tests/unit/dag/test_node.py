@@ -2,9 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import pytest
-from pydantic import TypeAdapter
-
 from dag.attempt import Attempt, Provenance
 from dag.node import Node
 
