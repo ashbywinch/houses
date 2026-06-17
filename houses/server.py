@@ -39,6 +39,7 @@ from houses.sheets import (
 )
 from houses.sheets.backfill import batch_stream
 from houses.sheets.reader import get_properties_data, resolve_tab
+from houses.web.api_router import api_router
 from houses.web.router import web_router
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,7 @@ async def server_error(request: Request, exc: Exception):
 
 
 app.mount("/static", StaticFiles(directory="houses/static"), name="static")
+app.include_router(api_router)
 app.include_router(web_router)
 
 

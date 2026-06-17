@@ -1,4 +1,4 @@
-"""REST API for the reactive DAG.
+"""REST + WebSocket API for the reactive DAG.
 
 Endpoints return node ``to_json()`` output — the API never accesses
 node internals directly.
@@ -6,14 +6,62 @@ node internals directly.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+import asyncio
+import json
+import logging
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 
 from houses.nodes.property import PropertyNodes
 from houses.nodes.settings import settings_node
 
+logger = logging.getLogger(__name__)
+
 api_router = APIRouter(prefix="/api")
 
 _registry: dict[str, PropertyNodes] = {}
+
+_websocket_clients: set[WebSocket] = set()
+
+
+async def _broadcast(data: dict[str, Any]) -> None:
+    """Send a JSON message to all connected WebSocket clients."""
+    message = json.dumps(data)
+    dead: list[WebSocket] = []
+    for ws in _websocket_clients:
+        try:
+            await ws.send_text(message)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        _websocket_clients.discard(ws)
+
+
+def register_property(rid: str, prop: PropertyNodes) -> None:
+    """Register a property and wire its changed signal to WebSocket broadcast."""
+    _registry[rid] = prop
+    prop.changed.connect(lambda: asyncio.ensure_future(
+        _broadcast({"type": "property_updated", "rid": rid, "data": prop.to_json()})
+    ))
+
+
+@api_router.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    _websocket_clients.add(websocket)
+    try:
+        # Send initial state
+        await websocket.send_json({
+            "type": "init",
+            "properties": list(_registry.keys()),
+        })
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _websocket_clients.discard(websocket)
 
 
 @api_router.get("/properties")
