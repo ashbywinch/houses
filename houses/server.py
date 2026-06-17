@@ -39,7 +39,7 @@ from houses.sheets import (
 )
 from houses.sheets.backfill import batch_stream
 from houses.sheets.reader import get_properties_data, resolve_tab
-from houses.web.api_router import api_router
+from houses.web.api_router import api_router, register_property
 from houses.web.router import web_router
 
 logger = logging.getLogger(__name__)
@@ -252,6 +252,24 @@ async def upsert_property(
                 await resolve_property(rid2, ["best_address", "best_location", "map_url"])
             except Exception as e:
                 logger.warning("Failed to write source values for %s: %s", rid2, e)
+
+            # ── Dual-write to new DAG ────────────────────────────
+            try:
+                from houses.nodes.cutover import push_enriched_property
+                from houses.nodes.property import PropertyNodes
+
+                prop = PropertyNodes(rid2)
+                push_enriched_property(rid2, enriched, {
+                    "rightmove_address": prop.rightmove_address,
+                    "rightmove_url": prop.rightmove_url,
+                    "rightmove_bedrooms": prop.rightmove_bedrooms,
+                    "rightmove_price": prop.rightmove_price,
+                    "rightmove_location": prop.rightmove_location,
+                })
+                register_property(rid2, prop)
+                logger.info("Pushed enriched data to new DAG for %s", rid2)
+            except Exception as e:
+                logger.warning("Failed to push to new DAG for %s: %s", rid2, e)
 
         dump = asdict_serializable(enriched)
         extra: dict[str, Any] = {}
