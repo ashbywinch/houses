@@ -36,6 +36,26 @@ run: setup
 	@echo "${YELLOW}Starting houses server on http://127.0.0.1:8080${NC}"
 	@$(UV) run uvicorn houses.server:app --host 0.0.0.0 --port 8080 --reload
 
+FRONTEND := houses/frontend
+NPM := npm
+
+frontend-setup:
+	@cd $(FRONTEND) && $(NPM) install
+	@echo "${GREEN}✓ Frontend dependencies installed${NC}"
+
+frontend-dev: frontend-setup
+	@echo "${YELLOW}Starting Vue dev server on http://localhost:5173${NC}"
+	@cd $(FRONTEND) && $(NPM) run dev
+
+frontend-build: frontend-setup
+	@cd $(FRONTEND) && $(NPM) run build
+	@echo "${GREEN}✓ Frontend build complete${NC}"
+
+dev: run & frontend-dev
+
+test: setup lint
+	@$(PYTEST) tests/unit/ tests/integration/ -q
+
 test: setup lint
 	@$(PYTEST) tests/unit/ tests/integration/ -q 
 

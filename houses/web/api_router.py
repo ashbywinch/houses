@@ -70,6 +70,15 @@ async def list_properties():
     return {"properties": list(_registry.keys())}
 
 
+@api_router.get("/properties/all")
+async def get_all_properties():
+    """Return all registered properties' DAG node values."""
+    return {
+        rid: prop.to_json()
+        for rid, prop in _registry.items()
+    }
+
+
 @api_router.get("/properties/{rid}")
 async def get_property(rid: str):
     """Return a single property's DAG node values."""
@@ -77,6 +86,15 @@ async def get_property(rid: str):
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
     return prop.to_json()
+
+
+@api_router.post("/seed")
+async def seed_properties():
+    """Bootstrap the registry from all existing sheet properties."""
+    from houses.nodes.bootstrap import seed_registry_from_sheet
+
+    count = seed_registry_from_sheet()
+    return {"seeded": count, "total": len(_registry)}
 
 
 @api_router.get("/settings")

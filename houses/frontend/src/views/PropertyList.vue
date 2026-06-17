@@ -7,7 +7,7 @@ import PropertyCard from '../components/PropertyCard.vue'
 const store = usePropertiesStore()
 
 onMounted(() => {
-  store.loadRids()
+  store.loadAll()
 })
 </script>
 

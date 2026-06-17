@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { PropertyResponse } from '../types'
-import { fetchProperties, fetchProperty } from '../services/api'
+import { fetchProperty } from '../services/api'
 
 export const usePropertiesStore = defineStore('properties', () => {
   const rids = ref<string[]>([])
@@ -9,11 +9,15 @@ export const usePropertiesStore = defineStore('properties', () => {
   const loading = ref(false)
   const error = ref<string | null>(null)
 
-  async function loadRids() {
+  async function loadAll() {
     loading.value = true
     error.value = null
     try {
-      rids.value = await fetchProperties()
+      const resp = await fetch('/api/properties/all')
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data: Record<string, PropertyResponse> = await resp.json()
+      properties.value = data
+      rids.value = Object.keys(data)
     } catch (e) {
       error.value = String(e)
     } finally {
@@ -42,5 +46,5 @@ export const usePropertiesStore = defineStore('properties', () => {
     properties.value[rid] = data
   }
 
-  return { rids, properties, loading, error, loadRids, loadProperty, updateProperty }
+  return { rids, properties, loading, error, loadAll, loadProperty, updateProperty }
 })
