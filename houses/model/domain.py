@@ -12,18 +12,20 @@ Existing classes imported for convenience:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from money import Money
 
-if TYPE_CHECKING:
-    from pint import Quantity as _Quantity
-
-from houses.commute import CostGroup  # noqa: F401 — re-export
-from houses.commute import JourneyLeg  # noqa: F401 — re-export
+from houses.commute import (
+    CostGroup,  # noqa: F401 — re-export
+    JourneyLeg,  # noqa: F401 — re-export
+)
 from houses.property import CouncilTaxInfo  # noqa: F401 — re-export
 from houses.schools import School  # noqa: F401 — re-export
+
+if TYPE_CHECKING:
+    from pint import Quantity as _Quantity
 
 
 @dataclass(frozen=True)
