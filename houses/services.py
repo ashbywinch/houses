@@ -12,10 +12,9 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Protocol
 
-from dag.attempt import Provenance
+from dag.attempt import Attempt
 from dag.persistence import latest_node_result
 from dag.source_node import SourceNode
-from houses.attempt import Attempt
 from houses.commute import Commute
 from houses.geo import GeoPoint
 from houses.nodes.settings import make_default_financials, make_default_persons, make_default_thresholds
@@ -112,12 +111,12 @@ def _make_settings_source(node_id: str, value_type: type, default_factory):
     """Create a settings SourceNode from DB or defaults (eager — not lazy)."""
     node = SourceNode(node_id, value_type)
     persisted = latest_node_result(node_id)
-    if persisted and persisted.get("succeeded"):
+    if persisted and persisted.get("status") == "succeeded":
         val = node._adapter.validate_python(persisted["value"])
         node._value = val
-        node._provenance = Provenance("db")
+        node._source_label = persisted.get("source_label", "db")
     else:
-        node.push(default_factory(), Provenance("config"))
+        node.push(default_factory(), "config")
     return node
 
 

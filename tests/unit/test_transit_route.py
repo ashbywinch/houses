@@ -107,10 +107,10 @@ async def test_enrich_uses_tfl_tube_fare_when_needed(tmp_path):
     )
 
     async def mock_geocode(_):
-        from houses.attempt import Attempt
+        from dag.attempt import Attempt
         from houses.geo import GeoPoint
 
-        return Attempt.succeeded(GeoPoint(51.317, -0.556), "test")
+        return Attempt.succeeded(GeoPoint(51.317, -0.556))
 
     # Inject a mock tube fare of £3.40 (peak) instead of hardcoded £2.80
     import houses.transit_route as tr

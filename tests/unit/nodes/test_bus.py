@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from dag.attempt import Provenance
 from dag.source_node import SourceNode
 from houses.geo import GeoPoint
 
@@ -16,7 +15,9 @@ class TestBusRouteNode:
         walk = SourceNode[bool]("walk_br", bool)
         transit = SourceNode[dict]("transit_br", dict)
 
-        loc.push(GeoPoint(51.5, -0.1), Provenance("test"))
+        loc.push(GeoPoint(51.5, -0.1), "test")
+        walk.push(False, "test")
+        transit.push({}, "test")
         node = BusRouteNode(
             "br",
             best_location=loc,
@@ -24,7 +25,7 @@ class TestBusRouteNode:
             transit_node=transit,
         )
         a = await node.attempt()
-        assert a.is_succeeded
+        assert a.succeeded
 
 
 class TestBodsFareNode:
@@ -35,9 +36,9 @@ class TestBodsFareNode:
         route = SourceNode[dict]("route_bf", dict)
         node = BodsFareNode("bf", bus_route_node=route)
 
-        route.push({}, Provenance("test"))
+        route.push({}, "test")
         a = await node.attempt()
-        assert a.is_succeeded
+        assert a.succeeded
 
 
 class TestBusLegAugmentNode:
@@ -57,7 +58,10 @@ class TestBusLegAugmentNode:
             bus_route_node=route,
             bods_fare_node=fare,
         )
-        walk.push(False, Provenance("test"))
+        transit.push({"augmented": True}, "test")
+        walk.push(False, "test")
+        route.push({}, "test")
+        fare.push({}, "test")
         a = await node.attempt()
-        assert a.is_succeeded
-        assert a.value_or_none()["augmented"] is False
+        assert a.succeeded
+        assert a.value_or_none()["augmented"] is True

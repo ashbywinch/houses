@@ -110,7 +110,10 @@ async def capture_page(url: str, output_dir: str, label: str):
 
 async def main():
     parser = ArgumentParser(description="Capture Vue frontend DOM")
-    parser.add_argument("--output", "-o", default=None, help="Output directory (default: tools/captures/<session-timestamp>)")
+    parser.add_argument(
+        "--output", "-o", default=None,
+        help="Output directory (default: tools/captures/<session-timestamp>)",
+    )
     parser.add_argument("--list-only", action="store_true")
     parser.add_argument("--detail-only", action="store_true")
     args = parser.parse_args()

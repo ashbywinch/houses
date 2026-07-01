@@ -5,7 +5,7 @@ from abc import abstractmethod
 from inspect import iscoroutine
 from typing import Generic, TypeVar
 
-from dag.attempt import Attempt
+from dag.attempt import Attempt, Provenance
 from dag.node import Node
 from dag.signals import Slot
 
@@ -69,6 +69,11 @@ class ComputedNode(Node[T], Generic[T]):
     async def attempt(self) -> Attempt[T]:
         if self._is_stale():
             dep_attempts = [await dep.attempt() for dep in self._deps]
+            # If any dep is pending, the result is pending — we don't have
+            # enough information to compute yet.
+            if any(a.pending for a in dep_attempts):
+                self._cached = Attempt.pending()
+                return self._cached
             try:
                 result = self.compute(*dep_attempts)
                 if iscoroutine(result):
@@ -83,10 +88,20 @@ class ComputedNode(Node[T], Generic[T]):
             try:
                 result_dict = await self.to_json()
             except Exception as e:
-                result_dict = {"succeeded": False, "value": None, "error": str(e),
-                              "provenance": {"label": ""}}
+                result_dict = {
+                    "status": "impossible",
+                    "value": None,
+                    "error": str(e),
+                    "provenance": {"label": ""},
+                }
             self._persist(result_dict, dep_timestamps)
         return self._cached
+
+    async def build_provenance(self) -> Provenance:
+        sources: dict[str, Provenance] = {}
+        for dep in self._deps:
+            sources[dep._id] = await dep.build_provenance()
+        return Provenance.composite(self._id, sources)
 
     @abstractmethod
     def compute(self, *dep_attempts: Attempt) -> Attempt[T]:

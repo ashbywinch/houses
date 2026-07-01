@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 
-from dag.attempt import Provenance
 from dag.source_node import SourceNode
 from houses.geo import GeoPoint
 from houses.property import EnrichedProperty
@@ -28,16 +27,17 @@ def push_enriched_property(rid: str, enriched: EnrichedProperty,
         enriched: The EnrichedProperty from enrichment.
         sources: Dict of SourceNode instances (from a PropertyNodes object).
     """
+
     if enriched.address:
-        sources["rightmove_address"].push(enriched.address, Provenance("Rightmove"))
+        sources["rightmove_address"].push(enriched.address, "Rightmove")
     if enriched.url:
-        sources["rightmove_url"].push(enriched.url, Provenance("Browser extension"))
+        sources["rightmove_url"].push(enriched.url, "Browser extension")
     if enriched.bedrooms is not None:
-        sources["rightmove_bedrooms"].push(str(enriched.bedrooms), Provenance("Rightmove"))
+        sources["rightmove_bedrooms"].push(str(enriched.bedrooms), "Rightmove")
     if enriched.price is not None:
-        sources["rightmove_price"].push(str(enriched.price), Provenance("Rightmove"))
+        sources["rightmove_price"].push(str(enriched.price), "Rightmove")
     if enriched.approx_latitude is not None and enriched.approx_longitude is not None:
         sources["rightmove_location"].push(
             GeoPoint(lat=enriched.approx_latitude, lon=enriched.approx_longitude),
-            Provenance("Rightmove map"),
+            "Rightmove map",
         )

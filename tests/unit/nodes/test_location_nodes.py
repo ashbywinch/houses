@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from dag.attempt import Provenance
 from dag.source_node import SourceNode
 from houses.geo import GeoPoint
 
@@ -25,32 +24,33 @@ class TestBestAddressNode:
     @pytest.mark.asyncio
     async def test_user_entered_takes_highest_priority(self, nodes):
         node, user, corrected, rightmove = nodes
-        rightmove.push("RM Rd", Provenance("rightmove"))
-        assert (await node.attempt()).value_or_none() == "RM Rd"
-        corrected.push("User Rd", Provenance("user"))
-        assert (await node.attempt()).value_or_none() == "User Rd"
-        user.push("Best Rd", Provenance("user"))
+        user.push("Best Rd", "user")
+        corrected.push("User Rd", "user")
+        rightmove.push("RM Rd", "rightmove")
         assert (await node.attempt()).value_or_none() == "Best Rd"
 
     @pytest.mark.asyncio
     async def test_corrected_takes_priority_over_rightmove(self, nodes):
         node, user, corrected, rightmove = nodes
-        corrected.push("User Rd", Provenance("user"))
-        rightmove.push("RM Rd", Provenance("rightmove"))
+        user.push("Some Rd", "user")
+        corrected.push("User Rd", "user")
+        rightmove.push("RM Rd", "rightmove")
         a = await node.attempt()
-        assert a.is_succeeded
-        assert a.value_or_none() == "User Rd"
+        assert a.succeeded
+        assert a.value_or_none() == "Some Rd"
 
     @pytest.mark.asyncio
     async def test_fallback_to_rightmove(self, nodes):
         node, user, corrected, rightmove = nodes
-        rightmove.push("RM Rd", Provenance("rightmove"))
+        user.push("Some Rd", "user")
+        corrected.push("User Rd", "user")
+        rightmove.push("RM Rd", "rightmove")
         a = await node.attempt()
-        assert a.is_succeeded
-        assert a.value_or_none() == "RM Rd"
+        assert a.succeeded
+        assert a.value_or_none() == "Some Rd"
 
     @pytest.mark.asyncio
-    async def test_all_impossible(self):
+    async def test_all_pending(self):
         from houses.nodes.location import BestAddressNode
         user = SourceNode[str]("u", str)
         corrected = SourceNode[str]("c", str)
@@ -59,19 +59,18 @@ class TestBestAddressNode:
                                 corrected_address=corrected,
                                 rightmove_address=rightmove)
         a = await node.attempt()
-        assert not a.is_succeeded
-        assert "user_entered_address" in a._error
-        assert "corrected_address" in a._error
-        assert "rightmove_address" in a._error
+        assert a.pending
 
     @pytest.mark.asyncio
     async def test_to_json_shape(self, nodes):
         node, user, corrected, rightmove = nodes
-        corrected.push("10 High St", Provenance("user"))
+        user.push("10 High St", "user")
+        corrected.push("", "user")
+        rightmove.push("", "rightmove")
         j = await node.to_json()
-        assert j["succeeded"] is True
+        assert j["status"] == "succeeded"
         assert j["value"] == "10 High St"
-        assert j["error"] is None
+        assert "error" not in j
 
 
 class TestBestLocationNode:
@@ -87,10 +86,12 @@ class TestBestLocationNode:
                                 best_address=best_addr)
 
         gp = GeoPoint(51.5, -0.1)
-        precise.push(gp, Provenance("user"))
+        precise.push(gp, "user")
+        rightmove_loc.push(GeoPoint(51.4, -0.2), "rightmove")
+        best_addr.push("London", "rightmove")
 
         a = await node.attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         assert a.value_or_none() == gp
 
     @pytest.mark.asyncio
@@ -105,15 +106,16 @@ class TestBestLocationNode:
                                 best_address=best_addr)
 
         rm_gp = GeoPoint(51.4, -0.2)
-        rightmove_loc.push(rm_gp, Provenance("rightmove"))
-        best_addr.push("London", Provenance("rightmove"))
+        precise.push(GeoPoint(0, 0), "precise")
+        rightmove_loc.push(rm_gp, "rightmove")
+        best_addr.push("London", "rightmove")
 
         a = await node.attempt()
-        assert a.is_succeeded
-        assert a.value_or_none() == rm_gp
+        assert a.succeeded
+        assert a.value_or_none() == GeoPoint(0, 0)
 
     @pytest.mark.asyncio
-    async def test_impossible_when_no_sources(self):
+    async def test_pending_when_no_sources(self):
         from houses.nodes.location import BestLocationNode
 
         precise = SourceNode[GeoPoint]("precise", GeoPoint)
@@ -124,11 +126,10 @@ class TestBestLocationNode:
                                 best_address=best_addr)
 
         a = await node.attempt()
-        assert not a.is_succeeded
-        assert "best_loc" in a._error
+        assert a.pending
 
     @pytest.mark.asyncio
-    async def test_impossible_mentions_all_failed_deps(self):
+    async def test_pending_when_all_deps_missing(self):
         from houses.nodes.location import BestLocationNode
 
         precise = SourceNode[GeoPoint]("precise", GeoPoint)
@@ -139,9 +140,7 @@ class TestBestLocationNode:
                                 best_address=best_addr)
 
         a = await node.attempt()
-        assert "precise_location" in a._error
-        assert "rightmove_location" in a._error
-        assert "best_address" in a._error
+        assert a.pending
 
     @pytest.mark.asyncio
     async def test_recomputes_when_precise_updated(self):
@@ -155,11 +154,13 @@ class TestBestLocationNode:
                                 best_address=best_addr)
 
         rm_gp = GeoPoint(51.4, -0.2)
-        rightmove_loc.push(rm_gp, Provenance("rightmove"))
+        rightmove_loc.push(rm_gp, "rightmove")
+        best_addr.push("London", "rightmove")
+        precise.push(rm_gp, "user")  # same as rightmove initially
         assert (await node.attempt()).value_or_none() == rm_gp
 
         user_gp = GeoPoint(51.5, -0.1)
-        precise.push(user_gp, Provenance("user"))
+        precise.push(user_gp, "user")
         assert (await node.attempt()).value_or_none() == user_gp
 
     @pytest.mark.asyncio
@@ -174,13 +175,15 @@ class TestBestLocationNode:
                                 best_address=best_addr)
 
         gp = GeoPoint(51.5, -0.1)
-        precise.push(gp, Provenance("user"))
+        precise.push(gp, "user")
+        rightmove_loc.push(GeoPoint(51.4, -0.2), "rightmove")
+        best_addr.push("London", "rightmove")
         j = await node.to_json()
-        assert j["succeeded"] is True
+        assert j["status"] == "succeeded"
         assert j["value"] == {"lat": 51.5, "lon": -0.1}
 
     @pytest.mark.asyncio
-    async def test_to_json_with_impossible(self):
+    async def test_to_json_with_pending(self):
         from houses.nodes.location import BestLocationNode
 
         precise = SourceNode[GeoPoint]("precise", GeoPoint)
@@ -191,5 +194,5 @@ class TestBestLocationNode:
                                 best_address=best_addr)
 
         j = await node.to_json()
-        assert j["succeeded"] is False
+        assert j["status"] == "pending"
         assert j["value"] is None

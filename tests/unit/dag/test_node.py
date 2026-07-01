@@ -17,11 +17,11 @@ class TestNodeBase:
             "dep_b": Attempt.impossible("not set"),
         }
         result = node.call_impossible(dep_attempts, extra="cache expired")
-        assert not result.is_succeeded
-        assert "test_node" in result._error
-        assert "dep_a: HTTP 503" in result._error
-        assert "dep_b: not set" in result._error
-        assert "cache expired" in result._error
+        assert not result.succeeded
+        assert "test_node" in result.error
+        assert "dep_a: HTTP 503" in result.error
+        assert "dep_b: not set" in result.error
+        assert "cache expired" in result.error
 
     def test_impossible_without_extra(self):
         node = _ConcreteNode("test_node", str)
@@ -30,30 +30,30 @@ class TestNodeBase:
             "origin": Attempt.impossible("no address"),
         }
         result = node.call_impossible(dep_attempts)
-        assert "origin: no address" in result._error
-        assert result._error.startswith("test_node")
+        assert "origin: no address" in result.error
+        assert result.error.startswith("test_node")
 
     def test_impossible_with_succeeded_deps(self):
         node = _ConcreteNode("test_node", str)
 
         dep_attempts = {
-            "ok": Attempt.succeeded("value", Provenance("test")),
+            "ok": Attempt.succeeded("value"),
             "fail": Attempt.impossible("broken"),
         }
         result = node.call_impossible(dep_attempts)
-        assert "ok:" not in result._error
-        assert "fail: broken" in result._error
+        assert "ok:" not in result.error
+        assert "fail: broken" in result.error
 
     @pytest.mark.asyncio
     async def test_to_json_with_succeeded(self):
         node = _ConcreteNode("test_node", str)
-        node._test_attempt = Attempt.succeeded("hello", Provenance("test_src"))
+        node._test_attempt = Attempt.succeeded("hello")
 
         j = await node.to_json()
-        assert j["succeeded"] is True
+        assert j["status"] == "succeeded"
         assert j["value"] == "hello"
-        assert j["error"] is None
-        assert j["provenance"]["label"] == "test_src"
+        assert "error" not in j
+        assert j["provenance"]["label"] == "test_node"
 
     @pytest.mark.asyncio
     async def test_to_json_with_impossible(self):
@@ -61,7 +61,7 @@ class TestNodeBase:
         node._test_attempt = Attempt.impossible("something failed")
 
         j = await node.to_json()
-        assert j["succeeded"] is False
+        assert j["status"] == "impossible"
         assert j["value"] is None
         assert j["error"] == "something failed"
 
@@ -73,10 +73,10 @@ class TestNodeBase:
             y: int
 
         node = _ConcreteNode("point_node", Point)
-        node._test_attempt = Attempt.succeeded(Point(x=1, y=2), Provenance("test"))
+        node._test_attempt = Attempt.succeeded(Point(x=1, y=2))
 
         j = await node.to_json()
-        assert j["succeeded"] is True
+        assert j["status"] == "succeeded"
         assert j["value"] == {"x": 1, "y": 2}
 
     def test_changed_signal(self):
@@ -89,21 +89,21 @@ class TestNodeBase:
 
     def test_id_property(self):
         node = _ConcreteNode("my_id", int)
-        assert node.id == "my_id"
+        assert node._id == "my_id"
 
     @pytest.mark.asyncio
     async def test_attempt_async(self):
         node = _ConcreteNode("test", str)
-        node._test_attempt = Attempt.succeeded("val", Provenance("t"))
+        node._test_attempt = Attempt.succeeded("val")
         a = await node.attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         assert a.value_or_none() == "val"
 
     @pytest.mark.asyncio
     async def test_provenance_description_in_json(self):
-        node = _ConcreteNode("test", str)
-        node._test_attempt = Attempt.succeeded(
-            "val", Provenance("test", description="TfL transit route"))
+        node = _ConcreteNode("desc_test", str)
+        node._test_attempt = Attempt.succeeded("val")
+        node._test_provenance = Provenance("test", description="TfL transit route")
         j = await node.to_json()
         assert j["provenance"]["description"] == "TfL transit route"
 
@@ -114,9 +114,13 @@ class _ConcreteNode(Node[str]):
     def __init__(self, node_id: str, value_type: type):
         super().__init__(node_id, value_type)
         self._test_attempt = Attempt.impossible("not set")
+        self._test_provenance = Provenance(label=node_id)
 
     async def attempt(self) -> Attempt:
         return self._test_attempt
+
+    async def build_provenance(self) -> Provenance:
+        return self._test_provenance
 
     def call_impossible(self, dep_attempts, extra=""):
         return self._impossible(dep_attempts, extra)

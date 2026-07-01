@@ -15,7 +15,7 @@ from typing import Any
 
 from money import Money
 
-from houses.attempt import Attempt
+from dag.attempt import Attempt
 from houses.commute import Commute
 from houses.geo import GeoPoint
 from houses.property import CouncilTaxInfo
@@ -38,11 +38,11 @@ class FakeGeocoder:
 
     async def geocode_postcode(self, postcode: str) -> Attempt[GeoPoint]:
         self.postcode_calls.append(postcode)
-        return Attempt.succeeded(self.result, "fake") if self.result else Attempt.impossible("fake", "no result")
+        return Attempt.succeeded(self.result) if self.result else Attempt.impossible("no result")
 
     async def geocode_address(self, address: str) -> Attempt[GeoPoint]:
         self.address_calls.append(address)
-        return Attempt.succeeded(self.result, "fake") if self.result else Attempt.impossible("fake", "no result")
+        return Attempt.succeeded(self.result) if self.result else Attempt.impossible("no result")
 
 
 _DEFAULT_SIMON = Commute(
@@ -81,15 +81,15 @@ class FakeCommuteRouter:
 
     async def simon_commute(self, postcode: str) -> Attempt[Commute]:
         self.calls.append(("simon", postcode))
-        return Attempt.succeeded(self.simon, "fake") if self.simon else Attempt.impossible("fake", "no route")
+        return Attempt.succeeded(self.simon) if self.simon else Attempt.impossible("no route")
 
     async def lorena_commute(self, postcode: str) -> Attempt[Commute]:
         self.calls.append(("lorena", postcode))
-        return Attempt.succeeded(self.lorena, "fake") if self.lorena else Attempt.impossible("fake", "no route")
+        return Attempt.succeeded(self.lorena) if self.lorena else Attempt.impossible("no route")
 
     async def petrol_cost(self, postcode: str) -> Attempt[Commute]:
         self.calls.append(("petrol", postcode))
-        return Attempt.succeeded(self.petrol, "fake") if self.petrol else Attempt.impossible("fake", "no route")
+        return Attempt.succeeded(self.petrol) if self.petrol else Attempt.impossible("no route")
 
 
 class FakeSchoolLookup:
@@ -156,10 +156,9 @@ class FakeCouncilTax:
         if band:
             self._result: Attempt[CouncilTaxInfo] = Attempt.succeeded(
                 CouncilTaxInfo(band=band, yearly_cost=cost),
-                "fake",
             )
         else:
-            self._result = Attempt.impossible("fake", "no result")
+            self._result = Attempt.impossible("no result")
 
     async def lookup(self, postcode: str, address: str = "") -> Attempt[CouncilTaxInfo]:
         return self._result

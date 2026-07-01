@@ -318,11 +318,11 @@ async def run_enrichment(
     # Single PropertyLocation — resolve once for all enrichment steps
     location = PropertyLocation(postcode=postcode, address=lookup or address)
     location = await location.resolve()
-    approx_lat = location.coordinates.value_or_none().lat if location.coordinates.is_succeeded else None
-    approx_lng = location.coordinates.value_or_none().lon if location.coordinates.is_succeeded else None
+    approx_lat = location.coordinates.value_or_none().lat if location.coordinates.succeeded else None
+    approx_lng = location.coordinates.value_or_none().lon if location.coordinates.succeeded else None
     geocode_lat = approx_lat
     geocode_lng = approx_lng
-    geo_source = location.coordinates.source if location.coordinates.is_succeeded else ""
+    geo_source = ""
 
     if enabled is None or "simon" in enabled:
         simon = (await svc.commute_router.simon_commute(lookup)).value_or_none()
@@ -387,8 +387,8 @@ async def run_enrichment(
     if (enabled is None or "council_tax" in enabled) and postcode and not is_outcode(postcode) and address:
         result = await svc.council_tax_service.lookup(postcode, address)
         council_tax = result.value_or_none()
-        if result.is_impossible:
-            logger.debug("Council tax: %s for %s", result.reason, postcode)
+        if result.impossible:
+            logger.debug("Council tax: %s for %s", result.error, postcode)
 
     if enabled is None or "geo" in enabled:
         if actual_latitude is not None and actual_longitude is not None:

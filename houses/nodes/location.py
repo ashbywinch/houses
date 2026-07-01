@@ -24,11 +24,11 @@ class BestAddressNode(ComputedNode[str]):
     def compute(self, user_entered: Attempt[str],
                 corrected: Attempt[str],
                 rightmove: Attempt[str]) -> Attempt[str]:
-        if user_entered.is_succeeded:
+        if user_entered.succeeded:
             return user_entered
-        if corrected.is_succeeded:
+        if corrected.succeeded:
             return corrected
-        if rightmove.is_succeeded:
+        if rightmove.succeeded:
             return rightmove
         return self._impossible(
             {"user_entered_address": user_entered,
@@ -44,7 +44,7 @@ class BestLocationNode(ComputedNode[GeoPoint]):
 
     The geocode path is only attempted when best_address resolves to a
     single-property address. Geocoding requires async compute and is
-    wired separately (see GeocodeNode in Phase 3).
+    wired separately (see GeocodeNode).
     """
 
     def __init__(self, node_id: str, *, precise_location, rightmove_location,
@@ -56,9 +56,9 @@ class BestLocationNode(ComputedNode[GeoPoint]):
     def compute(self, precise: Attempt[GeoPoint],
                 rightmove: Attempt[GeoPoint],
                 address: Attempt[str]) -> Attempt[GeoPoint]:
-        if precise.is_succeeded:
+        if precise.succeeded:
             return precise
-        if address.is_succeeded and is_single_property_address(address.value_or_none()):
+        if address.succeeded and is_single_property_address(address.value_or_none()):
             return self._impossible(
                 {"precise_location": precise, "rightmove_location": rightmove},
                 extra=(
@@ -66,7 +66,7 @@ class BestLocationNode(ComputedNode[GeoPoint]):
                     "but geocoding requires async compute"
                 ),
             )
-        if rightmove.is_succeeded:
+        if rightmove.succeeded:
             return rightmove
         return self._impossible(
             {

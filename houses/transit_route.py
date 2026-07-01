@@ -11,8 +11,8 @@ from datetime import datetime, timedelta
 import httpx
 from money import Money
 
+from dag.attempt import Attempt
 from houses.api_cache import cached_async_client, get_cached, set_cached
-from houses.attempt import Attempt
 from houses.car_park import CarParkRegistry
 from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
@@ -439,8 +439,8 @@ class TransitRoute:
             cost_groups=tuple(cost_groups),
         )
         if duration_minutes is not None:
-            return Attempt.succeeded(result, "tfl")
-        return Attempt.impossible("tfl", "could not route transit")
+            return Attempt.succeeded(result)
+        return Attempt.impossible("could not route transit")
 
     # ── Internal methods ────────────────────────────────────────
 
@@ -541,10 +541,10 @@ class TransitRoute:
 
         if car_park is None:
             result = await parking.add_nearest_car_park_for(station)
-            car_park = result.value_or_none() if result.is_succeeded else None
+            car_park = result.value_or_none() if result.succeeded else None
         elif car_park.daily_cost is None:
             result = await parking.load_costs(car_park, station)
-            if result.is_succeeded:
+            if result.succeeded:
                 car_park = result.value_or_none()
 
         if car_park is None or car_park.daily_cost is None:

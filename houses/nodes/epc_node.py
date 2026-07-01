@@ -1,71 +1,53 @@
 from __future__ import annotations
 
-import logging
-
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt
 from dag.computed_node import ComputedNode
 
-logger = logging.getLogger(__name__)
 
-
-class EpcNode(ComputedNode[str]):
-    """Async node that looks up EPC rating via the EPC service.
-
-    Deps: (best_address)
-    """
-
+class EpcNode(ComputedNode[dict]):
     def __init__(self, node_id: str, *, best_address):
-        super().__init__(
-            node_id,
-            str,
-            (best_address,),
-        )
+        super().__init__(node_id, dict, (best_address,))
 
-    async def compute(self, best_address: Attempt[str]) -> Attempt[str]:
+    async def compute(self, address: Attempt[str]) -> Attempt[dict]:
+        if not address.succeeded:
+            return self._impossible({"best_address": address})
         from houses.context import get_services
 
-        if not best_address.is_succeeded:
-            return self._impossible({"best_address": best_address})
-        address = best_address.value_or_none()
-        rating = await get_services().epc_service.lookup(address, address)
-        if rating:
-            return Attempt.succeeded(
-                rating,
-                Provenance("EPC API", description=f"EPC rating for {address}"),
-            )
-        return Attempt.impossible(f"no EPC rating found for {address}",
-                                   Provenance("EPC API", description=f"lookup for {address}"))
+        addr = address.value_or_none() or ""
+        svc = get_services()
+        band = await svc.epc_service.lookup(addr)
+        if band:
+            return Attempt.succeeded({"band": band, "potential": band})
+        return Attempt.impossible("no EPC data")
+
+    async def build_provenance(self):
+        from dag.attempt import Provenance
+        return Provenance(label="EPC API")
 
 
 class CouncilTaxNode(ComputedNode[dict]):
-    """Async node that looks up council tax via the council tax service.
-
-    Deps: (best_address, postcode_node)
-    Uses the postcode for the API lookup; the full address is for context.
-    """
-
     def __init__(self, node_id: str, *, best_address, postcode_node):
-        super().__init__(
-            node_id,
-            dict,
-            (best_address, postcode_node),
-        )
+        super().__init__(node_id, dict, (best_address, postcode_node))
 
-    async def compute(self, best_address: Attempt[str],
-                      postcode_attempt: Attempt[str]) -> Attempt[dict]:
+    async def compute(self, address: Attempt[str],
+                      postcode: Attempt[str]) -> Attempt[dict]:
+        if not address.succeeded or not postcode.succeeded:
+            extra = {}
+            if not address.succeeded:
+                extra["best_address"] = address
+            if not postcode.succeeded:
+                extra["postcode_node"] = postcode
+            return self._impossible(extra)
         from houses.context import get_services
 
-        if not postcode_attempt.is_succeeded:
-            return self._impossible({"postcode": postcode_attempt})
-        postcode = postcode_attempt.value_or_none()
-        address = best_address.value_or_none() if best_address.is_succeeded else postcode
-        result = await get_services().council_tax_service.lookup(postcode, address)
-        if result.is_succeeded:
-            ct = result.value_or_none()
-            return Attempt.succeeded(
-                {"band": ct.band, "yearly_cost": ct.yearly_cost},
-                Provenance("Council Tax", description=f"council tax for {postcode}"),
-            )
-        error_detail = getattr(result, '_reason', None) or getattr(result, '_error', None) or 'unknown'
-        return Attempt.impossible(f"council_tax_lookup: {error_detail}",
-                                   Provenance("Council Tax", description=f"lookup for {address}"))
+        addr = address.value_or_none() or ""
+        svc = get_services()
+        result = await svc.council_tax_service.lookup(postcode.value_or_none() or "", address=addr)
+        if result.succeeded:
+            val = result.value_or_none()
+            return Attempt.succeeded({"band": val.band, "cost": val.yearly_cost})
+        return Attempt.impossible("no council tax data")
+
+    async def build_provenance(self):
+        from dag.attempt import Provenance
+        return Provenance(label="Council Tax")

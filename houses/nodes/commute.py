@@ -93,20 +93,30 @@ def commute_source_node(node_id: str) -> SourceNode[Commute]:
 
 
 class _CommuteSourceNode(SourceNode[dict]):
+    """A SourceNode that holds a raw Commute (not serialised to dict).
+
+    Values are not persisted to the DB — they are ephemeral results
+    pushed from the commute pipeline during enrichment.
+    """
+
     def __init__(self, node_id: str) -> None:
         super().__init__(node_id, dict)
 
-    def push(self, value: Commute, provenance) -> None:
+    def push(self, value: Commute, source_label: str = "") -> None:
         self._value = value
-        self._provenance = provenance
+        self._source_label = source_label
         self._persisted_at = time.monotonic()
         self._db_created_at = datetime.now(UTC).isoformat()
         self.changed.emit()
 
     async def attempt(self) -> Attempt[Commute]:
         if self._value is not None:
-            return Attempt.succeeded(self._value, self._provenance)
-        return Attempt.impossible("not set")
+            return Attempt.succeeded(self._value)
+        return Attempt.pending()
+
+    async def build_provenance(self):
+        from dag.attempt import Provenance
+        return Provenance.from_label(self._source_label)
 
 
 class CommuteSelectorNode(ComputedNode[dict]):
@@ -121,13 +131,13 @@ class CommuteSelectorNode(ComputedNode[dict]):
                 poi: Attempt[str],
                 transit: Attempt[dict],
                 bus: Attempt[dict]) -> Attempt[dict]:
-        if not origin.is_succeeded or not poi.is_succeeded:
+        if not origin.succeeded or not poi.succeeded:
             return self._impossible(
                 {"origin": origin, "poi": poi},
             )
-        if transit.is_succeeded:
+        if transit.succeeded:
             return transit
-        if bus.is_succeeded:
+        if bus.succeeded:
             return bus
         return self._impossible(
             {"transit_result": transit, "bus_result": bus},
@@ -135,14 +145,11 @@ class CommuteSelectorNode(ComputedNode[dict]):
 
     async def to_json(self) -> dict:
         attempt = await self.attempt()
-        result: dict[str, Any] = {
-            "succeeded": attempt.is_succeeded,
-            "provenance": self._provenance_to_json(attempt.provenance),
+        result: dict = {
+            "status": attempt.status,
+            "value": _serialize_value(attempt.value_or_none()) if attempt.succeeded else None,
         }
-        if attempt.is_succeeded:
-            result["value"] = _serialize_value(attempt.value_or_none())
-            result["error"] = None
-        else:
-            result["value"] = None
-            result["error"] = attempt._error
+        if attempt.impossible:
+            result["error"] = attempt.error
+        result["provenance"] = (await self.build_provenance()).to_dict()
         return result

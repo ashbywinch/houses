@@ -59,10 +59,10 @@ async def best_location(
     if is_single_property_address(best_address):
         geocode = _geocoder or _geocode_address
         point = await geocode(best_address)
-        if point and point.is_succeeded:
+        if point and point.succeeded:
             coords = point.value_or_none()
             if coords:
-                return coords, f"Geocoded ({point.source})"
+                return coords, "Geocoded"
     if rightmove_location:
         gp = rightmove_location if isinstance(rightmove_location, GeoPoint) else _deserialize_gp(rightmove_location)
         if gp:

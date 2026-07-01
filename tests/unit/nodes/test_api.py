@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dag.attempt import Provenance
 from houses.geo import GeoPoint
 
 
@@ -20,14 +19,18 @@ class TestPropertyApi:
 
         client, reg = self._setup()
         prop = PropertyNodes("prop123")
-        prop.precise_location.push(GeoPoint(51.5, -0.1), Provenance("user"))
+        prop.precise_location.push(GeoPoint(51.5, -0.1), "user")
+        prop.rightmove_location.push(GeoPoint(51.4, -0.2), "rightmove")
+        prop.user_entered_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        prop.corrected_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        prop.rightmove_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
         reg["prop123"] = prop
 
         resp = client.get("/api/properties/prop123")
         assert resp.status_code == 200
         data = resp.json()
         assert data["rid"] == "prop123"
-        assert data["best_location"]["succeeded"] is True
+        assert data["best_location"]["status"] == "succeeded"
         assert data["best_location"]["value"] == {"lat": 51.5, "lon": -0.1}
 
     def test_get_property_404(self):

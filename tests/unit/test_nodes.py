@@ -79,8 +79,8 @@ class TestBestLocation:
         gc = GeoPoint(lat=51.5, lon=-0.37)
 
         async def fake_geocode(_):
-            from houses.attempt import Attempt
-            return Attempt.succeeded(gc, "test_source")
+            from dag.attempt import Attempt
+            return Attempt.succeeded(gc)
 
         result, source = await best_location(
             precise_location=None, rightmove_location=rm,
@@ -88,7 +88,7 @@ class TestBestLocation:
             _geocoder=fake_geocode,
         )
         assert result == gc
-        assert source == "Geocoded (test_source)"
+        assert source == "Geocoded"
 
     async def test_rightmove_used_when_address_is_vague(self):
         rm = GeoPoint(lat=51.4, lon=-0.2)
@@ -112,8 +112,8 @@ class TestBestLocation:
 
     async def test_geocodes_single_property_address_when_no_other_source(self):
         async def fake_geocode(address: str):
-            from houses.attempt import Attempt
-            return Attempt.succeeded(GeoPoint(51.5, -0.37), "test_source")
+            from dag.attempt import Attempt
+            return Attempt.succeeded(GeoPoint(51.5, -0.37))
 
         result, source = await best_location(
             precise_location=None, rightmove_location=None,
@@ -121,7 +121,7 @@ class TestBestLocation:
             _geocoder=fake_geocode,
         )
         assert result == GeoPoint(51.5, -0.37)
-        assert source == "Geocoded (test_source)"
+        assert source == "Geocoded"
 
     async def test_does_not_geocode_vague_address(self):
         result, source = await best_location(

@@ -159,11 +159,13 @@ def _load_naptan_stops() -> dict[str, tuple[float, float]] | None:
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    R = 6371.0
+    r = 6371.0
     dlat_r = math.radians(lat2 - lat1)
     dlon_r = math.radians(lon2 - lon1)
-    a = math.sin(dlat_r / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon_r / 2) ** 2
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    sin_half = math.sin(dlat_r / 2) ** 2
+    cos_product = math.cos(math.radians(lat1)) * math.cos(math.radians(lat2))
+    a = sin_half + cos_product * math.sin(dlon_r / 2) ** 2
+    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 def _build_station_grid(stations: list[Station]) -> list[list[list[Station]]]:
@@ -251,7 +253,10 @@ def download_dataset(dataset_id: int, api_key: str, cached_only: bool = False) -
         yield resp.text
 
 
-def parse_netex_fares(xml_str: str, stations: list[Station], naptan: dict[str, tuple[float, float]] | None = None) -> dict | None:
+def parse_netex_fares(
+    xml_str: str, stations: list[Station],
+    naptan: dict[str, tuple[float, float]] | None = None,
+) -> dict | None:
     try:
         root = ET.fromstring(xml_str)
     except ET.ParseError as e:
@@ -301,8 +306,7 @@ def parse_netex_fares(xml_str: str, stations: list[Station], naptan: dict[str, t
             continue
 
         stops[atco] = {"name": name, "lat": lat, "lon": lon, "near_station": False}
-        if lat is not None and lon is not None:
-            if is_near_station(lat, lon, stations):
+        if lat is not None and lon is not None and is_near_station(lat, lon, stations):
                 stops[atco]["near_station"] = True
 
     if not stops:
@@ -329,7 +333,11 @@ def parse_netex_fares(xml_str: str, stations: list[Station], naptan: dict[str, t
         zone_id_el = _first_found(
             zone_el.find(".//netex:Id", NS), zone_el.find(".//netex:id", NS),
         )
-        zone_id = zone_id_el.text.strip() if zone_id_el is not None and zone_id_el.text else (zone_el.get("id", "") or "").strip()
+        zone_id = (
+            zone_id_el.text.strip()
+            if zone_id_el is not None and zone_id_el.text
+            else (zone_el.get("id", "") or "").strip()
+        )
         members: list[str] = []
         for member in zone_el.iter():
             mt = _unprefixed(member.tag)
@@ -389,8 +397,7 @@ def parse_netex_fares(xml_str: str, stations: list[Station], naptan: dict[str, t
         if price_ref_el is not None:
             price_group_ref = price_ref_el.get("ref", "") or price_ref_el.text or ""
             price = _find_price_for_group(root, price_group_ref)
-            if price is not None:
-                if normalized_key not in zone_fares:
+            if price is not None and normalized_key not in zone_fares:
                     zone_fares[normalized_key] = {"adult_single": price}
 
     for dmep in root.iter():
@@ -437,7 +444,7 @@ def parse_netex_fares(xml_str: str, stations: list[Station], naptan: dict[str, t
     logger.info("Parsed %d zone pair prices", len(zone_fares))
 
     stop_coords: list[dict] = []
-    for zone_id, members in zones.items():
+    for _, members in zones.items():
         for atco in members:
             stop = stops.get(atco)
             if stop and stop.get("lat") is not None and stop.get("lon") is not None:
@@ -475,7 +482,6 @@ def _find_price_for_group(root: ET.Element, group_ref: str) -> float | None:
         for amt in pg.iter():
             atag = _unprefixed(amt.tag)
             if atag == "Amount":
-                amt_el = amt.find(".//netex:Amount", NS) or amt
                 try:
                     text = amt.text or ""
                     if text:
@@ -599,8 +605,14 @@ def _associate_product_with_zones(
                                 sop_ref = dme_sop_ref.get("ref", "")
                                 sop_id = sop.get("id", sop.attrib.get("{http://www.netex.org.uk/netex}id", ""))
                                 if sop_ref and sop_id and sop_ref == sop_id:
-                                    start_ref = dme.find(".//netex:StartZoneRef", NS) or dme.find(".//netex:startZoneRef", NS)
-                                    end_ref = dme.find(".//netex:EndZoneRef", NS) or dme.find(".//netex:endZoneRef", NS)
+                                    start_ref = (
+                                        dme.find(".//netex:StartZoneRef", NS)
+                                        or dme.find(".//netex:startZoneRef", NS)
+                                    )
+                                    end_ref = (
+                                        dme.find(".//netex:EndZoneRef", NS)
+                                        or dme.find(".//netex:endZoneRef", NS)
+                                    )
                                     if start_ref is not None and end_ref is not None:
                                         sz = start_ref.get("ref", "") or start_ref.text or ""
                                         ez = end_ref.get("ref", "") or end_ref.text or ""
@@ -830,8 +842,7 @@ def extract_operator_fares(
             continue
         for key in list(combined_fares):
             z1, z2 = key.split(":")
-            if z1 in covered_zones and z2 in covered_zones:
-                if nf["product_type"] not in combined_fares[key]:
+            if z1 in covered_zones and z2 in covered_zones and nf["product_type"] not in combined_fares[key]:
                     combined_fares[key][nf["product_type"]] = nf["price"]
 
     if not combined_zones or not combined_fares:
@@ -893,7 +904,10 @@ def main():
 
         logger.info("Processing %s (%s)...", display_name, noc)
         try:
-            op_data = extract_operator_fares(noc, display_name, stations, api_key, cached_only=args.cached_only, naptan=naptan)
+            op_data = extract_operator_fares(
+                noc, display_name, stations, api_key,
+                cached_only=args.cached_only, naptan=naptan,
+            )
             if op_data:
                 all_operator_data[display_name] = op_data
                 with ckpt.open("w") as f:

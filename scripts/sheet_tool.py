@@ -374,7 +374,7 @@ def cmd_migrate_view(dry_run: bool = False, undo: bool = False):
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
 
-    from houses.sheets import VIEW_HEADERS as new_headers
+    from houses.sheets import VIEW_HEADERS as NEW_HEADERS
     from houses.sheets import ensure_named_ranges, sync_data_formulas, sync_view_formulas
 
     view_ws = sh.worksheet(VIEW_TAB)
@@ -458,7 +458,7 @@ def cmd_migrate_view(dry_run: bool = False, undo: bool = False):
     print("  Inserted 7 columns at position 23 (affordability block + Ashby Works)")
 
     # Step 3: Write 34 new headers
-    for i, h in enumerate(new_headers):
+    for i, h in enumerate(NEW_HEADERS):
         view_ws.update_acell(f"{_col_letter(i)}1", h)
     print("  Wrote 34 new headers")
 
@@ -569,7 +569,7 @@ def cmd_migrate_data_formulas(dry_run: bool = False):
         print(f"  Deleted {num_cols - expected} excess columns")
 
     # Step 3: Refresh formulas
-    from houses.sheets import sync_data_formulas, sync_view_formulas, ensure_named_ranges
+    from houses.sheets import ensure_named_ranges, sync_data_formulas, sync_view_formulas
     ensure_named_ranges(sh)
     print("  Named ranges refreshed")
     sync_data_formulas(sh)

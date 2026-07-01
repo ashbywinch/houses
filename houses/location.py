@@ -10,8 +10,8 @@ from dataclasses import dataclass, replace
 
 import httpx
 
+from dag.attempt import Attempt
 from houses.api_cache import cached_async_client, get_cached, set_cached, with_cache
-from houses.attempt import Attempt
 from houses.config import settings
 from houses.geo import GeoPoint
 from houses.retry import retry_async
@@ -120,12 +120,12 @@ class PropertyLocation:
         Only makes API calls when coordinates are still pending.
         Returns a new ``PropertyLocation`` with ``coordinates`` populated.
         """
-        if not self.coordinates.is_pending:
+        if not self.coordinates.pending:
             return self
 
         address = self._upgrade_address(self.address, self.postcode)
         result = await _geocode_address(address)
-        if result.is_succeeded:
+        if result.succeeded:
             return replace(self, coordinates=result)
         result = await _geocode_postcode(self.postcode)
         return replace(self, coordinates=result)
@@ -135,7 +135,7 @@ class PropertyLocation:
 
         Useful when the sheet already has coordinates and re-geocoding is unnecessary.
         """
-        return replace(self, coordinates=Attempt.succeeded(point, source))
+        return replace(self, coordinates=Attempt.succeeded(point))
 
     @classmethod
     async def from_town(cls, town: str) -> PropertyLocation:
@@ -146,7 +146,7 @@ class PropertyLocation:
         """
         key = town.strip().upper()
         if not key:
-            return cls(coordinates=Attempt.impossible("from_town", "empty town name"))
+            return cls(coordinates=Attempt.impossible("empty town name"))
 
         # ORS Pelias — disk-cached via with_cache
         ors_params = {"text": f"{town}, UK", "size": 1}
@@ -171,7 +171,7 @@ class PropertyLocation:
                 features = data.get("features", [])
                 if features:
                     lng, lat = features[0]["geometry"]["coordinates"]
-                    return cls(coordinates=Attempt.succeeded(GeoPoint(lat, lng), "ors"))
+                    return cls(coordinates=Attempt.succeeded(GeoPoint(lat, lng)))
         except httpx.HTTPStatusError as exc:
             logger.warning("ORS geocoding failed for town: %s (%s)", town, exc.response.status_code)
         except Exception:
@@ -196,7 +196,7 @@ class PropertyLocation:
                 if data:
                     return cls(
                         coordinates=Attempt.succeeded(
-                            GeoPoint(float(data[0]["lat"]), float(data[0]["lon"])), "nominatim"
+                            GeoPoint(float(data[0]["lat"]), float(data[0]["lon"]))
                         )
                     )
         except httpx.HTTPStatusError as exc:
@@ -209,7 +209,7 @@ class PropertyLocation:
         if stripped and stripped.upper() != key:
             return await cls.from_town(stripped)
 
-        return cls(coordinates=Attempt.impossible("from_town", "all geocoders failed"))
+        return cls(coordinates=Attempt.impossible("all geocoders failed"))
 
 
 # ── Private helpers ──────────────────────────────────────────────
@@ -223,7 +223,7 @@ async def geocode(postcode: str) -> Attempt[GeoPoint]:
 async def _geocode_nominatim(query: str) -> Attempt[GeoPoint]:
     """Geocode a place name via Nominatim (free, 1 req/sec max)."""
     if _get_geo_state().nominatim_exhausted:
-        return Attempt.impossible("nominatim", "rate limit exhausted")
+        return Attempt.impossible("rate limit exhausted")
     cache_key = f"nom::{query.strip().upper()}"
     cache = _geo_cache_var.get()
     if cache is not None:
@@ -243,10 +243,10 @@ async def _geocode_nominatim(query: str) -> Attempt[GeoPoint]:
             lat = float(data[0]["lat"])
             lng = float(data[0]["lon"])
             gp = GeoPoint(lat, lng)
-            result = Attempt.succeeded(gp, "nominatim")
+            result = Attempt.succeeded(gp)
             _cache_result(cache_key, result)
             return result
-        return Attempt.impossible("nominatim", "no results")
+        return Attempt.impossible("no results")
     else:
         try:
             async with cached_async_client(timeout=10.0) as client:
@@ -263,18 +263,18 @@ async def _geocode_nominatim(query: str) -> Attempt[GeoPoint]:
                     lat = float(data[0]["lat"])
                     lng = float(data[0]["lon"])
                     gp = GeoPoint(lat, lng)
-                    result = Attempt.succeeded(gp, "nominatim")
+                    result = Attempt.succeeded(gp)
                     _cache_result(cache_key, result)
                     return result
-                return Attempt.impossible("nominatim", "no results")
+                return Attempt.impossible("no results")
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 429:
                 _get_geo_state().nominatim_exhausted = True
             logger.warning("Nominatim geocoding failed for %s (%s)", query, exc.response.status_code)
-            return Attempt.impossible("nominatim", f"HTTP {exc.response.status_code}", exc)
-        except Exception as exc:
+            return Attempt.impossible(f"HTTP {exc.response.status_code}")
+        except Exception:
             logger.warning("Nominatim geocoding failed for: %s", query)
-            return Attempt.impossible("nominatim", "unexpected error", exc)
+            return Attempt.impossible("unexpected error")
 
 
 async def _geocode_address(address: str) -> Attempt[GeoPoint]:
@@ -299,7 +299,7 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
         if data.get("status") == "OK" and data.get("results"):
             loc = data["results"][0]["geometry"]["location"]
             gp = GeoPoint(loc["lat"], loc["lng"])
-            result = Attempt.succeeded(gp, "google-maps")
+            result = Attempt.succeeded(gp)
             _cache_result(cache_key, result)
             logger.info("Geocoded '%s' via google-maps (cached)", address)
             return result
@@ -319,7 +319,7 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
                     set_cached("GET", googlegeocode_url, cache_params, None, data)
                     loc = data["results"][0]["geometry"]["location"]
                     gp = GeoPoint(loc["lat"], loc["lng"])
-                    result = Attempt.succeeded(gp, "google-maps")
+                    result = Attempt.succeeded(gp)
                     _cache_result(cache_key, result)
                     logger.info("Geocoded '%s' via google-maps", address)
                     return result
@@ -344,7 +344,7 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
             if features:
                 lng, lat = features[0]["geometry"]["coordinates"]
                 gp = GeoPoint(lat, lng)
-                result = Attempt.succeeded(gp, "ors-pelias")
+                result = Attempt.succeeded(gp)
                 _cache_result(cache_key, result)
                 logger.info("Geocoded '%s' via ors-pelias (cached) → (%s, %s)", address, f"{lat:.4f}", f"{lng:.4f}")
                 return result
@@ -368,7 +368,7 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
                     if features:
                         lng, lat = features[0]["geometry"]["coordinates"]
                         gp = GeoPoint(lat, lng)
-                        result = Attempt.succeeded(gp, "ors-pelias")
+                        result = Attempt.succeeded(gp)
                         _cache_result(cache_key, result)
                         logger.info("Geocoded '%s' via ors-pelias → (%s, %s)", address, f"{lat:.4f}", f"{lng:.4f}")
                         return result
@@ -389,7 +389,7 @@ async def _geocode_postcode(postcode: str) -> Attempt[GeoPoint]:
     """Geocode a UK postcode via postcodes.io with in-memory caching."""
     key = postcode.strip().upper()
     if not key:
-        return Attempt.impossible("geocode_postcode", "empty postcode")
+        return Attempt.impossible("empty postcode")
     cache = _geo_cache_var.get()
     if cache is not None:
         cached = cache.get(key)
@@ -403,9 +403,9 @@ async def _geocode_postcode(postcode: str) -> Attempt[GeoPoint]:
         data = disk
         result = data.get("result")
         if not result:
-            return Attempt.impossible("postcodes.io", "postcode not found")
+            return Attempt.impossible("postcode not found")
         gp = GeoPoint(result["latitude"], result["longitude"])
-        attempt = Attempt.succeeded(gp, "postcodes.io")
+        attempt = Attempt.succeeded(gp)
         _cache_result(key, attempt)
         return attempt
     else:
@@ -422,21 +422,21 @@ async def _geocode_postcode(postcode: str) -> Attempt[GeoPoint]:
                 set_cached("GET", url, None, None, data)
                 result = data.get("result")
                 if not result:
-                    return Attempt.impossible("postcodes.io", "postcode not found")
+                    return Attempt.impossible("postcode not found")
                 gp = GeoPoint(result["latitude"], result["longitude"])
-                attempt = Attempt.succeeded(gp, "postcodes.io")
+                attempt = Attempt.succeeded(gp)
                 _cache_result(key, attempt)
                 return attempt
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
-                _cache_result(key, Attempt.impossible("postcodes.io", "postcode not found (404)"))
+                _cache_result(key, Attempt.impossible("postcode not found (404)"))
                 set_cached("GET", url, None, None, {})
-                return Attempt.impossible("postcodes.io", "postcode not found (404)")
+                return Attempt.impossible("postcode not found (404)")
             logger.warning("Geocode HTTP error for %s: %s", key, e)
-            return Attempt.impossible("postcodes.io", f"HTTP {e.response.status_code}", e)
-        except Exception as exc:
+            return Attempt.impossible(f"HTTP {e.response.status_code}")
+        except Exception:
             logger.exception("Failed to geocode postcode: %s", key)
-            return Attempt.impossible("geocode_postcode", "unexpected error", exc)
+            return Attempt.impossible("unexpected error")
 
 
 # ── Postcode helpers ────────────────────────────────────────────────────

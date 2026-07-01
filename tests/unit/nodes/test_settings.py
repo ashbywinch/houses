@@ -19,7 +19,7 @@ class TestDecomposedSources:
     @pytest.mark.asyncio
     async def test_persons_source_has_defaults(self, _svc):
         a = await _svc.persons_source.attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         persons = a.value_or_none()
         assert len(persons) == 3
         simon = persons[0]
@@ -42,7 +42,7 @@ class TestDecomposedSources:
     @pytest.mark.asyncio
     async def test_financial_source_has_defaults(self, _svc):
         a = await _svc.financial_source.attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         fin = a.value_or_none()
         assert fin["mortgage_rate"] == 0.045
         assert fin["working_weeks_per_year"] == 46
@@ -50,7 +50,7 @@ class TestDecomposedSources:
     @pytest.mark.asyncio
     async def test_commute_thresholds_source(self, _svc):
         a = await _svc.commute_thresholds_source.attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         thresh = a.value_or_none()
         assert "Simon" in thresh
         assert "Lorena" in thresh

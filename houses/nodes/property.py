@@ -156,7 +156,6 @@ class PropertyNodes:
             node.changed.connect(slot)
 
     def _build_commute_pipeline(self) -> None:
-        from dag.attempt import Provenance
         self._transit_nodes = []
         self._bus_augment_nodes = []
         self.commute_selectors = {}
@@ -187,7 +186,7 @@ class PropertyNodes:
                     )
                 else:
                     poi_src = SourceNode[str](f"{self.rid}/{key}/poi", str)
-                    poi_src.push(postcode, Provenance("persons_source"))
+                    poi_src.push(postcode, "persons_source")
 
                 transit_node = TransitNode(
                     f"{self.rid}/{key}/computed_transit",
@@ -282,11 +281,15 @@ class PropertyNodes:
 
     async def _monthly_sinking(self) -> dict:
         yearly = await self.yearly_sinking_fund.to_json()
-        if yearly.get("succeeded") and yearly.get("value") is not None:
-            monthly = round(yearly["value"] / 12 * 2 / 3, 2)
-            return {"succeeded": True, "value": monthly, "error": None,
-                    "provenance": {"label": "formula:monthly_sinking",
-                                   "description": f"{yearly['value']}/12*2/3"}}
+        if yearly.get("status") == "succeeded" and yearly.get("value") is not None:
+            yearly_value = yearly["value"]
+            monthly = round(yearly_value / 12 * 2 / 3, 2)
+            return {
+                "status": "succeeded",
+                "value": monthly,
+                "provenance": {"label": "formula:monthly_sinking",
+                               "description": f"{yearly_value}/12*2/3"},
+            }
         return yearly
 
     async def to_json_detail(self) -> dict[str, Any]:

@@ -1,32 +1,18 @@
 from __future__ import annotations
 
-import logging
-
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt
 from dag.computed_node import ComputedNode
-from houses.geo import GeoPoint
-
-logger = logging.getLogger(__name__)
 
 
 class ParkAndRideAugmentNode(ComputedNode[dict]):
-    """Sync node that prepends a drive leg to a park-and-ride station.
+    def __init__(self, node_id: str, *, transit_node):
+        super().__init__(node_id, dict, (transit_node,))
 
-    Deps: (transit_node, best_location)
-    """
-
-    def __init__(self, node_id: str, *, transit_node, best_location):
-        super().__init__(
-            node_id,
-            dict,
-            (transit_node, best_location),
-        )
-
-    def compute(self, transit: Attempt[dict],
-                location: Attempt[GeoPoint]) -> Attempt[dict]:
-        if not transit.is_succeeded:
+    def compute(self, transit: Attempt[dict]) -> Attempt[dict]:
+        if not transit.succeeded:
             return self._impossible({"transit_node": transit})
-        return Attempt.succeeded(
-            {"park_and_ride": True},
-            Provenance("park_and_ride", description="park and ride augmentation"),
-        )
+        return Attempt.succeeded({"park_and_ride": True})
+
+    async def build_provenance(self):
+        from dag.attempt import Provenance
+        return Provenance(label="park_and_ride")

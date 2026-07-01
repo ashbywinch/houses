@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from dag.attempt import Provenance
 from dag.source_node import SourceNode
 from houses.geo import GeoPoint
 from houses.model.domain import PlaceOfInterest
@@ -10,7 +9,7 @@ from houses.model.domain import PlaceOfInterest
 
 class TestTransitNode:
     @pytest.mark.asyncio
-    async def test_impossible_without_location(self):
+    async def test_pending_without_location(self):
         from houses.nodes.transit import TransitNode
 
         loc = SourceNode[GeoPoint]("loc", GeoPoint)
@@ -19,22 +18,20 @@ class TestTransitNode:
 
         node = TransitNode("tn", best_location=loc, poi=poi, persons_source=persons)
         a = await node.attempt()
-        assert not a.is_succeeded
-        assert "best_location" in a._error
+        assert a.pending
 
     @pytest.mark.asyncio
-    async def test_impossible_without_poi(self):
+    async def test_pending_without_poi(self):
         from houses.nodes.transit import TransitNode
 
         loc = SourceNode[GeoPoint]("loc2", GeoPoint)
         poi = SourceNode[PlaceOfInterest]("poi2", PlaceOfInterest)
         persons = SourceNode[list]("persons2", list)
 
-        loc.push(GeoPoint(51.5, -0.1), Provenance("test"))
+        loc.push(GeoPoint(51.5, -0.1), "test")
         node = TransitNode("tn2", best_location=loc, poi=poi, persons_source=persons)
         a = await node.attempt()
-        assert not a.is_succeeded
-        assert "poi" in a._error
+        assert a.pending
 
 
 class TestWalkLegCheckNode:
@@ -45,7 +42,9 @@ class TestWalkLegCheckNode:
         transit = SourceNode[dict]("transit_w", dict)
         persons = SourceNode[list]("persons_w", list)
 
+        transit.push({}, "test")
+        persons.push([], "test")
         node = WalkLegCheckNode("wlc", transit_node=transit, persons_source=persons)
         a = await node.attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         assert a.value_or_none() is False

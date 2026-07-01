@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from dag.attempt import Provenance
 from houses.geo import GeoPoint
 
 
@@ -31,7 +30,7 @@ class TestProperty:
         received = []
         prop.changed.connect(lambda: received.append("changed"))
 
-        prop.precise_location.push(GeoPoint(51.5, -0.1), Provenance("user"))
+        prop.precise_location.push(GeoPoint(51.5, -0.1), "user")
 
         assert len(received) >= 1
 
@@ -41,10 +40,14 @@ class TestProperty:
 
         prop = PropertyNodes("prop123")
         gp = GeoPoint(51.5, -0.1)
-        prop.precise_location.push(gp, Provenance("user"))
+        prop.precise_location.push(gp, "user")
+        prop.rightmove_location.push(GeoPoint(51.4, -0.2), "rightmove")
+        prop.user_entered_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        prop.corrected_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        prop.rightmove_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
 
         a = await prop.best_location.attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         assert a.value_or_none() == gp
 
     @pytest.mark.asyncio
@@ -53,9 +56,13 @@ class TestProperty:
 
         prop = PropertyNodes("prop123")
         gp = GeoPoint(51.5, -0.1)
-        prop.precise_location.push(gp, Provenance("user"))
+        prop.precise_location.push(gp, "user")
+        prop.rightmove_location.push(GeoPoint(51.4, -0.2), "rightmove")
+        prop.user_entered_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        prop.corrected_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        prop.rightmove_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
 
         j = await prop.to_json()
         assert j["rid"] == "prop123"
-        assert j["best_location"]["succeeded"] is True
+        assert j["best_location"]["status"] == "succeeded"
         assert j["best_location"]["value"] == {"lat": 51.5, "lon": -0.1}

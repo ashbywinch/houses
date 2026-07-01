@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from dag.attempt import Provenance
 from dag.persistence import latest_node_result
 from dag.source_node import SourceNode
 from houses.config import settings
@@ -91,13 +90,10 @@ def make_persisted_source(node_id: str, value_type: type,
     """
     node = SourceNode(node_id, value_type)
     persisted = latest_node_result(node_id)
-    if persisted and persisted.get("succeeded"):
+    if persisted and persisted.get("status") == "succeeded":
         val = node._adapter.validate_python(persisted["value"])
         node._value = val
-        node._provenance = Provenance("db")
+        node._source_label = persisted.get("source_label", "db")
     else:
-        node.push(default_factory(), Provenance("config"))
+        node.push(default_factory(), "config")
     return node
-
-
-

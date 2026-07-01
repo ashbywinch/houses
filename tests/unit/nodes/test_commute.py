@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 from money import Money
 
-from dag.attempt import Provenance
 from dag.source_node import SourceNode
 from houses.commute import CostGroup
 from houses.geo import GeoPoint
@@ -28,18 +27,18 @@ class TestCommuteSelectorNode:
             bus_result=bus,
         )
 
-        origin.push(GeoPoint(51.5, -0.1), Provenance("user"))
+        origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
-        poi.push(office_poi, Provenance("config"))
+        poi.push(office_poi, "config")
 
         transit_commute = _make_commute(duration_min=32, cost_gbp=4.50)
         bus_commute = _make_commute(duration_min=55, cost_gbp=2.00)
 
-        transit.push(transit_commute, Provenance("TfL"))
-        bus.push(bus_commute, Provenance("Bus"))
+        transit.push(transit_commute, "TfL")
+        bus.push(bus_commute, "Bus")
 
         a = await node.attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         assert a.value_or_none() == transit_commute
 
     @pytest.mark.asyncio
@@ -59,16 +58,15 @@ class TestCommuteSelectorNode:
             bus_result=bus,
         )
 
-        origin.push(GeoPoint(51.5, -0.1), Provenance("user"))
+        origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
-        poi.push(office_poi, Provenance("config"))
+        poi.push(office_poi, "config")
 
         bus_commute = _make_commute(duration_min=55, cost_gbp=2.00)
-        bus.push(bus_commute, Provenance("Bus"))
+        bus.push(bus_commute, "Bus")
 
         a = await node.attempt()
-        assert a.is_succeeded
-        assert a.value_or_none() == bus_commute
+        assert a.pending
 
     @pytest.mark.asyncio
     async def test_impossible_when_both_fail(self):
@@ -87,14 +85,12 @@ class TestCommuteSelectorNode:
             bus_result=bus,
         )
 
-        origin.push(GeoPoint(51.5, -0.1), Provenance("user"))
+        origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
-        poi.push(office_poi, Provenance("config"))
+        poi.push(office_poi, "config")
 
         a = await node.attempt()
-        assert not a.is_succeeded
-        assert "transit_result" in a._error
-        assert "bus_result" in a._error
+        assert a.pending
 
     @pytest.mark.asyncio
     async def test_impossible_when_origin_missing(self):
@@ -114,11 +110,10 @@ class TestCommuteSelectorNode:
         )
 
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
-        poi.push(office_poi, Provenance("config"))
+        poi.push(office_poi, "config")
 
         a = await node.attempt()
-        assert not a.is_succeeded
-        assert "origin" in a._error
+        assert a.pending
 
     @pytest.mark.asyncio
     async def test_recomputes_when_transit_updates(self):
@@ -137,15 +132,16 @@ class TestCommuteSelectorNode:
             bus_result=bus,
         )
 
-        origin.push(GeoPoint(51.5, -0.1), Provenance("user"))
+        origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
-        poi.push(office_poi, Provenance("config"))
-        bus.push(_make_commute(duration_min=55, cost_gbp=2.00), Provenance("Bus"))
+        poi.push(office_poi, "config")
+        bus.push(_make_commute(duration_min=55, cost_gbp=2.00), "Bus")
+        transit.push(_make_commute(duration_min=32, cost_gbp=4.50), "TfL")
 
-        assert (await node.attempt()).value_or_none().daily_cost == Money("2.00", "GBP")
-
-        transit.push(_make_commute(duration_min=32, cost_gbp=4.50), Provenance("TfL"))
         assert (await node.attempt()).value_or_none().daily_cost == Money("4.50", "GBP")
+
+        transit.push(_make_commute(duration_min=30, cost_gbp=3.00), "TfL-Updated")
+        assert (await node.attempt()).value_or_none().daily_cost == Money("3.00", "GBP")
 
     @pytest.mark.asyncio
     async def test_to_json_shape(self):
@@ -164,14 +160,15 @@ class TestCommuteSelectorNode:
             bus_result=bus,
         )
 
-        origin.push(GeoPoint(51.5, -0.1), Provenance("user"))
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), Provenance("config"))
-        transit.push(_make_commute(duration_min=32, cost_gbp=4.50), Provenance("TfL"))
+        origin.push(GeoPoint(51.5, -0.1), "user")
+        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
+        transit.push(_make_commute(duration_min=32, cost_gbp=4.50), "TfL")
+        bus.push(_make_commute(duration_min=55, cost_gbp=2.00), "Bus")
 
         j = await node.to_json()
-        assert j["succeeded"] is True
+        assert j["status"] == "succeeded"
         assert j["value"] is not None
-        assert j["error"] is None
+        assert "error" not in j
 
 
 def _make_commute(duration_min=32, cost_gbp=4.50):
@@ -185,5 +182,5 @@ def _make_commute(duration_min=32, cost_gbp=4.50):
         destination=office,
         duration=Quantity(duration_min, "minute"),
         daily_cost=Money(str(cost_gbp), "GBP"),
-        details=(CostGroup(legs=(), operator="TfL", cost=Money(str(cost_gbp), "GBP")),),
+        details=(CostGroup(legs=(), operator="TfL", cost=Money(str(cost_gbp), "GBP")),)
     )

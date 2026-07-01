@@ -69,7 +69,7 @@ class TestBootstrapFromRow:
         }
         bootstrap_from_row(row, sources)
         a = await sources["rightmove_location"].attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         assert a.value_or_none() == GeoPoint(51.5, -0.1)
 
     @pytest.mark.asyncio
@@ -84,7 +84,7 @@ class TestBootstrapFromRow:
             "Approx Longitude (est)": "-0.1",
         }
         bootstrap_from_row(row, sources)
-        assert not (await sources["rightmove_location"].attempt()).is_succeeded
+        assert not (await sources["rightmove_location"].attempt()).succeeded
 
     @pytest.mark.asyncio
     async def test_pushes_precise_location(self):
@@ -100,7 +100,7 @@ class TestBootstrapFromRow:
         }
         bootstrap_from_row(row, sources)
         a = await sources["precise_location"].attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         assert a.value_or_none() == GeoPoint(51.6, -0.2)
 
     @pytest.mark.asyncio
@@ -117,7 +117,7 @@ class TestBootstrapFromRow:
         }
         bootstrap_from_row(row, sources)
         a = await sources["corrected_address"].attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         # Address gets postcode appended
         assert "SW1V 2QQ" in a.value_or_none()
 
@@ -136,7 +136,7 @@ class TestBootstrapFromRow:
         }
         bootstrap_from_row(row, sources)
         a = await sources["user_entered_address"].attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         assert a.value_or_none() == "31 Isambard Road, Southall, UB2 4GN"
         assert "UB2, UB2 4GN" not in a.value_or_none()  # no duplication
 
@@ -154,7 +154,7 @@ class TestBootstrapFromRow:
         }
         bootstrap_from_row(row, sources)
         a = await sources["user_entered_address"].attempt()
-        assert not a.is_succeeded  # not pushed because upgraded == address
+        assert not a.succeeded  # not pushed because upgraded == address
 
     @pytest.mark.asyncio
     async def test_all_sources_integration(self):
@@ -196,21 +196,8 @@ class TestBootstrapFromRow:
             ),
         )
         a = await best_loc.attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         assert a.value_or_none() == GeoPoint(51.6, -0.2)
-
-    @pytest.mark.asyncio
-    async def test_sets_provenance_labels(self):
-        from houses.nodes.bootstrap import PROVENANCE_LABELS, bootstrap_from_row
-
-        sources = {
-            "rightmove_address": SourceNode[str]("rightmove_address", str),
-        }
-        row = {"Address": "10 High St"}
-        bootstrap_from_row(row, sources)
-        a = await sources["rightmove_address"].attempt()
-        assert a.provenance.label == PROVENANCE_LABELS["rightmove_address"]
-
 
 class TestUpgradeAddress:
     def test_replaces_outcode_with_full_postcode(self):

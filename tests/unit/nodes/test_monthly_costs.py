@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from dag.attempt import Provenance
 from dag.source_node import SourceNode
 
 
@@ -14,11 +13,13 @@ class TestMonthlyMortgagePaymentNode:
         price = SourceNode[str]("price_mm", str)
         fin = SourceNode[dict]("fin_mm", dict)
 
+        price.push("0", "test")
+        fin.push({}, "test")
         node = MonthlyMortgagePaymentNode(
             "mm", rightmove_price=price, financial_source=fin,
         )
         a = await node.attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         assert a.value_or_none() == 0.0
 
     @pytest.mark.asyncio
@@ -28,17 +29,17 @@ class TestMonthlyMortgagePaymentNode:
         price = SourceNode[str]("price_mm2", str)
         fin = SourceNode[dict]("fin_mm2", dict)
 
-        price.push("300000", Provenance("test"))
+        price.push("300000", "test")
         fin.push({
             "mortgage_rate": 0.045,
             "mortgage_term_years": 30,
-        }, Provenance("test"))
+        }, "test")
 
         node = MonthlyMortgagePaymentNode(
             "mm2", rightmove_price=price, financial_source=fin,
         )
         a = await node.attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         assert a.value_or_none() > 0
 
 
@@ -50,11 +51,13 @@ class TestYearlySinkingFundNode:
         price = SourceNode[str]("price_ys", str)
         fin = SourceNode[dict]("fin_ys", dict)
 
+        price.push("0", "test")
+        fin.push({}, "test")
         node = YearlySinkingFundNode(
             "ys", rightmove_price=price, financial_source=fin,
         )
         a = await node.attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         assert a.value_or_none() == 0.0
 
     @pytest.mark.asyncio
@@ -64,14 +67,14 @@ class TestYearlySinkingFundNode:
         price = SourceNode[str]("price_ys2", str)
         fin = SourceNode[dict]("fin_ys2", dict)
 
-        price.push("500000", Provenance("test"))
-        fin.push({"sinking_fund_rate": 0.01}, Provenance("test"))
+        price.push("500000", "test")
+        fin.push({"sinking_fund_rate": 0.01}, "test")
 
         node = YearlySinkingFundNode(
             "ys2", rightmove_price=price, financial_source=fin,
         )
         a = await node.attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         assert a.value_or_none() == 5000.0
 
 
@@ -92,9 +95,12 @@ class TestCommuteBreakdownNode:
             lorena_office=src_lorena,
             persons_source=persons,
         )
-        persons.push([{"name": "Simon", "places_of_interest": []}], Provenance("test"))
+        src_simon.push({}, "test")
+        src_brac.push({}, "test")
+        src_lorena.push({}, "test")
+        persons.push([{"name": "Simon", "places_of_interest": []}], "test")
         a = await node.attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         assert a.value_or_none()["yearly_total_gbp"] == 0.0
 
 
@@ -117,7 +123,11 @@ class TestTotalMonthlyHousingCostNode:
             commute_breakdown_node=cb,
             council_tax_node=ct,
         )
-        fin.push({}, Provenance("test"))
+        mg.push(0.0, "test")
+        sf.push(0.0, "test")
+        fin.push({}, "test")
+        cb.push({}, "test")
+        ct.push({}, "test")
         a = await node.attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         assert isinstance(a.value_or_none(), float)

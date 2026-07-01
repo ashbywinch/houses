@@ -99,7 +99,7 @@ class TestGetCommuteChoice:
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
 
         result = await get_commute("GU21 7QF", "SW1V 2QQ", has_car=False, max_walk_minutes=30)
-        assert result.is_succeeded, f"Expected succeeded, got {result}"
+        assert result.succeeded, f"Expected succeeded, got {result}"
         assert result.value_or_none().duration_minutes == 20
 
     @pytest.mark.asyncio
@@ -120,7 +120,7 @@ class TestGetCommuteChoice:
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
 
         result = await get_commute("GU21 7QF", "SW1V 2QQ", has_car=False, max_walk_minutes=30)
-        assert result.is_succeeded, f"Expected succeeded, got {result}"
+        assert result.succeeded, f"Expected succeeded, got {result}"
         assert result.value_or_none().duration_minutes == 30  # transit, not walking
 
     @pytest.mark.asyncio
@@ -150,7 +150,7 @@ class TestGetCommuteChoice:
         monkeypatch.setattr("houses.routing._in_congestion_zone", mock_cz)
 
         result = await get_commute("GU21 7QF", "RG12 8YA", has_car=True, max_walk_minutes=15)
-        assert result.is_succeeded, f"Expected succeeded, got {result}"
+        assert result.succeeded, f"Expected succeeded, got {result}"
         assert result.value_or_none().duration_minutes == 25  # driving
 
     @pytest.mark.asyncio
@@ -180,7 +180,7 @@ class TestGetCommuteChoice:
         monkeypatch.setattr("houses.routing._in_congestion_zone", mock_cz)
 
         result = await get_commute("GU21 7QF", "RG12 8YA", has_car=True, max_walk_minutes=15)
-        assert result.is_succeeded, f"Expected succeeded, got {result}"
+        assert result.succeeded, f"Expected succeeded, got {result}"
         assert result.value_or_none().duration_minutes == 25  # driving is faster than transit
 
     @pytest.mark.asyncio
@@ -206,7 +206,7 @@ class TestGetCommuteChoice:
         monkeypatch.setattr("houses.routing._in_congestion_zone", mock_cz)
 
         result = await get_commute("GU21 7QF", "SW1V 2QQ", has_car=True, max_walk_minutes=15)
-        assert result.is_succeeded, f"Expected succeeded, got {result}"
+        assert result.succeeded, f"Expected succeeded, got {result}"
         assert result.value_or_none().duration_minutes == 30  # transit, not driving
 
     @pytest.mark.asyncio
@@ -236,8 +236,8 @@ class TestGetCommuteChoice:
         monkeypatch.setattr("houses.routing._in_congestion_zone", mock_cz)
 
         result = await get_commute("GU21 7QF", "RG12 8YA", has_car=True, max_walk_minutes=15)
-        assert result.is_impossible, f"Expected impossible, got {result}"
-        assert result.reason, "Should have a reason for failure"
+        assert result.impossible, f"Expected impossible, got {result}"
+        assert result.error, "Should have a reason for failure"
 
     # ── Tiebreak: priced vs non-priced routes ─────────────────────────
     # Requirement: "Have an accurate price for the whole journey" (#1).
@@ -261,7 +261,7 @@ class TestGetCommuteChoice:
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_tfl)
 
         result = await get_commute("GU21 7QF", "EC3A 7LP", has_car=False, max_walk_minutes=30)
-        assert result.is_succeeded, f"Expected succeeded, got {result}"
+        assert result.succeeded, f"Expected succeeded, got {result}"
         best = result.value_or_none()
         assert best.daily_cost_gbp == Money("5.0", "GBP"), "Should return the route with a real cost"
 
@@ -275,7 +275,7 @@ class TestTflNoBusWhenHasCar:
     @pytest.mark.asyncio
     async def test_skips_with_bus_when_no_bus_succeeds(self, monkeypatch):
         """has_car=True + no_bus succeeds → with_bus is not compared."""
-        from houses.attempt import Attempt
+        from dag.attempt import Attempt
         from houses.commute import Commute
 
         no_bus = Commute(
@@ -297,8 +297,8 @@ class TestTflNoBusWhenHasCar:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                return Attempt.succeeded(no_bus, "tfl")
-            return Attempt.succeeded(with_bus, "tfl")
+                return Attempt.succeeded(no_bus)
+            return Attempt.succeeded(with_bus)
 
         from houses.routing import _tfl_transit_commute
 
@@ -313,10 +313,10 @@ class TestTflNoBusWhenHasCar:
     @pytest.mark.asyncio
     async def test_uses_with_bus_when_no_bus_fails(self, monkeypatch):
         """has_car=True + no_bus fails → with_bus is used as last resort."""
-        from houses.attempt import Attempt
+        from dag.attempt import Attempt
         from houses.commute import Commute
 
-        no_bus = Attempt.impossible("tfl", "no route found")
+        no_bus = Attempt.impossible("no route found")
         with_bus = Commute(
             destination_label="",
             destination_postcode="SW1V 2QQ",
@@ -331,7 +331,7 @@ class TestTflNoBusWhenHasCar:
             call_count += 1
             if call_count == 1:
                 return no_bus
-            return Attempt.succeeded(with_bus, "tfl")
+            return Attempt.succeeded(with_bus)
 
         from houses.routing import _tfl_transit_commute
 
@@ -408,7 +408,7 @@ class TestSchoolCommute:
 
         async def mock_get_commute(origin, dest, *, has_car, max_walk_minutes):
             captured.update(origin=origin, dest=dest, has_car=has_car, max_walk_minutes=max_walk_minutes)
-            from houses.attempt import Attempt
+            from dag.attempt import Attempt
 
             commute = Commute(
                 destination_label="",
@@ -416,7 +416,7 @@ class TestSchoolCommute:
                 duration_minutes=10,
                 daily_cost_gbp=Money("0.0", "GBP"),
             )
-            return Attempt.succeeded(commute, "test")
+            return Attempt.succeeded(commute)
 
         monkeypatch.setattr("houses.routing.get_commute", mock_get_commute)
 

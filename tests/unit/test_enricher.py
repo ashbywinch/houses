@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from money import Money
 
-from houses.attempt import Attempt
+from dag.attempt import Attempt
 from houses.bus_journey import BusJourneyRegistry, FareProduct, FareProductType, cheapest_round_trip
 from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.enricher import (
@@ -323,7 +323,7 @@ class TestFindNearestFilters:
         # Mock geocode — property at midpoint (both schools within ~0.1° ≈ 7km,
         # school_search_radius_km=5, but 0.001° ≈ 70m fits inside radius)
         async def mock_geocode(*_, **__):
-            return Attempt.succeeded(GeoPoint(51.5005, -0.1005), "test")
+            return Attempt.succeeded(GeoPoint(51.5005, -0.1005))
 
         monkeypatch.setattr("houses.schools.geocode", mock_geocode)
         monkeypatch.setattr("houses.schools._geocode_address", mock_geocode)
@@ -362,7 +362,7 @@ class TestFindNearestFilters:
         monkeypatch.setattr("houses.schools._load_schools", lambda: [unnamed, named])
 
         async def mock_geocode(*_, **__):
-            return Attempt.succeeded(GeoPoint(51.5005, -0.1005), "test")
+            return Attempt.succeeded(GeoPoint(51.5005, -0.1005))
 
         monkeypatch.setattr("houses.schools.geocode", mock_geocode)
         monkeypatch.setattr("houses.schools._geocode_address", mock_geocode)
@@ -1016,7 +1016,7 @@ class TestBusFallback:
         )
 
         async def mock_transit(self):
-            return Attempt.succeeded(no_bus, "test")
+            return Attempt.succeeded(no_bus)
 
         async def mock_bus(*_):
             return bus_route
@@ -1070,7 +1070,7 @@ class TestBusFallback:
         )
 
         async def mock_transit(self):
-            return Attempt.succeeded(with_bus if self._allow_bus else no_bus, "test")
+            return Attempt.succeeded(with_bus if self._allow_bus else no_bus)
 
         async def mock_bus(*_):
             return bus_route
@@ -1150,7 +1150,7 @@ class TestBusFallback:
         )
 
         async def mock_transit(self):
-            return Attempt.succeeded(with_bus if self._allow_bus else no_bus, "test")
+            return Attempt.succeeded(with_bus if self._allow_bus else no_bus)
 
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
         monkeypatch.setattr("houses.routing._find_bus_alternative", lambda *_: None)
@@ -1298,7 +1298,7 @@ class TestEnrichRailFares:
         )
 
         async def mock_geocode(_):
-            return Attempt.succeeded(GeoPoint(51.317, -0.556), "test")
+            return Attempt.succeeded(GeoPoint(51.317, -0.556))
 
         from houses.commute import Commute
         from houses.enrichment_runner import _enrich_rail_fares
@@ -1352,7 +1352,7 @@ class TestEnrichRailFares:
         )
 
         async def mock_geocode(_):
-            return Attempt.succeeded(GeoPoint(51.303, -0.636), "test")
+            return Attempt.succeeded(GeoPoint(51.303, -0.636))
 
         from houses.commute import Commute
         from houses.enrichment_runner import _enrich_rail_fares

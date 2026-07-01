@@ -13,7 +13,7 @@ class TestEpcNode:
         addr = SourceNode[str]("addr_epc", str)
         node = EpcNode("epc", best_address=addr)
         a = await node.attempt()
-        assert not a.is_succeeded
+        assert not a.succeeded
 
 
 class TestCouncilTaxNode:
@@ -25,7 +25,7 @@ class TestCouncilTaxNode:
         pc = SourceNode[str]("pc_ct", str)
         node = CouncilTaxNode("ct", best_address=addr, postcode_node=pc)
         a = await node.attempt()
-        assert not a.is_succeeded
+        assert not a.succeeded
 
     @pytest.mark.asyncio
     async def test_impossible_without_address(self):
@@ -35,7 +35,7 @@ class TestCouncilTaxNode:
         pc = SourceNode[str]("pc_ct2", str)
         node = CouncilTaxNode("ct2", best_address=addr, postcode_node=pc)
         a = await node.attempt()
-        assert not a.is_succeeded
+        assert not a.succeeded
 
 
 class TestWalkabilityNode:
@@ -47,7 +47,7 @@ class TestWalkabilityNode:
         addr = SourceNode[str]("addr_w", str)
         node = WalkabilityNode("wlk", best_location=loc, best_address=addr)
         a = await node.attempt()
-        assert not a.is_succeeded
+        assert not a.succeeded
 
 
 class TestTownDescNode:
@@ -58,7 +58,7 @@ class TestTownDescNode:
         loc = SourceNode[dict]("loc_td", dict)
         node = TownDescNode("td", best_location=loc)
         a = await node.attempt()
-        assert not a.is_succeeded
+        assert not a.succeeded
 
 
 class TestGeocodeNode:
@@ -69,7 +69,7 @@ class TestGeocodeNode:
         addr = SourceNode[str]("addr_gc", str)
         node = GeocodeNode("gc", best_address=addr)
         a = await node.attempt()
-        assert not a.is_succeeded
+        assert not a.succeeded
 
 
 class TestParkAndRideAugmentNode:
@@ -78,7 +78,6 @@ class TestParkAndRideAugmentNode:
         from houses.nodes.park_and_ride import ParkAndRideAugmentNode
 
         transit = SourceNode[dict]("t_pr", dict)
-        loc = SourceNode[dict]("loc_pr", dict)
-        node = ParkAndRideAugmentNode("pr", transit_node=transit, best_location=loc)
+        node = ParkAndRideAugmentNode("pr", transit_node=transit)
         a = await node.attempt()
-        assert not a.is_succeeded
+        assert not a.succeeded

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt
 from dag.computed_node import ComputedNode
 from dag.persistence import latest_node_result
 from dag.source_node import SourceNode
@@ -14,10 +14,10 @@ class TestComputedNode:
         src = SourceNode[int]("src", int)
         node = _DoubleNode("double", deps=(src,))
 
-        src.push(2, Provenance("test"))
+        src.push(2, "test")
         assert (await node.attempt()).value_or_none() == 4
 
-        src.push(3, Provenance("test"))
+        src.push(3, "test")
         assert (await node.attempt()).value_or_none() == 6
 
     @pytest.mark.asyncio
@@ -26,9 +26,9 @@ class TestComputedNode:
         node = _DoubleNode("double", deps=(src,))
 
         a = await node.attempt()
-        assert a.is_succeeded is False
+        assert a.succeeded is False
 
-        src.push(5, Provenance("test"))
+        src.push(5, "test")
         a = await node.attempt()
         assert a.value_or_none() == 10
 
@@ -37,7 +37,7 @@ class TestComputedNode:
         src = SourceNode[int]("src", int)
         node = _DoubleNode("double", deps=(src,))
 
-        src.push(10, Provenance("test"))
+        src.push(10, "test")
         first = await node.attempt()
         assert first.value_or_none() == 20
 
@@ -51,11 +51,11 @@ class TestComputedNode:
         b = SourceNode[int]("b", int)
         node = _SumNode("sum", deps=(a, b))
 
-        a.push(3, Provenance("t"))
-        b.push(4, Provenance("t"))
+        a.push(3, "t")
+        b.push(4, "t")
         assert (await node.attempt()).value_or_none() == 7
 
-        a.push(10, Provenance("t"))
+        a.push(10, "t")
         assert (await node.attempt()).value_or_none() == 14
 
     def test_changed_signal_fires_on_recompute(self):
@@ -65,10 +65,10 @@ class TestComputedNode:
         received = []
         node.changed.connect(lambda: received.append("changed"))
 
-        src.push(2, Provenance("test"))
+        src.push(2, "test")
         assert received == ["changed"]
 
-        src.push(3, Provenance("test"))
+        src.push(3, "test")
         assert received == ["changed", "changed"]
 
     @pytest.mark.asyncio
@@ -77,14 +77,14 @@ class TestComputedNode:
         node = _DoubleNode("double", deps=(src,))
 
         a = await node.attempt()
-        assert a.is_succeeded is False
+        assert a.succeeded is False
 
     @pytest.mark.asyncio
     async def test_to_json(self):
         src = SourceNode[int]("src", int)
         node = _DoubleNode("double", deps=(src,))
 
-        src.push(4, Provenance("test"))
+        src.push(4, "test")
         j = await node.to_json()
         assert j["value"] == 8
 
@@ -93,19 +93,19 @@ class TestComputedNode:
         src = SourceNode[int]("src_persist", int)
         node = _DoubleNode("double_persist", deps=(src,))
 
-        src.push(7, Provenance("test"))
+        src.push(7, "test")
         await node.attempt()
 
         loaded = latest_node_result("double_persist")
         assert loaded is not None
-        assert loaded["succeeded"] is True
+        assert loaded["status"] == "succeeded"
         assert loaded["value"] == 14
 
     @pytest.mark.asyncio
     async def test_loads_from_db_on_init(self):
         src = SourceNode[int]("src_reload", int)
         node1 = _DoubleNode("double_reload", deps=(src,))
-        src.push(9, Provenance("test"))
+        src.push(9, "test")
         await node1.attempt()
 
         src2 = SourceNode[int]("src_reload", int)
@@ -118,11 +118,11 @@ class TestComputedNode:
         src = SourceNode[int]("src_stale", int)
         node = _DoubleNode("double_stale", deps=(src,))
 
-        src.push(5, Provenance("test"))
+        src.push(5, "test")
         await node.attempt()
         assert node.compute_count == 1
 
-        src.push(10, Provenance("test"))
+        src.push(10, "test")
         await node.attempt()
         assert node.compute_count == 2
 
@@ -131,7 +131,7 @@ class TestComputedNode:
         src = SourceNode[int]("src_async", int)
         node = _AsyncDoubleNode("double_async", deps=(src,))
 
-        src.push(3, Provenance("test"))
+        src.push(3, "test")
         a = await node.attempt()
         assert a.value_or_none() == 6
 
@@ -140,12 +140,12 @@ class TestComputedNode:
         src = SourceNode[int]("src_dep_ts", int)
         node = _DoubleNode("double_dep_ts", deps=(src,))
 
-        src.push(42, Provenance("test"))
+        src.push(42, "test")
         await node.attempt()
 
         loaded = latest_node_result("double_dep_ts")
         assert loaded is not None
-        assert loaded["succeeded"] is True
+        assert loaded["status"] == "succeeded"
         assert loaded["value"] == 84
 
 
@@ -157,9 +157,8 @@ class _DoubleNode(ComputedNode[int]):
     def compute(self, *dep_attempts) -> Attempt[int]:
         self.compute_count += 1
         val = dep_attempts[0]
-        if val.is_succeeded:
-            return Attempt.succeeded(val.value_or_none() * 2,
-                                     Provenance("doubled"))
+        if val.succeeded:
+            return Attempt.succeeded(val.value_or_none() * 2)
         return Attempt.impossible("dep failed")
 
 
@@ -171,8 +170,8 @@ class _SumNode(ComputedNode[int]):
     def compute(self, *dep_attempts) -> Attempt[int]:
         self.compute_count += 1
         vals = [a.value_or_none() for a in dep_attempts]
-        if all(a.is_succeeded for a in dep_attempts):
-            return Attempt.succeeded(sum(vals), Provenance("sum"))
+        if all(a.succeeded for a in dep_attempts):
+            return Attempt.succeeded(sum(vals))
         return Attempt.impossible("one or more deps failed")
 
 
@@ -182,7 +181,6 @@ class _AsyncDoubleNode(ComputedNode[int]):
 
     async def compute(self, *dep_attempts) -> Attempt[int]:
         val = dep_attempts[0]
-        if val.is_succeeded:
-            return Attempt.succeeded(val.value_or_none() * 2,
-                                     Provenance("doubled"))
+        if val.succeeded:
+            return Attempt.succeeded(val.value_or_none() * 2)
         return Attempt.impossible("dep failed")

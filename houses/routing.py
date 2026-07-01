@@ -12,8 +12,8 @@ import re
 
 from money import Money
 
+from dag.attempt import Attempt
 from houses.api_cache import cached_async_client, get_cached, set_cached
-from houses.attempt import Attempt
 from houses.bus_journey import cheapest_round_trip
 from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
@@ -364,12 +364,12 @@ async def _tfl_transit_commute(origin_postcode: str, dest_postcode: str, has_car
     # When the traveler has a car, park-and-ride is preferred over bus.
     # If no_bus succeeded, return it directly.  If it failed, fall through
     # to try with_bus as a last resort.
-    if has_car and not no_bus.is_impossible:
+    if has_car and not no_bus.impossible:
         return no_bus.value_or_none()
 
     with_bus = await TransitRoute(origin_postcode, dest_postcode, label, park_and_ride=has_car, allow_bus=True).plan()
 
-    if no_bus.is_impossible and with_bus.is_impossible:
+    if no_bus.impossible and with_bus.impossible:
         return None
 
     empty = Commute(destination_label=label, destination_postcode=dest_postcode)
@@ -583,7 +583,7 @@ async def get_commute(
         failures.append(f"walk: {e}")
         walk = None
     if walk is not None and walk.duration_minutes is not None and walk.duration_minutes <= max_walk_minutes:
-        return Attempt.succeeded(walk, "walk")
+        return Attempt.succeeded(walk)
     if walk is not None:
         candidates.append(walk)
 
@@ -628,10 +628,10 @@ async def get_commute(
             no_cost = 1 if (c.daily_cost_gbp is None or c.daily_cost_gbp == Money("0", "GBP")) else 0
             return (no_cost, c.duration_minutes or 0)
 
-        return Attempt.succeeded(min(valid, key=_tiebreak), "routing")
+        return Attempt.succeeded(min(valid, key=_tiebreak))
 
     reason = "; ".join(failures) if failures else "no route available"
-    return Attempt.impossible("routing", reason)
+    return Attempt.impossible(reason)
 
 
 def _with_label(commute: Commute, label: str, postcode: str) -> Commute:

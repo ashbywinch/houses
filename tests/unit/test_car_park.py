@@ -320,7 +320,7 @@ class TestCarParkRegistry:
         assert car_park.daily_cost is None  # blank before load
 
         result = await registry.load_costs(car_park, station)
-        assert result.is_succeeded
+        assert result.succeeded
         updated = result.value_or_none()
         assert updated is car_park  # same object, mutated
         assert updated.daily_cost == Money("12.80", "GBP")
@@ -343,8 +343,8 @@ class TestCarParkRegistry:
         car_park = registry.find_car_park(station)
 
         result = await registry.load_costs(car_park, station)
-        assert result.is_impossible
-        assert "No APCOA rate" in result.reason
+        assert result.impossible
+        assert "No APCOA rate" in result.error
 
     @pytest.mark.asyncio
     async def test_add_nearest_car_park_for_unknown_station(self, tmp_path, monkeypatch):
@@ -367,7 +367,7 @@ class TestCarParkRegistry:
         assert registry.find_car_park(station) is None  # not in CSV
 
         result = await registry.add_nearest_car_park_for(station)
-        assert result.is_succeeded
+        assert result.succeeded
         car_park = result.value_or_none()
         assert car_park.name == "Reading Station Car Park"
         assert car_park.daily_cost == Money("15.00", "GBP")
@@ -393,5 +393,5 @@ class TestCarParkRegistry:
 
         station = Station(name="Reading", crs="RDG", location=GeoPoint(51.4, -1.0))
         result = await registry.add_nearest_car_park_for(station)
-        assert result.is_impossible
-        assert "No APCOA car park" in result.reason
+        assert result.impossible
+        assert "No APCOA car park" in result.error

@@ -23,16 +23,15 @@ class TestSchoolNodes:
 
     @pytest.mark.asyncio
     async def test_secondary_calls_find_nearest_with_correct_params(self):
-        from dag.attempt import Provenance
         from dag.source_node import SourceNode
         from houses.geo import GeoPoint
         from houses.nodes.schools import SecondarySchoolNode
         from houses.schools import SchoolGender
 
         loc = SourceNode[GeoPoint]("loc", GeoPoint)
-        loc.push(GeoPoint(51.5, -0.37), Provenance("test"))
+        loc.push(GeoPoint(51.5, -0.37), "test")
         addr = SourceNode[str]("addr", str)
-        addr.push("31 Isambard Road, Southall, UB2 4GN", Provenance("test"))
+        addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
 
         class AssertingService:
             async def find_nearest(self, postcode, child_age, address="", requirement=None):
@@ -52,16 +51,15 @@ class TestSchoolNodes:
 
     @pytest.mark.asyncio
     async def test_primary_calls_find_nearest_with_boys_and_age_7(self):
-        from dag.attempt import Provenance
         from dag.source_node import SourceNode
         from houses.geo import GeoPoint
         from houses.nodes.schools import PrimarySchoolNode
         from houses.schools import SchoolGender
 
         loc = SourceNode[GeoPoint]("loc", GeoPoint)
-        loc.push(GeoPoint(51.5, -0.37), Provenance("test"))
+        loc.push(GeoPoint(51.5, -0.37), "test")
         addr = SourceNode[str]("addr", str)
-        addr.push("31 Isambard Road, Southall, UB2 4GN", Provenance("test"))
+        addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
 
         class AssertingService:
             async def find_nearest(self, postcode, child_age, address="", requirement=None):
@@ -85,23 +83,22 @@ class TestCouncilTaxNode:
 
     @pytest.mark.asyncio
     async def test_passes_postcode_not_full_address(self):
-        from dag.attempt import Provenance
         from dag.source_node import SourceNode
         from houses.nodes.epc_node import CouncilTaxNode
 
         addr = SourceNode[str]("addr", str)
-        addr.push("31 Isambard Road, Southall, UB2 4GN", Provenance("test"))
+        addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
         pc = SourceNode[str]("pc", str)
-        pc.push("UB2 4GN", Provenance("test"))
+        pc.push("UB2 4GN", "test")
 
         captured = {}
 
         class CapturingService:
             async def lookup(self, postcode, address=""):
                 captured["postcode"] = postcode
-                from houses.attempt import Attempt
+                from dag.attempt import Attempt
                 from houses.property import CouncilTaxInfo
-                return Attempt.succeeded(CouncilTaxInfo(band="D", yearly_cost=1800.0), "test")
+                return Attempt.succeeded(CouncilTaxInfo(band="D", yearly_cost=1800.0))
 
         import houses.context as ctx
         from tests.helpers import make_services
@@ -121,11 +118,11 @@ class TestCouncilTaxNode:
         from houses.nodes.epc_node import CouncilTaxNode
 
         addr = SourceNode[str]("addr", str)
+        addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
         pc = SourceNode[str]("pc", str)
         node = CouncilTaxNode("ct2", best_address=addr, postcode_node=pc)
         a = await node.attempt()
-        assert not a.is_succeeded
-        assert "postcode" in (a._error or "")
+        assert a.pending
 
 
 class TestRouteDescription:
@@ -162,15 +159,14 @@ class TestTownNode:
 
     @pytest.mark.asyncio
     async def test_returns_town_from_address(self):
-        from dag.attempt import Provenance
         from dag.source_node import SourceNode
         from houses.nodes.area import TownNode
 
         addr = SourceNode[str]("addr", str)
-        addr.push("48 Acacia Avenue, Southall, UB2 5AD", Provenance("test"))
+        addr.push("48 Acacia Avenue, Southall, UB2 5AD", "test")
         node = TownNode("tn", best_address=addr)
         a = await node.attempt()
-        assert a.is_succeeded
+        assert a.succeeded
         assert a.value_or_none() == "Southall"
 
     @pytest.mark.asyncio
@@ -181,7 +177,7 @@ class TestTownNode:
         addr = SourceNode[str]("addr2", str)
         node = TownNode("tn2", best_address=addr)
         a = await node.attempt()
-        assert not a.is_succeeded
+        assert not a.succeeded
 
 
 class TestTownName:

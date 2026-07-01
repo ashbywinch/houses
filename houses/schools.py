@@ -274,10 +274,10 @@ async def compute_school_commute(property_postcode: str, school: School) -> Comm
     from houses.routing import get_commute
 
     result = await get_commute(property_postcode, school.postcode, has_car=False, max_walk_minutes=20)
-    if result.is_impossible:
+    if result.impossible:
         import logging
 
         logging.getLogger(__name__).debug(
-            "School commute for %s → %s: %s", property_postcode, school.postcode, result.reason
+            "School commute for %s → %s: %s", property_postcode, school.postcode, result.error
         )
     return result.value_or_none()

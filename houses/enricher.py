@@ -12,8 +12,8 @@ import re
 
 import httpx
 
+from dag.attempt import Attempt
 from houses.api_cache import get_cached, set_cached
-from houses.attempt import Attempt
 from houses.commute import Commute, CommuteBreakdown
 from houses.config import settings
 from houses.retry import retry_async
@@ -81,27 +81,25 @@ async def compute_simon_commute(property_postcode: str) -> Attempt[Commute]:
     from houses.routing import _with_label, get_commute
 
     result = await get_commute(property_postcode, settings.simon_postcode, has_car=True, max_walk_minutes=15)
-    if result.is_succeeded:
+    if result.succeeded:
         commute = result.value_or_none()
         return Attempt.succeeded(
             _with_label(commute, "Simon — Pimlico / Victoria", settings.simon_postcode),
-            result.source,
         )
     # Propagate the failure reason from get_commute
-    return Attempt.impossible(result.source, result.reason)
+    return Attempt.impossible(result.error)
 
 
 async def compute_lorena_commute(property_postcode: str) -> Attempt[Commute]:
     from houses.routing import _with_label, get_commute
 
     result = await get_commute(property_postcode, settings.lorena_postcode, has_car=False, max_walk_minutes=30)
-    if result.is_succeeded:
+    if result.succeeded:
         commute = result.value_or_none()
         return Attempt.succeeded(
             _with_label(commute, "Lorena — Aldgate / City of London", settings.lorena_postcode),
-            result.source,
         )
-    return Attempt.impossible(result.source, result.reason)
+    return Attempt.impossible(result.error)
 
 
 def _pick_best_lorena_route(no_bus: Commute, with_bus: Commute) -> Commute:
@@ -183,6 +181,5 @@ async def compute_petrol_cost(origin_postcode: str) -> Attempt[Commute]:
     if commute:
         return Attempt.succeeded(
             _with_label(commute, "Bracknell Office (RG12 8YA)", settings.bracknell_postcode),
-            "ors",
         )
-    return Attempt.impossible("petrol", "could not route to Bracknell")
+    return Attempt.impossible("could not route to Bracknell")

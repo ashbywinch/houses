@@ -31,14 +31,12 @@ class Node(ABC, Generic[T]):
 
         stored = latest_node_result(self._id)
         if stored is not None:
-            succeeded = stored["succeeded"]
-            if succeeded:
+            status = stored.get("status", "")
+            if status == "succeeded":
                 val = self._adapter.validate_python(stored["value"])
-                prov = Provenance(
-                    stored.get("provenance", {}).get("label", ""),
-                    stored.get("provenance", {}).get("description", ""),
-                )
-                attempt: Attempt[T] = Attempt.succeeded(val, prov)
+                attempt: Attempt[T] = Attempt.succeeded(val)
+            elif status == "pending":
+                attempt = Attempt.pending()
             else:
                 attempt = Attempt.impossible(stored.get("error", "unknown"))
             self._db_created_at = stored.get("_persisted_at", "")
@@ -49,30 +47,31 @@ class Node(ABC, Generic[T]):
             return attempt
         return None
 
-    @property
-    def id(self) -> str:
-        return self._id
-
-    @property
-    def value_type(self) -> type[T]:
-        return self._value_type
-
     @abstractmethod
     async def attempt(self) -> Attempt[T]:
+        """Compute or retrieve the current value."""
+        ...
+
+    @abstractmethod
+    async def build_provenance(self) -> Provenance:
+        """Build provenance by walking dependency nodes.
+
+        Returns a ``Provenance`` tree describing where this node's
+        value came from.  The tree is computed dynamically — it is
+        not cached on the ``Attempt`` object.
+        """
         ...
 
     async def to_json(self) -> dict:
         attempt = await self.attempt()
         result: dict[str, Any] = {
-            "succeeded": attempt.is_succeeded,
-            "provenance": self._provenance_to_json(attempt.provenance),
+            "status": attempt.status,
+            "value": self._adapter.dump_python(attempt.value)
+            if attempt.succeeded else None,
         }
-        if attempt.is_succeeded:
-            result["value"] = self._adapter.dump_python(attempt.value_or_none())
-            result["error"] = None
-        else:
-            result["value"] = None
-            result["error"] = attempt._error
+        if attempt.impossible:
+            result["error"] = attempt.error
+        result["provenance"] = (await self.build_provenance()).to_dict()
         return result
 
     def _persist(self, result_dict: dict,
@@ -89,18 +88,7 @@ class Node(ABC, Generic[T]):
         if extra:
             parts.append(extra)
         for name, attempt in dep_attempts.items():
-            if not attempt.is_succeeded:
-                detail = attempt._error or "unknown"
+            if not attempt.succeeded:
+                detail = attempt.error or "unknown"
                 parts.append(f"{name}: {detail}")
         return Attempt.impossible("; ".join(parts))
-
-    def _provenance_to_json(self, prov: Provenance) -> dict:
-        result: dict[str, Any] = {"label": prov.label}
-        if prov.description:
-            result["description"] = prov.description
-        if prov.source_attempts:
-            result["sources"] = {
-                name: self._provenance_to_json(a.provenance)
-                for name, a in prov.source_attempts.items()
-            }
-        return result

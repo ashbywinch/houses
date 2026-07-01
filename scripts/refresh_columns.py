@@ -17,9 +17,9 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from houses.enrichment_runner import ENRICHMENT_FIELD_COLUMNS, run_backfill_enrichment
-from houses.sheets import Tab, row_values, col_letter, get_client
 from houses.config import settings
+from houses.enrichment_runner import ENRICHMENT_FIELD_COLUMNS, run_backfill_enrichment
+from houses.sheets import Tab, col_letter, get_client, row_values
 
 
 async def main():
@@ -29,7 +29,7 @@ async def main():
     # All column headers that belong to the requested fields
     headers_to_write: set[str] = set()
     for f in fields:
-        headers_to_write.update(_ENRICHMENT_FIELD_COLUMNS.get(f, set()))
+        headers_to_write.update(ENRICHMENT_FIELD_COLUMNS.get(f, set()))
 
     gclient = get_client()
     sh = gclient.open_by_key(settings.sheet_id)

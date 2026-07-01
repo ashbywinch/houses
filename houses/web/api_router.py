@@ -93,7 +93,7 @@ def _score_from_summary(s: dict) -> int:
     score = 0
     for key, cd in s.get("commutes", {}).items():
         c = cd.get("commute", {})
-        dur = c.get("value", {}).get("duration", {}).get("value") if c.get("succeeded") else None
+        dur = c.get("value", {}).get("duration", {}).get("value") if c.get("status") == "succeeded" else None
         if dur is not None:
             score += _commute_score(dur, bracknell="Bracknell" in key)
     ps = s.get("schools", {}).get("primary", {}).get("school", {}).get("value", {})
@@ -148,9 +148,8 @@ async def patch_address(rid: str, body: dict):
     prop = _registry.get(rid)
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
-    from dag.attempt import Provenance
 
-    prop.corrected_address.push(body.get("address", ""), Provenance("user"))
+    prop.corrected_address.push(body.get("address", ""), "user")
     return {"status": "ok"}
 
 
@@ -159,11 +158,10 @@ async def patch_location(rid: str, body: dict):
     prop = _registry.get(rid)
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
-    from dag.attempt import Provenance
     from houses.geo import GeoPoint
 
     gp = GeoPoint(lat=body["lat"], lon=body["lon"])
-    prop.precise_location.push(gp, Provenance("user"))
+    prop.precise_location.push(gp, "user")
     return {"status": "ok"}
 
 
@@ -197,15 +195,11 @@ async def get_settings_decomposed():
 
 @api_router.patch("/settings/persons")
 async def patch_persons(body: list = Body()):  # noqa: B008
-    from dag.attempt import Provenance
-
-    get_services().persons_source.push(body, Provenance("user"))
+    get_services().persons_source.push(body, "user")
     return {"status": "ok"}
 
 
 @api_router.patch("/settings/financial")
 async def patch_financial(body: dict):
-    from dag.attempt import Provenance
-
-    get_services().financial_source.push(body, Provenance("user"))
+    get_services().financial_source.push(body, "user")
     return {"status": "ok"}

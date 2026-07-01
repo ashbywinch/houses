@@ -145,6 +145,40 @@ Compare key elements:
 - **Card sorting** — by computed score, highest first
 - **Total monthly** — at the very bottom of each card
 
+## Code Knowledge Graph
+
+This project uses `code-review-graph` (MCP tool) to build a knowledge graph
+of the codebase — functions, classes, files, their relationships, and
+community structure. The graph enables structural analysis, impact radius
+checks, code review support, and refactoring guidance.
+
+### Incremental Builds Only
+
+**Never run a full rebuild.** The graph supports incremental updates, which
+are fast (seconds) and only re-parse changed files. Full rebuilds parse every
+file from scratch and are unnecessary.
+
+```bash
+# Correct — incremental (default):
+uvx code-review-graph build
+uvx code-review-graph postprocess
+
+# Never do this:
+uvx code-review-graph build --full-rebuild
+```
+
+When using the MCP tool `code-review-graph_build_or_update_graph_tool`:
+- Leave `full_rebuild` unset or set to `false` (the default)
+- Set `postprocess` to `"minimal"` for quick builds that skip
+  community/flow detection
+
+### When to Build
+
+- The first time you use the graph in a session
+- After code changes — the graph auto-detects what changed
+- Check staleness: `uvx code-review-graph status` — if "Built at commit"
+  doesn't match HEAD, rebuild
+
 ## API Reference
 
 Read `docs/api.md` for full API documentation.

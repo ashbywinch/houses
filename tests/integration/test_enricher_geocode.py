@@ -70,7 +70,7 @@ async def test_geocode_empty_postcode():
     """Empty postcode should return None without making HTTP calls."""
     result = await geocode("")
     assert result.value_or_none() is None
-    assert result.is_impossible
+    assert result.impossible
 
 
 @pytest.mark.asyncio

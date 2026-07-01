@@ -7,8 +7,9 @@ from enum import Enum
 from money import Money
 from pint import Quantity
 
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt
 from dag.computed_node import ComputedNode
+from dag.node import Node
 from houses.geo import GeoPoint
 from houses.model.domain import Commute
 from houses.routing import get_commute
@@ -75,35 +76,82 @@ def _route_description(legs: tuple[CommuteLeg, ...]) -> str:
     return " → ".join(parts)
 
 
+def _serialize_commute_result(cr: CommuteResult) -> dict:
+    return {
+        "duration": {"value": int(cr.duration.magnitude), "unit": "minute"},
+        "daily_cost": (
+            {"amount": float(cr.daily_cost.amount), "currency": str(cr.daily_cost.currency)}
+            if cr.daily_cost else {"amount": 0, "currency": "GBP"}
+        ),
+        "label": cr.label,
+        "mode": cr.mode,
+        "route_description": cr.route_description,
+        "is_child": cr.is_child,
+        "source_url": cr.source_url,
+        "destination_url": cr.destination_url,
+    }
+
+
+def _deserialize_commute_result(data: dict) -> CommuteResult:
+    dur = data.get("duration", {})
+    dc = data.get("daily_cost") or {}
+    return CommuteResult(
+        duration=Quantity(dur.get("value", 0), "minute"),
+        daily_cost=(
+            Money(dc["amount"], dc["currency"])
+            if dc.get("amount") else None
+        ),
+        label=data.get("label", ""),
+        mode=data.get("mode", "transit"),
+        route_description=data.get("route_description", ""),
+        is_child=data.get("is_child", False),
+        source_url=data.get("source_url", ""),
+        destination_url=data.get("destination_url", ""),
+    )
+
+
 class WalkLegCheckNode(ComputedNode[bool]):
     def __init__(self, node_id: str, *, transit_node, persons_source):
         super().__init__(node_id, bool, (transit_node, persons_source))
 
     def compute(self, transit: Attempt[dict],
                 persons: Attempt[list]) -> Attempt[bool]:
-        return Attempt.succeeded(False, Provenance("walk_check",
-                                  description="simplified walk check"))
+        return Attempt.succeeded(False)
 
 
-class TransitNode(ComputedNode[CommuteResult]):
+class TransitNode(ComputedNode[dict]):
+    """Computes a transit commute from best_location to a POI postcode.
+
+    Persists and loads a serialised dict (not CommuteResult directly)
+    so the value survives restarts without needing to reconstruct
+    Money/Quantity types on every load.  The dict is lazily deserialised
+    back to CommuteResult for consumption in ``to_json()``.
+    """
+
     def __init__(self, node_id: str, *, best_location, poi, persons_source, best_address=None):
-        deps = (best_location, poi, persons_source)
+        deps: tuple[Node, ...] = (best_location, poi, persons_source)
         if best_address is not None:
             deps = deps + (best_address,)
-        super().__init__(node_id, object, deps)
+        super().__init__(node_id, dict, deps)
         self._best_address = best_address
+        # Upgrade a dict cached value to CommuteResult if loaded from DB
+        self._commute_cache: CommuteResult | None = None
+        if self._cached is not None and self._cached.succeeded:
+            val = self._cached.value
+            if isinstance(val, dict):
+                self._commute_cache = _deserialize_commute_result(val)
 
     async def compute(self, location: Attempt[GeoPoint],
                       poi: Attempt[str],
                       persons: Attempt[list],
-                      best_address: Attempt[str] = None) -> Attempt[CommuteResult]:
-        if not location.is_succeeded:
+                      best_address: Attempt[str] = None) -> Attempt[dict]:
+        if not location.succeeded:
             return self._impossible({"best_location": location})
-        if not poi.is_succeeded:
+        if not poi.succeeded:
             return self._impossible({"poi": poi})
-        if not persons.is_succeeded:
+        if not persons.succeeded:
             return self._impossible({"persons_source": persons})
-        loc: GeoPoint = location.value_or_none()
+        loc = location.value_or_none()
         dest_postcode = poi.value_or_none()
 
         # Extract person name from node_id: {rid}/{person}/{poi_label}/computed_transit
@@ -128,90 +176,51 @@ class TransitNode(ComputedNode[CommuteResult]):
             has_car=has_car,
             max_walk_minutes=max_walk,
         )
-        if commute.is_succeeded:
+        if commute.succeeded:
             val = commute.value_or_none()
             details = _build_details(val)
-            # Use the POI label from settings (user-defined), not the raw API string
             parts = self._id.split("/")
             label = parts[2] if len(parts) >= 3 else (val.destination_label or "")
             raw_mode = val.mode if hasattr(val, 'mode') else "transit"
             mode = raw_mode.name.lower() if isinstance(raw_mode, Enum) else str(raw_mode)
-            # Detect walking: if all legs are "walk" mode
             if details and all(leg.mode == "walk" for leg in details):
                 mode = "walk"
-            return Attempt.succeeded(
-                CommuteResult(
-                    duration=Quantity(val.duration_minutes or 0, "minute"),
-                    daily_cost=val.daily_cost_gbp,
-                    label=label,
-                    mode=mode,
-                    details=details,
-                    route_description=_route_description(details),
-                    is_child=is_child,
-                ),
-                Provenance("TfL API",
-                           description=f"transit {loc.lat},{loc.lon} → {dest_postcode}"),
+            cr = CommuteResult(
+                duration=Quantity(val.duration_minutes or 0, "minute"),
+                daily_cost=val.daily_cost_gbp,
+                label=label,
+                mode=mode,
+                details=details,
+                route_description=_route_description(details),
+                is_child=is_child,
             )
-        err = commute._reason or commute._error or "unknown"
-        return Attempt.impossible(f"get_commute: {err}",
-                                   Provenance("TfL API",
-                                              description=f"transit {loc.lat},{loc.lon} → {dest_postcode}"))
+            self._commute_cache = cr
+            return Attempt.succeeded(_serialize_commute_result(cr))
+        err = commute.error or "unknown"
+        return Attempt.impossible(f"get_commute: {err}")
 
     async def to_json(self) -> dict:
         attempt = await self.attempt()
-        if attempt.is_succeeded:
-            cr = attempt.value_or_none()
-            return {
-                "succeeded": True,
-                "value": {
-                    "duration": {"value": int(cr.duration.magnitude), "unit": "minute"},
-                    "daily_cost": (
-                        {"amount": float(cr.daily_cost.amount), "currency": str(cr.daily_cost.currency)}
-                        if cr.daily_cost else {"amount": 0, "currency": "GBP"}
-                    ),
-                    "label": cr.label,
-                    "mode": cr.mode,
-                    "route_description": cr.route_description,
-                    "is_child": cr.is_child,
-                    "source_url": cr.source_url,
-                    "destination_url": cr.destination_url,
-                },
-                "error": None,
-                "provenance": self._provenance_to_json(attempt.provenance),
-            }
-        return {
-            "succeeded": False, "value": None,
-            "error": attempt._error,
-            "provenance": self._provenance_to_json(attempt.provenance),
+        result: dict = {
+            "status": attempt.status,
+            "value": None,
         }
-
-    def _load_from_db(self) -> None:
-        from dag.persistence import latest_node_result
-        stored = latest_node_result(self._id)
-        if stored is not None:
-            succeeded = stored["succeeded"]
-            if succeeded:
-                v = stored["value"]
-                poi_label = ""
-                parts = self._id.split("/")
-                if len(parts) >= 3:
-                    poi_label = parts[2]
-                cr = CommuteResult(
-                    duration=Quantity(v.get("duration", {}).get("value", 0), "minute"),
-                    daily_cost=(
-                        Money(v["daily_cost"]["amount"], v["daily_cost"]["currency"])
-                        if v.get("daily_cost") and v["daily_cost"].get("amount") else None
-                    ),
-                    label=poi_label or v.get("label", ""),
-                    mode=v.get("mode", "transit"),
-                    route_description=v.get("route_description", ""),
-                )
-                prov = Provenance(stored.get("provenance", {}).get("label", ""))
-                self._cached = Attempt.succeeded(cr, prov)
+        if attempt.succeeded:
+            cr = self._commute_cache
+            if cr is None and isinstance(attempt.value, dict):
+                cr = _deserialize_commute_result(attempt.value)
+            if cr is not None:
+                result["value"] = _serialize_commute_result(cr)
             else:
-                self._cached = Attempt.impossible(stored.get("error", "unknown"))
-            self._db_created_at = stored.get("_persisted_at", "")
-            dep_ts = stored.get("dep_timestamps")
-            self._loaded_dep_timestamps = dep_ts if isinstance(dep_ts, dict) else {}
-            self._computed_at = __import__("time").monotonic()
-            self._persisted_at = __import__("time").monotonic()
+                result["value"] = attempt.value
+        if attempt.impossible:
+            result["error"] = attempt.error
+        result["provenance"] = (await self.build_provenance()).to_dict()
+        return result
+
+    async def build_provenance(self):
+        from dag.attempt import Provenance
+        description = ""
+        if self._commute_cache:
+            description = f"transit to {self._commute_cache.label}"
+        return Provenance(label="TfL API", description=description)

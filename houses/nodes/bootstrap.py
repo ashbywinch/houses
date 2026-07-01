@@ -4,14 +4,13 @@ import logging
 import re
 from typing import Any
 
-from dag.attempt import Provenance
 from dag.persistence import latest_node_result
 from dag.source_node import SourceNode
 from houses.geo import GeoPoint
 
 logger = logging.getLogger(__name__)
 
-PROVENANCE_LABELS: dict[str, str] = {
+SOURCE_LABELS: dict[str, str] = {
     "rightmove_url": "Browser extension",
     "rightmove_address": "Rightmove",
     "rightmove_bedrooms": "Rightmove",
@@ -70,19 +69,19 @@ def bootstrap_from_row(row: dict[str, Any],
     price = (row.get("Price (£)") or "").strip()
 
     if url and "rightmove_url" in sources:
-        sources["rightmove_url"].push(url, Provenance(PROVENANCE_LABELS["rightmove_url"]))
+        sources["rightmove_url"].push(url, SOURCE_LABELS["rightmove_url"])
         pushed += 1
 
     if address and "rightmove_address" in sources:
-        sources["rightmove_address"].push(address, Provenance(PROVENANCE_LABELS["rightmove_address"]))
+        sources["rightmove_address"].push(address, SOURCE_LABELS["rightmove_address"])
         pushed += 1
 
     if bedrooms and "rightmove_bedrooms" in sources:
-        sources["rightmove_bedrooms"].push(bedrooms, Provenance(PROVENANCE_LABELS["rightmove_bedrooms"]))
+        sources["rightmove_bedrooms"].push(bedrooms, SOURCE_LABELS["rightmove_bedrooms"])
         pushed += 1
 
     if price and "rightmove_price" in sources:
-        sources["rightmove_price"].push(price, Provenance(PROVENANCE_LABELS["rightmove_price"]))
+        sources["rightmove_price"].push(price, SOURCE_LABELS["rightmove_price"])
         pushed += 1
 
     approx_lat = (row.get("Approx Latitude (est)") or "").strip()
@@ -92,7 +91,7 @@ def bootstrap_from_row(row: dict[str, Any],
             flat, flng = float(approx_lat), float(approx_lng)
             sources["rightmove_location"].push(
                 GeoPoint(flat, flng),
-                Provenance(PROVENANCE_LABELS["rightmove_location"]),
+                SOURCE_LABELS["rightmove_location"],
             )
             pushed += 1
         except (ValueError, TypeError) as exc:
@@ -105,7 +104,7 @@ def bootstrap_from_row(row: dict[str, Any],
             aflat, aflng = float(actual_lat), float(actual_lng)
             sources["precise_location"].push(
                 GeoPoint(aflat, aflng),
-                Provenance(PROVENANCE_LABELS["precise_location"]),
+                SOURCE_LABELS["precise_location"],
             )
             pushed += 1
         except (ValueError, TypeError) as exc:
@@ -116,27 +115,26 @@ def bootstrap_from_row(row: dict[str, Any],
         if upgraded != address and "user_entered_address" in sources:
             sources["user_entered_address"].push(
                 upgraded,
-                Provenance(PROVENANCE_LABELS["user_entered_address"]),
+                SOURCE_LABELS["user_entered_address"],
             )
             pushed += 1
         if "corrected_address" in sources:
             sources["corrected_address"].push(
                 upgraded,
-                Provenance(PROVENANCE_LABELS["corrected_address"]),
+                SOURCE_LABELS["corrected_address"],
             )
             pushed += 1
 
     if postcode and "postcode" in sources:
-        sources["postcode"].push(postcode, Provenance("Sheet"))
+        sources["postcode"].push(postcode, "Sheet")
         pushed += 1
 
     if postcode and "user_entered_address" in sources and address:
-        # If address plus postcode makes a better address, push to user_entered
         upgraded = _upgrade_address(address, postcode)
         if upgraded != address:
             sources["user_entered_address"].push(
                 upgraded,
-                Provenance("User correction"),
+                "User correction",
             )
 
     for source_key, col_name in COMMENT_COLUMNS.items():
@@ -151,7 +149,7 @@ def bootstrap_from_row(row: dict[str, Any],
                     val = float(val)
                 except (ValueError, TypeError):
                     continue
-            src.push(val, Provenance(label))
+            src.push(val, label)
             pushed += 1
 
     return pushed
@@ -191,7 +189,7 @@ def seed_registry_from_sheet() -> int:
 
         check_key = f"{raw_rid}/rightmove_address"
         persisted = latest_node_result(check_key)
-        if persisted and persisted.get("succeeded"):
+        if persisted and persisted.get("status") == "succeeded":
             logger.debug("Skipping %s — already seeded", raw_rid)
         else:
             bootstrap_from_row(row, source_dict)
