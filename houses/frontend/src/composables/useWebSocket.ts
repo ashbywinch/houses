@@ -14,7 +14,7 @@ export function useWebSocket() {
       try {
         const msg = JSON.parse(event.data)
         if (msg.type === 'property_updated' && msg.rid) {
-          store.updateProperty(msg.rid, msg.data)
+          store.updateSummary(msg.rid, msg.data)
         }
       } catch {
         // ignore parse errors

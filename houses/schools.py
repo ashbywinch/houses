@@ -91,6 +91,7 @@ class School:
     # Age range from GIAS (fallback when phase-based ranges don't apply)
     statutory_low_age: int | None
     statutory_high_age: int | None
+    url: str = ""  # GIAS details page, populated automatically from URN
 
     # ── Age ranges by phase ─────────────────────────────────────────
     # PhaseOfEducation is clean (controlled vocabulary, 21k+ schools). The
@@ -130,8 +131,9 @@ class School:
             gender = SchoolGender(raw_gender)
         except ValueError:
             gender = SchoolGender.UNKNOWN
+        urn = (row.get(cls._COL_URN) or "").strip()
         return cls(
-            urn=(row.get(cls._COL_URN) or "").strip(),
+            urn=urn,
             name=(row.get(cls._COL_NAME) or "").strip(),
             phase=(row.get(cls._COL_PHASE) or "").strip(),
             statutory_low_age=cls._try_int(row.get(cls._COL_LOW_AGE)),
@@ -143,6 +145,8 @@ class School:
             ofsted_rating=(row.get(cls._COL_OFSTED) or "").strip(),
             inspection_year=(row.get(cls._COL_INSPECTION_YEAR) or "").strip(),
             coords=GeoPoint(float(lat), float(lng)) if lat and lng else None,
+            url=(f"https://get-information-schools.service.gov.uk"
+                  f"/Establishments/Establishment/Details/{urn}") if urn else "",
         )
 
     # ── Queries ─────────────────────────────────────────────────────

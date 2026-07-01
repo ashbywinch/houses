@@ -15,6 +15,7 @@ class Provenance:
     hierarchical provenance.
     """
     label: str = ""
+    description: str = ""
     source_attempts: dict[str, Attempt] = field(default_factory=dict)
 
 

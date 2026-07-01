@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from dag.attempt import Provenance
 from houses.geo import GeoPoint
 
@@ -33,25 +35,27 @@ class TestProperty:
 
         assert len(received) >= 1
 
-    def test_best_location_uses_precise(self):
+    @pytest.mark.asyncio
+    async def test_best_location_uses_precise(self):
         from houses.nodes.property import PropertyNodes
 
         prop = PropertyNodes("prop123")
         gp = GeoPoint(51.5, -0.1)
         prop.precise_location.push(gp, Provenance("user"))
 
-        a = prop.best_location.attempt()
+        a = await prop.best_location.attempt()
         assert a.is_succeeded
         assert a.value_or_none() == gp
 
-    def test_to_json_includes_location(self):
+    @pytest.mark.asyncio
+    async def test_to_json_includes_location(self):
         from houses.nodes.property import PropertyNodes
 
         prop = PropertyNodes("prop123")
         gp = GeoPoint(51.5, -0.1)
         prop.precise_location.push(gp, Provenance("user"))
 
-        j = prop.to_json()
+        j = await prop.to_json()
         assert j["rid"] == "prop123"
         assert j["best_location"]["succeeded"] is True
         assert j["best_location"]["value"] == {"lat": 51.5, "lon": -0.1}

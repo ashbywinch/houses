@@ -25,7 +25,7 @@ onMounted(() => {
     </div>
     <div v-else class="card-list">
       <template v-for="rid in store.rids" :key="rid">
-        <PropertyCard :rid :data="store.properties[rid]" />
+        <PropertyCard :rid :data="store.summaries[rid]" />
       </template>
     </div>
   </div>

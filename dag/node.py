@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
+from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 
 from pydantic import TypeAdapter
@@ -12,19 +14,40 @@ T = TypeVar("T")
 
 
 class Node(ABC, Generic[T]):
-    """Base class for all DAG nodes.
-
-    Every node has a unique ``id``, a ``value_type`` for serialisation,
-    and a ``changed`` signal that fires when the value updates.
-
-    Subclasses must implement ``attempt()``.
-    """
+    """Base class for all DAG nodes."""
 
     def __init__(self, node_id: str, value_type: type[T]) -> None:
         self._id = node_id
         self._value_type = value_type
         self._adapter = TypeAdapter(value_type)
         self.changed = Signal()
+        self._computed_at: float = 0.0
+        self._persisted_at: float = 0.0
+        self._db_created_at: str = ""
+        self._loaded_dep_timestamps: dict[str, str] = {}
+
+    def _load_attempt_from_db(self) -> Attempt[T] | None:
+        from dag.persistence import latest_node_result
+
+        stored = latest_node_result(self._id)
+        if stored is not None:
+            succeeded = stored["succeeded"]
+            if succeeded:
+                val = self._adapter.validate_python(stored["value"])
+                prov = Provenance(
+                    stored.get("provenance", {}).get("label", ""),
+                    stored.get("provenance", {}).get("description", ""),
+                )
+                attempt: Attempt[T] = Attempt.succeeded(val, prov)
+            else:
+                attempt = Attempt.impossible(stored.get("error", "unknown"))
+            self._db_created_at = stored.get("_persisted_at", "")
+            dep_ts = stored.get("dep_timestamps")
+            self._loaded_dep_timestamps = dep_ts if isinstance(dep_ts, dict) else {}
+            self._computed_at = time.monotonic()
+            self._persisted_at = time.monotonic()
+            return attempt
+        return None
 
     @property
     def id(self) -> str:
@@ -35,16 +58,11 @@ class Node(ABC, Generic[T]):
         return self._value_type
 
     @abstractmethod
-    def attempt(self) -> Attempt[T]:
-        """Return the current value with provenance."""
+    async def attempt(self) -> Attempt[T]:
         ...
 
-    def to_json(self) -> dict:
-        """Serialise this node's current value + provenance.
-
-        The API calls this method — it never accesses internal state.
-        """
-        attempt = self.attempt()
+    async def to_json(self) -> dict:
+        attempt = await self.attempt()
         result: dict[str, Any] = {
             "succeeded": attempt.is_succeeded,
             "provenance": self._provenance_to_json(attempt.provenance),
@@ -57,15 +75,16 @@ class Node(ABC, Generic[T]):
             result["error"] = attempt._error
         return result
 
+    def _persist(self, result_dict: dict,
+                 dep_timestamps: dict[str, str] | None = None) -> None:
+        from dag.persistence import save_node_result
+
+        save_node_result(self._id, result_dict, dep_timestamps)
+        self._persisted_at = time.monotonic()
+        self._db_created_at = datetime.now(UTC).isoformat()
+
     def _impossible(self, dep_attempts: dict[str, Attempt[T]],
                     extra: str = "") -> Attempt[T]:
-        """Build a detailed failure message from every failed dependency.
-
-        Produces strings like::
-
-            "BestLocationNode: precise_location: not set; "
-            "rightmove_location: HTTP 503"
-        """
         parts = [self._id]
         if extra:
             parts.append(extra)
@@ -77,6 +96,8 @@ class Node(ABC, Generic[T]):
 
     def _provenance_to_json(self, prov: Provenance) -> dict:
         result: dict[str, Any] = {"label": prov.label}
+        if prov.description:
+            result["description"] = prov.description
         if prov.source_attempts:
             result["sources"] = {
                 name: self._provenance_to_json(a.provenance)

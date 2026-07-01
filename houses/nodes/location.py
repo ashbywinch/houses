@@ -7,21 +7,33 @@ from houses.model.geo import is_single_property_address
 
 
 class BestAddressNode(ComputedNode[str]):
-    """Selects the best address from corrected_address and rightmove_address.
+    """Selects the best address from available sources.
 
-    Priority: corrected_address > rightmove_address.
+    Priority: user_entered_address > corrected_address > rightmove_address.
     """
 
-    def __init__(self, node_id: str, *, corrected_address, rightmove_address):
-        super().__init__(node_id, str, (corrected_address, rightmove_address))
+    def __init__(self, node_id: str, *,
+                 user_entered_address,
+                 corrected_address,
+                 rightmove_address):
+        super().__init__(
+            node_id, str,
+            (user_entered_address, corrected_address, rightmove_address),
+        )
 
-    def compute(self, corrected: Attempt[str], rightmove: Attempt[str]) -> Attempt[str]:
+    def compute(self, user_entered: Attempt[str],
+                corrected: Attempt[str],
+                rightmove: Attempt[str]) -> Attempt[str]:
+        if user_entered.is_succeeded:
+            return user_entered
         if corrected.is_succeeded:
             return corrected
         if rightmove.is_succeeded:
             return rightmove
         return self._impossible(
-            {"corrected_address": corrected, "rightmove_address": rightmove}
+            {"user_entered_address": user_entered,
+             "corrected_address": corrected,
+             "rightmove_address": rightmove}
         )
 
 

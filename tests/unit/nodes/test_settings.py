@@ -1,105 +1,57 @@
 from __future__ import annotations
 
-from dag.attempt import Attempt, Provenance
-from dag.computed_node import ComputedNode
-from dag.source_node import SourceNode
-from houses.model.domain import PlaceOfInterest
+import pytest
 
 
-class TestDefaultSettings:
-    def test_default_has_persons(self):
-        from houses.nodes.settings import make_default_settings
+class TestDecomposedSources:
+    @pytest.fixture
+    def _svc(self):
+        from houses.context import get_services
+        try:
+            return get_services()
+        except LookupError:
+            from houses.services import Services
+            svc = Services()
+            import houses.context as ctx
+            ctx._request_services.set(svc)
+            return svc
 
-        dto = make_default_settings()
-        persons = dto["persons"]
-        assert len(persons) >= 2
-        names = [p.name for p in persons]
-        assert "Simon" in names
-        assert "Lorena" in names
-
-    def test_default_settings_values(self):
-        from houses.nodes.settings import make_default_settings
-
-        dto = make_default_settings()
-        assert dto["bus_walk_penalty_minutes"] == 10
-        assert "Simon" in dto["commute_thresholds"]
-        assert "Lorena" in dto["commute_thresholds"]
-
-    def test_default_persons_have_places_of_interest(self):
-        from houses.nodes.settings import make_default_settings
-
-        dto = make_default_settings()
-        for p in dto["persons"]:
-            assert len(p.places_of_interest) > 0
-            assert isinstance(p.places_of_interest[0], PlaceOfInterest)
-
-
-class TestSettingsSourceNode:
-    def test_holds_defaults(self):
-        from houses.nodes.settings import make_settings_node
-
-        node = make_settings_node()
-        a = node.attempt()
+    @pytest.mark.asyncio
+    async def test_persons_source_has_defaults(self, _svc):
+        a = await _svc.persons_source.attempt()
         assert a.is_succeeded
-        v = a.value_or_none()
-        assert v["bus_walk_penalty_minutes"] == 10
+        persons = a.value_or_none()
+        assert len(persons) == 3
+        simon = persons[0]
+        assert simon["name"] == "Simon"
+        assert simon["bus_walk_penalty_minutes"] == 20
+        assert len(simon["places_of_interest"]) == 3
+        george = persons[2]
+        assert george["name"] == "George"
+        assert george["is_child"] is True
+        assert len(george["places_of_interest"]) == 2
 
-    def test_to_json_shape(self):
-        from houses.nodes.settings import make_settings_node
+    @pytest.mark.asyncio
+    async def test_lorena_has_two_trips(self, _svc):
+        a = await _svc.persons_source.attempt()
+        lorena = a.value_or_none()[1]
+        lorena_office = lorena["places_of_interest"][0]
+        assert lorena_office["label"] == "Aldgate"
+        assert lorena_office["trips_per_week"] == 2
 
-        node = make_settings_node()
-        j = node.to_json()
-        assert j["succeeded"] is True
-        value = j["value"]
-        assert "persons" in value
-        assert "bus_walk_penalty_minutes" in value
-        assert j["error"] is None
+    @pytest.mark.asyncio
+    async def test_financial_source_has_defaults(self, _svc):
+        a = await _svc.financial_source.attempt()
+        assert a.is_succeeded
+        fin = a.value_or_none()
+        assert fin["mortgage_rate"] == 0.045
+        assert fin["working_weeks_per_year"] == 46
 
-    def test_push_updates_value(self):
-        from houses.nodes.settings import make_default_settings, make_settings_node
-
-        node = make_settings_node()
-        new = make_default_settings()
-        new["bus_walk_penalty_minutes"] = 15
-        node.push(new, Provenance("user"))
-
-        a = node.attempt()
-        assert a.value_or_none()["bus_walk_penalty_minutes"] == 15
-
-    def test_push_emits_changed(self):
-        from houses.nodes.settings import make_default_settings, make_settings_node
-
-        node = make_settings_node()
-        received = []
-        node.changed.connect(lambda: received.append("changed"))
-
-        new = make_default_settings()
-        new["bus_walk_penalty_minutes"] = 15
-        node.push(new, Provenance("user"))
-
-        assert len(received) == 1
-
-    def test_downstream_recomputes_on_push(self):
-        src = SourceNode[dict]("test_setting", dict)
-        src.push({"bus_walk_penalty_minutes": 10}, Provenance("default"))
-
-        class PenaltyAwareNode(ComputedNode[int]):
-            def __init__(self):
-                super().__init__("penalty_aware", int, (src,))
-                self.compute_count = 0
-
-            def compute(self, *dep_attempts: Attempt) -> Attempt[int]:
-                self.compute_count += 1
-                s = dep_attempts[0].value_or_none() or {}
-                penalty = s.get("bus_walk_penalty_minutes", 0)
-                return Attempt.succeeded(penalty, Provenance("computed"))
-
-        node = PenaltyAwareNode()
-
-        assert node.attempt().value_or_none() == 10
-        assert node.compute_count == 1
-
-        src.push({"bus_walk_penalty_minutes": 20}, Provenance("user"))
-
-        assert node.attempt().value_or_none() == 20
-        assert node.compute_count == 2
+    @pytest.mark.asyncio
+    async def test_commute_thresholds_source(self, _svc):
+        a = await _svc.commute_thresholds_source.attempt()
+        assert a.is_succeeded
+        thresh = a.value_or_none()
+        assert "Simon" in thresh
+        assert "Lorena" in thresh
+        assert thresh["Simon"]["good_max_minutes"] == 30

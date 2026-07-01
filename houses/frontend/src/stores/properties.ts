@@ -1,11 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { PropertyResponse } from '../types'
-import { fetchProperty } from '../services/api'
+import type { PropertyDetail, PropertySummary } from '../types'
+import { fetchAllSummaries, fetchPropertyDetail } from '../services/api'
 
 export const usePropertiesStore = defineStore('properties', () => {
   const rids = ref<string[]>([])
-  const properties = ref<Record<string, PropertyResponse>>({})
+  const summaries = ref<Record<string, PropertySummary>>({})
+  const details = ref<Record<string, PropertyDetail>>({})
   const loading = ref(false)
   const error = ref<string | null>(null)
 
@@ -13,10 +14,8 @@ export const usePropertiesStore = defineStore('properties', () => {
     loading.value = true
     error.value = null
     try {
-      const resp = await fetch('/api/properties/all')
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-      const data: Record<string, PropertyResponse> = await resp.json()
-      properties.value = data
+      const data = await fetchAllSummaries()
+      summaries.value = data
       rids.value = Object.keys(data)
     } catch (e) {
       error.value = String(e)
@@ -25,15 +24,15 @@ export const usePropertiesStore = defineStore('properties', () => {
     }
   }
 
-  async function loadProperty(rid: string) {
-    const existing = properties.value[rid]
+  async function loadDetail(rid: string) {
+    const existing = details.value[rid]
     if (existing) return existing
     loading.value = true
     error.value = null
     try {
-      const prop = await fetchProperty(rid)
-      properties.value[rid] = prop
-      return prop
+      const detail = await fetchPropertyDetail(rid)
+      details.value[rid] = detail
+      return detail
     } catch (e) {
       error.value = String(e)
       return null
@@ -42,9 +41,13 @@ export const usePropertiesStore = defineStore('properties', () => {
     }
   }
 
-  function updateProperty(rid: string, data: PropertyResponse) {
-    properties.value[rid] = data
+  function updateSummary(rid: string, data: PropertySummary) {
+    summaries.value[rid] = data
   }
 
-  return { rids, properties, loading, error, loadAll, loadProperty, updateProperty }
+  function updateDetail(rid: string, data: PropertyDetail) {
+    details.value[rid] = data
+  }
+
+  return { rids, summaries, details, loading, error, loadAll, loadDetail, updateSummary, updateDetail }
 })

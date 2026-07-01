@@ -1,5 +1,5 @@
 # Makefile for houses — Browser-to-Spreadsheet Ingestion Engine
-.PHONY: help setup run test test-all test-integration test-e2e e2e lint format clean
+.PHONY: help setup run frontend-dev frontend-build dev test test-all test-integration test-e2e e2e lint format clean reset-db
 
 # Variables
 PYTHON := .venv/bin/python
@@ -16,7 +16,7 @@ NC := \033[0m
 help:
 	@echo "Available commands:"
 	@echo "  ${GREEN}make setup${NC}              Create venv and install dependencies"
-	@echo "  ${GREEN}make run${NC}                Start the FastAPI server (uvicorn)"
+	@echo "  ${GREEN}make run${NC}                Start backend + frontend dev server"
 	@echo "  ${GREEN}make test${NC}               Run unit + integration tests (fast, mocked APIs)"
 	@echo "  ${GREEN}make test-all${NC}           Run all tests including e2e (hits real APIs)"
 	@echo "  ${GREEN}make test-integration${NC}   Run only integration tests"
@@ -32,9 +32,11 @@ setup:
 	@$(UV) sync --all-extras
 	@echo "${GREEN}✓ Setup complete${NC}"
 
-run: setup
-	@echo "${YELLOW}Starting houses server on http://127.0.0.1:8080${NC}"
-	@$(UV) run uvicorn houses.server:app --host 0.0.0.0 --port 8080 --reload
+run: setup frontend-setup
+	@echo "${YELLOW}Backend: http://127.0.0.1:8080  Frontend: http://localhost:5173${NC}"
+	@trap 'kill 0' EXIT; \
+		cd houses/frontend && npm run dev & \
+		$(UV) run uvicorn houses.server:app --host 0.0.0.0 --port 8080 --reload
 
 FRONTEND := houses/frontend
 NPM := npm
@@ -51,13 +53,11 @@ frontend-build: frontend-setup
 	@cd $(FRONTEND) && $(NPM) run build
 	@echo "${GREEN}✓ Frontend build complete${NC}"
 
-dev: run & frontend-dev
-
 test: setup lint
-	@$(PYTEST) tests/unit/ tests/integration/ -q
-
-test: setup lint
-	@$(PYTEST) tests/unit/ tests/integration/ -q 
+	$(PYTEST) tests/unit/ -q --tb=short
+	$(PYTEST) tests/integration/ -q --tb=short
+	cd houses/frontend && npx vue-tsc -b --noEmit
+	cd houses/frontend && npx vitest run
 
 test-e2e: setup lint
 	@$(PYTEST) tests/e2e/ -m e2e -q
@@ -82,4 +82,8 @@ clean:
 	@rm -f .coverage coverage.xml
 	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	@find . -type f -name "*.pyc" -delete
+
+reset-db:  # Reset DAG database but PRESERVE API cache
+	@rm -f data/dag.db
+	@echo "data/dag.db removed (API cache in data/cache/ left intact)"
 	@echo "${GREEN}✓ Cleaned${NC}"

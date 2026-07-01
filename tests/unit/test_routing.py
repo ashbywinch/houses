@@ -1,4 +1,4 @@
-"""Tests for houses/routing.py — get_commute(), _walk_commute(), etc."""
+"""Tests for houses/routing.py — get_commute(), _google_route_commute, etc."""
 
 from __future__ import annotations
 
@@ -11,19 +11,19 @@ from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 
 
 class TestWalkCommuteFailsFast:
-    """_walk_commute must raise ValueError when Google API key is missing."""
+    """_google_route_commute must raise ValueError when Google API key is missing."""
 
     def test_raises_without_api_key(self):
         import asyncio
 
         from houses.config import settings
-        from houses.routing import _walk_commute
+        from houses.routing import _google_route_commute
 
         original = settings.google_maps_api_key
         try:
             settings.google_maps_api_key = ""
             with pytest.raises(ValueError, match="Google Maps API key not configured"):
-                asyncio.run(_walk_commute("SW1V 2QQ", "EC3A 7LP"))
+                asyncio.run(_google_route_commute("SW1V 2QQ", "EC3A 7LP", "WALK"))
         finally:
             settings.google_maps_api_key = original
 
@@ -95,7 +95,7 @@ class TestGetCommuteChoice:
         async def mock_none(*_, **__):
             return None
 
-        monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
+        monkeypatch.setattr("houses.routing._google_route_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
 
         result = await get_commute("GU21 7QF", "SW1V 2QQ", has_car=False, max_walk_minutes=30)
@@ -116,7 +116,7 @@ class TestGetCommuteChoice:
         async def mock_none(*_, **__):
             return None
 
-        monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
+        monkeypatch.setattr("houses.routing._google_route_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
 
         result = await get_commute("GU21 7QF", "SW1V 2QQ", has_car=False, max_walk_minutes=30)
@@ -143,10 +143,10 @@ class TestGetCommuteChoice:
         def mock_cz(_):
             return False
 
-        monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
+        monkeypatch.setattr("houses.routing._google_route_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
 
-        monkeypatch.setattr("houses.routing._drive_commute", mock_drive)
+        monkeypatch.setattr("houses.routing._google_route_commute", mock_drive)
         monkeypatch.setattr("houses.routing._in_congestion_zone", mock_cz)
 
         result = await get_commute("GU21 7QF", "RG12 8YA", has_car=True, max_walk_minutes=15)
@@ -173,10 +173,10 @@ class TestGetCommuteChoice:
         def mock_cz(_):
             return False
 
-        monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
+        monkeypatch.setattr("houses.routing._google_route_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
 
-        monkeypatch.setattr("houses.routing._drive_commute", mock_drive)
+        monkeypatch.setattr("houses.routing._google_route_commute", mock_drive)
         monkeypatch.setattr("houses.routing._in_congestion_zone", mock_cz)
 
         result = await get_commute("GU21 7QF", "RG12 8YA", has_car=True, max_walk_minutes=15)
@@ -188,25 +188,21 @@ class TestGetCommuteChoice:
         """Central London destinations should never try driving."""
         from houses.routing import get_commute
 
-        async def mock_walk(*_):
-            return None
-
         async def mock_transit(*_, **__):
             return _TRANSIT_30
 
-        async def mock_none(*_, **__):
+        async def mock_routes(origin, dest, mode, max_walk_minutes=None):
+            if mode == "WALK":
+                return None
+            if mode == "DRIVE":
+                return _DRIVE_25
             return None
-
-        async def mock_drive(*_):
-            return _DRIVE_25
 
         def mock_cz(_):
             return True
 
-        monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
+        monkeypatch.setattr("houses.routing._google_route_commute", mock_routes)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
-
-        monkeypatch.setattr("houses.routing._drive_commute", mock_drive)
         monkeypatch.setattr("houses.routing._in_congestion_zone", mock_cz)
 
         result = await get_commute("GU21 7QF", "SW1V 2QQ", has_car=True, max_walk_minutes=15)
@@ -233,10 +229,10 @@ class TestGetCommuteChoice:
         def mock_cz(_):
             return False
 
-        monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
+        monkeypatch.setattr("houses.routing._google_route_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
 
-        monkeypatch.setattr("houses.routing._drive_commute", mock_drive)
+        monkeypatch.setattr("houses.routing._google_route_commute", mock_drive)
         monkeypatch.setattr("houses.routing._in_congestion_zone", mock_cz)
 
         result = await get_commute("GU21 7QF", "RG12 8YA", has_car=True, max_walk_minutes=15)
@@ -261,7 +257,7 @@ class TestGetCommuteChoice:
         async def mock_tfl(*_, **__):
             return _SLOWER_HAS_COST  # 25 min, cost=5.0
 
-        monkeypatch.setattr("houses.routing._walk_commute", mock_walk)
+        monkeypatch.setattr("houses.routing._google_route_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_tfl)
 
         result = await get_commute("GU21 7QF", "EC3A 7LP", has_car=False, max_walk_minutes=30)

@@ -633,4 +633,10 @@ The agent must follow these rules throughout:
 5. **Do not skip steps.** The ordering is deliberate — foundation (dag library)
    before domain objects, domain objects before signals, signals before API,
    API before Vue. Jumping ahead will produce code that can't be tested in
-   isolation.
+    isolation.
+
+6. **Commit after every step.** Every migration step that produces working
+   code must be committed with a clear message before starting the next
+   step. Use `git tag` to mark milestones (e.g. `v0.4-library`, `v0.5-domain`,
+   `v0.6-api`). The starting point for this rewrite is tagged
+   `v0.3-pre-rewrite`.

@@ -7,33 +7,16 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-import pytest
-
 from dag.persistence import (
     _deserialize_value,
     _serialize_value,
     get_all_source_values,
     get_latest_source_value,
     insert_source_value,
+    latest_node_result,
     load_node_data,
+    save_node_result,
 )
-
-
-@pytest.fixture(autouse=True)
-def _sqlite_memory():
-    """Replace the global DB connection with an in-memory database."""
-    import sqlite3
-
-    import dag.persistence as per
-
-    saved = per._get_db
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    per._get_db = lambda: conn
-    per.init_db()
-    yield
-    per._get_db = saved
-
 
 RID = "prop123"
 
@@ -118,3 +101,44 @@ class TestNodeData:
         data = load_node_data(RID)
         assert "address" in data["sources"]
         assert data["sources"]["address"]["value"] == "10 High St"
+
+
+class TestNodeResults:
+    def test_save_and_load(self):
+        result = {"succeeded": True, "value": "hello", "error": None,
+                  "provenance": {"label": "test"}}
+        save_node_result("node1", result)
+        loaded = latest_node_result("node1")
+        assert loaded is not None
+        assert loaded["succeeded"] is True
+        assert loaded["value"] == "hello"
+
+    def test_load_returns_none_for_missing(self):
+        assert latest_node_result("nonexistent") is None
+
+    def test_load_returns_latest(self):
+        save_node_result("node1", {"succeeded": True, "value": "first"})
+        save_node_result("node1", {"succeeded": True, "value": "second"})
+        loaded = latest_node_result("node1")
+        assert loaded["value"] == "second"
+
+    def test_save_persists_dep_timestamps(self):
+        result = {"succeeded": True, "value": 42, "error": None,
+                  "provenance": {"label": "test"}}
+        deps = {"src_node": 12345.67, "other_node": 89101.23}
+        save_node_result("node2", result, dep_timestamps=deps)
+        loaded = latest_node_result("node2")
+        # dep_timestamps is stored but latest_node_result doesn't return it
+        assert loaded["value"] == 42
+
+    def test_saves_multiple_nodes_independently(self):
+        save_node_result("a", {"value": "AAA"})
+        save_node_result("b", {"value": "BBB"})
+        assert latest_node_result("a")["value"] == "AAA"
+        assert latest_node_result("b")["value"] == "BBB"
+
+    def test_persisted_at_timestamp(self):
+        save_node_result("n", {"value": 1})
+        loaded = latest_node_result("n")
+        assert "_persisted_at" in loaded
+        assert loaded["_persisted_at"] is not None

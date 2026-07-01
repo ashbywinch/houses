@@ -1,39 +1,46 @@
 <script setup lang="ts">
-defineProps<{
+import { computed } from 'vue'
+
+const props = defineProps<{
   label: string
   duration: number | null
-  cost: number | null
+  cost?: number | null
+  mode?: string
   goodMax?: number
   fineMax?: number
 }>()
 
-function colourClass(duration: number | null, good = 30, fine = 45): string {
-  if (duration === null) return 'pill--muted'
-  if (duration <= good) return 'pill--good'
-  if (duration <= fine) return 'pill--warn'
+const colour = computed(() => {
+  const d = props.duration
+  const good = props.goodMax ?? 45
+  const fine = props.fineMax ?? 75
+  if (d === null) return 'pill--muted'
+  if (d <= good) return 'pill--good'
+  if (d <= fine) return 'pill--warn'
   return 'pill--bad'
-}
+})
+
+const displayText = computed(() => {
+  const durStr = formatDuration(props.duration)
+  const modeStr = props.mode ? ` ${props.mode}` : ''
+  const costStr = props.cost ? ` · £${props.cost.toFixed(2)}` : ''
+  if (props.label) return `${props.label} ${durStr}${modeStr}${costStr}`
+  return `${durStr}${modeStr}${costStr}`
+})
 
 function formatDuration(minutes: number | null): string {
   if (minutes === null) return '?'
   if (minutes < 60) return `${minutes}m`
   const h = Math.floor(minutes / 60)
-  const m = minutes % 60
-  return m > 0 ? `${h}h ${m}m` : `${h}h`
-}
-
-function formatCost(cost: number | null): string {
-  if (cost === null) return ''
-  return `£${cost.toFixed(2)}`
+  const r = minutes % 60
+  if (r === 0) return `${h}h`
+  return `${h}h${r}`
 }
 </script>
 
 <template>
-  <span
-    class="pill"
-    :class="colourClass(duration, goodMax, fineMax)"
-  >
-    {{ label }} {{ formatDuration(duration) }}{{ cost ? ' · ' + formatCost(cost) : '' }}
+  <span class="pill" :class="colour">
+    {{ displayText }}
   </span>
 </template>
 

@@ -126,13 +126,11 @@ class EndpointClient:
                         self._remaining_budget,
                     )
                 elif 400 <= e.status < 500:
-                    # 4xx (except 429) — won't self-resolve
                     self._permanently_blocked = True
+                    body = getattr(e, 'read', lambda: b'')()
                     logger.warning(
-                        "%s: HTTP %d on attempt %d → permanently blocked",
-                        self.name,
-                        e.status,
-                        attempt + 1,
+                        "%s: HTTP %d on attempt %d → permanently blocked. body=%s",
+                        self.name, e.status, attempt + 1, body,
                     )
                     return None
                 else:
@@ -148,13 +146,12 @@ class EndpointClient:
                         delay,
                     )
             except httpx.HTTPStatusError as e:
+                body = e.response.text[:500]
                 if 400 <= e.response.status_code < 500:
                     self._permanently_blocked = True
                     logger.warning(
-                        "%s: HTTP %d on attempt %d → permanently blocked",
-                        self.name,
-                        e.response.status_code,
-                        attempt + 1,
+                        "%s: HTTP %d on attempt %d → permanently blocked. body=%s",
+                        self.name, e.response.status_code, attempt + 1, body,
                     )
                     return None
                 else:

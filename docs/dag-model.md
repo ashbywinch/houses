@@ -134,3 +134,147 @@ to `GEOPOINT_NODES` in `persistence.py` so the serializer handles it.
 ```python
 GEOPOINT_NODES = {"rightmove_location", "geocode_location", "precise_location", "best_location"}
 ```
+
+---
+
+## New DAG Convention (houses/nodes/)
+
+The DAG was replaced in 2026. Nodes now live in `houses/nodes/` using the
+`dag/` library (`ComputedNode`, `SourceNode`, `Attempt`, `Provenance`).
+
+### Every compute MUST return Attempt[T]
+
+No raw values, no `None`, no implicit returns. Every code path must end with
+either `Attempt.succeeded(value, provenance)` or `Attempt.impossible(reason, provenance)`.
+
+```python
+# ✅ Correct
+async def compute(self, dep: Attempt[str]) -> Attempt[int]:
+    if not dep.is_succeeded:
+        return self._impossible({"dep": dep})
+    return Attempt.succeeded(len(dep.value_or_none()), Provenance("my_service", description="..."))
+
+# ❌ Wrong — loses error and provenance
+return Attempt.impossible("failed")                          # missing provenance
+return None                                                  # not an Attempt at all
+return old_attempt_object_without_check                      # never assume succeeded
+```
+
+### Provenance is mandatory on EVERY Attempt
+
+`Attempt.impossible` must include a `Provenance(label, description)` explaining
+what operation failed and where it happened:
+
+```python
+# ✅ Correct
+return Attempt.impossible("no school found",
+                           Provenance("GIAS CSV", description=f"near {postcode}"))
+
+# ❌ Wrong — user can't tell what failed or where
+return Attempt.impossible("no school found")
+```
+
+`Attempt.succeeded` must include provenance showing the data source:
+
+```python
+return Attempt.succeeded(
+    result,
+    Provenance("EPC API", description=f"EPC lookup for {address}"),
+)
+```
+
+### No side effects in computed nodes
+
+Computed nodes must not push values into SourceNodes. Use a pure dependency
+chain instead:
+
+```python
+# ✅ SchoolPostcodeNode: depends on school node, extracts postcode
+class SchoolPostcodeNode(ComputedNode[str]):
+    deps: (school_node,)  # signal chain handles staleness
+
+    async def compute(self, school_attempt: Attempt[dict]) -> Attempt[str]:
+        if school_attempt.is_succeeded:
+            return Attempt.succeeded(school_attempt.value_or_none()["postcode"], ...)
+
+# ❌ Side-effect approach (never do this):
+# school node pushes postcode to George's poi_src inside compute()
+```
+
+The signal chain propagates automatically:
+1. School node computes, emits `changed`
+2. SchoolPostcodeNode becomes stale (dep changed)
+3. SchoolPostcodeNode recomputes, emits `changed`
+4. TransitNode becomes stale (dep changed)
+5. TransitNode recomputes with the new postcode
+
+No manual `_sync_` methods needed.
+
+### Values must be typed classes, not dicts
+
+Commute data uses `CommuteResult` (frozen dataclass with `duration: Quantity`,
+`daily_cost: Money`, `mode`, `details`). Never return plain dicts as node values.
+
+```python
+# ✅ Correct
+return Attempt.succeeded(
+    CommuteResult(duration=Quantity(32, "minute"), daily_cost=Money("4.50", "GBP"), ...),
+    ...
+)
+
+# ❌ Wrong — no type safety, field names can drift
+return Attempt.succeeded(
+    {"duration": 32, "daily_cost": 4.50, ...},  # what's the schema?
+    ...
+)
+```
+
+### Service Protocol returns must be wrapped in Attempt
+
+When a service returns `School | None`, the node's compute wraps it in
+`Attempt.succeeded(...)` or `Attempt.impossible(...)` with the appropriate
+provenance. The DAG boundary always uses Attempt — never pass raw values
+between nodes.
+
+### Walk commute detection
+
+When `get_commute` returns a `Commute` object whose legs are all walking,
+`TransitNode` sets `mode="walk"` so the frontend can use walk-specific
+pill colour thresholds (15/30 instead of 45/75).
+
+### Settings sources live in Services, not at module level
+
+``persons_source``, ``financial_source`` and ``commute_thresholds_source``
+are **not** module-level variables. They live in the ``Services`` DI
+container and are created eagerly by ``Services.__init__``.
+
+```python
+# ✅ Correct — access via the container
+from houses.context import get_services
+svc = get_services()
+data = await svc.persons_source.attempt()
+
+# ❌ Wrong — no module-level import
+from houses.nodes.settings import persons_source  # no longer exists
+```
+
+**Updating settings** at runtime uses the PATCH endpoint, which pushes
+new values into the SourceNode. The signal chain propagates the change
+to all downstream computed nodes automatically:
+
+```bash
+curl -X PATCH http://localhost:8080/api/settings/persons \
+  -H 'Content-Type: application/json' \
+  -d '[...]'
+```
+
+**Never delete the database** to force a recompute. Use the PATCH
+endpoint instead.
+
+### DB isolation for tests
+
+The ``_sqlite_memory`` fixture in ``tests/unit/conftest.py`` replaces
+the global DB connection with an in-memory SQLite before every test.
+Because settings sources are not module-level, they read from the
+in-memory DB by default — no stale cached data, no real DB access
+during test collection.

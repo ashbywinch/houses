@@ -9,10 +9,20 @@ import importlib
 import json
 import sqlite3
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from pydantic import TypeAdapter
+
+
+class DagJSONEncoder(json.JSONEncoder):
+    """Handles enums and other non-serializable types in DAG node results."""
+
+    def default(self, o):
+        if isinstance(o, Enum):
+            return o.name.lower()
+        return super().default(o)
 
 DB_PATH: Path | None = None
 
@@ -87,6 +97,15 @@ def init_db(db_path: str | None = None) -> None:
             updated_at TEXT NOT NULL,
             PRIMARY KEY (property_id, node_id)
         );
+
+        CREATE TABLE IF NOT EXISTS node_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            node_id TEXT NOT NULL,
+            result_json TEXT NOT NULL,
+            dep_timestamps TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_nr_node ON node_results(node_id, created_at DESC);
     """)
     conn.commit()
 
@@ -148,3 +167,52 @@ def load_node_data(property_id: str) -> dict[str, Any]:
     return {
         "sources": get_all_source_values(property_id),
     }
+
+
+def save_node_result(node_id: str, result_dict: dict[str, Any],
+                     dep_timestamps: dict[str, float] | None = None) -> int:
+    """Persist a node's to_json() output to the node_results table.
+
+    Each call appends a new row. The most recent row is the current value.
+    """
+    if not _table_exists("node_results"):
+        init_db()
+    conn = _get_db()
+    now = datetime.now(UTC).isoformat()
+    cur = conn.execute(
+        "INSERT INTO node_results (node_id, result_json, dep_timestamps, created_at)"
+        " VALUES (?, ?, ?, ?)",
+        (node_id,
+         json.dumps(result_dict, cls=DagJSONEncoder),
+         json.dumps(dep_timestamps, cls=DagJSONEncoder) if dep_timestamps else None,
+         now),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def latest_node_result(node_id: str) -> dict[str, Any] | None:
+    """Return the most recent to_json() dict for a node, or None."""
+    if not _table_exists("node_results"):
+        init_db()
+        return None
+    conn = _get_db()
+    row = conn.execute(
+        "SELECT result_json, created_at FROM node_results"
+        " WHERE node_id=? ORDER BY created_at DESC LIMIT 1",
+        (node_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    result = json.loads(row["result_json"])
+    result["_persisted_at"] = row["created_at"]
+    return result
+
+
+def _table_exists(name: str) -> bool:
+    conn = _get_db()
+    row = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (name,),
+    ).fetchone()
+    return row is not None

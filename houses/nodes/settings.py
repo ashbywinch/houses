@@ -1,8 +1,11 @@
-"""Settings SourceNodes for the reactive DAG.
+"""Settings source factories.
 
-Settings are stored as SourceNode values so changes propagate
-reactively through the graph. Default values mirror the existing
-houses/config.py Settings class.
+Settings sources are NOT module-level objects — they're created eagerly
+by ``Services.__init__`` in ``houses/services.py``.  Tests create them
+from the in-memory DB by calling ``make_services``.
+
+This module provides the default-value factories and the persistence
+helper used by the production ``Services`` constructor.
 """
 
 from __future__ import annotations
@@ -10,47 +13,91 @@ from __future__ import annotations
 from typing import Any
 
 from dag.attempt import Provenance
+from dag.persistence import latest_node_result
 from dag.source_node import SourceNode
 from houses.config import settings
-from houses.model.domain import Person, PlaceOfInterest
 
 
-def make_default_settings() -> dict[str, Any]:
-    """Build the default settings dict from config and domain defaults."""
-    return {
-        "persons": [
-            Person(
-                name="Simon",
-                has_car=True,
-                deposit_equity=None,
-                places_of_interest=(
-                    PlaceOfInterest(label="Office", postcode=settings.simon_postcode),
-                    PlaceOfInterest(label="Bracknell", postcode=settings.bracknell_postcode),
-                    PlaceOfInterest(label="Dad", postcode="OX7 5GZ"),
-                ),
-            ),
-            Person(
-                name="Lorena",
-                has_car=False,
-                deposit_equity=None,
-                places_of_interest=(
-                    PlaceOfInterest(label="Office", postcode=settings.lorena_postcode),
-                ),
-            ),
-        ],
-        "commute_thresholds": {
-            "Simon": {"good_max_minutes": 30, "fine_max_minutes": 45},
-            "Lorena": {"good_max_minutes": 40, "fine_max_minutes": 60},
+def make_default_persons() -> list[dict]:
+    return [
+        {
+            "name": "Simon",
+            "has_car": True,
+            "is_child": False,
+            "deposit_equity": None,
+            "bus_walk_penalty_minutes": 20,
+            "places_of_interest": [
+                {"label": "Pimlico", "postcode": settings.simon_postcode,
+                 "trips_per_week": 1, "weeks_per_year": 46},
+                {"label": "Bracknell", "postcode": settings.bracknell_postcode,
+                 "trips_per_week": 1, "weeks_per_year": 46},
+                {"label": "Dad", "postcode": "OX7 5GZ",
+                 "trips_per_week": 0, "weeks_per_year": 46},
+            ],
         },
-        "bus_walk_penalty_minutes": settings.bus_walk_penalty_minutes,
+        {
+            "name": "Lorena",
+            "has_car": False,
+            "is_child": False,
+            "deposit_equity": None,
+            "bus_walk_penalty_minutes": 15,
+            "places_of_interest": [
+                {"label": "Aldgate", "postcode": settings.lorena_postcode,
+                 "trips_per_week": 2, "weeks_per_year": 46},
+            ],
+        },
+        {
+            "name": "George",
+            "has_car": False,
+            "is_child": True,
+            "deposit_equity": None,
+            "bus_walk_penalty_minutes": 30,
+            "places_of_interest": [
+                {"label": "Primary School", "postcode": "",
+                 "trips_per_week": 5, "weeks_per_year": 39},
+                {"label": "Secondary School", "postcode": "",
+                 "trips_per_week": 5, "weeks_per_year": 39},
+            ],
+        },
+    ]
+
+
+def make_default_financials() -> dict[str, Any]:
+    return {
+        "current_home_sale_price": 0,
+        "current_home_outstanding_mortgage": 0,
+        "mortgage_rate": 0.045,
+        "mortgage_term_years": 30,
+        "sinking_fund_rate": 0.01,
+        "rental_income_monthly": 0,
+        "life_insurance_monthly": 0,
+        "working_weeks_per_year": 46,
     }
 
 
-def make_settings_node() -> SourceNode[dict[str, Any]]:
-    """Create a new settings SourceNode populated with defaults."""
-    node = SourceNode[dict[str, Any]]("settings", dict[str, Any])
-    node.push(make_default_settings(), Provenance("config"))
+def make_default_thresholds() -> dict[str, dict[str, int]]:
+    return {
+        "Simon": {"good_max_minutes": 30, "fine_max_minutes": 45},
+        "Lorena": {"good_max_minutes": 40, "fine_max_minutes": 60},
+    }
+
+
+def make_persisted_source(node_id: str, value_type: type,
+                          default_factory) -> SourceNode:
+    """Create a settings SourceNode from DB or defaults.
+
+    Called by ``Services.__init__`` (production) and by tests that want
+    real data seeded into the in-memory database.
+    """
+    node = SourceNode(node_id, value_type)
+    persisted = latest_node_result(node_id)
+    if persisted and persisted.get("succeeded"):
+        val = node._adapter.validate_python(persisted["value"])
+        node._value = val
+        node._provenance = Provenance("db")
+    else:
+        node.push(default_factory(), Provenance("config"))
     return node
 
 
-settings_node = make_settings_node()
+

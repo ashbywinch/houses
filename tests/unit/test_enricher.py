@@ -1026,7 +1026,7 @@ class TestBusFallback:
 
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
         monkeypatch.setattr("houses.routing._find_bus_alternative", mock_bus)
-        monkeypatch.setattr("houses.routing._walk_commute", _disabled)
+        monkeypatch.setattr("houses.routing._google_route_commute", _disabled)
 
         result = (await compute_lorena_commute("GU52")).get()
         assert result.non_rail_cost() > 0, "Should find bus cost"
@@ -1080,7 +1080,7 @@ class TestBusFallback:
 
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
         monkeypatch.setattr("houses.routing._find_bus_alternative", mock_bus)
-        monkeypatch.setattr("houses.routing._walk_commute", _none)
+        monkeypatch.setattr("houses.routing._google_route_commute", _none)
 
         result = (await compute_lorena_commute("GU52")).get()
         assert result.non_rail_cost() > 0, "Should find bus cost"
@@ -1154,7 +1154,7 @@ class TestBusFallback:
 
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_transit)
         monkeypatch.setattr("houses.routing._find_bus_alternative", lambda *_: None)
-        monkeypatch.setattr("houses.routing._walk_commute", _none)
+        monkeypatch.setattr("houses.routing._google_route_commute", _none)
 
         result = (await compute_lorena_commute("GU52")).get()
         assert result is not None

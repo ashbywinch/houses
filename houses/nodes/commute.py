@@ -1,14 +1,8 @@
-"""Commute ComputedNodes for the reactive DAG.
-
-Each Person × PlaceOfInterest gets a CommuteSelectorNode that picks
-the best available commute from transit and bus results. Transit and
-bus results are pushed to SourceNodes by the existing enrichment modules.
-"""
-
 from __future__ import annotations
 
+import time
 from dataclasses import fields, is_dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -19,14 +13,34 @@ from dag.attempt import Attempt
 from dag.computed_node import ComputedNode
 from dag.source_node import SourceNode
 from houses.geo import GeoPoint
-from houses.model.domain import Commute, PlaceOfInterest
+from houses.model.domain import Commute
+
+
+def format_duration(minutes: int | None) -> str:
+    """Match the old ``houses.web.card_data._dur`` format.
+
+    Returns ``""`` for ``None``, ``"9m"`` for <60, ``"1h2"`` (no space),
+    ``"2h"`` for exact hours.
+    """
+    if minutes is None:
+        return ""
+    if minutes < 60:
+        return f"{minutes}m"
+    h = minutes // 60
+    r = minutes % 60
+    return f"{h}h{r}" if r else f"{h}h"
+
+
+def commute_colour(minutes: int | None, bracknell: bool = False) -> str:
+    """Match the old ``houses.web.card_data.commute_colour`` thresholds."""
+    if minutes is None:
+        return "muted"
+    if bracknell:
+        return "good" if minutes < 30 else "warn" if minutes <= 60 else "bad"
+    return "good" if minutes < 45 else "warn" if minutes <= 75 else "bad"
 
 
 def _serialize_value(val: Any) -> Any:
-    """Recursively serialise a value tree to JSON-friendly types.
-
-    Handles Money, pint Quantity, dataclasses, enums, and standard collections.
-    """
     if isinstance(val, Money):
         return {"amount": float(val.amount), "currency": val.currency}
     if hasattr(val, "units") and hasattr(val, "magnitude"):
@@ -38,6 +52,21 @@ def _serialize_value(val: Any) -> Any:
     if isinstance(val, Enum):
         return val.name.lower()
     if is_dataclass(val) and not isinstance(val, type):
+        cls_name = type(val).__name__
+        if cls_name == "CommuteResult":
+            dc = val.daily_cost
+            return {
+                "duration": {"value": int(val.duration.magnitude), "unit": "minute"},
+                "daily_cost": (
+                    {"amount": float(dc.amount), "currency": str(dc.currency)}
+                    if dc else {"amount": 0, "currency": "GBP"}
+                ),
+                "label": val.label,
+                "mode": val.mode,
+                "route_description": val.route_description,
+                "is_child": val.is_child,
+                "details": [_serialize_leg(leg) for leg in val.details],
+            }
         result: dict[str, Any] = {}
         for f in fields(val):
             result[f.name] = _serialize_value(getattr(val, f.name))
@@ -49,41 +78,38 @@ def _serialize_value(val: Any) -> Any:
     return val
 
 
-def commute_source_node(node_id: str) -> SourceNode[Commute]:
-    """Create a SourceNode for Commute values.
+def _serialize_leg(leg) -> dict:
+    mode = leg.mode.name.lower() if isinstance(leg.mode, Enum) else leg.mode
+    return {
+        "mode": mode,
+        "duration": {"value": int(leg.duration.magnitude), "unit": "minute"},
+        "line_name": leg.line_name,
+        "destination": leg.destination,
+    }
 
-    Uses a plain dict value_type internally and overrides the adapter
-    to avoid pydantic issues with Money/pint types.
-    """
+
+def commute_source_node(node_id: str) -> SourceNode[Commute]:
     return _CommuteSourceNode(node_id)
 
 
 class _CommuteSourceNode(SourceNode[dict]):
-    """A SourceNode that stores Commute objects but bypasses TypeAdapter for them."""
-
     def __init__(self, node_id: str) -> None:
         super().__init__(node_id, dict)
 
     def push(self, value: Commute, provenance) -> None:
         self._value = value
         self._provenance = provenance
+        self._persisted_at = time.monotonic()
+        self._db_created_at = datetime.now(UTC).isoformat()
         self.changed.emit()
 
-    def attempt(self) -> Attempt[Commute]:
+    async def attempt(self) -> Attempt[Commute]:
         if self._value is not None:
             return Attempt.succeeded(self._value, self._provenance)
         return Attempt.impossible("not set")
 
 
 class CommuteSelectorNode(ComputedNode[dict]):
-    """Selects the best commute from transit and bus results.
-
-    Priority: transit > bus > impossible.
-    Requires origin and POI to be resolved.
-    Serialises Commute values via custom _serialize_value to support
-    Money and pint types that pydantic's TypeAdapter cannot handle.
-    """
-
     def __init__(self, node_id: str, *, origin, poi, transit_result, bus_result):
         super().__init__(
             node_id,
@@ -92,9 +118,9 @@ class CommuteSelectorNode(ComputedNode[dict]):
         )
 
     def compute(self, origin: Attempt[GeoPoint],
-                poi: Attempt[PlaceOfInterest],
-                transit: Attempt[Commute],
-                bus: Attempt[Commute]) -> Attempt[Commute]:
+                poi: Attempt[str],
+                transit: Attempt[dict],
+                bus: Attempt[dict]) -> Attempt[dict]:
         if not origin.is_succeeded or not poi.is_succeeded:
             return self._impossible(
                 {"origin": origin, "poi": poi},
@@ -107,8 +133,8 @@ class CommuteSelectorNode(ComputedNode[dict]):
             {"transit_result": transit, "bus_result": bus},
         )
 
-    def to_json(self) -> dict:
-        attempt = self.attempt()
+    async def to_json(self) -> dict:
+        attempt = await self.attempt()
         result: dict[str, Any] = {
             "succeeded": attempt.is_succeeded,
             "provenance": self._provenance_to_json(attempt.provenance),

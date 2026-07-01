@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
+
 from dag.attempt import Attempt, Provenance
 from dag.node import Node
 
@@ -39,29 +41,32 @@ class TestNodeBase:
             "fail": Attempt.impossible("broken"),
         }
         result = node.call_impossible(dep_attempts)
-        assert "ok:" not in result._error  # only failed deps appear
+        assert "ok:" not in result._error
         assert "fail: broken" in result._error
 
-    def test_to_json_with_succeeded(self):
+    @pytest.mark.asyncio
+    async def test_to_json_with_succeeded(self):
         node = _ConcreteNode("test_node", str)
         node._test_attempt = Attempt.succeeded("hello", Provenance("test_src"))
 
-        j = node.to_json()
+        j = await node.to_json()
         assert j["succeeded"] is True
         assert j["value"] == "hello"
         assert j["error"] is None
         assert j["provenance"]["label"] == "test_src"
 
-    def test_to_json_with_impossible(self):
+    @pytest.mark.asyncio
+    async def test_to_json_with_impossible(self):
         node = _ConcreteNode("test_node", str)
         node._test_attempt = Attempt.impossible("something failed")
 
-        j = node.to_json()
+        j = await node.to_json()
         assert j["succeeded"] is False
         assert j["value"] is None
         assert j["error"] == "something failed"
 
-    def test_to_json_with_complex_type(self):
+    @pytest.mark.asyncio
+    async def test_to_json_with_complex_type(self):
         @dataclass
         class Point:
             x: int
@@ -70,7 +75,7 @@ class TestNodeBase:
         node = _ConcreteNode("point_node", Point)
         node._test_attempt = Attempt.succeeded(Point(x=1, y=2), Provenance("test"))
 
-        j = node.to_json()
+        j = await node.to_json()
         assert j["succeeded"] is True
         assert j["value"] == {"x": 1, "y": 2}
 
@@ -86,6 +91,22 @@ class TestNodeBase:
         node = _ConcreteNode("my_id", int)
         assert node.id == "my_id"
 
+    @pytest.mark.asyncio
+    async def test_attempt_async(self):
+        node = _ConcreteNode("test", str)
+        node._test_attempt = Attempt.succeeded("val", Provenance("t"))
+        a = await node.attempt()
+        assert a.is_succeeded
+        assert a.value_or_none() == "val"
+
+    @pytest.mark.asyncio
+    async def test_provenance_description_in_json(self):
+        node = _ConcreteNode("test", str)
+        node._test_attempt = Attempt.succeeded(
+            "val", Provenance("test", description="TfL transit route"))
+        j = await node.to_json()
+        assert j["provenance"]["description"] == "TfL transit route"
+
 
 class _ConcreteNode(Node[str]):
     """Concrete subclass for testing the abstract Node base."""
@@ -94,7 +115,7 @@ class _ConcreteNode(Node[str]):
         super().__init__(node_id, value_type)
         self._test_attempt = Attempt.impossible("not set")
 
-    def attempt(self) -> Attempt:
+    async def attempt(self) -> Attempt:
         return self._test_attempt
 
     def call_impossible(self, dep_attempts, extra=""):

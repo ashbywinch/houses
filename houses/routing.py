@@ -10,17 +10,16 @@ import json
 import logging
 import re
 
-import httpx
 from money import Money
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.attempt import Attempt
 from houses.bus_journey import cheapest_round_trip
-from houses.commute import Commute, CommuteMode, CostGroup, JourneyLeg, LegMode
+from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.endpoint_client import EndpointClient
+from houses.geo import GeoPoint
 from houses.http_error import HttpError
-from houses.retry import retry_async
 
 logger = logging.getLogger(__name__)
 
@@ -237,18 +236,28 @@ async def _walk_to_station_minutes(
     return round(int(routes[0].get("duration", "0s").rstrip("s")) / 60)
 
 
-async def _walk_commute(origin_postcode: str, dest_postcode: str) -> Commute | None:
-    """Try walking via Google Routes walking mode.
+async def _google_route_commute(origin: str | GeoPoint, dest: str | GeoPoint,
+                                 mode: str, max_walk_minutes: int | None = None) -> Commute | None:
+    """Try walking or driving via Google Routes API.
 
-    Raises:
-        ValueError: If the Google Maps API key is not configured.
+    Skips the API call entirely when the straight-line distance makes
+    walking infeasible (exceeds ``max_walk_minutes`` at 5 km/h).
     """
+    if mode == "WALK" and max_walk_minutes is not None:
+        max_walk_km = max_walk_minutes * 5.0 / 60.0  # 5 km/h walking pace
+        if isinstance(origin, GeoPoint) and isinstance(dest, GeoPoint):
+            dist_km = origin.distance_km_to(dest)
+            if dist_km > max_walk_km:
+                return None
+        # If dest is a postcode string we can't check distance — let the API decide
+
     body = {
-        "origin": {"address": origin_postcode},
-        "destination": {"address": dest_postcode},
-        "travelMode": "WALK",
+        "origin": _address_waypoint(origin),
+        "destination": _address_waypoint(dest),
+        "travelMode": mode,
     }
-    data = await _google_routes_post(body, "routes.duration,routes.distanceMeters")
+    mask = "routes.duration,routes.legs" if mode == "DRIVE" else "routes.duration,routes.distanceMeters"
+    data = await _google_routes_post(body, mask, timeout=15.0 if mode == "DRIVE" else 10.0)
     if data is None:
         return None
 
@@ -258,181 +267,25 @@ async def _walk_commute(origin_postcode: str, dest_postcode: str) -> Commute | N
     duration_sec = int(routes[0].get("duration", "0s").rstrip("s"))
     duration_min = round(duration_sec / 60)
 
+    dest_str = dest if isinstance(dest, str) else f"{dest.lat},{dest.lon}"
+    daily = None
+    if mode == "WALK":
+        leg = JourneyLeg(mode=LegMode.WALK, duration_minutes=duration_min)
+        daily = Money("0", "GBP")
+    else:
+        leg = JourneyLeg(mode=LegMode.DRIVE, duration_minutes=duration_min)
     return Commute(
         destination_label="",
-        destination_postcode=dest_postcode,
+        destination_postcode=dest_str,
         duration_minutes=duration_min,
-        daily_cost_gbp=Money("0", "GBP"),
-        mode=LegMode.WALK,
+        daily_cost_gbp=daily,
+        mode=LegMode.WALK if mode == "WALK" else LegMode.DRIVE,
         cost_groups=(
             CostGroup(
-                legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=duration_min),),
+                legs=(leg,),
             ),
         ),
     )
-
-
-# (Google transit full routing removed — TfL covers London; bus augmentation
-# is handled by _find_bus_alternative below.)
-
-
-# ---------------------------------------------------------------------------
-# Driving — ORS Directions
-# ---------------------------------------------------------------------------
-
-
-async def _drive_commute(origin_postcode: str, dest_postcode: str) -> Commute | None:
-    """Driving route via ORS Directions API.
-
-    Does NOT pre-check for the API key — just let the HTTP call fail if
-    the key is missing.  This keeps the fail-fast principle consistent:
-    don't check for failure before trying, just let the code fail.
-    """
-
-    from houses.location import _geocode_address, geocode
-
-    origin_coords = (await geocode(origin_postcode)).value_or_none()
-    if origin_coords is None:
-        origin_coords = (await _geocode_address(origin_postcode)).value_or_none()
-    if origin_coords is None:
-        return None
-
-    dest_coords = (await geocode(dest_postcode)).value_or_none()
-    if dest_coords is None:
-        dest_coords = (await _geocode_address(dest_postcode)).value_or_none()
-    if dest_coords is None:
-        return None
-
-    coords = [[origin_coords.lon, origin_coords.lat], [dest_coords.lon, dest_coords.lat]]
-    body = {"coordinates": coords, "units": "km"}
-    key = json.dumps(body, sort_keys=True)
-
-    cached = get_cached("POST", ORS_DIRECTIONS_URL, None, key)
-    if cached is not None:
-        dir_data = cached
-    else:
-        try:
-            async with cached_async_client(timeout=15.0) as client:
-                resp = await retry_async(
-                    lambda: client.post(
-                        ORS_DIRECTIONS_URL,
-                        headers={
-                            "Authorization": settings.ors_api_key,
-                            "Content-Type": "application/json",
-                        },
-                        json=body,
-                    ),
-                    max_retries=3,
-                    base_delay=2.0,
-                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-                )
-                resp.raise_for_status()
-                dir_data = resp.json()
-                set_cached("POST", ORS_DIRECTIONS_URL, None, key, dir_data)
-        except Exception as e:
-            logger.debug("Driving route failed for %s → %s: %s", origin_postcode, dest_postcode, e)
-            return None
-
-    try:
-        one_way_km = dir_data["routes"][0]["summary"]["distance"]
-        one_way_duration_sec = dir_data["routes"][0]["summary"]["duration"]
-        round_trip_km = round(one_way_km * 2, 1)
-        duration_minutes = round(one_way_duration_sec / 60)  # one-way
-        litres_per_100km = 235.214 / settings.petrol_mpg
-        litres_used = (round_trip_km / 100) * litres_per_100km
-        cost = round(litres_used * settings.petrol_price_per_litre, 2)
-
-        return Commute(
-            destination_label="",
-            destination_postcode=dest_postcode,
-            duration_minutes=duration_minutes,
-            daily_cost_gbp=Money(str(cost), "GBP"),
-            mode=CommuteMode.DRIVE,
-            cost_groups=(
-                CostGroup(
-                    legs=(JourneyLeg(mode=LegMode.DRIVE, duration_minutes=duration_minutes),),
-                    cost=cost,
-                ),
-            ),
-        )
-    except (KeyError, IndexError) as e:
-        logger.debug("Failed to parse ORS response: %s", e)
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Bus alternative — Google Routes for non-TfL areas
-# ---------------------------------------------------------------------------
-
-
-def _parse_google_steps(steps: list[dict]) -> list[JourneyLeg]:
-    """Parse Google Routes steps into JourneyLeg objects.
-
-    Every returned leg has ``start_station``, ``end_station``,
-    ``line_name``, ``duration_minutes``, and ``mode`` set from the
-    Google response fields.
-    """
-    legs: list[JourneyLeg] = []
-    for s in steps:
-        mode = s.get("travelMode", "WALK")
-        dur_raw: str = s.get("staticDuration", "0s")
-        dur = int(dur_raw.rstrip("s"))
-        dur_min = round(dur / 60)
-
-        if mode == "WALK":
-            legs.append(JourneyLeg(mode=LegMode.WALK, duration_minutes=dur_min))
-        elif mode == "TRANSIT":
-            td = s.get("transitDetails", {})
-            vtype = td.get("transitLine", {}).get("vehicle", {}).get("type", "")
-            dep_stop = td.get("stopDetails", {}).get("departureStop", {}).get("name", "")
-            arr_stop = td.get("stopDetails", {}).get("arrivalStop", {}).get("name", "")
-            line = td.get("transitLine", {}).get("nameShort", "") or td.get("transitLine", {}).get("name", "")
-
-            if vtype == "BUS":
-                legs.append(
-                    JourneyLeg(
-                        mode=LegMode.BUS,
-                        duration_minutes=dur_min,
-                        start_station=dep_stop,
-                        line_name=line,
-                        end_station=arr_stop,
-                    )
-                )
-            else:
-                mode_enum = {
-                    "RAIL": LegMode.TRAIN,
-                    "TRAIN": LegMode.TRAIN,
-                    "HEAVY_RAIL": LegMode.TRAIN,
-                    "TRAM": LegMode.TRAIN,
-                    "SUBWAY": LegMode.TUBE,
-                    "METRO": LegMode.TUBE,
-                }.get(vtype, LegMode.TRAIN)
-                legs.append(
-                    JourneyLeg(
-                        mode=mode_enum,
-                        duration_minutes=dur_min,
-                        start_station=dep_stop,
-                        line_name=line,
-                        end_station=arr_stop,
-                    )
-                )
-    return legs
-
-
-async def _find_bus_alternative(origin: str, destination: str) -> Commute | None:
-    """Find a bus alternative via Google Routes API (for areas outside TfL coverage).
-
-    Used when TfL doesn't find a bus leg (out-of-London areas). Returns a
-    Commute with bus fare looked up from BODS data, or None if the API
-    also can't route the journey.
-    """
-    body = {
-        "origin": {"address": origin},
-        "destination": {"address": destination},
-        "travelMode": "TRANSIT",
-        "transitPreferences": {"routingPreference": "less_walking"},
-        "computeAlternativeRoutes": False,
-    }
 
     data = await _google_routes_post(body, "routes.duration,routes.legs", timeout=15.0)
     if data is None:
@@ -476,7 +329,7 @@ async def _find_bus_alternative(origin: str, destination: str) -> Commute | None
 
     return Commute(
         destination_label="Lorena — Aldgate / City of London (Bus)",
-        destination_postcode=destination,
+        destination_postcode=dest,
         duration_minutes=duration_min,
         daily_cost_gbp=daily_cost_gbp,
         mode="transit",
@@ -505,7 +358,7 @@ async def _tfl_transit_commute(origin_postcode: str, dest_postcode: str, has_car
     """
     from houses.transit_route import TransitRoute
 
-    label = f"{origin_postcode} → {dest_postcode}"
+    label = dest_postcode
     no_bus = await TransitRoute(origin_postcode, dest_postcode, label, park_and_ride=has_car).plan()
 
     # When the traveler has a car, park-and-ride is preferred over bus.
@@ -607,6 +460,66 @@ async def _replace_walk_with_bus(
     )
 
 
+async def _find_bus_alternative(origin: str, dest: str) -> Commute | None:
+    """Find a bus alternative via Google Routes API (for areas outside TfL coverage)."""
+    body = {
+        "origin": {"address": origin},
+        "destination": {"address": dest},
+        "travelMode": "TRANSIT",
+        "transitPreferences": {"routingPreference": "less_walking"},
+        "computeAlternativeRoutes": False,
+    }
+    data = await _google_routes_post(body, "routes.duration,routes.legs", timeout=15.0)
+    if data is None:
+        return None
+    routes = data.get("routes", [])
+    if not routes:
+        return None
+    leg = routes[0].get("legs", [{}])[0]
+    duration_sec = int(routes[0].get("duration", "0s").rstrip("s"))
+    duration_min = round(duration_sec / 60)
+    steps = leg.get("steps", [])
+    total_bus_cost = 0.0
+    bus_cost_gbp = None
+    for s in steps:
+        if s.get("travelMode") != "TRANSIT":
+            continue
+        td = s.get("transitDetails", {})
+        if td.get("transitLine", {}).get("vehicle", {}).get("type") != "BUS":
+            continue
+        dep_stop = td.get("stopDetails", {}).get("departureStop", {})
+        arr_stop = td.get("stopDetails", {}).get("arrivalStop", {})
+        dep_name = dep_stop.get("name", "")
+        arr_name = arr_stop.get("name", "")
+        dep_coords = dep_stop.get("location", {}).get("latLng", {})
+        arr_coords = arr_stop.get("location", {}).get("latLng", {})
+        dep_point = {"lat": dep_coords.get("latitude"), "lon": dep_coords.get("longitude")} if dep_coords else None
+        arr_point = {"lat": arr_coords.get("latitude"), "lon": arr_coords.get("longitude")} if arr_coords else None
+        leg_cost = _bus_fare_for(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
+        if leg_cost is not None:
+            total_bus_cost += leg_cost
+    if total_bus_cost > 0:
+        bus_cost_gbp = total_bus_cost
+        daily_cost_gbp = Money(str(round(total_bus_cost, 2)), "GBP")
+    else:
+        daily_cost_gbp = None
+    return Commute(
+        destination_label="Lorena — Aldgate / City of London (Bus)",
+        destination_postcode=dest,
+        duration_minutes=duration_min,
+        daily_cost_gbp=daily_cost_gbp,
+        mode="transit",
+        cost_groups=(
+            CostGroup(
+                legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=duration_min or 0),),
+                cost=bus_cost_gbp,
+            ),
+        )
+        if bus_cost_gbp is not None
+        else (),
+    )
+
+
 def _pick_best_route(a: Commute, b: Commute) -> Commute:
     """Pick the better of two transit route options.
 
@@ -628,9 +541,16 @@ def _pick_best_route(a: Commute, b: Commute) -> Commute:
 # ---------------------------------------------------------------------------
 
 
+def _address_waypoint(loc: str | GeoPoint) -> dict:
+    """Build a Google Routes waypoint from a postcode string or GeoPoint."""
+    if isinstance(loc, GeoPoint):
+        return {"location": {"latLng": {"latitude": loc.lat, "longitude": loc.lon}}}
+    return {"address": loc}
+
+
 async def get_commute(
-    origin_postcode: str,
-    dest_postcode: str,
+    origin_postcode: str | GeoPoint,
+    dest_postcode: str | GeoPoint,
     *,
     has_car: bool,
     max_walk_minutes: int,
@@ -638,7 +558,7 @@ async def get_commute(
     """Route from origin to destination based on the traveler's circumstances.
 
     Parameters:
-        origin_postcode: Where the traveler starts.
+        origin_postcode: Where the traveler starts (postcode string or GeoPoint).
         dest_postcode: Where the traveler is going.
         has_car: Whether the traveler has access to a car.
         max_walk_minutes: Maximum acceptable walking time for the first/last
@@ -647,24 +567,18 @@ async def get_commute(
     Returns an ``Attempt[Commute]``.  When no route is available or a backend
     fails, the attempt carries the source and reason (e.g. ``"google_routes"``,
     ``"API rate limited (429)"``).
-
-    Optimisation order (cheapest API calls first):
-        0. Congestion zone check — skip driving for central London.
-        1. Walking API — if ``≤ max_walk_minutes``, return immediately.
-        2. Transit (TfL for London, Google Routes otherwise).
-        3. If ``has_car`` and destination is NOT congestion zone: driving.
-        4. Pick the quicker among available options.
-        5. If no car and transit unavailable → ``None``.
     """
     candidates: list[Commute] = []
     failures: list[str] = []
 
+    dest_str = dest_postcode if isinstance(dest_postcode, str) else f"{dest_postcode.lat},{dest_postcode.lon}"
+
     # ── 0. Congestion zone — skip driving ──────────────────────────
-    dest_in_congestion = _in_congestion_zone(dest_postcode)
+    dest_in_congestion = _in_congestion_zone(dest_str)
 
     # ── 1. Walking (cheapest to try) ───────────────────────────────
     try:
-        walk = await _walk_commute(origin_postcode, dest_postcode)
+        walk = await _google_route_commute(origin_postcode, dest_postcode, "WALK", max_walk_minutes)
     except ValueError as e:
         failures.append(f"walk: {e}")
         walk = None
@@ -674,15 +588,14 @@ async def get_commute(
         candidates.append(walk)
 
     # ── 2. Transit ─────────────────────────────────────────────────
-    # TfL handles London transit with full pricing (tap-in/tap-out).
-    # For non-London areas, no transit API is available.
     tfl: Commute | None = None
+    origin_str = origin_postcode if isinstance(origin_postcode, str) else f"{origin_postcode.lat},{origin_postcode.lon}"
 
-    if _is_london_area(dest_postcode):
+    if _is_london_area(dest_str):
         try:
-            tfl = await _tfl_transit_commute(origin_postcode, dest_postcode, has_car)
+            tfl = await _tfl_transit_commute(origin_str, dest_str, has_car)
         except Exception as e:
-            logger.warning("TfL transit failed for %s → %s: %s", origin_postcode, dest_postcode, e)
+            logger.warning("TfL transit failed for %s → %s: %s", origin_str, dest_str, e)
             failures.append(f"tfl_transit: {e}")
 
     if tfl is not None:
@@ -691,7 +604,7 @@ async def get_commute(
     # ── 3. Driving ─────────────────────────────────────────────────
     if has_car and not dest_in_congestion:
         try:
-            drive = await _drive_commute(origin_postcode, dest_postcode)
+            drive = await _google_route_commute(origin_postcode, dest_postcode, "DRIVE")
         except ValueError as e:
             failures.append(f"drive: {e}")
             drive = None

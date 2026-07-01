@@ -1,5 +1,6 @@
 """FastAPI app — /inject-property endpoint, startup/shutdown."""
 
+import asyncio
 import csv
 import io
 import json
@@ -75,6 +76,22 @@ async def lifespan(_app: FastAPI):
         from houses.nodes.bootstrap import seed_registry_from_sheet
 
         seed_registry_from_sheet()
+        # Eagerly compute all DAG nodes. The seed pushes source values
+        # which makes every computed node stale.  Warming now means
+        # HTTP requests read from cache instead of triggering API calls.
+        from houses.web.api_router import _registry
+
+        tasks = []
+        for prop in _registry.values():
+            for sel in prop.commute_selectors.values():
+                for dep in sel._deps:
+                    tasks.append(asyncio.create_task(dep.attempt()))
+        if tasks:
+            done, pending = await asyncio.wait(tasks, timeout=180)
+            failed = [t for t in done if t.exception()]
+            if failed:
+                logger.warning("Warmup: %d/%d tasks failed", len(failed), len(tasks))
+            logger.info("Warmup: %d/%d nodes computed", len(done) - len(failed), len(tasks))
     except Exception:
         logger.info("Sheet not available yet — registry seeding deferred")
 

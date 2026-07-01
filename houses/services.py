@@ -12,9 +12,13 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Protocol
 
+from dag.attempt import Provenance
+from dag.persistence import latest_node_result
+from dag.source_node import SourceNode
 from houses.attempt import Attempt
 from houses.commute import Commute
 from houses.geo import GeoPoint
+from houses.nodes.settings import make_default_financials, make_default_persons, make_default_thresholds
 from houses.property import CouncilTaxInfo
 from houses.schools import School, SchoolGender
 
@@ -102,6 +106,19 @@ class PersistenceService(Protocol):
     def load_property_data(self, rid: str) -> Any: ...
 
     async def resolve_property(self, rid: str, node_ids: list[str] | None = None) -> dict[str, Any]: ...
+
+
+def _make_settings_source(node_id: str, value_type: type, default_factory):
+    """Create a settings SourceNode from DB or defaults (eager — not lazy)."""
+    node = SourceNode(node_id, value_type)
+    persisted = latest_node_result(node_id)
+    if persisted and persisted.get("succeeded"):
+        val = node._adapter.validate_python(persisted["value"])
+        node._value = val
+        node._provenance = Provenance("db")
+    else:
+        node.push(default_factory(), Provenance("config"))
+    return node
 
 
 # ── Default implementations (thin wrappers around real modules) ────────
@@ -254,3 +271,11 @@ class Services:
     council_tax_service: CouncilTaxService = dataclasses.field(default_factory=_DefaultCouncilTax)
     rail_fare_service: RailFareService = dataclasses.field(default_factory=_DefaultRailFare)
     persistence: PersistenceService = dataclasses.field(default_factory=_DefaultPersistence)
+
+    # ── Settings sources (eager singletons, not module-level) ──────────
+    persons_source: SourceNode[list] = dataclasses.field(
+        default_factory=lambda: _make_settings_source("persons", list, make_default_persons))
+    financial_source: SourceNode[dict] = dataclasses.field(
+        default_factory=lambda: _make_settings_source("financial", dict, make_default_financials))
+    commute_thresholds_source: SourceNode[dict] = dataclasses.field(
+        default_factory=lambda: _make_settings_source("commute_thresholds", dict, make_default_thresholds))

@@ -34,14 +34,17 @@ class PlaceOfInterest:
 
     label: str
     postcode: str
+    trips_per_week: int = 1
+    weeks_per_year: int = 46
 
 
 @dataclass(frozen=True)
 class Person:
-    """A person who will live at the property and may commute."""
+    """A person with dependents whose commute costs are considered."""
 
     name: str
     has_car: bool
+    is_child: bool = False
     deposit_equity: Money | None = None
     places_of_interest: tuple[PlaceOfInterest, ...] = ()
 

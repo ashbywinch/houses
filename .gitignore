@@ -80,3 +80,6 @@ data/bods_stops.csv
 .code-review-graph/
 .ropeproject/
 data/houses.db*
+# DAG database (recreatable)
+data/dag.db
+tools/captures/

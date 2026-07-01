@@ -21,7 +21,17 @@ All env vars can be placed in a `.env` file at the project root for non-sensitiv
 ## Running
 
 ```bash
-make run          # Start dev server on http://127.0.0.1:8080 with auto-reload
+make run          # Start backend (:8080) + frontend (:5173) with auto-reload
+```
+
+``make run`` starts both the FastAPI backend (uvicorn with ``--reload``) and
+the Vite frontend dev server. The frontend proxies ``/api/*`` requests to the
+backend on port 8080.
+
+To start only one:
+```bash
+make frontend-dev   # Vite dev server only (requires backend separately)
+make run            # Backend only — add ``DBG=1 make run`` for extra logging
 ```
 
 ## Testing
@@ -85,6 +95,55 @@ This is idempotent — safe to run multiple times. The Properties Data tab is cl
 ## Env File Template
 
 See `.env.example` for all configurable environment variables with comments.
+
+## Capturing the Frontend DOM for Comparison
+
+The rendered Vue frontend can be captured for comparison against the saved
+reference HTML in ``docs/current-ui/``.
+
+### Prerequisites
+
+Both servers must be running:
+
+```bash
+make run                  # Backend on :8080 (with auto-reload)
+# In a separate terminal:
+cd houses/frontend && npm run dev   # Frontend on :5173
+```
+
+### Capture
+
+```bash
+.venv/bin/python tools/capture_dom.py            # Both pages
+.venv/bin/python tools/capture_dom.py --list-only  # List page only
+.venv/bin/python tools/capture_dom.py --detail-only # Detail page only
+```
+
+Output lands in ``tools/captures/<session-timestamp>/``:
+- ``dom_list.html`` / ``dom_detail.html`` — full rendered HTML
+- ``screenshot_list.png`` / ``screenshot_detail.png`` — full-page screenshots
+
+The script reuses a single browser instance across captures, waits for both
+servers to be ready, and reports console errors and card count.
+
+### What to Compare
+
+The reference HTML is in ``docs/current-ui/``:
+- ``list-page.html`` — old Jinja-rendered list page
+- ``detail-page.html`` — old Jinja-rendered detail page
+
+Compare key elements:
+- **Address** — should include full postcode, not just outcode
+- **Walk-to-town** — first commute row, labelled with town name
+- **Commute labels** — from settings (Pimlico, Bracknell, Dad, Aldgate, …)
+- **Commute mode** — ``transit``, ``drive``, ``walk`` appended to duration
+- **Duration format** — ``1h30`` (no space, no ``m`` suffix), ``9m``
+- **Direction links** — every commute/school pill must be a clickable
+  ``<a>`` pointing to Google Maps directions
+- **School Ofsted pills** — ``pill--sm pill--{good|warn|bad}``
+- **School walk pills** — from child (George) commutes, with ``↗`` suffix
+- **Card sorting** — by computed score, highest first
+- **Total monthly** — at the very bottom of each card
 
 ## API Reference
 

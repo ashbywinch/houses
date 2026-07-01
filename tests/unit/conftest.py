@@ -39,3 +39,19 @@ def _no_sheet_writes():
     settings.sheet_id = ""
     yield
     settings.sheet_id = saved
+
+
+@pytest.fixture(autouse=True)
+def _sqlite_memory():
+    """Use an in-memory SQLite database so no test writes to data/dag.db."""
+    import sqlite3
+
+    import dag.persistence as per
+
+    saved = per._get_db
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    per._get_db = lambda: conn
+    per.init_db()
+    yield
+    per._get_db = saved

@@ -1,33 +1,40 @@
-"""Property — the top-level container holding all DAG nodes for one property.
-
-PropertyNodes creates and wires the SourceNodes and ComputedNodes for a single
-property. When any source value changes, the Property emits its own ``changed``
-signal so the API layer can push updates via WebSocket.
-"""
-
 from __future__ import annotations
 
 from typing import Any
 
 from dag.signals import Signal, Slot
 from dag.source_node import SourceNode
+from houses.context import get_services
 from houses.geo import GeoPoint
+from houses.nodes.area import TownDescNode, TownNode, WalkabilityNode
+from houses.nodes.bus import BodsFareNode, BusLegAugmentNode, BusRouteNode
+from houses.nodes.commute import CommuteSelectorNode
+from houses.nodes.epc_node import CouncilTaxNode, EpcNode
+from houses.nodes.geocode import GeocodeNode
 from houses.nodes.location import BestAddressNode, BestLocationNode
+from houses.nodes.monthly_costs import (
+    CommuteBreakdownNode,
+    MonthlyMortgagePaymentNode,
+    TotalMonthlyHousingCostNode,
+    YearlySinkingFundNode,
+)
+from houses.nodes.schools import PrimarySchoolNode, SecondarySchoolNode
+from houses.nodes.transit import TransitNode, WalkLegCheckNode
 
 
 class PropertyNodes:
     """Holds all DAG node references for one property.
 
-    Creates SourceNodes for user-owned and enrichment data, and ComputedNodes
-    for derived values (best_address, best_location). Signals are wired so
-    that changes propagate reactively.
+    Creates SourceNodes for user-owned and enrichment data, ComputedNodes
+    for derived values, and wires signal propagation.
     """
 
     def __init__(self, rid: str) -> None:
         self.rid = rid
         self.changed = Signal()
+        self._svc = get_services()
 
-        # Source nodes
+        # ── Source Nodes (user-entered / scraped) ──────────────────────
         self.rightmove_url = SourceNode[str](f"{rid}/rightmove_url", str)
         self.rightmove_address = SourceNode[str](f"{rid}/rightmove_address", str)
         self.rightmove_bedrooms = SourceNode[str](f"{rid}/rightmove_bedrooms", str)
@@ -35,10 +42,22 @@ class PropertyNodes:
         self.rightmove_location = SourceNode[GeoPoint](f"{rid}/rightmove_location", GeoPoint)
         self.precise_location = SourceNode[GeoPoint](f"{rid}/precise_location", GeoPoint)
         self.corrected_address = SourceNode[str](f"{rid}/corrected_address", str)
+        self.user_entered_address = SourceNode[str](f"{rid}/user_entered_address", str)
+        self.postcode = SourceNode[str](f"{rid}/postcode", str)
 
-        # Computed nodes
+        # Comments from View tab
+        self.comment_status = SourceNode[str](f"{rid}/status", str)
+        self.comment_status_reason = SourceNode[str](f"{rid}/status_reason", str)
+        self.comment_group_notes = SourceNode[str](f"{rid}/group_notes", str)
+        self.comment_ashby_comments = SourceNode[str](f"{rid}/ashby_comments", str)
+        self.comment_ashby_works = SourceNode[float](f"{rid}/ashby_works", float)
+        self.comment_design_needed = SourceNode[str](f"{rid}/design_needed", str)
+        self.comment_planning_needed = SourceNode[str](f"{rid}/planning_needed", str)
+
+        # ── Location ComputedNodes ─────────────────────────────────────
         self.best_address = BestAddressNode(
             f"{rid}/best_address",
+            user_entered_address=self.user_entered_address,
             corrected_address=self.corrected_address,
             rightmove_address=self.rightmove_address,
         )
@@ -48,16 +67,87 @@ class PropertyNodes:
             rightmove_location=self.rightmove_location,
             best_address=self.best_address,
         )
+        self.geocode = GeocodeNode(
+            f"{rid}/geocode",
+            best_address=self.best_address,
+        )
 
-        # Wire all source node signals → property changed
-        all_nodes = [
-            self.rightmove_url,
-            self.rightmove_address,
-            self.rightmove_bedrooms,
-            self.rightmove_price,
-            self.rightmove_location,
-            self.precise_location,
-            self.corrected_address,
+        # ── Enrichment Nodes ────────────────────────────────────────────
+        self.epc = EpcNode(
+            f"{rid}/epc",
+            best_address=self.best_address,
+        )
+        self.council_tax = CouncilTaxNode(
+            f"{rid}/council_tax",
+            best_address=self.best_address,
+            postcode_node=self.postcode,
+        )
+        self.walkability = WalkabilityNode(
+            f"{rid}/walkability",
+            best_location=self.best_location,
+            best_address=self.best_address,
+        )
+        self.town_desc = TownDescNode(
+            f"{rid}/town_desc",
+            best_location=self.best_location,
+        )
+        self.town_name = TownNode(
+            f"{rid}/town_name",
+            best_address=self.best_address,
+        )
+
+        # ── School Nodes ───────────────────────────────────────────────
+        self.primary_school = PrimarySchoolNode(
+            f"{rid}/primary_school",
+            best_location=self.best_location,
+            best_address=self.best_address,
+        )
+        self.secondary_school = SecondarySchoolNode(
+            f"{rid}/secondary_school",
+            best_location=self.best_location,
+            best_address=self.best_address,
+        )
+
+        # ── Commute Pipeline ────────────────────────────────────────────
+        self._build_commute_pipeline()
+
+        # ── Monthly Cost Calculation Nodes ──────────────────────────────
+        self.monthly_mortgage = MonthlyMortgagePaymentNode(
+            f"{rid}/monthly_mortgage",
+            rightmove_price=self.rightmove_price,
+            financial_source=self._svc.financial_source,
+        )
+        self.yearly_sinking_fund = YearlySinkingFundNode(
+            f"{rid}/yearly_sinking_fund",
+            rightmove_price=self.rightmove_price,
+            financial_source=self._svc.financial_source,
+        )
+        self.commute_breakdown = CommuteBreakdownNode(
+            f"{rid}/commute_breakdown",
+            simon_office=self.commute_simon_office,
+            simon_bracknell=self.commute_simon_bracknell,
+            lorena_office=self.commute_lorena_office,
+            persons_source=self._svc.persons_source,
+        )
+        self.total_monthly_cost = TotalMonthlyHousingCostNode(
+            f"{rid}/total_monthly_cost",
+            monthly_mortgage_node=self.monthly_mortgage,
+            yearly_sinking_fund_node=self.yearly_sinking_fund,
+            financial_source=self._svc.financial_source,
+            commute_breakdown_node=self.commute_breakdown,
+            council_tax_node=self.council_tax,
+        )
+
+        # ── Signal wiring ──────────────────────────────────────────────
+        all_nodes: list = [
+            self.rightmove_url, self.rightmove_address,
+            self.rightmove_bedrooms, self.rightmove_price,
+            self.rightmove_location, self.precise_location,
+            self.corrected_address, self.user_entered_address, self.postcode,
+            self.comment_status, self.comment_status_reason,
+            self.comment_group_notes, self.comment_ashby_comments,
+            self.comment_ashby_works, self.comment_design_needed,
+            self.comment_planning_needed,
         ]
         self._slots: list[Slot] = []
         for node in all_nodes:
@@ -65,13 +155,190 @@ class PropertyNodes:
             self._slots.append(slot)
             node.changed.connect(slot)
 
+    def _build_commute_pipeline(self) -> None:
+        from dag.attempt import Provenance
+        self._transit_nodes = []
+        self._bus_augment_nodes = []
+        self.commute_selectors = {}
+
+        for p_info in (self._svc.persons_source._value or []):
+            p_name = p_info["name"] if isinstance(p_info, dict) else p_info.name
+            pois = p_info.get("places_of_interest", []) if isinstance(p_info, dict) else p_info.places_of_interest
+            for poi in pois:
+                label = poi["label"] if isinstance(poi, dict) else poi.label
+                postcode = poi["postcode"] if isinstance(poi, dict) else poi.postcode
+                key = f"{p_name}/{label}"
+
+                is_child = (
+                    p_info.get("is_child", False) if isinstance(p_info, dict)
+                    else getattr(p_info, "is_child", False)
+                )
+
+                if is_child:
+                    school_node = (self.primary_school if "Primary" in label
+                                   else self.secondary_school if "Secondary" in label
+                                   else None)
+                    if school_node is None:
+                        continue
+                    from houses.nodes.schools import SchoolLocationNode
+                    poi_src = SchoolLocationNode(
+                        f"{self.rid}/{key}/poi",
+                        school_node=school_node,
+                    )
+                else:
+                    poi_src = SourceNode[str](f"{self.rid}/{key}/poi", str)
+                    poi_src.push(postcode, Provenance("persons_source"))
+
+                transit_node = TransitNode(
+                    f"{self.rid}/{key}/computed_transit",
+                    best_location=self.best_location,
+                    poi=poi_src,
+                    persons_source=self._svc.persons_source,
+                )
+                self._transit_nodes.append(transit_node)
+
+                walk_check = WalkLegCheckNode(
+                    f"{self.rid}/{key}/walk_check",
+                    transit_node=transit_node,
+                    persons_source=self._svc.persons_source,
+                )
+
+                bus_route = BusRouteNode(
+                    f"{self.rid}/{key}/bus_route",
+                    best_location=self.best_location,
+                    walk_leg_check_node=walk_check,
+                    transit_node=transit_node,
+                )
+
+                bods_fare = BodsFareNode(
+                    f"{self.rid}/{key}/bods_fare",
+                    bus_route_node=bus_route,
+                )
+
+                bus_augment = BusLegAugmentNode(
+                    f"{self.rid}/{key}/bus_augment",
+                    transit_node=transit_node,
+                    walk_leg_check_node=walk_check,
+                    bus_route_node=bus_route,
+                    bods_fare_node=bods_fare,
+                )
+                self._bus_augment_nodes.append(bus_augment)
+                selector = CommuteSelectorNode(
+                    f"{self.rid}/{key}/commute",
+                    origin=self.best_location,
+                    poi=poi_src,
+                    transit_result=transit_node,
+                    bus_result=bus_augment,
+                )
+                self.commute_selectors[key] = selector
+
+        simon_key = "Simon/Office"
+        bracknell_key = "Simon/Bracknell"
+        lorena_key = "Lorena/Office"
+        self.commute_simon_office = self.commute_selectors.get(
+            simon_key, SourceNode[dict](f"{self.rid}/{simon_key}/fallback", dict))
+        self.commute_simon_bracknell = self.commute_selectors.get(
+            bracknell_key, SourceNode[dict](f"{self.rid}/{bracknell_key}/fallback", dict))
+        self.commute_lorena_office = self.commute_selectors.get(
+            lorena_key, SourceNode[dict](f"{self.rid}/{lorena_key}/fallback", dict))
+
     def _on_node_changed(self) -> None:
         self.changed.emit()
 
-    def to_json(self) -> dict[str, Any]:
-        """Serialise the full property state."""
+    async def to_json(self) -> dict[str, Any]:
         return {
             "rid": self.rid,
-            "best_address": self.best_address.to_json(),
-            "best_location": self.best_location.to_json(),
+            "best_address": await self.best_address.to_json(),
+            "best_location": await self.best_location.to_json(),
+            "rightmove_url": await self.rightmove_url.to_json(),
+            "rightmove_price": await self.rightmove_price.to_json(),
+            "rightmove_bedrooms": await self.rightmove_bedrooms.to_json(),
+            "postcode": await self.corrected_address.to_json(),
+        }
+
+    async def to_json_summary(self) -> dict[str, Any]:
+        return {
+            "rid": self.rid,
+            "best_address": await self.best_address.to_json(),
+            "best_location": await self.best_location.to_json(),
+            "rightmove_price": await self.rightmove_price.to_json(),
+            "rightmove_bedrooms": await self.rightmove_bedrooms.to_json(),
+            "total_monthly_cost": await self.total_monthly_cost.to_json(),
+            "town_name": await self.town_name.to_json(),
+            "commutes": {
+                k: {"commute": await v.to_json()}
+                for k, v in self.commute_selectors.items()
+            },
+            "schools": {
+                "primary": {
+                    "school": await self.primary_school.to_json(),
+                },
+                "secondary": {
+                    "school": await self.secondary_school.to_json(),
+                },
+            },
+            "walkability": await self.walkability.to_json(),
+        }
+
+    async def _monthly_sinking(self) -> dict:
+        yearly = await self.yearly_sinking_fund.to_json()
+        if yearly.get("succeeded") and yearly.get("value") is not None:
+            monthly = round(yearly["value"] / 12 * 2 / 3, 2)
+            return {"succeeded": True, "value": monthly, "error": None,
+                    "provenance": {"label": "formula:monthly_sinking",
+                                   "description": f"{yearly['value']}/12*2/3"}}
+        return yearly
+
+    async def to_json_detail(self) -> dict[str, Any]:
+        return {
+            "rid": self.rid,
+            "best_address": await self.best_address.to_json(),
+            "user_entered_address": await self.user_entered_address.to_json(),
+            "rightmove_url": await self.rightmove_url.to_json(),
+            "rightmove_price": await self.rightmove_price.to_json(),
+            "rightmove_bedrooms": await self.rightmove_bedrooms.to_json(),
+            "postcode": await self.corrected_address.to_json(),
+            "town_name": await self.town_name.to_json(),
+            "location": {
+                "best_location": await self.best_location.to_json(),
+                "geocode": await self.geocode.to_json(),
+                "rightmove_location": await self.rightmove_location.to_json(),
+                "precise_location": await self.precise_location.to_json(),
+            },
+            "commutes": {
+                k: await v.to_json()
+                for k, v in self.commute_selectors.items()
+            },
+            "schools": {
+                "primary": {
+                    "school": await self.primary_school.to_json(),
+                },
+                "secondary": {
+                    "school": await self.secondary_school.to_json(),
+                },
+            },
+            "affordability": {
+                "council_tax": await self.council_tax.to_json(),
+                "monthly_mortgage": await self.monthly_mortgage.to_json(),
+                "monthly_sinking_fund": await self._monthly_sinking(),
+                "monthly_commute_cost": await self.commute_breakdown.to_json(),
+                "total_monthly_housing_cost": await self.total_monthly_cost.to_json(),
+            },
+            "area": {
+                "walkability": await self.walkability.to_json(),
+                "town_description": await self.town_desc.to_json(),
+            },
+            "comments": {
+                "status": await self.comment_status.to_json(),
+                "status_reason": await self.comment_status_reason.to_json(),
+                "group_notes": await self.comment_group_notes.to_json(),
+                "ashby_comments": await self.comment_ashby_comments.to_json(),
+                "ashby_works_estimate": await self.comment_ashby_works.to_json(),
+                "design_needed": await self.comment_design_needed.to_json(),
+                "planning_needed": await self.comment_planning_needed.to_json(),
+            },
+            "settings": {
+                "persons": await self._svc.persons_source.to_json(),
+                "financial": await self._svc.financial_source.to_json(),
+            },
         }
