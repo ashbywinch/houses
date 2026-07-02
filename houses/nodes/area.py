@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dag.attempt import Attempt
-from dag.computed_node import ComputedNode
+from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.geo import GeoPoint
 
 
-class WalkabilityNode(ComputedNode[dict]):
+class WalkabilityNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, best_location, best_address):
         deps: tuple[Node, ...] = (best_location, best_address)
         super().__init__(node_id, dict, deps)
@@ -27,7 +27,7 @@ class WalkabilityNode(ComputedNode[dict]):
         return Provenance(label="walkability")
 
 
-class TownDescNode(ComputedNode[dict]):
+class TownDescNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, best_location):
         super().__init__(node_id, dict, (best_location,))
 
@@ -46,7 +46,7 @@ class TownDescNode(ComputedNode[dict]):
         return Provenance(label="LLM")
 
 
-class TownNode(ComputedNode[str]):
+class TownNode(DerivedNode[str]):
     def __init__(self, node_id: str, *, best_address):
         deps: tuple[Node, ...] = (best_address,)
         super().__init__(node_id, str, deps)

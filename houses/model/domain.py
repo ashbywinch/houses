@@ -53,7 +53,7 @@ class Person:
 class Commute:
     """A person's commute from a property to a place of interest.
 
-    Every field is produced by a ComputedNode — duration, daily_cost, and
+    Every field is produced by a DerivedNode — duration, daily_cost, and
     details are never assigned ad-hoc outside the DAG.
 
     ``details`` replaces the old ``cost_groups`` name. Callers look here

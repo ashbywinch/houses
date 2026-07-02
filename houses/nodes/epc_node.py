@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dag.attempt import Attempt
-from dag.computed_node import ComputedNode
+from dag.derived_node import DerivedNode
 
 
-class EpcNode(ComputedNode[dict]):
+class EpcNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, best_address):
         super().__init__(node_id, dict, (best_address,))
 
@@ -25,7 +25,7 @@ class EpcNode(ComputedNode[dict]):
         return Provenance(label="EPC API")
 
 
-class CouncilTaxNode(ComputedNode[dict]):
+class CouncilTaxNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, best_address, postcode_node):
         super().__init__(node_id, dict, (best_address, postcode_node))
 

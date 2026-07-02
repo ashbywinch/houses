@@ -8,12 +8,12 @@ from dag.node import Node
 T = TypeVar("T")
 
 
-class SourceNode(Node[T], Generic[T]):
+class UserInputNode(Node[T], Generic[T]):
     """A leaf node whose value is set externally by enrichment modules,
     sheet imports, or user edits.
 
     Call ``.push(value, source_label)`` to set a new value. This emits the
-    ``changed`` signal so that downstream ComputedNodes re-compute.
+    ``changed`` signal so that downstream DerivedNodes re-compute.
     Persists to SQLite automatically on every push.
     """
 

@@ -12,7 +12,7 @@ from dag.signals import Slot
 T = TypeVar("T")
 
 
-class ComputedNode(Node[T], Generic[T]):
+class DerivedNode(Node[T], Generic[T]):
     """A node whose value is computed from other nodes.
 
     Subclasses declare their dependencies and implement ``compute()``.

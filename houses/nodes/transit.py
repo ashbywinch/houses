@@ -8,7 +8,7 @@ from money import Money
 from pint import Quantity
 
 from dag.attempt import Attempt
-from dag.computed_node import ComputedNode
+from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.geo import GeoPoint
 from houses.model.domain import Commute
@@ -110,7 +110,7 @@ def _deserialize_commute_result(data: dict) -> CommuteResult:
     )
 
 
-class WalkLegCheckNode(ComputedNode[bool]):
+class WalkLegCheckNode(DerivedNode[bool]):
     def __init__(self, node_id: str, *, transit_node, persons_source):
         super().__init__(node_id, bool, (transit_node, persons_source))
 
@@ -119,7 +119,7 @@ class WalkLegCheckNode(ComputedNode[bool]):
         return Attempt.succeeded(False)
 
 
-class TransitNode(ComputedNode[dict]):
+class TransitNode(DerivedNode[dict]):
     """Computes a transit commute from best_location to a POI postcode.
 
     Persists and loads a serialised dict (not CommuteResult directly)

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dag.attempt import Attempt
-from dag.computed_node import ComputedNode
+from dag.derived_node import DerivedNode
 
 
-class ParkAndRideAugmentNode(ComputedNode[dict]):
+class ParkAndRideAugmentNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, transit_node):
         super().__init__(node_id, dict, (transit_node,))
 

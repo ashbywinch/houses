@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from dag.source_node import SourceNode
+from dag.user_input_node import UserInputNode
 
 
 class TestMonthlyMortgagePaymentNode:
@@ -10,8 +10,8 @@ class TestMonthlyMortgagePaymentNode:
     async def test_zero_when_no_price(self):
         from houses.nodes.monthly_costs import MonthlyMortgagePaymentNode
 
-        price = SourceNode[str]("price_mm", str)
-        fin = SourceNode[dict]("fin_mm", dict)
+        price = UserInputNode[str]("price_mm", str)
+        fin = UserInputNode[dict]("fin_mm", dict)
 
         price.push("0", "test")
         fin.push({}, "test")
@@ -26,8 +26,8 @@ class TestMonthlyMortgagePaymentNode:
     async def test_computes_with_valid_data(self):
         from houses.nodes.monthly_costs import MonthlyMortgagePaymentNode
 
-        price = SourceNode[str]("price_mm2", str)
-        fin = SourceNode[dict]("fin_mm2", dict)
+        price = UserInputNode[str]("price_mm2", str)
+        fin = UserInputNode[dict]("fin_mm2", dict)
 
         price.push("300000", "test")
         fin.push({
@@ -48,8 +48,8 @@ class TestYearlySinkingFundNode:
     async def test_zero_when_no_price(self):
         from houses.nodes.monthly_costs import YearlySinkingFundNode
 
-        price = SourceNode[str]("price_ys", str)
-        fin = SourceNode[dict]("fin_ys", dict)
+        price = UserInputNode[str]("price_ys", str)
+        fin = UserInputNode[dict]("fin_ys", dict)
 
         price.push("0", "test")
         fin.push({}, "test")
@@ -64,8 +64,8 @@ class TestYearlySinkingFundNode:
     async def test_computes_with_price(self):
         from houses.nodes.monthly_costs import YearlySinkingFundNode
 
-        price = SourceNode[str]("price_ys2", str)
-        fin = SourceNode[dict]("fin_ys2", dict)
+        price = UserInputNode[str]("price_ys2", str)
+        fin = UserInputNode[dict]("fin_ys2", dict)
 
         price.push("500000", "test")
         fin.push({"sinking_fund_rate": 0.01}, "test")
@@ -83,10 +83,10 @@ class TestCommuteBreakdownNode:
     async def test_returns_defaults_when_no_commutes(self):
         from houses.nodes.monthly_costs import CommuteBreakdownNode
 
-        src_simon = SourceNode[dict]("simon", dict)
-        src_brac = SourceNode[dict]("brac", dict)
-        src_lorena = SourceNode[dict]("lorena", dict)
-        persons = SourceNode[list]("persons_cb", list)
+        src_simon = UserInputNode[dict]("simon", dict)
+        src_brac = UserInputNode[dict]("brac", dict)
+        src_lorena = UserInputNode[dict]("lorena", dict)
+        persons = UserInputNode[list]("persons_cb", list)
 
         node = CommuteBreakdownNode(
             "cb",
@@ -109,11 +109,11 @@ class TestTotalMonthlyHousingCostNode:
     async def test_returns_zero_when_no_data(self):
         from houses.nodes.monthly_costs import TotalMonthlyHousingCostNode
 
-        mg = SourceNode[float]("mg", float)
-        sf = SourceNode[float]("sf", float)
-        fin = SourceNode[dict]("fin_tm", dict)
-        cb = SourceNode[dict]("cb_tm", dict)
-        ct = SourceNode[dict]("ct_tm", dict)
+        mg = UserInputNode[float]("mg", float)
+        sf = UserInputNode[float]("sf", float)
+        fin = UserInputNode[dict]("fin_tm", dict)
+        cb = UserInputNode[dict]("cb_tm", dict)
+        ct = UserInputNode[dict]("ct_tm", dict)
 
         node = TotalMonthlyHousingCostNode(
             "tm",

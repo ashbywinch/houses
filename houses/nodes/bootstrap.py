@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from dag.persistence import latest_node_result
-from dag.source_node import SourceNode
+from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ def _upgrade_address(address: str, postcode: str) -> str:
 
 
 def bootstrap_from_row(row: dict[str, Any],
-                       sources: dict[str, SourceNode]) -> int:
+                       sources: dict[str, UserInputNode]) -> int:
     pushed = 0
 
     address = (row.get("Address") or "").strip()
@@ -144,7 +144,7 @@ def bootstrap_from_row(row: dict[str, Any],
         if val:
             src = sources[source_key]
             label = COMMENT_LABELS.get(source_key, "Sheet")
-            if isinstance(src, SourceNode) and src._value_type is float:
+            if isinstance(src, UserInputNode) and src._value_type is float:
                 try:
                     val = float(val)
                 except (ValueError, TypeError):

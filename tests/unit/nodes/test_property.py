@@ -6,7 +6,7 @@ from houses.geo import GeoPoint
 
 
 class TestProperty:
-    def test_creates_source_nodes(self):
+    def test_creates_user_input_nodes(self):
         from houses.nodes.property import PropertyNodes
 
         prop = PropertyNodes("prop123")
@@ -16,7 +16,7 @@ class TestProperty:
         assert prop.precise_location is not None
         assert prop.corrected_address is not None
 
-    def test_creates_computed_nodes(self):
+    def test_creates_derived_nodes(self):
         from houses.nodes.property import PropertyNodes
 
         prop = PropertyNodes("prop123")

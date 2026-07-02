@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from dag.source_node import SourceNode
+from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 
 
@@ -12,7 +12,7 @@ class TestBootstrapFromRow:
         from houses.nodes.bootstrap import bootstrap_from_row
 
         sources = {
-            "rightmove_address": SourceNode[str]("rightmove_address", str),
+            "rightmove_address": UserInputNode[str]("rightmove_address", str),
         }
         row = {"Address": "10 High St, London SW1V 2QQ"}
         bootstrap_from_row(row, sources)
@@ -24,7 +24,7 @@ class TestBootstrapFromRow:
         from houses.nodes.bootstrap import bootstrap_from_row
 
         sources = {
-            "rightmove_url": SourceNode[str]("rightmove_url", str),
+            "rightmove_url": UserInputNode[str]("rightmove_url", str),
         }
         row = {"Rightmove URL": "https://www.rightmove.co.uk/properties/12345"}
         bootstrap_from_row(row, sources)
@@ -36,7 +36,7 @@ class TestBootstrapFromRow:
         from houses.nodes.bootstrap import bootstrap_from_row
 
         sources = {
-            "rightmove_bedrooms": SourceNode[str]("rightmove_bedrooms", str),
+            "rightmove_bedrooms": UserInputNode[str]("rightmove_bedrooms", str),
         }
         row = {"Bedrooms": "3"}
         bootstrap_from_row(row, sources)
@@ -48,7 +48,7 @@ class TestBootstrapFromRow:
         from houses.nodes.bootstrap import bootstrap_from_row
 
         sources = {
-            "rightmove_price": SourceNode[str]("rightmove_price", str),
+            "rightmove_price": UserInputNode[str]("rightmove_price", str),
         }
         row = {"Price (£)": "450000"}
         bootstrap_from_row(row, sources)
@@ -60,7 +60,7 @@ class TestBootstrapFromRow:
         from houses.nodes.bootstrap import bootstrap_from_row
 
         sources = {
-            "rightmove_location": SourceNode[GeoPoint]("rightmove_location", GeoPoint),
+            "rightmove_location": UserInputNode[GeoPoint]("rightmove_location", GeoPoint),
         }
         row = {
             "Approx Latitude (est)": "51.5",
@@ -77,7 +77,7 @@ class TestBootstrapFromRow:
         from houses.nodes.bootstrap import bootstrap_from_row
 
         sources = {
-            "rightmove_location": SourceNode[GeoPoint]("rightmove_location", GeoPoint),
+            "rightmove_location": UserInputNode[GeoPoint]("rightmove_location", GeoPoint),
         }
         row = {
             "Approx Latitude (est)": "not-a-number",
@@ -91,7 +91,7 @@ class TestBootstrapFromRow:
         from houses.nodes.bootstrap import bootstrap_from_row
 
         sources = {
-            "precise_location": SourceNode[GeoPoint]("precise_location", GeoPoint),
+            "precise_location": UserInputNode[GeoPoint]("precise_location", GeoPoint),
         }
         row = {
             "Actual Latitude": "51.6",
@@ -109,7 +109,7 @@ class TestBootstrapFromRow:
         from houses.nodes.bootstrap import bootstrap_from_row
 
         sources = {
-            "corrected_address": SourceNode[str]("corrected_address", str),
+            "corrected_address": UserInputNode[str]("corrected_address", str),
         }
         row = {
             "Address": "10 High St, London",
@@ -127,8 +127,8 @@ class TestBootstrapFromRow:
         from houses.nodes.bootstrap import bootstrap_from_row
 
         sources = {
-            "user_entered_address": SourceNode[str]("user_addr", str),
-            "rightmove_address": SourceNode[str]("rm_addr", str),
+            "user_entered_address": UserInputNode[str]("user_addr", str),
+            "rightmove_address": UserInputNode[str]("rm_addr", str),
         }
         row = {
             "Address": "31 Isambard Road, Southall, UB2",
@@ -146,7 +146,7 @@ class TestBootstrapFromRow:
         from houses.nodes.bootstrap import bootstrap_from_row
 
         sources = {
-            "user_entered_address": SourceNode[str]("user_addr2", str),
+            "user_entered_address": UserInputNode[str]("user_addr2", str),
         }
         row = {
             "Address": "10 High St, London SW1V 2QQ",
@@ -161,11 +161,11 @@ class TestBootstrapFromRow:
         from houses.nodes.bootstrap import bootstrap_from_row
         from houses.nodes.location import BestAddressNode, BestLocationNode
 
-        precise = SourceNode[GeoPoint]("precise_location", GeoPoint)
-        corrected = SourceNode[str]("corrected_address", str)
-        user = SourceNode[str]("user_entered_address", str)
-        rightmove_addr = SourceNode[str]("rightmove_address", str)
-        rightmove_loc = SourceNode[GeoPoint]("rightmove_location", GeoPoint)
+        precise = UserInputNode[GeoPoint]("precise_location", GeoPoint)
+        corrected = UserInputNode[str]("corrected_address", str)
+        user = UserInputNode[str]("user_entered_address", str)
+        rightmove_addr = UserInputNode[str]("rightmove_address", str)
+        rightmove_loc = UserInputNode[GeoPoint]("rightmove_location", GeoPoint)
 
         row = {
             "Address": "10 High St, London",

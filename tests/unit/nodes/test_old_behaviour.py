@@ -23,14 +23,14 @@ class TestSchoolNodes:
 
     @pytest.mark.asyncio
     async def test_secondary_calls_find_nearest_with_correct_params(self):
-        from dag.source_node import SourceNode
+        from dag.user_input_node import UserInputNode
         from houses.geo import GeoPoint
         from houses.nodes.schools import SecondarySchoolNode
         from houses.schools import SchoolGender
 
-        loc = SourceNode[GeoPoint]("loc", GeoPoint)
+        loc = UserInputNode[GeoPoint]("loc", GeoPoint)
         loc.push(GeoPoint(51.5, -0.37), "test")
-        addr = SourceNode[str]("addr", str)
+        addr = UserInputNode[str]("addr", str)
         addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
 
         class AssertingService:
@@ -51,14 +51,14 @@ class TestSchoolNodes:
 
     @pytest.mark.asyncio
     async def test_primary_calls_find_nearest_with_boys_and_age_7(self):
-        from dag.source_node import SourceNode
+        from dag.user_input_node import UserInputNode
         from houses.geo import GeoPoint
         from houses.nodes.schools import PrimarySchoolNode
         from houses.schools import SchoolGender
 
-        loc = SourceNode[GeoPoint]("loc", GeoPoint)
+        loc = UserInputNode[GeoPoint]("loc", GeoPoint)
         loc.push(GeoPoint(51.5, -0.37), "test")
-        addr = SourceNode[str]("addr", str)
+        addr = UserInputNode[str]("addr", str)
         addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
 
         class AssertingService:
@@ -83,12 +83,12 @@ class TestCouncilTaxNode:
 
     @pytest.mark.asyncio
     async def test_passes_postcode_not_full_address(self):
-        from dag.source_node import SourceNode
+        from dag.user_input_node import UserInputNode
         from houses.nodes.epc_node import CouncilTaxNode
 
-        addr = SourceNode[str]("addr", str)
+        addr = UserInputNode[str]("addr", str)
         addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
-        pc = SourceNode[str]("pc", str)
+        pc = UserInputNode[str]("pc", str)
         pc.push("UB2 4GN", "test")
 
         captured = {}
@@ -114,12 +114,12 @@ class TestCouncilTaxNode:
 
     @pytest.mark.asyncio
     async def test_fails_when_postcode_missing(self):
-        from dag.source_node import SourceNode
+        from dag.user_input_node import UserInputNode
         from houses.nodes.epc_node import CouncilTaxNode
 
-        addr = SourceNode[str]("addr", str)
+        addr = UserInputNode[str]("addr", str)
         addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
-        pc = SourceNode[str]("pc", str)
+        pc = UserInputNode[str]("pc", str)
         node = CouncilTaxNode("ct2", best_address=addr, postcode_node=pc)
         a = await node.attempt()
         assert a.pending
@@ -159,10 +159,10 @@ class TestTownNode:
 
     @pytest.mark.asyncio
     async def test_returns_town_from_address(self):
-        from dag.source_node import SourceNode
+        from dag.user_input_node import UserInputNode
         from houses.nodes.area import TownNode
 
-        addr = SourceNode[str]("addr", str)
+        addr = UserInputNode[str]("addr", str)
         addr.push("48 Acacia Avenue, Southall, UB2 5AD", "test")
         node = TownNode("tn", best_address=addr)
         a = await node.attempt()
@@ -171,10 +171,10 @@ class TestTownNode:
 
     @pytest.mark.asyncio
     async def test_fails_without_address(self):
-        from dag.source_node import SourceNode
+        from dag.user_input_node import UserInputNode
         from houses.nodes.area import TownNode
 
-        addr = SourceNode[str]("addr2", str)
+        addr = UserInputNode[str]("addr2", str)
         node = TownNode("tn2", best_address=addr)
         a = await node.attempt()
         assert not a.succeeded

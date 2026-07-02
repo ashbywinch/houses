@@ -18,12 +18,12 @@ def _fake_svc():
 @pytest.mark.asyncio
 async def test_school_location_node_returns_geopoint():
     """SchoolLocationNode must return the school's coordinates as GeoPoint."""
-    from dag.source_node import SourceNode
+    from dag.user_input_node import UserInputNode
     from houses.schools import School, SchoolGender
 
-    loc = SourceNode[GeoPoint]("loc", GeoPoint)
+    loc = UserInputNode[GeoPoint]("loc", GeoPoint)
     loc.push(GeoPoint(51.5, -0.37), "test")
-    addr = SourceNode[str]("addr", str)
+    addr = UserInputNode[str]("addr", str)
     addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
 
     import houses.context as ctx
@@ -54,12 +54,12 @@ async def test_school_location_node_returns_geopoint():
 @pytest.mark.asyncio
 async def test_school_node_output_has_url():
     """School node output must contain 'url' and 'coords' keys."""
-    from dag.source_node import SourceNode
+    from dag.user_input_node import UserInputNode
     from houses.schools import School, SchoolGender
 
-    loc = SourceNode[GeoPoint]("loc2", GeoPoint)
+    loc = UserInputNode[GeoPoint]("loc2", GeoPoint)
     loc.push(GeoPoint(51.5, -0.37), "test")
-    addr = SourceNode[str]("addr2", str)
+    addr = UserInputNode[str]("addr2", str)
     addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
 
     import houses.context as ctx

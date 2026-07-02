@@ -14,7 +14,7 @@ from typing import Any, Protocol
 
 from dag.attempt import Attempt
 from dag.persistence import latest_node_result
-from dag.source_node import SourceNode
+from dag.user_input_node import UserInputNode
 from houses.commute import Commute
 from houses.geo import GeoPoint
 from houses.nodes.settings import make_default_financials, make_default_persons, make_default_thresholds
@@ -108,8 +108,8 @@ class PersistenceService(Protocol):
 
 
 def _make_settings_source(node_id: str, value_type: type, default_factory):
-    """Create a settings SourceNode from DB or defaults (eager — not lazy)."""
-    node = SourceNode(node_id, value_type)
+    """Create a settings UserInputNode from DB or defaults (eager — not lazy)."""
+    node = UserInputNode(node_id, value_type)
     persisted = latest_node_result(node_id)
     if persisted and persisted.get("status") == "succeeded":
         val = node._adapter.validate_python(persisted["value"])
@@ -272,9 +272,9 @@ class Services:
     persistence: PersistenceService = dataclasses.field(default_factory=_DefaultPersistence)
 
     # ── Settings sources (eager singletons, not module-level) ──────────
-    persons_source: SourceNode[list] = dataclasses.field(
+    persons_source: UserInputNode[list] = dataclasses.field(
         default_factory=lambda: _make_settings_source("persons", list, make_default_persons))
-    financial_source: SourceNode[dict] = dataclasses.field(
+    financial_source: UserInputNode[dict] = dataclasses.field(
         default_factory=lambda: _make_settings_source("financial", dict, make_default_financials))
-    commute_thresholds_source: SourceNode[dict] = dataclasses.field(
+    commute_thresholds_source: UserInputNode[dict] = dataclasses.field(
         default_factory=lambda: _make_settings_source("commute_thresholds", dict, make_default_thresholds))

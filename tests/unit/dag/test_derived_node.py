@@ -3,15 +3,15 @@ from __future__ import annotations
 import pytest
 
 from dag.attempt import Attempt
-from dag.computed_node import ComputedNode
+from dag.derived_node import DerivedNode
 from dag.persistence import latest_node_result
-from dag.source_node import SourceNode
+from dag.user_input_node import UserInputNode
 
 
-class TestComputedNode:
+class TestDerivedNode:
     @pytest.mark.asyncio
     async def test_recomputes_on_dep_change(self):
-        src = SourceNode[int]("src", int)
+        src = UserInputNode[int]("src", int)
         node = _DoubleNode("double", deps=(src,))
 
         src.push(2, "test")
@@ -22,7 +22,7 @@ class TestComputedNode:
 
     @pytest.mark.asyncio
     async def test_initial_attempt_runs_compute(self):
-        src = SourceNode[int]("src", int)
+        src = UserInputNode[int]("src", int)
         node = _DoubleNode("double", deps=(src,))
 
         a = await node.attempt()
@@ -34,7 +34,7 @@ class TestComputedNode:
 
     @pytest.mark.asyncio
     async def test_caches_result_until_dep_changes(self):
-        src = SourceNode[int]("src", int)
+        src = UserInputNode[int]("src", int)
         node = _DoubleNode("double", deps=(src,))
 
         src.push(10, "test")
@@ -47,8 +47,8 @@ class TestComputedNode:
 
     @pytest.mark.asyncio
     async def test_multiple_deps(self):
-        a = SourceNode[int]("a", int)
-        b = SourceNode[int]("b", int)
+        a = UserInputNode[int]("a", int)
+        b = UserInputNode[int]("b", int)
         node = _SumNode("sum", deps=(a, b))
 
         a.push(3, "t")
@@ -59,7 +59,7 @@ class TestComputedNode:
         assert (await node.attempt()).value_or_none() == 14
 
     def test_changed_signal_fires_on_recompute(self):
-        src = SourceNode[int]("src", int)
+        src = UserInputNode[int]("src", int)
         node = _DoubleNode("double", deps=(src,))
 
         received = []
@@ -73,7 +73,7 @@ class TestComputedNode:
 
     @pytest.mark.asyncio
     async def test_dep_failure_propagates(self):
-        src = SourceNode[int]("src", int)
+        src = UserInputNode[int]("src", int)
         node = _DoubleNode("double", deps=(src,))
 
         a = await node.attempt()
@@ -81,7 +81,7 @@ class TestComputedNode:
 
     @pytest.mark.asyncio
     async def test_to_json(self):
-        src = SourceNode[int]("src", int)
+        src = UserInputNode[int]("src", int)
         node = _DoubleNode("double", deps=(src,))
 
         src.push(4, "test")
@@ -90,7 +90,7 @@ class TestComputedNode:
 
     @pytest.mark.asyncio
     async def test_persists_after_compute(self):
-        src = SourceNode[int]("src_persist", int)
+        src = UserInputNode[int]("src_persist", int)
         node = _DoubleNode("double_persist", deps=(src,))
 
         src.push(7, "test")
@@ -103,19 +103,19 @@ class TestComputedNode:
 
     @pytest.mark.asyncio
     async def test_loads_from_db_on_init(self):
-        src = SourceNode[int]("src_reload", int)
+        src = UserInputNode[int]("src_reload", int)
         node1 = _DoubleNode("double_reload", deps=(src,))
         src.push(9, "test")
         await node1.attempt()
 
-        src2 = SourceNode[int]("src_reload", int)
+        src2 = UserInputNode[int]("src_reload", int)
         node2 = _DoubleNode("double_reload", deps=(src2,))
         a = await node2.attempt()
         assert a.value_or_none() == 18
 
     @pytest.mark.asyncio
     async def test_staleness_timestamp_dep_push(self):
-        src = SourceNode[int]("src_stale", int)
+        src = UserInputNode[int]("src_stale", int)
         node = _DoubleNode("double_stale", deps=(src,))
 
         src.push(5, "test")
@@ -128,7 +128,7 @@ class TestComputedNode:
 
     @pytest.mark.asyncio
     async def test_async_compute(self):
-        src = SourceNode[int]("src_async", int)
+        src = UserInputNode[int]("src_async", int)
         node = _AsyncDoubleNode("double_async", deps=(src,))
 
         src.push(3, "test")
@@ -137,7 +137,7 @@ class TestComputedNode:
 
     @pytest.mark.asyncio
     async def test_dep_timestamps_not_returned_by_latest(self):
-        src = SourceNode[int]("src_dep_ts", int)
+        src = UserInputNode[int]("src_dep_ts", int)
         node = _DoubleNode("double_dep_ts", deps=(src,))
 
         src.push(42, "test")
@@ -149,7 +149,7 @@ class TestComputedNode:
         assert loaded["value"] == 84
 
 
-class _DoubleNode(ComputedNode[int]):
+class _DoubleNode(DerivedNode[int]):
     def __init__(self, node_id: str, deps):
         super().__init__(node_id, int, deps)
         self.compute_count = 0
@@ -162,7 +162,7 @@ class _DoubleNode(ComputedNode[int]):
         return Attempt.impossible("dep failed")
 
 
-class _SumNode(ComputedNode[int]):
+class _SumNode(DerivedNode[int]):
     def __init__(self, node_id: str, deps):
         super().__init__(node_id, int, deps)
         self.compute_count = 0
@@ -175,7 +175,7 @@ class _SumNode(ComputedNode[int]):
         return Attempt.impossible("one or more deps failed")
 
 
-class _AsyncDoubleNode(ComputedNode[int]):
+class _AsyncDoubleNode(DerivedNode[int]):
     def __init__(self, node_id: str, deps):
         super().__init__(node_id, int, deps)
 

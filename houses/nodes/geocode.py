@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dag.attempt import Attempt
-from dag.computed_node import ComputedNode
+from dag.derived_node import DerivedNode
 from houses.geo import GeoPoint
 
 
-class GeocodeNode(ComputedNode[GeoPoint]):
+class GeocodeNode(DerivedNode[GeoPoint]):
     def __init__(self, node_id: str, *, best_address):
         super().__init__(node_id, GeoPoint, (best_address,))
 

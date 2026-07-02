@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from dag.signals import Signal, Slot
-from dag.source_node import SourceNode
+from dag.user_input_node import UserInputNode
 from houses.context import get_services
 from houses.geo import GeoPoint
 from houses.nodes.area import TownDescNode, TownNode, WalkabilityNode
@@ -25,7 +25,7 @@ from houses.nodes.transit import TransitNode, WalkLegCheckNode
 class PropertyNodes:
     """Holds all DAG node references for one property.
 
-    Creates SourceNodes for user-owned and enrichment data, ComputedNodes
+    Creates UserInputNodes for user-owned and enrichment data, DerivedNodes
     for derived values, and wires signal propagation.
     """
 
@@ -35,26 +35,26 @@ class PropertyNodes:
         self._svc = get_services()
 
         # ── Source Nodes (user-entered / scraped) ──────────────────────
-        self.rightmove_url = SourceNode[str](f"{rid}/rightmove_url", str)
-        self.rightmove_address = SourceNode[str](f"{rid}/rightmove_address", str)
-        self.rightmove_bedrooms = SourceNode[str](f"{rid}/rightmove_bedrooms", str)
-        self.rightmove_price = SourceNode[str](f"{rid}/rightmove_price", str)
-        self.rightmove_location = SourceNode[GeoPoint](f"{rid}/rightmove_location", GeoPoint)
-        self.precise_location = SourceNode[GeoPoint](f"{rid}/precise_location", GeoPoint)
-        self.corrected_address = SourceNode[str](f"{rid}/corrected_address", str)
-        self.user_entered_address = SourceNode[str](f"{rid}/user_entered_address", str)
-        self.postcode = SourceNode[str](f"{rid}/postcode", str)
+        self.rightmove_url = UserInputNode[str](f"{rid}/rightmove_url", str)
+        self.rightmove_address = UserInputNode[str](f"{rid}/rightmove_address", str)
+        self.rightmove_bedrooms = UserInputNode[str](f"{rid}/rightmove_bedrooms", str)
+        self.rightmove_price = UserInputNode[str](f"{rid}/rightmove_price", str)
+        self.rightmove_location = UserInputNode[GeoPoint](f"{rid}/rightmove_location", GeoPoint)
+        self.precise_location = UserInputNode[GeoPoint](f"{rid}/precise_location", GeoPoint)
+        self.corrected_address = UserInputNode[str](f"{rid}/corrected_address", str)
+        self.user_entered_address = UserInputNode[str](f"{rid}/user_entered_address", str)
+        self.postcode = UserInputNode[str](f"{rid}/postcode", str)
 
         # Comments from View tab
-        self.comment_status = SourceNode[str](f"{rid}/status", str)
-        self.comment_status_reason = SourceNode[str](f"{rid}/status_reason", str)
-        self.comment_group_notes = SourceNode[str](f"{rid}/group_notes", str)
-        self.comment_ashby_comments = SourceNode[str](f"{rid}/ashby_comments", str)
-        self.comment_ashby_works = SourceNode[float](f"{rid}/ashby_works", float)
-        self.comment_design_needed = SourceNode[str](f"{rid}/design_needed", str)
-        self.comment_planning_needed = SourceNode[str](f"{rid}/planning_needed", str)
+        self.comment_status = UserInputNode[str](f"{rid}/status", str)
+        self.comment_status_reason = UserInputNode[str](f"{rid}/status_reason", str)
+        self.comment_group_notes = UserInputNode[str](f"{rid}/group_notes", str)
+        self.comment_ashby_comments = UserInputNode[str](f"{rid}/ashby_comments", str)
+        self.comment_ashby_works = UserInputNode[float](f"{rid}/ashby_works", float)
+        self.comment_design_needed = UserInputNode[str](f"{rid}/design_needed", str)
+        self.comment_planning_needed = UserInputNode[str](f"{rid}/planning_needed", str)
 
-        # ── Location ComputedNodes ─────────────────────────────────────
+        # ── Location DerivedNodes ─────────────────────────────────────
         self.best_address = BestAddressNode(
             f"{rid}/best_address",
             user_entered_address=self.user_entered_address,
@@ -185,7 +185,7 @@ class PropertyNodes:
                         school_node=school_node,
                     )
                 else:
-                    poi_src = SourceNode[str](f"{self.rid}/{key}/poi", str)
+                    poi_src = UserInputNode[str](f"{self.rid}/{key}/poi", str)
                     poi_src.push(postcode, "persons_source")
 
                 transit_node = TransitNode(
@@ -235,11 +235,11 @@ class PropertyNodes:
         bracknell_key = "Simon/Bracknell"
         lorena_key = "Lorena/Office"
         self.commute_simon_office = self.commute_selectors.get(
-            simon_key, SourceNode[dict](f"{self.rid}/{simon_key}/fallback", dict))
+            simon_key, UserInputNode[dict](f"{self.rid}/{simon_key}/fallback", dict))
         self.commute_simon_bracknell = self.commute_selectors.get(
-            bracknell_key, SourceNode[dict](f"{self.rid}/{bracknell_key}/fallback", dict))
+            bracknell_key, UserInputNode[dict](f"{self.rid}/{bracknell_key}/fallback", dict))
         self.commute_lorena_office = self.commute_selectors.get(
-            lorena_key, SourceNode[dict](f"{self.rid}/{lorena_key}/fallback", dict))
+            lorena_key, UserInputNode[dict](f"{self.rid}/{lorena_key}/fallback", dict))
 
     def _on_node_changed(self) -> None:
         self.changed.emit()

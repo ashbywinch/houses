@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from dag.persistence import latest_node_result
-from dag.source_node import SourceNode
+from dag.user_input_node import UserInputNode
 from houses.config import settings
 
 
@@ -82,13 +82,13 @@ def make_default_thresholds() -> dict[str, dict[str, int]]:
 
 
 def make_persisted_source(node_id: str, value_type: type,
-                          default_factory) -> SourceNode:
-    """Create a settings SourceNode from DB or defaults.
+                          default_factory) -> UserInputNode:
+    """Create a settings UserInputNode from DB or defaults.
 
     Called by ``Services.__init__`` (production) and by tests that want
     real data seeded into the in-memory database.
     """
-    node = SourceNode(node_id, value_type)
+    node = UserInputNode(node_id, value_type)
     persisted = latest_node_result(node_id)
     if persisted and persisted.get("status") == "succeeded":
         val = node._adapter.validate_python(persisted["value"])

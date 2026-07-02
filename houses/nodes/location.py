@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dag.attempt import Attempt
-from dag.computed_node import ComputedNode
+from dag.derived_node import DerivedNode
 from houses.geo import GeoPoint
 from houses.model.geo import is_single_property_address
 
 
-class BestAddressNode(ComputedNode[str]):
+class BestAddressNode(DerivedNode[str]):
     """Selects the best address from available sources.
 
     Priority: user_entered_address > corrected_address > rightmove_address.
@@ -37,7 +37,7 @@ class BestAddressNode(ComputedNode[str]):
         )
 
 
-class BestLocationNode(ComputedNode[GeoPoint]):
+class BestLocationNode(DerivedNode[GeoPoint]):
     """Selects the best location from available sources.
 
     Priority: precise_location > geocode(best_address) > rightmove_location.

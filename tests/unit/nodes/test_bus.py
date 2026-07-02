@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from dag.source_node import SourceNode
+from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 
 
@@ -11,9 +11,9 @@ class TestBusRouteNode:
     async def test_returns_dict_when_location_ok(self):
         from houses.nodes.bus import BusRouteNode
 
-        loc = SourceNode[GeoPoint]("loc_br", GeoPoint)
-        walk = SourceNode[bool]("walk_br", bool)
-        transit = SourceNode[dict]("transit_br", dict)
+        loc = UserInputNode[GeoPoint]("loc_br", GeoPoint)
+        walk = UserInputNode[bool]("walk_br", bool)
+        transit = UserInputNode[dict]("transit_br", dict)
 
         loc.push(GeoPoint(51.5, -0.1), "test")
         walk.push(False, "test")
@@ -33,7 +33,7 @@ class TestBodsFareNode:
     async def test_succeeds_with_empty_route(self):
         from houses.nodes.bus import BodsFareNode
 
-        route = SourceNode[dict]("route_bf", dict)
+        route = UserInputNode[dict]("route_bf", dict)
         node = BodsFareNode("bf", bus_route_node=route)
 
         route.push({}, "test")
@@ -46,10 +46,10 @@ class TestBusLegAugmentNode:
     async def test_succeeds_when_walk_ok(self):
         from houses.nodes.bus import BusLegAugmentNode
 
-        transit = SourceNode[dict]("t_bl", dict)
-        walk = SourceNode[bool]("w_bl", bool)
-        route = SourceNode[dict]("r_bl", dict)
-        fare = SourceNode[dict]("f_bl", dict)
+        transit = UserInputNode[dict]("t_bl", dict)
+        walk = UserInputNode[bool]("w_bl", bool)
+        route = UserInputNode[dict]("r_bl", dict)
+        fare = UserInputNode[dict]("f_bl", dict)
 
         node = BusLegAugmentNode(
             "bla",

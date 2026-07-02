@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import pytest
 
-from dag.source_node import SourceNode
+from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 
 
 class TestBestAddressNode:
     @pytest.fixture
     def nodes(self):
-        user = SourceNode[str]("user", str)
-        corrected = SourceNode[str]("corrected", str)
-        rightmove = SourceNode[str]("rightmove", str)
+        user = UserInputNode[str]("user", str)
+        corrected = UserInputNode[str]("corrected", str)
+        rightmove = UserInputNode[str]("rightmove", str)
         from houses.nodes.location import BestAddressNode
         node = BestAddressNode(
             "best_addr",
@@ -52,9 +52,9 @@ class TestBestAddressNode:
     @pytest.mark.asyncio
     async def test_all_pending(self):
         from houses.nodes.location import BestAddressNode
-        user = SourceNode[str]("u", str)
-        corrected = SourceNode[str]("c", str)
-        rightmove = SourceNode[str]("r", str)
+        user = UserInputNode[str]("u", str)
+        corrected = UserInputNode[str]("c", str)
+        rightmove = UserInputNode[str]("r", str)
         node = BestAddressNode("ba", user_entered_address=user,
                                 corrected_address=corrected,
                                 rightmove_address=rightmove)
@@ -78,9 +78,9 @@ class TestBestLocationNode:
     async def test_precise_takes_priority(self):
         from houses.nodes.location import BestLocationNode
 
-        precise = SourceNode[GeoPoint]("precise", GeoPoint)
-        rightmove_loc = SourceNode[GeoPoint]("rm_loc", GeoPoint)
-        best_addr = SourceNode[str]("addr", str)
+        precise = UserInputNode[GeoPoint]("precise", GeoPoint)
+        rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
+        best_addr = UserInputNode[str]("addr", str)
         node = BestLocationNode("best_loc", precise_location=precise,
                                 rightmove_location=rightmove_loc,
                                 best_address=best_addr)
@@ -98,9 +98,9 @@ class TestBestLocationNode:
     async def test_rightmove_used_when_precise_missing_and_vague_address(self):
         from houses.nodes.location import BestLocationNode
 
-        precise = SourceNode[GeoPoint]("precise", GeoPoint)
-        rightmove_loc = SourceNode[GeoPoint]("rm_loc", GeoPoint)
-        best_addr = SourceNode[str]("addr", str)
+        precise = UserInputNode[GeoPoint]("precise", GeoPoint)
+        rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
+        best_addr = UserInputNode[str]("addr", str)
         node = BestLocationNode("best_loc", precise_location=precise,
                                 rightmove_location=rightmove_loc,
                                 best_address=best_addr)
@@ -118,9 +118,9 @@ class TestBestLocationNode:
     async def test_pending_when_no_sources(self):
         from houses.nodes.location import BestLocationNode
 
-        precise = SourceNode[GeoPoint]("precise", GeoPoint)
-        rightmove_loc = SourceNode[GeoPoint]("rm_loc", GeoPoint)
-        best_addr = SourceNode[str]("addr", str)
+        precise = UserInputNode[GeoPoint]("precise", GeoPoint)
+        rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
+        best_addr = UserInputNode[str]("addr", str)
         node = BestLocationNode("best_loc", precise_location=precise,
                                 rightmove_location=rightmove_loc,
                                 best_address=best_addr)
@@ -132,9 +132,9 @@ class TestBestLocationNode:
     async def test_pending_when_all_deps_missing(self):
         from houses.nodes.location import BestLocationNode
 
-        precise = SourceNode[GeoPoint]("precise", GeoPoint)
-        rightmove_loc = SourceNode[GeoPoint]("rm_loc", GeoPoint)
-        best_addr = SourceNode[str]("addr", str)
+        precise = UserInputNode[GeoPoint]("precise", GeoPoint)
+        rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
+        best_addr = UserInputNode[str]("addr", str)
         node = BestLocationNode("best_loc", precise_location=precise,
                                 rightmove_location=rightmove_loc,
                                 best_address=best_addr)
@@ -146,9 +146,9 @@ class TestBestLocationNode:
     async def test_recomputes_when_precise_updated(self):
         from houses.nodes.location import BestLocationNode
 
-        precise = SourceNode[GeoPoint]("precise", GeoPoint)
-        rightmove_loc = SourceNode[GeoPoint]("rm_loc", GeoPoint)
-        best_addr = SourceNode[str]("addr", str)
+        precise = UserInputNode[GeoPoint]("precise", GeoPoint)
+        rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
+        best_addr = UserInputNode[str]("addr", str)
         node = BestLocationNode("best_loc", precise_location=precise,
                                 rightmove_location=rightmove_loc,
                                 best_address=best_addr)
@@ -167,9 +167,9 @@ class TestBestLocationNode:
     async def test_to_json_with_succeeded(self):
         from houses.nodes.location import BestLocationNode
 
-        precise = SourceNode[GeoPoint]("precise", GeoPoint)
-        rightmove_loc = SourceNode[GeoPoint]("rm_loc", GeoPoint)
-        best_addr = SourceNode[str]("addr", str)
+        precise = UserInputNode[GeoPoint]("precise", GeoPoint)
+        rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
+        best_addr = UserInputNode[str]("addr", str)
         node = BestLocationNode("best_loc", precise_location=precise,
                                 rightmove_location=rightmove_loc,
                                 best_address=best_addr)
@@ -186,9 +186,9 @@ class TestBestLocationNode:
     async def test_to_json_with_pending(self):
         from houses.nodes.location import BestLocationNode
 
-        precise = SourceNode[GeoPoint]("precise", GeoPoint)
-        rightmove_loc = SourceNode[GeoPoint]("rm_loc", GeoPoint)
-        best_addr = SourceNode[str]("addr", str)
+        precise = UserInputNode[GeoPoint]("precise", GeoPoint)
+        rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
+        best_addr = UserInputNode[str]("addr", str)
         node = BestLocationNode("best_loc", precise_location=precise,
                                 rightmove_location=rightmove_loc,
                                 best_address=best_addr)

@@ -10,8 +10,8 @@ from typing import Any
 from money import Money
 
 from dag.attempt import Attempt
-from dag.computed_node import ComputedNode
-from dag.source_node import SourceNode
+from dag.derived_node import DerivedNode
+from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute
 
@@ -88,12 +88,12 @@ def _serialize_leg(leg) -> dict:
     }
 
 
-def commute_source_node(node_id: str) -> SourceNode[Commute]:
-    return _CommuteSourceNode(node_id)
+def commute_input_node(node_id: str) -> UserInputNode[Commute]:
+    return _CommuteInputNode(node_id)
 
 
-class _CommuteSourceNode(SourceNode[dict]):
-    """A SourceNode that holds a raw Commute (not serialised to dict).
+class _CommuteInputNode(UserInputNode[dict]):
+    """A UserInputNode that holds a raw Commute (not serialised to dict).
 
     Values are not persisted to the DB — they are ephemeral results
     pushed from the commute pipeline during enrichment.
@@ -119,7 +119,7 @@ class _CommuteSourceNode(SourceNode[dict]):
         return Provenance.from_label(self._source_label)
 
 
-class CommuteSelectorNode(ComputedNode[dict]):
+class CommuteSelectorNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, origin, poi, transit_result, bus_result):
         super().__init__(
             node_id,

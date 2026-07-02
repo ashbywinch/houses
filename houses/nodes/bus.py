@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from dag.attempt import Attempt
-from dag.computed_node import ComputedNode
+from dag.derived_node import DerivedNode
 
 
-class BusRouteNode(ComputedNode[dict]):
+class BusRouteNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, best_location, walk_leg_check_node, transit_node):
         super().__init__(node_id, dict, (best_location, walk_leg_check_node, transit_node))
 
@@ -16,7 +16,7 @@ class BusRouteNode(ComputedNode[dict]):
         return Attempt.succeeded({"route": "simplified"})
 
 
-class BodsFareNode(ComputedNode[dict]):
+class BodsFareNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, bus_route_node):
         super().__init__(node_id, dict, (bus_route_node,))
 
@@ -26,7 +26,7 @@ class BodsFareNode(ComputedNode[dict]):
         return Attempt.succeeded({"fare": 0})
 
 
-class BusLegAugmentNode(ComputedNode[dict]):
+class BusLegAugmentNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, transit_node, walk_leg_check_node,
                  bus_route_node, bods_fare_node):
         super().__init__(node_id, dict, (transit_node, walk_leg_check_node,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from money import Money
 
-from dag.source_node import SourceNode
+from dag.user_input_node import UserInputNode
 from houses.commute import CostGroup
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
@@ -12,12 +12,12 @@ from houses.model.domain import Commute, Person, PlaceOfInterest
 class TestCommuteSelectorNode:
     @pytest.mark.asyncio
     async def test_transit_takes_priority(self):
-        from houses.nodes.commute import CommuteSelectorNode, commute_source_node
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
 
-        origin = SourceNode[GeoPoint]("origin", GeoPoint)
-        poi = SourceNode[PlaceOfInterest]("poi", PlaceOfInterest)
-        transit = commute_source_node("transit")
-        bus = commute_source_node("bus")
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = commute_input_node("transit")
+        bus = commute_input_node("bus")
 
         node = CommuteSelectorNode(
             "commute_selector",
@@ -43,12 +43,12 @@ class TestCommuteSelectorNode:
 
     @pytest.mark.asyncio
     async def test_fallback_to_bus(self):
-        from houses.nodes.commute import CommuteSelectorNode, commute_source_node
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
 
-        origin = SourceNode[GeoPoint]("origin", GeoPoint)
-        poi = SourceNode[PlaceOfInterest]("poi", PlaceOfInterest)
-        transit = commute_source_node("transit")
-        bus = commute_source_node("bus")
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = commute_input_node("transit")
+        bus = commute_input_node("bus")
 
         node = CommuteSelectorNode(
             "commute_selector",
@@ -70,12 +70,12 @@ class TestCommuteSelectorNode:
 
     @pytest.mark.asyncio
     async def test_impossible_when_both_fail(self):
-        from houses.nodes.commute import CommuteSelectorNode, commute_source_node
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
 
-        origin = SourceNode[GeoPoint]("origin", GeoPoint)
-        poi = SourceNode[PlaceOfInterest]("poi", PlaceOfInterest)
-        transit = commute_source_node("transit")
-        bus = commute_source_node("bus")
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = commute_input_node("transit")
+        bus = commute_input_node("bus")
 
         node = CommuteSelectorNode(
             "commute_selector",
@@ -94,12 +94,12 @@ class TestCommuteSelectorNode:
 
     @pytest.mark.asyncio
     async def test_impossible_when_origin_missing(self):
-        from houses.nodes.commute import CommuteSelectorNode, commute_source_node
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
 
-        origin = SourceNode[GeoPoint]("origin", GeoPoint)
-        poi = SourceNode[PlaceOfInterest]("poi", PlaceOfInterest)
-        transit = commute_source_node("transit")
-        bus = commute_source_node("bus")
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = commute_input_node("transit")
+        bus = commute_input_node("bus")
 
         node = CommuteSelectorNode(
             "commute_selector",
@@ -117,12 +117,12 @@ class TestCommuteSelectorNode:
 
     @pytest.mark.asyncio
     async def test_recomputes_when_transit_updates(self):
-        from houses.nodes.commute import CommuteSelectorNode, commute_source_node
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
 
-        origin = SourceNode[GeoPoint]("origin", GeoPoint)
-        poi = SourceNode[PlaceOfInterest]("poi", PlaceOfInterest)
-        transit = commute_source_node("transit")
-        bus = commute_source_node("bus")
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = commute_input_node("transit")
+        bus = commute_input_node("bus")
 
         node = CommuteSelectorNode(
             "commute_selector",
@@ -145,12 +145,12 @@ class TestCommuteSelectorNode:
 
     @pytest.mark.asyncio
     async def test_to_json_shape(self):
-        from houses.nodes.commute import CommuteSelectorNode, commute_source_node
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
 
-        origin = SourceNode[GeoPoint]("origin", GeoPoint)
-        poi = SourceNode[PlaceOfInterest]("poi", PlaceOfInterest)
-        transit = commute_source_node("transit")
-        bus = commute_source_node("bus")
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = commute_input_node("transit")
+        bus = commute_input_node("bus")
 
         node = CommuteSelectorNode(
             "commute_selector",

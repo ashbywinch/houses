@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dag.attempt import Attempt
-from dag.computed_node import ComputedNode
+from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.geo import GeoPoint
 
 
-class PrimarySchoolNode(ComputedNode[dict]):
+class PrimarySchoolNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, best_location, best_address):
         deps: tuple[Node, ...] = (best_location, best_address)
         super().__init__(node_id, dict, deps)
@@ -35,7 +35,7 @@ class PrimarySchoolNode(ComputedNode[dict]):
         return Provenance(label="GIAS CSV")
 
 
-class SecondarySchoolNode(ComputedNode[dict]):
+class SecondarySchoolNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, best_location, best_address):
         deps: tuple[Node, ...] = (best_location, best_address)
         super().__init__(node_id, dict, deps)
@@ -64,7 +64,7 @@ class SecondarySchoolNode(ComputedNode[dict]):
         return Provenance(label="GIAS CSV")
 
 
-class SchoolLocationNode(ComputedNode[str]):
+class SchoolLocationNode(DerivedNode[str]):
     def __init__(self, node_id: str, *, school_node):
         super().__init__(node_id, str, (school_node,))
 

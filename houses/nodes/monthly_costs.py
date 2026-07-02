@@ -3,10 +3,10 @@ from __future__ import annotations
 from decimal import Decimal
 
 from dag.attempt import Attempt
-from dag.computed_node import ComputedNode
+from dag.derived_node import DerivedNode
 
 
-class CommuteBreakdownNode(ComputedNode[dict]):
+class CommuteBreakdownNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *,
                  simon_office, simon_bracknell, lorena_office,
                  persons_source):
@@ -32,7 +32,7 @@ class CommuteBreakdownNode(ComputedNode[dict]):
         return Provenance(label="commute_breakdown")
 
 
-class MonthlyMortgagePaymentNode(ComputedNode[float]):
+class MonthlyMortgagePaymentNode(DerivedNode[float]):
     def __init__(self, node_id: str, *,
                  rightmove_price, financial_source):
         super().__init__(node_id, float, (rightmove_price, financial_source))
@@ -66,7 +66,7 @@ class MonthlyMortgagePaymentNode(ComputedNode[float]):
         return Provenance(label="mortgage_formula")
 
 
-class YearlySinkingFundNode(ComputedNode[float]):
+class YearlySinkingFundNode(DerivedNode[float]):
     def __init__(self, node_id: str, *,
                  rightmove_price, financial_source):
         super().__init__(node_id, float, (rightmove_price, financial_source))
@@ -91,7 +91,7 @@ class YearlySinkingFundNode(ComputedNode[float]):
         return Provenance(label="sinking_fund_formula")
 
 
-class TotalMonthlyHousingCostNode(ComputedNode[float]):
+class TotalMonthlyHousingCostNode(DerivedNode[float]):
     def __init__(self, node_id: str, *,
                  monthly_mortgage_node, yearly_sinking_fund_node,
                  financial_source, commute_breakdown_node,
