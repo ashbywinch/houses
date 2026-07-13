@@ -36,42 +36,88 @@ class BestAddressNode(DerivedNode[str]):
              "rightmove_address": rightmove}
         )
 
-
 class BestLocationNode(DerivedNode[GeoPoint]):
     """Selects the best location from available sources.
 
     Priority: precise_location > geocode(best_address) > rightmove_location.
 
-    The geocode path is only attempted when best_address resolves to a
-    single-property address. Geocoding requires async compute and is
-    wired separately (see GeocodeNode).
+    All source nodes (precise, geocode, rightmove) are optional —
+    if they have no value, fall through to the next source.
+    Only best_address is a hard dependency.
     """
 
     def __init__(self, node_id: str, *, precise_location, rightmove_location,
-                 best_address):
-        super().__init__(
-            node_id, GeoPoint, (precise_location, rightmove_location, best_address)
-        )
+                 best_address, geocode=None):
+        # Only best_address is a hard dep
+        super().__init__(node_id, GeoPoint, (best_address,))
+        self._precise_location = precise_location
+        self._rightmove_location = rightmove_location
+        self._geocode = geocode
+        self._precise_ts_at_compute: str = ""
+        self._rightmove_ts_at_compute: str = ""
+        self._geocode_ts_at_compute: str = ""
 
-    def compute(self, precise: Attempt[GeoPoint],
-                rightmove: Attempt[GeoPoint],
-                address: Attempt[str]) -> Attempt[GeoPoint]:
-        if precise.succeeded:
-            return precise
+        from dag.signals import Slot
+        for src in (precise_location, rightmove_location):
+            slot = Slot(self._on_dep_changed)
+            self._slots.append(slot)
+            src.changed.connect(slot)
+        if geocode is not None:
+            slot = Slot(self._on_dep_changed)
+            self._slots.append(slot)
+            geocode.changed.connect(slot)
+
+    def _is_stale(self) -> bool:
+        if self._cached is None:
+            return True
+        if super()._is_stale():
+            return True
+        for src, ts_field in (
+            (self._precise_location, self._precise_ts_at_compute),
+            (self._rightmove_location, self._rightmove_ts_at_compute),
+        ):
+            ts = src._db_created_at
+            if ts and ts != ts_field:
+                return True
+        if self._geocode is not None:
+            ts = self._geocode._db_created_at
+            if ts and ts != self._geocode_ts_at_compute:
+                return True
+        return False
+
+    async def compute(self,
+                      address: Attempt[str]) -> Attempt[GeoPoint]:
+        # Snapshot timestamps for optional sources so _is_stale() can
+        # detect future changes after this recompute.
+        self._precise_ts_at_compute = self._precise_location._db_created_at
+        self._rightmove_ts_at_compute = self._rightmove_location._db_created_at
+        if self._geocode is not None:
+            self._geocode_ts_at_compute = self._geocode._db_created_at
+
+        # Check precise_location first (optional — may be pending)
+        precise_attempt = await self._precise_location.attempt()
+        if precise_attempt.succeeded:
+            return precise_attempt
+
+        # Check geocode (optional — may be pending)
+        if self._geocode is not None:
+            geocode_attempt = await self._geocode.attempt()
+            if geocode_attempt.succeeded:
+                return geocode_attempt
+
+        # Check rightmove_location (optional — may be pending)
+        rightmove_attempt = await self._rightmove_location.attempt()
+        if rightmove_attempt.succeeded:
+            return rightmove_attempt
+
         if address.succeeded and is_single_property_address(address.value_or_none()):
             return self._impossible(
-                {"precise_location": precise, "rightmove_location": rightmove},
+                {"best_address": address},
                 extra=(
                     f"address '{address.value_or_none()}' is single-property "
-                    "but geocoding requires async compute"
+                    "but all geocoding sources failed"
                 ),
             )
-        if rightmove.succeeded:
-            return rightmove
         return self._impossible(
-            {
-                "precise_location": precise,
-                "rightmove_location": rightmove,
-                "best_address": address,
-            }
+            {"best_address": address}
         )

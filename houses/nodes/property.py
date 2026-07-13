@@ -61,15 +61,16 @@ class PropertyNodes:
             corrected_address=self.corrected_address,
             rightmove_address=self.rightmove_address,
         )
+        self.geocode = GeocodeNode(
+            f"{rid}/geocode",
+            best_address=self.best_address,
+        )
         self.best_location = BestLocationNode(
             f"{rid}/best_location",
             precise_location=self.precise_location,
             rightmove_location=self.rightmove_location,
             best_address=self.best_address,
-        )
-        self.geocode = GeocodeNode(
-            f"{rid}/geocode",
-            best_address=self.best_address,
+            geocode=self.geocode,
         )
 
         # ── Enrichment Nodes ────────────────────────────────────────────

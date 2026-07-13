@@ -194,3 +194,128 @@ class TestBestLocationNode:
         j = await node.to_json()
         assert j["status"] == "pending"
         assert j["value"] is None
+
+class TestBestLocationNodeGeocodeFallback:
+    """BestLocationNode should fall back to GeocodeNode when coordinates
+    are unavailable but a single-property address exists."""
+
+    @pytest.mark.asyncio
+    async def test_geocode_fallback_priority_over_rightmove(self):
+        """When precise_location is missing, geocode result should
+        take priority over rightmove_location for single-property addresses."""
+        from houses.nodes.location import BestLocationNode
+
+        # Use UserInputNode as stand-in for GeocodeNode's result
+        precise = UserInputNode[GeoPoint]("precise_gp", GeoPoint)
+        rightmove_loc = UserInputNode[GeoPoint]("rm_loc_gp", GeoPoint)
+        best_addr = UserInputNode[str]("addr_gp", str)
+        geocode_result = UserInputNode[GeoPoint]("geocode_gp", GeoPoint)
+
+        node = BestLocationNode(
+            "best_loc_gp",
+            precise_location=precise,
+            rightmove_location=rightmove_loc,
+            best_address=best_addr,
+            geocode=geocode_result,
+        )
+
+        gp_geo = GeoPoint(51.5, -0.1)
+        gp_rm = GeoPoint(51.4, -0.2)
+
+        best_addr.push("123 Main Road, London, SW1 1AA", "rightmove")
+        rightmove_loc.push(gp_rm, "rightmove")
+        geocode_result.push(gp_geo, "geocode")
+
+        a = await node.attempt()
+        assert a.succeeded
+        # Geocode should take priority over rightmove when precise is missing
+        # and address is single-property
+        assert a.value_or_none() == gp_geo
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_rightmove_when_geocode_fails(self):
+        """When geocode fails but rightmove_location succeeds, use rightmove."""
+        from houses.nodes.location import BestLocationNode
+
+        precise = UserInputNode[GeoPoint]("precise_gf2", GeoPoint)
+        rightmove_loc = UserInputNode[GeoPoint]("rm_loc_gf2", GeoPoint)
+        best_addr = UserInputNode[str]("addr_gf2", str)
+        geocode_result = UserInputNode[GeoPoint]("geocode_gf2", GeoPoint)
+
+        node = BestLocationNode(
+            "best_loc_gf2",
+            precise_location=precise,
+            rightmove_location=rightmove_loc,
+            best_address=best_addr,
+            geocode=geocode_result,
+        )
+
+        gp_rm = GeoPoint(51.4, -0.2)
+        best_addr.push("Vague Road, London", "rightmove")
+        rightmove_loc.push(gp_rm, "rightmove")
+        # geocode_result left empty (pending)
+
+        a = await node.attempt()
+        assert a.succeeded
+        assert a.value_or_none() == gp_rm
+
+    @pytest.mark.asyncio
+    async def test_precise_still_takes_highest_priority(self):
+        """precise_location remains highest priority even when geocode is wired."""
+        from houses.nodes.location import BestLocationNode
+
+        precise = UserInputNode[GeoPoint]("precise_gf3", GeoPoint)
+        rightmove_loc = UserInputNode[GeoPoint]("rm_loc_gf3", GeoPoint)
+        best_addr = UserInputNode[str]("addr_gf3", str)
+        geocode_result = UserInputNode[GeoPoint]("geocode_gf3", GeoPoint)
+
+        node = BestLocationNode(
+            "best_loc_gf3",
+            precise_location=precise,
+            rightmove_location=rightmove_loc,
+            best_address=best_addr,
+            geocode=geocode_result,
+        )
+
+        gp_precise = GeoPoint(51.5, -0.1)
+        gp_geo = GeoPoint(51.6, -0.2)
+        gp_rm = GeoPoint(51.4, -0.3)
+
+        best_addr.push("123 Main Road, London, SW1 1AA", "rightmove")
+        rightmove_loc.push(gp_rm, "rightmove")
+        geocode_result.push(gp_geo, "geocode")
+        precise.push(gp_precise, "user")
+
+        a = await node.attempt()
+        assert a.succeeded
+        assert a.value_or_none() == gp_precise
+
+    @pytest.mark.asyncio
+    async def test_recomputes_when_geocode_updated(self):
+        """Updating the geocode dependency should trigger recompute."""
+        from houses.nodes.location import BestLocationNode
+
+        precise = UserInputNode[GeoPoint]("precise_gf4", GeoPoint)
+        rightmove_loc = UserInputNode[GeoPoint]("rm_loc_gf4", GeoPoint)
+        best_addr = UserInputNode[str]("addr_gf4", str)
+        geocode_result = UserInputNode[GeoPoint]("geocode_gf4", GeoPoint)
+
+        node = BestLocationNode(
+            "best_loc_gf4",
+            precise_location=precise,
+            rightmove_location=rightmove_loc,
+            best_address=best_addr,
+            geocode=geocode_result,
+        )
+
+        best_addr.push("123 Main Road, London, SW1 1AA", "rightmove")
+        rightmove_loc.push(GeoPoint(51.4, -0.2), "rightmove")
+        # Initial geocode same as rightmove
+        gp1 = GeoPoint(51.4, -0.2)
+        geocode_result.push(gp1, "geocode")
+        assert (await node.attempt()).value_or_none() == gp1
+
+        # Update geocode with better coordinates
+        gp2 = GeoPoint(51.5, -0.1)
+        geocode_result.push(gp2, "geocode")
+        assert (await node.attempt()).value_or_none() == gp2
