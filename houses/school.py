@@ -22,6 +22,8 @@ class School:
     _COL_INSPECTION_YEAR: ClassVar[str] = "InspectionYear"
     _COL_LAT: ClassVar[str] = "Latitude"
     _COL_LNG: ClassVar[str] = "Longitude"
+    _COL_CORR_LAT: ClassVar[str] = "CorrectedLatitude"
+    _COL_CORR_LNG: ClassVar[str] = "CorrectedLongitude"
     _COL_LOW_AGE: ClassVar[str] = "StatutoryLowAge"
     _COL_HIGH_AGE: ClassVar[str] = "StatutoryHighAge"
 
@@ -44,11 +46,10 @@ class School:
     ofsted_rating: str
     inspection_year: str
     coords: GeoPoint | None
-
     statutory_low_age: int | None
     statutory_high_age: int | None
+    full_address: str = ""
     url: str = ""
-
     _PHASE_RANGES: ClassVar[dict[str, tuple[int, int]]] = {
         "nursery": (2, 4),
         "primary": (4, 11),
@@ -72,8 +73,18 @@ class School:
 
     @classmethod
     def from_GIAS_row(cls, row: dict) -> School:
-        lat = row.get(cls._COL_LAT)
-        lng = row.get(cls._COL_LNG)
+        # Prefer corrected coordinates if available
+        corr_lat = (row.get(cls._COL_CORR_LAT) or "").strip()
+        corr_lng = (row.get(cls._COL_CORR_LNG) or "").strip()
+        if corr_lat and corr_lng:
+            try:
+                coords = GeoPoint(float(corr_lat), float(corr_lng))
+            except (ValueError, TypeError):
+                coords = None
+        else:
+            lat = row.get(cls._COL_LAT)
+            lng = row.get(cls._COL_LNG)
+            coords = GeoPoint(float(lat), float(lng)) if lat and lng else None
         raw_gender = (row.get(cls._COL_GENDER) or "").strip().lower()
         try:
             gender = SchoolGender(raw_gender)
@@ -92,7 +103,7 @@ class School:
             website=(row.get(cls._COL_WEBSITE) or "").strip(),
             ofsted_rating=(row.get(cls._COL_OFSTED) or "").strip(),
             inspection_year=(row.get(cls._COL_INSPECTION_YEAR) or "").strip(),
-            coords=GeoPoint(float(lat), float(lng)) if lat and lng else None,
+            coords=coords,
             url=(f"https://get-information-schools.service.gov.uk"
                   f"/Establishments/Establishment/Details/{urn}") if urn else "",
         )
