@@ -165,7 +165,7 @@ def _compute_petrol_from_distance_km(round_trip_km: float) -> float:
 
 
 async def compute_petrol_cost(origin_postcode: str) -> Attempt[Commute]:
-    result = await get_commute(origin_postcode, settings.bracknell_postcode, has_car=True)
+    result = await get_commute(origin_postcode, settings.bracknell_postcode, has_car=True, max_walk_minutes=0)
     if result.succeeded:
         commute = _with_label(result.value_or_none(), "Bracknell Office (RG12 8YA)", settings.bracknell_postcode)
         return Attempt.succeeded(commute)

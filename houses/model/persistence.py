@@ -16,7 +16,9 @@ from houses.model import DerivedRow, PropertyData, SourceRow, UserRow
 def _serialize_value(val: Any) -> str:
     if val is None:
         return ""
-    if isinstance(val, (str, int, float, bool)):
+    if isinstance(val, bool):
+        return json.dumps(val)
+    if isinstance(val, (str, int, float)):
         return str(val)
 
     ta = TypeAdapter(type(val))
@@ -28,7 +30,7 @@ def _serialize_value(val: Any) -> str:
 
 
 def _deserialize_value(raw: str) -> Any:
-    if not raw or raw == "None":
+    if not raw:
         return None
     try:
         d = json.loads(raw)
@@ -46,9 +48,11 @@ def _deserialize_value(raw: str) -> Any:
     if isinstance(d, dict) and "lat" in d and "lon" in d:
         try:
             return GeoPoint(lat=d["lat"], lon=d["lon"])
-        except (TypeError, ValueError):
+        except Exception:
             return raw
     return raw
+
+
 
 
 DB_PATH: Path | None = None

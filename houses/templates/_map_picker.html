@@ -4,7 +4,7 @@
     <span id="map-picker-lat">{{ lat or '' }}</span>
     <span id="map-picker-lng">{{ lng or '' }}</span>
   </div>
-  <form hx-post="/properties/{{ rid }}/enhance" hx-swap="outerHTML" hx-target="#field-location">
+  <form hx-post="/properties/{{ rid }}/enhance" hx-swap="outerHTML" hx-target="#map-picker">
     <input type="hidden" name="action" value="location">
     <input type="hidden" name="precise_lat" id="precise_lat" value="">
     <input type="hidden" name="precise_lng" id="precise_lng" value="">

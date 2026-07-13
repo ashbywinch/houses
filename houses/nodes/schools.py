@@ -23,14 +23,16 @@ class PrimarySchoolNode(DerivedNode[dict]):
         )
         if school is None:
             return Attempt.impossible("no primary school found")
-        return Attempt.succeeded({
+        result = {
             "name": school.name,
             "ofsted": school.ofsted_rating,
             "walk_minutes": None,
-        })
-
-    async def build_provenance(self):
-        return Provenance(label="GIAS CSV")
+            "url": school.url,
+        }
+        if school.coords:
+            result["lat"] = school.coords.lat
+            result["lon"] = school.coords.lon
+        return Attempt.succeeded(result)
 
 
 class SecondarySchoolNode(DerivedNode[dict]):
@@ -47,13 +49,16 @@ class SecondarySchoolNode(DerivedNode[dict]):
         school = await svc.school_lookup.find_nearest(
             f"{loc.lat},{loc.lon}", child_age=11,
         )
-        if school is None:
-            return Attempt.impossible("no secondary school found")
-        return Attempt.succeeded({
+        result = {
             "name": school.name,
             "ofsted": school.ofsted_rating,
             "walk_minutes": None,
-        })
+            "url": school.url,
+        }
+        if school.coords:
+            result["lat"] = school.coords.lat
+            result["lon"] = school.coords.lon
+        return Attempt.succeeded(result)
 
     async def build_provenance(self):
         return Provenance(label="GIAS CSV")
@@ -66,7 +71,7 @@ class SchoolLocationNode(DerivedNode[str]):
     def compute(self, school: Attempt[dict]) -> Attempt[str]:
         if not school.succeeded:
             return self._impossible({"school_node": school})
-        return Attempt.succeeded("school_location")
-
-    async def build_provenance(self):
-        return Provenance(label="school_location")
+        val = school.value_or_none()
+        if val and "lat" in val and "lon" in val:
+            return Attempt.succeeded(f"{val['lat']},{val['lon']}")
+        return Attempt.impossible("school has no coordinates")

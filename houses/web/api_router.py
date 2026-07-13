@@ -38,7 +38,7 @@ def _register_with_ws(rid: str, prop: PropertyNodes) -> None:
         await _broadcast({
             "type": "property_updated",
             "rid": rid,
-            "data": await prop.to_json(),
+            "data": await prop.to_json_summary(),
         })
     prop.changed.connect(lambda: asyncio.ensure_future(_on_changed()))
 
@@ -158,7 +158,11 @@ async def patch_location(rid: str, body: dict):
     prop = _registry.get(rid)
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
-    gp = GeoPoint(lat=body["lat"], lon=body["lon"])
+    lat = body.get("lat")
+    lon = body.get("lon")
+    if lat is None or lon is None:
+        raise HTTPException(status_code=422, detail="lat and lon are required")
+    gp = GeoPoint(lat=lat, lon=lon)
     prop.precise_location.push(gp, "user")
     return {"status": "ok"}
 

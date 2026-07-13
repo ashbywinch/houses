@@ -102,8 +102,11 @@
     }
   });
 
-  document.addEventListener("htmx:beforeSwap", function () {
+  document.addEventListener("htmx:beforeSwap", function(evt) {
     var mc = document.getElementById("leaflet-map");
-    if (mc && mc._leaflet_map) { mc._leaflet_map.remove(); delete mc._leaflet_map; }
+    if (mc && mc._leaflet_map && evt.detail.target && evt.detail.target.id === 'leaflet-map') {
+      mc._leaflet_map.remove();
+      delete mc._leaflet_map;
+    }
   });
 })();

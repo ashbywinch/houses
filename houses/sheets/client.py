@@ -31,7 +31,7 @@ def _build_client() -> gspread.Client | None:
 
 
 def get_client() -> gspread.Client | None:
-    return get_sheets_client()
+    return _real_get_client()
 
 
 def _real_get_client() -> gspread.Client | None:

@@ -36,7 +36,7 @@ class TestSchoolNodes:
         class AssertingService:
             async def find_nearest(self, postcode, child_age, address="", requirement=None):
                 assert requirement == SchoolGender.BOYS, f"Expected BOYS got {requirement}"
-                assert child_age == 12, f"Expected 12 got {child_age}"
+                assert child_age == 11, f"Expected 11 got {child_age}"
                 return None
 
         from houses.services_provider import _request_services as _sp
@@ -64,7 +64,7 @@ class TestSchoolNodes:
         class AssertingService:
             async def find_nearest(self, postcode, child_age, address="", requirement=None):
                 assert requirement == SchoolGender.BOYS, f"Expected BOYS got {requirement}"
-                assert child_age == 7, f"Expected 7 got {child_age}"
+                assert child_age == 4, f"Expected 4 got {child_age}"
                 return None
 
         from houses.services_provider import _request_services as _sp

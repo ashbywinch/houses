@@ -11,7 +11,8 @@ class TestEpcNode:
         from houses.nodes.epc_node import EpcNode
 
         addr = UserInputNode[str]("addr_epc", str)
-        node = EpcNode("epc", best_address=addr)
+        pc = UserInputNode[str]("pc_epc", str)
+        node = EpcNode("epc", best_address=addr, postcode_node=pc)
         a = await node.attempt()
         assert not a.succeeded
 

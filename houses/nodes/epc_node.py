@@ -6,15 +6,17 @@ from houses.context import get_services
 
 
 class EpcNode(DerivedNode[dict]):
-    def __init__(self, node_id: str, *, best_address):
-        super().__init__(node_id, dict, (best_address,))
+    def __init__(self, node_id: str, *, best_address, postcode_node):
+        super().__init__(node_id, dict, (best_address, postcode_node))
 
-    async def compute(self, address: Attempt[str]) -> Attempt[dict]:
+    async def compute(self, address: Attempt[str],
+                      postcode: Attempt[str]) -> Attempt[dict]:
         if not address.succeeded:
             return self._impossible({"best_address": address})
         addr = address.value_or_none() or ""
+        postcode_val = postcode.value_or_none() or ""
         svc = get_services()
-        band = await svc.epc_service.lookup(addr)
+        band = await svc.epc_service.lookup(postcode_val, address=addr)
         if band:
             return Attempt.succeeded({"band": band, "potential": band})
         return Attempt.impossible("no EPC data")

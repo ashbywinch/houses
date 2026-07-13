@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { PropertySummary } from '../types'
 import CommutePill from './CommutePill.vue'
 
@@ -6,30 +7,29 @@ const props = defineProps<{
   rid: string
   data: PropertySummary
 }>()
-
-const address = props.data.best_address.succeeded
+const address = computed(() => props.data.best_address.succeeded
   ? props.data.best_address.value
-  : props.rid
+  : props.rid)
 
-const location = props.data.best_location.succeeded
+const location = computed(() => props.data.best_location.succeeded
   ? props.data.best_location.value
-  : null
+  : null)
 
-const price = props.data.rightmove_price.succeeded
+const price = computed(() => props.data.rightmove_price.succeeded
   ? props.data.rightmove_price.value
-  : null
+  : null)
 
-const bedrooms = props.data.rightmove_bedrooms.succeeded
+const bedrooms = computed(() => props.data.rightmove_bedrooms.succeeded
   ? props.data.rightmove_bedrooms.value
-  : null
+  : null)
 
-const monthlyCost = props.data.total_monthly_cost.succeeded
+const monthlyCost = computed(() => props.data.total_monthly_cost.succeeded
   ? props.data.total_monthly_cost.value
-  : null
+  : null)
 
-const mapUrl = location
-  ? `https://www.google.com/maps?q=${location.lat},${location.lon}`
-  : null
+const mapUrl = computed(() => location.value
+  ? `https://www.google.com/maps?q=${location.value.lat},${location.value.lon}`
+  : null)
 
 const rightmoveUrl = `https://www.rightmove.co.uk/properties/${props.rid}`
 

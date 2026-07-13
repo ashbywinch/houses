@@ -69,6 +69,9 @@ class Node(ABC, Generic[T]):
             "value": self._adapter.dump_python(attempt.value)
             if attempt.succeeded else None,
         }
+        result["succeeded"] = attempt.succeeded
+        result["pending"] = attempt.pending
+        result["impossible"] = attempt.impossible
         if attempt.impossible:
             result["error"] = attempt.error
         result["provenance"] = (await self.build_provenance()).to_dict()

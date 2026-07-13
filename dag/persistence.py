@@ -41,7 +41,9 @@ def _get_db() -> sqlite3.Connection:
 def _serialize_value(val: Any) -> str:
     if val is None:
         return ""
-    if isinstance(val, (str, int, float, bool)):
+    if isinstance(val, bool):
+        return json.dumps(val)
+    if isinstance(val, (str, int, float)):
         return str(val)
     try:
         ta = TypeAdapter(type(val))
@@ -55,7 +57,7 @@ def _serialize_value(val: Any) -> str:
 
 
 def _deserialize_value(raw: str) -> Any:
-    if not raw or raw == "None":
+    if not raw:
         return None
     try:
         d = json.loads(raw)
@@ -70,6 +72,8 @@ def _deserialize_value(raw: str) -> Any:
         except Exception:
             return d
     return d
+
+
 
 
 def init_db(db_path: str | None = None) -> None:
@@ -170,7 +174,7 @@ def load_node_data(property_id: str) -> dict[str, Any]:
 
 
 def save_node_result(node_id: str, result_dict: dict[str, Any],
-                     dep_timestamps: dict[str, float] | None = None) -> int:
+                     dep_timestamps: dict[str, str] | None = None) -> int:
     """Persist a node's to_json() output to the node_results table.
 
     Each call appends a new row. The most recent row is the current value.
@@ -198,13 +202,14 @@ def latest_node_result(node_id: str) -> dict[str, Any] | None:
         return None
     conn = _get_db()
     row = conn.execute(
-        "SELECT result_json, created_at FROM node_results"
+        "SELECT result_json, dep_timestamps, created_at FROM node_results"
         " WHERE node_id=? ORDER BY created_at DESC LIMIT 1",
         (node_id,),
     ).fetchone()
     if row is None:
         return None
     result = json.loads(row["result_json"])
+    result["_dep_timestamps"] = json.loads(row["dep_timestamps"]) if row["dep_timestamps"] else {}
     result["_persisted_at"] = row["created_at"]
     return result
 

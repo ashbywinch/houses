@@ -67,8 +67,7 @@ this derived node was last computed, it recomputes.
 
 ## Node Registry
 
-All nodes are declared in `houses/model/nodes.py` using the `@node()`
-decorator. The decorator registers the node in the global `NODES` dict.
+All nodes are declared in `houses/nodes/` using classes that inherit from
 
 ```python
 @node(id="my_value", kind=NodeKind.derived, deps=["dep_a", "dep_b"])
@@ -81,7 +80,7 @@ Node IDs must be unique. Dependencies are referenced by their node ID.
 
 ## Adding a New Node
 
-1. **Declare the node** in `houses/model/nodes.py` with the `@node()` decorator.
+1. **Declare the node** in `houses/nodes/` as a class inheriting from `DerivedNode` or `UserInputNode`.
    - The decorator argument `id` is the node's key throughout the system.
    - For `source` or `user_input` nodes, declare without a compute function:
 
@@ -140,62 +139,38 @@ GEOPOINT_NODES = {"rightmove_location", "geocode_location", "precise_location", 
 ## New DAG Convention (houses/nodes/)
 
 The DAG was replaced in 2026. Nodes now live in `houses/nodes/` using the
-`dag/` library (`ComputedNode`, `SourceNode`, `Attempt`, `Provenance`).
+`dag/` library (`DerivedNode`, `UserInputNode`, `Attempt`, `Provenance`).
 
 ### Every compute MUST return Attempt[T]
 
 No raw values, no `None`, no implicit returns. Every code path must end with
-either `Attempt.succeeded(value, provenance)` or `Attempt.impossible(reason, provenance)`.
+either `Attempt.succeeded(value)` or `Attempt.impossible(reason)`.
 
 ```python
 # ✅ Correct
 async def compute(self, dep: Attempt[str]) -> Attempt[int]:
-    if not dep.is_succeeded:
+    if not dep.succeeded:
         return self._impossible({"dep": dep})
-    return Attempt.succeeded(len(dep.value_or_none()), Provenance("my_service", description="..."))
+    return Attempt.succeeded(len(dep.value_or_none()))
 
-# ❌ Wrong — loses error and provenance
-return Attempt.impossible("failed")                          # missing provenance
 return None                                                  # not an Attempt at all
 return old_attempt_object_without_check                      # never assume succeeded
 ```
 
-### Provenance is mandatory on EVERY Attempt
-
-`Attempt.impossible` must include a `Provenance(label, description)` explaining
-what operation failed and where it happened:
-
-```python
-# ✅ Correct
-return Attempt.impossible("no school found",
-                           Provenance("GIAS CSV", description=f"near {postcode}"))
-
-# ❌ Wrong — user can't tell what failed or where
-return Attempt.impossible("no school found")
-```
-
-`Attempt.succeeded` must include provenance showing the data source:
-
-```python
-return Attempt.succeeded(
-    result,
-    Provenance("EPC API", description=f"EPC lookup for {address}"),
-)
-```
 
 ### No side effects in computed nodes
 
-Computed nodes must not push values into SourceNodes. Use a pure dependency
+Derived nodes must not push values into SourceNodes. Use a pure dependency
 chain instead:
 
 ```python
 # ✅ SchoolPostcodeNode: depends on school node, extracts postcode
-class SchoolPostcodeNode(ComputedNode[str]):
+class SchoolPostcodeNode(DerivedNode[str]):
     deps: (school_node,)  # signal chain handles staleness
 
     async def compute(self, school_attempt: Attempt[dict]) -> Attempt[str]:
-        if school_attempt.is_succeeded:
-            return Attempt.succeeded(school_attempt.value_or_none()["postcode"], ...)
+        if school_attempt.succeeded:
+            return Attempt.succeeded(school_attempt.value_or_none()["postcode"])
 
 # ❌ Side-effect approach (never do this):
 # school node pushes postcode to George's poi_src inside compute()
@@ -259,7 +234,7 @@ from houses.nodes.settings import persons_source  # no longer exists
 ```
 
 **Updating settings** at runtime uses the PATCH endpoint, which pushes
-new values into the SourceNode. The signal chain propagates the change
+new values into the UserInputNode. The signal chain propagates the change
 to all downstream computed nodes automatically:
 
 ```bash

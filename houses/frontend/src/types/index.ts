@@ -29,6 +29,7 @@ export interface SchoolValue {
   name: string
   ofsted: string
   distance_km: number
+  url: string
 }
 
 export interface MonthlyCostSummary {

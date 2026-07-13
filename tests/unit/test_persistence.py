@@ -212,8 +212,8 @@ class TestGeoPointPersistence:
         assert loaded["best_location"].value == gp
         assert isinstance(loaded["best_location"].value, GeoPoint)
 
-    def test_derived_geopoint_empty_string_loads_as_none(self):
-        """A previously-buggy "None" string loads back as None."""
+    def test_derived_geopoint_string_none_loads_as_string(self):
+        """The literal string 'None' is preserved, not treated as Python None."""
         from houses.model.persistence import get_db
 
         conn = get_db()
@@ -225,8 +225,8 @@ class TestGeoPointPersistence:
         )
         conn.commit()
         loaded = get_all_derived_values(RID)
-        assert loaded["best_location"].value is None
-        assert not isinstance(loaded["best_location"].value, str)
+        assert loaded["best_location"].value == "None"
+        assert isinstance(loaded["best_location"].value, str)
 
     def test_source_geopoint_stored_as_json_loads_as_geopoint(self):
         """Source values for GeoPoint nodes deserialize to GeoPoint on load."""

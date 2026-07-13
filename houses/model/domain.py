@@ -6,8 +6,8 @@ for costs (currency is in the object, not the variable name).
 
 Existing classes imported for convenience:
   - ``CostGroup``, ``JourneyLeg`` from ``houses.commute``
-  - ``School`` from ``houses.schools``
-  - ``CouncilTaxInfo`` from ``houses.property``
+  - ``School`` from ``houses.school``
+
 """
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ from houses.commute import (
     CostGroup,  # noqa: F401 — re-export
     JourneyLeg,  # noqa: F401 — re-export
 )
-from houses.council_tax_info import CouncilTaxInfo  # noqa: F401 — re-export
 from houses.school import School  # noqa: F401 — re-export
 
 if TYPE_CHECKING:

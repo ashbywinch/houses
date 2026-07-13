@@ -117,7 +117,7 @@ below shows the four layers and how data flows through them:
 │               External code reads derived values via resolve_property │
 │               or load_property_data — never by querying the DB       │
 │               directly.                                              │
-│  Files:       model/__init__.py, model/registry.py, model/nodes.py,  │
+│  Files:       model/__init__.py, model/registry.py, houses/nodes/,    │
 │               model/resolver.py, model/persistence.py                │
 │                                                                      │
 ├──────────────────────────────────────────────────────────────────────┤

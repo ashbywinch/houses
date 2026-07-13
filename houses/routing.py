@@ -187,17 +187,38 @@ def _outcode_from_postcode(postcode: str) -> str | None:
 
 def _in_congestion_zone(postcode: str) -> bool:
     oc = _outcode_from_postcode(postcode)
-    return oc in _CONGESTION_OUTCODES if oc else False
+    if oc:
+        return oc in _CONGESTION_OUTCODES
+    # Check coordinate strings ("lat,lon") — central London congestion zone box
+    if "," in postcode:
+        try:
+            lat, lon = postcode.split(",")
+            return 51.5 < float(lat) < 51.52 and -0.15 < float(lon) < 0.01
+        except (ValueError, TypeError):
+            pass
+    return False
 
 
 def _is_london_area(postcode: str) -> bool:
-    """Rough check: is this postcode in the TfL service area?"""
-    oc = _outcode_from_postcode(postcode)
-    if not oc:
-        return False
-    # All London postcode areas start with E, EC, N, NW, SE, SW, W, WC
-    return oc.startswith(("E", "EC", "N", "NW", "SE", "SW", "W", "WC"))
+    """Rough check: is this postcode in the TfL service area?
 
+    This is an OPTIMISATION, not a correctness gate.  A false positive
+    (trying TfL for an out-of-area destination) is harmless — the API
+    returns no routes and the caller falls through to driving.  A false
+    negative means we skip TfL for a London destination, still getting
+    a valid driving result.
+    """
+    oc = _outcode_from_postcode(postcode)
+    if oc:
+        return oc.startswith(("E", "EC", "N", "NW", "SE", "SW", "W", "WC"))
+    # Check coordinate strings ("lat,lon") — London bounding box
+    if "," in postcode:
+        try:
+            lat, lon = postcode.split(",")
+            return 51.3 < float(lat) < 51.7 and -0.5 < float(lon) < 0.3  # approx Greater London
+        except (ValueError, TypeError):
+            pass
+    return False
 
 # ---------------------------------------------------------------------------
 # Walking — Google Routes walking mode
@@ -256,7 +277,7 @@ async def _google_route_commute(origin: str | GeoPoint, dest: str | GeoPoint,
         "destination": _address_waypoint(dest),
         "travelMode": mode,
     }
-    mask = "routes.duration,routes.legs" if mode == "DRIVE" else "routes.duration,routes.distanceMeters"
+    mask = "routes.duration,routes.distanceMeters,routes.legs"
     data = await _google_routes_post(body, mask, timeout=15.0 if mode == "DRIVE" else 10.0)
     if data is None:
         return None
@@ -266,6 +287,7 @@ async def _google_route_commute(origin: str | GeoPoint, dest: str | GeoPoint,
         return None
     duration_sec = int(routes[0].get("duration", "0s").rstrip("s"))
     duration_min = round(duration_sec / 60)
+    distance_meters = routes[0].get("distanceMeters", 0)
 
     dest_str = dest if isinstance(dest, str) else f"{dest.lat},{dest.lon}"
     daily = None
@@ -274,6 +296,11 @@ async def _google_route_commute(origin: str | GeoPoint, dest: str | GeoPoint,
         daily = Money("0", "GBP")
     else:
         leg = JourneyLeg(mode=LegMode.DRIVE, duration_minutes=duration_min)
+        round_trip_km = (distance_meters / 1000) * 2
+        litres_per_100km = 235.214 / settings.petrol_mpg
+        litres_used = (round_trip_km / 100) * litres_per_100km
+        cost = round(litres_used * settings.petrol_price_per_litre, 2)
+        daily = Money(str(cost), "GBP")
     return Commute(
         destination_label="",
         destination_postcode=dest_str,
@@ -283,64 +310,9 @@ async def _google_route_commute(origin: str | GeoPoint, dest: str | GeoPoint,
         cost_groups=(
             CostGroup(
                 legs=(leg,),
+                cost=daily,
             ),
         ),
-    )
-
-    data = await _google_routes_post(body, "routes.duration,routes.legs", timeout=15.0)
-    if data is None:
-        return None
-
-    routes = data.get("routes", [])
-    if not routes:
-        return None
-
-    leg = routes[0].get("legs", [{}])[0]
-    duration_sec = int(routes[0].get("duration", "0s").rstrip("s"))
-    duration_min = round(duration_sec / 60)
-
-    steps = leg.get("steps", [])
-
-    total_bus_cost = 0.0
-    bus_cost_gbp = None
-    for s in steps:
-        if s.get("travelMode") != "TRANSIT":
-            continue
-        td = s.get("transitDetails", {})
-        if td.get("transitLine", {}).get("vehicle", {}).get("type") != "BUS":
-            continue
-        dep_stop = td.get("stopDetails", {}).get("departureStop", {})
-        arr_stop = td.get("stopDetails", {}).get("arrivalStop", {})
-        dep_name = dep_stop.get("name", "")
-        arr_name = arr_stop.get("name", "")
-        dep_coords = dep_stop.get("location", {}).get("latLng", {})
-        arr_coords = arr_stop.get("location", {}).get("latLng", {})
-        dep_point = {"lat": dep_coords.get("latitude"), "lon": dep_coords.get("longitude")} if dep_coords else None
-        arr_point = {"lat": arr_coords.get("latitude"), "lon": arr_coords.get("longitude")} if arr_coords else None
-        leg_cost = _bus_fare_for(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
-        if leg_cost is not None:
-            total_bus_cost += leg_cost
-
-    if total_bus_cost > 0:
-        bus_cost_gbp = total_bus_cost
-        daily_cost_gbp = Money(str(round(total_bus_cost, 2)), "GBP")
-    else:
-        daily_cost_gbp = None
-
-    return Commute(
-        destination_label="Lorena — Aldgate / City of London (Bus)",
-        destination_postcode=dest,
-        duration_minutes=duration_min,
-        daily_cost_gbp=daily_cost_gbp,
-        mode="transit",
-        cost_groups=(
-            CostGroup(
-                legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=duration_min or 0),),
-                cost=bus_cost_gbp,
-            ),
-        )
-        if bus_cost_gbp is not None
-        else (),
     )
 
 

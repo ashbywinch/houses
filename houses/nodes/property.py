@@ -76,6 +76,7 @@ class PropertyNodes:
         self.epc = EpcNode(
             f"{rid}/epc",
             best_address=self.best_address,
+            postcode_node=self.postcode,
         )
         self.council_tax = CouncilTaxNode(
             f"{rid}/council_tax",
@@ -250,8 +251,7 @@ class PropertyNodes:
             "best_location": await self.best_location.to_json(),
             "rightmove_url": await self.rightmove_url.to_json(),
             "rightmove_price": await self.rightmove_price.to_json(),
-            "rightmove_bedrooms": await self.rightmove_bedrooms.to_json(),
-            "postcode": await self.corrected_address.to_json(),
+            "postcode": await self.postcode.to_json(),
         }
 
     async def to_json_summary(self) -> dict[str, Any]:
@@ -299,7 +299,7 @@ class PropertyNodes:
             "rightmove_url": await self.rightmove_url.to_json(),
             "rightmove_price": await self.rightmove_price.to_json(),
             "rightmove_bedrooms": await self.rightmove_bedrooms.to_json(),
-            "postcode": await self.corrected_address.to_json(),
+            "postcode": await self.postcode.to_json(),
             "town_name": await self.town_name.to_json(),
             "location": {
                 "best_location": await self.best_location.to_json(),

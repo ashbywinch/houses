@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePropertiesStore } from '../stores/properties'
 import { patchAddress, patchLocation } from '../services/api'
@@ -14,12 +14,10 @@ const detail = computed(() => store.details[rid.value])
 const editingAddress = ref('')
 const editingLat = ref('')
 const editingLon = ref('')
+watch(() => route.params.rid, (newRid) => {
+  if (newRid) store.loadDetail(newRid as string)
+}, { immediate: true })
 
-onMounted(() => {
-  if (rid.value) {
-    store.loadDetail(rid.value)
-  }
-})
 
 function formatDuration(dur: unknown): string {
   if (!dur || typeof dur !== 'object') return '?'

@@ -6,9 +6,12 @@ import io
 import json
 import logging
 from contextlib import asynccontextmanager
+import os
+
 from typing import Annotated, Any
 
 from fastapi import FastAPI, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -112,6 +115,14 @@ app = FastAPI(
     title="Houses — Property Enrichment Engine",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.environ.get("CORS_ORIGINS", "").split(",") if os.environ.get("CORS_ORIGINS") else ["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -267,8 +278,10 @@ async def upsert_property(
                 insert_source_value(rid2, "rid", rid2, "Derived")
                 insert_source_value(rid2, "rightmove_url", enriched.url, "Browser extension")
                 insert_source_value(rid2, "rightmove_address", enriched.address, "Rightmove")
-                insert_source_value(rid2, "rightmove_bedrooms", str(enriched.bedrooms), "Rightmove")
-                insert_source_value(rid2, "rightmove_price", str(enriched.price), "Rightmove")
+                if enriched.bedrooms:
+                    insert_source_value(rid2, "rightmove_bedrooms", str(enriched.bedrooms), "Rightmove")
+                if enriched.price:
+                    insert_source_value(rid2, "rightmove_price", str(enriched.price), "Rightmove")
                 if enriched.approx_latitude is not None and enriched.approx_longitude is not None:
                     gp = GeoPoint(lat=enriched.approx_latitude, lon=enriched.approx_longitude)
                     insert_source_value(rid2, "rightmove_location", gp, "Rightmove map")

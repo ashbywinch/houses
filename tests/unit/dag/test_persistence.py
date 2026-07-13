@@ -66,8 +66,9 @@ class TestSerialisation:
     def test_empty_string_deserialises_to_none(self):
         assert _deserialize_value("") is None
 
-    def test_none_string_deserialises_to_none(self):
-        assert _deserialize_value("None") is None
+    def test_none_string_preserved_as_string(self):
+        """The literal string 'None' is preserved, not treated as Python None."""
+        assert _deserialize_value("None") == "None"
 
 
 class TestSourceValuePersistence:

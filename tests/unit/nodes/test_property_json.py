@@ -51,7 +51,7 @@ def _fake_services(monkeypatch):
                 type_of_establishment="community school",
                 postcode="SW1V 2QQ", website="",
                 ofsted_rating="Good", inspection_year="2022",
-                coords=None, statutory_low_age=None,
+                coords=GeoPoint(lat=51.5, lon=-0.13), statutory_low_age=None,
                 statutory_high_age=None,
             )
         svc.school_lookup = type("FakeSchoolService", (), {
