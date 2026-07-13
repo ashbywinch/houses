@@ -19,8 +19,17 @@ from houses.commute import Commute
 from houses.geo import GeoPoint
 from houses.nodes.settings import make_default_financials, make_default_persons, make_default_thresholds
 from houses.council_tax_info import CouncilTaxInfo
+from houses.council_tax import lookup_council_tax
+from houses.enricher import compute_lorena_commute, compute_petrol_cost, compute_simon_commute
+
+from houses.epc import lookup_epc
+from houses.location import _geocode_address, geocode
+from houses.model.persistence import load_property_data
 from houses.school import School
 from houses.school_gender import SchoolGender
+from houses.schools import compute_school_commute, find_nearest
+from houses.town_desc import generate_town_description
+from houses.walkability import enrich_walkability
 
 # ── Protocols ──────────────────────────────────────────────────────────
 
@@ -118,30 +127,20 @@ def _make_settings_source(node_id: str, value_type: type, default_factory):
 
 class _DefaultGeocoder:
     async def geocode_postcode(self, postcode: str) -> Attempt[GeoPoint]:
-        from houses.location import geocode
-
         return await geocode(postcode)
 
     async def geocode_address(self, address: str) -> Attempt[GeoPoint]:
-        from houses.location import _geocode_address
-
         return await _geocode_address(address)
 
 
 class _DefaultCommuteRouter:
     async def simon_commute(self, postcode: str) -> Attempt[Commute]:
-        from houses.enricher import compute_simon_commute
-
         return await compute_simon_commute(postcode)
 
     async def lorena_commute(self, postcode: str) -> Attempt[Commute]:
-        from houses.enricher import compute_lorena_commute
-
         return await compute_lorena_commute(postcode)
 
     async def petrol_cost(self, postcode: str) -> Attempt[Commute]:
-        from houses.enricher import compute_petrol_cost
-
         return await compute_petrol_cost(postcode)
 
 
@@ -153,42 +152,30 @@ class _DefaultSchoolLookup:
         address: str = "",
         requirement: SchoolGender = SchoolGender.BOYS,
     ) -> School | None:
-        from houses.schools import find_nearest
-
         sch = await find_nearest(postcode, child_age=child_age, address=address, requirement=requirement)
         return sch
 
     async def school_commute(self, postcode: str, school: School) -> Commute | None:
-        from houses.schools import compute_school_commute
-
         return await compute_school_commute(postcode, school)
 
 
 class _DefaultWalkability:
     async def enrich(self, lat: float, lng: float, address: str) -> dict[str, Any]:
-        from houses.walkability import enrich_walkability
-
         return await enrich_walkability(lat, lng, address)
 
 
 class _DefaultTownDesc:
     async def describe(self, town_name: str, postcode: str) -> str:
-        from houses.town_desc import generate_town_description
-
         return await generate_town_description(town_name, postcode)
 
 
 class _DefaultEPCLookup:
     async def lookup(self, postcode: str, address: str = "") -> str:
-        from houses.epc import lookup_epc
-
         return await lookup_epc(postcode, address)
 
 
 class _DefaultCouncilTax:
     async def lookup(self, postcode: str, address: str = "") -> Attempt[CouncilTaxInfo]:
-        from houses.council_tax import lookup_council_tax
-
         return await lookup_council_tax(postcode, address)
 
 
@@ -208,9 +195,7 @@ class _DefaultRailFare:
 
 class _DefaultPersistence:
     def load_property_data(self, rid: str) -> Any:
-        from houses.model.persistence import load_property_data as _load
-
-        return _load(rid)
+        return load_property_data(rid)
 
 
 # ── DI Container ──────────────────────────────────────────────────────

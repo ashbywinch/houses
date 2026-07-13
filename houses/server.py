@@ -149,6 +149,7 @@ app.include_router(web_router)
 @app.middleware("http")
 async def _request_context(request, call_next):
     """Set up per-request context (geo cache, geo state, services, bus fares)."""
+    import houses.bus_fare_reader as _bfr
     import houses.context as _ctx
     from houses.bus_journey import BusJourneyRegistry
     from houses.location import _geo_state_var, _GeoState
@@ -157,11 +158,11 @@ async def _request_context(request, call_next):
     geo_cache_token = _loc._geo_cache_var.set({})
     geo_state_token = _geo_state_var.set(_GeoState())
     svc_token = _ctx._request_services.set(Services())
-    bus_token = _ctx._request_bus_fares.set(BusJourneyRegistry())
+    bus_token = _bfr._request_bus_fares.set(BusJourneyRegistry())
     try:
         return await call_next(request)
     finally:
-        _ctx._request_bus_fares.reset(bus_token)
+        _bfr._request_bus_fares.reset(bus_token)
         _ctx._request_services.reset(svc_token)
         _geo_state_var.reset(geo_state_token)
         _loc._geo_cache_var.reset(geo_cache_token)

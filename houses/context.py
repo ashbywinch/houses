@@ -28,7 +28,7 @@ from __future__ import annotations
 import contextvars
 from typing import Any
 
-from houses.bus_journey import BusJourneyRegistry
+from houses.bus_fare_reader import get_bus_fare_reader
 from houses.rail_fares import RailFareRegistry
 from houses.services import Services
 from houses.sheets import _real_get_client
@@ -36,10 +36,6 @@ from houses.sheets import _real_get_client
 # ── Context variables ─────────────────────────────────────────────
 
 _request_services: contextvars.ContextVar[Services | None] = contextvars.ContextVar("_request_services", default=None)
-
-_request_bus_fares: contextvars.ContextVar[BusJourneyRegistry | None] = contextvars.ContextVar(
-    "_request_bus_fares", default=None
-)
 
 _request_rail_fares: contextvars.ContextVar[RailFareRegistry | None] = contextvars.ContextVar(
     "_request_rail_fares", default=None
@@ -66,14 +62,6 @@ def get_rail_fare_registry() -> RailFareRegistry:
         reg = RailFareRegistry()
         _request_rail_fares.set(reg)
     return reg
-
-
-def get_bus_fare_reader():
-    reader = _request_bus_fares.get()
-    if reader is None:
-        reader = BusJourneyRegistry()
-        _request_bus_fares.set(reader)
-    return reader
 
 
 def get_sheets_client() -> Any | None:

@@ -14,8 +14,8 @@ from money import Money
 
 from dag.attempt import Attempt
 from houses.api_cache import cached_async_client, get_cached, set_cached
+from houses.bus_fare_reader import get_bus_fare_reader
 from houses.bus_journey import cheapest_round_trip
-from houses.context import get_bus_fare_reader
 from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.endpoint_client import EndpointClient
