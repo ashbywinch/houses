@@ -28,6 +28,18 @@ def _ensure_queue() -> None:
         _stale_queue = asyncio.Queue()
 
 
+async def flush_processor() -> None:
+    """Synchronously drain the stale queue — used in tests after pushing
+    source values, before reading derived nodes."""
+    _ensure_queue()
+    while not _stale_queue.empty():
+        try:
+            node = _stale_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+        await node.refresh()
+
+
 async def _processor() -> None:
     """Single consumer: pop stale nodes from the queue and refresh them."""
     _ensure_queue()
@@ -39,10 +51,6 @@ async def _processor() -> None:
                 _after_refresh(node)
         except Exception:
             pass
-
-
-# ── DerivedNode ──────────────────────────────────────────────────────
-
 
 class DerivedNode(Node[T], Generic[T]):
     """A node whose value is computed from other nodes.
@@ -70,15 +78,11 @@ class DerivedNode(Node[T], Generic[T]):
             dep.changed.connect(slot)
 
     def _on_dep_changed(self) -> None:
-        """A dependency changed — push this node to the stale queue.
-
-        This fires both for initial computation (dep was just pushed)
-        and for subsequent changes.  The processor checks _is_stale()
-        which returns True when _cached is None (never computed) or
-        when dep timestamps are newer.
-        """
+        """A dependency changed — push this node to the stale queue
+        so the processor recomputes it."""
         _stale_queue.put_nowait(self)
         self.changed.emit()
+
     def _is_stale(self) -> bool:
         if self._cached is None:
             return True
@@ -95,20 +99,22 @@ class DerivedNode(Node[T], Generic[T]):
     async def attempt(self) -> Attempt[T]:
         """Return the cached value.
 
-        On first call (no cached value) computes synchronously.  After
-        that, reads are instant unless stale, in which case refresh()
-        runs here too.  The processor handles background refreshes for
-        nodes that aren't explicitly read.
+        On first call (no cached value) computes synchronously — no
+        concurrent writer exists yet.  After that, reads are instant
+        unless stale (dep changed), in which case refresh() runs here.
+        The processor handles background refreshes for nodes that
+        aren't explicitly read.
         """
         if self._cached is not None:
             if self._is_stale():
                 await self.refresh()
             return self._cached
-        # First compute (no concurrent writer exists yet)
+        # First compute (no concurrent writer possible)
         await self.refresh()
         if self._cached is not None:
             return self._cached
         return Attempt.pending()
+
     async def refresh(self) -> None:
         """Recompute if stale, persist, and emit changed."""
         if not self._is_stale():
