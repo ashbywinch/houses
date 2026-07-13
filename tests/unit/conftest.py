@@ -55,3 +55,15 @@ def _sqlite_memory():
     per.init_db()
     yield
     per._get_db = saved
+
+@pytest.fixture(autouse=True)
+def _no_geocoding(monkeypatch):
+    """Prevent real geocoding API calls during unit tests.
+
+    The old model resolver's best_location node calls _geocode_address
+    for single-property addresses. Unit tests must not hit Google's API.
+    """
+    async def fake_geocode(_address: str) -> None:
+        return None
+
+    monkeypatch.setattr("houses.model.property._geocode_address", fake_geocode)

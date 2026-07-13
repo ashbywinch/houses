@@ -49,6 +49,8 @@ class SecondarySchoolNode(DerivedNode[dict]):
         school = await svc.school_lookup.find_nearest(
             f"{loc.lat},{loc.lon}", child_age=11,
         )
+        if school is None:
+            return Attempt.impossible("no secondary school found")
         result = {
             "name": school.name,
             "ofsted": school.ofsted_rating,

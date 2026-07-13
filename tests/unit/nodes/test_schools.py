@@ -72,3 +72,33 @@ async def test_school_location_node_fails_without_school():
     node = SchoolLocationNode("sln", school_node=school)
     a = await node.attempt()
     assert not a.succeeded
+
+@pytest.mark.asyncio
+async def test_secondary_school_returns_impossible_when_no_school_found():
+    """When school lookup returns None, secondary school must return
+    Attempt.impossible (not crash with AttributeError)."""
+    from houses.nodes.schools import SecondarySchoolNode
+
+    loc = UserInputNode[GeoPoint]("loc_ss3", GeoPoint)
+    loc.push(GeoPoint(51.5, -0.1), "test")
+    addr = UserInputNode[str]("addr_ss3", str)
+    addr.push("10 High St, London, SW1V 2QQ", "test")
+    node = SecondarySchoolNode("ss3", best_location=loc, best_address=addr)
+    a = await node.attempt()
+    assert not a.succeeded
+    assert "no secondary school found" in a.error
+
+
+@pytest.mark.asyncio
+async def test_primary_school_returns_impossible_when_no_school_found():
+    """Primary school must return Attempt.impossible when lookup returns None."""
+    from houses.nodes.schools import PrimarySchoolNode
+
+    loc = UserInputNode[GeoPoint]("loc_ps3", GeoPoint)
+    loc.push(GeoPoint(51.5, -0.1), "test")
+    addr = UserInputNode[str]("addr_ps3", str)
+    addr.push("10 High St, London, SW1V 2QQ", "test")
+    node = PrimarySchoolNode("ps3", best_location=loc, best_address=addr)
+    a = await node.attempt()
+    assert not a.succeeded
+    assert "no primary school found" in a.error
