@@ -9,7 +9,7 @@ from typing import Any
 
 from money import Money
 
-from dag.attempt import Attempt
+from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
@@ -115,7 +115,6 @@ class _CommuteInputNode(UserInputNode[dict]):
         return Attempt.pending()
 
     async def build_provenance(self):
-        from dag.attempt import Provenance
         return Provenance.from_label(self._source_label)
 
 

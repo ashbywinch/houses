@@ -18,8 +18,9 @@ from dag.user_input_node import UserInputNode
 from houses.commute import Commute
 from houses.geo import GeoPoint
 from houses.nodes.settings import make_default_financials, make_default_persons, make_default_thresholds
-from houses.property import CouncilTaxInfo
-from houses.schools import School, SchoolGender
+from houses.council_tax_info import CouncilTaxInfo
+from houses.school import School
+from houses.school_gender import SchoolGender
 
 # ── Protocols ──────────────────────────────────────────────────────────
 

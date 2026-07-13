@@ -18,7 +18,8 @@ from houses.model.domain import (
     Schools,
     Walkability,
 )
-from houses.schools import School, SchoolGender
+from houses.school import School
+from houses.school_gender import SchoolGender
 
 
 class TestPerson:

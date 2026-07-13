@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dag.attempt import Attempt
+from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
 
 
@@ -14,5 +14,4 @@ class ParkAndRideAugmentNode(DerivedNode[dict]):
         return Attempt.succeeded({"park_and_ride": True})
 
     async def build_provenance(self):
-        from dag.attempt import Provenance
         return Provenance(label="park_and_ride")

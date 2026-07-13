@@ -15,6 +15,7 @@ from money import Money
 from dag.attempt import Attempt
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.bus_journey import cheapest_round_trip
+from houses.context import get_bus_fare_reader
 from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.endpoint_client import EndpointClient
@@ -39,8 +40,6 @@ def _bus_fare_for(
 
     Returns the cost as a float, or ``None`` if no fare is found.
     """
-    from houses.context import get_bus_fare_reader
-
     fares_r = get_bus_fare_reader()
     fares = fares_r.fares_for_stops(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
     cheapest = cheapest_round_trip(fares, fares_r.national_max_single)

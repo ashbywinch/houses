@@ -19,7 +19,8 @@ def _fake_svc():
 async def test_school_location_node_returns_geopoint():
     """SchoolLocationNode must return the school's coordinates as GeoPoint."""
     from dag.user_input_node import UserInputNode
-    from houses.schools import School, SchoolGender
+    from houses.school import School
+    from houses.school_gender import SchoolGender
 
     loc = UserInputNode[GeoPoint]("loc", GeoPoint)
     loc.push(GeoPoint(51.5, -0.37), "test")
@@ -55,7 +56,8 @@ async def test_school_location_node_returns_geopoint():
 async def test_school_node_output_has_url():
     """School node output must contain 'url' and 'coords' keys."""
     from dag.user_input_node import UserInputNode
-    from houses.schools import School, SchoolGender
+    from houses.school import School
+    from houses.school_gender import SchoolGender
 
     loc = UserInputNode[GeoPoint]("loc2", GeoPoint)
     loc.push(GeoPoint(51.5, -0.37), "test")

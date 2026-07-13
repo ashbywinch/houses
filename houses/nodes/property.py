@@ -18,7 +18,7 @@ from houses.nodes.monthly_costs import (
     TotalMonthlyHousingCostNode,
     YearlySinkingFundNode,
 )
-from houses.nodes.schools import PrimarySchoolNode, SecondarySchoolNode
+from houses.nodes.schools import PrimarySchoolNode, SchoolLocationNode, SecondarySchoolNode
 from houses.nodes.transit import TransitNode, WalkLegCheckNode
 
 
@@ -179,7 +179,6 @@ class PropertyNodes:
                                    else None)
                     if school_node is None:
                         continue
-                    from houses.nodes.schools import SchoolLocationNode
                     poi_src = SchoolLocationNode(
                         f"{self.rid}/{key}/poi",
                         school_node=school_node,

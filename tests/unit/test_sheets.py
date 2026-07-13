@@ -6,7 +6,8 @@ from money import Money
 from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.geo import GeoPoint
 from houses.property import EnrichedProperty
-from houses.schools import School, SchoolGender
+from houses.school import School
+from houses.school_gender import SchoolGender
 from houses.sheets import (
     _FORMULA_COLUMNS,
     _USER_COLUMNS,
@@ -201,7 +202,7 @@ def test_row_values_with_full_enrichment():
 
 
 def test_row_values_with_council_tax():
-    from houses.property import CouncilTaxInfo
+    from houses.council_tax_info import CouncilTaxInfo
 
     ep = EnrichedProperty(
         url="https://www.rightmove.co.uk/properties/456",

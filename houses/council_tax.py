@@ -10,7 +10,7 @@ from pathlib import Path
 
 from dag.attempt import Attempt
 from houses.api_cache import cached_sync_client, get_cached, set_cached
-from houses.property import CouncilTaxInfo
+from houses.council_tax_info import CouncilTaxInfo
 
 logger = logging.getLogger(__name__)
 

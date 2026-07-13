@@ -26,7 +26,7 @@ class TestSchoolNodes:
         from dag.user_input_node import UserInputNode
         from houses.geo import GeoPoint
         from houses.nodes.schools import SecondarySchoolNode
-        from houses.schools import SchoolGender
+        from houses.school_gender import SchoolGender
 
         loc = UserInputNode[GeoPoint]("loc", GeoPoint)
         loc.push(GeoPoint(51.5, -0.37), "test")
@@ -54,7 +54,7 @@ class TestSchoolNodes:
         from dag.user_input_node import UserInputNode
         from houses.geo import GeoPoint
         from houses.nodes.schools import PrimarySchoolNode
-        from houses.schools import SchoolGender
+        from houses.school_gender import SchoolGender
 
         loc = UserInputNode[GeoPoint]("loc", GeoPoint)
         loc.push(GeoPoint(51.5, -0.37), "test")
@@ -97,7 +97,7 @@ class TestCouncilTaxNode:
             async def lookup(self, postcode, address=""):
                 captured["postcode"] = postcode
                 from dag.attempt import Attempt
-                from houses.property import CouncilTaxInfo
+                from houses.council_tax_info import CouncilTaxInfo
                 return Attempt.succeeded(CouncilTaxInfo(band="D", yearly_cost=1800.0))
 
         import houses.context as ctx

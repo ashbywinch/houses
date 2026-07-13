@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from houses.commute import Commute, CommuteBreakdown
-from houses.schools import School
+from houses.council_tax_info import CouncilTaxInfo
+from houses.location import resolve_house_location
+from houses.school import School
 
 if TYPE_CHECKING:
     from houses.geo import GeoPoint
@@ -41,8 +43,6 @@ class Property:
 
     async def location(self) -> GeoPoint | None:
         """Return the best spatial coordinate for this property."""
-        from houses.location import resolve_house_location
-
         return await resolve_house_location(
             postcode=self.postcode,
             address=self.address,
@@ -51,15 +51,6 @@ class Property:
             approx_lat=None,
             approx_lng=None,
         )
-
-
-@dataclass(frozen=True)
-class CouncilTaxInfo:
-    """Council tax band, cost, and evidence source."""
-
-    band: str = ""
-    yearly_cost: float | None = None
-    evidence_url: str = ""
 
 
 @dataclass

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dag.attempt import Attempt
+from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
 from dag.node import Node
+from houses.context import get_services
 from houses.geo import GeoPoint
 
 
@@ -15,8 +16,6 @@ class PrimarySchoolNode(DerivedNode[dict]):
                       address: Attempt[str]) -> Attempt[dict]:
         if not location.succeeded:
             return self._impossible({"best_location": location})
-        from houses.context import get_services
-
         loc = location.value_or_none()
         svc = get_services()
         school = await svc.school_lookup.find_nearest(
@@ -31,7 +30,6 @@ class PrimarySchoolNode(DerivedNode[dict]):
         })
 
     async def build_provenance(self):
-        from dag.attempt import Provenance
         return Provenance(label="GIAS CSV")
 
 
@@ -44,8 +42,6 @@ class SecondarySchoolNode(DerivedNode[dict]):
                       address: Attempt[str]) -> Attempt[dict]:
         if not location.succeeded:
             return self._impossible({"best_location": location})
-        from houses.context import get_services
-
         loc = location.value_or_none()
         svc = get_services()
         school = await svc.school_lookup.find_nearest(
@@ -60,7 +56,6 @@ class SecondarySchoolNode(DerivedNode[dict]):
         })
 
     async def build_provenance(self):
-        from dag.attempt import Provenance
         return Provenance(label="GIAS CSV")
 
 
@@ -74,5 +69,4 @@ class SchoolLocationNode(DerivedNode[str]):
         return Attempt.succeeded("school_location")
 
     async def build_provenance(self):
-        from dag.attempt import Provenance
         return Provenance(label="school_location")

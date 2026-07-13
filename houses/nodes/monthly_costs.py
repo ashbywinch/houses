@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from dag.attempt import Attempt
+from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
 
 
@@ -28,7 +28,6 @@ class CommuteBreakdownNode(DerivedNode[dict]):
         return Attempt.succeeded({"yearly_total_gbp": commute_total})
 
     async def build_provenance(self):
-        from dag.attempt import Provenance
         return Provenance(label="commute_breakdown")
 
 
@@ -62,7 +61,6 @@ class MonthlyMortgagePaymentNode(DerivedNode[float]):
         return Attempt.succeeded(round(monthly, 2))
 
     async def build_provenance(self):
-        from dag.attempt import Provenance
         return Provenance(label="mortgage_formula")
 
 
@@ -87,7 +85,6 @@ class YearlySinkingFundNode(DerivedNode[float]):
         return Attempt.succeeded(round(float(p) * rate, 2))
 
     async def build_provenance(self):
-        from dag.attempt import Provenance
         return Provenance(label="sinking_fund_formula")
 
 
@@ -119,5 +116,4 @@ class TotalMonthlyHousingCostNode(DerivedNode[float]):
         return Attempt.succeeded(round(total, 2))
 
     async def build_provenance(self):
-        from dag.attempt import Provenance
         return Provenance(label="total_monthly_formula")

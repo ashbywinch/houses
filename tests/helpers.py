@@ -18,8 +18,9 @@ from money import Money
 from dag.attempt import Attempt
 from houses.commute import Commute
 from houses.geo import GeoPoint
-from houses.property import CouncilTaxInfo
-from houses.schools import School, SchoolGender
+from houses.council_tax_info import CouncilTaxInfo
+from houses.school import School
+from houses.school_gender import SchoolGender
 from houses.services import Services
 
 # ── Individual Fake Services ──────────────────────────────────────────

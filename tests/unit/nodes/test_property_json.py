@@ -23,7 +23,8 @@ def _fake_services(monkeypatch):
 
     from dag.attempt import Attempt
     from houses.commute import Commute
-    from houses.schools import School, SchoolGender
+    from houses.school import School
+    from houses.school_gender import SchoolGender
 
     async def fake_get_commute(origin, dest, *, has_car, max_walk_minutes):
         return Attempt.succeeded(

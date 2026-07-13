@@ -33,7 +33,7 @@ from houses.location import (
 from houses.property import EnrichedProperty
 from houses.rail_fares import RailFareRegistry
 from houses.rightmove_scraper import scrape as scrape_rightmove
-from houses.schools import SchoolGender
+from houses.school_gender import SchoolGender
 from houses.services import Services
 from houses.stations import Station
 from houses.walkability import KNOWN_COUNTIES

@@ -18,7 +18,7 @@ from money import Money
 from houses.commute import Commute, LegMode
 from houses.config import settings
 from houses.property import EnrichedProperty
-from houses.schools import School
+from houses.school import School
 from houses.sheets.tab import Tab
 
 logger = logging.getLogger(__name__)

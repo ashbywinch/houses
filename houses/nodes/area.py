@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from dag.attempt import Attempt
+from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
 from dag.node import Node
+from houses.context import get_services
 from houses.geo import GeoPoint
+from houses.walkability import _extract_town
 
 
 class WalkabilityNode(DerivedNode[dict]):
@@ -13,8 +15,6 @@ class WalkabilityNode(DerivedNode[dict]):
 
     async def compute(self, location: Attempt[GeoPoint],
                       address: Attempt[str]) -> Attempt[dict]:
-        from houses.context import get_services
-
         if not location.succeeded:
             return self._impossible({"best_location": location})
         loc = location.value_or_none()
@@ -23,7 +23,6 @@ class WalkabilityNode(DerivedNode[dict]):
         return Attempt.succeeded(result)
 
     async def build_provenance(self):
-        from dag.attempt import Provenance
         return Provenance(label="walkability")
 
 
@@ -32,8 +31,6 @@ class TownDescNode(DerivedNode[dict]):
         super().__init__(node_id, dict, (best_location,))
 
     async def compute(self, location: Attempt[GeoPoint]) -> Attempt[dict]:
-        from houses.context import get_services
-
         if not location.succeeded:
             return self._impossible({"best_location": location})
         loc = location.value_or_none()
@@ -42,7 +39,6 @@ class TownDescNode(DerivedNode[dict]):
         return Attempt.succeeded({"description": desc})
 
     async def build_provenance(self):
-        from dag.attempt import Provenance
         return Provenance(label="LLM")
 
 
@@ -54,7 +50,6 @@ class TownNode(DerivedNode[str]):
     def compute(self, address: Attempt[str]) -> Attempt[str]:
         if not address.succeeded:
             return self._impossible({"best_address": address})
-        from houses.walkability import _extract_town
         addr = address.value_or_none() or ""
         town = _extract_town(addr)
         if town:
@@ -62,5 +57,4 @@ class TownNode(DerivedNode[str]):
         return Attempt.impossible("no town found in address")
 
     async def build_provenance(self):
-        from dag.attempt import Provenance
         return Provenance(label="address")

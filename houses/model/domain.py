@@ -21,8 +21,8 @@ from houses.commute import (
     CostGroup,  # noqa: F401 — re-export
     JourneyLeg,  # noqa: F401 — re-export
 )
-from houses.property import CouncilTaxInfo  # noqa: F401 — re-export
-from houses.schools import School  # noqa: F401 — re-export
+from houses.council_tax_info import CouncilTaxInfo  # noqa: F401 — re-export
+from houses.school import School  # noqa: F401 — re-export
 
 if TYPE_CHECKING:
     from pint import Quantity as _Quantity

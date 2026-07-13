@@ -16,7 +16,8 @@ from houses.enricher import (
     compute_commute_breakdown,
 )
 from houses.geo import GeoPoint
-from houses.schools import School, SchoolGender
+from houses.school import School
+from houses.school_gender import SchoolGender
 from houses.stations import Station
 from houses.stations import find as find_station
 from houses.transit_route import _format_route_summary, _next_weekday_date_params, _pick_best_journey

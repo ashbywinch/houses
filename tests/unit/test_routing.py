@@ -402,7 +402,9 @@ class TestSchoolCommute:
     @pytest.mark.asyncio
     async def test_delegates_to_get_commute(self, monkeypatch):
         """compute_school_commute calls get_commute with has_car=False, max_walk_minutes=20."""
-        from houses.schools import School, SchoolGender, compute_school_commute
+        from houses.school import School
+        from houses.school_gender import SchoolGender
+        from houses.schools import compute_school_commute
 
         captured = {}
 

@@ -1,8 +1,10 @@
 """Tests for data models."""
 
 from houses.commute import Commute, CommuteBreakdown
-from houses.property import CouncilTaxInfo, EnrichedProperty, Property
-from houses.schools import School, SchoolGender
+from houses.council_tax_info import CouncilTaxInfo
+from houses.property import EnrichedProperty, Property
+from houses.school import School
+from houses.school_gender import SchoolGender
 
 
 def test_property_payload() -> None:

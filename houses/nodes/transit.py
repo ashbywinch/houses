@@ -7,7 +7,7 @@ from enum import Enum
 from money import Money
 from pint import Quantity
 
-from dag.attempt import Attempt
+from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.geo import GeoPoint
@@ -219,7 +219,6 @@ class TransitNode(DerivedNode[dict]):
         return result
 
     async def build_provenance(self):
-        from dag.attempt import Provenance
         description = ""
         if self._commute_cache:
             description = f"transit to {self._commute_cache.label}"

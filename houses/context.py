@@ -26,12 +26,12 @@ Usage in tests::
 from __future__ import annotations
 
 import contextvars
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from houses.bus_journey import BusJourneyRegistry
-    from houses.rail_fares import RailFareRegistry
-    from houses.services import Services
+from houses.bus_journey import BusJourneyRegistry
+from houses.rail_fares import RailFareRegistry
+from houses.services import Services
+from houses.sheets import _real_get_client
 
 # ── Context variables ─────────────────────────────────────────────
 
@@ -53,9 +53,6 @@ _request_sheets_client: contextvars.ContextVar[Any | None] = contextvars.Context
 
 
 def get_services():
-    """Return the per-request Services, creating a default one if unset."""
-    from houses.services import Services
-
     svc = _request_services.get()
     if svc is None:
         svc = Services()
@@ -64,20 +61,14 @@ def get_services():
 
 
 def get_rail_fare_registry() -> RailFareRegistry:
-    """Return the per-request RailFareRegistry, creating a default if unset."""
-    from houses.rail_fares import RailFareRegistry as _RailFareRegistry
-
     reg = _request_rail_fares.get()
     if reg is None:
-        reg = _RailFareRegistry()
+        reg = RailFareRegistry()
         _request_rail_fares.set(reg)
     return reg
 
 
 def get_bus_fare_reader():
-    """Return the per-request BusJourneyRegistry, creating a default if unset."""
-    from houses.bus_journey import BusJourneyRegistry
-
     reader = _request_bus_fares.get()
     if reader is None:
         reader = BusJourneyRegistry()
@@ -95,6 +86,4 @@ def get_sheets_client() -> Any | None:
     client = _request_sheets_client.get()
     if client is not None:
         return client
-    from houses.sheets import _real_get_client
-
     return _real_get_client()

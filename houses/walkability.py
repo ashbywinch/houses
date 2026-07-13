@@ -11,6 +11,7 @@ import httpx
 from houses.api_cache import cached_async_client, with_cache
 from houses.config import settings
 from houses.geo import GeoPoint
+from houses.location import PropertyLocation
 from houses.retry import retry_async
 
 logger = logging.getLogger(__name__)
@@ -89,8 +90,6 @@ def _extract_town(address: str) -> str:
 
 async def _extract_town_centre(lat: float, lng: float, town: str) -> GeoPoint | None:
     """Resolve a town name to coordinates, used for walkability enrichment."""
-    from houses.location import PropertyLocation
-
     loc = await PropertyLocation.from_town(town)
     return loc.coordinates.value_or_none()
 

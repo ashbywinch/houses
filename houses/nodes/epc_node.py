@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dag.attempt import Attempt
+from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
+from houses.context import get_services
 
 
 class EpcNode(DerivedNode[dict]):
@@ -11,8 +12,6 @@ class EpcNode(DerivedNode[dict]):
     async def compute(self, address: Attempt[str]) -> Attempt[dict]:
         if not address.succeeded:
             return self._impossible({"best_address": address})
-        from houses.context import get_services
-
         addr = address.value_or_none() or ""
         svc = get_services()
         band = await svc.epc_service.lookup(addr)
@@ -21,7 +20,6 @@ class EpcNode(DerivedNode[dict]):
         return Attempt.impossible("no EPC data")
 
     async def build_provenance(self):
-        from dag.attempt import Provenance
         return Provenance(label="EPC API")
 
 
@@ -38,8 +36,6 @@ class CouncilTaxNode(DerivedNode[dict]):
             if not postcode.succeeded:
                 extra["postcode_node"] = postcode
             return self._impossible(extra)
-        from houses.context import get_services
-
         addr = address.value_or_none() or ""
         svc = get_services()
         result = await svc.council_tax_service.lookup(postcode.value_or_none() or "", address=addr)
@@ -49,5 +45,4 @@ class CouncilTaxNode(DerivedNode[dict]):
         return Attempt.impossible("no council tax data")
 
     async def build_provenance(self):
-        from dag.attempt import Provenance
         return Provenance(label="Council Tax")

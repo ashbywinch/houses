@@ -12,7 +12,8 @@ from money import Money
 from houses.commute import Commute, CommuteBreakdown
 from houses.config import settings
 from houses.enrichment_runner import header_to_enrichment_field, run_backfill_enrichment
-from houses.property import CouncilTaxInfo, EnrichedProperty
+from houses.council_tax_info import CouncilTaxInfo
+from houses.property import EnrichedProperty
 from houses.server import app
 from houses.services import Services
 from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS
