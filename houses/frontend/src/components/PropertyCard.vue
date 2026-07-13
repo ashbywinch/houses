@@ -104,11 +104,11 @@ function schoolCommute(commutes: Record<string, { commute: unknown }> | undefine
       <div v-if="bedrooms" class="card__specs">{{ bedrooms }} bed</div>
 
       <!-- Walk to town -->
-      <div v-if="data.walkability?.succeeded && location" class="card__row card__row--section card__commutes">
+      <div v-if="data.walkability?.succeeded && location && data.walkability.value?.walk_to_town_minutes != null" class="card__row card__row--section card__commutes">
         <span class="commute-unit">
           <span class="card__metric-label">{{ (data as any).town_name?.value || (data as any).town_name || 'Town' }}</span>
           <a :href="dirUrl(location.lat, location.lon, (data as any).town_name?.value || 'Town')" class="pill-link" target="_blank" rel="noopener">
-            <CommutePill :label="''" :duration="Math.round((data.walkability.value as any).walk_to_town_minutes || 0)" mode="walk" :cost="null" :goodMax="15" :fineMax="30" />
+            <CommutePill :label="''" :duration="Math.round(data.walkability.value.walk_to_town_minutes)" mode="walk" :cost="null" :goodMax="15" :fineMax="30" />
           </a>
         </span>
       </div>

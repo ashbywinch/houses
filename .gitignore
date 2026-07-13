@@ -85,4 +85,3 @@ data/dag.db
 data/dag.db-shm
 data/dag.db-wal
 tools/captures/
-data/edubaseall_enriched.csv
