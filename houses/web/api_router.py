@@ -183,16 +183,6 @@ async def get_settings():
     }
 
 
-@api_router.get("/settings/decomposed")
-async def get_settings_decomposed():
-    svc = get_services()
-    return {
-        "persons": await svc.persons_source.to_json(),
-        "financial": await svc.financial_source.to_json(),
-        "commute_thresholds": await svc.commute_thresholds_source.to_json(),
-    }
-
-
 @api_router.patch("/settings/persons")
 async def patch_persons(body: list = Body()):  # noqa: B008
     get_services().persons_source.push(body, "user")
