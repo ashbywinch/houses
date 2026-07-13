@@ -99,17 +99,24 @@ class PropertyNodes:
         )
 
         # ── School Nodes ───────────────────────────────────────────────
+        # Find the first child person's gender for school filtering
+        _school_req = "mixed"
+        for p in (self._svc.persons_source._value or []):
+            if p.get("is_child") if isinstance(p, dict) else p.is_child:
+                _school_req = p.get("gender", "mixed") if isinstance(p, dict) else p.gender
+                break
         self.primary_school = PrimarySchoolNode(
             f"{rid}/primary_school",
             best_location=self.best_location,
             best_address=self.best_address,
+            requirement=_school_req,
         )
         self.secondary_school = SecondarySchoolNode(
             f"{rid}/secondary_school",
             best_location=self.best_location,
             best_address=self.best_address,
+            requirement=_school_req,
         )
-
         # ── Commute Pipeline ────────────────────────────────────────────
         self._build_commute_pipeline()
 

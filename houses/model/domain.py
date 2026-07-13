@@ -43,10 +43,10 @@ class Person:
 
     name: str
     has_car: bool
+    gender: str = "mixed"
     is_child: bool = False
     deposit_equity: Money | None = None
     places_of_interest: tuple[PlaceOfInterest, ...] = ()
-
 
 @dataclass(frozen=True)
 class Commute:

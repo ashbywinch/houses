@@ -49,6 +49,7 @@ def make_default_persons() -> list[dict]:
             "name": "George",
             "has_car": False,
             "is_child": True,
+            "gender": "boys",
             "deposit_equity": None,
             "bus_walk_penalty_minutes": 30,
             "places_of_interest": [
