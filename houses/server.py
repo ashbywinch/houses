@@ -13,10 +13,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+import houses.bus_fare_reader as _bfr
+import houses.context as _ctx
 import houses.location as _loc
 import houses.model  # noqa: F401 — core types
 import houses.model.property  # noqa: F401 — registers Property nodes
 import houses.model.rightmove  # noqa: F401 — registers RightmoveProperty nodes
+from houses.bus_journey import BusJourneyRegistry
 from houses.config import settings
 from houses.enrichment_runner import (
     asdict_serializable,
@@ -40,8 +43,15 @@ from houses.sheets import (
 )
 from houses.sheets.backfill import batch_stream
 from houses.sheets.reader import get_properties_data, resolve_tab
-from houses.web.api_router import api_router, register_property
+from houses.web.api_router import _registry, api_router, register_property
 from houses.web.router import web_router
+
+from houses.geo import GeoPoint
+from houses.location import _geo_state_var, _GeoState
+from houses.nodes.bootstrap import seed_registry_from_sheet
+from houses.nodes.cutover import push_enriched_property
+from houses.nodes.property import PropertyNodes
+from houses.services import Services
 
 logger = logging.getLogger(__name__)
 
@@ -73,14 +83,10 @@ async def lifespan(_app: FastAPI):
     init_db()
 
     try:
-        from houses.nodes.bootstrap import seed_registry_from_sheet
-
         seed_registry_from_sheet()
         # Eagerly compute all DAG nodes. The seed pushes source values
         # which makes every computed node stale.  Warming now means
         # HTTP requests read from cache instead of triggering API calls.
-        from houses.web.api_router import _registry
-
         tasks = []
         for prop in _registry.values():
             for sel in prop.commute_selectors.values():
@@ -149,12 +155,6 @@ app.include_router(web_router)
 @app.middleware("http")
 async def _request_context(request, call_next):
     """Set up per-request context (geo cache, geo state, services, bus fares)."""
-    import houses.bus_fare_reader as _bfr
-    import houses.context as _ctx
-    from houses.bus_journey import BusJourneyRegistry
-    from houses.location import _geo_state_var, _GeoState
-    from houses.services import Services
-
     geo_cache_token = _loc._geo_cache_var.set({})
     geo_state_token = _geo_state_var.set(_GeoState())
     svc_token = _ctx._request_services.set(Services())
@@ -262,8 +262,6 @@ async def upsert_property(
         rid2 = rid or enriched.rid
         if rid2:
             try:
-                from houses.geo import GeoPoint
-
                 insert_source_value(rid2, "rid", rid2, "Derived")
                 insert_source_value(rid2, "rightmove_url", enriched.url, "Browser extension")
                 insert_source_value(rid2, "rightmove_address", enriched.address, "Rightmove")
@@ -281,9 +279,6 @@ async def upsert_property(
 
             # ── Dual-write to new DAG ────────────────────────────
             try:
-                from houses.nodes.cutover import push_enriched_property
-                from houses.nodes.property import PropertyNodes
-
                 prop = PropertyNodes(rid2)
                 push_enriched_property(rid2, enriched, {
                     "rightmove_address": prop.rightmove_address,
