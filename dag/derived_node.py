@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import time
+from datetime import UTC, datetime
 from abc import abstractmethod
 from inspect import iscoroutine
 from typing import Generic, TypeVar
@@ -81,7 +81,7 @@ class DerivedNode(Node[T], Generic[T]):
             except Exception as e:
                 result = Attempt.impossible(f"{self._id}: {e}")
             self._cached = result
-            self._computed_at = time.monotonic()
+            self._computed_at = datetime.now(UTC).isoformat()
             dep_timestamps = {
                 dep._id: dep._db_created_at for dep in self._deps
             }

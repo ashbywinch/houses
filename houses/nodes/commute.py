@@ -105,7 +105,7 @@ class _CommuteInputNode(UserInputNode[dict]):
     def push(self, value: Commute, source_label: str = "") -> None:
         self._value = value
         self._source_label = source_label
-        self._persisted_at = time.monotonic()
+        self._persisted_at = datetime.now(UTC).isoformat()
         self._db_created_at = datetime.now(UTC).isoformat()
         self.changed.emit()
 

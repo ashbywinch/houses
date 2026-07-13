@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
@@ -21,8 +20,8 @@ class Node(ABC, Generic[T]):
         self._value_type = value_type
         self._adapter = TypeAdapter(value_type)
         self.changed = Signal()
-        self._computed_at: float = 0.0
-        self._persisted_at: float = 0.0
+        self._computed_at: str = ""
+        self._persisted_at: str = ""
         self._db_created_at: str = ""
         self._loaded_dep_timestamps: dict[str, str] = {}
 
@@ -39,10 +38,14 @@ class Node(ABC, Generic[T]):
                 attempt = Attempt.pending()
             else:
                 attempt = Attempt.impossible(stored.get("error", "unknown"))
-            self._db_created_at = stored.get("_persisted_at", "")
+            # Store real calendar timestamps so staleness detection works
+            # across process restarts (unlike time.monotonic()).
+            self._persisted_at = stored.get("_persisted_at", "")
+            self._db_created_at = self._persisted_at
             dep_ts = stored.get("_dep_timestamps")
-            self._computed_at = time.monotonic()
-            self._persisted_at = time.monotonic()
+            self._computed_at = self._persisted_at
+            if dep_ts:
+                self._loaded_dep_timestamps = dep_ts
             return attempt
         return None
 
@@ -81,8 +84,9 @@ class Node(ABC, Generic[T]):
         from dag.persistence import save_node_result
 
         save_node_result(self._id, result_dict, dep_timestamps)
-        self._persisted_at = time.monotonic()
-        self._db_created_at = datetime.now(UTC).isoformat()
+        ts = datetime.now(UTC).isoformat()
+        self._persisted_at = ts
+        self._db_created_at = ts
 
     def _impossible(self, dep_attempts: dict[str, Attempt[T]],
                     extra: str = "") -> Attempt[T]:
