@@ -188,8 +188,6 @@ class _DefaultRailFare:
         simon: Commute | None,
         lorena: Commute | None,
     ) -> tuple[Commute | None, Commute | None]:
-        from houses.enrichment_runner import _enrich_rail_fares
-
         return await _enrich_rail_fares(enabled, postcode, address, simon, lorena)
 
 
@@ -203,18 +201,6 @@ class _DefaultPersistence:
 
 @dataclasses.dataclass
 class Services:
-    """All enrichment services with real defaults.
-
-    Usage in production::
-
-        svc = Services()
-        result = await svc.commute_router.simon_commute("RG14 1AA")
-
-    Usage in tests::
-
-        svc = Services(commute_router=FakeCommuteRouter(result=...))
-    """
-
     geocoder: GeocodingService = dataclasses.field(default_factory=_DefaultGeocoder)
     commute_router: CommuteRoutingService = dataclasses.field(default_factory=_DefaultCommuteRouter)
     school_lookup: SchoolLookupService = dataclasses.field(default_factory=_DefaultSchoolLookup)
@@ -225,10 +211,12 @@ class Services:
     rail_fare_service: RailFareService = dataclasses.field(default_factory=_DefaultRailFare)
     persistence: PersistenceService = dataclasses.field(default_factory=_DefaultPersistence)
 
-    # ── Settings sources (eager singletons, not module-level) ──────────
     persons_source: UserInputNode[list] = dataclasses.field(
         default_factory=lambda: _make_settings_source("persons", list, make_default_persons))
     financial_source: UserInputNode[dict] = dataclasses.field(
         default_factory=lambda: _make_settings_source("financial", dict, make_default_financials))
     commute_thresholds_source: UserInputNode[dict] = dataclasses.field(
         default_factory=lambda: _make_settings_source("commute_thresholds", dict, make_default_thresholds))
+
+
+

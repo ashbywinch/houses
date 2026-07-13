@@ -18,7 +18,7 @@ from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.location import _geocode_address, geocode
 from houses.retry import retry_async
-from houses.routing import _bus_fare_for
+
 from houses.stations import Station
 from houses.stations import find as find_station
 
@@ -332,12 +332,14 @@ class TransitRoute:
         label: str,
         park_and_ride: bool = False,
         allow_bus: bool = False,
+        fare_lookup: callable | None = None,
     ):
         self._origin = origin_postcode
         self._destination = destination_postcode
         self._label = label
         self._park_and_ride = park_and_ride
         self._allow_bus = allow_bus
+        self._fare_lookup = fare_lookup
 
     async def plan(self) -> Attempt[Commute]:
         """Fetch TfL route, pick best journey, enrich with costs.
@@ -495,7 +497,7 @@ class TransitRoute:
             arr_raw = bus_leg.get("arrivalPoint", {})
             dep_point = {"lat": dep_raw["lat"], "lon": dep_raw["lon"]} if dep_raw.get("lat") else None
             arr_point = {"lat": arr_raw["lat"], "lon": arr_raw["lon"]} if arr_raw.get("lat") else None
-            leg_cost = _bus_fare_for(dep, arr, dep_point=dep_point, arr_point=arr_point)
+            leg_cost = self._fare_lookup(dep, arr, dep_point=dep_point, arr_point=arr_point) if self._fare_lookup else None
             if leg_cost is not None:
                 total_bus_cost += leg_cost
 

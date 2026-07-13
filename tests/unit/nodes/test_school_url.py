@@ -8,11 +8,11 @@ from houses.geo import GeoPoint
 
 @pytest.fixture(autouse=True)
 def _fake_svc():
-    import houses.context as ctx
+    from houses.services_provider import _request_services as _sp
     from tests.helpers import make_services
-    token = ctx._request_services.set(make_services())
+    token = _sp.set(make_services())
     yield
-    ctx._request_services.reset(token)
+    _sp.reset(token)
 
 
 @pytest.mark.asyncio
@@ -27,7 +27,7 @@ async def test_school_location_node_returns_geopoint():
     addr = UserInputNode[str]("addr", str)
     addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
 
-    import houses.context as ctx
+    from houses.services_provider import _request_services as _sp
     from tests.helpers import make_services
 
     async def fake_find(*a, **kw):
@@ -41,7 +41,7 @@ async def test_school_location_node_returns_geopoint():
         )
 
     svc = make_services(school_lookup=type("FS", (), {"find_nearest": fake_find})())
-    token = ctx._request_services.set(svc)
+    token = _sp.set(svc)
     try:
         from houses.nodes.schools import PrimarySchoolNode, SchoolLocationNode
         primary = PrimarySchoolNode("ps", best_location=loc, best_address=addr)
@@ -49,7 +49,7 @@ async def test_school_location_node_returns_geopoint():
         a = await school_loc.attempt()
         assert a.succeeded, f"school loc failed: {a.error}"
     finally:
-        ctx._request_services.reset(token)
+        _sp.reset(token)
 
 
 @pytest.mark.asyncio
@@ -64,7 +64,7 @@ async def test_school_node_output_has_url():
     addr = UserInputNode[str]("addr2", str)
     addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
 
-    import houses.context as ctx
+    from houses.services_provider import _request_services as _sp
     from tests.helpers import make_services
 
     async def fake_find2(*a, **kw):
@@ -78,7 +78,7 @@ async def test_school_node_output_has_url():
         )
 
     svc = make_services(school_lookup=type("FS", (), {"find_nearest": fake_find2})())
-    token = ctx._request_services.set(svc)
+    token = _sp.set(svc)
     try:
         from houses.nodes.schools import PrimarySchoolNode
         sn = PrimarySchoolNode("ps2", best_location=loc, best_address=addr)
@@ -89,7 +89,7 @@ async def test_school_node_output_has_url():
         assert val["name"] == "Test School"
         assert val.get("ofsted") == "Good"
     finally:
-        ctx._request_services.reset(token)
+        _sp.reset(token)
 
 
 @pytest.mark.asyncio

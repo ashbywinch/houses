@@ -8,11 +8,11 @@ from houses.geo import GeoPoint
 
 @pytest.fixture(autouse=True)
 def _fake_svc():
-    import houses.context as ctx
+    from houses.services_provider import _request_services as _sp
     from tests.helpers import make_services
-    token = ctx._request_services.set(make_services())
+    token = _sp.set(make_services())
     yield
-    ctx._request_services.reset(token)
+    _sp.reset(token)
 
 
 @pytest.mark.asyncio

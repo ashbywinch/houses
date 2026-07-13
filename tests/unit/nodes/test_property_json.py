@@ -13,10 +13,10 @@ from houses.geo import GeoPoint
 @pytest.fixture(autouse=True)
 def _fake_services(monkeypatch):
     """Set fake singleton services so no real API calls are made."""
-    import houses.context as ctx
+    from houses.services_provider import _request_services as _sp
     from tests.helpers import make_services
 
-    token = ctx._request_services.set(make_services())
+    token = _sp.set(make_services())
 
     # Mock HTTP-calling enrichment functions not routed through Services
     from money import Money
@@ -40,9 +40,9 @@ def _fake_services(monkeypatch):
     monkeypatch.setattr(transit_mod, "get_commute", fake_get_commute)
 
     # Provide a fake school lookup so school nodes + George's commutes work
-    import houses.context as ctx
+    from houses.services_provider import _request_services as _sp
     from tests.helpers import make_services
-    svc = ctx._request_services.get()
+    svc = _sp.get()
     if svc:
         async def fake_find_nearest(*args, **kwargs):
             return School(
@@ -59,7 +59,7 @@ def _fake_services(monkeypatch):
         })()
 
     yield
-    ctx._request_services.reset(token)
+    _sp.reset(token)
 
 
 @pytest.fixture

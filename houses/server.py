@@ -16,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 import houses.bus_fare_reader as _bfr
 import houses.context as _ctx
 import houses.location as _loc
+import houses.services_provider as _sp
 import houses.model  # noqa: F401 — core types
 import houses.model.property  # noqa: F401 — registers Property nodes
 import houses.model.rightmove  # noqa: F401 — registers RightmoveProperty nodes
@@ -157,13 +158,13 @@ async def _request_context(request, call_next):
     """Set up per-request context (geo cache, geo state, services, bus fares)."""
     geo_cache_token = _loc._geo_cache_var.set({})
     geo_state_token = _geo_state_var.set(_GeoState())
-    svc_token = _ctx._request_services.set(Services())
+    svc_token = _sp._request_services.set(Services())
     bus_token = _bfr._request_bus_fares.set(BusJourneyRegistry())
     try:
         return await call_next(request)
     finally:
         _bfr._request_bus_fares.reset(bus_token)
-        _ctx._request_services.reset(svc_token)
+        _sp._request_services.reset(svc_token)
         _geo_state_var.reset(geo_state_token)
         _loc._geo_cache_var.reset(geo_cache_token)
 
@@ -252,6 +253,7 @@ async def upsert_property(
             enabled=enabled,
             actual_latitude=payload.actual_latitude,
             actual_longitude=payload.actual_longitude,
+            services=Services(),
         )
 
         row_url = None

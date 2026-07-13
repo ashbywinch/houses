@@ -11,12 +11,11 @@ from houses.context import get_services
 from houses.geo import GeoPoint
 from houses.nodes.bootstrap import seed_registry_from_sheet
 from houses.nodes.property import PropertyNodes
+from houses.property_registry import _registry, register_property
 
 logger = logging.getLogger(__name__)
 
 api_router = APIRouter(prefix="/api")
-
-_registry: dict[str, PropertyNodes] = {}
 
 _websocket_clients: set[WebSocket] = set()
 
@@ -33,15 +32,14 @@ async def _broadcast(data: dict[str, Any]) -> None:
         _websocket_clients.discard(ws)
 
 
-def register_property(rid: str, prop: PropertyNodes) -> None:
+def _register_with_ws(rid: str, prop: PropertyNodes) -> None:
+    register_property(rid, prop)
     async def _on_changed() -> None:
         await _broadcast({
             "type": "property_updated",
             "rid": rid,
             "data": await prop.to_json(),
         })
-
-    _registry[rid] = prop
     prop.changed.connect(lambda: asyncio.ensure_future(_on_changed()))
 
 

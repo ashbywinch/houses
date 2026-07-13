@@ -14,13 +14,16 @@ import dataclasses
 import logging
 import re
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from houses.services import Services
 
 from money import Money
 
 from houses.commute import Commute, CommuteBreakdown, LegMode
 from houses.config import settings
-from houses.context import get_rail_fare_registry
+from houses.rail_fare_registry import get_rail_fare_registry
 from houses.enricher import compute_commute_breakdown
 from houses.geo import GeoPoint
 from houses.location import (
@@ -34,7 +37,6 @@ from houses.property import EnrichedProperty
 from houses.rail_fares import RailFareRegistry
 from houses.rightmove_scraper import scrape as scrape_rightmove
 from houses.school_gender import SchoolGender
-from houses.services import Services
 from houses.stations import Station
 from houses.transit_route import FALLBACK_TUBE_SINGLE_GBP, get_tube_leg_fare
 from houses.walkability import KNOWN_COUNTIES
@@ -236,12 +238,12 @@ async def run_enrichment(
     address: str,
     postcode: str,
     lookup: str,
+    services: Services,
     bedrooms: int | None = None,
     price: float | None = None,
     enabled: set[str] | None = None,
     actual_latitude: float | None = None,
     actual_longitude: float | None = None,
-    services: Services | None = None,
 ) -> EnrichedProperty:
     """Run enrichment for the given set of fields and return an EnrichedProperty.
 
@@ -297,7 +299,7 @@ async def run_enrichment(
         else:
             lookup = ""
 
-    svc = services or Services()
+    svc = services
 
     simon = Commute(destination_label="Simon (London)", destination_postcode=postcode)
     lorena = Commute(destination_label="Lorena (London)", destination_postcode=postcode)
@@ -444,10 +446,10 @@ async def run_backfill_enrichment(
     address: str,
     postcode: str,
     lookup: str,
+    services: Services,
     bedrooms: int | None,
     price: float | None,
     enabled: set[str] | None,
-    services: Services | None = None,
 ) -> EnrichedProperty:
     """Backfill variant — thin wrapper around ``run_enrichment``.
 

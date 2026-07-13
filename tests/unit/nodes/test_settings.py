@@ -12,8 +12,8 @@ class TestDecomposedSources:
         except LookupError:
             from houses.services import Services
             svc = Services()
-            import houses.context as ctx
-            ctx._request_services.set(svc)
+            from houses.services_provider import _request_services as _sp
+            _sp.set(svc)
             return svc
 
     @pytest.mark.asyncio

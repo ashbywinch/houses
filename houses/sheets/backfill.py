@@ -15,6 +15,7 @@ from houses.enrichment_runner import (
     is_outcode,
     run_backfill_enrichment,
 )
+from houses.services import Services
 from houses.property import EnrichedProperty
 from houses.sheets import Tab, col_letter, row_values, write_enriched_row
 
@@ -117,6 +118,7 @@ async def batch_stream(
                 bedrooms=None,
                 price=None,
                 enabled=None,
+                services=Services(),
             )
             flat = row_values(enriched)
             if no_write:
@@ -198,6 +200,7 @@ async def batch_stream(
             bedrooms=None,
             price=None,
             enabled=needed if needed else None,
+            services=Services(),
         )
 
         if no_write:

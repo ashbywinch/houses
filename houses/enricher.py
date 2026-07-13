@@ -165,18 +165,8 @@ def _compute_petrol_from_distance_km(round_trip_km: float) -> float:
 
 
 async def compute_petrol_cost(origin_postcode: str) -> Attempt[Commute]:
-    """Bracknell commute — driving cost via ORS.
-
-    Note: This still exists as a separate function because the sheet
-    always shows a Bracknell cost, even when transit might be faster.
-    The ``get_commute`` function (in routing.py) handles the
-    transit-vs-driving comparison for other callers.
-    """
-    from houses.routing import _drive_commute
-
-    commute = await _drive_commute(origin_postcode, settings.bracknell_postcode)
-    if commute:
-        return Attempt.succeeded(
-            _with_label(commute, "Bracknell Office (RG12 8YA)", settings.bracknell_postcode),
-        )
-    return Attempt.impossible("could not route to Bracknell")
+    result = await get_commute(origin_postcode, settings.bracknell_postcode, has_car=True)
+    if result.succeeded:
+        commute = _with_label(result.value_or_none(), "Bracknell Office (RG12 8YA)", settings.bracknell_postcode)
+        return Attempt.succeeded(commute)
+    return Attempt.impossible(result.error)

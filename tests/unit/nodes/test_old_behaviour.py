@@ -11,11 +11,11 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _fake_services():
-    import houses.context as ctx
+    from houses.services_provider import _request_services as _sp
     from tests.helpers import make_services
-    token = ctx._request_services.set(make_services())
+    token = _sp.set(make_services())
     yield
-    ctx._request_services.reset(token)
+    _sp.reset(token)
 
 
 class TestSchoolNodes:
@@ -39,15 +39,15 @@ class TestSchoolNodes:
                 assert child_age == 12, f"Expected 12 got {child_age}"
                 return None
 
-        import houses.context as ctx
+        from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
         svc = make_services(school_lookup=AssertingService())
-        token = ctx._request_services.set(svc)
+        token = _sp.set(svc)
         try:
             node = SecondarySchoolNode("ss", best_location=loc, best_address=addr)
             await node.attempt()
         finally:
-            ctx._request_services.reset(token)
+            _sp.reset(token)
 
     @pytest.mark.asyncio
     async def test_primary_calls_find_nearest_with_boys_and_age_7(self):
@@ -67,15 +67,15 @@ class TestSchoolNodes:
                 assert child_age == 7, f"Expected 7 got {child_age}"
                 return None
 
-        import houses.context as ctx
+        from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
         svc = make_services(school_lookup=AssertingService())
-        token = ctx._request_services.set(svc)
+        token = _sp.set(svc)
         try:
             node = PrimarySchoolNode("ps", best_location=loc, best_address=addr)
             await node.attempt()
         finally:
-            ctx._request_services.reset(token)
+            _sp.reset(token)
 
 
 class TestCouncilTaxNode:
@@ -100,17 +100,17 @@ class TestCouncilTaxNode:
                 from houses.council_tax_info import CouncilTaxInfo
                 return Attempt.succeeded(CouncilTaxInfo(band="D", yearly_cost=1800.0))
 
-        import houses.context as ctx
+        from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
         svc = make_services(council_tax_service=CapturingService())
-        token = ctx._request_services.set(svc)
+        token = _sp.set(svc)
         try:
             node = CouncilTaxNode("ct", best_address=addr, postcode_node=pc)
             await node.attempt()
             assert captured.get("postcode") == "UB2 4GN", \
                 f"Expected 'UB2 4GN', got {captured.get('postcode')!r}"
         finally:
-            ctx._request_services.reset(token)
+            _sp.reset(token)
 
     @pytest.mark.asyncio
     async def test_fails_when_postcode_missing(self):
