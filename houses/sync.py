@@ -13,6 +13,7 @@ import logging
 from houses.geo import GeoPoint
 from houses.model.persistence import insert_source_value, insert_user_input, load_property_data
 from houses.model.resolver import resolve_property
+from houses.location import PropertyLocation
 from houses.web.geo_utils import valid_location
 
 logger = logging.getLogger(__name__)
@@ -64,8 +65,6 @@ def seed_dag_from_row(rid: str, row: dict[str, str]) -> bool:
             pass
     if address and postcode and postcode not in address:
         try:
-            from houses.location import PropertyLocation
-
             upgraded = PropertyLocation._upgrade_address(address, postcode)
             corrected = upgraded if upgraded != address else f"{address}, {postcode}"
             insert_user_input(rid, "corrected_address", corrected)

@@ -36,6 +36,7 @@ from houses.rightmove_scraper import scrape as scrape_rightmove
 from houses.school_gender import SchoolGender
 from houses.services import Services
 from houses.stations import Station
+from houses.transit_route import FALLBACK_TUBE_SINGLE_GBP, get_tube_leg_fare
 from houses.walkability import KNOWN_COUNTIES
 
 logger = logging.getLogger(__name__)
@@ -150,8 +151,6 @@ async def _enrich_rail_fares(
 
     if not simon_needs and not lorena_needs:
         return simon, lorena
-
-    from houses.transit_route import FALLBACK_TUBE_SINGLE_GBP, get_tube_leg_fare
 
     fare_pc = postcode or extract_postcode(address)
     if not fare_pc:
