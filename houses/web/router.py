@@ -65,8 +65,6 @@ async def _try_import_from_sheet(rid: str) -> tuple[bool, list[str]]:
     if not settings.sheet_id:
         return False, []
     try:
-        from houses.sheets.reader import get_properties_data, resolve_tab
-
         resolve_tab("data")
         props = get_properties_data()
     except Exception:

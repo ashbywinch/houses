@@ -12,6 +12,9 @@ import logging
 from dataclasses import dataclass
 
 from houses.geo import GeoPoint
+from houses.location import PropertyLocation
+from houses.sheets.reader import get_properties_data, resolve_tab
+from houses.sync import sync_property
 from houses.walkability import _extract_town
 from houses.web.geo_utils import valid_location
 
@@ -128,9 +131,6 @@ class CardData:
 
 
 def get_data_rows() -> list[dict[str, str]]:
-    """Read all rows from the Data tab."""
-    from houses.sheets.reader import get_properties_data, resolve_tab
-
     try:
         resolve_tab("data")
         return get_properties_data()
@@ -141,12 +141,9 @@ def get_data_rows() -> list[dict[str, str]]:
 
 def get_view_rows() -> list[dict[str, str]]:
     """Read all rows from the View tab."""
-    from houses.sheets.reader import get_properties_data as gpd
-    from houses.sheets.reader import resolve_tab as rt
-
     try:
-        rt("view")
-        return gpd()
+        resolve_tab("view")
+        return get_properties_data()
     except Exception:
         logger.warning("Failed to read view data from sheet")
         return []
@@ -189,8 +186,6 @@ def _card_address(data: dict[str, str]) -> str:
     postcode = (data.get("Postcode") or "").strip()
     if address and postcode and postcode not in address:
         try:
-            from houses.location import PropertyLocation
-
             upgraded = PropertyLocation._upgrade_address(address, postcode)
             return upgraded if upgraded != address else f"{address}, {postcode}"
         except Exception:
@@ -340,8 +335,6 @@ async def get_all_cards() -> list[CardData]:
     Orchestrates sheet I/O, DAG sync, and view model assembly.
     The DAG sync step is delegated to sync.sync_property.
     """
-    from houses.sync import sync_property
-
     data_rows = get_data_rows()
     if not data_rows:
         return []
