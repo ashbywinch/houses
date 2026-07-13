@@ -10,30 +10,59 @@ class BestAddressNode(DerivedNode[str]):
     """Selects the best address from available sources.
 
     Priority: user_entered_address > corrected_address > rightmove_address.
+
+    user_entered_address and corrected_address are optional — only
+    rightmove_address is a hard dependency (every property with a
+    sheet address pushes to it).
     """
 
     def __init__(self, node_id: str, *,
                  user_entered_address,
                  corrected_address,
                  rightmove_address):
-        super().__init__(
-            node_id, str,
-            (user_entered_address, corrected_address, rightmove_address),
-        )
+        super().__init__(node_id, str, (rightmove_address,))
+        self._user_entered = user_entered_address
+        self._corrected = corrected_address
+        self._user_entered_ts: str = ""
+        self._corrected_ts: str = ""
 
-    def compute(self, user_entered: Attempt[str],
-                corrected: Attempt[str],
-                rightmove: Attempt[str]) -> Attempt[str]:
-        if user_entered.succeeded:
-            return user_entered
-        if corrected.succeeded:
-            return corrected
+        from dag.signals import Slot
+        for src in (user_entered_address, corrected_address):
+            slot = Slot(self._on_dep_changed)
+            self._slots.append(slot)
+            src.changed.connect(slot)
+
+    def _is_stale(self) -> bool:
+        if self._cached is None:
+            return True
+        if super()._is_stale():
+            return True
+        for src, ts_field in (
+            (self._user_entered, self._user_entered_ts),
+            (self._corrected, self._corrected_ts),
+        ):
+            ts = src._db_created_at
+            if ts and ts != ts_field:
+                return True
+        return False
+
+    async def compute(self,
+                      rightmove: Attempt[str]) -> Attempt[str]:
+        # Snapshot timestamps for optional sources
+        self._user_entered_ts = self._user_entered._db_created_at
+        self._corrected_ts = self._corrected._db_created_at
+
+        # Check optional sources in priority order
+        user_attempt = await self._user_entered.attempt()
+        if user_attempt.succeeded:
+            return user_attempt
+        corrected_attempt = await self._corrected.attempt()
+        if corrected_attempt.succeeded:
+            return corrected_attempt
         if rightmove.succeeded:
             return rightmove
         return self._impossible(
-            {"user_entered_address": user_entered,
-             "corrected_address": corrected,
-             "rightmove_address": rightmove}
+            {"rightmove_address": rightmove}
         )
 
 class BestLocationNode(DerivedNode[GeoPoint]):
