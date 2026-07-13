@@ -18,7 +18,11 @@ def _serialize_value(val: Any) -> str:
         return ""
     if isinstance(val, bool):
         return json.dumps(val)
-    if isinstance(val, (str, int, float)):
+    if isinstance(val, str):
+        if not val:
+            return ""
+        return json.dumps(val)
+    if isinstance(val, (int, float)):
         return str(val)
 
     ta = TypeAdapter(type(val))
@@ -50,7 +54,7 @@ def _deserialize_value(raw: str) -> Any:
             return GeoPoint(lat=d["lat"], lon=d["lon"])
         except Exception:
             return raw
-    return raw
+    return d
 
 
 

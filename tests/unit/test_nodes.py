@@ -5,10 +5,11 @@ import json
 import pytest
 
 from houses.geo import GeoPoint
-from houses.model import NodeKind
 from houses.model.geo import serialize_gp
+from houses.model import NodeKind
 from houses.model.property import best_address, best_location, map_url
 from houses.model.registry import NODES, get_node
+import houses.model.rightmove  # noqa: F401 — registers Rightmove nodes
 
 
 class TestNodeRegistry:

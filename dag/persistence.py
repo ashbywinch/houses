@@ -43,7 +43,11 @@ def _serialize_value(val: Any) -> str:
         return ""
     if isinstance(val, bool):
         return json.dumps(val)
-    if isinstance(val, (str, int, float)):
+    if isinstance(val, str):
+        if not val:
+            return ""
+        return json.dumps(val)
+    if isinstance(val, (int, float)):
         return str(val)
     try:
         ta = TypeAdapter(type(val))

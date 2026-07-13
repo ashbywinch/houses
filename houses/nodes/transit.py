@@ -205,6 +205,9 @@ class TransitNode(DerivedNode[dict]):
             "status": attempt.status,
             "value": None,
         }
+        result["succeeded"] = attempt.succeeded
+        result["pending"] = attempt.pending
+        result["impossible"] = attempt.impossible
         if attempt.succeeded:
             cr = self._commute_cache
             if cr is None and isinstance(attempt.value, dict):

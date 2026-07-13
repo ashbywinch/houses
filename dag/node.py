@@ -40,8 +40,7 @@ class Node(ABC, Generic[T]):
             else:
                 attempt = Attempt.impossible(stored.get("error", "unknown"))
             self._db_created_at = stored.get("_persisted_at", "")
-            dep_ts = stored.get("dep_timestamps")
-            self._loaded_dep_timestamps = dep_ts if isinstance(dep_ts, dict) else {}
+            dep_ts = stored.get("_dep_timestamps")
             self._computed_at = time.monotonic()
             self._persisted_at = time.monotonic()
             return attempt

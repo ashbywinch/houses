@@ -57,7 +57,7 @@ def _is_stale(
 
 def _get_stored_time_for_row(node_id: str, row_id: int) -> datetime | None:
     conn = _persistence.get_db()
-    if node_id in {"corrected_address", "precise_location"}:
+    if node_id in _persistence.USER_TABLE_NODES:
         table = _persistence.USER_TABLE_NODES[node_id]
         row = conn.execute(
             f"SELECT created_at FROM {table} WHERE id=?",

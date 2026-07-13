@@ -148,6 +148,9 @@ class CommuteSelectorNode(DerivedNode[dict]):
             "status": attempt.status,
             "value": _serialize_value(attempt.value_or_none()) if attempt.succeeded else None,
         }
+        result["succeeded"] = attempt.succeeded
+        result["pending"] = attempt.pending
+        result["impossible"] = attempt.impossible
         if attempt.impossible:
             result["error"] = attempt.error
         result["provenance"] = (await self.build_provenance()).to_dict()

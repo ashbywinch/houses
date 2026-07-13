@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from houses.bus_fare_reader import get_bus_fare_reader
-from houses.rail_fare_registry import get_rail_fare_registry
-from houses.services_provider import get_services
-from houses.sheets import _real_get_client
+import contextvars
 
+from houses.services_provider import get_services
+
+_request_sheets_client: contextvars.ContextVar[Any | None] = contextvars.ContextVar("_request_sheets_client", default=None)
 
 def get_sheets_client() -> Any | None:
     """Return the per-request sheets client.
@@ -25,4 +25,5 @@ def get_sheets_client() -> Any | None:
     client = _request_sheets_client.get()
     if client is not None:
         return client
+    from houses.sheets import _real_get_client
     return _real_get_client()

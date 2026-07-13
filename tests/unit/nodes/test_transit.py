@@ -48,3 +48,23 @@ class TestWalkLegCheckNode:
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() is False
+
+class TestTransitNodeJson:
+    @pytest.mark.asyncio
+    async def test_to_json_has_boolean_fields(self):
+        """TransitNode.to_json() must include succeeded/pending/impossible booleans."""
+        from houses.nodes.transit import TransitNode
+
+        loc = UserInputNode[GeoPoint]("loc_tj", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi_tj", PlaceOfInterest)
+        persons = UserInputNode[list]("persons_tj", list)
+
+        node = TransitNode("tn_json", best_location=loc, poi=poi, persons_source=persons)
+        j = await node.to_json()
+        assert "succeeded" in j, "Missing succeeded field"
+        assert "pending" in j, "Missing pending field"
+        assert "impossible" in j, "Missing impossible field"
+        assert j["pending"] is True, "Should be pending (no deps pushed)"
+        assert j["succeeded"] is False
+        assert j["impossible"] is False
+        assert j["status"] == "pending"

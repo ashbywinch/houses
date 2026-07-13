@@ -111,37 +111,36 @@ async def test_enrich_uses_tfl_tube_fare_when_needed(tmp_path):
         from houses.geo import GeoPoint
 
         return Attempt.succeeded(GeoPoint(51.317, -0.556))
-
     async def mock_tube_fare(station, postcode, _data=None):
         return Money("3.40", "GBP")
 
-        simon = Commute(
-            destination_label="Simon",
-            destination_postcode="SW1V 2QQ",
-            duration_minutes=71,
-            daily_cost_gbp=Money("10.8", "GBP"),
-            cost_groups=(
-                CostGroup(legs=(JourneyLeg(mode=LegMode.PARK, duration_minutes=0),), operator="ParkCo", cost=10.8),
-            ),
-        )
-        lorena = Commute(
-            destination_label="Lorena",
-            destination_postcode="EC3A 7LP",
-            duration_minutes=90,
-            daily_cost_gbp=None,
-        )
-        simon_result, _ = await _enrich_rail_fares(
-            enabled={"simon"},
-            postcode="GU21 2NA",
-            address="Robin Hood Road, Knaphill",
-            simon=simon,
-            lorena=lorena,
-            _registry=reg,
-            _geocode=mock_geocode,
-            _tube_fare_fn=mock_tube_fare,
-        )
-        # rail: 17.00. tube: 3.40 (peak). return: (17.00 + 3.40) × 2 = 40.80
-        # parking: 10.80. total: 40.80 + 10.80 = 51.60
-        # With old £2.80: (17.00 + 2.80) × 2 + 10.80 = 50.40
-        # With new £3.40: (17.00 + 3.40) × 2 + 10.80 = 51.60
-        assert simon_result.daily_cost_gbp == Money("51.60", "GBP")
+    simon = Commute(
+        destination_label="Simon",
+        destination_postcode="SW1V 2QQ",
+        duration_minutes=71,
+        daily_cost_gbp=Money("10.8", "GBP"),
+        cost_groups=(
+            CostGroup(legs=(JourneyLeg(mode=LegMode.PARK, duration_minutes=0),), operator="ParkCo", cost=10.8),
+        ),
+    )
+    lorena = Commute(
+        destination_label="Lorena",
+        destination_postcode="EC3A 7LP",
+        duration_minutes=90,
+        daily_cost_gbp=None,
+    )
+    simon_result, _ = await _enrich_rail_fares(
+        enabled={"simon"},
+        postcode="GU21 2NA",
+        address="Robin Hood Road, Knaphill",
+        simon=simon,
+        lorena=lorena,
+        _registry=reg,
+        _geocode=mock_geocode,
+        _tube_fare_fn=mock_tube_fare,
+    )
+    # rail: 17.00. tube: 3.40 (peak). return: (17.00 + 3.40) × 2 = 40.80
+    # parking: 10.80. total: 40.80 + 10.80 = 51.60
+    # With old £2.80: (17.00 + 2.80) × 2 + 10.80 = 50.40
+    # With new £3.40: (17.00 + 3.40) × 2 + 10.80 = 51.60
+    assert simon_result.daily_cost_gbp == Money("51.60", "GBP")

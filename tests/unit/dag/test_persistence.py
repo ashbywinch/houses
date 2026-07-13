@@ -26,6 +26,13 @@ class TestSerialisation:
         s = _serialize_value("hello")
         assert _deserialize_value(s) == "hello"
 
+    def test_string_json_literal_roundtrip(self):
+        """Strings matching JSON literals must not be corrupted."""
+        for raw in ("true", "false", "null", "42", "3.14"):
+            s = _serialize_value(raw)
+            assert isinstance(_deserialize_value(s), str), f"'{raw}' corrupted to non-string"
+            assert _deserialize_value(s) == raw, f"'{raw}' roundtrip failed"
+
     def test_int_roundtrip(self):
         s = _serialize_value(42)
         assert _deserialize_value(s) == 42
