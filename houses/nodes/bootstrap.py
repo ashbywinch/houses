@@ -4,7 +4,6 @@ import logging
 import re
 from typing import Any
 
-from dag.persistence import latest_node_result
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 from houses.nodes.property import PropertyNodes
@@ -185,10 +184,10 @@ def seed_registry_from_sheet() -> int:
             "comment_design_needed": prop.comment_design_needed,
             "comment_planning_needed": prop.comment_planning_needed,
         }
-
         check_key = f"{raw_rid}/rightmove_address"
-        persisted = latest_node_result(check_key)
-        if persisted and persisted.get("status") == "succeeded":
+        from dag.persistence import get_latest_source_value
+        persisted = get_latest_source_value(raw_rid, "rightmove_address")
+        if persisted:
             logger.debug("Skipping %s — already seeded", raw_rid)
         else:
             bootstrap_from_row(row, source_dict)
