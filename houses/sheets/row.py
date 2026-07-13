@@ -19,6 +19,7 @@ from houses.commute import Commute, LegMode
 from houses.config import settings
 from houses.property import EnrichedProperty
 from houses.school import School
+from houses.sheets.client import get_client as _get_client
 from houses.sheets.tab import Tab
 
 logger = logging.getLogger(__name__)
@@ -290,8 +291,6 @@ async def write_enriched_row(property_: EnrichedProperty, tab: str = DATA_TAB) -
     if not settings.sheet_id:
         logger.info("No HOUSES_SHEET_ID configured; skipping sheet write")
         return None
-
-    from houses.sheets.client import get_client as _get_client
 
     client = _get_client()
     if client is None:

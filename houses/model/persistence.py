@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
+from houses.config import settings
+from houses.geo import GeoPoint
 from houses.model import DerivedRow, PropertyData, SourceRow, UserRow
 
 
@@ -16,7 +18,6 @@ def _serialize_value(val: Any) -> str:
         return ""
     if isinstance(val, (str, int, float, bool)):
         return str(val)
-    from pydantic import TypeAdapter
 
     ta = TypeAdapter(type(val))
     d = ta.dump_python(val)
@@ -43,8 +44,6 @@ def _deserialize_value(raw: str) -> Any:
         except Exception:
             return raw
     if isinstance(d, dict) and "lat" in d and "lon" in d:
-        from houses.geo import GeoPoint
-
         try:
             return GeoPoint(lat=d["lat"], lon=d["lon"])
         except (TypeError, ValueError):
@@ -58,8 +57,6 @@ DB_PATH: Path | None = None
 def get_db() -> sqlite3.Connection:
     global DB_PATH
     if DB_PATH is None:
-        from houses.config import settings
-
         DB_PATH = Path(settings.sqlite_path)
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))

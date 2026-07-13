@@ -9,6 +9,7 @@ from __future__ import annotations
 import gspread
 
 from houses.sheets.named_ranges import named_range_name
+from houses.sheets.row import DATA_TAB, Row
 
 _nr = named_range_name
 
@@ -130,8 +131,6 @@ DATA_FORMULA_COLS: dict[str, str] = {
 
 def sync_data_formulas(spreadsheet: gspread.Spreadsheet) -> None:
     """Write Data tab formulas for all formula-only columns (rows 2–N)."""
-    from houses.sheets.row import DATA_TAB, Row
-
     ws = spreadsheet.worksheet(DATA_TAB)
     data = ws.get_all_values()
     num_rows = len(data)
