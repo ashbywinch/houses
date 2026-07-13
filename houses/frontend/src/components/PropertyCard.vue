@@ -177,9 +177,23 @@ function schoolCommute(commutes: Record<string, { commute: unknown }> | undefine
 .commute-unit { display: inline-flex; align-items: center; gap: 4px; }
 .card__metric-label { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; }
 .pill-link { text-decoration: none; }
-.pill--sm { font-size: 11px; padding: 1px 7px; }
 .school-line { display: flex; align-items: center; gap: 4px; margin: 2px 0; flex-wrap: wrap; }
 .school__name { font-size: 12px; color: #1565c0; text-decoration: none; }
 .school__name:hover { text-decoration: underline; }
 .card__cost-total { font-size: 13px; color: var(--text-secondary); }
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.pill--sm { font-size: 11px; padding: 1px 7px; }
+.pill--good { background: var(--green-bg); color: var(--green); }
+.pill--warn { background: var(--orange-bg); color: var(--orange); }
+.pill--bad { background: var(--red-bg); color: var(--red); }
+.pill--muted { background: var(--muted-bg); color: var(--muted); }
 </style>
