@@ -22,11 +22,11 @@ ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 GOOGLE_MAPS_PLACES_URL = "https://places.googleapis.com/v1/places:searchNearby"
 
 _POSTCODE_FULL_RE = re.compile(
-    r"^[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}$",
+    r"[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}$",
     re.IGNORECASE,
 )
 _POSTCODE_OUTCODE_RE = re.compile(
-    r"^[A-Z]{1,2}[0-9][A-Z0-9]?$",
+    r"[A-Z]{1,2}[0-9][A-Z0-9]?$",
     re.IGNORECASE,
 )
 
