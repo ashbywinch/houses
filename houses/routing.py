@@ -515,6 +515,13 @@ def _address_waypoint(loc: str | GeoPoint) -> dict:
     """Build a Google Routes waypoint from a postcode string or GeoPoint."""
     if isinstance(loc, GeoPoint):
         return {"location": {"latLng": {"latitude": loc.lat, "longitude": loc.lon}}}
+    # If the string looks like "lat,lon", parse it as a location waypoint
+    if "," in loc:
+        try:
+            lat, lon = loc.split(",", 1)
+            return {"location": {"latLng": {"latitude": float(lat), "longitude": float(lon)}}}
+        except (ValueError, TypeError):
+            pass
     return {"address": loc}
 
 

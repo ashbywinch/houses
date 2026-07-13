@@ -210,3 +210,39 @@ class TestCommuteData:
             dur = c["value"]["duration"]
             assert isinstance(dur["value"], (int, float))
             assert dur["value"] > 0
+
+class TestFinancialSettingsPropagation:
+    """PATCH to financial settings must be visible through the DAG
+    without a server restart.  PropertyNodes must not cache a stale
+    Services reference at construction time."""
+
+    @pytest.mark.asyncio
+    async def test_financial_patch_propagates_to_detail(self, prop):
+        """After pushing new financial settings, the detail endpoint
+        must return the updated mortgage_rate and mortgage."""
+        from houses.context import get_services
+
+        # Read detail baseline
+        d1 = await prop.to_json_detail()
+        fin1 = d1["settings"]["financial"]["value"]
+        old_rate = fin1["mortgage_rate"]
+        old_mortgage = d1["affordability"]["monthly_mortgage"]["value"]
+
+        # Push new financial settings via the shared Services instance
+        new_financials = dict(fin1)
+        new_financials["mortgage_rate"] = 0.99
+        get_services().financial_source.push(new_financials, "user")
+
+        # Re-read — must reflect the new rate
+        d2 = await prop.to_json_detail()
+        fin2 = d2["settings"]["financial"]["value"]
+        new_mortgage = d2["affordability"]["monthly_mortgage"]["value"]
+
+        assert fin2["mortgage_rate"] == 0.99, (
+            f"Expected 0.99, got {fin2['mortgage_rate']}. "
+            f"PropertyNodes may be caching a stale Services reference."
+        )
+        assert new_mortgage != old_mortgage, (
+            f"Mortgage should have changed with new rate. "
+            f"Old={old_mortgage}, new={new_mortgage}"
+        )

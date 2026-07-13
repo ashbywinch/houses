@@ -556,3 +556,29 @@ async def test_replace_walk_with_bus_short_walk_no_replace():
     original = _tfl_complete(duration=90, cost="12.50", walk=9)
     result = await _replace_walk_with_bus(original, "GU22 8RU", "EC3A 7LP", 9, _bus_alternative=_bus_route())
     assert result is original
+
+class TestAddressWaypoint:
+    """_address_waypoint must handle postcodes, GeoPoints, and coordinate strings."""
+
+    def test_postcode_returns_address_waypoint(self):
+        from houses.routing import _address_waypoint
+        result = _address_waypoint("SW1V 2QQ")
+        assert result == {"address": "SW1V 2QQ"}
+
+    def test_geopoint_returns_location_waypoint(self):
+        from houses.routing import _address_waypoint
+        from houses.geo import GeoPoint
+        gp = GeoPoint(lat=51.5, lon=-0.13)
+        result = _address_waypoint(gp)
+        assert result == {"location": {"latLng": {"latitude": 51.5, "longitude": -0.13}}}
+
+    def test_coordinate_string_returns_location_waypoint(self):
+        """'lat,lon' strings must use location format, not address."""
+        from houses.routing import _address_waypoint
+        result = _address_waypoint("51.5,-0.13")
+        assert result == {"location": {"latLng": {"latitude": 51.5, "longitude": -0.13}}}
+
+    def test_invalid_coordinate_string_falls_back_to_address(self):
+        from houses.routing import _address_waypoint
+        result = _address_waypoint("not-a-coordinate")
+        assert result == {"address": "not-a-coordinate"}

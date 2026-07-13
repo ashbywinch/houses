@@ -80,20 +80,3 @@ def make_default_thresholds() -> dict[str, dict[str, int]]:
         "Lorena": {"good_max_minutes": 40, "fine_max_minutes": 60},
     }
 
-
-def make_persisted_source(node_id: str, value_type: type,
-                          default_factory) -> UserInputNode:
-    """Create a settings UserInputNode from DB or defaults.
-
-    Called by ``Services.__init__`` (production) and by tests that want
-    real data seeded into the in-memory database.
-    """
-    node = UserInputNode(node_id, value_type)
-    persisted = latest_node_result(node_id)
-    if persisted and persisted.get("status") == "succeeded":
-        val = node._adapter.validate_python(persisted["value"])
-        node._value = val
-        node._source_label = persisted.get("source_label", "db")
-    else:
-        node.push(default_factory(), "config")
-    return node

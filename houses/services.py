@@ -108,9 +108,16 @@ class PersistenceService(Protocol):
 
     def load_property_data(self, rid: str) -> Any: ...
 
+# Settings sources are cached by node_id so that the same UserInputNode
+# instance is returned on every Services() construction.  This means
+# a PATCH to /api/settings/financial updates the canonical node that
+# all PropertyNodes reference, without needing a server restart.
+_SETTINGS_SOURCE_CACHE: dict[str, UserInputNode] = {}
+
 
 def _make_settings_source(node_id: str, value_type: type, default_factory):
-    """Create a settings UserInputNode from DB or defaults (eager — not lazy)."""
+    if node_id in _SETTINGS_SOURCE_CACHE:
+        return _SETTINGS_SOURCE_CACHE[node_id]
     node = UserInputNode(node_id, value_type)
     persisted = latest_node_result(node_id)
     if persisted and persisted.get("status") == "succeeded":
@@ -119,9 +126,8 @@ def _make_settings_source(node_id: str, value_type: type, default_factory):
         node._source_label = persisted.get("source_label", "db")
     else:
         node.push(default_factory(), "config")
+    _SETTINGS_SOURCE_CACHE[node_id] = node
     return node
-
-
 # ── Default implementations (thin wrappers around real modules) ────────
 
 

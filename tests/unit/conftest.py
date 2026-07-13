@@ -67,3 +67,10 @@ def _no_geocoding(monkeypatch):
         return None
 
     monkeypatch.setattr("houses.model.property._geocode_address", fake_geocode)
+
+@pytest.fixture(autouse=True)
+def _isolate_settings_sources():
+    """Clear the settings-source cache so each test gets fresh defaults."""
+    from houses.services import _SETTINGS_SOURCE_CACHE
+    _SETTINGS_SOURCE_CACHE.clear()
+    yield
