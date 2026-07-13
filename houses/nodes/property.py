@@ -231,15 +231,30 @@ class PropertyNodes:
                 )
                 self.commute_selectors[key] = selector
 
-        simon_key = "Simon/Office"
-        bracknell_key = "Simon/Bracknell"
-        lorena_key = "Lorena/Office"
+        # Look up commute selectors by the actual POI labels from the
+        # persons config, so CommuteBreakdownNode deps resolve correctly.
+        simon_office_key = None
+        bracknell_key = None
+        lorena_office_key = None
+        for key in self.commute_selectors:
+            parts = key.split("/", 1)
+            if len(parts) != 2:
+                continue
+            p_name, label = parts
+            if p_name == "Simon" and label == "Bracknell":
+                bracknell_key = key
+            elif p_name == "Simon" and simon_office_key is None:
+                simon_office_key = key  # first non-Bracknell Simon commute
+            elif p_name == "Lorena" and lorena_office_key is None:
+                lorena_office_key = key  # first Lorena commute
+
+        fallback = lambda rid, key: UserInputNode[dict](f"{rid}/{key}/fallback", dict)
         self.commute_simon_office = self.commute_selectors.get(
-            simon_key, UserInputNode[dict](f"{self.rid}/{simon_key}/fallback", dict))
+            simon_office_key, fallback(self.rid, "simon_office"))
         self.commute_simon_bracknell = self.commute_selectors.get(
-            bracknell_key, UserInputNode[dict](f"{self.rid}/{bracknell_key}/fallback", dict))
+            bracknell_key, fallback(self.rid, "simon_bracknell"))
         self.commute_lorena_office = self.commute_selectors.get(
-            lorena_key, UserInputNode[dict](f"{self.rid}/{lorena_key}/fallback", dict))
+            lorena_office_key, fallback(self.rid, "lorena_office"))
 
     def _on_node_changed(self) -> None:
         self.changed.emit()
@@ -251,6 +266,7 @@ class PropertyNodes:
             "best_location": await self.best_location.to_json(),
             "rightmove_url": await self.rightmove_url.to_json(),
             "rightmove_price": await self.rightmove_price.to_json(),
+            "rightmove_bedrooms": await self.rightmove_bedrooms.to_json(),
             "postcode": await self.postcode.to_json(),
         }
 
