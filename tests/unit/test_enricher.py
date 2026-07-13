@@ -1301,6 +1301,9 @@ class TestEnrichRailFares:
         async def mock_geocode(_):
             return Attempt.succeeded(GeoPoint(51.317, -0.556))
 
+        async def mock_tube_fare(station, postcode, _data=None):
+            return None  # use FALLBACK_TUBE_SINGLE_GBP
+
         from houses.commute import Commute
         from houses.enrichment_runner import _enrich_rail_fares
 
@@ -1330,6 +1333,7 @@ class TestEnrichRailFares:
             lorena=lorena,
             _registry=reg,
             _geocode=mock_geocode,
+            _tube_fare_fn=mock_tube_fare,
         )
         # rail: (17.00 + 2.80) × 2 = 39.60. existing bus: 4.00. total: 43.60
         assert lorena_result.daily_cost_gbp == Money("43.60", "GBP")
@@ -1354,6 +1358,9 @@ class TestEnrichRailFares:
 
         async def mock_geocode(_):
             return Attempt.succeeded(GeoPoint(51.303, -0.636))
+
+        async def mock_tube_fare(station, postcode, _data=None):
+            return None  # use FALLBACK_TUBE_SINGLE_GBP
 
         from houses.commute import Commute
         from houses.enrichment_runner import _enrich_rail_fares
@@ -1385,6 +1392,7 @@ class TestEnrichRailFares:
             lorena=lorena,
             _registry=reg,
             _geocode=mock_geocode,
+            _tube_fare_fn=mock_tube_fare,
         )
         # rail: (17.00 + 2.80) × 2 = 39.60. existing parking: 10.80. total: 50.40
         assert simon_result.daily_cost_gbp == Money("50.40", "GBP")

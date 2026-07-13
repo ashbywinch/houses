@@ -112,15 +112,9 @@ async def test_enrich_uses_tfl_tube_fare_when_needed(tmp_path):
 
         return Attempt.succeeded(GeoPoint(51.317, -0.556))
 
-    # Inject a mock tube fare of £3.40 (peak) instead of hardcoded £2.80
-    import houses.transit_route as tr
-
     async def mock_tube_fare(station, postcode, _data=None):
         return Money("3.40", "GBP")
 
-    original = tr.get_tube_leg_fare
-    tr.get_tube_leg_fare = mock_tube_fare
-    try:
         simon = Commute(
             destination_label="Simon",
             destination_postcode="SW1V 2QQ",
@@ -144,11 +138,10 @@ async def test_enrich_uses_tfl_tube_fare_when_needed(tmp_path):
             lorena=lorena,
             _registry=reg,
             _geocode=mock_geocode,
+            _tube_fare_fn=mock_tube_fare,
         )
         # rail: 17.00. tube: 3.40 (peak). return: (17.00 + 3.40) × 2 = 40.80
         # parking: 10.80. total: 40.80 + 10.80 = 51.60
         # With old £2.80: (17.00 + 2.80) × 2 + 10.80 = 50.40
         # With new £3.40: (17.00 + 3.40) × 2 + 10.80 = 51.60
         assert simon_result.daily_cost_gbp == Money("51.60", "GBP")
-    finally:
-        tr.get_tube_leg_fare = original

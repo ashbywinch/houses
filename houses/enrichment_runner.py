@@ -126,14 +126,17 @@ async def _enrich_rail_fares(
     lorena: Commute,
     _registry: RailFareRegistry | None = None,
     _geocode=None,
+    _tube_fare_fn=None,
 ) -> tuple[Commute, Commute]:
     """Fallback: look up National Rail fares when TfL didn't return a cost.
 
-    ``_registry`` — optional ``RailFareRegistry`` instance (created via context var if not provided).
-    ``_geocode`` — optional async geocode function (default: ``houses.location.geocode``).
+    ``_registry`` — optional ``RailFareRegistry`` instance.
+    ``_geocode`` — optional async geocode function.
+    ``_tube_fare_fn`` — optional async tube fare function (default: ``get_tube_leg_fare``).
     """
     registry = _registry or get_rail_fare_registry()
     geo_fn = _geocode or geocode
+    tube_fare_fn = _tube_fare_fn or get_tube_leg_fare
 
     needs_rail = enabled is None or enabled & {"simon"} or enabled & {"lorena"}
     if not needs_rail:
@@ -185,7 +188,7 @@ async def _enrich_rail_fares(
         if dest:
             fare = registry.fare_between(origin, dest)
             if fare is not None:
-                tube_fare = await get_tube_leg_fare(dest, settings.simon_postcode)
+                tube_fare = await tube_fare_fn(dest, settings.simon_postcode)
                 tube_single = tube_fare or Money(FALLBACK_TUBE_SINGLE_GBP, "GBP")
                 rail_cost = (fare + tube_single) * 2
                 parking = Money(str(simon.non_rail_cost()), "GBP")
@@ -209,11 +212,11 @@ async def _enrich_rail_fares(
         if dest:
             fare = registry.fare_between(origin, dest)
             if fare is not None:
-                tube_fare = await get_tube_leg_fare(dest, settings.lorena_postcode)
+                tube_fare = await tube_fare_fn(dest, settings.lorena_postcode)
                 tube_single = tube_fare or Money(FALLBACK_TUBE_SINGLE_GBP, "GBP")
                 rail_cost = (fare + tube_single) * 2
-                bus = Money(str(lorena.non_rail_cost()), "GBP")
-                total = rail_cost + bus
+                existing = lorena.daily_cost_gbp or Money("0", "GBP")
+                total = rail_cost + existing
                 lorena = Commute(
                     destination_label=lorena.destination_label,
                     destination_postcode=lorena.destination_postcode,
@@ -223,10 +226,9 @@ async def _enrich_rail_fares(
                     cost_groups=lorena.cost_groups,
                 )
                 logger.info(
-                    "NR fare fallback for Lorena: %s (rail) + %s (tube) + %s (bus) = %s",
+                    "NR fare fallback for Lorena: %s (rail) + %s (tube) = %s",
                     str(fare.amount),
                     str(tube_single.amount),
-                    str(bus.amount),
                     str(total.amount),
                 )
 
