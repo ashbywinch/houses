@@ -246,3 +246,59 @@ class TestFinancialSettingsPropagation:
             f"Mortgage should have changed with new rate. "
             f"Old={old_mortgage}, new={new_mortgage}"
         )
+
+class TestSchoolAcceptableFromPersons:
+    """PropertyNodes extracts acceptable_schools from the first child person."""
+
+    @pytest.mark.asyncio
+    async def test_uses_first_child_acceptable_schools(self):
+        """school nodes should receive the acceptable_schools from persons_source."""
+        from houses.nodes.property import PropertyNodes
+        from houses.context import get_services
+        from houses.geo import GeoPoint
+
+        # Push persons with a child that has specific acceptable_schools
+        svc = get_services()
+        svc.persons_source.push([
+            {"name": "Parent", "has_car": True, "is_child": False},
+            {"name": "Child", "has_car": False, "is_child": True,
+             "acceptable_schools": ["girls"]},
+        ], "test")
+
+        p = PropertyNodes("test_acc")
+        p.rightmove_price.push("550000", "test")
+        p.rightmove_address.push("31 Isambard Rd", "test")
+        p.rightmove_bedrooms.push("3", "test")
+        p.rightmove_location.push(GeoPoint(51.48, -0.35), "rightmove")
+        p.corrected_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+        p.precise_location.push(GeoPoint(51.5, -0.37), "test")
+        p.postcode.push("SW1V 2QQ", "test")
+        p.user_entered_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+
+        # The school nodes should have acceptable=("girls",)
+        # We can check this by examining the node's _acceptable attribute
+        assert p.primary_school._acceptable == ("girls",)
+        assert p.secondary_school._acceptable == ("girls",)
+
+    @pytest.mark.asyncio
+    async def test_defaults_to_mixed_when_no_child(self):
+        """When no child is found, acceptable_schools defaults to ('mixed',)."""
+        from houses.nodes.property import PropertyNodes
+        from houses.context import get_services
+
+        svc = get_services()
+        svc.persons_source.push([
+            {"name": "Parent", "has_car": True, "is_child": False},
+        ], "test")
+
+        p = PropertyNodes("test_acc2")
+        p.rightmove_price.push("550000", "test")
+        p.rightmove_address.push("31 Isambard Rd", "test")
+        p.rightmove_bedrooms.push("3", "test")
+        p.corrected_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+        p.precise_location.push(GeoPoint(51.5, -0.37), "test")
+        p.postcode.push("SW1V 2QQ", "test")
+        p.user_entered_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+
+        assert p.primary_school._acceptable == ("mixed",)
+        assert p.secondary_school._acceptable == ("mixed",)
