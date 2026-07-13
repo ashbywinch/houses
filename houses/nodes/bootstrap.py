@@ -7,6 +7,8 @@ from typing import Any
 from dag.persistence import latest_node_result
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
+from houses.nodes.property import PropertyNodes
+from houses.sheets.reader import get_properties_data
 
 logger = logging.getLogger(__name__)
 
@@ -156,8 +158,6 @@ def bootstrap_from_row(row: dict[str, Any],
 
 
 def seed_registry_from_sheet() -> int:
-    from houses.nodes.property import PropertyNodes
-    from houses.sheets.reader import get_properties_data
     from houses.web.api_router import register_property
 
     rows = get_properties_data()
