@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class _GeoState:
+    google_exhausted: bool = False
     ors_geo_exhausted: bool = False
     nominatim_exhausted: bool = False
     nominatim_last_call: float = 0.0
@@ -285,53 +286,54 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
-
     # ── 1: Google Maps Geocoding ──────────────────────────────────
     # Note: No pre-check for the API key. Just try the call — the mock
     # transport handles it in tests, and in production a missing key
     # produces a non-OK response that falls through to the next geocoder.
-    googlegeocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
-    params = {"address": f"{address}, UK", "key": settings.google_maps_api_key}
-    cache_params = {"address": f"{address}, UK"}
-    cached = get_cached("GET", googlegeocode_url, cache_params, None)
-    if cached is not None:
-        data = cached
-        if data.get("status") == "OK" and data.get("results"):
-            loc = data["results"][0]["geometry"]["location"]
-            gp = GeoPoint(loc["lat"], loc["lng"])
-            result = Attempt.succeeded(gp)
-            _cache_result(cache_key, result)
-            logger.info("Geocoded '%s' via google-maps (cached)", address)
-            return result
-        logger.warning(
-            "Google Maps cached result for '%s' rejected: status=%s msg=%s",
-            address,
-            data.get("status"),
-            data.get("error_message", ""),
-        )
+    if _get_geo_state().google_exhausted:
+        logger.debug("Skipping Google Maps — API quota exhausted")
     else:
-        try:
-            async with cached_async_client(timeout=10.0) as client:
-                resp = await client.get(googlegeocode_url, params=params)
-                resp.raise_for_status()
-                data = resp.json()
-                if data.get("status") == "OK" and data.get("results"):
-                    set_cached("GET", googlegeocode_url, cache_params, None, data)
-                    loc = data["results"][0]["geometry"]["location"]
-                    gp = GeoPoint(loc["lat"], loc["lng"])
-                    result = Attempt.succeeded(gp)
-                    _cache_result(cache_key, result)
-                    logger.info("Geocoded '%s' via google-maps", address)
-                    return result
-                logger.warning(
-                    "Google Maps API response for '%s': status=%s msg=%s",
-                    address,
-                    data.get("status"),
-                    data.get("error_message", ""),
-                )
-        except Exception as exc:
-            logger.warning("Google Maps geocoding failed for '%s': %s", address, exc)
-
+        googlegeocode_url = "https://maps.googleapis.com/maps/api/geocode/json"
+        params = {"address": f"{address}, UK", "key": settings.google_maps_api_key}
+        cache_params = {"address": f"{address}, UK"}
+        cached = get_cached("GET", googlegeocode_url, cache_params, None)
+        if cached is not None:
+            data = cached
+            if data.get("status") == "OK" and data.get("results"):
+                loc = data["results"][0]["geometry"]["location"]
+                gp = GeoPoint(loc["lat"], loc["lng"])
+                result = Attempt.succeeded(gp)
+                _cache_result(cache_key, result)
+                logger.info("Geocoded '%s' via google-maps (cached)", address)
+                return result
+            if data.get("status") == "OVER_QUERY_LIMIT":
+                _get_geo_state().google_exhausted = True
+            logger.warning(
+                "Google Maps cached result for '%s' rejected: status=%s msg=%s",
+                address, data.get("status"), data.get("error_message", ""),
+            )
+        else:
+            try:
+                async with cached_async_client(timeout=10.0) as client:
+                    resp = await client.get(googlegeocode_url, params=params)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    if data.get("status") == "OK" and data.get("results"):
+                        set_cached("GET", googlegeocode_url, cache_params, None, data)
+                        loc = data["results"][0]["geometry"]["location"]
+                        gp = GeoPoint(loc["lat"], loc["lng"])
+                        result = Attempt.succeeded(gp)
+                        _cache_result(cache_key, result)
+                        logger.info("Geocoded '%s' via google-maps", address)
+                        return result
+                    if data.get("status") == "OVER_QUERY_LIMIT":
+                        _get_geo_state().google_exhausted = True
+                    logger.warning(
+                        "Google Maps API response for '%s': status=%s msg=%s",
+                        address, data.get("status"), data.get("error_message", ""),
+                    )
+            except Exception as exc:
+                logger.warning("Google Maps geocoding failed for '%s': %s", address, exc)
     # ── 2: ORS Pelias ─────────────────────────────────────────────
     # Note: No pre-check for the API key (same reason as Google Maps).
     # The exhausted flag is kept to stop hammering a rate-limited API.
