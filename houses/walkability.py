@@ -83,15 +83,52 @@ KNOWN_COUNTIES = frozenset(
 
 def _extract_town(address: str) -> str:
     parts = [p.strip() for p in address.split(",")]
-    filtered = [p for p in parts if p and not _POSTCODE_FULL_RE.match(p) and not _POSTCODE_OUTCODE_RE.match(p)]
+    # Use search() so postcodes embedded in a segment (e.g. "Surrey. KT9 2HN") are detected.
+    filtered = [p for p in parts if p
+                and not _POSTCODE_FULL_RE.search(p)
+                and not _POSTCODE_OUTCODE_RE.search(p)]
     non_county = [p for p in filtered if p.lower().strip() not in KNOWN_COUNTIES]
-    return non_county[-1] if non_county else (filtered[-1] if filtered else "")
+    candidate = non_county[-1] if non_county else (filtered[-1] if filtered else "")
+    # Strip trailing descriptions like " - Backing the River Wye"
+    if " - " in candidate:
+        candidate = candidate.split(" - ")[0].strip()
+    return candidate
 
 
 async def _extract_town_centre(lat: float, lng: float, town: str) -> GeoPoint | None:
     """Resolve a town name to coordinates, used for walkability enrichment."""
     loc = await PropertyLocation.from_town(town)
     return loc.coordinates.value_or_none()
+
+async def _find_town_centre_by_reverse_geocode(lat: float, lng: float) -> GeoPoint | None:
+    """Use ORS Pelias reverse geocode to find the nearest town and its centre."""
+    from houses.api_cache import cached_async_client, get_cached, set_cached
+
+    rev_url = ORS_GEOCODE_URL.replace("/search", "/reverse")
+    params = {"point.lat": lat, "point.lon": lng, "size": 1, "boundary.country": "GBR"}
+
+    cached = get_cached("GET", rev_url, params, None)
+    if cached is not None:
+        data = cached
+    else:
+        try:
+            async with cached_async_client(timeout=10.0) as client:
+                resp = await client.get(rev_url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                set_cached("GET", rev_url, params, None, data)
+        except Exception:
+            return None
+
+    features = data.get("features", [])
+    if not features:
+        return None
+    props = features[0].get("properties", {})
+    town = props.get("locality") or props.get("borough") or props.get("county")
+    if not town:
+        return None
+    # Forward-geocode the town name to get its centre
+    return await _extract_town_centre(lat, lng, town)
 
 
 async def _walk_duration(
@@ -278,22 +315,21 @@ async def enrich_walkability(
         town_centre = await _extract_town_centre(lat, lng, town)
         if town_centre:
             walk_to_town_minutes = await _walk_duration(lat, lng, town_centre)
-        else:
-            logger.warning(
-                "Could not geocode town centre for '%s' from address: %s",
-                town,
-                address,
-            )
-    else:
-        logger.warning(
-            "No town extracted from address: %s",
-            address,
-        )
+
+    # If the address-based town failed or gave an implausible result, try
+    # reverse-geocoding the property coordinates to find the actual nearest town.
+    if walk_to_town_minutes is None or walk_to_town_minutes <= 0 or walk_to_town_minutes > 180:
+        rev_centre = await _find_town_centre_by_reverse_geocode(lat, lng)
+        if rev_centre:
+            rev_minutes = await _walk_duration(lat, lng, rev_centre)
+            if rev_minutes is not None and 0 < rev_minutes <= 180:
+                walk_to_town_minutes = rev_minutes
+            # If reverse geocode also failed to produce a valid time, leave
+            # the original walk_to_town_minutes as-is (may be None or invalid).
 
     amenities = await _nearby_amenities(lat, lng)
 
-    # Sanitize walk time: ignore impossible values (ORS can return 0 or huge numbers
-    # when it can't find a proper route or geocoding is wrong)
+    # Sanitize walk time: ignore impossible values
     if walk_to_town_minutes is not None and (walk_to_town_minutes <= 0 or walk_to_town_minutes > 180):
         walk_to_town_minutes = None
 
