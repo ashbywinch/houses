@@ -70,11 +70,15 @@ class DerivedNode(Node[T], Generic[T]):
             dep.changed.connect(slot)
 
     def _on_dep_changed(self) -> None:
-        """A dependency changed — push this node to the stale queue."""
-        if self._cached is not None:
-            _stale_queue.put_nowait(self)
-        self.changed.emit()
+        """A dependency changed — push this node to the stale queue.
 
+        This fires both for initial computation (dep was just pushed)
+        and for subsequent changes.  The processor checks _is_stale()
+        which returns True when _cached is None (never computed) or
+        when dep timestamps are newer.
+        """
+        _stale_queue.put_nowait(self)
+        self.changed.emit()
     def _is_stale(self) -> bool:
         if self._cached is None:
             return True
@@ -89,22 +93,22 @@ class DerivedNode(Node[T], Generic[T]):
         return False
 
     async def attempt(self) -> Attempt[T]:
-        """Return the cached value, recomputing if stale.
+        """Return the cached value.
 
-        When a dep has changed, refresh() runs synchronously here.
-        The stale queue + _processor handle the same case for nodes
-        that aren't explicitly read — they catch up in the background.
+        On first call (no cached value) computes synchronously.  After
+        that, reads are instant unless stale, in which case refresh()
+        runs here too.  The processor handles background refreshes for
+        nodes that aren't explicitly read.
         """
         if self._cached is not None:
             if self._is_stale():
                 await self.refresh()
             return self._cached
-        # First compute (no concurrent writer possible)
+        # First compute (no concurrent writer exists yet)
         await self.refresh()
         if self._cached is not None:
             return self._cached
         return Attempt.pending()
-
     async def refresh(self) -> None:
         """Recompute if stale, persist, and emit changed."""
         if not self._is_stale():
