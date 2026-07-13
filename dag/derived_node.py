@@ -58,14 +58,14 @@ class DerivedNode(Node[T], Generic[T]):
         if self._cached is None:
             return True
         for dep in self._deps:
-            if dep._persisted_at > self._computed_at:
-                return True
+            if dep._persisted_at is not None and self._computed_at is not None:
+                if dep._persisted_at > self._computed_at:
+                    return True
             if self._loaded_dep_timestamps:
                 stored = self._loaded_dep_timestamps.get(dep._id, "")
                 if stored and dep._db_created_at != stored:
                     return True
         return False
-
     async def attempt(self) -> Attempt[T]:
         if self._is_stale():
             dep_attempts = [await dep.attempt() for dep in self._deps]
@@ -73,6 +73,7 @@ class DerivedNode(Node[T], Generic[T]):
             # enough information to compute yet.
             if any(a.pending for a in dep_attempts):
                 self._cached = Attempt.pending()
+                self._computed_at = datetime.now(UTC)
                 return self._cached
             try:
                 result = self.compute(*dep_attempts)
@@ -81,7 +82,7 @@ class DerivedNode(Node[T], Generic[T]):
             except Exception as e:
                 result = Attempt.impossible(f"{self._id}: {e}")
             self._cached = result
-            self._computed_at = datetime.now(UTC).isoformat()
+            self._computed_at = datetime.now(UTC)
             dep_timestamps = {
                 dep._id: dep._db_created_at for dep in self._deps
             }
