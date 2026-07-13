@@ -15,6 +15,7 @@ import httpx
 from dag.attempt import Attempt
 from houses.api_cache import get_cached, set_cached
 from houses.commute import Commute, CommuteBreakdown
+from houses.routing import _with_label, get_commute
 from houses.config import settings
 from houses.retry import retry_async
 
@@ -78,8 +79,6 @@ _END_PC_RE = re.compile(r",\s*[A-Z]{1,2}[0-9][A-Z0-9]?(?:\s*[0-9][A-Z]{2})?\s*$"
 
 
 async def compute_simon_commute(property_postcode: str) -> Attempt[Commute]:
-    from houses.routing import _with_label, get_commute
-
     result = await get_commute(property_postcode, settings.simon_postcode, has_car=True, max_walk_minutes=15)
     if result.succeeded:
         commute = result.value_or_none()
@@ -91,8 +90,6 @@ async def compute_simon_commute(property_postcode: str) -> Attempt[Commute]:
 
 
 async def compute_lorena_commute(property_postcode: str) -> Attempt[Commute]:
-    from houses.routing import _with_label, get_commute
-
     result = await get_commute(property_postcode, settings.lorena_postcode, has_car=False, max_walk_minutes=30)
     if result.succeeded:
         commute = result.value_or_none()
@@ -175,7 +172,7 @@ async def compute_petrol_cost(origin_postcode: str) -> Attempt[Commute]:
     The ``get_commute`` function (in routing.py) handles the
     transit-vs-driving comparison for other callers.
     """
-    from houses.routing import _drive_commute, _with_label
+    from houses.routing import _drive_commute
 
     commute = await _drive_commute(origin_postcode, settings.bracknell_postcode)
     if commute:
