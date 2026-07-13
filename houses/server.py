@@ -9,8 +9,7 @@ from contextlib import asynccontextmanager
 import os
 
 from typing import Annotated, Any
-
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -85,28 +84,26 @@ async def lifespan(_app: FastAPI):
     # leaking API keys in the server log
     logging.getLogger("httpx").setLevel(logging.WARNING)
     init_db()
+    seed_registry_from_sheet()
+    # Start the background stale-node processor and the WebSocket broadcaster.
+    # The processor eagerly recomputes nodes whose dependencies have changed;
+    # the broadcaster pushes fresh property summaries to connected clients.
+    from dag.derived_node import _processor as _start_processor, set_after_refresh
+    from houses.web.broadcaster import _broadcaster as _start_broadcaster, push_rid, register_client
 
-    try:
-        seed_registry_from_sheet()
-        # Eagerly compute all DAG nodes. The seed pushes source values
-        # which makes every computed node stale.  Warming now means
-        # HTTP requests read from cache instead of triggering API calls.
-        tasks = []
-        for prop in _registry.values():
-            for sel in prop.commute_selectors.values():
-                for dep in sel._deps:
-                    tasks.append(asyncio.create_task(dep.attempt()))
-        if tasks:
-            done, pending = await asyncio.wait(tasks, timeout=180)
-            failed = [t for t in done if t.exception()]
-            if failed:
-                logger.warning("Warmup: %d/%d tasks failed", len(failed), len(tasks))
-            logger.info("Warmup: %d/%d nodes computed", len(done) - len(failed), len(tasks))
-    except Exception:
-        logger.info("Sheet not available yet — registry seeding deferred")
+    # Wire: after each node refresh, push the property RID to the broadcast queue
+    def _on_node_refreshed(node):
+        rid = node._id.split("/")[0]
+        push_rid(rid)
+
+    set_after_refresh(_on_node_refreshed)
+    _proc_task = asyncio.create_task(_start_processor())
+    _bc_task = asyncio.create_task(_start_broadcaster())
 
     logger.info("Houses server starting" + (" (TRACE enabled)" if settings.trace else ""))
     yield
+    _proc_task.cancel()
+    _bc_task.cancel()
     logger.info("Houses server shutting down")
     await stop_chrome()
 
@@ -449,3 +446,8 @@ async def sync_view_formulas_endpoint() -> JSONResponse:
 @app.get("/health")
 async def health() -> JSONResponse:
     return JSONResponse(content={"status": "ok"})
+
+@app.websocket("/ws")
+async def property_ws(websocket: WebSocket) -> None:
+    from houses.web.broadcaster import register_client
+    await register_client(websocket)

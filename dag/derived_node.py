@@ -1,15 +1,47 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from abc import abstractmethod
+import asyncio
 from inspect import iscoroutine
-from typing import Generic, TypeVar
+from abc import abstractmethod
+from collections.abc import Callable
 
 from dag.attempt import Attempt, Provenance
 from dag.node import Node
 from dag.signals import Slot
+from typing import Generic, TypeVar
 
 T = TypeVar("T")
+_after_refresh: Callable[[DerivedNode], object] | None = None
+_stale_queue: asyncio.Queue[DerivedNode] = None  # type: ignore[assignment]
+
+
+def set_after_refresh(callback: Callable[[DerivedNode], object]) -> None:
+    """Register a callback called after each node refresh (for broadcasting)."""
+    global _after_refresh
+    _after_refresh = callback
+
+
+def _ensure_queue() -> None:
+    global _stale_queue
+    if _stale_queue is None:
+        _stale_queue = asyncio.Queue()
+
+
+async def _processor() -> None:
+    """Single consumer: pop stale nodes from the queue and refresh them."""
+    _ensure_queue()
+    while True:
+        node = await _stale_queue.get()
+        try:
+            await node.refresh()
+            if _after_refresh is not None:
+                _after_refresh(node)
+        except Exception:
+            pass
+
+
+# ── DerivedNode ──────────────────────────────────────────────────────
 
 
 class DerivedNode(Node[T], Generic[T]):
@@ -26,6 +58,7 @@ class DerivedNode(Node[T], Generic[T]):
         self._deps = deps
         self._cached: Attempt[T] | None = None
         self._slots: list[Slot] = []
+        _ensure_queue()
 
         loaded = self._load_attempt_from_db()
         if loaded is not None:
@@ -37,21 +70,9 @@ class DerivedNode(Node[T], Generic[T]):
             dep.changed.connect(slot)
 
     def _on_dep_changed(self) -> None:
-        """A dependency changed — recompute if we already have a cached value.
-
-        During startup nodes have ``_cached is None`` and are computed
-        lazily by the warmup / first read.  Once a node has computed at
-        least once, a dep update triggers an eager recompute so the next
-        HTTP response is fresh without a cold-start wait.
-        """
-        import asyncio
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            pass  # no running loop — lazy compute on first read
-        else:
-            if self._cached is not None:
-                asyncio.create_task(self.attempt())
+        """A dependency changed — push this node to the stale queue."""
+        if self._cached is not None:
+            _stale_queue.put_nowait(self)
         self.changed.emit()
 
     def _is_stale(self) -> bool:
@@ -66,43 +87,66 @@ class DerivedNode(Node[T], Generic[T]):
                 if stored and dep._db_created_at != stored:
                     return True
         return False
+
     async def attempt(self) -> Attempt[T]:
-        if self._is_stale():
-            dep_attempts = [await dep.attempt() for dep in self._deps]
-            # If any dep is pending, the result is pending — we don't have
-            # enough information to compute yet.
-            if any(a.pending for a in dep_attempts):
-                self._cached = Attempt.pending()
-                self._computed_at = datetime.now(UTC)
-                return self._cached
-            try:
-                result = self.compute(*dep_attempts)
-                if iscoroutine(result):
-                    result = await result
-            except Exception as e:
-                result = Attempt.impossible(f"{self._id}: {e}")
-            self._cached = result
-            self._computed_at = datetime.now(UTC)
-            dep_timestamps = {
-                dep._id: dep._db_created_at for dep in self._deps
+        """Return the cached value, recomputing if stale.
+
+        When a dep has changed, refresh() runs synchronously here.
+        The stale queue + _processor handle the same case for nodes
+        that aren't explicitly read — they catch up in the background.
+        """
+        if self._cached is not None:
+            if self._is_stale():
+                await self.refresh()
+            return self._cached
+        # First compute (no concurrent writer possible)
+        await self.refresh()
+        if self._cached is not None:
+            return self._cached
+        return Attempt.pending()
+
+    async def refresh(self) -> None:
+        """Recompute if stale, persist, and emit changed."""
+        if not self._is_stale():
+            return
+        dep_attempts = [await dep.attempt() for dep in self._deps]
+        if any(a.pending for a in dep_attempts):
+            return
+        try:
+            result = self.compute(*dep_attempts)
+            if iscoroutine(result):
+                result = await result
+        except Exception as e:
+            result = Attempt.impossible(f"{self._id}: {e}")
+        self._cached = result
+        self._computed_at = datetime.now(UTC)
+        dep_timestamps = {
+            dep._id: dep._db_created_at for dep in self._deps
+        }
+        try:
+            result_dict = await self.to_json()
+        except Exception as e:
+            result_dict = {
+                "status": "impossible",
+                "value": None,
+                "error": str(e),
+                "provenance": {"label": ""},
             }
-            try:
-                result_dict = await self.to_json()
-            except Exception as e:
-                result_dict = {
-                    "status": "impossible",
-                    "value": None,
-                    "error": str(e),
-                    "provenance": {"label": ""},
-                }
-            self._persist(result_dict, dep_timestamps)
-        return self._cached
+        self._persist(result_dict, dep_timestamps)
+        self.changed.emit()
 
     async def build_provenance(self) -> Provenance:
         sources: dict[str, Provenance] = {}
         for dep in self._deps:
             sources[dep._id] = await dep.build_provenance()
         return Provenance.composite(self._id, sources)
+
+
+    async def to_json(self) -> dict:
+        result = await super().to_json()
+        if self._cached is not None:
+            result["stale"] = self._is_stale()
+        return result
 
     @abstractmethod
     def compute(self, *dep_attempts: Attempt) -> Attempt[T]:

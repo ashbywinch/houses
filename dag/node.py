@@ -78,6 +78,7 @@ class Node(ABC, Generic[T]):
         result["succeeded"] = attempt.succeeded
         result["pending"] = attempt.pending
         result["impossible"] = attempt.impossible
+        result["stale"] = False
         if attempt.impossible:
             result["error"] = attempt.error
         result["provenance"] = (await self.build_provenance()).to_dict()
