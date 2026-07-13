@@ -60,10 +60,18 @@ function commuteLabel(c: unknown, key: string): string {
   return key.split("/").slice(1).join("/")
 }
 
+function simpleOfsted(rating: string | null): string {
+  if (!rating) return ''
+  // Ofsted API returns strings like "Good, Behaviour Outstanding, ..."
+  // Only show the overall rating on the card
+  return rating.split(',')[0].trim()
+}
+
 function ofstedClass(rating: string | null): string {
-  if (rating === 'Outstanding') return 'pill--good'
-  if (rating === 'Good') return 'pill--warn'
-  if (rating === 'Requires Improvement') return 'pill--bad'
+  const main = simpleOfsted(rating)
+  if (main === 'Outstanding') return 'pill--good'
+  if (main === 'Good') return 'pill--warn'
+  if (main === 'Requires Improvement' || main === 'Inadequate') return 'pill--bad'
   return 'pill--muted'
 }
 
@@ -118,28 +126,28 @@ function schoolCommute(commutes: Record<string, { commute: unknown }> | undefine
         </template>
       </div>
 
-      <!-- Schools (walk times from George's commutes, Ofsted first) -->
+
+      <!-- Schools (walk times from child commutes, Ofsted last) -->
       <div v-if="data.schools" class="card__row card__row--section card__schools">
         <div v-if="data.schools.primary.school.succeeded" class="school-line">
           <a :href="data.schools.primary.school.value!.url || `https://get-information-schools.service.gov.uk/Establishments/Establishment/Details/${rid}`" target="_blank" class="school__name">{{ data.schools.primary.school.value!.name }}</a>
-          <span class="pill pill--sm" :class="ofstedClass(data.schools.primary.school.value!.ofsted)">{{ data.schools.primary.school.value!.ofsted }}</span>
           <span v-if="location && commuteDuration(schoolCommute(data.commutes, 'Primary'))" class="pill-link">
             <a :href="dirUrl(location.lat, location.lon, data.schools.primary.school.value!.name)" target="_blank" rel="noopener">
-              <span class="pill pill--sm pill--good">{{ commuteDuration(schoolCommute(data.commutes, 'Primary')) }}m walk ↗</span>
+              <CommutePill :label="''" :duration="commuteDuration(schoolCommute(data.commutes, 'Primary'))" mode="walk" :cost="null" :goodMax="15" :fineMax="30" />
             </a>
           </span>
+          <span class="pill pill--sm" :class="ofstedClass(data.schools.primary.school.value!.ofsted)">{{ simpleOfsted(data.schools.primary.school.value!.ofsted) }}</span>
         </div>
         <div v-if="data.schools.secondary.school.succeeded" class="school-line">
           <a :href="data.schools.secondary.school.value!.url || `https://get-information-schools.service.gov.uk/Establishments/Establishment/Details/${rid}`" target="_blank" class="school__name">{{ data.schools.secondary.school.value!.name }}</a>
-          <span class="pill pill--sm" :class="ofstedClass(data.schools.secondary.school.value!.ofsted)">{{ data.schools.secondary.school.value!.ofsted }}</span>
           <span v-if="location && commuteDuration(schoolCommute(data.commutes, 'Secondary'))" class="pill-link">
             <a :href="dirUrl(location.lat, location.lon, data.schools.secondary.school.value!.name)" target="_blank" rel="noopener">
-              <span class="pill pill--sm pill--good">{{ commuteDuration(schoolCommute(data.commutes, 'Secondary')) }}m walk ↗</span>
+              <CommutePill :label="''" :duration="commuteDuration(schoolCommute(data.commutes, 'Secondary'))" mode="walk" :cost="null" :goodMax="15" :fineMax="30" />
             </a>
           </span>
+          <span class="pill pill--sm" :class="ofstedClass(data.schools.secondary.school.value!.ofsted)">{{ simpleOfsted(data.schools.secondary.school.value!.ofsted) }}</span>
         </div>
       </div>
-
       <!-- Monthly cost -->
       <div class="card__row card__row--section card__financial">
         <span class="card__cost-total">Total monthly: {{ monthlyCost !== null ? '£' + monthlyCost.toLocaleString() + '/mo' : 'unknown' }}</span>
