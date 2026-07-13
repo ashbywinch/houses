@@ -15,6 +15,7 @@ from pathlib import Path
 
 from houses.commute import Commute
 from houses.config import settings
+from houses.geo import GeoPoint
 from houses.location import _geocode_address, geocode
 from houses.school import School
 from houses.school_gender import SchoolGender
@@ -66,7 +67,18 @@ async def find_nearest(
     if not schools:
         return None
 
-    property_coords = (await geocode(postcode)).value_or_none()
+    property_coords = None
+    # If the input is a "lat,lon" coordinate string, parse it directly
+    # instead of trying to geocode it (geocoding would fail).
+    if "," in postcode:
+        try:
+            lat_str, lon_str = postcode.split(",", 1)
+            property_coords = GeoPoint(lat=float(lat_str), lon=float(lon_str))
+        except (ValueError, TypeError):
+            pass
+
+    if property_coords is None:
+        property_coords = (await geocode(postcode)).value_or_none()
     if property_coords is None and address:
         property_coords = (await _geocode_address(address)).value_or_none()
     if property_coords is None:

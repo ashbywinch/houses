@@ -28,6 +28,40 @@ class TestWalkCommuteFailsFast:
             settings.google_maps_api_key = original
 
 
+
+@pytest.mark.asyncio
+async def test_find_nearest_handles_coordinate_string(monkeypatch):
+    """find_nearest must accept a 'lat,lon' coordinate string and use it
+    directly instead of trying to geocode it."""
+    from houses.geo import GeoPoint
+    from houses.school_gender import SchoolGender
+    from houses.schools import find_nearest, School
+
+    # Fake school at a known location
+    fake_school = School(
+        urn="1", name="Test Primary", phase="Primary",
+        gender=SchoolGender.MIXED, type_of_establishment="community school",
+        postcode="SW1V 2QQ", website="",
+        ofsted_rating="Good", inspection_year="2022",
+        coords=GeoPoint(lat=51.5, lon=-0.13),
+        statutory_low_age=4, statutory_high_age=11,
+    )
+    geocode_called = False
+    async def fake_geocode(_input):
+        nonlocal geocode_called
+        geocode_called = True
+        from dag.attempt import Attempt
+        return Attempt.pending()  # geocode can't parse coordinate strings
+    monkeypatch.setattr("houses.schools.geocode", fake_geocode)
+    monkeypatch.setattr("houses.schools._geocode_address", fake_geocode)
+    monkeypatch.setattr("houses.schools._load_schools", lambda: [fake_school])
+
+    result = await find_nearest("51.5,-0.13", child_age=4, requirement=SchoolGender.MIXED)
+
+    assert result is not None, "find_nearest should find a school from coordinate input"
+    assert result.name == "Test Primary"
+    assert not geocode_called, "find_nearest should NOT call geocode when given coordinates"
+
 # ── Congestion zone ─────────────────────────────────────────────────────
 
 
