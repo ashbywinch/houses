@@ -12,12 +12,12 @@ from dag.signals import Slot
 from typing import Generic, TypeVar
 
 T = TypeVar("T")
-_after_refresh: Callable[[DerivedNode], object] | None = None
+
 _stale_queue: asyncio.Queue[DerivedNode] = None  # type: ignore[assignment]
+_after_refresh: Callable[[DerivedNode], object] | None = None
 
 
 def set_after_refresh(callback: Callable[[DerivedNode], object]) -> None:
-    """Register a callback called after each node refresh (for broadcasting)."""
     global _after_refresh
     _after_refresh = callback
 
@@ -29,8 +29,6 @@ def _ensure_queue() -> None:
 
 
 async def flush_processor() -> None:
-    """Synchronously drain the stale queue — used in tests after pushing
-    source values, before reading derived nodes."""
     _ensure_queue()
     while not _stale_queue.empty():
         try:
@@ -41,7 +39,6 @@ async def flush_processor() -> None:
 
 
 async def _processor() -> None:
-    """Single consumer: pop stale nodes from the queue and refresh them."""
     _ensure_queue()
     while True:
         node = await _stale_queue.get()
@@ -52,13 +49,9 @@ async def _processor() -> None:
         except Exception:
             pass
 
-class DerivedNode(Node[T], Generic[T]):
-    """A node whose value is computed from other nodes.
 
-    Subclasses declare their dependencies and implement ``compute()``.
-    Results are cached until a dep's timestamp indicates a newer value.
-    After each recompute, the result is persisted to SQLite.
-    """
+class DerivedNode(Node[T], Generic[T]):
+    """A node whose value is computed from other nodes."""
 
     def __init__(self, node_id: str, value_type: type[T],
                  deps: tuple[Node, ...]) -> None:
@@ -78,8 +71,8 @@ class DerivedNode(Node[T], Generic[T]):
             dep.changed.connect(slot)
 
     def _on_dep_changed(self) -> None:
-        """A dependency changed — push this node to the stale queue
-        so the processor recomputes it."""
+        if not self._is_stale():
+            return
         _stale_queue.put_nowait(self)
         self.changed.emit()
 
@@ -97,26 +90,17 @@ class DerivedNode(Node[T], Generic[T]):
         return False
 
     async def attempt(self) -> Attempt[T]:
-        """Return the cached value.
+        """Read-only: return the cached value.
 
-        On first call (no cached value) computes synchronously — no
-        concurrent writer exists yet.  After that, reads are instant
-        unless stale (dep changed), in which case refresh() runs here.
-        The processor handles background refreshes for nodes that
-        aren't explicitly read.
+        If never computed, returns Attempt.pending().  The processor
+        handles all computation — enqueued by _on_dep_changed when
+        deps are pushed during bootstrap.
         """
-        if self._cached is not None:
-            if self._is_stale():
-                await self.refresh()
-            return self._cached
-        # First compute (no concurrent writer possible)
-        await self.refresh()
         if self._cached is not None:
             return self._cached
         return Attempt.pending()
 
     async def refresh(self) -> None:
-        """Recompute if stale, persist, and emit changed."""
         if not self._is_stale():
             return
         dep_attempts = [await dep.attempt() for dep in self._deps]
@@ -130,16 +114,12 @@ class DerivedNode(Node[T], Generic[T]):
             result = Attempt.impossible(f"{self._id}: {e}")
         self._cached = result
         self._computed_at = datetime.now(UTC)
-        dep_timestamps = {
-            dep._id: dep._db_created_at for dep in self._deps
-        }
+        dep_timestamps = {dep._id: dep._db_created_at for dep in self._deps}
         try:
             result_dict = await self.to_json()
         except Exception as e:
             result_dict = {
-                "status": "impossible",
-                "value": None,
-                "error": str(e),
+                "status": "impossible", "value": None, "error": str(e),
                 "provenance": {"label": ""},
             }
         self._persist(result_dict, dep_timestamps)
@@ -150,7 +130,6 @@ class DerivedNode(Node[T], Generic[T]):
         for dep in self._deps:
             sources[dep._id] = await dep.build_provenance()
         return Provenance.composite(self._id, sources)
-
 
     async def to_json(self) -> dict:
         result = await super().to_json()

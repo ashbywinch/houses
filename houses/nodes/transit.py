@@ -170,7 +170,8 @@ class TransitNode(DerivedNode[dict]):
                 max_walk = int(p.get("bus_walk_penalty_minutes", 30)) if isinstance(p, dict) else 30
                 break
 
-        commute = await get_commute(
+        svc = get_services()
+        commute = await svc.commute_router.route(
             loc,
             dest_postcode,
             has_car=has_car,

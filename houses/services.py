@@ -43,7 +43,7 @@ class GeocodingService(Protocol):
 
 
 class CommuteRoutingService(Protocol):
-    """Simon's commute, Lorena's commute, and Bracknell petrol cost."""
+    """Simon's commute, Lorena's commute, Bracknell petrol cost, and generic routing."""
 
     async def simon_commute(self, postcode: str) -> Attempt[Commute]: ...
 
@@ -51,6 +51,14 @@ class CommuteRoutingService(Protocol):
 
     async def petrol_cost(self, postcode: str) -> Attempt[Commute]: ...
 
+    async def route(
+        self,
+        origin: str | GeoPoint,
+        destination: str | GeoPoint,
+        *,
+        has_car: bool,
+        max_walk_minutes: int,
+    ) -> Attempt[Commute]: ...
 
 class SchoolLookupService(Protocol):
     """Find nearest suitable school and compute its commute."""
@@ -141,13 +149,27 @@ class _DefaultGeocoder:
 
 class _DefaultCommuteRouter:
     async def simon_commute(self, postcode: str) -> Attempt[Commute]:
+        from houses.enricher import compute_simon_commute
         return await compute_simon_commute(postcode)
 
     async def lorena_commute(self, postcode: str) -> Attempt[Commute]:
+        from houses.enricher import compute_lorena_commute
         return await compute_lorena_commute(postcode)
 
     async def petrol_cost(self, postcode: str) -> Attempt[Commute]:
+        from houses.enricher import compute_petrol_cost
         return await compute_petrol_cost(postcode)
+
+    async def route(
+        self,
+        origin: str | GeoPoint,
+        destination: str | GeoPoint,
+        *,
+        has_car: bool,
+        max_walk_minutes: int,
+    ) -> Attempt[Commute]:
+        from houses.routing import get_commute
+        return await get_commute(origin, destination, has_car=has_car, max_walk_minutes=max_walk_minutes)
 
 
 class _DefaultSchoolLookup:
@@ -158,12 +180,12 @@ class _DefaultSchoolLookup:
         address: str = "",
         acceptable: tuple[SchoolGender, ...] = (SchoolGender.MIXED,),
     ) -> School | None:
+        from houses.schools import find_nearest
         return await find_nearest(postcode, child_age=child_age, address=address, acceptable=acceptable)
 
     async def school_commute(self, postcode: str, school: School) -> Commute | None:
+        from houses.schools import compute_school_commute
         return await compute_school_commute(postcode, school)
-
-
 class _DefaultWalkability:
     async def enrich(self, lat: float, lng: float, address: str) -> dict[str, Any]:
         return await enrich_walkability(lat, lng, address)

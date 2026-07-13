@@ -25,41 +25,22 @@ def _fake_services(monkeypatch):
     from houses.commute import Commute
     from houses.school import School
     from houses.school_gender import SchoolGender
-
-    async def fake_get_commute(origin, dest, *, has_car, max_walk_minutes):
+    async def fake_route(origin, destination, *, has_car, max_walk_minutes):
         return Attempt.succeeded(
             Commute(
                 destination_label="Office",
-                destination_postcode=dest,
+                destination_postcode=destination if isinstance(destination, str) else str(destination),
                 duration_minutes=32,
                 daily_cost_gbp=Money("4.50", "GBP"),
             ),
         )
 
-    import houses.nodes.transit as transit_mod
-    monkeypatch.setattr(transit_mod, "get_commute", fake_get_commute)
+    svc = _sp.get()
+    if svc and hasattr(svc, 'commute_router'):
+        svc.commute_router.route = fake_route
+    svc.commute_router.route = fake_route
 
     # Provide a fake school lookup so school nodes + George's commutes work
-    from houses.services_provider import _request_services as _sp
-    from tests.helpers import make_services
-    svc = _sp.get()
-    if svc:
-        async def fake_find_nearest(*args, **kwargs):
-            return School(
-                urn="123", name="Test School", phase="primary",
-                gender=SchoolGender.BOYS,
-                type_of_establishment="community school",
-                postcode="SW1V 2QQ", website="",
-                ofsted_rating="Good", inspection_year="2022",
-                coords=GeoPoint(lat=51.5, lon=-0.13), statutory_low_age=None,
-                statutory_high_age=None,
-            )
-        svc.school_lookup = type("FakeSchoolService", (), {
-            "find_nearest": fake_find_nearest,
-        })()
-
-    yield
-    _sp.reset(token)
 
 
 @pytest.fixture

@@ -92,6 +92,17 @@ class FakeCommuteRouter:
         self.calls.append(("petrol", postcode))
         return Attempt.succeeded(self.petrol) if self.petrol else Attempt.impossible("no route")
 
+    async def route(
+        self,
+        origin: str | GeoPoint,
+        destination: str | GeoPoint,
+        *,
+        has_car: bool,
+        max_walk_minutes: int,
+    ) -> Attempt[Commute]:
+        self.calls.append(("route", str(origin)))
+        return Attempt.impossible("mocked route")
+
 
 class FakeSchoolLookup:
     """Returns no school (None) for any lookup."""

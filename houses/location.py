@@ -140,70 +140,21 @@ class PropertyLocation:
 
     @classmethod
     async def from_town(cls, town: str) -> PropertyLocation:
-        """Resolve a town name to a PropertyLocation.
+        """Resolve a town name to a PropertyLocation via the injected geocoder.
 
-        Tries ORS Pelias, then Nominatim. Strips common suffixes
-        (``Station Area``, ``Village``, etc.) as a final fallback.
+        Tries the service-layer geocoder (Google Maps → ORS → Nominatim).
+        Strips common suffixes (``Station Area``, ``Village``, etc.) as
+        a final fallback if the geocoder returns no result.
         """
         key = town.strip().upper()
         if not key:
             return cls(coordinates=Attempt.impossible("empty town name"))
 
-        # ORS Pelias — disk-cached via with_cache
-        ors_params = {"text": f"{town}, UK", "size": 1}
-        try:
-            async with cached_async_client(timeout=10.0) as client:
-
-                async def _fetch_ors():
-                    resp = await retry_async(
-                        lambda: client.get(
-                            ORS_GEOCODE_URL,
-                            params=ors_params,
-                            headers={"Authorization": settings.ors_api_key},
-                        ),
-                        max_retries=2,
-                        base_delay=1.0,
-                        exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-                    )
-                    resp.raise_for_status()
-                    return resp.json()
-
-                data = await with_cache("GET", ORS_GEOCODE_URL, params=ors_params, fetch=_fetch_ors)
-                features = data.get("features", [])
-                if features:
-                    lng, lat = features[0]["geometry"]["coordinates"]
-                    return cls(coordinates=Attempt.succeeded(GeoPoint(lat, lng)))
-        except httpx.HTTPStatusError as exc:
-            logger.warning("ORS geocoding failed for town: %s (%s)", town, exc.response.status_code)
-        except Exception:
-            logger.warning("ORS geocoding failed for town: %s", town)
-
-        # Fallback: Nominatim (free, no key) — disk-cached via with_cache
-        nom_params = {"q": f"{town}, UK", "format": "json", "limit": 1}
-        try:
-            async with cached_async_client(timeout=10.0) as client:
-
-                async def _fetch_nom():
-                    resp = await client.get(
-                        "https://nominatim.openstreetmap.org/search",
-                        params=nom_params,
-                        headers={"User-Agent": "HousesApp/1.0"},
-                    )
-                    resp.raise_for_status()
-                    return resp.json()
-
-                nom_url = "https://nominatim.openstreetmap.org/search"
-                data = await with_cache("GET", nom_url, params=nom_params, fetch=_fetch_nom)
-                if data:
-                    return cls(
-                        coordinates=Attempt.succeeded(
-                            GeoPoint(float(data[0]["lat"]), float(data[0]["lon"]))
-                        )
-                    )
-        except httpx.HTTPStatusError as exc:
-            logger.warning("Nominatim geocoding failed for town: %s (%s)", town, exc.response.status_code)
-        except Exception:
-            logger.warning("Nominatim geocoding failed for town: %s", town)
+        from houses.services_provider import get_services
+        result = await get_services().geocoder.geocode_address(f"{town}, UK")
+        coords = result.value_or_none()
+        if coords is not None:
+            return cls(coordinates=Attempt.succeeded(coords))
 
         # Try stripping suffixes like "Station Area" → "Maidenhead"
         stripped = _TOWN_SUFFIXES.sub("", town).strip()
