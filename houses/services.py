@@ -60,7 +60,7 @@ class SchoolLookupService(Protocol):
         postcode: str,
         child_age: int,
         address: str = "",
-        requirement: SchoolGender = SchoolGender.BOYS,
+        acceptable: tuple[SchoolGender, ...] = (SchoolGender.MIXED,),
     ) -> School | None: ...
 
     async def school_commute(self, postcode: str, school: School) -> Commute | None: ...
@@ -156,10 +156,9 @@ class _DefaultSchoolLookup:
         postcode: str,
         child_age: int,
         address: str = "",
-        requirement: SchoolGender = SchoolGender.BOYS,
+        acceptable: tuple[SchoolGender, ...] = (SchoolGender.MIXED,),
     ) -> School | None:
-        sch = await find_nearest(postcode, child_age=child_age, address=address, requirement=requirement)
-        return sch
+        return await find_nearest(postcode, child_age=child_age, address=address, acceptable=acceptable)
 
     async def school_commute(self, postcode: str, school: School) -> Commute | None:
         return await compute_school_commute(postcode, school)

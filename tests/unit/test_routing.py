@@ -56,7 +56,7 @@ async def test_find_nearest_handles_coordinate_string(monkeypatch):
     monkeypatch.setattr("houses.schools._geocode_address", fake_geocode)
     monkeypatch.setattr("houses.schools._load_schools", lambda: [fake_school])
 
-    result = await find_nearest("51.5,-0.13", child_age=4, requirement=SchoolGender.MIXED)
+    result = await find_nearest("51.5,-0.13", child_age=4, acceptable=(SchoolGender.MIXED,))
 
     assert result is not None, "find_nearest should find a school from coordinate input"
     assert result.name == "Test Primary"

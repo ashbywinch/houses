@@ -97,7 +97,14 @@ class School:
                   f"/Establishments/Establishment/Details/{urn}") if urn else "",
         )
 
+    def accepts_any(self, acceptable: tuple[SchoolGender, ...]) -> bool:
+        """Check if this school's gender is in the acceptable set."""
+        if self.gender == SchoolGender.UNKNOWN:
+            return False
+        return self.gender in acceptable
+
     def accepts(self, requirement: SchoolGender) -> bool:
+        """Check if this school accepts a child of the given gender requirement."""
         if self.gender == SchoolGender.UNKNOWN:
             return False
         return self.gender in (SchoolGender.MIXED, requirement)

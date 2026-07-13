@@ -105,9 +105,9 @@ class FakeSchoolLookup:
         postcode: str,
         child_age: int,
         address: str = "",
-        requirement: SchoolGender = SchoolGender.BOYS,
+        acceptable: tuple[SchoolGender, ...] = (SchoolGender.MIXED,),
     ) -> School | None:
-        self.find_calls.append(dict(postcode=postcode, child_age=child_age, address=address, requirement=requirement))
+        self.find_calls.append(dict(postcode=postcode, child_age=child_age, address=address, acceptable=acceptable))
         return None
 
     async def school_commute(self, postcode: str, school: School) -> Commute | None:

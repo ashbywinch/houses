@@ -345,16 +345,17 @@ async def run_enrichment(
     if enabled is None or "schools" in enabled:
         loc_coords = location.coordinates.value_or_none()
         primary = await svc.school_lookup.find_nearest(
-            postcode, child_age=7, address=address, requirement=SchoolGender.BOYS
+            postcode, child_age=7, address=address,
+            acceptable=(SchoolGender.BOYS, SchoolGender.GIRLS, SchoolGender.MIXED),
         )
         primary_commute = await svc.school_lookup.school_commute(postcode, primary) if primary else None
         primary_dist = (
             round(loc_coords.distance_km_to(primary.coords), 2) if primary and primary.coords and loc_coords else None
         )
         secondary = await svc.school_lookup.find_nearest(
-            postcode, child_age=12, address=address, requirement=SchoolGender.BOYS
+            postcode, child_age=12, address=address,
+            acceptable=(SchoolGender.BOYS, SchoolGender.GIRLS, SchoolGender.MIXED),
         )
-        secondary_commute = await svc.school_lookup.school_commute(postcode, secondary) if secondary else None
         secondary_dist = (
             round(loc_coords.distance_km_to(secondary.coords), 2)
             if secondary and secondary.coords and loc_coords

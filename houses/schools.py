@@ -50,15 +50,15 @@ async def find_nearest(
     child_age: int,
     address: str = "",
     *,
-    requirement: SchoolGender,
+    acceptable: tuple[SchoolGender, ...] = (SchoolGender.MIXED,),
 ) -> School | None:
-    """Find the nearest school accepting a child of the given age and gender.
+    """Find the nearest school accepting a child of the given age.
 
     Args:
         postcode: Property postcode (used to geocode and compute distances).
         child_age: Age of the child (checked against school's age range).
         address: Property address (fallback if postcode geocoding fails).
-        requirement: Gender requirement (boys, girls, or mixed).
+        acceptable: Tuple of SchoolGender values the family finds acceptable.
 
     Returns the nearest ``School`` or ``None`` if no suitable school is found
     within the configured search radius.
@@ -87,7 +87,7 @@ async def find_nearest(
     candidates: list[tuple[float, School]] = []
 
     for school in schools:
-        if not school.accepts(requirement):
+        if not school.accepts_any(acceptable):
             continue
         if not school.accepts_age(child_age):
             continue
@@ -112,6 +112,7 @@ async def find_nearest(
 
     candidates.sort(key=lambda x: x[0])
     return candidates[0][1]
+
 
 
 # ---------------------------------------------------------------------------

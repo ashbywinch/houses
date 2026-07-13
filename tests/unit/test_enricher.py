@@ -329,7 +329,8 @@ class TestFindNearestFilters:
         monkeypatch.setattr("houses.schools.geocode", mock_geocode)
         monkeypatch.setattr("houses.schools._geocode_address", mock_geocode)
 
-        result = await find_nearest("SL6 3CC", child_age=7, requirement=SchoolGender.BOYS)
+        result = await find_nearest("SL6 3CC", child_age=7,
+            acceptable=(SchoolGender.BOYS, SchoolGender.GIRLS, SchoolGender.MIXED))
         assert result is not None, "Expected a school, got None"
         assert result.name == "Free School", f"Expected Free School, got {result.name}"
 
@@ -368,7 +369,8 @@ class TestFindNearestFilters:
         monkeypatch.setattr("houses.schools.geocode", mock_geocode)
         monkeypatch.setattr("houses.schools._geocode_address", mock_geocode)
 
-        result = await find_nearest("SL6 3CC", child_age=7, requirement=SchoolGender.BOYS)
+        result = await find_nearest("SL6 3CC", child_age=7,
+            acceptable=(SchoolGender.BOYS, SchoolGender.GIRLS, SchoolGender.MIXED))
         assert result is not None, "Expected a school, got None"
         assert result.name == "Has A Name School", f"Expected Has A Name, got {result.name}"
 

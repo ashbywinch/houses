@@ -5,14 +5,16 @@ from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.context import get_services
 from houses.geo import GeoPoint
+from houses.school_gender import SchoolGender
+
 
 
 class PrimarySchoolNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, best_location, best_address,
-                 requirement: str = "mixed"):
+                 acceptable: tuple[str, ...] = ("mixed",)):
         deps: tuple[Node, ...] = (best_location, best_address)
         super().__init__(node_id, dict, deps)
-        self._requirement = requirement
+        self._acceptable = acceptable
 
     async def compute(self, location: Attempt[GeoPoint],
                       address: Attempt[str]) -> Attempt[dict]:
@@ -22,7 +24,7 @@ class PrimarySchoolNode(DerivedNode[dict]):
         svc = get_services()
         school = await svc.school_lookup.find_nearest(
             f"{loc.lat},{loc.lon}", child_age=4,
-            requirement=self._requirement,
+            acceptable=tuple(SchoolGender(v) for v in self._acceptable),
         )
         if school is None:
             return Attempt.impossible("no primary school found")
@@ -40,10 +42,10 @@ class PrimarySchoolNode(DerivedNode[dict]):
 
 class SecondarySchoolNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, best_location, best_address,
-                 requirement: str = "mixed"):
+                 acceptable: tuple[str, ...] = ("mixed",)):
         deps: tuple[Node, ...] = (best_location, best_address)
         super().__init__(node_id, dict, deps)
-        self._requirement = requirement
+        self._acceptable = acceptable
 
     async def compute(self, location: Attempt[GeoPoint],
                       address: Attempt[str]) -> Attempt[dict]:
@@ -53,7 +55,7 @@ class SecondarySchoolNode(DerivedNode[dict]):
         svc = get_services()
         school = await svc.school_lookup.find_nearest(
             f"{loc.lat},{loc.lon}", child_age=12,
-            requirement=self._requirement,
+            acceptable=tuple(SchoolGender(v) for v in self._acceptable),
         )
         if school is None:
             return Attempt.impossible("no secondary school found")
