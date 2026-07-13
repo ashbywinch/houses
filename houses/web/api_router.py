@@ -8,6 +8,8 @@ from typing import Any
 from fastapi import APIRouter, Body, HTTPException, WebSocket, WebSocketDisconnect
 
 from houses.context import get_services
+from houses.geo import GeoPoint
+from houses.nodes.bootstrap import seed_registry_from_sheet
 from houses.nodes.property import PropertyNodes
 
 logger = logging.getLogger(__name__)
@@ -158,8 +160,6 @@ async def patch_location(rid: str, body: dict):
     prop = _registry.get(rid)
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
-    from houses.geo import GeoPoint
-
     gp = GeoPoint(lat=body["lat"], lon=body["lon"])
     prop.precise_location.push(gp, "user")
     return {"status": "ok"}
@@ -167,8 +167,6 @@ async def patch_location(rid: str, body: dict):
 
 @api_router.post("/seed")
 async def seed_properties():
-    from houses.nodes.bootstrap import seed_registry_from_sheet
-
     count = seed_registry_from_sheet()
     return {"seeded": count, "total": len(_registry)}
 
