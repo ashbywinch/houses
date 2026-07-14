@@ -185,7 +185,15 @@ async def get_settings():
 
 @api_router.patch("/settings/persons")
 async def patch_persons(body: list = Body()):  # noqa: B008
-    get_services().persons_source.push(body, "user")
+    from houses.model.domain import Person, PlaceOfInterest
+    persons = [
+        Person(**{k: (
+            tuple(PlaceOfInterest(**poi) if isinstance(poi, dict) else poi
+                  for poi in v) if k == "places_of_interest" else v
+        ) for k, v in p.items()}) if isinstance(p, dict) else p
+        for p in body
+    ]
+    get_services().persons_source.push(persons, "user")
     return {"status": "ok"}
 
 

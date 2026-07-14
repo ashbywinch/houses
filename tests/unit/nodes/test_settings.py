@@ -23,21 +23,21 @@ class TestDecomposedSources:
         persons = a.value_or_none()
         assert len(persons) == 3
         simon = persons[0]
-        assert simon["name"] == "Simon"
-        assert simon["bus_walk_penalty_minutes"] == 20
-        assert len(simon["places_of_interest"]) == 3
+        assert simon.name == "Simon"
+        assert simon.bus_walk_penalty_minutes == 20
+        assert len(simon.places_of_interest) == 3
         george = persons[2]
-        assert george["name"] == "George"
-        assert george["is_child"] is True
-        assert len(george["places_of_interest"]) == 2
+        assert george.name == "George"
+        assert george.is_child is True
+        assert len(george.places_of_interest) == 2
 
     @pytest.mark.asyncio
     async def test_lorena_has_two_trips(self, _svc):
         a = await _svc.persons_source.attempt()
         lorena = a.value_or_none()[1]
-        lorena_office = lorena["places_of_interest"][0]
-        assert lorena_office["label"] == "Aldgate"
-        assert lorena_office["trips_per_week"] == 2
+        lorena_office = lorena.places_of_interest[0]
+        assert lorena_office.label == "Aldgate"
+        assert lorena_office.trips_per_week == 2
 
     @pytest.mark.asyncio
     async def test_financial_source_has_defaults(self, _svc):

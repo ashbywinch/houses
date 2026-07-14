@@ -15,50 +15,41 @@ from typing import Any
 from dag.persistence import latest_node_result
 from dag.user_input_node import UserInputNode
 from houses.config import settings
+from houses.model.domain import Person, PlaceOfInterest
 
 
-def make_default_persons() -> list[dict]:
+
+def make_default_persons() -> list[Person]:
+    """Default set of persons with their commute preferences."""
     return [
-        {
-            "name": "Simon",
-            "has_car": True,
-            "is_child": False,
-            "deposit_equity": None,
-            "bus_walk_penalty_minutes": 20,
-            "places_of_interest": [
-                {"label": "Pimlico", "postcode": settings.simon_postcode,
-                 "trips_per_week": 1, "weeks_per_year": 46},
-                {"label": "Bracknell", "postcode": settings.bracknell_postcode,
-                 "trips_per_week": 1, "weeks_per_year": 46},
-                {"label": "Dad", "postcode": "OX7 5GZ",
-                 "trips_per_week": 0, "weeks_per_year": 46},
-            ],
-        },
-        {
-            "name": "Lorena",
-            "has_car": False,
-            "is_child": False,
-            "deposit_equity": None,
-            "bus_walk_penalty_minutes": 15,
-            "places_of_interest": [
-                {"label": "Aldgate", "postcode": settings.lorena_postcode,
-                 "trips_per_week": 2, "weeks_per_year": 46},
-            ],
-        },
-        {
-            "name": "George",
-            "has_car": False,
-            "is_child": True,
-            "acceptable_schools": ["mixed", "boys", "girls"],
-            "deposit_equity": None,
-            "bus_walk_penalty_minutes": 30,
-            "places_of_interest": [
-                {"label": "Primary School", "postcode": "",
-                 "trips_per_week": 5, "weeks_per_year": 39},
-                {"label": "Secondary School", "postcode": "",
-                 "trips_per_week": 5, "weeks_per_year": 39},
-            ],
-        },
+        Person(
+            name="Simon", has_car=True, bus_walk_penalty_minutes=20,
+            places_of_interest=(
+                PlaceOfInterest(label="Pimlico", postcode=settings.simon_postcode,
+                                trips_per_week=1, weeks_per_year=46),
+                PlaceOfInterest(label="Bracknell", postcode=settings.bracknell_postcode,
+                                trips_per_week=1, weeks_per_year=46),
+                PlaceOfInterest(label="Dad", postcode="OX7 5GZ",
+                                trips_per_week=0, weeks_per_year=46),
+            ),
+        ),
+        Person(
+            name="Lorena", has_car=False, bus_walk_penalty_minutes=15,
+            places_of_interest=(
+                PlaceOfInterest(label="Aldgate", postcode=settings.lorena_postcode,
+                                trips_per_week=2, weeks_per_year=46),
+            ),
+        ),
+        Person(
+            name="George", has_car=False, is_child=True,
+            acceptable_schools=("mixed", "boys", "girls"),
+            places_of_interest=(
+                PlaceOfInterest(label="Primary School", postcode="",
+                                trips_per_week=5, weeks_per_year=39),
+                PlaceOfInterest(label="Secondary School", postcode="",
+                                trips_per_week=5, weeks_per_year=39),
+            ),
+        ),
     ]
 
 

@@ -44,6 +44,7 @@ class Person:
     name: str
     has_car: bool
     is_child: bool = False
+    bus_walk_penalty_minutes: int = 30
     acceptable_schools: tuple[str, ...] = ("mixed",)
     deposit_equity: Money | None = None
     places_of_interest: tuple[PlaceOfInterest, ...] = ()

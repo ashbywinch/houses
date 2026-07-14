@@ -102,12 +102,8 @@ class PropertyNodes:
         # Find the first child person's acceptable school types
         _school_acceptable = ("mixed",)
         for p in (self._svc.persons_source._value or []):
-            if p.get("is_child") if isinstance(p, dict) else p.is_child:
-                _school_acceptable = tuple(
-                    p.get("acceptable_schools", ["mixed"])
-                    if isinstance(p, dict)
-                    else p.acceptable_schools
-                )
+            if p.is_child:
+                _school_acceptable = p.acceptable_schools
                 break
         self.primary_school = PrimarySchoolNode(
             f"{rid}/primary_school",
@@ -174,14 +170,14 @@ class PropertyNodes:
         self.commute_selectors = {}
 
         for p_info in (self._svc.persons_source._value or []):
-            p_name = p_info["name"]
-            pois = p_info.get("places_of_interest", [])
+            p_name = p_info.name
+            pois = p_info.places_of_interest
             for poi in pois:
-                label = poi["label"]
-                postcode = poi["postcode"]
+                label = poi.label
+                postcode = poi.postcode
                 key = f"{p_name}/{label}"
 
-                is_child = p_info.get("is_child", False)
+                is_child = p_info.is_child
                 if is_child:
                     school_node = (self.primary_school if "Primary" in label
                                    else self.secondary_school if "Secondary" in label

@@ -162,13 +162,10 @@ class TransitNode(DerivedNode[dict]):
         is_child = False
         max_walk = 30
         for p in persons_list:
-            pn = p["name"] if isinstance(p, dict) else getattr(p, "name", "")
-            if pn == name:
-                hc = p.get("has_car", False) if isinstance(p, dict) else getattr(p, "has_car", False)
-                has_car = bool(hc)
-                ic = p.get("is_child", False) if isinstance(p, dict) else getattr(p, "is_child", False)
-                is_child = bool(ic)
-                max_walk = int(p.get("bus_walk_penalty_minutes", 30)) if isinstance(p, dict) else 30
+            if p.name == name:
+                has_car = p.has_car
+                is_child = p.is_child
+                max_walk = p.bus_walk_penalty_minutes
                 break
 
         svc = get_services()

@@ -2,8 +2,41 @@ from __future__ import annotations
 
 from typing import Any, Generic, TypeVar
 
+from pydantic import TypeAdapter
+from pydantic_core import core_schema
+
 from dag.attempt import Attempt, Provenance
 from dag.node import Node
+
+
+# Register Money's pydantic schema so TypeAdapter(list[Person]) works.
+# This IS the correct pydantic v2 approach for third-party types:
+# __get_pydantic_core_schema__ is an explicit protocol they support.
+try:
+    from money import Money
+    from pydantic_core import core_schema
+
+    if not hasattr(Money, "__get_pydantic_core_schema__"):
+        def _money_schema(_source, _handler):
+            def validate(v):
+                if isinstance(v, Money):
+                    return v
+                if isinstance(v, dict):
+                    return Money(v.get("amount", 0), v.get("currency", "GBP"))
+                raise ValueError(f"Cannot convert {type(v)} to Money")
+
+            def serialize(m):
+                return {"amount": float(m.amount), "currency": m.currency}
+
+            return core_schema.no_info_plain_validator_function(
+                validate,
+                serialization=core_schema.plain_serializer_function_ser_schema(serialize),
+            )
+
+        Money.__get_pydantic_core_schema__ = _money_schema
+except ImportError:
+    pass
+
 
 T = TypeVar("T")
 
@@ -28,26 +61,20 @@ class UserInputNode(Node[T], Generic[T]):
 
     def _load_persisted_label(self) -> str:
         """Read the source_label from the last persisted result."""
-        from dag.persistence import latest_node_result
-
-        stored = latest_node_result(self._id)
-        if stored is not None:
-            return stored.get("source_label", "")
-        return ""
-
     def push(self, value: T, source_label: str = "") -> None:
         """Set a new value and persist.
 
         Args:
-            value: The value to store.
+            value: The value to store. Validated through the type adapter
+                so Person dataclasses and other structured types work.
             source_label: Human-readable source identifier
                 (e.g. ``"Rightmove"``, ``"User correction"``, ``"TfL API"``).
         """
-        self._value = value
+        self._value = self._adapter.validate_python(value)
         self._source_label = source_label
         result_dict: dict[str, Any] = {
             "status": "succeeded",
-            "value": self._adapter.dump_python(value),
+            "value": self._adapter.dump_python(self._value),
             "source_label": source_label,
         }
         self._persist(result_dict)

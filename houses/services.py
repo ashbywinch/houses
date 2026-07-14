@@ -139,7 +139,6 @@ def _make_settings_source(node_id: str, value_type: type, default_factory):
         node._source_label = persisted.get("source_label", "db")
     else:
         node.push(default_factory(), "config")
-    _SETTINGS_SOURCE_CACHE[node_id] = node
     return node
 # ── Default implementations (thin wrappers around real modules) ────────
 
@@ -296,12 +295,10 @@ class Services:
     rail_fare_service: RailFareService = dataclasses.field(default_factory=_DefaultRailFare)
     persistence: PersistenceService = dataclasses.field(default_factory=_DefaultPersistence)
 
-    persons_source: UserInputNode[list] = dataclasses.field(
-        default_factory=lambda: _make_settings_source("persons", list, make_default_persons))
+    persons_source: UserInputNode[list[Person]] = dataclasses.field(
+        default_factory=lambda: _make_settings_source("persons", list[Person], make_default_persons))
     financial_source: UserInputNode[dict] = dataclasses.field(
         default_factory=lambda: _make_settings_source("financial", dict, make_default_financials))
     commute_thresholds_source: UserInputNode[dict] = dataclasses.field(
         default_factory=lambda: _make_settings_source("commute_thresholds", dict, make_default_thresholds))
-
-
 
