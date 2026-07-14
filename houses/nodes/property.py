@@ -349,6 +349,7 @@ class PropertyNodes:
                 },
             },
             "affordability": {
+                "stamp_duty": await self.stamp_duty.to_json(),
                 "council_tax": await self.council_tax.to_json(),
                 "monthly_mortgage": await self.monthly_mortgage.to_json(),
                 "monthly_sinking_fund": await self._monthly_sinking(),
