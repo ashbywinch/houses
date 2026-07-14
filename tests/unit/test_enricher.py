@@ -513,17 +513,11 @@ class TestCommuteSelectorPipeline:
 
 
 class TestCommuteBreakdown:
-    """CommuteBreakdownNode — sums yearly commute costs.
-
-    NOTE: The current ``CommuteBreakdownNode.compute()`` uses placeholder
-    ``0.0`` values and always returns ``yearly_total_gbp=0.0`` regardless
-    of input commute costs.  The tests below record the existing behaviour
-    and document the correct expected computation.
-    """
+    """CommuteBreakdownNode — sums yearly commute costs."""
 
     @pytest.mark.asyncio
-    async def test_yearly_total_is_zero_with_all_commutes(self):
-        """All commute selectors succeed but yearly total is 0.0 (current placeholder)."""
+    async def test_yearly_formula_with_all_costs(self):
+        """46wk x (15 + 10 + 2x24) = 46 x 73 = 3358"""
         from houses.nodes.monthly_costs import CommuteBreakdownNode
 
         so = UserInputNode[dict]("cbd_so1", dict)
@@ -537,8 +531,8 @@ class TestCommuteBreakdown:
             lorena_office=lo, persons_source=persons,
         )
 
-        so.push(_serialize_commute(30, 10.0, label="Pimlico"), "test")
-        sb.push(_serialize_commute(90, 12.50, label="Bracknell", mode="drive"), "test")
+        so.push(_serialize_commute(30, 15.0, label="Pimlico"), "test")
+        sb.push(_serialize_commute(90, 10.0, label="Bracknell", mode="drive"), "test")
         lo.push(_serialize_commute(45, 24.0, label="Aldgate"), "test")
         persons.push([
             Person("Simon", True, places_of_interest=(
@@ -554,16 +548,52 @@ class TestCommuteBreakdown:
 
         a = await node.attempt()
         assert a.succeeded
-        # Current (broken) behaviour — returns 0.0 regardless
         val = a.value_or_none()
-        assert val["yearly_total_gbp"] == 0.0
+        # Simon office: 15.0 * 1 * 46 = 690
+        # Simon Bracknell: 10.0 * 1 * 46 = 460
+        # Lorena: 24.0 * 2 * 46 = 2208
+        # Total: 3358
+        assert val["yearly_total_gbp"] == 3358.0
 
-        # Expected correct computation:
-        #   Simon office:  10.00 * 1 * 46 =  460.00
-        #   Simon Bracknell 12.50 * 1 * 46 =  575.00
-        #   Lorena office: 24.00 * 2 * 46 = 2208.00
-        #   Total:                         = 3243.00
-        # assert val["yearly_total_gbp"] == pytest.approx(3243.00, rel=1e-9)
+    @pytest.mark.asyncio
+    async def test_missing_cost_means_partial_total(self):
+        """When some costs are present, total includes only those."""
+        from houses.nodes.monthly_costs import CommuteBreakdownNode
+
+        so = UserInputNode[dict]("cbd_so2", dict)
+        sb = UserInputNode[dict]("cbd_sb2", dict)
+        lo = UserInputNode[dict]("cbd_lo2", dict)
+        persons = UserInputNode[list]("cbd_ps2", list)
+
+        node = CommuteBreakdownNode(
+            "cbd2",
+            simon_office=so, simon_bracknell=sb,
+            lorena_office=lo, persons_source=persons,
+        )
+
+        # Simon office has no commute data (empty dict), others have costs
+        so.push({}, "test")
+        sb.push(_serialize_commute(90, 10.0, label="Bracknell", mode="drive"), "test")
+        lo.push(_serialize_commute(45, 24.0, label="Aldgate"), "test")
+        persons.push([
+            Person("Simon", True, places_of_interest=(
+                PlaceOfInterest("Pimlico", "SW1V 2QQ", trips_per_week=1, weeks_per_year=46),
+                PlaceOfInterest("Bracknell", "RG12 8YA", trips_per_week=1, weeks_per_year=46),
+            )),
+            Person("Lorena", False, places_of_interest=(
+                PlaceOfInterest("Aldgate", "EC3A 7LP", trips_per_week=2, weeks_per_year=46),
+            )),
+        ], "test")
+        await flush_processor()
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded
+        val = a.value_or_none()
+        # Simon Bracknell: 10.0 * 1 * 46 = 460
+        # Lorena: 24.0 * 2 * 46 = 2208
+        # Total: 2668
+        assert val["yearly_total_gbp"] == 2668.0
 
     @pytest.mark.asyncio
     async def test_returns_defaults_when_no_commutes(self):
@@ -617,7 +647,8 @@ class TestCommuteBreakdown:
 
         a = await node.attempt()
         assert a.succeeded
-        assert a.value_or_none()["yearly_total_gbp"] == 0.0
+        # Simon office: 10.0 * 1 * 46 = 460 (no places_of_interest on Person, so trips/weeks default)
+        assert a.value_or_none()["yearly_total_gbp"] == 460.0
 
 
 # ======================================================================

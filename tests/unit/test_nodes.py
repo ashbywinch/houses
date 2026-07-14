@@ -5,7 +5,7 @@ import json
 import pytest
 
 from houses.geo import GeoPoint
-from houses.model.geo import _deserialize_gp, is_single_property_address, serialize_gp
+from houses.model.geo import _deserialize_gp, is_single_property_address
 
 
 class TestSinglePropertyAddress:
@@ -23,12 +23,15 @@ class TestSinglePropertyAddress:
 class TestSerializeGP:
     """Tests for GeoPoint serialization helpers used by the DAG persistence layer."""
 
-    def test_noop_returns_gp_as_is(self):
+    def test_roundtrip(self):
+        """GeoPoint serialized via dag.persistence._serialize_value produces correct lat/lon in JSON."""
+        from dag.persistence import _serialize_value
+
         gp = GeoPoint(lat=51.5, lon=-0.1)
-        # serialize_gp is a no-op identity function (GeoPoint is serialized
-        # by dag.persistence._serialize_value, not this helper)
-        result = serialize_gp(gp)
-        assert result is gp
+        s = _serialize_value(gp)
+        d = json.loads(s)
+        assert d["lat"] == 51.5
+        assert d["lon"] == -0.1
 
     def test_deserialize(self):
         gp = _deserialize_gp('{"lat": 51.5, "lon": -0.1}')

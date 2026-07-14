@@ -54,9 +54,8 @@ async def test_geocode_simple_address(_mock_http_requests):
     assert any("maps.googleapis.com" in c for c in _mock_http_requests.calls)
     assert result.value_or_none() == GeoPoint(51.5, -0.7)
 
-
 @pytest.mark.asyncio
-async def test_geocode_caches_result():
+async def test_geocode_caches_result(_mock_http_requests):
     """Geocoding the same address twice should only hit the API once (in-memory cache)."""
     addr = UserInputNode[str]("addr_cr", str)
     node = GeocodeNode("geocode_cr", best_address=addr)
@@ -64,17 +63,27 @@ async def test_geocode_caches_result():
     addr.push("OX11 1AA", "test")
     await flush_processor()
     result1 = await node.attempt()
+    n_google_calls = sum(
+        1 for c in _mock_http_requests.calls
+        if "maps.googleapis.com/maps/api/geocode" in c
+    )
 
     addr.push("OX11 1AA", "test")
     await flush_processor()
     result2 = await node.attempt()
+    n_google_calls2 = sum(
+        1 for c in _mock_http_requests.calls
+        if "maps.googleapis.com/maps/api/geocode" in c
+    )
 
     assert result1.value_or_none() == GeoPoint(51.5, -0.1)
     assert result2.value_or_none() == GeoPoint(51.5, -0.1)
+    assert n_google_calls == 1, "first attempt should make 1 API call"
+    assert n_google_calls2 == n_google_calls, "second attempt should hit cache, not the API"
 
 
 @pytest.mark.asyncio
-async def test_geocode_caches_success():
+async def test_geocode_caches_success(_mock_http_requests):
     """A successful geocode should cache the result and not retry."""
     addr = UserInputNode[str]("addr_cs", str)
     node = GeocodeNode("geocode_cs", best_address=addr)
@@ -82,13 +91,23 @@ async def test_geocode_caches_success():
     addr.push("GU22 8BQ", "test")
     await flush_processor()
     result1 = await node.attempt()
+    n_google_calls = sum(
+        1 for c in _mock_http_requests.calls
+        if "maps.googleapis.com/maps/api/geocode" in c
+    )
 
     addr.push("GU22 8BQ", "test")
     await flush_processor()
     result2 = await node.attempt()
+    n_google_calls2 = sum(
+        1 for c in _mock_http_requests.calls
+        if "maps.googleapis.com/maps/api/geocode" in c
+    )
 
     assert result1.value_or_none() == GeoPoint(51.5, -0.1)
     assert result2.value_or_none() == GeoPoint(51.5, -0.1)
+    assert n_google_calls == 1, "first attempt should make 1 API call"
+    assert n_google_calls2 == n_google_calls, "second attempt should hit cache, not the API"
 
 
 @pytest.mark.asyncio
@@ -114,10 +133,9 @@ async def test_geocode_all_apis_fail(_mock_http_requests):
     result = await node.attempt()
     assert result.impossible
 
-
 @pytest.mark.asyncio
 async def test_geocode_empty_address(_mock_http_requests):
-    """Empty address should return impossible (or fall through gracefully)."""
+    """Empty address should return impossible with no successful geocode."""
     _mock_http_requests.add_rule(
         lambda url: "maps.googleapis.com" in url,
         lambda request: Response(403),
@@ -136,14 +154,17 @@ async def test_geocode_empty_address(_mock_http_requests):
     addr.push("", "test")
     await flush_processor()
     result = await node.attempt()
+    assert result.value_or_none() is None
     assert result.impossible
 
 
 @pytest.mark.asyncio
 async def test_geocode_normalises_case(_mock_http_requests):
-    """Address is uppercased by the service layer before lookup."""
+    """Lowercase address should flow through to Google Maps without corruption."""
+    # Set up a rule matching ONLY the lowercase address in the URL, proving
+    # the service layer passes the address through without transformation.
     _mock_http_requests.add_rule(
-        lambda url: "maps.googleapis.com" in url and "RG14" in url,
+        lambda url: "maps.googleapis.com/maps/api/geocode" in url and "rg14" in url,
         lambda request: Response(
             200,
             json={
@@ -158,6 +179,8 @@ async def test_geocode_normalises_case(_mock_http_requests):
     await flush_processor()
     result = await node.attempt()
     assert result.value_or_none() == GeoPoint(51.5, -0.1)
+    assert any("maps.googleapis.com/maps/api/geocode" in c and "rg14" in c
+               for c in _mock_http_requests.calls), "Google Maps API should be called with lowercase address"
 
 
 class TestGeocodeNodeFullAddress:

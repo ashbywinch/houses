@@ -303,7 +303,7 @@ class TestScoring:
         await flush_processor()
         s = await prop.to_json_summary()
         score = _score_from_summary(s)
-        assert isinstance(score, int)
+        assert score == 15
 
     def test_all_green_returns_max(self):
         summary = {

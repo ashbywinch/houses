@@ -68,7 +68,7 @@ class TestBestLocationFlow:
 
     @pytest.mark.asyncio
     async def test_impossible_when_no_location_sources(self):
-        """Without any location source, best_location stays impossible/pending
+        """Without any location source, best_location stays impossible
         even when an address exists."""
         from houses.nodes.location import BestLocationNode
 
@@ -87,7 +87,7 @@ class TestBestLocationFlow:
         await flush_processor()
 
         a = await node.attempt()
-        assert not a.succeeded
+        assert a.impossible
 
     @pytest.mark.asyncio
     async def test_recomputes_on_rightmove_location_update(self):

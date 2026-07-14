@@ -18,14 +18,30 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                 simon_bracknell: Attempt[dict],
                 lorena_office: Attempt[dict],
                 persons: Attempt[list]) -> Attempt[dict]:
-        commute_total = 0.0
-        if simon_office.succeeded:
-            commute_total += 0.0  # placeholder
-        if simon_bracknell.succeeded:
-            commute_total += 0.0
-        if lorena_office.succeeded:
-            commute_total += 0.0
-        return Attempt.succeeded({"yearly_total_gbp": commute_total})
+        yearly = 0.0
+        persons_list = persons.value_or_none() if persons.succeeded else []
+
+        for commute_attempt in [simon_office, simon_bracknell, lorena_office]:
+            if not commute_attempt.succeeded:
+                continue
+            val = commute_attempt.value_or_none() or {}
+            dc = val.get("daily_cost") or {}
+            daily = float(dc.get("amount", 0))
+            commute_label = val.get("label", "")
+
+            # Look up trips/week for the POI matching this commute's label
+            trips = 1
+            weeks = 46
+            for p in persons_list:
+                if hasattr(p, 'places_of_interest'):
+                    for poi in (p.places_of_interest or ()):
+                        if poi.label and poi.label == commute_label:
+                            trips = poi.trips_per_week
+                            weeks = poi.weeks_per_year
+                            break
+            yearly += daily * trips * weeks
+
+        return Attempt.succeeded({"yearly_total_gbp": round(yearly, 2)})
 
     async def build_provenance(self):
         return Provenance(label="commute_breakdown")
