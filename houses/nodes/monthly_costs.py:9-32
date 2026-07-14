@@ -1,0 +1,45 @@
+class CommuteBreakdownNode(DerivedNode[dict]):
+    def __init__(self, node_id: str, *,
+                 simon_office, simon_bracknell, lorena_office,
+                 persons_source):
+        super().__init__(node_id, dict,
+                         (simon_office, simon_bracknell, lorena_office,
+                          persons_source))
+
+    def compute(self, simon_office: Attempt[dict],
+                simon_bracknell: Attempt[dict],
+                lorena_office: Attempt[dict],
+                persons: Attempt[list]) -> Attempt[dict]:
+        yearly = 0.0
+        persons_list = persons.value_or_none() if persons.succeeded else []
+
+        for commute_attempt, label in [
+            (simon_office, "simon_office"),
+            (simon_bracknell, "simon_bracknell"),
+            (lorena_office, "lorena_office"),
+        ]:
+            if not commute_attempt.succeeded:
+                continue
+            val = commute_attempt.value_or_none() or {}
+            # daily_cost is {"amount": float, "currency": "GBP"}
+            dc = val.get("daily_cost") or {}
+            daily = float(dc.get("amount", 0))
+
+            # Look up trips/week for this person from the persons list
+            trips = 1
+            weeks = 46
+            # Extract person name from the commute label pattern
+            for p in persons_list:
+                if hasattr(p, 'name') and p.name.lower() in label:
+                    for poi in (p.places_of_interest or ()):
+                        if poi.label and poi.label.lower() in label:
+                            trips = poi.trips_per_week
+                            weeks = poi.weeks_per_year
+                            break
+                    break
+            yearly += daily * trips * weeks
+
+        return Attempt.succeeded({"yearly_total_gbp": round(yearly, 2)})
+
+    async def build_provenance(self):
+        return Provenance(label="commute_breakdown")

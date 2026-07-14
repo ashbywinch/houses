@@ -198,7 +198,76 @@ class Row:
                 for _leg, desc in zip(group.legs, group.leg_descriptions(), strict=True):
                     if "bus" in desc.lower():
                         return desc
+        return ""
 
+    # ── Domain-to-sheet mapping ─────────────────────────────────────
+
+    @classmethod
+    def from_property(cls, property_: EnrichedProperty) -> dict[str, str]:
+        """Build a header->value dict from an enriched property.
+
+        Returns values keyed by header name, including both enriched
+        and user-owned columns.
+        """
+        result: dict[str, str] = {}
+        r = result
+        r["Rightmove URL"] = property_.url
+        r["Address"] = property_.address
+        r["Postcode"] = property_.postcode
+        r["Bedrooms"] = str(property_.bedrooms) if property_.bedrooms else ""
+        r["Price (£)"] = str(property_.price) if property_.price else ""
+        r["Actual Latitude"] = str(property_.actual_latitude) if property_.actual_latitude is not None else ""
+        r["Actual Longitude"] = str(property_.actual_longitude) if property_.actual_longitude is not None else ""
+        r["Rightmove ID"] = property_.rid
+        r["Simon London (min)"] = cls._fmt_duration(property_.simon_commute)
+        r["Simon London Cost (£)"] = cls._fmt_cost(
+            property_.simon_commute.daily_cost_gbp if property_.simon_commute else None
+        )
+        r["Simon London Route"] = property_.simon_commute.summary() if property_.simon_commute else ""
+        r["Simon Parking Cost (£)"] = cls._fmt_cost(
+            property_.simon_commute.non_rail_cost() if property_.simon_commute else None
+        )
+        r["Lorena London (min)"] = cls._fmt_duration(property_.lorena_commute)
+        r["Lorena London Cost (£)"] = cls._fmt_cost(
+            property_.lorena_commute.daily_cost_gbp if property_.lorena_commute else None
+        )
+        r["Lorena London Route"] = property_.lorena_commute.summary() if property_.lorena_commute else ""
+        bt = property_.petrol.duration_minutes if property_.petrol else None
+        r["Bracknell Time (min)"] = str(bt) if bt is not None else ""
+        r["Bracknell Cost (£)"] = cls._fmt_cost(property_.petrol.daily_cost_gbp if property_.petrol else None)
+        r["Primary School"] = property_.primary_school.name if property_.primary_school else ""
+        r["Primary Distance (km)"] = cls._fmt_dist(property_.primary_school_distance_km)
+        r["Primary Walk (min)"] = cls._fmt_walk(property_.primary_school_commute)
+        r["Primary School Link"] = cls._fmt_school_link(property_.primary_school)
+        r["Primary Ofsted"] = property_.primary_ofsted
+        r["Primary Inspection Year"] = property_.primary_inspection_year
+        r["Secondary School"] = property_.secondary_school.name if property_.secondary_school else ""
+        r["Secondary Distance (km)"] = cls._fmt_dist(property_.secondary_school_distance_km)
+        r["Secondary Walk (min)"] = cls._fmt_walk(property_.secondary_school_commute)
+        r["Secondary School Link"] = cls._fmt_school_link(property_.secondary_school)
+        r["Secondary Ofsted"] = property_.secondary_ofsted
+        r["Secondary Inspection Year"] = property_.secondary_inspection_year
+        r["Area Description"] = property_.town_description
+        r["Walk to Town (min)"] = (
+            str(property_.walk_to_town_minutes) if property_.walk_to_town_minutes is not None else ""
+        )
+        r["Walkable Amenities"] = property_.walkable_amenities
+        r["EPC Rating"] = property_.epc_rating
+        r["Council Tax Band"] = property_.council_tax.band if property_.council_tax else ""
+        r["Council Tax Cost (£)"] = cls._fmt_cost(property_.council_tax.yearly_cost if property_.council_tax else None)
+        r["Secondary Bus (min)"] = cls._fmt_bus(property_.secondary_school_commute)
+        r["Secondary Bus Route"] = cls._fmt_bus_route(property_.secondary_school_commute)
+        r["Approx Latitude (est)"] = str(property_.approx_latitude) if property_.approx_latitude is not None else ""
+        r["Approx Longitude (est)"] = str(property_.approx_longitude) if property_.approx_longitude is not None else ""
+        r["Approx Station CRS"] = property_.approx_station_crs
+        r["Approx Station Name"] = property_.approx_station_name
+        return result
+
+    @classmethod
+    def to_list(cls, property_: EnrichedProperty) -> list[str]:
+        """Build a full positional row matching HEADERS order, for appending new rows."""
+        enriched = cls.from_property(property_)
+        return [enriched.get(h, "") for h in cls.HEADERS]
 # ── Sheet-level operations ──────────────────────────────────────────────
 
 

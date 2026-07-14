@@ -71,8 +71,8 @@ class DerivedNode(Node[T], Generic[T]):
             self._slots.append(slot)
             dep.changed.connect(slot)
 
-        # If still pending after DB load, queue for recomputation.
-        if self._attempt.pending:
+        # If pending or stale after DB load, queue for recomputation.
+        if self._attempt.pending or self._is_stale():
             _stale_queue.put_nowait(self)
 
     def _on_dep_changed(self) -> None:

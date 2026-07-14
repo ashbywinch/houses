@@ -43,6 +43,10 @@ _FORMULA_COLUMNS = Row._FORMULA_COLUMNS
 col_index = Row.index_of
 col_letter = Row.letter_of
 
+# Backward-compat aliases used by scripts/update_sheet.py
+_build_full_row = Row.to_list
+row_values = Row.from_property
+
 # ── Public API ───────────────────────────────────────────────────────
 
 __all__ = [
@@ -50,7 +54,12 @@ __all__ = [
     "Tab",
     "Row",
     "View",
-    # Tab name constants
+    "_USER_COLUMNS",
+    "col_index",
+    "col_letter",
+    # Backward-compat aliases
+    "row_values",
+    "_build_full_row",
     "DATA_TAB",
     "VIEW_TAB",
     "CONSTANTS_TAB",
