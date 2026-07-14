@@ -1,3 +1,23 @@
+# Code Discovery Rules
+
+**ALWAYS use the code-review-graph MCP tools for structural code discovery.** A persistent
+file watcher (`code-review-graph watch`) keeps the graph up-to-date automatically.
+
+1. Open tool call with `mcp__code_review_graph_query_graph_tool` for:
+   - `callers_of` / `callees_of` — find who calls / is called by a function
+   - `importers_of` / `imports_of` — find what imports / is imported by a file
+   - `children_of` — list members of a class or file
+   - `file_summary` — list every symbol in a file with line numbers
+   - `inheritors_of` — find subclasses
+2. Fall back to `grep`/`read` only for reading file CONTENT after the graph has
+   located the exact file and line.
+3. NEVER start with `grep`/`read` for cross-file structural questions. The graph
+   operates on parsed AST and won't miss patterns that text regex would.
+
+The watcher runs as a persistent background process (`crg-watch`). No manual
+`build_or_update_graph` calls needed — it detects filesystem changes automatically.
+
+
 # AGENTS.md — Houses
 
 **Browser-to-Spreadsheet Ingestion & Enrichment Engine.**

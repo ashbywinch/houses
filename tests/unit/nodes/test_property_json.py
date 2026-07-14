@@ -18,29 +18,29 @@ def _fake_services(monkeypatch):
 
     token = _sp.set(make_services())
 
-    # Mock HTTP-calling enrichment functions not routed through Services
     from money import Money
-
     from dag.attempt import Attempt
-    from houses.commute import Commute
-    from houses.school import School
-    from houses.school_gender import SchoolGender
+    from houses.model.domain import Commute, Person, PlaceOfInterest
+    from pint import Quantity
+
     async def fake_route(origin, destination, *, has_car, max_walk_minutes):
         return Attempt.succeeded(
             Commute(
-                destination_label="Office",
-                destination_postcode=destination if isinstance(destination, str) else str(destination),
-                duration_minutes=32,
-                daily_cost_gbp=Money("4.50", "GBP"),
+                person=Person(name="Simon", has_car=False),
+                label="Office",
+                destination=PlaceOfInterest(label="Office",
+                                             postcode=destination if isinstance(destination, str) else str(destination)),
+                duration=Quantity(32, "minute"),
+                daily_cost=Money("4.50", "GBP"),
             ),
         )
 
     svc = _sp.get()
     if svc and hasattr(svc, 'commute_router'):
         svc.commute_router.route = fake_route
-    svc.commute_router.route = fake_route
 
-    # Provide a fake school lookup so school nodes + George's commutes work
+    yield
+    _sp.reset(token)
 
 
 @pytest.fixture

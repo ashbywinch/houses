@@ -29,11 +29,8 @@ from houses.enrichment_runner import (
     extract_postcode,
     header_to_enrichment_field,
     is_outcode,
-    run_backfill_enrichment,
-    run_enrichment,
 )
-from houses.model.persistence import init_db, insert_source_value
-from houses.model.resolver import resolve_property
+from houses.model.persistence import init_db
 from houses.property import Property
 from houses.rightmove_scraper import RightmoveProperty, stop_chrome
 from houses.rightmove_scraper import scrape as scrape_rightmove
@@ -42,14 +39,15 @@ from houses.sheets import (
     get_client,
     row_values,
     sync_view_formulas,
-    write_enriched_row,
 )
-from houses.sheets.backfill import batch_stream
 from houses.sheets.reader import get_properties_data, resolve_tab
 from houses.web.api_router import _registry, api_router, register_property
 from houses.web.router import web_router
-
 from houses.geo import GeoPoint
+from houses.nodes.bootstrap import seed_registry_from_sheet
+from houses.nodes.cutover import push_enriched_property
+from houses.nodes.property import PropertyNodes
+from houses.services import Services
 from houses.location import _geo_state_var, _GeoState
 from houses.nodes.bootstrap import seed_registry_from_sheet
 from houses.nodes.cutover import push_enriched_property
@@ -232,6 +230,7 @@ async def upsert_property(
                     pass
 
         scrape_error = None
+        scraped = None
         if not address and payload.url:
             try:
                 scraped = await scrape_rightmove(payload.url)
@@ -250,46 +249,19 @@ async def upsert_property(
                 scrape_error = str(e)
                 logger.warning("Scrape failed for %s: %s", payload.url, e)
 
-        enabled = set(fields) if fields else None
-        enriched = await run_enrichment(
-            url=payload.url,
-            address=address,
-            postcode=postcode,
-            lookup=lookup,
-            bedrooms=payload.bedrooms,
-            price=payload.price,
-            enabled=enabled,
-            actual_latitude=payload.actual_latitude,
-            actual_longitude=payload.actual_longitude,
-            services=Services(),
+        # ── Seed the DAG (no sheet writes, no old enrichment) ─────────
+        from houses.property import EnrichedProperty
+        enriched = EnrichedProperty(
+            url=payload.url or (scraped.url if scraped else ""),
+            address=address or (scraped.address if scraped else ""),
+            postcode=postcode or (scraped.postcode if scraped else ""),
+            bedrooms=payload.bedrooms if payload.bedrooms is not None else (scraped.bedrooms if scraped else None),
+            price=payload.price if payload.price is not None else (scraped.price if scraped else None),
+            approx_latitude=scraped.latitude if scraped else None,
+            approx_longitude=scraped.longitude if scraped else None,
         )
-
-        row_url = None
-        if not no_write:
-            row_url = await write_enriched_row(enriched, payload.tab)
-
-        # ── Dual-write to SQLite ───────────────────────────────────
         rid2 = rid or enriched.rid
         if rid2:
-            try:
-                insert_source_value(rid2, "rid", rid2, "Derived")
-                insert_source_value(rid2, "rightmove_url", enriched.url, "Browser extension")
-                insert_source_value(rid2, "rightmove_address", enriched.address, "Rightmove")
-                if enriched.bedrooms:
-                    insert_source_value(rid2, "rightmove_bedrooms", str(enriched.bedrooms), "Rightmove")
-                if enriched.price:
-                    insert_source_value(rid2, "rightmove_price", str(enriched.price), "Rightmove")
-                if enriched.approx_latitude is not None and enriched.approx_longitude is not None:
-                    gp = GeoPoint(lat=enriched.approx_latitude, lon=enriched.approx_longitude)
-                    insert_source_value(rid2, "rightmove_location", gp, "Rightmove map")
-                if enriched.geocode_latitude is not None and enriched.geocode_longitude is not None:
-                    gp = GeoPoint(lat=enriched.geocode_latitude, lon=enriched.geocode_longitude)
-                    insert_source_value(rid2, "geocode_location", gp, f"Geocoded ({enriched.geo_provenance})")
-                await resolve_property(rid2, ["best_address", "best_location", "map_url"])
-            except Exception as e:
-                logger.warning("Failed to write source values for %s: %s", rid2, e)
-
-            # ── Dual-write to new DAG ────────────────────────────
             try:
                 prop = PropertyNodes(rid2)
                 push_enriched_property(rid2, enriched, {
@@ -300,129 +272,16 @@ async def upsert_property(
                     "rightmove_location": prop.rightmove_location,
                 })
                 register_property(rid2, prop)
-                logger.info("Pushed enriched data to new DAG for %s", rid2)
+                logger.info("Seeded DAG for %s", rid2)
             except Exception as e:
-                logger.warning("Failed to push to new DAG for %s: %s", rid2, e)
+                logger.warning("Failed to seed DAG for %s: %s", rid2, e)
 
         dump = asdict_serializable(enriched)
         extra: dict[str, Any] = {}
         if scrape_error:
             extra["scrape_warning"] = scrape_error
             dump["_scrape_warning"] = scrape_error
-
-        if row_url:
-            return JSONResponse(content={"status": "ok", "row_url": row_url, "data": dump, **extra}, status_code=201)
-        return JSONResponse(
-            content={"status": "ok", "note": "Sheets not configured", "data": dump, **extra}, status_code=200
-        )
-
-    # ── Batch mode ────────────────────────────────────────────────
-    if not settings.sheet_id:
-
-        async def _empty():
-            yield json.dumps({"status": "ok", "note": "Sheets not configured", "results": []}) + "\n"
-
-        return StreamingResponse(_empty(), media_type="text/plain")
-
-    gclient = get_client()
-    if gclient is None:
-
-        async def _empty():
-            yield json.dumps({"status": "ok", "note": "Sheets not configured", "results": []}) + "\n"
-
-        return StreamingResponse(_empty(), media_type="text/plain")
-
-    return StreamingResponse(batch_stream(gclient, no_write, fields, rids, force), media_type="text/plain")
-
-
-@app.post("/properties/compare", response_model=None)
-async def compare_properties(
-    rids: Annotated[str | None, Query()] = None,
-    fields: Annotated[list[str] | None, Query()] = None,
-) -> StreamingResponse:
-    """Compare current sheet data with a fresh no-write re-enrichment.
-
-    Returns a TSV diff with columns RID, Field, Old (sheet), New (enriched).
-    This is POST because it triggers enrichment (API calls, caching).
-
-    ``fields`` is a list of column header names to compare (e.g.
-    ``["Simon Parking Cost (£)"]``).  Each column header is mapped to
-    its enrichment group so only the required API calls are made.
-    If omitted, all enrichment columns are compared.
-    """
-
-    # Map column headers to enrichment field groups
-    enabled_groups: set[str] | None = None
-    compare_columns: set[str] | None = None
-    if fields:
-        enabled_groups = set()
-        compare_columns = set()
-        for col in fields:
-            compare_columns.add(col.strip())
-            group = header_to_enrichment_field(col.strip())
-            if group:
-                enabled_groups.add(group)
-
-    # Read sheet data first
-    props = get_properties_data()
-
-    # Build enriched flat dicts by calling _run_backfill_enrichment per property
-    enriched_rows: dict[str, dict[str, str]] = {}
-
-    for _view_row_idx, data_row in enumerate([list(p.values()) for p in props], 2):
-        rid = data_row[col_index("Rightmove ID")] if col_index("Rightmove ID") < len(data_row) else ""
-        if not rid:
-            continue
-        if rids and rid not in {r.strip() for r in rids.split(",")}:
-            continue
-
-        address = data_row[col_index("Address")] if col_index("Address") < len(data_row) else ""
-        postcode = data_row[col_index("Postcode")] if col_index("Postcode") < len(data_row) else ""
-        url = (
-            data_row[col_index("Rightmove URL")]
-            if col_index("Rightmove URL") < len(data_row)
-            else (f"https://www.rightmove.co.uk/properties/{rid}")
-        )
-
-        enriched = await run_backfill_enrichment(
-            url=url,
-            address=address,
-            postcode=postcode,
-            lookup=None,  # _run_enrichment will compute best lookup
-            bedrooms=None,
-            price=None,
-            enabled=enabled_groups,
-        )
-        enriched_rows[rid] = row_values(enriched)
-
-    # Build TSV diff
-    output = io.StringIO()
-    writer = csv.writer(output, delimiter="\t", lineterminator="\n")
-    writer.writerow(["RID", "Field", "Old (sheet)", "New (enriched)"])
-
-    diff_count = 0
-    for p in props:
-        rid = p.get("Rightmove ID", "").strip()
-        if not rid or rid not in enriched_rows:
-            continue
-        new_data = enriched_rows[rid]
-        for header, old_val in p.items():
-            stripped = header.strip()
-            if not stripped or stripped in ("Rightmove ID",):
-                continue
-            if compare_columns is not None and stripped not in compare_columns:
-                continue
-            new_val = new_data.get(stripped, "")
-            old_clean = old_val.strip() if old_val else ""
-            if old_clean != new_val:
-                diff_count += 1
-                writer.writerow([rid, stripped, old_clean, new_val])
-
-    writer.writerow([])
-    writer.writerow(["DIFF_COUNT", str(diff_count), "", ""])
-    result = output.getvalue()
-
-    return StreamingResponse(iter([result]), media_type="text/tab-separated-values")
+        return JSONResponse(content={"status": "ok", "rid": rid2, "data": dump, **extra}, status_code=200)
 
 
 @app.post("/sync-view-formulas")

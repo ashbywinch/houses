@@ -69,10 +69,10 @@ class DerivedNode(Node[T], Generic[T]):
             slot = Slot(self._on_dep_changed)
             self._slots.append(slot)
             dep.changed.connect(slot)
-
     def _on_dep_changed(self) -> None:
         if not self._is_stale():
             return
+        _ensure_queue()
         _stale_queue.put_nowait(self)
         self.changed.emit()
 
@@ -83,6 +83,10 @@ class DerivedNode(Node[T], Generic[T]):
             if dep._persisted_at is not None and self._computed_at is not None:
                 if dep._persisted_at > self._computed_at:
                     return True
+            if isinstance(dep, DerivedNode):
+                if dep._computed_at is not None and self._computed_at is not None:
+                    if dep._computed_at > self._computed_at:
+                        return True
             if self._loaded_dep_timestamps:
                 stored = self._loaded_dep_timestamps.get(dep._id, "")
                 if stored and dep._db_created_at != stored:

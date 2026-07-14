@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 
+from houses.context import get_services
 from money import Money
 from pint import Quantity
 
@@ -48,9 +49,9 @@ _LEG_MODE_LABEL = {
 
 
 def _build_details(commute: Commute) -> tuple[CommuteLeg, ...]:
-    """Convert old Commute cost_groups/legs into new CommuteLeg tuples."""
+    """Convert a Commute's cost groups into CommuteLeg tuples."""
     legs: list[CommuteLeg] = []
-    for cg in commute.cost_groups:
+    for cg in commute.details:
         for leg in cg.legs:
             mode_name = leg.mode.name.lower() if hasattr(leg.mode, 'name') else str(leg.mode)
             legs.append(CommuteLeg(
@@ -181,14 +182,14 @@ class TransitNode(DerivedNode[dict]):
             val = commute.value_or_none()
             details = _build_details(val)
             parts = self._id.split("/")
-            label = parts[2] if len(parts) >= 3 else (val.destination_label or "")
+            label = parts[2] if len(parts) >= 3 else (val.destination.label or "")
             raw_mode = val.mode if hasattr(val, 'mode') else "transit"
             mode = raw_mode.name.lower() if isinstance(raw_mode, Enum) else str(raw_mode)
             if details and all(leg.mode == "walk" for leg in details):
                 mode = "walk"
             cr = CommuteResult(
-                duration=Quantity(val.duration_minutes or 0, "minute"),
-                daily_cost=val.daily_cost_gbp,
+                duration=Quantity(int(val.duration.magnitude), "minute") if val.duration else Quantity(0, "minute"),
+                daily_cost=val.daily_cost,
                 label=label,
                 mode=mode,
                 details=details,
@@ -197,8 +198,6 @@ class TransitNode(DerivedNode[dict]):
             )
             self._commute_cache = cr
             return Attempt.succeeded(_serialize_commute_result(cr))
-        err = commute.error or "unknown"
-        return Attempt.impossible(f"get_commute: {err}")
 
     async def to_json(self) -> dict:
         attempt = await self.attempt()

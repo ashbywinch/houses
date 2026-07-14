@@ -10,12 +10,17 @@ specific services without monkeypatching.
 from __future__ import annotations
 
 import dataclasses
+from enum import Enum
 from typing import Any, Protocol
 
 from dag.attempt import Attempt
 from dag.persistence import latest_node_result
 from dag.user_input_node import UserInputNode
-from houses.commute import Commute
+from money import Money
+from pint import Quantity
+
+from houses.model.domain import Commute, Person, PlaceOfInterest
+from houses.commute import CostGroup
 from houses.geo import GeoPoint
 from houses.nodes.settings import make_default_financials, make_default_persons, make_default_thresholds
 from houses.council_tax_info import CouncilTaxInfo
@@ -146,19 +151,58 @@ class _DefaultGeocoder:
     async def geocode_address(self, address: str) -> Attempt[GeoPoint]:
         return await _geocode_address(address)
 
-
 class _DefaultCommuteRouter:
+
     async def simon_commute(self, postcode: str) -> Attempt[Commute]:
         from houses.enricher import compute_simon_commute
-        return await compute_simon_commute(postcode)
+        result = await compute_simon_commute(postcode)
+        if not result.succeeded:
+            return Attempt.impossible(result.error or "simon commute failed")
+        old = result.value_or_none()
+        return Attempt.succeeded(Commute(
+            person=Person(name="Simon", has_car=False),
+            label=old.destination_label,
+            destination=PlaceOfInterest(label=old.destination_label,
+                                         postcode=old.destination_postcode),
+            duration=Quantity(old.duration_minutes or 0, "minute"),
+            daily_cost=old.daily_cost_gbp or Money("0", "GBP"),
+            mode=old.mode.name.lower() if isinstance(old.mode, Enum) else str(old.mode),
+            details=old.cost_groups,
+        ))
 
     async def lorena_commute(self, postcode: str) -> Attempt[Commute]:
         from houses.enricher import compute_lorena_commute
-        return await compute_lorena_commute(postcode)
+        result = await compute_lorena_commute(postcode)
+        if not result.succeeded:
+            return Attempt.impossible(result.error or "lorena commute failed")
+        old = result.value_or_none()
+        return Attempt.succeeded(Commute(
+            person=Person(name="Lorena", has_car=False),
+            label=old.destination_label,
+            destination=PlaceOfInterest(label=old.destination_label,
+                                         postcode=old.destination_postcode),
+            duration=Quantity(old.duration_minutes or 0, "minute"),
+            daily_cost=old.daily_cost_gbp or Money("0", "GBP"),
+            mode=old.mode.name.lower() if isinstance(old.mode, Enum) else str(old.mode),
+            details=old.cost_groups,
+        ))
 
     async def petrol_cost(self, postcode: str) -> Attempt[Commute]:
         from houses.enricher import compute_petrol_cost
-        return await compute_petrol_cost(postcode)
+        result = await compute_petrol_cost(postcode)
+        if not result.succeeded:
+            return Attempt.impossible(result.error or "petrol cost failed")
+        old = result.value_or_none()
+        return Attempt.succeeded(Commute(
+            person=Person(name="Simon", has_car=True),
+            label=old.destination_label,
+            destination=PlaceOfInterest(label=old.destination_label,
+                                         postcode=old.destination_postcode),
+            duration=Quantity(old.duration_minutes or 0, "minute"),
+            daily_cost=old.daily_cost_gbp or Money("0", "GBP"),
+            mode=old.mode.name.lower() if isinstance(old.mode, Enum) else str(old.mode),
+            details=old.cost_groups,
+        ))
 
     async def route(
         self,
@@ -169,7 +213,21 @@ class _DefaultCommuteRouter:
         max_walk_minutes: int,
     ) -> Attempt[Commute]:
         from houses.routing import get_commute
-        return await get_commute(origin, destination, has_car=has_car, max_walk_minutes=max_walk_minutes)
+        result = await get_commute(origin, destination, has_car=has_car,
+                                   max_walk_minutes=max_walk_minutes)
+        if not result.succeeded:
+            return Attempt.impossible(result.error or "route failed")
+        old = result.value_or_none()
+        return Attempt.succeeded(Commute(
+            person=Person(name="", has_car=has_car),
+            label=old.destination_label,
+            destination=PlaceOfInterest(label=old.destination_label,
+                                         postcode=old.destination_postcode),
+            duration=Quantity(old.duration_minutes or 0, "minute"),
+            daily_cost=old.daily_cost_gbp or Money("0", "GBP"),
+            mode=old.mode.name.lower() if isinstance(old.mode, Enum) else str(old.mode),
+            details=old.cost_groups,
+        ))
 
 
 class _DefaultSchoolLookup:

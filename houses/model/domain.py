@@ -64,6 +64,7 @@ class Commute:
     destination: PlaceOfInterest
     duration: _Quantity
     daily_cost: Money
+    mode: str = "transit"
     details: tuple[CostGroup, ...] = ()
 
 
