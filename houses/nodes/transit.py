@@ -183,9 +183,20 @@ class TransitNode(DerivedNode[dict]):
             mode = raw_mode.name.lower() if isinstance(raw_mode, Enum) else str(raw_mode)
             if details and all(leg.mode == "walk" for leg in details):
                 mode = "walk"
+            daily_cost = val.daily_cost
+            if not is_child and (daily_cost is None or float(daily_cost.amount) == 0):
+                address = dest_postcode
+                if best_address is not None and best_address.succeeded:
+                    addr_val = best_address.value_or_none()
+                    if addr_val:
+                        address = addr_val
+                daily_cost = await self._apply_nr_fare(
+                    val, dest_postcode, address, name, details,
+                )
+
             cr = CommuteResult(
                 duration=Quantity(int(val.duration.magnitude), "minute") if val.duration else Quantity(0, "minute"),
-                daily_cost=val.daily_cost,
+                daily_cost=daily_cost or Money("0", "GBP"),
                 label=label,
                 mode=mode,
                 details=details,
@@ -195,6 +206,56 @@ class TransitNode(DerivedNode[dict]):
             self._commute_cache = cr
             return Attempt.succeeded(_serialize_commute_result(cr))
         return self._impossible({"commute": commute})
+
+    async def _apply_nr_fare(self, commute, dest_postcode, address, person_name, details,
+                              _registry=None, _geocode=None, _tube_fare_fn=None):
+        from houses.rail_fares import enrich_rail_fares
+        from houses.commute import Commute as OldCommute, CostGroup, JourneyLeg
+
+        # Allow test injection via instance variables
+        _registry = _registry or getattr(self, '_nr_registry', None)
+        _geocode = _geocode or getattr(self, '_nr_geocode', None)
+        _tube_fare_fn = _tube_fare_fn or getattr(self, '_nr_tube_fare', None)
+
+        cost_groups = []
+        for d in details:
+            cost_groups.append(CostGroup(
+                legs=(JourneyLeg(mode=d.mode, duration_minutes=int(d.duration.magnitude)),),
+                cost=0.0,
+            ))
+        old_commute = OldCommute(
+            destination_label=getattr(commute, 'destination_label', ''),
+            destination_postcode=dest_postcode,
+            duration_minutes=int(commute.duration.magnitude) if commute.duration else None,
+            daily_cost_gbp=None,
+            cost_groups=tuple(cost_groups),
+        )
+        dummy = OldCommute(
+            destination_label="", destination_postcode="",
+            duration_minutes=None, daily_cost_gbp=None,
+        )
+
+        name_lower = person_name.lower()
+        if name_lower == "simon":
+            enriched, _ = await enrich_rail_fares(
+                enabled={"simon"}, postcode=address, address=address,
+                simon=old_commute, lorena=dummy,
+                _registry=_registry, _geocode=_geocode, _tube_fare_fn=_tube_fare_fn,
+            )
+            result = enriched
+        elif name_lower == "lorena":
+            _, enriched = await enrich_rail_fares(
+                enabled={"lorena"}, postcode=address, address=address,
+                simon=dummy, lorena=old_commute,
+                _registry=_registry, _geocode=_geocode, _tube_fare_fn=_tube_fare_fn,
+            )
+            result = enriched
+        else:
+            return commute.daily_cost
+
+        if result.daily_cost_gbp is not None and float(result.daily_cost_gbp.amount) > 0:
+            return result.daily_cost_gbp
+        return commute.daily_cost
 
     async def to_json(self) -> dict:
         attempt = await self.attempt()
