@@ -174,18 +174,14 @@ class PropertyNodes:
         self.commute_selectors = {}
 
         for p_info in (self._svc.persons_source._value or []):
-            p_name = p_info["name"] if isinstance(p_info, dict) else p_info.name
-            pois = p_info.get("places_of_interest", []) if isinstance(p_info, dict) else p_info.places_of_interest
+            p_name = p_info["name"]
+            pois = p_info.get("places_of_interest", [])
             for poi in pois:
-                label = poi["label"] if isinstance(poi, dict) else poi.label
-                postcode = poi["postcode"] if isinstance(poi, dict) else poi.postcode
+                label = poi["label"]
+                postcode = poi["postcode"]
                 key = f"{p_name}/{label}"
 
-                is_child = (
-                    p_info.get("is_child", False) if isinstance(p_info, dict)
-                    else getattr(p_info, "is_child", False)
-                )
-
+                is_child = p_info.get("is_child", False)
                 if is_child:
                     school_node = (self.primary_school if "Primary" in label
                                    else self.secondary_school if "Secondary" in label
