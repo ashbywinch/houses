@@ -69,6 +69,8 @@ class DerivedNode(Node[T], Generic[T]):
         for dep in deps:
             slot = Slot(self._on_dep_changed)
             self._slots.append(slot)
+            dep.changed.connect(slot)
+
     def _on_dep_changed(self) -> None:
         if not self._is_stale():
             return

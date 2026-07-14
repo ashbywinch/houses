@@ -67,10 +67,9 @@ function simpleOfsted(rating: string | null): string {
   return rating.split(',')[0].trim()
 }
 
-function ofstedClass(rating: string | null): string {
-  const main = simpleOfsted(rating)
-  if (main === 'Outstanding') return 'pill--good'
-  if (main === 'Good') return 'pill--warn'
+function isChildCommute(c: unknown): boolean {
+  return (c as Record<string, unknown> | undefined)?.is_child === true
+}
   if (main === 'Requires Improvement' || main === 'Inadequate') return 'pill--bad'
   return 'pill--muted'
 }

@@ -240,8 +240,8 @@ class PropertyNodes:
                     poi=poi_src,
                     transit_result=transit_node,
                     bus_result=bus_augment,
+                    is_child=is_child,
                 )
-                self.commute_selectors[key] = selector
 
         # Look up commute selectors by the actual POI labels from the
         # persons config, so CommuteBreakdownNode deps resolve correctly.

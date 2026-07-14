@@ -58,7 +58,9 @@ class TestDerivedNode:
         a.push(10, "t")
         assert (await node.attempt()).value_or_none() == 14
 
-    def test_changed_signal_fires_on_recompute(self):
+    @pytest.mark.asyncio
+    async def test_changed_signal_fires_on_recompute(self):
+        import dag.derived_node as dn
         src = UserInputNode[int]("src", int)
         node = _DoubleNode("double", deps=(src,))
 
@@ -66,9 +68,11 @@ class TestDerivedNode:
         node.changed.connect(lambda: received.append("changed"))
 
         src.push(2, "test")
+        await dn.flush_processor()
         assert received == ["changed"]
 
         src.push(3, "test")
+        await dn.flush_processor()
         assert received == ["changed", "changed"]
 
     @pytest.mark.asyncio

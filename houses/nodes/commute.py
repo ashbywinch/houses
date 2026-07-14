@@ -118,12 +118,14 @@ class _CommuteInputNode(UserInputNode[dict]):
 
 
 class CommuteSelectorNode(DerivedNode[dict]):
-    def __init__(self, node_id: str, *, origin, poi, transit_result, bus_result):
+    def __init__(self, node_id: str, *, origin, poi, transit_result, bus_result,
+                 is_child: bool = False):
         super().__init__(
             node_id,
             dict,
             (origin, poi, transit_result, bus_result),
         )
+        self._is_child = is_child
 
     def compute(self, origin: Attempt[GeoPoint],
                 poi: Attempt[str],
@@ -146,6 +148,7 @@ class CommuteSelectorNode(DerivedNode[dict]):
         result: dict = {
             "status": attempt.status,
             "value": _serialize_value(attempt.value_or_none()) if attempt.succeeded else None,
+            "is_child": self._is_child,
         }
         result["succeeded"] = attempt.succeeded
         result["pending"] = attempt.pending
