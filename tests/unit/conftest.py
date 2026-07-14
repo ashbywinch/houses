@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import tempfile
 from pathlib import Path
-
 import pytest
 
 import dag.derived_node as _dn
@@ -26,17 +25,10 @@ def _make_mock_services():
 _request_services.set(_make_mock_services())
 
 _orig_attempt = _dn.DerivedNode.attempt
-_flushing = False
 
 
 async def _flushing_attempt(self):
-    global _flushing
-    if not _flushing:
-        _flushing = True
-        try:
-            await flush_processor()
-        finally:
-            _flushing = False
+    await flush_processor()
     if self._cached is None:
         await self.refresh()
     elif self._is_stale():

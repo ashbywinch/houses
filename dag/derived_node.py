@@ -70,8 +70,6 @@ class DerivedNode(Node[T], Generic[T]):
             self._slots.append(slot)
             dep.changed.connect(slot)
     def _on_dep_changed(self) -> None:
-        if not self._is_stale():
-            return
         _ensure_queue()
         _stale_queue.put_nowait(self)
         self.changed.emit()
@@ -107,11 +105,8 @@ class DerivedNode(Node[T], Generic[T]):
     async def refresh(self) -> None:
         if not self._is_stale():
             return
-        dep_attempts = [await dep.attempt() for dep in self._deps]
-        if any(a.pending for a in dep_attempts):
-            return
         try:
-            result = self.compute(*dep_attempts)
+            result = self.compute(*[await dep.attempt() for dep in self._deps])
             if iscoroutine(result):
                 result = await result
         except Exception as e:
