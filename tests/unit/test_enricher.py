@@ -667,9 +667,9 @@ class TestEnrichRailFares:
     @pytest.mark.asyncio
     async def test_lorena_bus_cost_adds_rail_fare(self, tmp_path):
         """Lorena with bus cost only (£4.00) gets rail fare (£37.20) added → £41.20."""
-        from houses.rail_fares import enrich_rail_fares, RailFareRegistry
-        from houses.stations import StationRegistry
         from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
+        from houses.rail_fares import RailFareRegistry, enrich_rail_fares
+        from houses.stations import StationRegistry
 
         stations_csv = tmp_path / "stations.csv"
         stations_csv.write_text(
@@ -722,9 +722,9 @@ class TestEnrichRailFares:
     @pytest.mark.asyncio
     async def test_simon_parking_cost_adds_rail_fare(self, tmp_path):
         """Simon with parking cost only (£10.80) gets rail fare added → £50.40."""
-        from houses.rail_fares import enrich_rail_fares, RailFareRegistry
-        from houses.stations import StationRegistry
         from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
+        from houses.rail_fares import RailFareRegistry, enrich_rail_fares
+        from houses.stations import StationRegistry
 
         stations_csv = tmp_path / "stations.csv"
         stations_csv.write_text(
@@ -778,8 +778,8 @@ class TestEnrichRailFares:
     @pytest.mark.asyncio
     async def test_full_tfl_fare_skips_nr(self):
         """When TfL already priced the journey, cost stays unchanged."""
-        from houses.rail_fares import enrich_rail_fares
         from houses.commute import Commute
+        from houses.rail_fares import enrich_rail_fares
 
         lorena = Commute(
             destination_label="Lorena",

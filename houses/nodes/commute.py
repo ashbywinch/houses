@@ -116,31 +116,70 @@ class _CommuteInputNode(UserInputNode[dict]):
         return Provenance.from_label(self._source_label)
 
 
+class RailFareNode(DerivedNode[dict]):
+    """Computes the National Rail fare for a commute when TfL has no price."""
+
+    def __init__(self, node_id: str, *, commute_node, best_location, person_name):
+        super().__init__(node_id, dict, (commute_node, best_location, person_name))
+
+    async def compute(self, commute_attempt: Attempt[dict],
+                       location_attempt: Attempt[GeoPoint],
+                       name_attempt: Attempt[str]) -> Attempt[dict]:
+        if not commute_attempt.succeeded:
+            return commute_attempt
+        val = commute_attempt.value_or_none() or {}
+        dc = val.get("daily_cost") or {}
+        if float(dc.get("amount", 0)) > 0:
+            return commute_attempt
+        from houses.commute import Commute as OldCommute
+        from houses.rail_fares import enrich_rail_fares
+        person_name = (name_attempt.value_or_none() or "").lower()
+        dest_postcode = val.get("label", "")
+        old = OldCommute("", dest_postcode, val.get("duration", {}).get("value"), None)
+        dummy = OldCommute("", "", None, None)
+        simon = old if person_name == "simon" else dummy
+        lorena = old if person_name == "lorena" else dummy
+        enriched, _ = await enrich_rail_fares({person_name}, dest_postcode, dest_postcode, simon, lorena)
+        result = enriched if person_name == "simon" else _
+        if result.daily_cost_gbp is not None and float(result.daily_cost_gbp.amount) > 0:
+            val["daily_cost"] = {"amount": float(result.daily_cost_gbp.amount), "currency": "GBP"}
+        return Attempt.succeeded(val)
+
 class CommuteSelectorNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, origin, poi, transit_result, bus_result,
-                 is_child: bool = False):
-        super().__init__(
-            node_id,
-            dict,
-            (origin, poi, transit_result, bus_result),
-        )
+                 is_child: bool = False, rail_fare_node=None):
+        deps = (origin, poi, transit_result, bus_result)
+        if rail_fare_node is not None:
+            deps = deps + (rail_fare_node,)
+        super().__init__(node_id, dict, deps)
         self._is_child = is_child
+        self._rail_fare_node = rail_fare_node
 
     def compute(self, origin: Attempt[GeoPoint],
                 poi: Attempt[str],
                 transit: Attempt[dict],
-                bus: Attempt[dict]) -> Attempt[dict]:
+                bus: Attempt[dict],
+                rail_fare: Attempt[dict] = None) -> Attempt[dict]:
         if not origin.succeeded or not poi.succeeded:
-            return self._impossible(
-                {"origin": origin, "poi": poi},
-            )
+            return self._impossible({"origin": origin, "poi": poi})
+
+        selected = None
         if transit.succeeded:
-            return transit
-        if bus.succeeded:
-            return bus
-        return self._impossible(
-            {"transit_result": transit, "bus_result": bus},
-        )
+            selected = transit
+        elif bus.succeeded:
+            selected = bus
+
+        if selected is not None:
+            # Try rail_fare enrichment when the selected commute has £0 cost
+            if rail_fare is not None and rail_fare.succeeded:
+                val = selected.value_or_none()
+                if isinstance(val, dict):
+                    dc = val.get("daily_cost") or {}
+                    if dc.get("amount", 0) == 0:
+                        return rail_fare
+            return selected
+
+        return self._impossible({"transit_result": transit, "bus_result": bus})
 
     async def to_json(self) -> dict:
         attempt = await self.attempt()

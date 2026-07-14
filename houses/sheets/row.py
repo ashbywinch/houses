@@ -16,6 +16,7 @@ import gspread
 from money import Money
 
 from houses.commute import Commute, LegMode
+from houses.property import EnrichedProperty
 from houses.school import School
 
 logger = logging.getLogger(__name__)

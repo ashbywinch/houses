@@ -233,6 +233,20 @@ class PropertyNodes:
                     bods_fare_node=bods_fare,
                 )
                 self._bus_augment_nodes.append(bus_augment)
+
+                # Create a RailFareNode for non-child commutes to apply NR fares
+                rail_fare_node = None
+                if not is_child:
+                    name_node = UserInputNode[str](f"{self.rid}/{key}/person_name", str)
+                    name_node.push(p_name, "persons_source")
+                    from houses.nodes.commute import RailFareNode
+                    rail_fare_node = RailFareNode(
+                        f"{self.rid}/{key}/rail_fare",
+                        commute_node=transit_node,
+                        best_location=self.best_location,
+                        person_name=name_node,
+                    )
+
                 selector = CommuteSelectorNode(
                     f"{self.rid}/{key}/commute",
                     origin=self.best_location,
@@ -240,6 +254,7 @@ class PropertyNodes:
                     transit_result=transit_node,
                     bus_result=bus_augment,
                     is_child=is_child,
+                    rail_fare_node=rail_fare_node,
                 )
                 self.commute_selectors[key] = selector
 
