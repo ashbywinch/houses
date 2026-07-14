@@ -13,29 +13,38 @@ class TestMonthlyMortgagePaymentNode:
 
         price = UserInputNode[str]("price_mm", str)
         fin = UserInputNode[dict]("fin_mm", dict)
+        sd = UserInputNode[float]("sd_mm", float)
+        persons = UserInputNode[list]("ps_mm", list)
 
         node = MonthlyMortgagePaymentNode(
-            "mm", rightmove_price=price, financial_source=fin,
+            "mm", rightmove_price=price, stamp_duty_node=sd,
+            persons_source=persons, financial_source=fin,
         )
         price.push("0", "test")
+        sd.push(0.0, "test")
+        persons.push([], "test")
         fin.push({}, "test")
         await flush_processor()
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() == 0.0
-
     @pytest.mark.asyncio
     async def test_computes_with_valid_data(self):
         from houses.nodes.monthly_costs import MonthlyMortgagePaymentNode
 
         price = UserInputNode[str]("price_mm2", str)
         fin = UserInputNode[dict]("fin_mm2", dict)
+        sd = UserInputNode[float]("sd_mm2", float)
+        persons = UserInputNode[list]("ps_mm2", list)
 
         node = MonthlyMortgagePaymentNode(
-            "mm2", rightmove_price=price, financial_source=fin,
+            "mm2", rightmove_price=price, stamp_duty_node=sd,
+            persons_source=persons, financial_source=fin,
         )
         price.push("300000", "test")
+        sd.push(0.0, "test")
+        persons.push([], "test")
         fin.push({
             "mortgage_rate": 0.045,
             "mortgage_term_years": 30,
@@ -46,7 +55,6 @@ class TestMonthlyMortgagePaymentNode:
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() > 0
-
 
 class TestYearlySinkingFundNode:
     @pytest.mark.asyncio

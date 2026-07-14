@@ -14,6 +14,7 @@ from houses.nodes.location import BestAddressNode, BestLocationNode
 from houses.nodes.monthly_costs import (
     CommuteBreakdownNode,
     MonthlyMortgagePaymentNode,
+    StampDutyNode,
     TotalMonthlyHousingCostNode,
     YearlySinkingFundNode,
 )
@@ -121,9 +122,15 @@ class PropertyNodes:
         self._build_commute_pipeline()
 
         # ── Monthly Cost Calculation Nodes ──────────────────────────────
+        self.stamp_duty = StampDutyNode(
+            f"{rid}/stamp_duty",
+            rightmove_price=self.rightmove_price,
+        )
         self.monthly_mortgage = MonthlyMortgagePaymentNode(
             f"{rid}/monthly_mortgage",
             rightmove_price=self.rightmove_price,
+            stamp_duty_node=self.stamp_duty,
+            persons_source=self._svc.persons_source,
             financial_source=self._svc.financial_source,
         )
         self.yearly_sinking_fund = YearlySinkingFundNode(

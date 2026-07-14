@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from money import Money
+
 from houses.config import settings
 from houses.model.domain import Person, PlaceOfInterest
 
@@ -21,6 +23,7 @@ def make_default_persons() -> list[Person]:
     return [
         Person(
             name="Simon", has_car=True, bus_walk_penalty_minutes=20,
+            deposit_equity=Money("177000", "GBP"),
             places_of_interest=(
                 PlaceOfInterest(label="Pimlico", postcode=settings.simon_postcode,
                                 trips_per_week=1, weeks_per_year=46),
@@ -32,6 +35,7 @@ def make_default_persons() -> list[Person]:
         ),
         Person(
             name="Lorena", has_car=False, bus_walk_penalty_minutes=15,
+            deposit_equity=Money("0", "GBP"),
             places_of_interest=(
                 PlaceOfInterest(label="Aldgate", postcode=settings.lorena_postcode,
                                 trips_per_week=2, weeks_per_year=46),
@@ -54,11 +58,11 @@ def make_default_financials() -> dict[str, Any]:
     return {
         "current_home_sale_price": 0,
         "current_home_outstanding_mortgage": 0,
-        "mortgage_rate": 0.045,
-        "mortgage_term_years": 30,
+        "mortgage_rate": 0.0495,
+        "mortgage_term_years": 27,
         "sinking_fund_rate": 0.01,
         "rental_income_monthly": 0,
-        "life_insurance_monthly": 0,
+        "life_insurance_monthly": 150,
         "working_weeks_per_year": 46,
     }
 
@@ -68,4 +72,3 @@ def make_default_thresholds() -> dict[str, dict[str, int]]:
         "Simon": {"good_max_minutes": 30, "fine_max_minutes": 45},
         "Lorena": {"good_max_minutes": 40, "fine_max_minutes": 60},
     }
-
