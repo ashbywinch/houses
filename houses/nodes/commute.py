@@ -149,17 +149,13 @@ class CommuteSelectorNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, origin, poi, transit_result, bus_result,
                  is_child: bool = False, rail_fare_node=None):
         deps = (origin, poi, transit_result, bus_result)
-        if rail_fare_node is not None:
-            deps = deps + (rail_fare_node,)
         super().__init__(node_id, dict, deps)
         self._is_child = is_child
         self._rail_fare_node = rail_fare_node
-
-    def compute(self, origin: Attempt[GeoPoint],
-                poi: Attempt[str],
-                transit: Attempt[dict],
-                bus: Attempt[dict],
-                rail_fare: Attempt[dict] = None) -> Attempt[dict]:
+    async def compute(self, origin: Attempt[GeoPoint],
+                      poi: Attempt[str],
+                      transit: Attempt[dict],
+                      bus: Attempt[dict]) -> Attempt[dict]:
         if not origin.succeeded or not poi.succeeded:
             return self._impossible({"origin": origin, "poi": poi})
 
@@ -170,13 +166,13 @@ class CommuteSelectorNode(DerivedNode[dict]):
             selected = bus
 
         if selected is not None:
-            # Try rail_fare enrichment when the selected commute has £0 cost
-            if rail_fare is not None and rail_fare.succeeded:
-                val = selected.value_or_none()
-                if isinstance(val, dict):
-                    dc = val.get("daily_cost") or {}
-                    if dc.get("amount", 0) == 0:
-                        return rail_fare
+            val = selected.value_or_none() or {}
+            if isinstance(val, dict):
+                dc = val.get("daily_cost") or {}
+                if dc.get("amount", 0) == 0 and self._rail_fare_node is not None:
+                    rf_attempt = await self._rail_fare_node.attempt()
+                    if rf_attempt.succeeded:
+                        return rf_attempt
             return selected
 
         return self._impossible({"transit_result": transit, "bus_result": bus})
