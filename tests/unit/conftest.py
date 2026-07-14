@@ -28,13 +28,11 @@ _orig_attempt = _dn.DerivedNode.attempt
 
 
 async def _flushing_attempt(self):
-    await flush_processor()
     if self._cached is None:
         await self.refresh()
     elif self._is_stale():
         await self.refresh()
     return await _orig_attempt(self)
-
 
 @pytest.fixture(autouse=True)
 def _clear_stale_queue():

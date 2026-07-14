@@ -105,8 +105,11 @@ class DerivedNode(Node[T], Generic[T]):
     async def refresh(self) -> None:
         if not self._is_stale():
             return
+        dep_attempts = [await dep.attempt() for dep in self._deps]
+        if any(a.pending for a in dep_attempts):
+            return
         try:
-            result = self.compute(*[await dep.attempt() for dep in self._deps])
+            result = self.compute(*dep_attempts)
             if iscoroutine(result):
                 result = await result
         except Exception as e:

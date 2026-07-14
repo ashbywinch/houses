@@ -104,23 +104,14 @@ class FakeCommuteRouter:
 
 
 class FakeSchoolLookup:
-    """Returns a default school for any lookup. Override via constructor."""
+    """School lookup that returns whatever school was passed to constructor.
+
+    ``FakeSchoolLookup()`` returns None (no school found).  Override with
+    ``FakeSchoolLookup(school=some_school)`` to return a specific school.
+    """
 
     def __init__(self, school: School | None = None):
-        self.school = school or School(
-            urn="123",
-            name="Test School",
-            phase="primary",
-            gender=SchoolGender.MIXED,
-            type_of_establishment="community school",
-            postcode="SW1V 2QQ",
-            website="https://example.com",
-            ofsted_rating="Good",
-            inspection_year="2022",
-            coords=GeoPoint(lat=51.5, lon=-0.13),
-            statutory_low_age=None,
-            statutory_high_age=None,
-        )
+        self.school = school
         self.find_calls: list[tuple[str, int, str, tuple]] = []
 
     async def find_nearest(
@@ -142,7 +133,6 @@ class FakeSchoolLookup:
             duration=Quantity(20, "minute"),
             daily_cost=Money("0", "GBP"),
         )
-
 
 class FakeWalkability:
     def __init__(self, walk_to_town_minutes: int = 10, amenities: str = ""):
@@ -192,6 +182,16 @@ class FakeRailFare:
 # ── Composite helper ──────────────────────────────────────────────────
 
 
+_DEFAULT_SCHOOL = School(
+    urn="123", name="Test School", phase="primary",
+    gender=SchoolGender.MIXED, type_of_establishment="community school",
+    postcode="SW1V 2QQ", website="https://example.com",
+    ofsted_rating="Good", inspection_year="2022",
+    coords=GeoPoint(lat=51.5, lon=-0.13),
+    statutory_low_age=None, statutory_high_age=None,
+)
+
+
 def make_services(**overrides: Any) -> Services:
     """Build a ``Services`` with all fakes, optionally overriding specific services.
 
@@ -205,7 +205,7 @@ def make_services(**overrides: Any) -> Services:
     base: dict[str, Any] = dict(
         geocoder=FakeGeocoder(),
         commute_router=FakeCommuteRouter(),
-        school_lookup=FakeSchoolLookup(),
+        school_lookup=FakeSchoolLookup(school=_DEFAULT_SCHOOL),
         walkability_service=FakeWalkability(walk_to_town_minutes=10, amenities="Shops, cafe"),
         town_desc_service=FakeTownDesc(),
         epc_service=FakeEPC(),

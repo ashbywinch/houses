@@ -20,6 +20,8 @@ class PrimarySchoolNode(DerivedNode[dict]):
                       address: Attempt[str]) -> Attempt[dict]:
         if not location.succeeded:
             return self._impossible({"best_location": location})
+        if not address.succeeded:
+            return self._impossible({"best_address": address})
         loc = location.value_or_none()
         svc = get_services()
         school = await svc.school_lookup.find_nearest(
