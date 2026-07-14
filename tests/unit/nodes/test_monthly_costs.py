@@ -144,3 +144,58 @@ class TestTotalMonthlyHousingCostNode:
         a = await node.attempt()
         assert a.succeeded
         assert isinstance(a.value_or_none(), float)
+
+    @pytest.mark.asyncio
+    async def test_includes_all_cost_components(self):
+        """Each cost component contributes to the total.
+        Replaces the old spreadsheet formula test that checked
+        named range references in VIEW_FORMULA_COLS."""
+        from houses.nodes.monthly_costs import TotalMonthlyHousingCostNode
+
+        mg = UserInputNode[float]("mg2", float)
+        sf = UserInputNode[float]("sf2", float)
+        fin = UserInputNode[dict]("fin2", dict)
+        cb = UserInputNode[dict]("cb2", dict)
+        ct = UserInputNode[dict]("ct2", dict)
+
+        node = TotalMonthlyHousingCostNode(
+            "tm2",
+            monthly_mortgage_node=mg,
+            yearly_sinking_fund_node=sf,
+            financial_source=fin,
+            commute_breakdown_node=cb,
+            council_tax_node=ct,
+        )
+
+        # Push all deps with initial values so node is computable
+        mg.push(0.0, "test")
+        sf.push(0.0, "test")
+        cb.push({}, "test")
+        ct.push({}, "test")
+        fin.push({}, "test")
+        await flush_processor()
+        await flush_processor()
+
+        # Mortgage alone contributes 1000
+        mg.push(1000.0, "test")
+        await flush_processor()
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded
+        assert a.value_or_none() == 1000.0
+
+        # Sinking fund: 1200 / 12 * 2 / 3 = 66.67
+        sf.push(1200.0, "test")
+        await flush_processor()
+        await flush_processor()
+        a = await node.attempt()
+        expected = 1000.0 + 1200.0 / 12 * 2 / 3
+        assert a.value_or_none() == round(expected, 2)
+
+        # Commute: yearly_total_gbp = 4600 / 46 = 100
+        cb.push({"yearly_total_gbp": 4600.0}, "test")
+        await flush_processor()
+        await flush_processor()
+        a = await node.attempt()
+        expected = 1000.0 + 1200.0 / 12 * 2 / 3 + 4600.0 / 46
+        assert a.value_or_none() == round(expected, 2)

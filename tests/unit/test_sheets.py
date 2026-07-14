@@ -196,6 +196,19 @@ def test_view_formula_cols_use_named_ranges():
 
 
 
+def test_total_monthly_formula_references_cost_components():
+    """The Total Monthly formula must reference the individual commute cost
+    columns, not a single aggregate (Data_CommuteCost does not exist)."""
+    formula = VIEW_FORMULA_COLS.get("total monthly housing cost (£)", "")
+    assert "Data_MonthlyMortgagePayment" in formula
+    assert "Data_YearlySinkingFund" in formula
+    assert "Data_BracknellCost" in formula
+    assert "Data_SimonLondonCost" in formula
+    assert "Data_LorenaLondonCost" in formula
+    assert "Data_CouncilTaxCost" in formula
+    assert "View_Status" in formula
+
+
 
 def test_affordability_formulas_use_ifna_not_ifferror():
     """Every INDEX-based formula must avoid IFERROR (= use IFNA)."""
