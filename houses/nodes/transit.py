@@ -209,8 +209,9 @@ class TransitNode(DerivedNode[dict]):
 
     async def _apply_nr_fare(self, commute, dest_postcode, address, person_name, details,
                               _registry=None, _geocode=None, _tube_fare_fn=None):
+        from houses.commute import Commute as OldCommute
+        from houses.commute import CostGroup, JourneyLeg
         from houses.rail_fares import enrich_rail_fares
-        from houses.commute import Commute as OldCommute, CostGroup, JourneyLeg
 
         # Allow test injection via instance variables
         _registry = _registry or getattr(self, '_nr_registry', None)

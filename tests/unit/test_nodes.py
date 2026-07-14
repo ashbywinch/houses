@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from houses.geo import GeoPoint
 from houses.model.geo import _deserialize_gp, is_single_property_address
 

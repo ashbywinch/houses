@@ -25,7 +25,6 @@ from houses.property_registry import _registry, register_property
 from houses.web.api_router import _score_from_summary
 from tests.helpers import make_services
 
-
 # ── Fixtures ────────────────────────────────────────────────────────────
 
 

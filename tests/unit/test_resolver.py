@@ -13,7 +13,6 @@ from dag.derived_node import DerivedNode, flush_processor
 from dag.persistence import latest_node_result
 from dag.user_input_node import UserInputNode
 
-
 # ── Helper subclasses ────────────────────────────────────────────────────────
 
 

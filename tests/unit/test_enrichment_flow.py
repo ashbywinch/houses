@@ -248,6 +248,7 @@ class TestEnrichmentApi:
     async def test_get_property_404_for_unknown_rid(self):
         """GET /api/properties/{rid} returns 404 when property not registered."""
         from fastapi import HTTPException
+
         from houses.web.api_router import get_property
 
         with pytest.raises(HTTPException) as exc_info:
@@ -362,7 +363,6 @@ class TestEnrichmentBootstrap:
     async def test_push_enriched_property_seeds_nodes(self):
         """push_enriched_property correctly pushes to the right UserInputNodes."""
         from houses.nodes.cutover import push_enriched_property
-        from houses.nodes.location import BestAddressNode
         from houses.nodes.property import PropertyNodes
 
         prop = PropertyNodes(RID * 2)
@@ -442,7 +442,6 @@ class TestEnrichmentBootstrap:
     async def test_precise_location_overrides_approx(self):
         """When both approx (rightmove_location) and precise_location are set,
         precise wins."""
-        from houses.nodes.location import BestLocationNode
         from houses.nodes.property import PropertyNodes
 
         prop = PropertyNodes(f"{RID}_precise")

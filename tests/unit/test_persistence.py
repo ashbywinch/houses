@@ -12,8 +12,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from dag.persistence import (
     _deserialize_value,
     _serialize_value,
@@ -123,7 +121,6 @@ class TestGeoPointPersistence:
     def test_inline_none_string_survives(self):
         """When ``\"value\": \"None\"`` is stored in the result JSON directly,
         it comes back as the Python string ``\"None\"``, not Python None."""
-        import sqlite3
         from datetime import UTC, datetime
 
         import dag.persistence as per

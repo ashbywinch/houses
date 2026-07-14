@@ -19,7 +19,9 @@ from houses.property_registry import _registry, register_property
 
 @pytest.fixture(autouse=True)
 def _fresh_db():
-    import sqlite3, dag.persistence as per
+    import sqlite3
+
+    import dag.persistence as per
     saved = per._get_db
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
