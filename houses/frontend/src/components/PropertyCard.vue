@@ -67,16 +67,16 @@ function simpleOfsted(rating: string | null): string {
   return rating.split(',')[0].trim()
 }
 
-function isChildCommute(c: unknown): boolean {
-  return (c as Record<string, unknown> | undefined)?.is_child === true
-}
+function ofstedClass(rating: string | null): string {
+  const main = simpleOfsted(rating)
+  if (main === 'Outstanding') return 'pill--good'
+  if (main === 'Good') return 'pill--warn'
   if (main === 'Requires Improvement' || main === 'Inadequate') return 'pill--bad'
   return 'pill--muted'
 }
 
 function isChildCommute(c: unknown): boolean {
-  const val = (c as Record<string, unknown> | undefined)?.value as Record<string, unknown> | undefined
-  return val?.is_child === true
+  return (c as Record<string, unknown> | undefined)?.is_child === true
 }
 
 function schoolCommute(commutes: Record<string, { commute: unknown }> | undefined, labelPart: string): unknown | null {
@@ -105,8 +105,8 @@ function schoolCommute(commutes: Record<string, { commute: unknown }> | undefine
       <!-- Walk to town -->
       <div v-if="data.walkability?.succeeded && location && data.walkability.value?.walk_to_town_minutes != null" class="card__row card__row--section card__commutes">
         <span class="commute-unit">
-          <span class="card__metric-label">{{ (data as any).town_name?.value || (data as any).town_name || 'Town' }}</span>
-          <a :href="dirUrl(location.lat, location.lon, (data as any).town_name?.value || 'Town')" class="pill-link" target="_blank" rel="noopener">
+          <span class="card__metric-label">{{ data.town_name?.value || 'Town' }}</span>
+          <a :href="dirUrl(location.lat, location.lon, data.town_name?.value || 'Town')" class="pill-link" target="_blank" rel="noopener">
             <CommutePill :label="''" :duration="Math.round(data.walkability.value.walk_to_town_minutes)" mode="walk" :cost="null" :goodMax="15" :fineMax="30" />
           </a>
         </span>

@@ -41,8 +41,7 @@ export interface MonthlyCostSummary {
 }
 
 export interface CommuteSummary {
-  [key: string]: unknown
-  commute: AttemptValue<CommuteValue>
+  commute: AttemptValue<CommuteValue> & { is_child?: boolean }
 }
 
 export interface PropertySummary {
@@ -56,6 +55,7 @@ export interface PropertySummary {
     primary: { school: AttemptValue<SchoolValue> }
     secondary: { school: AttemptValue<SchoolValue> }
   }
+  town_name?: AttemptValue<string>
   total_monthly_cost: AttemptValue<number>
   walkability: AttemptValue<Record<string, unknown>>
 }
