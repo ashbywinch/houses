@@ -154,6 +154,7 @@ class TestCommuteData:
 
     @pytest.mark.asyncio
     async def test_commute_data_has_duration_with_value_and_unit(self, prop):
+        assert prop.commute_selectors, "no commute selectors — pipeline must create them"
         for key, selector in prop.commute_selectors.items():
             j = await selector.to_json()
             assert j["status"] == "succeeded", f"{key}: {j.get('error')}"
@@ -163,6 +164,7 @@ class TestCommuteData:
 
     @pytest.mark.asyncio
     async def test_commute_data_has_daily_cost_with_amount_and_currency(self, prop):
+        assert prop.commute_selectors, "no commute selectors — pipeline must create them"
         for key, selector in prop.commute_selectors.items():
             j = await selector.to_json()
             assert j["status"] == "succeeded", f"{key}: {j.get('error')}"
@@ -172,26 +174,26 @@ class TestCommuteData:
 
     @pytest.mark.asyncio
     async def test_commute_data_has_label(self, prop):
+        assert prop.commute_selectors, "no commute selectors — pipeline must create them"
         for key, selector in prop.commute_selectors.items():
             j = await selector.to_json()
             assert j["status"] == "succeeded", f"{key}: {j.get('error')}"
             val = j.get("value", {})
             assert isinstance(val, dict), f"{key}: value not dict: {type(val)}"
             assert "label" in val, f"{key}: keys={list(val.keys())}"
-            # Label is the POI label from settings (Bracknell, Office, Dad, Primary School, …)
             assert val["label"], f"{key}: empty label"
 
     @pytest.mark.asyncio
     async def test_commute_duration_appears_in_summary(self, prop):
         """List page PropertyCard accesses c.commute.value.duration.value."""
         s = await prop.to_json_summary()
+        assert s["commutes"], "summary must contain commutes"
         for key, cd in s["commutes"].items():
             c = cd["commute"]
             assert c["status"] == "succeeded", f"{key}: {c.get('error')}"
             dur = c["value"]["duration"]
             assert isinstance(dur["value"], (int, float))
             assert dur["value"] > 0
-
 class TestFinancialSettingsPropagation:
     """PATCH to financial settings must be visible through the DAG
     without a server restart.  PropertyNodes must not cache a stale

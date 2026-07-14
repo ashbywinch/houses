@@ -22,7 +22,6 @@ def _make_mock_services():
     )
 
 
-_request_services.set(_make_mock_services())
 
 _orig_attempt = _dn.DerivedNode.attempt
 
@@ -92,6 +91,14 @@ def _sqlite_memory():
     yield
     per._get_db = saved
 
+
+@pytest.fixture(autouse=True)
+def _mock_services():
+    """Set mock services AFTER _sqlite_memory has switched to in-memory DB."""
+    from houses.services_provider import _request_services as _sp
+    token = _sp.set(_make_mock_services())
+    yield
+    _sp.reset(token)
 
 @pytest.fixture(autouse=True)
 def _no_geocoding(monkeypatch):
