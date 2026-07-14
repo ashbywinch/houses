@@ -48,6 +48,7 @@ async def _processor() -> None:
                 _after_refresh(node)
         except Exception:
             pass
+        await asyncio.sleep(0)
 
 
 class DerivedNode(Node[T], Generic[T]):
@@ -68,11 +69,11 @@ class DerivedNode(Node[T], Generic[T]):
         for dep in deps:
             slot = Slot(self._on_dep_changed)
             self._slots.append(slot)
-            dep.changed.connect(slot)
     def _on_dep_changed(self) -> None:
+        if not self._is_stale():
+            return
         _ensure_queue()
         _stale_queue.put_nowait(self)
-        self.changed.emit()
 
     def _is_stale(self) -> bool:
         if self._cached is None:
