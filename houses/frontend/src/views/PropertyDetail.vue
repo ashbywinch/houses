@@ -213,6 +213,10 @@ async function saveLocation() {
           <div class="detail__field-label">Council Tax</div>
           <div class="detail__field-value">{{ detail.affordability.council_tax.value?.band ?? '?' }} · £{{ detail.affordability.council_tax.value?.yearly_cost ?? '?' }}/yr</div>
         </div>
+        <div class="detail__field" v-if="detail.affordability.stamp_duty">
+          <div class="detail__field-label">Stamp Duty</div>
+          <div class="detail__field-value">£{{ detail.affordability.stamp_duty.succeeded ? detail.affordability.stamp_duty.value?.toLocaleString() : '?' }}</div>
+        </div>
         <div class="detail__field detail__field--total">
           <div class="detail__field-label">Total Monthly</div>
           <div class="detail__field-value">£{{ detail.affordability.total_monthly_housing_cost.value ?? '?' }}</div>
