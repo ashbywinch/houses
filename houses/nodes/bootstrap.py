@@ -48,7 +48,6 @@ _OUTCODE_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z0-9]?)\s*\Z", re.IGNORECASE)
 
 
 def _upgrade_address(address: str, postcode: str) -> str:
-    """Replace trailing outcode with full postcode, or append if no outcode."""
     if not address or not postcode:
         return address
     if postcode in address:
@@ -184,14 +183,7 @@ def seed_registry_from_sheet() -> int:
             "comment_design_needed": prop.comment_design_needed,
             "comment_planning_needed": prop.comment_planning_needed,
         }
-        check_key = f"{raw_rid}/rightmove_address"
-        from dag.persistence import get_latest_source_value
-        persisted = get_latest_source_value(raw_rid, "rightmove_address")
-        if persisted:
-            logger.debug("Skipping %s — already seeded", raw_rid)
-        else:
-            bootstrap_from_row(row, source_dict)
-
+        bootstrap_from_row(row, source_dict)
         register_property(raw_rid, prop)
         count += 1
 

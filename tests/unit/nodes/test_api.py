@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from houses.geo import GeoPoint
+from tests.unit.conftest import flush_all
 
 
 class TestPropertyApi:
@@ -25,6 +26,7 @@ class TestPropertyApi:
         prop.corrected_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
         prop.rightmove_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
         reg["prop123"] = prop
+        flush_all()
 
         resp = client.get("/api/properties/prop123")
         assert resp.status_code == 200

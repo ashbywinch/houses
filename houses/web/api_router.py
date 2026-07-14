@@ -1,63 +1,59 @@
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Body, HTTPException, WebSocket
 
-from houses.context import get_services
+from houses.services_provider import get_services
 from houses.geo import GeoPoint
 from houses.nodes.bootstrap import seed_registry_from_sheet
-from houses.nodes.property import PropertyNodes
-from houses.property_registry import _registry, register_property
+from houses.property_registry import _registry
 
 logger = logging.getLogger(__name__)
 
 api_router = APIRouter(prefix="/api")
 
-_websocket_clients: set[WebSocket] = set()
-
-
-async def _broadcast(data: dict[str, Any]) -> None:
-    message = json.dumps(data)
-    dead: list[WebSocket] = []
-    for ws in _websocket_clients:
-        try:
-            await ws.send_text(message)
-        except Exception:
-            dead.append(ws)
-    for ws in dead:
-        _websocket_clients.discard(ws)
-
-
-def _register_with_ws(rid: str, prop: PropertyNodes) -> None:
-    register_property(rid, prop)
-    async def _on_changed() -> None:
-        await _broadcast({
-            "type": "property_updated",
-            "rid": rid,
-            "data": await prop.to_json_summary(),
-        })
-    prop.changed.connect(lambda: asyncio.ensure_future(_on_changed()))
-
 
 @api_router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    _websocket_clients.add(websocket)
-    try:
-        await websocket.send_json({
-            "type": "init",
-            "properties": list(_registry.keys()),
-        })
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        pass
-    finally:
-        _websocket_clients.discard(websocket)
+async def websocket_endpoint(websocket: WebSocket) -> None:
+    from houses.web.broadcaster import register_client
+    await register_client(websocket)
+
+
+@api_router.get("/properties/{rid}/staleness")
+async def staleness_check(rid: str, nodes: str = ""):
+    """Check which DAG nodes are stale for a given property.
+
+    Returns ``{"rid": str, "nodes": {node_id: bool, ...}, "fresh": bool}``.
+    """
+    from houses.property_registry import _registry
+
+    prop = _registry.get(rid)
+    if prop is None:
+        return {"rid": rid, "nodes": {}, "fresh": False, "error": "property not found"}
+
+    node_list = [n.strip() for n in nodes.split(",") if n.strip()]
+    detail = await prop.to_json_detail()
+    stale_map: dict[str, bool] = {}
+    for nid in node_list:
+        parts = nid.split("/", 1)
+        if len(parts) == 1:
+            val = detail.get(nid, {})
+        else:
+            val = detail
+            for segment in parts:
+                if isinstance(val, dict):
+                    val = val.get(segment, {})
+                else:
+                    val = {}
+                    break
+        if isinstance(val, dict):
+            stale_map[nid] = val.get("status") != "succeeded"
+        else:
+            stale_map[nid] = True
+
+    fresh = not any(stale_map.values())
+    return {"rid": rid, "nodes": stale_map, "fresh": fresh}
 
 
 @api_router.get("/properties")

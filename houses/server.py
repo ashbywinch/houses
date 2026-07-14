@@ -1,54 +1,36 @@
 """FastAPI app — /inject-property endpoint, startup/shutdown."""
 
 import asyncio
-import csv
-import io
-import json
 import logging
 from contextlib import asynccontextmanager
 import os
 
 from typing import Annotated, Any
-from fastapi import FastAPI, Query, Request, WebSocket
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
+from pathlib import Path
 
 import houses.bus_fare_reader as _bfr
-import houses.context as _ctx
 import houses.location as _loc
 import houses.services_provider as _sp
-import houses.model  # noqa: F401 — core types
-import houses.model.property  # noqa: F401 — registers Property nodes
-import houses.model.rightmove  # noqa: F401 — registers RightmoveProperty nodes
 from houses.bus_journey import BusJourneyRegistry
 from houses.config import settings
-from houses.enrichment_runner import (
-    asdict_serializable,
-    extract_postcode,
-    header_to_enrichment_field,
-    is_outcode,
-)
-from houses.model.persistence import init_db
+from houses.location import _geo_state_var, _GeoState, extract_postcode, is_outcode
+from houses.web.json_utils import asdict_serializable
+from dag.persistence import init_db as init_dag_db
 from houses.property import Property
 from houses.rightmove_scraper import RightmoveProperty, stop_chrome
 from houses.rightmove_scraper import scrape as scrape_rightmove
 from houses.sheets import (
     col_index,
     get_client,
-    row_values,
     sync_view_formulas,
 )
 from houses.sheets.reader import get_properties_data, resolve_tab
-from houses.web.api_router import _registry, api_router, register_property
-from houses.web.router import web_router
-from houses.geo import GeoPoint
-from houses.nodes.bootstrap import seed_registry_from_sheet
-from houses.nodes.cutover import push_enriched_property
-from houses.nodes.property import PropertyNodes
-from houses.services import Services
-from houses.location import _geo_state_var, _GeoState
+from houses.web.api_router import api_router
+from houses.property_registry import register_property
 from houses.nodes.bootstrap import seed_registry_from_sheet
 from houses.nodes.cutover import push_enriched_property
 from houses.nodes.property import PropertyNodes
@@ -81,13 +63,13 @@ async def lifespan(_app: FastAPI):
     # httpx logs full URLs including query params — suppress to avoid
     # leaking API keys in the server log
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    init_db()
+    init_dag_db()
     seed_registry_from_sheet()
     # Start the background stale-node processor and the WebSocket broadcaster.
     # The processor eagerly recomputes nodes whose dependencies have changed;
     # the broadcaster pushes fresh property summaries to connected clients.
     from dag.derived_node import _processor as _start_processor, set_after_refresh
-    from houses.web.broadcaster import _broadcaster as _start_broadcaster, push_rid, register_client
+    from houses.web.broadcaster import _broadcaster as _start_broadcaster, push_rid
 
     # Wire: after each node refresh, push the property RID to the broadcast queue
     def _on_node_refreshed(node):
@@ -121,42 +103,9 @@ app.add_middleware(
 )
 
 
-_error_templates = Jinja2Templates(directory="houses/templates")
-
-
-@app.exception_handler(404)
-async def not_found_html(request: Request, _):
-    if "text/html" in request.headers.get("accept", ""):
-        return _error_templates.TemplateResponse(
-            request,
-            "error.html",
-            {
-                "status_code": 404,
-                "message": "Not Found",
-                "detail": "This property doesn't exist or hasn't been enriched yet.",
-            },
-            status_code=404,
-        )
-    return JSONResponse({"error": "not found"}, status_code=404)
-
-
-@app.exception_handler(500)
-@app.exception_handler(Exception)
-async def server_error(request: Request, exc: Exception):
-    logger.exception("Unhandled error: %s", exc)
-    if "text/html" in request.headers.get("accept", ""):
-        return _error_templates.TemplateResponse(
-            request,
-            "error.html",
-            {"status_code": 500, "message": "Server Error", "detail": "Something went wrong loading this property."},
-            status_code=500,
-        )
-    return JSONResponse({"error": "internal server error"}, status_code=500)
-
-
 app.mount("/static", StaticFiles(directory="houses/static"), name="static")
 app.include_router(api_router)
-app.include_router(web_router)
+
 
 
 @app.middleware("http")
@@ -305,8 +254,3 @@ async def sync_view_formulas_endpoint() -> JSONResponse:
 @app.get("/health")
 async def health() -> JSONResponse:
     return JSONResponse(content={"status": "ok"})
-
-@app.websocket("/ws")
-async def property_ws(websocket: WebSocket) -> None:
-    from houses.web.broadcaster import register_client
-    await register_client(websocket)

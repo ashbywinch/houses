@@ -11,7 +11,6 @@ from typing import Any
 
 import contextvars
 
-from houses.services_provider import get_services
 
 _request_sheets_client: contextvars.ContextVar[Any | None] = contextvars.ContextVar("_request_sheets_client", default=None)
 

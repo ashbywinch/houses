@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from dag.derived_node import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 
@@ -16,6 +17,8 @@ class TestBootstrapFromRow:
         }
         row = {"Address": "10 High St, London SW1V 2QQ"}
         bootstrap_from_row(row, sources)
+        await flush_processor()
+        await flush_processor()
         a = await sources["rightmove_address"].attempt()
         assert a.value_or_none() == "10 High St, London SW1V 2QQ"
 
@@ -28,6 +31,8 @@ class TestBootstrapFromRow:
         }
         row = {"Rightmove URL": "https://www.rightmove.co.uk/properties/12345"}
         bootstrap_from_row(row, sources)
+        await flush_processor()
+        await flush_processor()
         a = await sources["rightmove_url"].attempt()
         assert a.value_or_none() == "https://www.rightmove.co.uk/properties/12345"
 
@@ -40,6 +45,8 @@ class TestBootstrapFromRow:
         }
         row = {"Bedrooms": "3"}
         bootstrap_from_row(row, sources)
+        await flush_processor()
+        await flush_processor()
         a = await sources["rightmove_bedrooms"].attempt()
         assert a.value_or_none() == "3"
 
@@ -52,6 +59,8 @@ class TestBootstrapFromRow:
         }
         row = {"Price (£)": "450000"}
         bootstrap_from_row(row, sources)
+        await flush_processor()
+        await flush_processor()
         a = await sources["rightmove_price"].attempt()
         assert a.value_or_none() == "450000"
 
@@ -68,6 +77,8 @@ class TestBootstrapFromRow:
             "Postcode": "SW1V 2QQ",
         }
         bootstrap_from_row(row, sources)
+        await flush_processor()
+        await flush_processor()
         a = await sources["rightmove_location"].attempt()
         assert a.succeeded
         assert a.value_or_none() == GeoPoint(51.5, -0.1)
@@ -84,6 +95,8 @@ class TestBootstrapFromRow:
             "Approx Longitude (est)": "-0.1",
         }
         bootstrap_from_row(row, sources)
+        await flush_processor()
+        await flush_processor()
         assert not (await sources["rightmove_location"].attempt()).succeeded
 
     @pytest.mark.asyncio
@@ -99,6 +112,8 @@ class TestBootstrapFromRow:
             "Postcode": "SW1V 2QQ",
         }
         bootstrap_from_row(row, sources)
+        await flush_processor()
+        await flush_processor()
         a = await sources["precise_location"].attempt()
         assert a.succeeded
         assert a.value_or_none() == GeoPoint(51.6, -0.2)
@@ -116,6 +131,8 @@ class TestBootstrapFromRow:
             "Postcode": "SW1V 2QQ",
         }
         bootstrap_from_row(row, sources)
+        await flush_processor()
+        await flush_processor()
         a = await sources["corrected_address"].attempt()
         assert a.succeeded
         # Address gets postcode appended
@@ -135,6 +152,8 @@ class TestBootstrapFromRow:
             "Postcode": "UB2 4GN",
         }
         bootstrap_from_row(row, sources)
+        await flush_processor()
+        await flush_processor()
         a = await sources["user_entered_address"].attempt()
         assert a.succeeded
         assert a.value_or_none() == "31 Isambard Road, Southall, UB2 4GN"
@@ -153,6 +172,8 @@ class TestBootstrapFromRow:
             "Postcode": "SW1V 2QQ",
         }
         bootstrap_from_row(row, sources)
+        await flush_processor()
+        await flush_processor()
         a = await sources["user_entered_address"].attempt()
         assert not a.succeeded  # not pushed because upgraded == address
 
@@ -166,6 +187,20 @@ class TestBootstrapFromRow:
         user = UserInputNode[str]("user_entered_address", str)
         rightmove_addr = UserInputNode[str]("rightmove_address", str)
         rightmove_loc = UserInputNode[GeoPoint]("rightmove_location", GeoPoint)
+
+        # Create derived nodes before bootstrap so changed signals enqueue them
+        best_addr = BestAddressNode(
+            "best_addr",
+            user_entered_address=user,
+            corrected_address=corrected,
+            rightmove_address=rightmove_addr,
+        )
+        best_loc = BestLocationNode(
+            "best_loc",
+            precise_location=precise,
+            rightmove_location=rightmove_loc,
+            best_address=best_addr,
+        )
 
         row = {
             "Address": "10 High St, London",
@@ -183,21 +218,13 @@ class TestBootstrapFromRow:
             "user_entered_address": user,
         }
         bootstrap_from_row(row, sources)
+        await flush_processor()
+        await flush_processor()
 
-        best_loc = BestLocationNode(
-            "best_loc",
-            precise_location=precise,
-            rightmove_location=rightmove_loc,
-            best_address=BestAddressNode(
-                "best_addr",
-                user_entered_address=user,
-                corrected_address=corrected,
-                rightmove_address=rightmove_addr,
-            ),
-        )
         a = await best_loc.attempt()
         assert a.succeeded
         assert a.value_or_none() == GeoPoint(51.6, -0.2)
+
 
 class TestUpgradeAddress:
     def test_replaces_outcode_with_full_postcode(self):

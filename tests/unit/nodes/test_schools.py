@@ -4,6 +4,7 @@ import pytest
 
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
+from dag.derived_node import flush_processor
 
 
 @pytest.fixture(autouse=True)
@@ -11,8 +12,10 @@ def _fake_svc():
     from houses.services_provider import _request_services as _sp
     from tests.helpers import make_services
     token = _sp.set(make_services())
-    yield
-    _sp.reset(token)
+    try:
+        yield
+    finally:
+        _sp.reset(token)
 
 
 @pytest.mark.asyncio
@@ -22,6 +25,8 @@ async def test_primary_school_impossible_without_location():
     loc = UserInputNode[GeoPoint]("loc_ps", GeoPoint)
     addr = UserInputNode[str]("addr_ps", str)
     addr.push("10 High St, SW1V 2QQ", "test")
+    await flush_processor()
+    await flush_processor()
     node = PrimarySchoolNode("ps", best_location=loc, best_address=addr)
     a = await node.attempt()
     assert not a.succeeded
@@ -34,6 +39,8 @@ async def test_secondary_school_impossible_without_location():
     loc = UserInputNode[GeoPoint]("loc_ss", GeoPoint)
     addr = UserInputNode[str]("addr_ss", str)
     addr.push("10 High St, SW1V 2QQ", "test")
+    await flush_processor()
+    await flush_processor()
     node = SecondarySchoolNode("ss", best_location=loc, best_address=addr)
     a = await node.attempt()
     assert not a.succeeded
@@ -45,6 +52,8 @@ async def test_primary_school_impossible_without_address():
 
     loc = UserInputNode[GeoPoint]("loc_ps2", GeoPoint)
     loc.push(GeoPoint(51.5, -0.1), "test")
+    await flush_processor()
+    await flush_processor()
     addr = UserInputNode[str]("addr_ps2", str)
     node = PrimarySchoolNode("ps2", best_location=loc, best_address=addr)
     a = await node.attempt()
@@ -57,6 +66,8 @@ async def test_secondary_school_impossible_without_address():
 
     loc = UserInputNode[GeoPoint]("loc_ss2", GeoPoint)
     loc.push(GeoPoint(51.5, -0.1), "test")
+    await flush_processor()
+    await flush_processor()
     addr = UserInputNode[str]("addr_ss2", str)
     node = SecondarySchoolNode("ss2", best_location=loc, best_address=addr)
     a = await node.attempt()
@@ -83,10 +94,12 @@ async def test_secondary_school_returns_impossible_when_no_school_found():
     token = _sp.set(make_services(school_lookup=FakeSchoolLookup(school=None)))
     try:
         loc = UserInputNode[GeoPoint]("loc_ss3", GeoPoint)
-        loc.push(GeoPoint(51.5, -0.1), "test")
         addr = UserInputNode[str]("addr_ss3", str)
-        addr.push("10 High St, London, SW1V 2QQ", "test")
         node = SecondarySchoolNode("ss3", best_location=loc, best_address=addr)
+        loc.push(GeoPoint(51.5, -0.1), "test")
+        addr.push("10 High St, London, SW1V 2QQ", "test")
+        await flush_processor()
+        await flush_processor()
         a = await node.attempt()
         assert not a.succeeded
         assert "no secondary school found" in a.error
@@ -103,10 +116,12 @@ async def test_primary_school_returns_impossible_when_no_school_found():
     token = _sp.set(make_services(school_lookup=FakeSchoolLookup(school=None)))
     try:
         loc = UserInputNode[GeoPoint]("loc_ps3", GeoPoint)
-        loc.push(GeoPoint(51.5, -0.1), "test")
         addr = UserInputNode[str]("addr_ps3", str)
-        addr.push("10 High St, London, SW1V 2QQ", "test")
         node = PrimarySchoolNode("ps3", best_location=loc, best_address=addr)
+        loc.push(GeoPoint(51.5, -0.1), "test")
+        addr.push("10 High St, London, SW1V 2QQ", "test")
+        await flush_processor()
+        await flush_processor()
         a = await node.attempt()
         assert not a.succeeded
         assert "no primary school found" in a.error
@@ -173,11 +188,8 @@ class TestSchoolNodeAcceptable:
     async def test_primary_school_uses_custom_acceptable(self):
         from houses.nodes.schools import PrimarySchoolNode
         from houses.school_gender import SchoolGender
-
-        loc = UserInputNode[GeoPoint]("loc_ps_acc", GeoPoint)
-        loc.push(GeoPoint(51.5, -0.37), "test")
-        addr = UserInputNode[str]("addr_ps_acc", str)
-        addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        from houses.services_provider import _request_services as _sp
+        from tests.helpers import make_services
 
         seen_acceptable = None
 
@@ -187,29 +199,28 @@ class TestSchoolNodeAcceptable:
                 seen_acceptable = acceptable
                 return None
 
-        from houses.services_provider import _request_services as _sp
-        from tests.helpers import make_services
         svc = make_services(school_lookup=AssertingService())
         token = _sp.set(svc)
         try:
+            loc = UserInputNode[GeoPoint]("loc_ps_acc", GeoPoint)
+            addr = UserInputNode[str]("addr_ps_acc", str)
             node = PrimarySchoolNode("ps_acc", best_location=loc, best_address=addr,
                                      acceptable=("boys", "girls"))
-            await node.attempt()
+            loc.push(GeoPoint(51.5, -0.37), "test")
+            addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+            await flush_processor()
+            await flush_processor()
+            assert seen_acceptable is not None
+            assert set(seen_acceptable) == {SchoolGender.BOYS, SchoolGender.GIRLS}
         finally:
             _sp.reset(token)
-
-        assert seen_acceptable is not None
-        assert set(seen_acceptable) == {SchoolGender.BOYS, SchoolGender.GIRLS}
 
     @pytest.mark.asyncio
     async def test_secondary_school_uses_custom_acceptable(self):
         from houses.nodes.schools import SecondarySchoolNode
         from houses.school_gender import SchoolGender
-
-        loc = UserInputNode[GeoPoint]("loc_ss_acc", GeoPoint)
-        loc.push(GeoPoint(51.5, -0.37), "test")
-        addr = UserInputNode[str]("addr_ss_acc", str)
-        addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        from houses.services_provider import _request_services as _sp
+        from tests.helpers import make_services
 
         seen_acceptable = None
 
@@ -219,29 +230,28 @@ class TestSchoolNodeAcceptable:
                 seen_acceptable = acceptable
                 return None
 
-        from houses.services_provider import _request_services as _sp
-        from tests.helpers import make_services
         svc = make_services(school_lookup=AssertingService())
         token = _sp.set(svc)
         try:
+            loc = UserInputNode[GeoPoint]("loc_ss_acc", GeoPoint)
+            addr = UserInputNode[str]("addr_ss_acc", str)
             node = SecondarySchoolNode("ss_acc", best_location=loc, best_address=addr,
                                        acceptable=("girls",))
-            await node.attempt()
+            loc.push(GeoPoint(51.5, -0.37), "test")
+            addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+            await flush_processor()
+            await flush_processor()
+            assert seen_acceptable is not None
+            assert list(seen_acceptable) == [SchoolGender.GIRLS]
         finally:
             _sp.reset(token)
-
-        assert seen_acceptable is not None
-        assert list(seen_acceptable) == [SchoolGender.GIRLS]
 
     @pytest.mark.asyncio
     async def test_primary_school_default_acceptable_is_mixed(self):
         from houses.nodes.schools import PrimarySchoolNode
         from houses.school_gender import SchoolGender
-
-        loc = UserInputNode[GeoPoint]("loc_ps_def", GeoPoint)
-        loc.push(GeoPoint(51.5, -0.37), "test")
-        addr = UserInputNode[str]("addr_ps_def", str)
-        addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        from houses.services_provider import _request_services as _sp
+        from tests.helpers import make_services
 
         seen = None
 
@@ -251,27 +261,26 @@ class TestSchoolNodeAcceptable:
                 seen = acceptable
                 return None
 
-        from houses.services_provider import _request_services as _sp
-        from tests.helpers import make_services
         svc = make_services(school_lookup=AssertingService())
         token = _sp.set(svc)
         try:
+            loc = UserInputNode[GeoPoint]("loc_ps_def", GeoPoint)
+            addr = UserInputNode[str]("addr_ps_def", str)
             node = PrimarySchoolNode("ps_def", best_location=loc, best_address=addr)
-            await node.attempt()
+            loc.push(GeoPoint(51.5, -0.37), "test")
+            addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+            await flush_processor()
+            await flush_processor()
+            assert seen == (SchoolGender.MIXED,)
         finally:
             _sp.reset(token)
-
-        assert seen == (SchoolGender.MIXED,)
 
     @pytest.mark.asyncio
     async def test_secondary_school_default_acceptable_is_mixed(self):
         from houses.nodes.schools import SecondarySchoolNode
         from houses.school_gender import SchoolGender
-
-        loc = UserInputNode[GeoPoint]("loc_ss_def", GeoPoint)
-        loc.push(GeoPoint(51.5, -0.37), "test")
-        addr = UserInputNode[str]("addr_ss_def", str)
-        addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        from houses.services_provider import _request_services as _sp
+        from tests.helpers import make_services
 
         seen = None
 
@@ -281,14 +290,16 @@ class TestSchoolNodeAcceptable:
                 seen = acceptable
                 return None
 
-        from houses.services_provider import _request_services as _sp
-        from tests.helpers import make_services
         svc = make_services(school_lookup=AssertingService())
         token = _sp.set(svc)
         try:
+            loc = UserInputNode[GeoPoint]("loc_ss_def", GeoPoint)
+            addr = UserInputNode[str]("addr_ss_def", str)
             node = SecondarySchoolNode("ss_def", best_location=loc, best_address=addr)
-            await node.attempt()
+            loc.push(GeoPoint(51.5, -0.37), "test")
+            addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+            await flush_processor()
+            await flush_processor()
+            assert seen == (SchoolGender.MIXED,)
         finally:
             _sp.reset(token)
-
-        assert seen == (SchoolGender.MIXED,)

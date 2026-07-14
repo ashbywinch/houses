@@ -58,13 +58,13 @@ class DerivedNode(Node[T], Generic[T]):
                  deps: tuple[Node, ...]) -> None:
         super().__init__(node_id, value_type)
         self._deps = deps
-        self._cached: Attempt[T] | None = None
+        self._attempt: Attempt[T] = Attempt.pending()
         self._slots: list[Slot] = []
         _ensure_queue()
 
         loaded = self._load_attempt_from_db()
-        if loaded is not None:
-            self._cached = loaded
+        if loaded is not None and loaded.succeeded:
+            self._attempt = loaded
 
         for dep in deps:
             slot = Slot(self._on_dep_changed)
@@ -78,7 +78,7 @@ class DerivedNode(Node[T], Generic[T]):
         _stale_queue.put_nowait(self)
 
     def _is_stale(self) -> bool:
-        if self._cached is None:
+        if self._attempt.pending:
             return True
         for dep in self._deps:
             if dep._persisted_at is not None and self._computed_at is not None:
@@ -95,15 +95,7 @@ class DerivedNode(Node[T], Generic[T]):
         return False
 
     async def attempt(self) -> Attempt[T]:
-        """Read-only: return the cached value.
-
-        If never computed, returns Attempt.pending().  The processor
-        handles all computation — enqueued by _on_dep_changed when
-        deps are pushed during bootstrap.
-        """
-        if self._cached is not None:
-            return self._cached
-        return Attempt.pending()
+        return self._attempt
 
     async def refresh(self) -> None:
         if not self._is_stale():
@@ -117,7 +109,7 @@ class DerivedNode(Node[T], Generic[T]):
                 result = await result
         except Exception as e:
             result = Attempt.impossible(f"{self._id}: {e}")
-        self._cached = result
+        self._attempt = result
         self._computed_at = datetime.now(UTC)
         dep_timestamps = {dep._id: dep._db_created_at for dep in self._deps}
         try:
@@ -138,7 +130,7 @@ class DerivedNode(Node[T], Generic[T]):
 
     async def to_json(self) -> dict:
         result = await super().to_json()
-        if self._cached is not None:
+        if not self._attempt.pending:
             result["stale"] = self._is_stale()
         return result
 

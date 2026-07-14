@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 
-from houses.context import get_services
+from houses.services_provider import get_services
 from money import Money
 from pint import Quantity
 
@@ -135,10 +135,10 @@ class TransitNode(DerivedNode[dict]):
             deps = deps + (best_address,)
         super().__init__(node_id, dict, deps)
         self._best_address = best_address
-        # Upgrade a dict cached value to CommuteResult if loaded from DB
         self._commute_cache: CommuteResult | None = None
-        if self._cached is not None and self._cached.succeeded:
-            val = self._cached.value
+        # Upgrade a dict cached value to CommuteResult if loaded from DB
+        if self._attempt.succeeded:
+            val = self._attempt.value
             if isinstance(val, dict):
                 self._commute_cache = _deserialize_commute_result(val)
 
@@ -195,6 +195,7 @@ class TransitNode(DerivedNode[dict]):
             )
             self._commute_cache = cr
             return Attempt.succeeded(_serialize_commute_result(cr))
+        return self._impossible({"commute": commute})
 
     async def to_json(self) -> dict:
         attempt = await self.attempt()

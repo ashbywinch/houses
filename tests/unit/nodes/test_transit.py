@@ -4,6 +4,7 @@ import pytest
 
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
+from dag.derived_node import flush_processor
 from houses.model.domain import PlaceOfInterest
 
 
@@ -29,6 +30,7 @@ class TestTransitNode:
         persons = UserInputNode[list]("persons2", list)
 
         loc.push(GeoPoint(51.5, -0.1), "test")
+        await flush_processor()
         node = TransitNode("tn2", best_location=loc, poi=poi, persons_source=persons)
         a = await node.attempt()
         assert a.pending
@@ -42,9 +44,10 @@ class TestWalkLegCheckNode:
         transit = UserInputNode[dict]("transit_w", dict)
         persons = UserInputNode[list]("persons_w", list)
 
+        node = WalkLegCheckNode("wlc", transit_node=transit, persons_source=persons)
         transit.push({}, "test")
         persons.push([], "test")
-        node = WalkLegCheckNode("wlc", transit_node=transit, persons_source=persons)
+        await flush_processor()
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() is False

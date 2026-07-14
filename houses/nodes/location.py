@@ -33,7 +33,7 @@ class BestAddressNode(DerivedNode[str]):
             src.changed.connect(slot)
 
     def _is_stale(self) -> bool:
-        if self._cached is None:
+        if self._attempt.pending:
             return True
         if super()._is_stale():
             return True
@@ -97,7 +97,7 @@ class BestLocationNode(DerivedNode[GeoPoint]):
             geocode.changed.connect(slot)
 
     def _is_stale(self) -> bool:
-        if self._cached is None:
+        if self._attempt.pending:
             return True
         if super()._is_stale():
             return True

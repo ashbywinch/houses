@@ -35,7 +35,9 @@ class Node(ABC, Generic[T]):
                 val = self._adapter.validate_python(stored["value"])
                 attempt: Attempt[T] = Attempt.succeeded(val)
             elif status == "pending":
-                attempt = Attempt.pending()
+                # A pending result means computation never finished — treat as
+                # not cached so the processor can retry.
+                return None
             else:
                 attempt = Attempt.impossible(stored.get("error", "unknown"))
             # Parse ISO timestamps from DB into proper datetime objects
@@ -92,6 +94,10 @@ class Node(ABC, Generic[T]):
         now = datetime.now(UTC)
         self._persisted_at = now
         self._db_created_at = now.isoformat()
+        # Keep stale-check state in sync so _is_stale() sees the new
+        # dep timestamps immediately, preventing re-queue loops.
+        if dep_timestamps is not None:
+            self._loaded_dep_timestamps = dep_timestamps
 
     def _impossible(self, dep_attempts: dict[str, Attempt[T]],
                     extra: str = "") -> Attempt[T]:

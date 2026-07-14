@@ -6,7 +6,7 @@ import pytest
 class TestDecomposedSources:
     @pytest.fixture
     def _svc(self):
-        from houses.context import get_services
+        from houses.services_provider import get_services
         try:
             return get_services()
         except LookupError:

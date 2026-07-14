@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from money import Money
+from dag.derived_node import flush_processor
 
 from dag.user_input_node import UserInputNode
 from houses.commute import CostGroup
@@ -37,6 +38,8 @@ class TestCommuteSelectorNode:
         transit.push(transit_commute, "TfL")
         bus.push(bus_commute, "Bus")
 
+        await flush_processor()
+
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() == transit_commute
@@ -65,6 +68,8 @@ class TestCommuteSelectorNode:
         bus_commute = _make_commute(duration_min=55, cost_gbp=2.00)
         bus.push(bus_commute, "Bus")
 
+        await flush_processor()
+
         a = await node.attempt()
         assert a.pending
 
@@ -89,6 +94,8 @@ class TestCommuteSelectorNode:
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
         poi.push(office_poi, "config")
 
+        await flush_processor()
+
         a = await node.attempt()
         assert a.pending
 
@@ -111,6 +118,8 @@ class TestCommuteSelectorNode:
 
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
         poi.push(office_poi, "config")
+
+        await flush_processor()
 
         a = await node.attempt()
         assert a.pending
@@ -138,9 +147,13 @@ class TestCommuteSelectorNode:
         bus.push(_make_commute(duration_min=55, cost_gbp=2.00), "Bus")
         transit.push(_make_commute(duration_min=32, cost_gbp=4.50), "TfL")
 
+        await flush_processor()
+
         assert (await node.attempt()).value_or_none().daily_cost == Money("4.50", "GBP")
 
         transit.push(_make_commute(duration_min=30, cost_gbp=3.00), "TfL-Updated")
+
+        await flush_processor()
         assert (await node.attempt()).value_or_none().daily_cost == Money("3.00", "GBP")
 
     @pytest.mark.asyncio
@@ -164,6 +177,8 @@ class TestCommuteSelectorNode:
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
         transit.push(_make_commute(duration_min=32, cost_gbp=4.50), "TfL")
         bus.push(_make_commute(duration_min=55, cost_gbp=2.00), "Bus")
+
+        await flush_processor()
 
         j = await node.to_json()
         assert j["status"] == "succeeded"

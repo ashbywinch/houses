@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.unit.conftest import flush_all
+
 
 @pytest.fixture(autouse=True)
 def _fake_services():
@@ -29,8 +31,9 @@ class TestSchoolNodes:
         from houses.school_gender import SchoolGender
 
         loc = UserInputNode[GeoPoint]("loc", GeoPoint)
-        loc.push(GeoPoint(51.5, -0.37), "test")
         addr = UserInputNode[str]("addr", str)
+        node = SecondarySchoolNode("ss", best_location=loc, best_address=addr)
+        loc.push(GeoPoint(51.5, -0.37), "test")
         addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
 
         class AssertingService:
@@ -44,7 +47,9 @@ class TestSchoolNodes:
         svc = make_services(school_lookup=AssertingService())
         token = _sp.set(svc)
         try:
-            node = SecondarySchoolNode("ss", best_location=loc, best_address=addr)
+            from dag.derived_node import flush_processor
+            await flush_processor()
+            await flush_processor()
             await node.attempt()
         finally:
             _sp.reset(token)
@@ -57,8 +62,9 @@ class TestSchoolNodes:
         from houses.school_gender import SchoolGender
 
         loc = UserInputNode[GeoPoint]("loc", GeoPoint)
-        loc.push(GeoPoint(51.5, -0.37), "test")
         addr = UserInputNode[str]("addr", str)
+        node = PrimarySchoolNode("ps", best_location=loc, best_address=addr)
+        loc.push(GeoPoint(51.5, -0.37), "test")
         addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
 
         class AssertingService:
@@ -72,7 +78,9 @@ class TestSchoolNodes:
         svc = make_services(school_lookup=AssertingService())
         token = _sp.set(svc)
         try:
-            node = PrimarySchoolNode("ps", best_location=loc, best_address=addr)
+            from dag.derived_node import flush_processor
+            await flush_processor()
+            await flush_processor()
             await node.attempt()
         finally:
             _sp.reset(token)
@@ -87,8 +95,9 @@ class TestCouncilTaxNode:
         from houses.nodes.epc_node import CouncilTaxNode
 
         addr = UserInputNode[str]("addr", str)
-        addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
         pc = UserInputNode[str]("pc", str)
+        node = CouncilTaxNode("ct", best_address=addr, postcode_node=pc)
+        addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
         pc.push("UB2 4GN", "test")
 
         captured = {}
@@ -105,7 +114,9 @@ class TestCouncilTaxNode:
         svc = make_services(council_tax_service=CapturingService())
         token = _sp.set(svc)
         try:
-            node = CouncilTaxNode("ct", best_address=addr, postcode_node=pc)
+            from dag.derived_node import flush_processor
+            await flush_processor()
+            await flush_processor()
             await node.attempt()
             assert captured.get("postcode") == "UB2 4GN", \
                 f"Expected 'UB2 4GN', got {captured.get('postcode')!r}"
@@ -118,9 +129,12 @@ class TestCouncilTaxNode:
         from houses.nodes.epc_node import CouncilTaxNode
 
         addr = UserInputNode[str]("addr", str)
-        addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
         pc = UserInputNode[str]("pc", str)
         node = CouncilTaxNode("ct2", best_address=addr, postcode_node=pc)
+        addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        from dag.derived_node import flush_processor
+        await flush_processor()
+        await flush_processor()
         a = await node.attempt()
         assert a.pending
 
@@ -163,8 +177,11 @@ class TestTownNode:
         from houses.nodes.area import TownNode
 
         addr = UserInputNode[str]("addr", str)
-        addr.push("48 Acacia Avenue, Southall, UB2 5AD", "test")
         node = TownNode("tn", best_address=addr)
+        addr.push("48 Acacia Avenue, Southall, UB2 5AD", "test")
+        from dag.derived_node import flush_processor
+        await flush_processor()
+        await flush_processor()
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() == "Southall"

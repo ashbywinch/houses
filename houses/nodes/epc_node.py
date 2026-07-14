@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
-from houses.context import get_services
+from houses.services_provider import get_services
 
 
 class EpcNode(DerivedNode[dict]):

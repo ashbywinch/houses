@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from dag.user_input_node import UserInputNode
+from dag.derived_node import flush_processor
 
 
 class TestMonthlyMortgagePaymentNode:
@@ -13,11 +14,13 @@ class TestMonthlyMortgagePaymentNode:
         price = UserInputNode[str]("price_mm", str)
         fin = UserInputNode[dict]("fin_mm", dict)
 
-        price.push("0", "test")
-        fin.push({}, "test")
         node = MonthlyMortgagePaymentNode(
             "mm", rightmove_price=price, financial_source=fin,
         )
+        price.push("0", "test")
+        fin.push({}, "test")
+        await flush_processor()
+        await flush_processor()
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() == 0.0
@@ -29,15 +32,17 @@ class TestMonthlyMortgagePaymentNode:
         price = UserInputNode[str]("price_mm2", str)
         fin = UserInputNode[dict]("fin_mm2", dict)
 
+        node = MonthlyMortgagePaymentNode(
+            "mm2", rightmove_price=price, financial_source=fin,
+        )
         price.push("300000", "test")
         fin.push({
             "mortgage_rate": 0.045,
             "mortgage_term_years": 30,
         }, "test")
+        await flush_processor()
+        await flush_processor()
 
-        node = MonthlyMortgagePaymentNode(
-            "mm2", rightmove_price=price, financial_source=fin,
-        )
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() > 0
@@ -51,11 +56,13 @@ class TestYearlySinkingFundNode:
         price = UserInputNode[str]("price_ys", str)
         fin = UserInputNode[dict]("fin_ys", dict)
 
-        price.push("0", "test")
-        fin.push({}, "test")
         node = YearlySinkingFundNode(
             "ys", rightmove_price=price, financial_source=fin,
         )
+        price.push("0", "test")
+        fin.push({}, "test")
+        await flush_processor()
+        await flush_processor()
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() == 0.0
@@ -67,12 +74,14 @@ class TestYearlySinkingFundNode:
         price = UserInputNode[str]("price_ys2", str)
         fin = UserInputNode[dict]("fin_ys2", dict)
 
-        price.push("500000", "test")
-        fin.push({"sinking_fund_rate": 0.01}, "test")
-
         node = YearlySinkingFundNode(
             "ys2", rightmove_price=price, financial_source=fin,
         )
+        price.push("500000", "test")
+        fin.push({"sinking_fund_rate": 0.01}, "test")
+        await flush_processor()
+        await flush_processor()
+
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() == 5000.0
@@ -99,6 +108,8 @@ class TestCommuteBreakdownNode:
         src_brac.push({}, "test")
         src_lorena.push({}, "test")
         persons.push([{"name": "Simon", "places_of_interest": []}], "test")
+        await flush_processor()
+        await flush_processor()
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none()["yearly_total_gbp"] == 0.0
@@ -128,6 +139,8 @@ class TestTotalMonthlyHousingCostNode:
         fin.push({}, "test")
         cb.push({}, "test")
         ct.push({}, "test")
+        await flush_processor()
+        await flush_processor()
         a = await node.attempt()
         assert a.succeeded
         assert isinstance(a.value_or_none(), float)

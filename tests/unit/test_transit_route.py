@@ -90,7 +90,7 @@ async def test_uses_peak_time_params():
 async def test_enrich_uses_tfl_tube_fare_when_needed(tmp_path):
     """_enrich_rail_fares uses the TfL tube fare instead of hardcoded £2.80."""
     from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
-    from houses.enrichment_runner import _enrich_rail_fares
+    from houses.rail_fares import enrich_rail_fares
     from houses.rail_fares import RailFareRegistry
     from houses.stations import StationRegistry
 
@@ -129,7 +129,7 @@ async def test_enrich_uses_tfl_tube_fare_when_needed(tmp_path):
         duration_minutes=90,
         daily_cost_gbp=None,
     )
-    simon_result, _ = await _enrich_rail_fares(
+    simon_result, _ = await enrich_rail_fares(
         enabled={"simon"},
         postcode="GU21 2NA",
         address="Robin Hood Road, Knaphill",

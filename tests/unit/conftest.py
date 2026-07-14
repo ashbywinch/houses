@@ -15,23 +15,28 @@ from houses.services_provider import _request_services
 from tests.helpers import make_services, FakeCommuteRouter, FakeSchoolLookup
 
 
+
+def flush_all() -> None:
+    """Synchronously drain the stale queue — call this after seeding data
+    to compute derived nodes before reading results."""
+    import asyncio
+    from dag.derived_node import flush_processor
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        # No event loop in this thread (e.g. sync test in non-main thread).
+        # Create one for the duration of the flush.
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    loop.run_until_complete(flush_processor())
+    loop.run_until_complete(flush_processor())
+
 def _make_mock_services():
     return make_services(
         commute_router=FakeCommuteRouter(),
         school_lookup=FakeSchoolLookup(),
     )
 
-
-
-_orig_attempt = _dn.DerivedNode.attempt
-
-
-async def _flushing_attempt(self):
-    if self._cached is None:
-        await self.refresh()
-    elif self._is_stale():
-        await self.refresh()
-    return await _orig_attempt(self)
 
 @pytest.fixture(autouse=True)
 def _clear_stale_queue():
@@ -42,13 +47,6 @@ def _clear_stale_queue():
         except asyncio.QueueEmpty:
             break
     yield
-
-
-@pytest.fixture(autouse=True)
-def _patch_attempt():
-    _dn.DerivedNode.attempt = _flushing_attempt
-    yield
-    _dn.DerivedNode.attempt = _orig_attempt
 
 
 @pytest.fixture(autouse=True)
@@ -99,12 +97,6 @@ def _mock_services():
     token = _sp.set(_make_mock_services())
     yield
     _sp.reset(token)
-
-@pytest.fixture(autouse=True)
-def _no_geocoding(monkeypatch):
-    async def fake_geocode(_address: str) -> None:
-        return None
-    monkeypatch.setattr("houses.model.property._geocode_address", fake_geocode)
 
 
 @pytest.fixture(autouse=True)

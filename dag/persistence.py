@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import TypeAdapter
+from houses.config import settings
+
+DB_PATH: Path | None = None
 
 
 class DagJSONEncoder(json.JSONEncoder):
@@ -24,13 +27,12 @@ class DagJSONEncoder(json.JSONEncoder):
             return o.name.lower()
         return super().default(o)
 
-DB_PATH: Path | None = None
 
 
 def _get_db() -> sqlite3.Connection:
     global DB_PATH
     if DB_PATH is None:
-        DB_PATH = Path("data/dag.db")
+        DB_PATH = Path(settings.sqlite_path)
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
@@ -86,26 +88,6 @@ def init_db(db_path: str | None = None) -> None:
         DB_PATH = Path(db_path)
     conn = _get_db()
     conn.executescript("""
-        CREATE TABLE IF NOT EXISTS source_values (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            property_id TEXT NOT NULL,
-            node_id TEXT NOT NULL,
-            value TEXT NOT NULL,
-            source TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_sv_prop_node ON source_values(property_id, node_id);
-
-        CREATE TABLE IF NOT EXISTS derived_values (
-            property_id TEXT NOT NULL,
-            node_id TEXT NOT NULL,
-            value TEXT NOT NULL,
-            source TEXT NOT NULL,
-            error TEXT,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (property_id, node_id)
-        );
-
         CREATE TABLE IF NOT EXISTS node_results (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             node_id TEXT NOT NULL,
@@ -115,66 +97,7 @@ def init_db(db_path: str | None = None) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_nr_node ON node_results(node_id, created_at DESC);
     """)
-    conn.commit()
 
-
-def insert_source_value(property_id: str, node_id: str,
-                        value: Any, source: str) -> int:
-    conn = _get_db()
-    now = datetime.now(UTC).isoformat()
-    cur = conn.execute(
-        "INSERT INTO source_values (property_id, node_id, value, source, created_at)"
-        " VALUES (?, ?, ?, ?, ?)",
-        (property_id, node_id, _serialize_value(value), source, now),
-    )
-    conn.commit()
-    return cur.lastrowid
-
-
-def get_latest_source_value(property_id: str,
-                            node_id: str) -> dict[str, Any] | None:
-    conn = _get_db()
-    row = conn.execute(
-        "SELECT value, source, created_at FROM source_values"
-        " WHERE property_id=? AND node_id=?"
-        " ORDER BY created_at DESC LIMIT 1",
-        (property_id, node_id),
-    ).fetchone()
-    if row is None:
-        return None
-    return {
-        "value": _deserialize_value(row["value"]),
-        "source": row["source"],
-        "created_at": row["created_at"],
-    }
-
-
-def get_all_source_values(property_id: str) -> dict[str, dict[str, Any]]:
-    conn = _get_db()
-    rows = conn.execute(
-        "SELECT node_id, value, source, created_at FROM source_values"
-        " WHERE property_id=? ORDER BY created_at DESC",
-        (property_id,),
-    ).fetchall()
-    result: dict[str, dict[str, Any]] = {}
-    seen: set[str] = set()
-    for row in rows:
-        nid = row["node_id"]
-        if nid not in seen:
-            seen.add(nid)
-            result[nid] = {
-                "value": _deserialize_value(row["value"]),
-                "source": row["source"],
-                "created_at": row["created_at"],
-            }
-    return result
-
-
-def load_node_data(property_id: str) -> dict[str, Any]:
-    """Load all stored data for a property."""
-    return {
-        "sources": get_all_source_values(property_id),
-    }
 
 
 def save_node_result(node_id: str, result_dict: dict[str, Any],

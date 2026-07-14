@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from dag.derived_node import flush_processor
+from tests.unit.conftest import flush_all
 from houses.geo import GeoPoint
 
 
@@ -45,6 +47,8 @@ class TestProperty:
         prop.user_entered_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
         prop.corrected_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
         prop.rightmove_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        await flush_processor()
+        await flush_processor()
 
         a = await prop.best_location.attempt()
         assert a.succeeded
@@ -61,6 +65,8 @@ class TestProperty:
         prop.user_entered_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
         prop.corrected_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
         prop.rightmove_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        await flush_processor()
+        await flush_processor()
 
         j = await prop.to_json()
         assert j["rid"] == "prop123"

@@ -79,18 +79,6 @@ class FakeCommuteRouter:
         self.petrol = petrol
         self.calls: list[tuple[str, str]] = []
 
-    async def simon_commute(self, postcode: str) -> Attempt[Commute]:
-        self.calls.append(("simon", postcode))
-        return Attempt.succeeded(self.simon) if self.simon else Attempt.impossible("no route")
-
-    async def lorena_commute(self, postcode: str) -> Attempt[Commute]:
-        self.calls.append(("lorena", postcode))
-        return Attempt.succeeded(self.lorena) if self.lorena else Attempt.impossible("no route")
-
-    async def petrol_cost(self, postcode: str) -> Attempt[Commute]:
-        self.calls.append(("petrol", postcode))
-        return Attempt.succeeded(self.petrol) if self.petrol else Attempt.impossible("no route")
-
     async def route(
         self,
         origin: str | GeoPoint,

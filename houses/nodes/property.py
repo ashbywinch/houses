@@ -4,7 +4,7 @@ from typing import Any
 
 from dag.signals import Signal, Slot
 from dag.user_input_node import UserInputNode
-from houses.context import get_services
+from houses.services_provider import get_services
 from houses.geo import GeoPoint
 from houses.nodes.area import TownDescNode, TownNode, WalkabilityNode
 from houses.nodes.bus import BodsFareNode, BusLegAugmentNode, BusRouteNode

@@ -4,6 +4,7 @@ import pytest
 
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
+from dag.derived_node import flush_processor
 
 
 class TestBusRouteNode:
@@ -14,16 +15,16 @@ class TestBusRouteNode:
         loc = UserInputNode[GeoPoint]("loc_br", GeoPoint)
         walk = UserInputNode[bool]("walk_br", bool)
         transit = UserInputNode[dict]("transit_br", dict)
-
-        loc.push(GeoPoint(51.5, -0.1), "test")
-        walk.push(False, "test")
-        transit.push({}, "test")
         node = BusRouteNode(
             "br",
             best_location=loc,
             walk_leg_check_node=walk,
             transit_node=transit,
         )
+        loc.push(GeoPoint(51.5, -0.1), "test")
+        walk.push(False, "test")
+        transit.push({}, "test")
+        await flush_processor(); await flush_processor()
         a = await node.attempt()
         assert a.succeeded
 
@@ -37,6 +38,7 @@ class TestBodsFareNode:
         node = BodsFareNode("bf", bus_route_node=route)
 
         route.push({}, "test")
+        await flush_processor(); await flush_processor()
         a = await node.attempt()
         assert a.succeeded
 
@@ -62,6 +64,7 @@ class TestBusLegAugmentNode:
         walk.push(False, "test")
         route.push({}, "test")
         fare.push({}, "test")
+        await flush_processor(); await flush_processor()
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none()["augmented"] is True

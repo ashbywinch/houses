@@ -1,0 +1,34 @@
+def seed_registry_from_sheet() -> int:
+    rows = get_properties_data()
+    count = 0
+    for row in rows:
+        raw_rid = (row.get("Rightmove ID") or "").strip()
+        if not raw_rid:
+            continue
+
+        prop = PropertyNodes(raw_rid)
+        source_dict = {
+            "rightmove_address": prop.rightmove_address,
+            "rightmove_url": prop.rightmove_url,
+            "rightmove_bedrooms": prop.rightmove_bedrooms,
+            "rightmove_price": prop.rightmove_price,
+            "rightmove_location": prop.rightmove_location,
+            "precise_location": prop.precise_location,
+            "corrected_address": prop.corrected_address,
+            "user_entered_address": prop.user_entered_address,
+            "postcode": prop.postcode,
+            "comment_status": prop.comment_status,
+            "comment_status_reason": prop.comment_status_reason,
+            "comment_group_notes": prop.comment_group_notes,
+            "comment_ashby_comments": prop.comment_ashby_comments,
+            "comment_ashby_works": prop.comment_ashby_works,
+            "comment_design_needed": prop.comment_design_needed,
+            "comment_planning_needed": prop.comment_planning_needed,
+        }
+        bootstrap_from_row(row, source_dict)
+
+        register_property(raw_rid, prop)
+        count += 1
+
+    logger.info("Seeded %d properties from sheet", count)
+    return count

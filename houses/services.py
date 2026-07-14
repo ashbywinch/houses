@@ -25,11 +25,9 @@ from houses.geo import GeoPoint
 from houses.nodes.settings import make_default_financials, make_default_persons, make_default_thresholds
 from houses.council_tax_info import CouncilTaxInfo
 from houses.council_tax import lookup_council_tax
-from houses.enricher import compute_lorena_commute, compute_petrol_cost, compute_simon_commute
 
 from houses.epc import lookup_epc
 from houses.location import _geocode_address, geocode
-from houses.model.persistence import load_property_data
 from houses.school import School
 from houses.school_gender import SchoolGender
 from houses.schools import compute_school_commute, find_nearest
@@ -46,15 +44,8 @@ class GeocodingService(Protocol):
 
     async def geocode_address(self, address: str) -> Attempt[GeoPoint]: ...
 
-
 class CommuteRoutingService(Protocol):
-    """Simon's commute, Lorena's commute, Bracknell petrol cost, and generic routing."""
-
-    async def simon_commute(self, postcode: str) -> Attempt[Commute]: ...
-
-    async def lorena_commute(self, postcode: str) -> Attempt[Commute]: ...
-
-    async def petrol_cost(self, postcode: str) -> Attempt[Commute]: ...
+    """Generic routing from an origin to a destination."""
 
     async def route(
         self,
@@ -64,7 +55,6 @@ class CommuteRoutingService(Protocol):
         has_car: bool,
         max_walk_minutes: int,
     ) -> Attempt[Commute]: ...
-
 class SchoolLookupService(Protocol):
     """Find nearest suitable school and compute its commute."""
 
@@ -150,58 +140,8 @@ class _DefaultGeocoder:
     async def geocode_address(self, address: str) -> Attempt[GeoPoint]:
         return await _geocode_address(address)
 
+
 class _DefaultCommuteRouter:
-
-    async def simon_commute(self, postcode: str) -> Attempt[Commute]:
-        from houses.enricher import compute_simon_commute
-        result = await compute_simon_commute(postcode)
-        if not result.succeeded:
-            return Attempt.impossible(result.error or "simon commute failed")
-        old = result.value_or_none()
-        return Attempt.succeeded(Commute(
-            person=Person(name="Simon", has_car=False),
-            label=old.destination_label,
-            destination=PlaceOfInterest(label=old.destination_label,
-                                         postcode=old.destination_postcode),
-            duration=Quantity(old.duration_minutes or 0, "minute"),
-            daily_cost=old.daily_cost_gbp or Money("0", "GBP"),
-            mode=old.mode.name.lower() if isinstance(old.mode, Enum) else str(old.mode),
-            details=old.cost_groups,
-        ))
-
-    async def lorena_commute(self, postcode: str) -> Attempt[Commute]:
-        from houses.enricher import compute_lorena_commute
-        result = await compute_lorena_commute(postcode)
-        if not result.succeeded:
-            return Attempt.impossible(result.error or "lorena commute failed")
-        old = result.value_or_none()
-        return Attempt.succeeded(Commute(
-            person=Person(name="Lorena", has_car=False),
-            label=old.destination_label,
-            destination=PlaceOfInterest(label=old.destination_label,
-                                         postcode=old.destination_postcode),
-            duration=Quantity(old.duration_minutes or 0, "minute"),
-            daily_cost=old.daily_cost_gbp or Money("0", "GBP"),
-            mode=old.mode.name.lower() if isinstance(old.mode, Enum) else str(old.mode),
-            details=old.cost_groups,
-        ))
-
-    async def petrol_cost(self, postcode: str) -> Attempt[Commute]:
-        from houses.enricher import compute_petrol_cost
-        result = await compute_petrol_cost(postcode)
-        if not result.succeeded:
-            return Attempt.impossible(result.error or "petrol cost failed")
-        old = result.value_or_none()
-        return Attempt.succeeded(Commute(
-            person=Person(name="Simon", has_car=True),
-            label=old.destination_label,
-            destination=PlaceOfInterest(label=old.destination_label,
-                                         postcode=old.destination_postcode),
-            duration=Quantity(old.duration_minutes or 0, "minute"),
-            daily_cost=old.daily_cost_gbp or Money("0", "GBP"),
-            mode=old.mode.name.lower() if isinstance(old.mode, Enum) else str(old.mode),
-            details=old.cost_groups,
-        ))
 
     async def route(
         self,
@@ -272,12 +212,14 @@ class _DefaultRailFare:
         simon: Commute | None,
         lorena: Commute | None,
     ) -> tuple[Commute | None, Commute | None]:
-        return await _enrich_rail_fares(enabled, postcode, address, simon, lorena)
+        from houses.rail_fares import enrich_rail_fares
+        return await enrich_rail_fares(enabled, postcode, address, simon, lorena)
 
 
 class _DefaultPersistence:
     def load_property_data(self, rid: str) -> Any:
-        return load_property_data(rid)
+        from dag.persistence import load_node_data
+        return load_node_data(rid)
 
 
 # ── DI Container ──────────────────────────────────────────────────────

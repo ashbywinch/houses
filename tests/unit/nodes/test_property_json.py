@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 
 from houses.geo import GeoPoint
+from dag.derived_node import flush_processor
 
 
 @pytest.fixture(autouse=True)
@@ -62,6 +63,8 @@ def prop():
 class TestSummaryShape:
     @pytest.mark.asyncio
     async def test_has_expected_keys(self, prop):
+        await flush_processor()
+        await flush_processor()
         s = await prop.to_json_summary()
         assert s["rid"] == "test_shape"
         assert "best_address" in s
@@ -75,6 +78,8 @@ class TestSummaryShape:
 
     @pytest.mark.asyncio
     async def test_every_value_is_wrapped(self, prop):
+        await flush_processor()
+        await flush_processor()
         s = await prop.to_json_summary()
         for key in ("best_address", "best_location", "rightmove_price",
                      "rightmove_bedrooms", "total_monthly_cost", "walkability"):
@@ -86,6 +91,8 @@ class TestSummaryShape:
 class TestDetailShape:
     @pytest.mark.asyncio
     async def test_has_all_sections(self, prop):
+        await flush_processor()
+        await flush_processor()
         d = await prop.to_json_detail()
         assert d["rid"] == "test_shape"
         for section in ("location", "commutes", "schools", "affordability",
@@ -94,6 +101,8 @@ class TestDetailShape:
 
     @pytest.mark.asyncio
     async def test_affordability_keys(self, prop):
+        await flush_processor()
+        await flush_processor()
         d = await prop.to_json_detail()
         af = d["affordability"]
         expected = ("council_tax", "monthly_mortgage", "monthly_sinking_fund",
@@ -103,6 +112,8 @@ class TestDetailShape:
 
     @pytest.mark.asyncio
     async def test_comments_keys(self, prop):
+        await flush_processor()
+        await flush_processor()
         d = await prop.to_json_detail()
         cm = d["comments"]
         expected = ("status", "status_reason", "group_notes", "ashby_comments",
@@ -112,6 +123,8 @@ class TestDetailShape:
 
     @pytest.mark.asyncio
     async def test_location_keys(self, prop):
+        await flush_processor()
+        await flush_processor()
         d = await prop.to_json_detail()
         loc = d["location"]
         expected = ("best_location", "geocode", "rightmove_location",
@@ -121,6 +134,8 @@ class TestDetailShape:
 
     @pytest.mark.asyncio
     async def test_settings_keys(self, prop):
+        await flush_processor()
+        await flush_processor()
         d = await prop.to_json_detail()
         s = d["settings"]
         assert "persons" in s
@@ -128,6 +143,8 @@ class TestDetailShape:
 
     @pytest.mark.asyncio
     async def test_schools_keys(self, prop):
+        await flush_processor()
+        await flush_processor()
         d = await prop.to_json_detail()
         sc = d["schools"]
         assert "primary" in sc
@@ -137,6 +154,8 @@ class TestDetailShape:
 
     @pytest.mark.asyncio
     async def test_monthly_sinking_is_monthly_not_yearly(self, prop):
+        await flush_processor()
+        await flush_processor()
         d = await prop.to_json_detail()
         sf = d["affordability"]["monthly_sinking_fund"]
         assert sf["status"] == "succeeded"
@@ -154,6 +173,8 @@ class TestCommuteData:
 
     @pytest.mark.asyncio
     async def test_commute_data_has_duration_with_value_and_unit(self, prop):
+        await flush_processor()
+        await flush_processor()
         assert prop.commute_selectors, "no commute selectors — pipeline must create them"
         for key, selector in prop.commute_selectors.items():
             j = await selector.to_json()
@@ -164,6 +185,8 @@ class TestCommuteData:
 
     @pytest.mark.asyncio
     async def test_commute_data_has_daily_cost_with_amount_and_currency(self, prop):
+        await flush_processor()
+        await flush_processor()
         assert prop.commute_selectors, "no commute selectors — pipeline must create them"
         for key, selector in prop.commute_selectors.items():
             j = await selector.to_json()
@@ -174,6 +197,8 @@ class TestCommuteData:
 
     @pytest.mark.asyncio
     async def test_commute_data_has_label(self, prop):
+        await flush_processor()
+        await flush_processor()
         assert prop.commute_selectors, "no commute selectors — pipeline must create them"
         for key, selector in prop.commute_selectors.items():
             j = await selector.to_json()
@@ -186,6 +211,8 @@ class TestCommuteData:
     @pytest.mark.asyncio
     async def test_commute_duration_appears_in_summary(self, prop):
         """List page PropertyCard accesses c.commute.value.duration.value."""
+        await flush_processor()
+        await flush_processor()
         s = await prop.to_json_summary()
         assert s["commutes"], "summary must contain commutes"
         for key, cd in s["commutes"].items():
@@ -194,6 +221,8 @@ class TestCommuteData:
             dur = c["value"]["duration"]
             assert isinstance(dur["value"], (int, float))
             assert dur["value"] > 0
+
+
 class TestFinancialSettingsPropagation:
     """PATCH to financial settings must be visible through the DAG
     without a server restart.  PropertyNodes must not cache a stale
@@ -203,7 +232,10 @@ class TestFinancialSettingsPropagation:
     async def test_financial_patch_propagates_to_detail(self, prop):
         """After pushing new financial settings, the detail endpoint
         must return the updated mortgage_rate and mortgage."""
-        from houses.context import get_services
+        from houses.services_provider import get_services
+
+        await flush_processor()
+        await flush_processor()
 
         # Read detail baseline
         d1 = await prop.to_json_detail()
@@ -215,6 +247,9 @@ class TestFinancialSettingsPropagation:
         new_financials = dict(fin1)
         new_financials["mortgage_rate"] = 0.99
         get_services().financial_source.push(new_financials, "user")
+
+        await flush_processor()
+        await flush_processor()
 
         # Re-read — must reflect the new rate
         d2 = await prop.to_json_detail()
@@ -230,6 +265,7 @@ class TestFinancialSettingsPropagation:
             f"Old={old_mortgage}, new={new_mortgage}"
         )
 
+
 class TestSchoolAcceptableFromPersons:
     """PropertyNodes extracts acceptable_schools from the first child person."""
 
@@ -237,7 +273,7 @@ class TestSchoolAcceptableFromPersons:
     async def test_uses_first_child_acceptable_schools(self):
         """school nodes should receive the acceptable_schools from persons_source."""
         from houses.nodes.property import PropertyNodes
-        from houses.context import get_services
+        from houses.services_provider import get_services
         from houses.geo import GeoPoint
 
         # Push persons with a child that has specific acceptable_schools
@@ -258,6 +294,9 @@ class TestSchoolAcceptableFromPersons:
         p.postcode.push("SW1V 2QQ", "test")
         p.user_entered_address.push("31 Isambard Rd, SW1V 2QQ", "test")
 
+        await flush_processor()
+        await flush_processor()
+
         # The school nodes should have acceptable=("girls",)
         # We can check this by examining the node's _acceptable attribute
         assert p.primary_school._acceptable == ("girls",)
@@ -267,7 +306,7 @@ class TestSchoolAcceptableFromPersons:
     async def test_defaults_to_mixed_when_no_child(self):
         """When no child is found, acceptable_schools defaults to ('mixed',)."""
         from houses.nodes.property import PropertyNodes
-        from houses.context import get_services
+        from houses.services_provider import get_services
 
         svc = get_services()
         svc.persons_source.push([
@@ -282,6 +321,9 @@ class TestSchoolAcceptableFromPersons:
         p.precise_location.push(GeoPoint(51.5, -0.37), "test")
         p.postcode.push("SW1V 2QQ", "test")
         p.user_entered_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+
+        await flush_processor()
+        await flush_processor()
 
         assert p.primary_school._acceptable == ("mixed",)
         assert p.secondary_school._acceptable == ("mixed",)
