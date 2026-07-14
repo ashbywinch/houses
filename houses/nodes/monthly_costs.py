@@ -112,8 +112,8 @@ class TotalMonthlyHousingCostNode(DerivedNode[float]):
             cb = commute.value_or_none() or {}
             total += cb.get("yearly_total_gbp", 0.0) / 46
         if council_tax.succeeded:
-            total += 0.0  # placeholder
+            ct_val = council_tax.value_or_none() or {}
+            total += ct_val.get("cost", 0.0) / 12
         return Attempt.succeeded(round(total, 2))
-
     async def build_provenance(self):
         return Provenance(label="total_monthly_formula")

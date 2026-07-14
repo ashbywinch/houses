@@ -199,3 +199,11 @@ class TestTotalMonthlyHousingCostNode:
         a = await node.attempt()
         expected = 1000.0 + 1200.0 / 12 * 2 / 3 + 4600.0 / 46
         assert a.value_or_none() == round(expected, 2)
+
+        # Council tax: cost 1800 / 12 = 150
+        ct.push({"band": "D", "cost": 1800.0}, "test")
+        await flush_processor()
+        await flush_processor()
+        a = await node.attempt()
+        expected = 1000.0 + 1200.0 / 12 * 2 / 3 + 4600.0 / 46 + 1800.0 / 12
+        assert a.value_or_none() == round(expected, 2)
