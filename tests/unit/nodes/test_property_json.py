@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import pytest
 
-from houses.geo import GeoPoint
 from dag.derived_node import flush_processor
+from houses.geo import GeoPoint
 
 
 @pytest.fixture(autouse=True)
@@ -20,9 +20,10 @@ def _fake_services(monkeypatch):
     token = _sp.set(make_services())
 
     from money import Money
+    from pint import Quantity
+
     from dag.attempt import Attempt
     from houses.model.domain import Commute, Person, PlaceOfInterest
-    from pint import Quantity
 
     async def fake_route(origin, destination, *, has_car, max_walk_minutes):
         return Attempt.succeeded(
@@ -30,7 +31,7 @@ def _fake_services(monkeypatch):
                 person=Person(name="Simon", has_car=False),
                 label="Office",
                 destination=PlaceOfInterest(label="Office",
-                                             postcode=destination if isinstance(destination, str) else str(destination)),
+                                             postcode=destination if isinstance(destination, str) else str(destination)),  # noqa: E501
                 duration=Quantity(32, "minute"),
                 daily_cost=Money("4.50", "GBP"),
             ),
@@ -240,7 +241,7 @@ class TestFinancialSettingsPropagation:
         # Read detail baseline
         d1 = await prop.to_json_detail()
         fin1 = d1["settings"]["financial"]["value"]
-        old_rate = fin1["mortgage_rate"]
+        fin1["mortgage_rate"]
         old_mortgage = d1["affordability"]["monthly_mortgage"]["value"]
 
         # Push new financial settings via the shared Services instance
@@ -272,9 +273,9 @@ class TestSchoolAcceptableFromPersons:
     @pytest.mark.asyncio
     async def test_uses_first_child_acceptable_schools(self):
         """school nodes should receive the acceptable_schools from persons_source."""
+        from houses.geo import GeoPoint
         from houses.nodes.property import PropertyNodes
         from houses.services_provider import get_services
-        from houses.geo import GeoPoint
 
         # Push persons with a child that has specific acceptable_schools
         svc = get_services()

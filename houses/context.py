@@ -7,12 +7,13 @@ context variable to inject fakes or pre-populated state.
 
 from __future__ import annotations
 
+import contextvars
 from typing import Any
 
-import contextvars
+_request_sheets_client: contextvars.ContextVar[Any | None] = contextvars.ContextVar(
+    "_request_sheets_client", default=None
+)
 
-
-_request_sheets_client: contextvars.ContextVar[Any | None] = contextvars.ContextVar("_request_sheets_client", default=None)
 
 def get_sheets_client() -> Any | None:
     """Return the per-request sheets client.

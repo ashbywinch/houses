@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from dag.derived_node import flush_processor
-from tests.unit.conftest import flush_all
 from houses.geo import GeoPoint
 
 

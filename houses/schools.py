@@ -13,13 +13,13 @@ import csv
 import logging
 from pathlib import Path
 
+import houses.routing as _routing
 from houses.commute import Commute
 from houses.config import settings
 from houses.geo import GeoPoint
 from houses.location import _geocode_address, geocode
 from houses.school import School
 from houses.school_gender import SchoolGender
-import houses.routing as _routing
 
 logger = logging.getLogger(__name__)
 

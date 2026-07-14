@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from dag.user_input_node import UserInputNode
 from dag.derived_node import flush_processor
+from dag.user_input_node import UserInputNode
 
 
 class TestMonthlyMortgagePaymentNode:

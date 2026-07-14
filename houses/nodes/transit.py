@@ -4,7 +4,6 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 
-from houses.services_provider import get_services
 from money import Money
 from pint import Quantity
 
@@ -13,7 +12,7 @@ from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.geo import GeoPoint
 from houses.model.domain import Commute
-from houses.routing import get_commute
+from houses.services_provider import get_services
 
 logger = logging.getLogger(__name__)
 

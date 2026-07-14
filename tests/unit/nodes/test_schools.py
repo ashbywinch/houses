@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
+if TYPE_CHECKING:
+    from houses.school import School
+
+from dag.derived_node import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
-from dag.derived_node import flush_processor
 
 
 @pytest.fixture(autouse=True)
@@ -90,7 +95,7 @@ async def test_secondary_school_returns_impossible_when_no_school_found():
     Attempt.impossible (not crash with AttributeError)."""
     from houses.nodes.schools import SecondarySchoolNode
     from houses.services_provider import _request_services as _sp
-    from tests.helpers import make_services, FakeSchoolLookup
+    from tests.helpers import FakeSchoolLookup, make_services
     token = _sp.set(make_services(school_lookup=FakeSchoolLookup(school=None)))
     try:
         loc = UserInputNode[GeoPoint]("loc_ss3", GeoPoint)
@@ -112,7 +117,7 @@ async def test_primary_school_returns_impossible_when_no_school_found():
     """Primary school must return Attempt.impossible when lookup returns None."""
     from houses.nodes.schools import PrimarySchoolNode
     from houses.services_provider import _request_services as _sp
-    from tests.helpers import make_services, FakeSchoolLookup
+    from tests.helpers import FakeSchoolLookup, make_services
     token = _sp.set(make_services(school_lookup=FakeSchoolLookup(school=None)))
     try:
         loc = UserInputNode[GeoPoint]("loc_ps3", GeoPoint)
@@ -132,10 +137,10 @@ async def test_primary_school_returns_impossible_when_no_school_found():
 class TestSchoolGenderFiltering:
     """School.accepts_any filters schools by acceptable genders."""
 
-    def _make_school(self, gender: str) -> School:
+    def _make_school(self, gender: str) -> School:  # noqa: F821
+        from houses.geo import GeoPoint
         from houses.school import School
         from houses.school_gender import SchoolGender
-        from houses.geo import GeoPoint
         return School(
             urn="test", name="Test School", phase="primary",
             gender=SchoolGender(gender),
@@ -204,7 +209,7 @@ class TestSchoolNodeAcceptable:
         try:
             loc = UserInputNode[GeoPoint]("loc_ps_acc", GeoPoint)
             addr = UserInputNode[str]("addr_ps_acc", str)
-            node = PrimarySchoolNode("ps_acc", best_location=loc, best_address=addr,
+            PrimarySchoolNode("ps_acc", best_location=loc, best_address=addr,
                                      acceptable=("boys", "girls"))
             loc.push(GeoPoint(51.5, -0.37), "test")
             addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
@@ -235,7 +240,7 @@ class TestSchoolNodeAcceptable:
         try:
             loc = UserInputNode[GeoPoint]("loc_ss_acc", GeoPoint)
             addr = UserInputNode[str]("addr_ss_acc", str)
-            node = SecondarySchoolNode("ss_acc", best_location=loc, best_address=addr,
+            SecondarySchoolNode("ss_acc", best_location=loc, best_address=addr,
                                        acceptable=("girls",))
             loc.push(GeoPoint(51.5, -0.37), "test")
             addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
@@ -266,7 +271,7 @@ class TestSchoolNodeAcceptable:
         try:
             loc = UserInputNode[GeoPoint]("loc_ps_def", GeoPoint)
             addr = UserInputNode[str]("addr_ps_def", str)
-            node = PrimarySchoolNode("ps_def", best_location=loc, best_address=addr)
+            PrimarySchoolNode("ps_def", best_location=loc, best_address=addr)
             loc.push(GeoPoint(51.5, -0.37), "test")
             addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
             await flush_processor()
@@ -295,7 +300,7 @@ class TestSchoolNodeAcceptable:
         try:
             loc = UserInputNode[GeoPoint]("loc_ss_def", GeoPoint)
             addr = UserInputNode[str]("addr_ss_def", str)
-            node = SecondarySchoolNode("ss_def", best_location=loc, best_address=addr)
+            SecondarySchoolNode("ss_def", best_location=loc, best_address=addr)
             loc.push(GeoPoint(51.5, -0.37), "test")
             addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
             await flush_processor()

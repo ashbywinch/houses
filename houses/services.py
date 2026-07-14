@@ -13,21 +13,19 @@ import dataclasses
 from enum import Enum
 from typing import Any, Protocol
 
-from dag.attempt import Attempt
-from dag.persistence import latest_node_result
-from dag.user_input_node import UserInputNode
 from money import Money
 from pint import Quantity
 
-from houses.model.domain import Commute, Person, PlaceOfInterest
-from houses.commute import CostGroup
-from houses.geo import GeoPoint
-from houses.nodes.settings import make_default_financials, make_default_persons, make_default_thresholds
-from houses.council_tax_info import CouncilTaxInfo
+from dag.attempt import Attempt
+from dag.persistence import latest_node_result
+from dag.user_input_node import UserInputNode
 from houses.council_tax import lookup_council_tax
-
+from houses.council_tax_info import CouncilTaxInfo
 from houses.epc import lookup_epc
+from houses.geo import GeoPoint
 from houses.location import _geocode_address, geocode
+from houses.model.domain import Commute, Person, PlaceOfInterest
+from houses.nodes.settings import make_default_financials, make_default_persons, make_default_thresholds
 from houses.school import School
 from houses.school_gender import SchoolGender
 from houses.schools import compute_school_commute, find_nearest
@@ -177,11 +175,9 @@ class _DefaultSchoolLookup:
         address: str = "",
         acceptable: tuple[SchoolGender, ...] = (SchoolGender.MIXED,),
     ) -> School | None:
-        from houses.schools import find_nearest
         return await find_nearest(postcode, child_age=child_age, address=address, acceptable=acceptable)
 
     async def school_commute(self, postcode: str, school: School) -> Commute | None:
-        from houses.schools import compute_school_commute
         return await compute_school_commute(postcode, school)
 class _DefaultWalkability:
     async def enrich(self, lat: float, lng: float, address: str) -> dict[str, Any]:

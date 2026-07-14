@@ -5,16 +5,19 @@ must push source values for every property so the DAG computes derived nodes.
 from __future__ import annotations
 
 import pytest
+
+from dag.derived_node import flush_processor
 from houses.nodes.bootstrap import bootstrap_from_row
 from houses.nodes.property import PropertyNodes
 from houses.property_registry import register_property
 from tests.helpers import make_services
-from dag.derived_node import flush_processor
 
 
 @pytest.fixture(autouse=True)
 def _fresh_db():
-    import sqlite3, dag.persistence as per
+    import sqlite3
+
+    import dag.persistence as per
     saved = per._get_db
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -26,11 +29,12 @@ def _fresh_db():
 
 @pytest.fixture(autouse=True)
 def _mock():
-    from houses.services_provider import _request_services as _sp
     from money import Money
     from pint import Quantity
-    from houses.model.domain import Commute, Person, PlaceOfInterest
+
     from dag.attempt import Attempt
+    from houses.model.domain import Commute, Person, PlaceOfInterest
+    from houses.services_provider import _request_services as _sp
 
     class _SuccessRouter:
         async def route(self, origin, destination, *, has_car, max_walk_minutes):

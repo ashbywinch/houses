@@ -18,7 +18,6 @@ from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.location import _geocode_address, geocode
 from houses.retry import retry_async
-
 from houses.stations import Station
 from houses.stations import find as find_station
 
@@ -497,7 +496,7 @@ class TransitRoute:
             arr_raw = bus_leg.get("arrivalPoint", {})
             dep_point = {"lat": dep_raw["lat"], "lon": dep_raw["lon"]} if dep_raw.get("lat") else None
             arr_point = {"lat": arr_raw["lat"], "lon": arr_raw["lon"]} if arr_raw.get("lat") else None
-            leg_cost = self._fare_lookup(dep, arr, dep_point=dep_point, arr_point=arr_point) if self._fare_lookup else None
+            leg_cost = self._fare_lookup(dep, arr, dep_point=dep_point, arr_point=arr_point) if self._fare_lookup else None  # noqa: E501
             if leg_cost is not None:
                 total_bus_cost += leg_cost
 

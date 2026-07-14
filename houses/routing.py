@@ -14,7 +14,6 @@ from money import Money
 
 from dag.attempt import Attempt
 from houses.api_cache import cached_async_client, get_cached, set_cached
-from houses.transit_route import TransitRoute
 from houses.bus_fare_reader import get_bus_fare_reader
 from houses.bus_journey import cheapest_round_trip
 from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
@@ -22,6 +21,7 @@ from houses.config import settings
 from houses.endpoint_client import EndpointClient
 from houses.geo import GeoPoint
 from houses.http_error import HttpError
+from houses.transit_route import TransitRoute
 
 logger = logging.getLogger(__name__)
 
@@ -329,7 +329,10 @@ async def _tfl_transit_commute(origin_postcode: str, dest_postcode: str, has_car
     walk exceeds max_walk_minutes (TfL doesn't cover some areas).
     """
     label = dest_postcode
-    no_bus = await TransitRoute(origin_postcode, dest_postcode, label, park_and_ride=has_car, fare_lookup=_bus_fare_for).plan()
+    no_bus = await TransitRoute(
+        origin_postcode, dest_postcode, label,
+        park_and_ride=has_car, fare_lookup=_bus_fare_for,
+    ).plan()
 
     # When the traveler has a car, park-and-ride is preferred over bus.
     # If no_bus succeeded, return it directly.  If it failed, fall through

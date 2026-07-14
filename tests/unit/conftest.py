@@ -5,21 +5,21 @@ from __future__ import annotations
 import asyncio
 import tempfile
 from pathlib import Path
+
 import pytest
 
 import dag.derived_node as _dn
 from dag.derived_node import flush_processor as flush_processor
 from houses.api_cache import set_cache_dir
 from houses.config import settings
-from houses.services_provider import _request_services
-from tests.helpers import make_services, FakeCommuteRouter, FakeSchoolLookup
-
+from tests.helpers import FakeCommuteRouter, FakeSchoolLookup, make_services
 
 
 def flush_all() -> None:
     """Synchronously drain the stale queue — call this after seeding data
     to compute derived nodes before reading results."""
     import asyncio
+
     from dag.derived_node import flush_processor
     try:
         loop = asyncio.get_event_loop()
@@ -80,6 +80,7 @@ def _no_sheet_writes():
 @pytest.fixture(autouse=True)
 def _sqlite_memory():
     import sqlite3
+
     import dag.persistence as per
     saved = per._get_db
     conn = sqlite3.connect(":memory:", check_same_thread=False)

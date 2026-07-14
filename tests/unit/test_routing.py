@@ -35,7 +35,7 @@ async def test_find_nearest_handles_coordinate_string(monkeypatch):
     directly instead of trying to geocode it."""
     from houses.geo import GeoPoint
     from houses.school_gender import SchoolGender
-    from houses.schools import find_nearest, School
+    from houses.schools import School, find_nearest
 
     # Fake school at a known location
     fake_school = School(
@@ -566,8 +566,8 @@ class TestAddressWaypoint:
         assert result == {"address": "SW1V 2QQ"}
 
     def test_geopoint_returns_location_waypoint(self):
-        from houses.routing import _address_waypoint
         from houses.geo import GeoPoint
+        from houses.routing import _address_waypoint
         gp = GeoPoint(lat=51.5, lon=-0.13)
         result = _address_waypoint(gp)
         assert result == {"location": {"latLng": {"latitude": 51.5, "longitude": -0.13}}}

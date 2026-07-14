@@ -88,7 +88,7 @@ def inspect_rid(rid: str):
             dur_str = json.dumps(dur) if dur else "MISSING"
             parts.append(f"    keys={keys}  duration={dur_str}")
         elif val is None:
-            parts.append(f"    value=None")
+            parts.append("    value=None")
         else:
             parts.append(f"    value={type(val).__name__}:{str(val)[:80]}")
 
@@ -100,7 +100,7 @@ def inspect_rid(rid: str):
         (rid,),
     ).fetchall()
     if sv:
-        print(f"\n  --- source_values ---")
+        print("\n  --- source_values ---")
         for row in sv:
             short = row["node_id"].replace(f"{rid}/", "", 1)
             try:
@@ -115,7 +115,7 @@ def inspect_rid(rid: str):
         (rid,),
     ).fetchall()
     if dv:
-        print(f"\n  --- derived_values ---")
+        print("\n  --- derived_values ---")
         for row in dv:
             short = row["node_id"].replace(f"{rid}/", "", 1)
             try:

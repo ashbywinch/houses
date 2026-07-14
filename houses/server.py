@@ -2,27 +2,30 @@
 
 import asyncio
 import logging
-from contextlib import asynccontextmanager
 import os
-
+from contextlib import asynccontextmanager
 from typing import Annotated, Any
+
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pathlib import Path
 
 import houses.bus_fare_reader as _bfr
 import houses.location as _loc
 import houses.services_provider as _sp
+from dag.persistence import init_db as init_dag_db
 from houses.bus_journey import BusJourneyRegistry
 from houses.config import settings
 from houses.location import _geo_state_var, _GeoState, extract_postcode, is_outcode
-from houses.web.json_utils import asdict_serializable
-from dag.persistence import init_db as init_dag_db
+from houses.nodes.bootstrap import seed_registry_from_sheet
+from houses.nodes.cutover import push_enriched_property
+from houses.nodes.property import PropertyNodes
 from houses.property import Property
+from houses.property_registry import register_property
 from houses.rightmove_scraper import RightmoveProperty, stop_chrome
 from houses.rightmove_scraper import scrape as scrape_rightmove
+from houses.services import Services
 from houses.sheets import (
     col_index,
     get_client,
@@ -30,11 +33,7 @@ from houses.sheets import (
 )
 from houses.sheets.reader import get_properties_data, resolve_tab
 from houses.web.api_router import api_router
-from houses.property_registry import register_property
-from houses.nodes.bootstrap import seed_registry_from_sheet
-from houses.nodes.cutover import push_enriched_property
-from houses.nodes.property import PropertyNodes
-from houses.services import Services
+from houses.web.json_utils import asdict_serializable
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +67,10 @@ async def lifespan(_app: FastAPI):
     # Start the background stale-node processor and the WebSocket broadcaster.
     # The processor eagerly recomputes nodes whose dependencies have changed;
     # the broadcaster pushes fresh property summaries to connected clients.
-    from dag.derived_node import _processor as _start_processor, set_after_refresh
-    from houses.web.broadcaster import _broadcaster as _start_broadcaster, push_rid
+    from dag.derived_node import _processor as _start_processor
+    from dag.derived_node import set_after_refresh
+    from houses.web.broadcaster import _broadcaster as _start_broadcaster
+    from houses.web.broadcaster import push_rid
 
     # Wire: after each node refresh, push the property RID to the broadcast queue
     def _on_node_refreshed(node):
@@ -156,7 +157,7 @@ async def upsert_property(
     if payload:
         # ── Single property mode ───────────────────────────────────
         postcode = payload.postcode or extract_postcode(payload.address)
-        lookup = payload.address if is_outcode(postcode) else postcode
+        payload.address if is_outcode(postcode) else postcode
         address = payload.address
 
         # Check for existing
@@ -193,7 +194,7 @@ async def upsert_property(
                     if scraped.price is not None and payload.price is None:
                         payload.price = scraped.price
                     postcode = payload.postcode or extract_postcode(address)
-                    lookup = address if is_outcode(postcode) else postcode
+                    address if is_outcode(postcode) else postcode
             except Exception as e:
                 scrape_error = str(e)
                 logger.warning("Scrape failed for %s: %s", payload.url, e)

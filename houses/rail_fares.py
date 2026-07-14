@@ -13,8 +13,12 @@ from pathlib import Path
 
 from money import Money
 
+from houses.commute import Commute, LegMode
+from houses.config import settings
 from houses.geo import GeoPoint
+from houses.location import extract_postcode, geocode
 from houses.stations import Station, StationRegistry
+from houses.transit_route import FALLBACK_TUBE_SINGLE_GBP, get_tube_leg_fare
 
 logger = logging.getLogger(__name__)
 
@@ -86,11 +90,6 @@ class RailFareRegistry:
             return None
         return self._fares_by_pair.get(frozenset({origin.crs, destination.crs}))
 
-from houses.commute import Commute, LegMode
-from houses.config import settings
-from houses.rail_fare_registry import get_rail_fare_registry
-from houses.location import extract_postcode, geocode
-from houses.transit_route import FALLBACK_TUBE_SINGLE_GBP, get_tube_leg_fare
 
 
 async def enrich_rail_fares(
@@ -109,8 +108,9 @@ async def enrich_rail_fares(
     ``_geocode`` — optional async geocode function.
     ``_tube_fare_fn`` — optional async tube fare function (default: ``get_tube_leg_fare``).
     """
-    registry = _registry or get_rail_fare_registry()
+    from houses.rail_fare_registry import get_rail_fare_registry
     geo_fn = _geocode or geocode
+    registry = _registry or get_rail_fare_registry()
     tube_fare_fn = _tube_fare_fn or get_tube_leg_fare
 
     needs_rail = enabled is None or enabled & {"simon"} or enabled & {"lorena"}

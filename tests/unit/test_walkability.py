@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import patch
 
 from houses.walkability import _extract_town
 
@@ -54,10 +53,11 @@ class TestExtractTown:
     @pytest.mark.asyncio
     async def test_reverse_geocode_fallback(self) -> None:
         """When address-based town fails, reverse geocode should provide a fallback."""
-        from houses.walkability import enrich_walkability
-        from houses.api_cache import set_cache_dir
-        from pathlib import Path
         import tempfile
+        from pathlib import Path
+
+        from houses.api_cache import set_cache_dir
+        from houses.walkability import enrich_walkability
 
         # Use a temp cache dir so we don't pollute the real cache
         with tempfile.TemporaryDirectory() as tmp:
@@ -92,11 +92,12 @@ class TestExtractTown:
     @pytest.mark.asyncio
     async def test_reverse_geocode_not_needed_when_address_works(self) -> None:
         """When address-based town gives a valid walk time, don't call reverse geocode."""
-        from houses.walkability import enrich_walkability, _extract_town_centre, _walk_duration
-        from houses.api_cache import set_cache_dir
-        from pathlib import Path
         import tempfile
+        from pathlib import Path
+
+        from houses.api_cache import set_cache_dir
         from houses.geo import GeoPoint
+        from houses.walkability import enrich_walkability
 
         with tempfile.TemporaryDirectory() as tmp:
             set_cache_dir(Path(tmp))

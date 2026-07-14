@@ -10,11 +10,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from houses.config import settings
-from houses.services_provider import _request_services
-from tests.helpers import make_services
-from houses.services import _SETTINGS_SOURCE_CACHE
 from houses.nodes.property import PropertyNodes
 from houses.property_registry import register_property
+from houses.services import _SETTINGS_SOURCE_CACHE
+from houses.services_provider import _request_services
+from tests.helpers import make_services
 
 _SETTINGS_SOURCE_CACHE.clear()
 token = _request_services.set(make_services())

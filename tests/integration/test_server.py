@@ -1,22 +1,13 @@
 """Tests for the FastAPI server endpoints."""
 
-import asyncio
-import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from money import Money
 
-from houses.commute import Commute, CommuteBreakdown
 from houses.config import settings
-from houses.council_tax_info import CouncilTaxInfo
-from houses.property import EnrichedProperty
 from houses.server import app
-from houses.services import Services
-from houses.sheets import COLUMN_HEADERS, VIEW_HEADERS
-from tests.helpers import FakeCommuteRouter, FakeEPC
 
 client = TestClient(app)
 

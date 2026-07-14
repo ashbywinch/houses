@@ -72,7 +72,7 @@ class School:
             return None
 
     @classmethod
-    def from_GIAS_row(cls, row: dict) -> School:
+    def from_GIAS_row(cls, row: dict) -> School:  # noqa: N802
         # Prefer corrected coordinates if available
         corr_lat = (row.get(cls._COL_CORR_LAT) or "").strip()
         corr_lng = (row.get(cls._COL_CORR_LNG) or "").strip()

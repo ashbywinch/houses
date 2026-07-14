@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
-from houses.services_provider import get_services
 from houses.geo import GeoPoint
+from houses.services_provider import get_services
 
 
 class GeocodeNode(DerivedNode[GeoPoint]):

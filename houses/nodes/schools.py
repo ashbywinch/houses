@@ -3,10 +3,9 @@ from __future__ import annotations
 from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
 from dag.node import Node
-from houses.services_provider import get_services
 from houses.geo import GeoPoint
 from houses.school_gender import SchoolGender
-
+from houses.services_provider import get_services
 
 
 class PrimarySchoolNode(DerivedNode[dict]):

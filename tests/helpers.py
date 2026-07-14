@@ -11,13 +11,12 @@ from money import Money
 from pint import Quantity
 
 from dag.attempt import Attempt
-from houses.model.domain import Commute, Person, PlaceOfInterest
-from houses.geo import GeoPoint
 from houses.council_tax_info import CouncilTaxInfo
+from houses.geo import GeoPoint
+from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.school import School
 from houses.school_gender import SchoolGender
 from houses.services import Services
-
 
 # ── Individual Fake Services ──────────────────────────────────────────
 

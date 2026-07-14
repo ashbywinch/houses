@@ -4,7 +4,6 @@ from typing import Any
 
 from dag.signals import Signal, Slot
 from dag.user_input_node import UserInputNode
-from houses.services_provider import get_services
 from houses.geo import GeoPoint
 from houses.nodes.area import TownDescNode, TownNode, WalkabilityNode
 from houses.nodes.bus import BodsFareNode, BusLegAugmentNode, BusRouteNode
@@ -20,6 +19,7 @@ from houses.nodes.monthly_costs import (
 )
 from houses.nodes.schools import PrimarySchoolNode, SchoolLocationNode, SecondarySchoolNode
 from houses.nodes.transit import TransitNode, WalkLegCheckNode
+from houses.services_provider import get_services
 
 
 class PropertyNodes:
@@ -253,7 +253,8 @@ class PropertyNodes:
             elif p_name == "Lorena" and lorena_office_key is None:
                 lorena_office_key = key  # first Lorena commute
 
-        fallback = lambda rid, key: UserInputNode[dict](f"{rid}/{key}/fallback", dict)
+        def fallback(rid, key):
+            return UserInputNode[dict](f"{rid}/{key}/fallback", dict)
         self.commute_simon_office = self.commute_selectors.get(
             simon_office_key, fallback(self.rid, "simon_office"))
         self.commute_simon_bracknell = self.commute_selectors.get(

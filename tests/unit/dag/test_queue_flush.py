@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import pytest
 
+import dag.derived_node as dn
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode, flush_processor
-import dag.derived_node as dn
 from dag.node import Node
 from dag.user_input_node import UserInputNode
 
@@ -45,7 +45,7 @@ def _clear_queue():
     while not dn._stale_queue.empty():
         try:
             dn._stale_queue.get_nowait()
-        except:
+        except:  # noqa: E722
             break
     yield
 

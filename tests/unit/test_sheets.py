@@ -60,7 +60,6 @@ def test_named_range_name_is_deterministic():
 
 def test_view_formulas_use_named_ranges():
     """View tab formulas must never contain hardcoded cross-sheet refs or IFERROR."""
-    from houses.sheets import named_range_name
 
     for key, formula in VIEW_FORMULA_COLS.items():
         assert "Data_" in formula or "Const_" in formula, (
@@ -81,7 +80,7 @@ def test_xlookup_key_is_typed_as_number():
             )
     if not xlookups_found:
         import warnings
-        warnings.warn("No XLOOKUP formulas found — check if this test still applies")
+        warnings.warn("No XLOOKUP formulas found — check if this test still applies", stacklevel=2)
 
 
 def test_const_range_name_generates_correct_prefix():

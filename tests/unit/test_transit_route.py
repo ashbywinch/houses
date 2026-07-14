@@ -90,8 +90,7 @@ async def test_uses_peak_time_params():
 async def test_enrich_uses_tfl_tube_fare_when_needed(tmp_path):
     """_enrich_rail_fares uses the TfL tube fare instead of hardcoded £2.80."""
     from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
-    from houses.rail_fares import enrich_rail_fares
-    from houses.rail_fares import RailFareRegistry
+    from houses.rail_fares import RailFareRegistry, enrich_rail_fares
     from houses.stations import StationRegistry
 
     stations_csv = tmp_path / "stations.csv"

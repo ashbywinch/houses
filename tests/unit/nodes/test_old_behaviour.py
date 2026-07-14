@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import pytest
 
-from tests.unit.conftest import flush_all
-
 
 @pytest.fixture(autouse=True)
 def _fake_services():
@@ -28,7 +26,6 @@ class TestSchoolNodes:
         from dag.user_input_node import UserInputNode
         from houses.geo import GeoPoint
         from houses.nodes.schools import SecondarySchoolNode
-        from houses.school_gender import SchoolGender
 
         loc = UserInputNode[GeoPoint]("loc", GeoPoint)
         addr = UserInputNode[str]("addr", str)
@@ -59,7 +56,6 @@ class TestSchoolNodes:
         from dag.user_input_node import UserInputNode
         from houses.geo import GeoPoint
         from houses.nodes.schools import PrimarySchoolNode
-        from houses.school_gender import SchoolGender
 
         loc = UserInputNode[GeoPoint]("loc", GeoPoint)
         addr = UserInputNode[str]("addr", str)

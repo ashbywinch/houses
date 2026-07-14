@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 import httpx
 
 from dag.attempt import Attempt
-from houses.api_cache import cached_async_client, get_cached, set_cached, with_cache
+from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.config import settings
 from houses.geo import GeoPoint
 from houses.retry import retry_async

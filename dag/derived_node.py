@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import asyncio
-from inspect import iscoroutine
 from abc import abstractmethod
 from collections.abc import Callable
+from datetime import UTC, datetime
+from inspect import iscoroutine
+from typing import Generic, TypeVar
 
 from dag.attempt import Attempt, Provenance
 from dag.node import Node
 from dag.signals import Slot
-from typing import Generic, TypeVar
 
 T = TypeVar("T")
 
@@ -85,13 +85,13 @@ class DerivedNode(Node[T], Generic[T]):
         if self._attempt.pending:
             return True
         for dep in self._deps:
-            if dep._persisted_at is not None and self._computed_at is not None:
-                if dep._persisted_at > self._computed_at:
-                    return True
-            if isinstance(dep, DerivedNode):
-                if dep._computed_at is not None and self._computed_at is not None:
-                    if dep._computed_at > self._computed_at:
-                        return True
+            if dep._persisted_at is not None and self._computed_at is not None \
+                    and dep._persisted_at > self._computed_at:
+                return True
+            if isinstance(dep, DerivedNode) and dep._computed_at is not None \
+                    and self._computed_at is not None \
+                    and dep._computed_at > self._computed_at:
+                return True
             if self._loaded_dep_timestamps:
                 stored = self._loaded_dep_timestamps.get(dep._id, "")
                 if stored and dep._db_created_at != stored:

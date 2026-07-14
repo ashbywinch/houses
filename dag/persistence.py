@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import TypeAdapter
+
 from houses.config import settings
 
 DB_PATH: Path | None = None

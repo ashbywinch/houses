@@ -4,10 +4,10 @@ import logging
 
 from fastapi import APIRouter, Body, HTTPException, WebSocket
 
-from houses.services_provider import get_services
 from houses.geo import GeoPoint
 from houses.nodes.bootstrap import seed_registry_from_sheet
 from houses.property_registry import _registry
+from houses.services_provider import get_services
 
 logger = logging.getLogger(__name__)
 

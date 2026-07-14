@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Generic, TypeVar
 
-from pydantic import TypeAdapter
 from pydantic_core import core_schema
 
 from dag.attempt import Attempt, Provenance
 from dag.node import Node
-
 
 # Register Money's pydantic schema so TypeAdapter(list[Person]) works.
 # This IS the correct pydantic v2 approach for third-party types:

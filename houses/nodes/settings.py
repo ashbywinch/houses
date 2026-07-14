@@ -12,11 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from dag.persistence import latest_node_result
-from dag.user_input_node import UserInputNode
 from houses.config import settings
 from houses.model.domain import Person, PlaceOfInterest
-
 
 
 def make_default_persons() -> list[Person]:
