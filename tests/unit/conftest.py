@@ -8,8 +8,7 @@ from pathlib import Path
 
 import pytest
 
-import dag.derived_node as _dn
-from dag.derived_node import flush_processor as flush_processor
+from dag.derived_node import TestScheduler, flush_processor, set_scheduler
 from houses.api_cache import set_cache_dir
 from houses.config import settings
 from tests.helpers import FakeCommuteRouter, FakeSchoolLookup, make_services
@@ -18,15 +17,10 @@ from tests.helpers import FakeCommuteRouter, FakeSchoolLookup, make_services
 def flush_all() -> None:
     """Synchronously drain the stale queue — call this after seeding data
     to compute derived nodes before reading results."""
-    import asyncio
-
-    from dag.derived_node import flush_processor
 
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
-        # No event loop in this thread (e.g. sync test in non-main thread).
-        # Create one for the duration of the flush.
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
     loop.run_until_complete(flush_processor())
@@ -38,17 +32,13 @@ def _make_mock_services():
         commute_router=FakeCommuteRouter(),
         school_lookup=FakeSchoolLookup(),
     )
-
-
 @pytest.fixture(autouse=True)
-def _clear_stale_queue():
-    _dn._ensure_queue()
-    while not _dn._stale_queue.empty():
-        try:
-            _dn._stale_queue.get_nowait()
-        except asyncio.QueueEmpty:
-            break
+def _inject_test_scheduler():
+    """Each test gets an isolated scheduler — no global queue leakage."""
+    set_scheduler(TestScheduler())
     yield
+
+
 
 
 @pytest.fixture(autouse=True)

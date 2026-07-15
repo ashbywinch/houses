@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 from abc import abstractmethod
 from collections.abc import Callable
@@ -11,47 +12,131 @@ from typing import Generic, TypeVar
 from dag.attempt import Attempt, Provenance
 from dag.node import Node
 from dag.signals import Slot
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-_stale_queue: asyncio.Queue[DerivedNode] = None  # type: ignore[assignment]
-_after_refresh: Callable[[DerivedNode], object] | None = None
+
+# ── Refresh scheduler (DI via ContextVar) ────────────────────────────
+
+class RefreshScheduler:
+    """Pluggable scheduler for refreshing stale DerivedNodes.
+
+    Production: ``AsyncQueueScheduler`` — background ``asyncio.Queue``.
+    Tests: provide an isolated instance with ``set_scheduler()``.
+    """
+
+    def register(self, node: DerivedNode) -> None:
+        """Called when a DerivedNode is created."""
+
+    def schedule(self, node: DerivedNode) -> None:
+        """Request that *node* be refreshed when convenient."""
+
+    async def process_pending(self) -> None:
+        """Synchronously process all currently scheduled nodes."""
 
 
+class AsyncQueueScheduler(RefreshScheduler):
+    """Default production scheduler — background ``asyncio.Queue``."""
+
+    def __init__(self) -> None:
+        self._queue: asyncio.Queue[DerivedNode] = asyncio.Queue()
+        self._after_refresh: Callable[[DerivedNode], object] | None = None
+
+    def register(self, node: DerivedNode) -> None:
+        if node._attempt.pending or node._is_stale():
+            self._queue.put_nowait(node)
+
+    def schedule(self, node: DerivedNode) -> None:
+        self._queue.put_nowait(node)
+
+    async def process_pending(self) -> None:
+        while not self._queue.empty():
+            try:
+                node = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            await node.refresh()
+
+    async def _background_loop(self) -> None:
+        while True:
+            node = await self._queue.get()
+            try:
+                await node.refresh()
+                if self._after_refresh is not None:
+                    self._after_refresh(node)
+            except Exception as exc:
+                logger.exception("DAG processor failed for %s: %s", node._id, exc)
+            await asyncio.sleep(0)
+
+
+class TestScheduler(RefreshScheduler):
+    """Isolated scheduler for tests — no global state.
+
+    Each test creates its own instance via ``set_scheduler()``.
+    Call ``process_pending()`` to flush only this scheduler's nodes.
+    """
+
+    def __init__(self) -> None:
+        self._pending: list[DerivedNode] = []
+
+    def register(self, node: DerivedNode) -> None:
+        if node._attempt.pending or node._is_stale():
+            self._pending.append(node)
+
+    def schedule(self, node: DerivedNode) -> None:
+        self._pending.append(node)
+    async def process_pending(self) -> None:
+        while self._pending:
+            todo, self._pending = self._pending, []
+            for node in todo:
+                await node.refresh()
 def set_after_refresh(callback: Callable[[DerivedNode], object]) -> None:
-    global _after_refresh
-    _after_refresh = callback
+    sched = _get_scheduler()
+    if isinstance(sched, AsyncQueueScheduler):
+        sched._after_refresh = callback
 
 
-def _ensure_queue() -> None:
-    global _stale_queue
-    if _stale_queue is None:
-        _stale_queue = asyncio.Queue()
+# ContextVar-based DI — tests call ``set_scheduler(TestScheduler())``.
 
+_scheduler_var: contextvars.ContextVar[RefreshScheduler | None] = (
+    contextvars.ContextVar("_dag_scheduler", default=None)
+)
+
+
+def _get_scheduler() -> RefreshScheduler:
+    sched = _scheduler_var.get()
+    if sched is None:
+        sched = AsyncQueueScheduler()
+        _scheduler_var.set(sched)
+    return sched
+
+
+def set_scheduler(scheduler: RefreshScheduler) -> None:
+    """Override the scheduler (used by tests to inject an isolated one)."""
+    _scheduler_var.set(scheduler)
+
+
+def reset_scheduler() -> None:
+    """Reset to default (clears the ContextVar override)."""
+    _scheduler_var.set(None)
+
+
+# ── Module-level convenience aliases (delegating to current scheduler) ──
 
 async def flush_processor() -> None:
-    _ensure_queue()
-    while not _stale_queue.empty():
-        try:
-            node = _stale_queue.get_nowait()
-        except asyncio.QueueEmpty:
-            break
-        await node.refresh()
+    await _get_scheduler().process_pending()
+
+def start_processor() -> asyncio.Task:
+    """Start the background refresh loop. Returns the asyncio Task."""
+    sched = _get_scheduler()
+    if isinstance(sched, AsyncQueueScheduler):
+        return asyncio.create_task(sched._background_loop())
+    raise TypeError(f"Cannot start background processor on {type(sched).__name__}")
 
 
-async def _processor() -> None:
-    _ensure_queue()
-    while True:
-        node = await _stale_queue.get()
-        try:
-            await node.refresh()
-            if _after_refresh is not None:
-                _after_refresh(node)
-        except Exception as exc:
-            logger.exception("DAG processor failed for %s: %s", node._id, exc)
-        await asyncio.sleep(0)
-
+# ── DerivedNode ─────────────────────────────────────────────────────
 
 class DerivedNode(Node[T], Generic[T]):
     """A node whose value is computed from other nodes."""
@@ -62,7 +147,6 @@ class DerivedNode(Node[T], Generic[T]):
         self._deps = deps
         self._attempt: Attempt[T] = Attempt.pending()
         self._slots: list[Slot] = []
-        _ensure_queue()
 
         loaded = self._load_attempt_from_db()
         if loaded is not None and loaded.succeeded:
@@ -73,9 +157,7 @@ class DerivedNode(Node[T], Generic[T]):
             self._slots.append(slot)
             dep.changed.connect(slot)
 
-        # If pending or stale after DB load, queue for recomputation.
-        if self._attempt.pending or self._is_stale():
-            _stale_queue.put_nowait(self)
+        _get_scheduler().register(self)
 
     def _get_active_deps(self) -> tuple[Node, ...]:
         return self._deps
@@ -86,8 +168,7 @@ class DerivedNode(Node[T], Generic[T]):
     def _on_dep_changed(self) -> None:
         if not self._is_stale():
             return
-        _ensure_queue()
-        _stale_queue.put_nowait(self)
+        _get_scheduler().schedule(self)
 
     def _is_stale(self) -> bool:
         if self._attempt.pending:
@@ -141,6 +222,7 @@ class DerivedNode(Node[T], Generic[T]):
             sources[dep._id] = await dep.build_provenance()
         description = self._attempt.error if self._attempt.impossible else ""
         return Provenance(label=self.display_name, description=description, sources=sources)
+
     async def to_json(self) -> dict:
         result = await super().to_json()
         if not self._attempt.pending:

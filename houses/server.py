@@ -67,8 +67,8 @@ async def lifespan(_app: FastAPI):
     # Start the background stale-node processor and the WebSocket broadcaster.
     # The processor eagerly recomputes nodes whose dependencies have changed;
     # the broadcaster pushes fresh property summaries to connected clients.
-    from dag.derived_node import _processor as _start_processor
     from dag.derived_node import set_after_refresh
+    from dag.derived_node import start_processor as _start_processor
     from houses.web.broadcaster import _broadcaster as _start_broadcaster
     from houses.web.broadcaster import push_rid
 

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import pytest
 
-import dag.derived_node as dn
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode, flush_processor
 from dag.node import Node
@@ -41,12 +40,7 @@ class DoubleNode(DerivedNode[int]):
 
 @pytest.fixture(autouse=True)
 def _clear_queue():
-    dn._ensure_queue()
-    while not dn._stale_queue.empty():
-        try:
-            dn._stale_queue.get_nowait()
-        except:  # noqa: E722
-            break
+    # Queue is already isolated per-test via conftest._inject_test_scheduler
     yield
 
 

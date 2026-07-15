@@ -341,8 +341,8 @@ class TestTransitCostAttribution:
         from money import Money
         from pint import Quantity
 
-        from houses.commute import CostGroup, JourneyLeg, LegMode
         from dag.user_input_node import UserInputNode
+        from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.geo import GeoPoint
         from houses.nodes.park_and_ride import ParkAndRideAugmentNode
         from houses.services_provider import _request_services as _sp
@@ -399,10 +399,10 @@ class TestTransitCostAttribution:
             train_group = train_groups[0]
             assert train_group.cost is not None, (
                 f"Train CostGroup has no cost. "
-                f"total={result.daily_cost}, groups={[(cg.cost, [str(l.mode) for l in cg.legs]) for cg in result.details]}"
+                f"total={result.daily_cost}, "
+                f"groups={[(cg.cost, [str(leg.mode) for leg in cg.legs]) for cg in result.details]}"
             )
-            assert float(train_group.cost.amount) == 12.50, (
-                f"Expected £12.50 transit fare on train group, got {train_group.cost}"
-            )
+            c = float(train_group.cost.amount)
+            assert c == 12.50, f"Expected £12.50 on train group, got {train_group.cost}"
         finally:
             _sp.reset(token)
