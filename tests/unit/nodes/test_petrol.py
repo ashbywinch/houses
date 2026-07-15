@@ -100,6 +100,15 @@ class TestPetrolCostAugmentNode:
         # No extra petrol leg — fuel cost folded into daily_cost
         assert len(val.details) == 1
         assert not any(cg.operator == "Fuel" for cg in val.details)
+        # The drive CostGroup must have the fuel cost attributed
+        drive_cg = next((cg for cg in val.details), None)
+        assert drive_cg is not None
+        assert drive_cg.cost is not None, "Drive CostGroup should have cost attributed"
+        # Original cost was 5.00, fuel added 3.64 → total 8.64
+        if isinstance(drive_cg.cost, Money):
+            assert float(drive_cg.cost.amount) == 8.64, (
+                f"Expected drive CostGroup cost £8.64, got {drive_cg.cost}"
+            )
 
     @pytest.mark.asyncio
     async def test_skips_non_drive_commute(self):

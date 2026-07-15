@@ -406,3 +406,75 @@ class TestTransitCostAttribution:
             assert c == 12.50, f"Expected £12.50 on train group, got {train_group.cost}"
         finally:
             _sp.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_park_and_ride_attributes_cost_when_tfl_returns_zero(self):
+        """Park-and-ride with existing_cost=0 (TfL NR case): train CostGroup
+        must get cost attributed (even if 0) so the frontend shows it and
+        CommuteSelectorNode can apply the NR fare."""
+        from money import Money
+        from pint import Quantity
+
+        from dag.user_input_node import UserInputNode
+        from houses.commute import CostGroup, JourneyLeg, LegMode
+        from houses.geo import GeoPoint
+        from houses.nodes.park_and_ride import ParkAndRideAugmentNode
+        from houses.services_provider import _request_services as _sp
+        from tests.helpers import make_services
+
+        class _FakeDriveTime:
+            async def estimate(self, origin, station):
+                return 10
+
+        svc = make_services(drive_time_service=_FakeDriveTime())
+        token = _sp.set(svc)
+        try:
+            transit = UserInputNode[Commute]("t_cta_zero", Commute)
+            loc = UserInputNode[GeoPoint]("t_cta_zero_loc", GeoPoint)
+            pc = UserInputNode[str]("t_cta_zero_pc", str)
+            pc.push("SL6 3YZ", "test")
+            loc.push(GeoPoint(51.5, -0.1), "test")
+
+            walk_leg = JourneyLeg(mode=LegMode.WALK, duration_minutes=30, end_station="Maidenhead Rail Station")
+            train_leg = JourneyLeg(mode=LegMode.TRAIN, duration_minutes=30, end_station="London Paddington")
+            group = CostGroup(legs=(walk_leg, train_leg), operator="TfL", cost=None)
+            c = Commute(
+                person=Person(name="Simon", has_car=True),
+                label="Office",
+                destination=PlaceOfInterest("Office", "SW1V 2QQ"),
+                duration=Quantity(60, "minute"),
+                daily_cost=Money("0", "GBP"),  # TfL returns 0 for NR
+                mode="transit",
+                details=(group,),
+            )
+            transit.push(c, "test")
+
+            node = ParkAndRideAugmentNode(
+                "t_cta_zero_pr", transit_node=transit, best_location=loc, postcode_node=pc,
+                has_car=True, max_walk=20,
+            )
+
+            await node.refresh()
+
+            a = await node.attempt()
+            result = a.value_or_none()
+            assert result.daily_cost is not None
+            # daily_cost = 0 (existing) + parking
+            assert float(result.daily_cost.amount) > 0, f"Expected >0, got {result.daily_cost}"
+
+            train_groups = [
+                cg for cg in result.details
+                if any(leg.mode == LegMode.TRAIN for leg in cg.legs)
+            ]
+            assert len(train_groups) > 0
+
+            train_group = train_groups[0]
+            # BUG: Cost is None because existing_cost=0 skipped attribution.
+            # Fix: should be 0 (not None) so frontend shows it.
+            assert train_group.cost is not None, (
+                f"Train CostGroup should have cost attributed (even if 0). "
+                f"total={result.daily_cost}, "
+                f"groups={[(cg.cost, [str(leg.mode) for leg in cg.legs]) for cg in result.details]}"
+            )
+        finally:
+            _sp.reset(token)

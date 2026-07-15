@@ -72,8 +72,22 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         if fuel_cost <= 0:
             return commute
 
+        new_daily_cost = round(float(val.daily_cost.amount) + fuel_cost, 2)
+
+        # Attribute fuel cost to the drive CostGroup(s)
+        from dataclasses import replace as _replace_cg
+        new_details = list(val.details)
+        for i, cg in enumerate(new_details):
+            has_drive = any(leg.mode == LegMode.DRIVE for leg in cg.legs)
+            if has_drive:
+                old_cost = float(cg.cost.amount) if isinstance(cg.cost, Money) else (cg.cost or 0)
+                new_cost = round(old_cost + fuel_cost, 2)
+                new_details[i] = _replace_cg(cg, cost=Money(str(new_cost), "GBP"))
+                break
+
         new_commute = replace(
             val,
-            daily_cost=Money(str(round(float(val.daily_cost.amount) + fuel_cost, 2)), "GBP"),
+            daily_cost=Money(str(new_daily_cost), "GBP"),
+            details=tuple(new_details),
         )
         return Attempt.succeeded(new_commute)

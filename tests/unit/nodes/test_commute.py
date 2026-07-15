@@ -574,7 +574,122 @@ class TestDynamicDeps:
         a = await node.attempt()
         assert a.succeeded, "Should compute without bus when walk is fine"
         assert a.value_or_none() is not None
+    @pytest.mark.asyncio
+    async def test_rail_fare_applied_when_walk_check_impossible(self):
+        """When walk_check is impossible (not False), bus is not active.
+        RailFareNode's attempt lands in the `bus` parameter positionally,
+        leaving `rail_fare=None` in compute(), so the NR fare is lost.
+        This test verifies the fix — rail_fare's cost must be applied."""
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
 
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = commute_input_node("transit2")
+        bus = commute_input_node("bus2")
+        rail_fare = commute_input_node("rail_fare2")
+
+        # Walk check that is impossible (succeeded=False) — same as Lorena/Aldgate
+        from dag.derived_node import DerivedNode
+
+        class _ImpossibleWalkCheck(DerivedNode[bool]):
+            def __init__(self):
+                super().__init__("wci", bool, ())
+                self._attempt = Attempt.impossible("no transit data")
+
+            def compute(self):
+                return self._attempt
+
+        walk_check = _ImpossibleWalkCheck()
+
+        node = CommuteSelectorNode(
+            "rf_walk_impossible",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            bus_result=bus,
+            walk_leg_check=walk_check,
+            rail_fare_node=rail_fare,
+        )
+
+        origin.push(GeoPoint(51.5, -0.1), "user")
+        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
+
+        # Transit has £0 cost (TfL doesn't price NR)
+        transit.push(_make_commute(duration_min=32, cost_gbp=0), "TfL")
+        # Rail fare computed successfully with cost
+        rail_fare.push(_make_commute(duration_min=30, cost_gbp=41.0), "NR")
+
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded, "Should compute when rail_fare resolved"
+        val = a.value_or_none()
+        assert val is not None
+        # The commute should have the rail_fare cost (£41), not the transit cost (£0)
+        assert float(val.daily_cost.amount) == 41.0, (
+            f"Expected rail_fare cost £41.0, got £{val.daily_cost.amount}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_rail_fare_applied_when_transit_has_unpriced_legs(self):
+        """When transit has cost > 0 (e.g. from park_and_ride parking) but
+        the transit legs (train/tube) have no cost attributed, the
+        CommuteSelectorNode must still apply the rail_fare."""
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
+
+        origin = UserInputNode[GeoPoint]("origin_ul", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi_ul", PlaceOfInterest)
+        transit = commute_input_node("transit_ul")
+        bus = commute_input_node("bus_ul")
+        rail_fare = commute_input_node("rail_fare_ul")
+        walk_check = _succeeded_walk_check(False)  # bus not active
+
+        node = CommuteSelectorNode(
+            "rf_unpriced",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            bus_result=bus,
+            walk_leg_check=walk_check,
+            rail_fare_node=rail_fare,
+        )
+
+        origin.push(GeoPoint(51.5, -0.1), "user")
+        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
+
+        # Transit has cost > 0 (parking) but the train leg CostGroup has cost=None
+        from pint import Quantity
+        from houses.commute import CostGroup, JourneyLeg, LegMode
+        office = PlaceOfInterest("Office", "SW1V 2QQ")
+        person = Person("Simon", True, places_of_interest=(office,))
+        train_leg = JourneyLeg(mode=LegMode.TRAIN, duration_minutes=30, end_station="London Waterloo")
+        park_leg = JourneyLeg(mode=LegMode.PARK, duration_minutes=0)
+        transit_commute = Commute(
+            person=person,
+            label="Office",
+            destination=office,
+            duration=Quantity(60, "minute"),
+            daily_cost=Money("10.90", "GBP"),  # parking cost only
+            mode="transit",
+            details=(
+                CostGroup(legs=(train_leg,), operator="", cost=None),  # unpriced transit!
+                CostGroup(legs=(park_leg,), operator="Ascot Car Park", cost=Money("10.90", "GBP")),
+            ),
+        )
+        transit.push(transit_commute, "TfL+Park")
+        # Rail fare computed successfully with cost
+        rail_fare.push(_make_commute(duration_min=30, cost_gbp=41.0), "NR")
+
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded, "Should compute when rail_fare resolved"
+        val = a.value_or_none()
+        assert val is not None
+        # The commute should include the rail_fare cost (£41), not just parking
+        assert float(val.daily_cost.amount) == 41.0, (
+            f"Expected rail_fare cost £41.0, got £{val.daily_cost.amount}"
+        )
 
 class TestWalkLegCheckNode:
     """Direct WalkLegCheckNode tests."""
@@ -867,6 +982,13 @@ class TestRailFareNode:
         assert val is not None
         # (17.00 + 2.80) × 2 = 39.60
         assert float(val.daily_cost.amount) == 39.60
+        # The transit CostGroup must also have its cost attributed
+        transit_cg = next((cg for cg in val.details if cg.operator == "TfL"), None)
+        assert transit_cg is not None, "TfL CostGroup should exist"
+        assert transit_cg.cost is not None, "TfL CostGroup should have cost attributed"
+        assert float(transit_cg.cost.amount) == 39.60, (
+            f"Expected TfL CostGroup cost £39.60, got {transit_cg.cost}"
+        )
 
 
 @pytest.mark.asyncio

@@ -123,8 +123,9 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         )
 
         # Attribute the original transit fare to new_first_cg (drive + transit legs)
-        # if it has no cost yet and there's an existing fare.
-        if new_first_cg.cost is None and existing_cost > 0:
+        # if it has no cost yet.  Always attribute (even if 0) so the frontend
+        # shows the cost leg and CommuteSelectorNode can apply the NR fare.
+        if new_first_cg.cost is None:
             has_transit = any(
                 leg.mode in (LegMode.TRAIN, LegMode.TUBE, LegMode.BUS)
                 for leg in new_first_cg.legs

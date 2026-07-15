@@ -16,6 +16,23 @@ from houses.model.domain import Commute
 from houses.stations import Station
 
 
+def _has_unpriced_transit(commute: Commute | None) -> bool:
+    """Check if a commute has transit legs (train/tube) with cost=None.
+
+    Used to decide whether to activate RailFareNode even when total
+    daily_cost > 0 (e.g. park-and-ride added parking cost but the
+    train fare is missing).
+    """
+    if commute is None:
+        return False
+    from houses.commute import LegMode
+
+    _transit_modes = {LegMode.TRAIN, LegMode.TUBE, LegMode.DLR, LegMode.OVERGROUND}
+    for cg in (commute.details or ()):
+        if cg.cost is None and any(leg.mode in _transit_modes for leg in cg.legs):
+            return True
+    return False
+
 def format_duration(minutes: int | None) -> str:
     """Match the old ``houses.web.card_data._dur`` format.
 
@@ -243,7 +260,17 @@ class RailFareNode(DerivedNode[Commute]):
             return Attempt.impossible(f"no fare {origin.crs}→{terminal_station.crs}")
         tube_fare = await get_tube_leg_fare(terminal_station, "") or Money(FALLBACK_TUBE_SINGLE_GBP, "GBP")
         total = (fare + tube_fare) * 2
-        new_commute = replace(commute, daily_cost=Money(str(total.amount), "GBP"))
+
+        # Attribute the fare to transit CostGroup(s) so frontend displays it
+        from houses.commute import LegMode
+        _transit_modes = {LegMode.TRAIN, LegMode.TUBE, LegMode.DLR, LegMode.OVERGROUND}
+        new_details = list(commute.details)
+        for i, cg in enumerate(new_details):
+            if cg.operator == "TfL" or any(leg.mode in _transit_modes for leg in cg.legs):
+                new_details[i] = replace(cg, cost=total)
+        new_details_t = tuple(new_details)
+
+        new_commute = replace(commute, daily_cost=Money(str(total.amount), "GBP"), details=new_details_t)
         return Attempt.succeeded(new_commute)
 
 
@@ -282,15 +309,15 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         if self.bus_result is not None and walk_check_attempt.succeeded and walk_check_attempt.value:
             deps.append(self.bus_result)
 
-        # Rail fare active when transit cost is £0 and the commute uses
-        # rail-based modes (not drive/walk/cycle, which have no rail legs
-        # from which to extract a destination terminal).
+        # Rail fare active when transit cost is £0 OR when transit legs
+        # (train/tube) have no cost attributed (e.g. park-and-ride added
+        # parking cost but the train fare is still missing).
         transit_attempt = self.transit_result.latest_attempt()
         val = transit_attempt.value_or_none()
         if self.rail_fare_node is not None and transit_attempt.succeeded:
             mode = val.mode if val else ""
             cost = float(val.daily_cost.amount) if val and val.daily_cost else 0
-            if cost == 0 and mode in ("transit", "train", "tube", "bus", "dlr", "overground", "tram"):
+            if (cost == 0 or _has_unpriced_transit(val)) and mode in ("transit", "train", "tube", "dlr", "overground", "tram"):
                 deps.append(self.rail_fare_node)
         return tuple(deps)
 
@@ -302,6 +329,22 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         bus: Attempt[Commute] = None,
         rail_fare: Attempt[Commute] = None,
     ) -> Attempt[Commute]:
+        # The optional deps (bus, rail_fare) are passed positionally, but
+        # _get_active_deps() may omit one of them (e.g. no bus when walk is
+        # fine).  When that happens the remaining optional shifts into the
+        # wrong parameter slot.  Remap by identity to get the right attempt.
+        _active = self._get_active_deps()
+        _dep_ids = {id(d) for d in _active}
+        _args = (origin, poi, transit, bus, rail_fare)
+        by_id: dict[int, Attempt] = {}
+        for dep, arg in zip(_active, _args):
+            by_id[id(dep)] = arg
+        origin = by_id.get(id(self.origin))
+        poi = by_id.get(id(self.poi))
+        transit = by_id.get(id(self.transit_result))
+        bus = by_id.get(id(self.bus_result)) if self.bus_result is not None and id(self.bus_result) in _dep_ids else None
+        rail_fare = by_id.get(id(self.rail_fare_node)) if self.rail_fare_node is not None and id(self.rail_fare_node) in _dep_ids else None
+
         if not origin.succeeded or not poi.succeeded:
             return self._impossible({"origin": origin, "poi": poi})
 
@@ -319,7 +362,10 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         if selected is not None:
             val = selected.value_or_none()
             dc = val.daily_cost if val else None
-            if (dc is None or dc.amount == 0) and rail_fare is not None and rail_fare.succeeded:
+            # Use rail_fare when the selected commute has no cost OR has
+            # unpriced transit legs (park-and-ride added parking but train
+            # fare is missing).
+            if (dc is None or dc.amount == 0 or _has_unpriced_transit(val)) and rail_fare is not None and rail_fare.succeeded:
                 return rail_fare
             return selected
 
