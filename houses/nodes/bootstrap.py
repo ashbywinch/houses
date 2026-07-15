@@ -148,13 +148,23 @@ def bootstrap_from_row(row: dict[str, Any], sources: dict[str, UserInputNode]) -
 
 
 def seed_registry_from_sheet() -> int:
+    from dag.persistence import property_rids
+    from houses.property_registry import register_property
+
+    db_rids = property_rids()
+    if db_rids:
+        for rid in db_rids:
+            prop = PropertyNodes(rid)
+            register_property(rid, prop)
+        logger.info("Rebuilt registry for %d properties from DB", len(db_rids))
+        return len(db_rids)
+
     rows = get_properties_data()
     count = 0
     for row in rows:
         raw_rid = (row.get("Rightmove ID") or "").strip()
         if not raw_rid:
             continue
-
         prop = PropertyNodes(raw_rid)
         source_dict = {
             "rightmove_address": prop.rightmove_address,

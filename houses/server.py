@@ -78,7 +78,7 @@ async def lifespan(_app: FastAPI):
         push_rid(rid)
 
     set_after_refresh(_on_node_refreshed)
-    _proc_task = asyncio.create_task(_start_processor())
+    _proc_task = _start_processor()
     _bc_task = asyncio.create_task(_start_broadcaster())
 
     logger.info("Houses server starting" + (" (TRACE enabled)" if settings.trace else ""))

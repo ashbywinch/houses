@@ -17,18 +17,11 @@ class BestAddressNode(DerivedNode[str]):
     """
 
     def __init__(self, node_id: str, *, user_entered_address, corrected_address, rightmove_address):
-        super().__init__(node_id, str, (rightmove_address,))
         self._user_entered = user_entered_address
         self._corrected = corrected_address
         self._user_entered_ts: str = ""
         self._corrected_ts: str = ""
-
-        from dag.signals import Slot
-
-        for src in (user_entered_address, corrected_address):
-            slot = Slot(self._on_dep_changed)
-            self._slots.append(slot)
-            src.changed.connect(slot)
+        super().__init__(node_id, str, (rightmove_address,))
 
     def _is_stale(self) -> bool:
         if self._attempt.pending:
@@ -72,14 +65,13 @@ class BestLocationNode(DerivedNode[GeoPoint]):
     """
 
     def __init__(self, node_id: str, *, precise_location, rightmove_location, best_address, geocode=None):
-        # Only best_address is a hard dep
-        super().__init__(node_id, GeoPoint, (best_address,))
         self._precise_location = precise_location
         self._rightmove_location = rightmove_location
         self._geocode = geocode
         self._precise_ts_at_compute: str = ""
         self._rightmove_ts_at_compute: str = ""
         self._geocode_ts_at_compute: str = ""
+        super().__init__(node_id, GeoPoint, (best_address,))
 
         from dag.signals import Slot
 

@@ -165,3 +165,13 @@ def property_created_at(rid: str) -> str | None:
         (f"{rid}/%",),
     ).fetchone()
     return row[0] if row and row[0] else None
+def property_rids() -> list[str]:
+    """Return distinct property RIDs from the node_results table."""
+    if not _table_exists("node_results"):
+        return []
+    conn = _get_db()
+    rows = conn.execute(
+        "SELECT DISTINCT SUBSTR(node_id, 1, INSTR(node_id, '/') - 1) AS rid"
+        " FROM node_results WHERE node_id LIKE '%/%'"
+    ).fetchall()
+    return sorted(set(r[0] for r in rows if r[0]))

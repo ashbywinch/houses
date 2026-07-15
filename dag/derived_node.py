@@ -98,19 +98,17 @@ def set_after_refresh(callback: Callable[[DerivedNode], object]) -> None:
         sched._after_refresh = callback
 
 
-# ContextVar-based DI — tests call ``set_scheduler(TestScheduler())``.
-
+# Production default — shared across all asyncio tasks.
+# ContextVar override is only for test injection (set_scheduler).
+_default_scheduler: RefreshScheduler = AsyncQueueScheduler()
 _scheduler_var: contextvars.ContextVar[RefreshScheduler | None] = (
     contextvars.ContextVar("_dag_scheduler", default=None)
 )
 
 
 def _get_scheduler() -> RefreshScheduler:
-    sched = _scheduler_var.get()
-    if sched is None:
-        sched = AsyncQueueScheduler()
-        _scheduler_var.set(sched)
-    return sched
+    override = _scheduler_var.get()
+    return override if override is not None else _default_scheduler
 
 
 def set_scheduler(scheduler: RefreshScheduler) -> None:
@@ -127,6 +125,7 @@ def reset_scheduler() -> None:
 
 async def flush_processor() -> None:
     await _get_scheduler().process_pending()
+
 
 def start_processor() -> asyncio.Task:
     """Start the background refresh loop. Returns the asyncio Task."""

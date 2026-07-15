@@ -35,9 +35,9 @@ setup:
 
 run: setup frontend-setup
 	@echo "${YELLOW}Backend: http://127.0.0.1:8080  Frontend: http://localhost:5173${NC}"
-	@trap 'kill 0' EXIT; \
-		cd houses/frontend && npm run dev & \
-		$(UV) run python -m houses
+	@mkdir -p .logs; \
+		cd houses/frontend && npm run dev > ../../.logs/frontend.log 2>&1 & \
+		$(UV) run python -m houses > .logs/backend.log 2>&1
 
 run-prod: setup frontend-build
 	@echo "${YELLOW}Serving frontend build + backend on http://127.0.0.1:8080${NC}"
