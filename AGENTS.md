@@ -37,9 +37,34 @@ make test-integration           # Integration tests only
   proper process trapping.
 - **NEVER start a dev server via ``bash`` with ``&``** — the process dies when
   bash reaps the background job. The Makefile handles this correctly.
-- **NEVER kill the server.** Auto-reload handles code changes. If the server
-  isn't responding (port conflict, stale process), ask the user what to do —
-  don't kill and restart unilaterally.
+- **NEVER kill the server.** Here's why and what to do instead:
+
+  ### Why you must not touch the server:
+  - ``uvicorn --reload`` watches all .py files via inotify. Your code changes are
+    live within ~1 second of saving. The server never runs stale code.
+  - ``make run`` uses ``trap 'kill 0' EXIT`` — killing one process kills both
+    backend and frontend plus the code-review-graph watcher.
+  - ``fuser -k 8080/tcp`` kills indiscriminately: the working server, the CRG
+    watcher, and any connected browser. It creates daemon crash loops.
+  - Launch daemon ``restart: always`` recycles dead servers. Frequent restarts =
+    crash loop → needs manual intervention.
+
+  ### What TO do when you need server output:
+  - **Read logs**: ``launch logs houses-server --lines=30``
+  - **Check if alive**: ``curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/health``
+  - **Check port**: ``ss -tlnp | grep 8080``
+
+  ### CONSTRAINTS — follow this path when anything seems wrong:
+
+  API error, empty page, or server seems broken?
+    - Is ``curl localhost:8080/api/health`` returning 200?
+      - YES → the server is live and running your latest code. **Fix your code.**
+        Read logs: ``launch logs houses-server --lines=20``
+      - NO  → the server may be down. Check port: ``ss -tlnp | grep 8080``
+        - Port 8080 has a listener? → **Tell the user** with ``curl`` + ``launch list`` output.
+        - Port 8080 is empty?       → **Tell the user** "The dev server is not running."
+    - **In every case: do NOT stop, start, or restart anything yourself.**
+      The user controls server lifecycle. You report state.
 
 ## Decision Tree
 

@@ -99,8 +99,6 @@ def init_db(db_path: str | None = None) -> None:
         CREATE INDEX IF NOT EXISTS idx_nr_node ON node_results(node_id, created_at DESC);
     """)
 
-
-
 def save_node_result(node_id: str, result_dict: dict[str, Any],
                      dep_timestamps: dict[str, str] | None = None) -> int:
     """Persist a node's to_json() output to the node_results table.

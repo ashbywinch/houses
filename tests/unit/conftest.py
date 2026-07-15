@@ -8,10 +8,17 @@ from pathlib import Path
 
 import pytest
 
-from dag.derived_node import TestScheduler, flush_processor, set_scheduler
+from dag.derived_node import flush_processor
 from houses.api_cache import set_cache_dir
 from houses.config import settings
 from tests.helpers import FakeCommuteRouter, FakeSchoolLookup, make_services
+
+# Critical isolation fixtures (in-memory DB, isolated scheduler) live in
+# isolation_fixtures.py so they can't be accidentally broken by import edits.
+from tests.unit.isolation_fixtures import (  # noqa: F401, F811
+    _inject_test_scheduler,
+    _sqlite_memory,
+)
 
 
 def flush_all() -> None:
@@ -32,13 +39,6 @@ def _make_mock_services():
         commute_router=FakeCommuteRouter(),
         school_lookup=FakeSchoolLookup(),
     )
-@pytest.fixture(autouse=True)
-def _inject_test_scheduler():
-    """Each test gets an isolated scheduler — no global queue leakage."""
-    set_scheduler(TestScheduler())
-    yield
-
-
 
 
 @pytest.fixture(autouse=True)
@@ -65,20 +65,6 @@ def _no_sheet_writes():
     yield
     settings.sheet_id = saved
 
-
-@pytest.fixture(autouse=True)
-def _sqlite_memory():
-    import sqlite3
-
-    import dag.persistence as per
-
-    saved = per._get_db
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    per._get_db = lambda: conn
-    per.init_db()
-    yield
-    per._get_db = saved
 
 @pytest.fixture(autouse=True)
 def _mock_services():
