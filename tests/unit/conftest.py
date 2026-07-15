@@ -80,7 +80,6 @@ def _sqlite_memory():
     yield
     per._get_db = saved
 
-
 @pytest.fixture(autouse=True)
 def _mock_services():
     """Set mock services AFTER _sqlite_memory has switched to in-memory DB."""
