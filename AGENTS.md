@@ -66,6 +66,34 @@ make test-integration           # Integration tests only
     - **In every case: do NOT stop, start, or restart anything yourself.**
       The user controls server lifecycle. You report state.
 
+- **NEVER delete or recreate the database.** Here's why and what to do instead:
+
+  ### Why you must not touch the database:
+  - The DB is backed by ``node_results``, ``source_values``, and other tables
+    that persist property data. Deleting it erases real data irrecoverably.
+  - Every property's DAG state, commute results, EPC data, and user settings
+    live in the DB. Re-seeding from the sheet only restores raw addresses —
+    computed data is gone.
+  - Test failures, server errors, and unexpected behavior are **always** caused
+    by code bugs, never by a "corrupted" or "stale" database.
+  - The DB file is at ``data/houses.db`` (SQLite). Deleting ``data/`` or running
+    ``rm data/houses.db`` destroys everything.
+
+  ### What TO do when data seems wrong:
+  - **Inspect the DB directly**: ``sqlite3 data/houses.db "SELECT * FROM node_results LIMIT 5;"``
+  - **Check a property's DAG state**: query ``node_results`` for a specific RID
+  - **Re-run a specific computation**: call the relevant API endpoint, don't nuke the DB
+  - **Write a test that reproduces the bug** — if the test passes against a fresh DB
+    but fails against real data, the bug is in how you seeded, not in the DB itself
+
+  ### CONSTRAINTS:
+  - **Do NOT** run ``rm``, ``unlink``, ``truncate``, ``DROP TABLE``, or any
+    command that deletes database files or tables.
+  - **Do NOT** delete ``data/``, ``data/houses.db``, or any file under ``data/``.
+  - **If you believe the DB is corrupted**: reproduce the issue in a test against
+    a clean in-memory SQLite database. If it reproduces, it's a code bug. If it
+    doesn't, the real DB has data your code doesn't handle — fix the code.
+
 ## Decision Tree
 
 - **Develop / test / run**: [docs/development.md](docs/development.md)

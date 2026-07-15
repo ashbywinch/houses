@@ -141,6 +141,43 @@ GEOPOINT_NODES = {"rightmove_location", "geocode_location", "precise_location", 
 The DAG was replaced in 2026. Nodes now live in `houses/nodes/` using the
 `dag/` library (`DerivedNode`, `UserInputNode`, `Attempt`, `Provenance`).
 
+### One concept, one node
+
+Every distinct derived value gets its own `DerivedNode` subclass in
+`houses/nodes/`. If a node's `compute()` would calculate something that
+isn't part of that node's named purpose, split it into a new node.
+
+```python
+# ✅ Correct — each calculation is its own node
+class PetrolNode(DerivedNode[PetrolCost]):
+    deps: (commute_node,)
+    async def compute(self, commute: Attempt[CommuteResult]) -> Attempt[PetrolCost]:
+        ...
+
+class CommuteNode(DerivedNode[CommuteResult]):
+    ...  # only commute logic, not petrol
+
+# ❌ Wrong — CommuteNode should not calculate petrol costs
+class CommuteNode(DerivedNode[CommuteResult]):
+    async def compute(self, ...) -> Attempt[CommuteResult]:
+        commute = calculate_commute(...)
+        petrol = calculate_petrol(...)  # unrelated logic shoved in
+        ...
+```
+
+**Why:**
+- Each node has a single responsibility — test it in isolation, compose freely
+- The signal chain tracks real dependencies; shoving unrelated logic into one
+  node hides the dependency graph and causes unnecessary recomputation
+- A node's return type maps directly to what it computes; one node returning
+  a tuple of unrelated values means no downstream node can depend on just one
+  of them
+- Adding a new node costs ~30 lines and doesn't touch existing compute logic
+
+**Signal to create a new node:** You're adding code to an existing `compute()`
+that reads data the node didn't already use, or returns a value conceptually
+independent of the node's current return type.
+
 ### Every compute MUST return Attempt[T]
 
 No raw values, no `None`, no implicit returns. Every code path must end with
