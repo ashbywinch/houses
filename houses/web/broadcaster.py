@@ -4,6 +4,7 @@ When a DAG node finishes recomputing (via _processor), its RID is pushed
 to _broadcast_queue.  The _broadcaster picks it up, recomputes the full
 summary for that property, and sends it to all connected WebSocket clients.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -39,13 +40,13 @@ def push_rid(rid: str) -> None:
 
 async def _broadcaster() -> None:
     """Pop completed RIDs from the queue and push summaries."""
-    from houses.property_registry import _registry
+    from houses.property_registry import get_property
 
     while True:
         rid = await _broadcast_queue.get()
         if not _websocket_clients:
             continue
-        prop = _registry.get(rid)
+        prop = get_property(rid)
         if prop is None:
             continue
         try:

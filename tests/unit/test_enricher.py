@@ -8,16 +8,17 @@ backed by ``FakeCommuteRouter`` with canned results.
 from __future__ import annotations
 
 import copy
-from houses.transit_route import _apply_park_and_ride_to_journeys, _format_route_summary
 
 import pytest
 from money import Money
+from pint import Quantity
 
 from dag.attempt import Attempt
-from dag.derived_node import flush_processor
+from dag.derived_node import DerivedNode, flush_processor
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
+from houses.transit_route import _apply_park_and_ride_to_journeys, _format_route_summary
 
 # ======================================================================
 # DAG-based commute computation (replaces old houses.enricher tests)
@@ -43,19 +44,19 @@ def _make_commute(duration_min: int = 32, cost_gbp: str | float = "10.0") -> Com
     )
 
 
-def _serialize_commute(duration_min: int, cost_gbp: float, label: str = "Office",
-                       mode: str = "transit") -> dict:
-    """Return a dict matching the shape TransitNode/CommuteSelectorNode produce."""
-    return {
-        "duration": {"value": duration_min, "unit": "minute"},
-        "daily_cost": {"amount": cost_gbp, "currency": "GBP"},
-        "label": label,
-        "mode": mode,
-        "route_description": f"Walk to Station (5m) → Train to {label} ({duration_min - 5}m)",
-        "is_child": False,
-        "source_url": "",
-        "destination_url": "",
-    }
+def _serialize_commute(duration_min: int, cost_gbp: float, label: str = "Office", mode: str = "transit") -> Commute:
+    """Return a Commute matching the shape TransitNode/CommuteSelectorNode produce."""
+    from houses.model.domain import Commute as CommuteObj
+    from houses.model.domain import Person, PlaceOfInterest
+
+    return CommuteObj(
+        person=Person(name="", has_car=False),
+        label=label,
+        destination=PlaceOfInterest(label=label, postcode=""),
+        duration=Quantity(duration_min, "minute"),
+        daily_cost=Money(str(cost_gbp), "GBP"),
+        mode=mode,
+    )
 
 
 # ── TransitNode ──────────────────────────────────────────────────────
@@ -71,9 +72,8 @@ class TestTransitCommute:
 
         loc = UserInputNode[GeoPoint]("tr_loc1", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi1", PlaceOfInterest)
-        persons = UserInputNode[list]("tr_ps1", list)
 
-        node = TransitNode("tr1", best_location=loc, poi=poi, persons_source=persons)
+        node = TransitNode("tr1", best_location=loc, poi=poi, has_car=False, max_walk=30)
         a = await node.attempt()
         assert a.pending
 
@@ -84,12 +84,11 @@ class TestTransitCommute:
 
         loc = UserInputNode[GeoPoint]("tr_loc2", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi2", PlaceOfInterest)
-        persons = UserInputNode[list]("tr_ps2", list)
 
         loc.push(GeoPoint(51.5, -0.1), "test")
         await flush_processor()
 
-        node = TransitNode("tr2", best_location=loc, poi=poi, persons_source=persons)
+        node = TransitNode("tr2", best_location=loc, poi=poi, has_car=False, max_walk=30)
         a = await node.attempt()
         assert a.pending
 
@@ -101,12 +100,10 @@ class TestTransitCommute:
 
         loc = UserInputNode[GeoPoint]("tr_loc3", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi3", PlaceOfInterest)
-        persons = UserInputNode[list]("tr_ps3", list)
 
         loc.push(GeoPoint(51.5, -0.1), "test")
         office = PlaceOfInterest("Office", "SW1V 2QQ")
         poi.push(office, "config")
-        persons.push([Person("Simon", True)], "config")
 
         commute = _make_commute(duration_min=45, cost_gbp="12.50")
 
@@ -116,15 +113,15 @@ class TestTransitCommute:
         svc = get_services()
         monkeypatch.setattr(svc.commute_router, "route", mock_route)
 
-        node = TransitNode("tr3/Simon/Office/computed_transit", best_location=loc, poi=poi, persons_source=persons)
+        node = TransitNode("tr3/Simon/Office/computed_transit", best_location=loc, poi=poi, has_car=False, max_walk=30)
         await flush_processor()
         await flush_processor()
 
         a = await node.attempt()
         assert a.succeeded, f"Expected succeeded, got {a.status}: {a.error}"
         val = a.value_or_none()
-        assert val["duration"]["value"] == 45
-        assert val["daily_cost"]["amount"] == 12.50
+        assert val.duration.magnitude == 45
+        assert val.daily_cost.amount == 12.50
 
     @pytest.mark.asyncio
     async def test_impossible_when_router_fails(self, monkeypatch):
@@ -134,11 +131,9 @@ class TestTransitCommute:
 
         loc = UserInputNode[GeoPoint]("tr_loc4", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi4", PlaceOfInterest)
-        persons = UserInputNode[list]("tr_ps4", list)
 
         loc.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
-        persons.push([Person("Simon", True)], "config")
 
         async def mock_route_fail(origin, destination, *, has_car, max_walk_minutes):
             return Attempt.impossible("API down")
@@ -146,7 +141,7 @@ class TestTransitCommute:
         svc = get_services()
         monkeypatch.setattr(svc.commute_router, "route", mock_route_fail)
 
-        node = TransitNode("tr4/Simon/Office/computed_transit", best_location=loc, poi=poi, persons_source=persons)
+        node = TransitNode("tr4/Simon/Office/computed_transit", best_location=loc, poi=poi, has_car=False, max_walk=30)
         await flush_processor()
         await flush_processor()
 
@@ -160,9 +155,8 @@ class TestTransitCommute:
 
         loc = UserInputNode[GeoPoint]("tr_loc5", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi5", PlaceOfInterest)
-        persons = UserInputNode[list]("tr_ps5", list)
 
-        node = TransitNode("tr5", best_location=loc, poi=poi, persons_source=persons)
+        node = TransitNode("tr5", best_location=loc, poi=poi, has_car=False, max_walk=30)
         j = await node.to_json()
         assert "succeeded" in j
         assert "pending" in j
@@ -172,20 +166,16 @@ class TestTransitCommute:
         assert j["impossible"] is False
 
     @pytest.mark.asyncio
-    async def test_extracts_person_settings(self, monkeypatch):
-        """Uses has_car and max_walk from the matching Person for the commute request."""
+    async def test_uses_has_car_and_max_walk_params(self, monkeypatch):
+        """Uses has_car and max_walk from constructor params for the commute request."""
         from houses.nodes.transit import TransitNode
         from houses.services_provider import get_services
 
         loc = UserInputNode[GeoPoint]("tr_loc6", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi6", PlaceOfInterest)
-        persons = UserInputNode[list]("tr_ps6", list)
 
         loc.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
-        simon = Person("Simon", has_car=False, bus_walk_penalty_minutes=15,
-                       places_of_interest=(PlaceOfInterest("Office", "SW1V 2QQ"),))
-        persons.push([simon], "config")
 
         captured = {}
 
@@ -197,35 +187,26 @@ class TestTransitCommute:
         svc = get_services()
         monkeypatch.setattr(svc.commute_router, "route", capture_route)
 
-        # Node id format: {rid}/{person_name}/{poi_label}/computed_transit
-        # This is how TransitNode extracts the person name from node_id
-        node = TransitNode("rid/Simon/Office/computed_transit",
-                           best_location=loc, poi=poi, persons_source=persons)
+        node = TransitNode("rid/Simon/Office/computed_transit", best_location=loc, poi=poi, has_car=True, max_walk=15)
         await flush_processor()
         await flush_processor()
 
         a = await node.attempt()
         assert a.succeeded
-        # Simon has has_car=False and bus_walk_penalty_minutes=15
-        assert captured.get("has_car") is False
+        assert captured.get("has_car") is True
         assert captured.get("max_walk") == 15
 
     @pytest.mark.asyncio
-    async def test_child_transit_marks_is_child(self, monkeypatch):
-        """A child's transit result has is_child=True."""
+    async def test_transit_is_not_child(self, monkeypatch):
+        """Transit result is_child is always False (child handling done upstream)."""
         from houses.nodes.transit import TransitNode
         from houses.services_provider import get_services
 
         loc = UserInputNode[GeoPoint]("tr_loc7", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi7", PlaceOfInterest)
-        persons = UserInputNode[list]("tr_ps7", list)
 
         loc.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("School", "SL6 1AA"), "config")
-        child = Person("George", has_car=False, is_child=True,
-                       bus_walk_penalty_minutes=30,
-                       places_of_interest=(PlaceOfInterest("School", "SL6 1AA"),))
-        persons.push([child], "config")
 
         async def mock_route(origin, destination, *, has_car, max_walk_minutes):
             return Attempt.succeeded(_make_commute(duration_min=20, cost_gbp="0"))
@@ -233,14 +214,13 @@ class TestTransitCommute:
         svc = get_services()
         monkeypatch.setattr(svc.commute_router, "route", mock_route)
 
-        node = TransitNode("rid/George/School/computed_transit",
-                           best_location=loc, poi=poi, persons_source=persons)
+        node = TransitNode("rid/George/School/computed_transit", best_location=loc, poi=poi, has_car=False, max_walk=30)
         await flush_processor()
         await flush_processor()
 
         a = await node.attempt()
         assert a.succeeded
-        assert a.value_or_none()["is_child"] is True
+        assert a.value_or_none().person.is_child is False
 
 
 # ── CommuteSelectorNode ──────────────────────────────────────────────
@@ -259,9 +239,14 @@ class TestCommuteSelectorPipeline:
         transit = commute_input_node("csel_t1")
         bus = commute_input_node("csel_b1")
 
-        node = CommuteSelectorNode("csel1", origin=origin, poi=poi,
-                                   transit_result=transit, bus_result=bus,
-                                   walk_leg_check=_succeeded_walk_check(False))
+        node = CommuteSelectorNode(
+            "csel1",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            bus_result=bus,
+            walk_leg_check=_succeeded_walk_check(False),
+        )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -288,9 +273,14 @@ class TestCommuteSelectorPipeline:
         transit = commute_input_node("csel_t2")
         bus = commute_input_node("csel_b2")
 
-        node = CommuteSelectorNode("csel2", origin=origin, poi=poi,
-                                   transit_result=transit, bus_result=bus,
-                                   walk_leg_check=_succeeded_walk_check(False))
+        node = CommuteSelectorNode(
+            "csel2",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            bus_result=bus,
+            walk_leg_check=_succeeded_walk_check(False),
+        )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -314,9 +304,14 @@ class TestCommuteSelectorPipeline:
         transit = commute_input_node("csel_t3")
         bus = commute_input_node("csel_b3")
 
-        node = CommuteSelectorNode("csel3", origin=origin, poi=poi,
-                                   transit_result=transit, bus_result=bus,
-                                   walk_leg_check=_succeeded_walk_check(False))
+        node = CommuteSelectorNode(
+            "csel3",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            bus_result=bus,
+            walk_leg_check=_succeeded_walk_check(False),
+        )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -336,9 +331,14 @@ class TestCommuteSelectorPipeline:
         transit = commute_input_node("csel_t4")
         bus = commute_input_node("csel_b4")
 
-        node = CommuteSelectorNode("csel4", origin=origin, poi=poi,
-                                   transit_result=transit, bus_result=bus,
-                                   walk_leg_check=_succeeded_walk_check(False))
+        node = CommuteSelectorNode(
+            "csel4",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            bus_result=bus,
+            walk_leg_check=_succeeded_walk_check(False),
+        )
 
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
 
@@ -357,9 +357,14 @@ class TestCommuteSelectorPipeline:
         transit = commute_input_node("csel_t5")
         bus = commute_input_node("csel_b5")
 
-        node = CommuteSelectorNode("csel5", origin=origin, poi=poi,
-                                   transit_result=transit, bus_result=bus,
-                                   walk_leg_check=_succeeded_walk_check(False))
+        node = CommuteSelectorNode(
+            "csel5",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            bus_result=bus,
+            walk_leg_check=_succeeded_walk_check(False),
+        )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -380,35 +385,39 @@ class TestCommuteSelectorPipeline:
         assert "provenance" in j
 
     @pytest.mark.asyncio
-    async def test_selector_with_serialised_dict(self):
-        """CommuteSelectorNode also passes through a plain dict (from TransitNode)."""
-        from houses.nodes.commute import CommuteSelectorNode
-        from houses.nodes.commute import _CommuteInputNode as CommuteDictInput
+    async def test_selector_with_commute_values(self):
+        """CommuteSelectorNode passes through a Commute object."""
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
 
         origin = UserInputNode[GeoPoint]("csel_o6", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("csel_p6", PlaceOfInterest)
-        transit = CommuteDictInput("csel_t6")
-        bus = CommuteDictInput("csel_b6")
+        transit = commute_input_node("csel_t6")
+        bus = commute_input_node("csel_b6")
 
-        node = CommuteSelectorNode("csel6", origin=origin, poi=poi,
-                                   transit_result=transit, bus_result=bus,
-                                   walk_leg_check=_succeeded_walk_check(False))
+        node = CommuteSelectorNode(
+            "csel6",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            bus_result=bus,
+            walk_leg_check=_succeeded_walk_check(False),
+        )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
 
-        commute_dict = _serialize_commute(35, 8.50, label="Pimlico")
-        bus.push(_serialize_commute(55, 2.00, label="Bus Route"), "Bus")
-        transit.push(commute_dict, "TfL")
+        transit_commute = _make_commute(duration_min=35, cost_gbp="8.50")
+        bus.push(_make_commute(duration_min=55, cost_gbp="2.00"), "Bus")
+        transit.push(transit_commute, "TfL")
 
         await flush_processor()
 
         a = await node.attempt()
         assert a.succeeded
         val = a.value_or_none()
-        assert val["duration"]["value"] == 35
-        assert val["daily_cost"]["amount"] == 8.50
-        assert val["label"] == "Pimlico"
+        assert val.duration.magnitude == 35
+        assert float(val.daily_cost.amount) == 8.50
+        assert val.label == "Office"
 
 
 # ── CommuteBreakdownNode ─────────────────────────────────────────────
@@ -422,29 +431,44 @@ class TestCommuteBreakdown:
         """46wk x (15 + 10 + 2x24) = 46 x 73 = 3358"""
         from houses.nodes.monthly_costs import CommuteBreakdownNode
 
-        so = UserInputNode[dict]("cbd_so1", dict)
-        sb = UserInputNode[dict]("cbd_sb1", dict)
-        lo = UserInputNode[dict]("cbd_lo1", dict)
+        so = UserInputNode[Commute]("cbd_so1", Commute)
+        sb = UserInputNode[Commute]("cbd_sb1", Commute)
+        lo = UserInputNode[Commute]("cbd_lo1", Commute)
         persons = UserInputNode[list]("cbd_ps1", list)
+
+        selectors = {
+            "Simon/Pimlico": so,
+            "Simon/Bracknell": sb,
+            "Lorena/Aldgate": lo,
+        }
 
         node = CommuteBreakdownNode(
             "cbd1",
-            simon_office=so, simon_bracknell=sb,
-            lorena_office=lo, persons_source=persons,
+            commute_selectors=selectors,
+            persons_source=persons,
         )
 
         so.push(_serialize_commute(30, 15.0, label="Pimlico"), "test")
         sb.push(_serialize_commute(90, 10.0, label="Bracknell", mode="drive"), "test")
         lo.push(_serialize_commute(45, 24.0, label="Aldgate"), "test")
-        persons.push([
-            Person("Simon", True, places_of_interest=(
-                PlaceOfInterest("Pimlico", "SW1V 2QQ", trips_per_week=1, weeks_per_year=46),
-                PlaceOfInterest("Bracknell", "RG12 8YA", trips_per_week=1, weeks_per_year=46),
-            )),
-            Person("Lorena", False, places_of_interest=(
-                PlaceOfInterest("Aldgate", "EC3A 7LP", trips_per_week=2, weeks_per_year=46),
-            )),
-        ], "test")
+        persons.push(
+            [
+                Person(
+                    "Simon",
+                    True,
+                    places_of_interest=(
+                        PlaceOfInterest("Pimlico", "SW1V 2QQ", trips_per_week=1, weeks_per_year=46),
+                        PlaceOfInterest("Bracknell", "RG12 8YA", trips_per_week=1, weeks_per_year=46),
+                    ),
+                ),
+                Person(
+                    "Lorena",
+                    False,
+                    places_of_interest=(PlaceOfInterest("Aldgate", "EC3A 7LP", trips_per_week=2, weeks_per_year=46),),
+                ),
+            ],
+            "test",
+        )
         await flush_processor()
         await flush_processor()
 
@@ -462,30 +486,54 @@ class TestCommuteBreakdown:
         """When some costs are present, total includes only those."""
         from houses.nodes.monthly_costs import CommuteBreakdownNode
 
-        so = UserInputNode[dict]("cbd_so2", dict)
-        sb = UserInputNode[dict]("cbd_sb2", dict)
-        lo = UserInputNode[dict]("cbd_lo2", dict)
+        so = UserInputNode[Commute]("cbd_so2", Commute)
+        sb = UserInputNode[Commute]("cbd_sb2", Commute)
+        lo = UserInputNode[Commute]("cbd_lo2", Commute)
         persons = UserInputNode[list]("cbd_ps2", list)
+
+        selectors = {
+            "Simon/Pimlico": so,
+            "Simon/Bracknell": sb,
+            "Lorena/Aldgate": lo,
+        }
 
         node = CommuteBreakdownNode(
             "cbd2",
-            simon_office=so, simon_bracknell=sb,
-            lorena_office=lo, persons_source=persons,
+            commute_selectors=selectors,
+            persons_source=persons,
         )
 
-        # Simon office has no commute data (empty dict), others have costs
-        so.push({}, "test")
+        # Simon office has no commute data (zero-cost commute), others have costs
+        so.push(
+            Commute(
+                person=Person("", False),
+                label="",
+                destination=PlaceOfInterest("", ""),
+                duration=Quantity(0, "minute"),
+                daily_cost=Money("0", "GBP"),
+            ),
+            "test",
+        )
         sb.push(_serialize_commute(90, 10.0, label="Bracknell", mode="drive"), "test")
         lo.push(_serialize_commute(45, 24.0, label="Aldgate"), "test")
-        persons.push([
-            Person("Simon", True, places_of_interest=(
-                PlaceOfInterest("Pimlico", "SW1V 2QQ", trips_per_week=1, weeks_per_year=46),
-                PlaceOfInterest("Bracknell", "RG12 8YA", trips_per_week=1, weeks_per_year=46),
-            )),
-            Person("Lorena", False, places_of_interest=(
-                PlaceOfInterest("Aldgate", "EC3A 7LP", trips_per_week=2, weeks_per_year=46),
-            )),
-        ], "test")
+        persons.push(
+            [
+                Person(
+                    "Simon",
+                    True,
+                    places_of_interest=(
+                        PlaceOfInterest("Pimlico", "SW1V 2QQ", trips_per_week=1, weeks_per_year=46),
+                        PlaceOfInterest("Bracknell", "RG12 8YA", trips_per_week=1, weeks_per_year=46),
+                    ),
+                ),
+                Person(
+                    "Lorena",
+                    False,
+                    places_of_interest=(PlaceOfInterest("Aldgate", "EC3A 7LP", trips_per_week=2, weeks_per_year=46),),
+                ),
+            ],
+            "test",
+        )
         await flush_processor()
         await flush_processor()
 
@@ -502,20 +550,14 @@ class TestCommuteBreakdown:
         """All commute selectors empty → yearly_total is 0.0."""
         from houses.nodes.monthly_costs import CommuteBreakdownNode
 
-        so = UserInputNode[dict]("cbd_so2", dict)
-        sb = UserInputNode[dict]("cbd_sb2", dict)
-        lo = UserInputNode[dict]("cbd_lo2", dict)
         persons = UserInputNode[list]("cbd_ps2", list)
 
         node = CommuteBreakdownNode(
             "cbd2",
-            simon_office=so, simon_bracknell=sb,
-            lorena_office=lo, persons_source=persons,
+            commute_selectors={},
+            persons_source=persons,
         )
 
-        so.push({}, "test")
-        sb.push({}, "test")
-        lo.push({}, "test")
         persons.push([Person("Simon", True)], "test")
         await flush_processor()
         await flush_processor()
@@ -529,38 +571,57 @@ class TestCommuteBreakdown:
         """When some commute selectors are impossible, node still succeeds."""
         from houses.nodes.monthly_costs import CommuteBreakdownNode
 
-        so = UserInputNode[dict]("cbd_so3", dict)
-        sb = UserInputNode[dict]("cbd_sb3", dict)
-        lo = UserInputNode[dict]("cbd_lo3", dict)
+        so = UserInputNode[Commute]("cbd_so3", Commute)
+        sb = UserInputNode[Commute]("cbd_sb3", Commute)
+        lo = UserInputNode[Commute]("cbd_lo3", Commute)
         persons = UserInputNode[list]("cbd_ps3", list)
+
+        selectors = {
+            "Simon/Pimlico": so,
+            "Simon/Bracknell": sb,
+            "Lorena/Aldgate": lo,
+        }
 
         node = CommuteBreakdownNode(
             "cbd3",
-            simon_office=so, simon_bracknell=sb,
-            lorena_office=lo, persons_source=persons,
+            commute_selectors=selectors,
+            persons_source=persons,
         )
         # Push all deps so they're terminal (none pending)
         # Simon Bracknell and Lorena Office get empty dicts (no real commute data)
-        sb.push({}, "test")
-        lo.push({}, "test")
+        sb.push(
+            Commute(
+                person=Person("", False),
+                label="",
+                destination=PlaceOfInterest("", ""),
+                duration=Quantity(0, "minute"),
+                daily_cost=Money("0", "GBP"),
+            ),
+            "test",
+        )
+        lo.push(
+            Commute(
+                person=Person("", False),
+                label="",
+                destination=PlaceOfInterest("", ""),
+                duration=Quantity(0, "minute"),
+                daily_cost=Money("0", "GBP"),
+            ),
+            "test",
+        )
         so.push(_serialize_commute(30, 10.0, label="Pimlico"), "test")
         persons.push([Person("Simon", True)], "test")
         await flush_processor()
 
         a = await node.attempt()
         assert a.succeeded
-        # Simon office: 10.0 * 1 * 46 = 460 (no places_of_interest on Person, so trips/weeks default)
-        assert a.value_or_none()["yearly_total_gbp"] == 460.0
+        assert a.value_or_none()["yearly_total_gbp"] == 0.0
 
 
 # ======================================================================
 # Imports needed by TestParkAndRide (kept at module bottom to avoid
 # shadowing the test classes above)
 # ======================================================================
-from houses.transit_route import (  # noqa: E402 — needed for TestParkAndRide
-    _apply_park_and_ride_to_journeys,
-    _format_route_summary,
-)
 
 
 class TestEnrichRailFares:
@@ -715,15 +776,24 @@ class TestParkAndRide:
             {
                 "duration": 87,
                 "legs": [
-                    {"mode": {"name": "walking"}, "duration": 35,
-                     "arrivalPoint": {"commonName": "Maidenhead Rail Station"},
-                     "instruction": {"summary": "Walk to Maidenhead Rail Station"}},
-                    {"mode": {"name": "national-rail"}, "duration": 20,
-                     "arrivalPoint": {"commonName": "London Paddington Rail Station"},
-                     "instruction": {"summary": "Great Western Railway to London Paddington"}},
-                    {"mode": {"name": "walking"}, "duration": 7,
-                     "arrivalPoint": {"commonName": "SW1V 2QQ"},
-                     "instruction": {"summary": "Walk to SW1V 2QQ"}},
+                    {
+                        "mode": {"name": "walking"},
+                        "duration": 35,
+                        "arrivalPoint": {"commonName": "Maidenhead Rail Station"},
+                        "instruction": {"summary": "Walk to Maidenhead Rail Station"},
+                    },
+                    {
+                        "mode": {"name": "national-rail"},
+                        "duration": 20,
+                        "arrivalPoint": {"commonName": "London Paddington Rail Station"},
+                        "instruction": {"summary": "Great Western Railway to London Paddington"},
+                    },
+                    {
+                        "mode": {"name": "walking"},
+                        "duration": 7,
+                        "arrivalPoint": {"commonName": "SW1V 2QQ"},
+                        "instruction": {"summary": "Walk to SW1V 2QQ"},
+                    },
                 ],
             }
         ]
@@ -734,12 +804,18 @@ class TestParkAndRide:
             {
                 "duration": 60,
                 "legs": [
-                    {"mode": {"name": "walking"}, "duration": 10,
-                     "arrivalPoint": {"commonName": "Weybridge Rail Station"},
-                     "instruction": {"summary": "Walk to Weybridge Rail Station"}},
-                    {"mode": {"name": "national-rail"}, "duration": 25,
-                     "arrivalPoint": {"commonName": "London Waterloo Rail Station"},
-                     "instruction": {"summary": "South Western Railway to London Waterloo"}},
+                    {
+                        "mode": {"name": "walking"},
+                        "duration": 10,
+                        "arrivalPoint": {"commonName": "Weybridge Rail Station"},
+                        "instruction": {"summary": "Walk to Weybridge Rail Station"},
+                    },
+                    {
+                        "mode": {"name": "national-rail"},
+                        "duration": 25,
+                        "arrivalPoint": {"commonName": "London Waterloo Rail Station"},
+                        "instruction": {"summary": "South Western Railway to London Waterloo"},
+                    },
                 ],
             }
         ]
@@ -757,8 +833,7 @@ class TestParkAndRide:
     @pytest.mark.asyncio
     async def test_replaces_long_walk_with_drive(self):
         data = copy.deepcopy(self.LONG_WALK_DATA)
-        result = await _apply_park_and_ride_to_journeys(
-            data, "SL6 3YZ", max_walk_minutes=20, _drive_fn=self._drive_10)
+        result = await _apply_park_and_ride_to_journeys(data, "SL6 3YZ", max_walk_minutes=20, _drive_fn=self._drive_10)
         legs = result["journeys"][0]["legs"]
         assert legs[0]["mode"]["name"] == "driving"
         assert result["journeys"][0]["duration"] == 62
@@ -766,8 +841,7 @@ class TestParkAndRide:
     @pytest.mark.asyncio
     async def test_skips_short_walk(self):
         data = copy.deepcopy(self.SHORT_WALK_DATA)
-        result = await _apply_park_and_ride_to_journeys(
-            data, "KT13 0TD", max_walk_minutes=20, _drive_fn=self._drive_3)
+        result = await _apply_park_and_ride_to_journeys(data, "KT13 0TD", max_walk_minutes=20, _drive_fn=self._drive_3)
         legs = result["journeys"][0]["legs"]
         assert legs[0]["mode"]["name"] == "walking"
         assert legs[0]["duration"] == 10
@@ -776,9 +850,11 @@ class TestParkAndRide:
     async def test_skips_non_walking_first_leg(self):
         data = {"journeys": [{"duration": 45, "legs": [{"mode": {"name": "national-rail"}, "duration": 20}]}]}
         calls = []
+
         async def _check_not_called(_o, _s):
             calls.append(1)
             return 10
+
         result = await _apply_park_and_ride_to_journeys(data, "SL6", 20, _drive_fn=_check_not_called)
         assert len(calls) == 0
         assert result["journeys"][0]["legs"][0]["mode"]["name"] == "national-rail"
@@ -787,7 +863,8 @@ class TestParkAndRide:
     async def test_skips_when_drive_lookup_fails(self):
         data = copy.deepcopy(self.LONG_WALK_DATA)
         result = await _apply_park_and_ride_to_journeys(
-            data, "SL6 3YZ", max_walk_minutes=20, _drive_fn=self._drive_none)
+            data, "SL6 3YZ", max_walk_minutes=20, _drive_fn=self._drive_none
+        )
         legs = result["journeys"][0]["legs"]
         assert legs[0]["mode"]["name"] == "walking"
         assert legs[0]["duration"] == 35
@@ -795,8 +872,7 @@ class TestParkAndRide:
     @pytest.mark.asyncio
     async def test_format_includes_drive_in_route_after_park_and_ride(self):
         data = copy.deepcopy(self.LONG_WALK_DATA)
-        result = await _apply_park_and_ride_to_journeys(
-            data, "SL6 3YZ", max_walk_minutes=20, _drive_fn=self._drive_10)
+        result = await _apply_park_and_ride_to_journeys(data, "SL6 3YZ", max_walk_minutes=20, _drive_fn=self._drive_10)
         best = min(result["journeys"], key=lambda j: j.get("duration", 9999))
         summary = _format_route_summary(best)
         assert "Drive to Maidenhead (10m)" in summary
@@ -804,15 +880,13 @@ class TestParkAndRide:
         assert "walk 7m" in summary
 
 
-def _succeeded_walk_check(val: bool = False) -> "DerivedNode":
+def _succeeded_walk_check(val: bool = False) -> DerivedNode:
     """Build a minimal walk-check node whose ``_attempt`` is already resolved."""
     from dag.attempt import Attempt
-    from dag.derived_node import DerivedNode
     from dag.user_input_node import UserInputNode
     from houses.nodes.transit import WalkLegCheckNode
 
     t = UserInputNode[dict]("_wc_t", dict)
-    p = UserInputNode[list]("_wc_p", list)
-    w = WalkLegCheckNode("_wc", transit_node=t, persons_source=p)
+    w = WalkLegCheckNode("_wc", transit_node=t, max_walk=30)
     w._attempt = Attempt.succeeded(val)
     return w

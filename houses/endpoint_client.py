@@ -127,10 +127,13 @@ class EndpointClient:
                     )
                 elif 400 <= e.status < 500:
                     self._permanently_blocked = True
-                    body = getattr(e, 'read', lambda: b'')()
+                    body = getattr(e, "read", lambda: b"")()
                     logger.warning(
                         "%s: HTTP %d on attempt %d → permanently blocked. body=%s",
-                        self.name, e.status, attempt + 1, body,
+                        self.name,
+                        e.status,
+                        attempt + 1,
+                        body,
                     )
                     return None
                 else:
@@ -151,7 +154,10 @@ class EndpointClient:
                     self._permanently_blocked = True
                     logger.warning(
                         "%s: HTTP %d on attempt %d → permanently blocked. body=%s",
-                        self.name, e.response.status_code, attempt + 1, body,
+                        self.name,
+                        e.response.status_code,
+                        attempt + 1,
+                        body,
                     )
                     return None
                 else:

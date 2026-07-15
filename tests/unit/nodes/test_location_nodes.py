@@ -14,6 +14,7 @@ class TestBestAddressNode:
         corrected = UserInputNode[str]("corrected", str)
         rightmove = UserInputNode[str]("rightmove", str)
         from houses.nodes.location import BestAddressNode
+
         node = BestAddressNode(
             "best_addr",
             user_entered_address=user,
@@ -35,12 +36,13 @@ class TestBestAddressNode:
     @pytest.mark.asyncio
     async def test_corrected_takes_priority_over_rightmove(self, nodes):
         from houses.nodes.location import BestAddressNode
+
         # Create a node without user_entered to verify corrected > rightmove
         corrected = UserInputNode[str]("c2", str)
         rightmove = UserInputNode[str]("r2", str)
-        node = BestAddressNode("ba2", user_entered_address=corrected,
-                                corrected_address=corrected,
-                                rightmove_address=rightmove)
+        node = BestAddressNode(
+            "ba2", user_entered_address=corrected, corrected_address=corrected, rightmove_address=rightmove
+        )
         corrected.push("User Rd", "user")
         rightmove.push("RM Rd", "rightmove")
         await flush_processor()
@@ -52,12 +54,11 @@ class TestBestAddressNode:
     @pytest.mark.asyncio
     async def test_fallback_to_rightmove(self, nodes):
         from houses.nodes.location import BestAddressNode
+
         # All deps share the same UserInputNode; once pushed, all succeed
         # Priority: user_entered is checked first, so it returns rightmove's value
         shared = UserInputNode[str]("shared", str)
-        node = BestAddressNode("ba3", user_entered_address=shared,
-                                corrected_address=shared,
-                                rightmove_address=shared)
+        node = BestAddressNode("ba3", user_entered_address=shared, corrected_address=shared, rightmove_address=shared)
         shared.push("Rightmove Rd", "rightmove")
         await flush_processor()
         await flush_processor()
@@ -87,9 +88,9 @@ class TestBestLocationNode:
         precise = UserInputNode[GeoPoint]("precise", GeoPoint)
         rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
         best_addr = UserInputNode[str]("addr", str)
-        node = BestLocationNode("best_loc", precise_location=precise,
-                                rightmove_location=rightmove_loc,
-                                best_address=best_addr)
+        node = BestLocationNode(
+            "best_loc", precise_location=precise, rightmove_location=rightmove_loc, best_address=best_addr
+        )
 
         gp = GeoPoint(51.5, -0.1)
         precise.push(gp, "user")
@@ -111,9 +112,9 @@ class TestBestLocationNode:
         best_addr = UserInputNode[str]("addr_fb", str)
         # "precise" = rightmove_loc means it's always succeeded if rightmove is
         precise = rightmove_loc
-        node = BestLocationNode("best_loc_fb", precise_location=precise,
-                                rightmove_location=rightmove_loc,
-                                best_address=best_addr)
+        node = BestLocationNode(
+            "best_loc_fb", precise_location=precise, rightmove_location=rightmove_loc, best_address=best_addr
+        )
 
         rm_gp = GeoPoint(51.4, -0.2)
         rightmove_loc.push(rm_gp, "rightmove")
@@ -132,9 +133,9 @@ class TestBestLocationNode:
         precise = UserInputNode[GeoPoint]("precise", GeoPoint)
         rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
         best_addr = UserInputNode[str]("addr", str)
-        node = BestLocationNode("best_loc", precise_location=precise,
-                                rightmove_location=rightmove_loc,
-                                best_address=best_addr)
+        node = BestLocationNode(
+            "best_loc", precise_location=precise, rightmove_location=rightmove_loc, best_address=best_addr
+        )
 
         a = await node.attempt()
         assert a.pending
@@ -146,9 +147,9 @@ class TestBestLocationNode:
         precise = UserInputNode[GeoPoint]("precise", GeoPoint)
         rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
         best_addr = UserInputNode[str]("addr", str)
-        node = BestLocationNode("best_loc", precise_location=precise,
-                                rightmove_location=rightmove_loc,
-                                best_address=best_addr)
+        node = BestLocationNode(
+            "best_loc", precise_location=precise, rightmove_location=rightmove_loc, best_address=best_addr
+        )
 
         a = await node.attempt()
         assert a.pending
@@ -160,9 +161,9 @@ class TestBestLocationNode:
         precise = UserInputNode[GeoPoint]("precise", GeoPoint)
         rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
         best_addr = UserInputNode[str]("addr", str)
-        node = BestLocationNode("best_loc", precise_location=precise,
-                                rightmove_location=rightmove_loc,
-                                best_address=best_addr)
+        node = BestLocationNode(
+            "best_loc", precise_location=precise, rightmove_location=rightmove_loc, best_address=best_addr
+        )
 
         rm_gp = GeoPoint(51.4, -0.2)
         rightmove_loc.push(rm_gp, "rightmove")
@@ -185,9 +186,9 @@ class TestBestLocationNode:
         precise = UserInputNode[GeoPoint]("precise", GeoPoint)
         rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
         best_addr = UserInputNode[str]("addr", str)
-        node = BestLocationNode("best_loc", precise_location=precise,
-                                rightmove_location=rightmove_loc,
-                                best_address=best_addr)
+        node = BestLocationNode(
+            "best_loc", precise_location=precise, rightmove_location=rightmove_loc, best_address=best_addr
+        )
 
         gp = GeoPoint(51.5, -0.1)
         precise.push(gp, "user")
@@ -206,13 +207,14 @@ class TestBestLocationNode:
         precise = UserInputNode[GeoPoint]("precise", GeoPoint)
         rightmove_loc = UserInputNode[GeoPoint]("rm_loc", GeoPoint)
         best_addr = UserInputNode[str]("addr", str)
-        node = BestLocationNode("best_loc", precise_location=precise,
-                                rightmove_location=rightmove_loc,
-                                best_address=best_addr)
+        node = BestLocationNode(
+            "best_loc", precise_location=precise, rightmove_location=rightmove_loc, best_address=best_addr
+        )
 
         j = await node.to_json()
         assert j["status"] == "pending"
         assert j["value"] is None
+
 
 class TestBestLocationNodeGeocodeFallback:
     """BestLocationNode should fall back to GeocodeNode when coordinates

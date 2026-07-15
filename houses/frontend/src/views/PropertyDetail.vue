@@ -4,6 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { usePropertiesStore } from '../stores/properties'
 import { patchAddress, patchLocation } from '../services/api'
 import Header from '../components/Header.vue'
+import { ofstedClass } from '../utils/format'
+import { commuteColour } from '../utils/commute'
 const route = useRoute()
 const router = useRouter()
 const store = usePropertiesStore()
@@ -14,6 +16,7 @@ const detail = computed(() => store.details[rid.value])
 const editingAddress = ref('')
 const editingLat = ref('')
 const editingLon = ref('')
+const saveError = ref('')
 watch(() => route.params.rid, (newRid) => {
   if (newRid) store.loadDetail(newRid as string)
 }, { immediate: true })
@@ -47,12 +50,6 @@ function commuteDisplay(commute: unknown): { duration: string; cost: string } | 
   }
 }
 
-function ofstedClass(rating: string | null): string {
-  if (rating === 'Outstanding') return 'pill--good'
-  if (rating === 'Good') return 'pill--warn'
-  if (rating === 'Requires Improvement') return 'pill--bad'
-  return 'pill--muted'
-}
 
 function schoolWalkMin(commutes: Record<string, unknown> | undefined, labelPart: string): number | null {
   if (!commutes) return null
@@ -65,7 +62,6 @@ function schoolWalkMin(commutes: Record<string, unknown> | undefined, labelPart:
   }
   return null
 }
-
 function pillColour(commute: unknown): string {
   if (!commute || typeof commute !== 'object') return 'pill--muted'
   const c = commute as Record<string, unknown>
@@ -75,23 +71,37 @@ function pillColour(commute: unknown): string {
   const dur = val.duration as Record<string, unknown> | null
   if (!dur || typeof dur.value !== 'number') return 'pill--muted'
   const mins = dur.value
-  if (mins < 45) return 'pill--good'
-  if (mins <= 75) return 'pill--warn'
+  const colour = commuteColour(
+    mins,
+    store.settings.commute_thresholds?.good ?? 45,
+    store.settings.commute_thresholds?.warn ?? 75,
+  )
+  if (colour === 'green') return 'pill--good'
+  if (colour === 'orange') return 'pill--warn'
   return 'pill--bad'
 }
 
 async function saveAddress() {
-  if (editingAddress.value) {
-    await patchAddress(rid.value, editingAddress.value)
+  saveError.value = ''
+  try {
+    const r = await patchAddress(rid.value, editingAddress.value)
+    if (!r.ok) throw new Error(await r.text())
+    editingAddress.value = ''
+  } catch (e) {
+    saveError.value = 'Failed to save address'
   }
-  editingAddress.value = ''
 }
 
 async function saveLocation() {
+  saveError.value = ''
   const lat = parseFloat(editingLat.value)
   const lon = parseFloat(editingLon.value)
   if (!isNaN(lat) && !isNaN(lon)) {
-    await patchLocation(rid.value, lat, lon)
+    const r = await patchLocation(rid.value, lat, lon)
+    if (!r.ok) {
+      saveError.value = 'Failed to save location'
+      return
+    }
   }
   editingLat.value = ''
   editingLon.value = ''
@@ -108,11 +118,17 @@ async function saveLocation() {
     <div v-if="store.loading && !detail" class="empty-state">
       <p class="empty-state__text">Loading property...</p>
     </div>
+    <div v-else-if="store.error && !detail" class="empty-state">
+      <p class="empty-state__text">Failed to load property.</p>
+      <button class="btn--primary" @click="store.loadDetail(rid)">Retry</button>
+      <button class="btn--secondary" @click="router.push('/')">Back to list</button>
+    </div>
     <div v-else-if="!detail" class="empty-state">
       <p class="empty-state__text">Property not found.</p>
       <button class="btn--primary" @click="router.push('/')">Back to list</button>
     </div>
     <template v-else>
+
       <div class="detail__summary-bar">
         <span class="detail__price">
           {{ detail.best_address.value ?? rid }}
@@ -127,7 +143,6 @@ async function saveLocation() {
           £{{ detail.affordability.total_monthly_housing_cost.value }}/mo
         </span>
       </div>
-
       <!-- Commutes -->
       <section class="detail__section">
         <div class="detail__section-header">🚆 Commutes</div>
@@ -139,12 +154,28 @@ async function saveLocation() {
               {{ commuteDisplay(c)?.cost ?? '' }}
             </span>
           </div>
+          <!-- Leg details — iterate CostGroups, then legs within each group -->
+          <div v-if="c.value?.details?.length" class="detail__commute-legs">
+            <template v-for="(group, gi) in c.value.details" :key="gi">
+              <div v-for="(leg, li) in group.legs" :key="`${gi}-${li}`" class="detail__commute-leg">
+                <span class="commute-leg__mode">{{ leg.mode }}</span>
+                <span class="commute-leg__duration">{{ leg.duration_minutes }} min</span>
+                <span v-if="li === 0 && group.cost != null" class="commute-leg__cost">
+                  £{{ (typeof group.cost === 'number' ? group.cost : group.cost.amount).toFixed(2) }}
+                </span>
+                <span v-if="li === 0 && group.operator" class="commute-leg__operator">{{ group.operator }}</span>
+                <span v-if="leg.end_station" class="commute-leg__destination">{{ leg.end_station }}</span>
+              </div>
+            </template>
+            <div v-if="c.value?.route_description" class="detail__commute-route">
+              {{ c.value.route_description }}
+            </div>
+          </div>
           <div class="detail__provenance">
             {{ c.provenance?.label ?? 'unknown' }}
           </div>
-        </div>
+          </div>
       </section>
-
       <!-- Location -->
       <section class="detail__section">
         <div class="detail__section-header">📍 Location</div>
@@ -156,6 +187,7 @@ async function saveLocation() {
             <button v-if="!editingAddress" class="btn--small" @click="editingAddress = detail.best_address.value ?? ''">✏️</button>
             <button v-else class="btn--small btn--save" @click="saveAddress()">Save</button>
           </div>
+          <div v-if="saveError" class="detail__save-error">{{ saveError }}</div>
         </div>
         <div v-if="detail.location.best_location.succeeded" class="detail__field">
           <div class="detail__field-label">Coordinates</div>
@@ -169,6 +201,7 @@ async function saveLocation() {
               <input v-model="editingLon" class="detail__edit-input detail__edit-input--short" />
               <button class="btn--small btn--save" @click="saveLocation()">Save</button>
             </template>
+          <div v-if="saveError" class="detail__save-error">{{ saveError }}</div>
           </div>
         </div>
       </section>
@@ -194,6 +227,24 @@ async function saveLocation() {
         </div>
       </section>
 
+      <!-- EPC -->
+      <section class="detail__section">
+        <div class="detail__section-header">⚡ EPC</div>
+        <div class="detail__field">
+          <div class="detail__field-label">Energy Rating</div>
+          <div class="detail__field-value">
+            <template v-if="detail.epc?.succeeded">
+              Band {{ detail.epc.value?.band ?? '?' }}
+              <span v-if="detail.epc.value?.potential && detail.epc.value.potential !== detail.epc.value.band" class="detail__epc-potential">
+                (potential: {{ detail.epc.value.potential }})
+              </span>
+            </template>
+            <span v-else-if="detail.epc && !detail.epc.succeeded" class="detail__field-value--muted">No EPC data</span>
+            <span v-else class="detail__field-value--muted">Loading...</span>
+          </div>
+        </div>
+      </section>
+
       <!-- Affordability -->
       <section class="detail__section">
         <div class="detail__section-header">💰 Affordability</div>
@@ -208,6 +259,12 @@ async function saveLocation() {
         <div class="detail__field">
           <div class="detail__field-label">Monthly Commute Cost</div>
           <div class="detail__field-value">£{{ detail.affordability.monthly_commute_cost.value?.yearly_total_gbp != null ? (detail.affordability.monthly_commute_cost.value.yearly_total_gbp / 12).toFixed(2) : '?' }}</div>
+        </div>
+        <div v-if="detail.affordability.monthly_commute_cost.succeeded && detail.affordability.monthly_commute_cost.value?.persons" class="detail__subsection">
+          <div v-for="(cost, name) in detail.affordability.monthly_commute_cost.value.persons" :key="name" class="detail__field">
+            <div class="detail__field-label">{{ name }} Commute Cost</div>
+            <div class="detail__field-value">£{{ (cost.yearly_gbp / 12).toFixed(2) }}/mo · £{{ cost.yearly_gbp.toFixed(2) }}/yr</div>
+          </div>
         </div>
         <div class="detail__field">
           <div class="detail__field-label">Council Tax</div>
@@ -390,4 +447,42 @@ async function saveLocation() {
 .pill--warn { background: var(--orange-bg); color: var(--orange); }
 .pill--bad { background: var(--red-bg); color: var(--red); }
 .pill--muted { background: var(--muted-bg); color: var(--muted); }
+.detail__save-error {
+  color: var(--red, #e53e3e);
+  font-size: 0.85em;
+  margin-top: 4px;
+}
+.detail__commute-legs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  padding-left: 8px;
+  border-left: 2px solid var(--muted-bg, #e2e8f0);
+}
+.detail__commute-leg {
+  display: flex;
+  gap: 8px;
+  font-size: 0.85em;
+}
+.commute-leg__mode {
+  font-weight: 600;
+  min-width: 60px;
+}
+.commute-leg__duration {
+  color: var(--muted, #718096);
+}
+.commute-leg__cost {
+  color: var(--muted, #718096);
+}
+.detail__commute-route {
+  font-size: 0.8em;
+  color: var(--muted, #718096);
+  font-style: italic;
+}
+.commute-leg__operator {
+  font-size: 0.8em;
+  color: var(--muted, #718096);
+  font-style: italic;
+}
 </style>

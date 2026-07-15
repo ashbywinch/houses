@@ -220,7 +220,6 @@ and priority across the entire property data model.
 | `houses/endpoint_client.py` | Reusable API client with Retry-After + budget tracking |
 | `houses/services.py` | Service protocols + `Services` DI container |
 | `houses/context.py` | ContextVar per-request state (bus fares, geo state, sheets) |
-| `houses/attempt.py` | `Attempt[T]` result monad |
 | `houses/config.py` | Configuration — postcodes, API keys, constants |
 | `tests/helpers.py` | Reusable fakes: `FakeCommuteRouter`, `FakeEPC`, `make_services()` |
 | `houses/model/` | DAG node registry (`registry.py`), node declarations (`nodes.py`), resolver (`resolver.py`), persistence (`persistence.py`) |

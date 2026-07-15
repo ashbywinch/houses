@@ -140,6 +140,82 @@ class TestFormatDuration:
         assert format_duration(145) == "2h25"
 
 
+class TestOfstedColour:
+    """_ofsted_score() from the scoring routine replicates the old ofsted_colour() mapping.
+
+    The colour helper itself lives in the frontend;
+    the backend scoring uses the same thresholds.
+    """
+
+    @staticmethod
+    def _summary_with_ofsted(ofsted: str) -> dict:
+        return {
+            "commutes": {},
+            "schools": {
+                "primary": {"school": {"status": "succeeded", "value": {"ofsted": ofsted, "walk_minutes": None}}},
+                "secondary": {"school": {"status": "impossible", "value": None}},
+            },
+            "walkability": {"value": None},
+        }
+
+    def test_outstanding_is_good(self):
+        """Outstanding → score 2 (was colour 'good')."""
+        assert _score_from_summary(self._summary_with_ofsted("Outstanding")) == 2
+
+    def test_good_is_warn(self):
+        """Good → score 1 (was colour 'warn')."""
+        assert _score_from_summary(self._summary_with_ofsted("Good")) == 1
+
+    def test_requires_improvement_is_bad(self):
+        """Requires Improvement → score -1 (was colour 'bad')."""
+        assert _score_from_summary(self._summary_with_ofsted("Requires Improvement")) == -1
+
+    def test_inadequate_is_bad(self):
+        """Inadequate → score -1 (was colour 'bad')."""
+        assert _score_from_summary(self._summary_with_ofsted("Inadequate")) == -1
+
+    def test_empty_returns_muted(self):
+        """Empty → score 0 (was colour 'muted')."""
+        assert _score_from_summary(self._summary_with_ofsted("")) == 0
+
+
+class TestWalkColour:
+    """_walk_score() from the scoring routine replicates the old walk_colour() mapping.
+
+    Colour is now a frontend concern; the backend scoring still uses the
+    same thresholds (<15 green, 15-30 warn, >30 bad).
+    """
+
+    @staticmethod
+    def _summary_with_walk(minutes: int | None) -> dict:
+        return {
+            "commutes": {},
+            "schools": {
+                "primary": {"school": {"status": "impossible", "value": None}},
+                "secondary": {"school": {"status": "impossible", "value": None}},
+            },
+            "walkability": {"value": {"walk_to_town_minutes": minutes}},
+        }
+
+    def test_good_under_15(self):
+        """walk < 15 → score 2 (was colour 'good')."""
+        assert _score_from_summary(self._summary_with_walk(10)) == 2
+
+    def test_boundary_good_warn(self):
+        """14 → green/2, 15 → warn/1."""
+        assert _score_from_summary(self._summary_with_walk(14)) == 2
+        assert _score_from_summary(self._summary_with_walk(15)) == 1
+
+    def test_boundary_warn_bad(self):
+        """30 → warn/1, 31 → bad/-1."""
+        assert _score_from_summary(self._summary_with_walk(30)) == 1
+        assert _score_from_summary(self._summary_with_walk(31)) == -1
+
+    def test_none_returns_muted(self):
+        """None → score 0 (was colour 'muted')."""
+        assert _score_from_summary(self._summary_with_walk(None)) == 0
+
+
 # ── API response shape ──────────────────────────────────────────────────
 
 
@@ -153,9 +229,17 @@ class TestSummaryShape:
         s = await prop.to_json_summary()
 
         assert s["rid"] == "test_card"
-        for key in ("best_address", "best_location", "rightmove_price",
-                     "rightmove_bedrooms", "total_monthly_cost", "town_name",
-                     "commutes", "schools", "walkability"):
+        for key in (
+            "best_address",
+            "best_location",
+            "rightmove_price",
+            "rightmove_bedrooms",
+            "total_monthly_cost",
+            "town_name",
+            "commutes",
+            "schools",
+            "walkability",
+        ):
             assert key in s, f"Missing key: {key}"
 
     @pytest.mark.asyncio
@@ -165,9 +249,15 @@ class TestSummaryShape:
         await flush_processor()
         s = await prop.to_json_summary()
 
-        wrapped = ("best_address", "best_location", "rightmove_price",
-                    "rightmove_bedrooms", "total_monthly_cost", "town_name",
-                    "walkability")
+        wrapped = (
+            "best_address",
+            "best_location",
+            "rightmove_price",
+            "rightmove_bedrooms",
+            "total_monthly_cost",
+            "town_name",
+            "walkability",
+        )
         for key in wrapped:
             val = s[key]
             assert "status" in val, f"{key} missing status"
@@ -306,18 +396,19 @@ class TestScoring:
     def test_all_green_returns_max(self):
         summary = {
             "commutes": {
-                "Simon/Pimlico": {"commute": {"status": "succeeded",
-                                              "value": {"duration": {"value": 30, "unit": "minute"}}}},
-                "Lorena/Aldgate": {"commute": {"status": "succeeded",
-                                               "value": {"duration": {"value": 30, "unit": "minute"}}}},
-                "Simon/Bracknell": {"commute": {"status": "succeeded",
-                                                "value": {"duration": {"value": 20, "unit": "minute"}}}},
+                "Simon/Pimlico": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 30, "unit": "minute"}}}
+                },
+                "Lorena/Aldgate": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 30, "unit": "minute"}}}
+                },
+                "Simon/Bracknell": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 20, "unit": "minute"}}}
+                },
             },
             "schools": {
-                "primary": {"school": {"status": "succeeded",
-                                       "value": {"ofsted": "Outstanding", "walk_minutes": 5}}},
-                "secondary": {"school": {"status": "succeeded",
-                                         "value": {"ofsted": "Outstanding", "walk_minutes": 5}}},
+                "primary": {"school": {"status": "succeeded", "value": {"ofsted": "Outstanding", "walk_minutes": 5}}},
+                "secondary": {"school": {"status": "succeeded", "value": {"ofsted": "Outstanding", "walk_minutes": 5}}},
             },
             "walkability": {"value": {"walk_to_town_minutes": 5}},
         }
@@ -327,18 +418,19 @@ class TestScoring:
     def test_greens_and_warns_mixed(self):
         summary = {
             "commutes": {
-                "Simon/Pimlico": {"commute": {"status": "succeeded",
-                                              "value": {"duration": {"value": 30, "unit": "minute"}}}},
-                "Lorena/Aldgate": {"commute": {"status": "succeeded",
-                                               "value": {"duration": {"value": 50, "unit": "minute"}}}},
-                "Simon/Bracknell": {"commute": {"status": "succeeded",
-                                                "value": {"duration": {"value": 20, "unit": "minute"}}}},
+                "Simon/Pimlico": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 30, "unit": "minute"}}}
+                },
+                "Lorena/Aldgate": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 50, "unit": "minute"}}}
+                },
+                "Simon/Bracknell": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 20, "unit": "minute"}}}
+                },
             },
             "schools": {
-                "primary": {"school": {"status": "succeeded",
-                                       "value": {"ofsted": "Outstanding", "walk_minutes": 5}}},
-                "secondary": {"school": {"status": "succeeded",
-                                         "value": {"ofsted": "Good", "walk_minutes": 5}}},
+                "primary": {"school": {"status": "succeeded", "value": {"ofsted": "Outstanding", "walk_minutes": 5}}},
+                "secondary": {"school": {"status": "succeeded", "value": {"ofsted": "Good", "walk_minutes": 5}}},
             },
             "walkability": {"value": {"walk_to_town_minutes": 5}},
         }
@@ -348,18 +440,19 @@ class TestScoring:
     def test_bad_values_subtract(self):
         summary = {
             "commutes": {
-                "Simon/Pimlico": {"commute": {"status": "succeeded",
-                                              "value": {"duration": {"value": 90, "unit": "minute"}}}},
-                "Lorena/Aldgate": {"commute": {"status": "succeeded",
-                                               "value": {"duration": {"value": 80, "unit": "minute"}}}},
-                "Simon/Bracknell": {"commute": {"status": "succeeded",
-                                                "value": {"duration": {"value": 70, "unit": "minute"}}}},
+                "Simon/Pimlico": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 90, "unit": "minute"}}}
+                },
+                "Lorena/Aldgate": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 80, "unit": "minute"}}}
+                },
+                "Simon/Bracknell": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 70, "unit": "minute"}}}
+                },
             },
             "schools": {
-                "primary": {"school": {"status": "succeeded",
-                                       "value": {"ofsted": "Inadequate", "walk_minutes": 50}}},
-                "secondary": {"school": {"status": "succeeded",
-                                         "value": {"ofsted": "", "walk_minutes": None}}},
+                "primary": {"school": {"status": "succeeded", "value": {"ofsted": "Inadequate", "walk_minutes": 50}}},
+                "secondary": {"school": {"status": "succeeded", "value": {"ofsted": "", "walk_minutes": None}}},
             },
             "walkability": {"value": {"walk_to_town_minutes": None}},
         }
@@ -382,8 +475,9 @@ class TestScoring:
         """Bracknell commutes use 30/60 thresholds instead of 45/75."""
         summary = {
             "commutes": {
-                "Simon/Bracknell": {"commute": {"status": "succeeded",
-                                                "value": {"duration": {"value": 25, "unit": "minute"}}}},
+                "Simon/Bracknell": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 25, "unit": "minute"}}}
+                },
             },
             "schools": {
                 "primary": {"school": {"status": "impossible", "value": None}},
@@ -396,3 +490,42 @@ class TestScoring:
         assert _score_from_summary(summary) == 1  # warn = 1
         summary["commutes"]["Simon/Bracknell"]["commute"]["value"]["duration"]["value"] = 65
         assert _score_from_summary(summary) == -1  # bad = -1
+
+
+class TestCardSorting:
+    """Cards/properties sorted by score descending (matching old get_all_cards())."""
+
+    def test_sorted_by_score_descending(self):
+        """Verify the sorting logic used by get_all_properties()."""
+        high = {
+            "commutes": {},
+            "schools": {
+                "primary": {"school": {"status": "impossible", "value": None}},
+                "secondary": {"school": {"status": "impossible", "value": None}},
+            },
+            "walkability": {"value": None},
+        }
+        mid = {
+            "commutes": {},
+            "schools": {
+                "primary": {"school": {"status": "succeeded", "value": {"ofsted": "Outstanding", "walk_minutes": 5}}},
+                "secondary": {"school": {"status": "succeeded", "value": {"ofsted": "Good", "walk_minutes": 5}}},
+            },
+            "walkability": {"value": None},
+        }
+        low = {
+            "commutes": {
+                "Simon/Pimlico": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 90, "unit": "minute"}}}
+                },
+            },
+            "schools": {
+                "primary": {"school": {"status": "impossible", "value": None}},
+                "secondary": {"school": {"status": "impossible", "value": None}},
+            },
+            "walkability": {"value": None},
+        }
+
+        results = {"low": low, "high": high, "mid": mid}
+        scored = sorted(results.items(), key=lambda kv: _score_from_summary(kv[1]), reverse=True)
+        assert [r[0] for r in scored] == ["mid", "high", "low"]

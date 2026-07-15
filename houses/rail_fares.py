@@ -83,13 +83,11 @@ class RailFareRegistry:
 
         Tries exact origin→destination, then reverse (fares are symmetric
         for singles).  Returns ``None`` if no fare exists for this pair.
-        No London-terminal fallback — different terminals have different fares.
         """
         self._load()
         if not self._fares_by_pair:
             return None
         return self._fares_by_pair.get(frozenset({origin.crs, destination.crs}))
-
 
 
 async def enrich_rail_fares(
@@ -104,11 +102,17 @@ async def enrich_rail_fares(
 ) -> tuple[Commute, Commute]:
     """Fallback: look up National Rail fares when TfL didn't return a cost.
 
+    .. deprecated::
+       Use :func:`enrich_single_rail_fare` instead.  This function will be
+       removed in a future release once all callers migrate to the
+       station-object API.
+
     ``_registry`` — optional ``RailFareRegistry`` instance.
     ``_geocode`` — optional async geocode function.
     ``_tube_fare_fn`` — optional async tube fare function (default: ``get_tube_leg_fare``).
     """
     from houses.rail_fare_registry import get_rail_fare_registry
+
     geo_fn = _geocode or geocode
     registry = _registry or get_rail_fare_registry()
     tube_fare_fn = _tube_fare_fn or get_tube_leg_fare
@@ -206,3 +210,59 @@ async def enrich_rail_fares(
                 )
 
     return simon, lorena
+
+
+async def enrich_single_rail_fare(
+    commute: Commute,
+    origin_station: Station,
+    dest_station: Station,
+    destination_postcode: str,
+    parking_cost: Money | None = None,
+    _registry: RailFareRegistry | None = None,
+    _tube_fare_fn=None,
+) -> Commute | None:
+    """Enrich a single commute with a National Rail fare.
+
+    Looks up the fare between *origin_station* and *dest_station*,
+    applies a tube fare for last-mile connectivity, adds any
+    *parking_cost*, and returns an enriched ``Commute`` with
+    ``daily_cost_gbp`` set.
+
+    Returns ``None`` if no fare exists between the two stations.
+    Returns the original *commute* unchanged (but with the fare applied)
+    when the lookup succeeds.
+
+    ``_registry`` — optional ``RailFareRegistry`` instance.
+    ``_tube_fare_fn`` — optional async tube fare function (default: ``get_tube_leg_fare``).
+    """
+    from houses.rail_fare_registry import get_rail_fare_registry
+
+    registry = _registry or get_rail_fare_registry()
+    tube_fare_fn = _tube_fare_fn or get_tube_leg_fare
+
+    fare = registry.fare_between(origin_station, dest_station)
+    if fare is None:
+        return None
+
+    tube_fare = await tube_fare_fn(dest_station, destination_postcode)
+    tube_single = tube_fare or Money(FALLBACK_TUBE_SINGLE_GBP, "GBP")
+    rail_cost = (fare + tube_single) * 2
+
+    total = rail_cost + parking_cost if parking_cost is not None else rail_cost
+
+    enriched = Commute(
+        destination_label=commute.destination_label,
+        destination_postcode=commute.destination_postcode,
+        duration_minutes=commute.duration_minutes,
+        daily_cost_gbp=total,
+    )
+
+    logger.info(
+        "NR fare: %s (rail) + %s (tube)%s = %s",
+        str(fare.amount),
+        str(tube_single.amount),
+        f" + {parking_cost.amount} (parking)" if parking_cost else "",
+        str(total.amount),
+    )
+
+    return enriched

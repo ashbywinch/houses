@@ -3,6 +3,7 @@
 Uses the Services DI container with fake implementations so no
 external APIs are called during tests.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -30,15 +31,16 @@ def _fake_services(monkeypatch):
             Commute(
                 person=Person(name="Simon", has_car=False),
                 label="Office",
-                destination=PlaceOfInterest(label="Office",
-                                             postcode=destination if isinstance(destination, str) else str(destination)),  # noqa: E501
+                destination=PlaceOfInterest(
+                    label="Office", postcode=destination if isinstance(destination, str) else str(destination)
+                ),  # noqa: E501
                 duration=Quantity(32, "minute"),
                 daily_cost=Money("4.50", "GBP"),
             ),
         )
 
     svc = _sp.get()
-    if svc and hasattr(svc, 'commute_router'):
+    if svc and hasattr(svc, "commute_router"):
         svc.commute_router.route = fake_route
 
     yield
@@ -82,8 +84,14 @@ class TestSummaryShape:
         await flush_processor()
         await flush_processor()
         s = await prop.to_json_summary()
-        for key in ("best_address", "best_location", "rightmove_price",
-                     "rightmove_bedrooms", "total_monthly_cost", "walkability"):
+        for key in (
+            "best_address",
+            "best_location",
+            "rightmove_price",
+            "rightmove_bedrooms",
+            "total_monthly_cost",
+            "walkability",
+        ):
             assert "status" in s[key], f"{key} missing status"
             assert "value" in s[key], f"{key} missing value"
             assert "provenance" in s[key], f"{key} missing provenance"
@@ -96,8 +104,7 @@ class TestDetailShape:
         await flush_processor()
         d = await prop.to_json_detail()
         assert d["rid"] == "test_shape"
-        for section in ("location", "commutes", "schools", "affordability",
-                         "area", "comments", "settings"):
+        for section in ("location", "commutes", "schools", "affordability", "area", "comments", "settings"):
             assert section in d, f"missing section: {section}"
 
     @pytest.mark.asyncio
@@ -106,8 +113,13 @@ class TestDetailShape:
         await flush_processor()
         d = await prop.to_json_detail()
         af = d["affordability"]
-        expected = ("council_tax", "monthly_mortgage", "monthly_sinking_fund",
-                     "monthly_commute_cost", "total_monthly_housing_cost")
+        expected = (
+            "council_tax",
+            "monthly_mortgage",
+            "monthly_sinking_fund",
+            "monthly_commute_cost",
+            "total_monthly_housing_cost",
+        )
         for key in expected:
             assert key in af, f"missing affordability key: {key}"
 
@@ -117,8 +129,15 @@ class TestDetailShape:
         await flush_processor()
         d = await prop.to_json_detail()
         cm = d["comments"]
-        expected = ("status", "status_reason", "group_notes", "ashby_comments",
-                     "ashby_works_estimate", "design_needed", "planning_needed")
+        expected = (
+            "status",
+            "status_reason",
+            "group_notes",
+            "ashby_comments",
+            "ashby_works_estimate",
+            "design_needed",
+            "planning_needed",
+        )
         for key in expected:
             assert key in cm, f"missing comments key: {key}"
 
@@ -128,8 +147,7 @@ class TestDetailShape:
         await flush_processor()
         d = await prop.to_json_detail()
         loc = d["location"]
-        expected = ("best_location", "geocode", "rightmove_location",
-                     "precise_location")
+        expected = ("best_location", "geocode", "rightmove_location", "precise_location")
         for key in expected:
             assert key in loc, f"missing location key: {key}"
 
@@ -258,12 +276,10 @@ class TestFinancialSettingsPropagation:
         new_mortgage = d2["affordability"]["monthly_mortgage"]["value"]
 
         assert fin2["mortgage_rate"] == 0.99, (
-            f"Expected 0.99, got {fin2['mortgage_rate']}. "
-            f"PropertyNodes may be caching a stale Services reference."
+            f"Expected 0.99, got {fin2['mortgage_rate']}. PropertyNodes may be caching a stale Services reference."
         )
         assert new_mortgage != old_mortgage, (
-            f"Mortgage should have changed with new rate. "
-            f"Old={old_mortgage}, new={new_mortgage}"
+            f"Mortgage should have changed with new rate. Old={old_mortgage}, new={new_mortgage}"
         )
 
 
@@ -279,11 +295,13 @@ class TestSchoolAcceptableFromPersons:
 
         # Push persons with a child that has specific acceptable_schools
         svc = get_services()
-        svc.persons_source.push([
-            {"name": "Parent", "has_car": True, "is_child": False},
-            {"name": "Child", "has_car": False, "is_child": True,
-             "acceptable_schools": ["girls"]},
-        ], "test")
+        svc.persons_source.push(
+            [
+                {"name": "Parent", "has_car": True, "is_child": False},
+                {"name": "Child", "has_car": False, "is_child": True, "acceptable_schools": ["girls"]},
+            ],
+            "test",
+        )
 
         p = PropertyNodes("test_acc")
         p.rightmove_price.push("550000", "test")
@@ -310,9 +328,12 @@ class TestSchoolAcceptableFromPersons:
         from houses.services_provider import get_services
 
         svc = get_services()
-        svc.persons_source.push([
-            {"name": "Parent", "has_car": True, "is_child": False},
-        ], "test")
+        svc.persons_source.push(
+            [
+                {"name": "Parent", "has_car": True, "is_child": False},
+            ],
+            "test",
+        )
 
         p = PropertyNodes("test_acc2")
         p.rightmove_price.push("550000", "test")

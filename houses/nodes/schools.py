@@ -9,14 +9,12 @@ from houses.services_provider import get_services
 
 
 class PrimarySchoolNode(DerivedNode[dict]):
-    def __init__(self, node_id: str, *, best_location, best_address,
-                 acceptable: tuple[str, ...] = ("mixed",)):
+    def __init__(self, node_id: str, *, best_location, best_address, acceptable: tuple[str, ...] = ("mixed",)):
         deps: tuple[Node, ...] = (best_location, best_address)
         super().__init__(node_id, dict, deps)
         self._acceptable = acceptable
 
-    async def compute(self, location: Attempt[GeoPoint],
-                      address: Attempt[str]) -> Attempt[dict]:
+    async def compute(self, location: Attempt[GeoPoint], address: Attempt[str]) -> Attempt[dict]:
         if not location.succeeded:
             return self._impossible({"best_location": location})
         if not address.succeeded:
@@ -24,7 +22,8 @@ class PrimarySchoolNode(DerivedNode[dict]):
         loc = location.value_or_none()
         svc = get_services()
         school = await svc.school_lookup.find_nearest(
-            f"{loc.lat},{loc.lon}", child_age=4,
+            f"{loc.lat},{loc.lon}",
+            child_age=4,
             acceptable=tuple(SchoolGender(v) for v in self._acceptable),
         )
         if school is None:
@@ -42,20 +41,19 @@ class PrimarySchoolNode(DerivedNode[dict]):
 
 
 class SecondarySchoolNode(DerivedNode[dict]):
-    def __init__(self, node_id: str, *, best_location, best_address,
-                 acceptable: tuple[str, ...] = ("mixed",)):
+    def __init__(self, node_id: str, *, best_location, best_address, acceptable: tuple[str, ...] = ("mixed",)):
         deps: tuple[Node, ...] = (best_location, best_address)
         super().__init__(node_id, dict, deps)
         self._acceptable = acceptable
 
-    async def compute(self, location: Attempt[GeoPoint],
-                      address: Attempt[str]) -> Attempt[dict]:
+    async def compute(self, location: Attempt[GeoPoint], address: Attempt[str]) -> Attempt[dict]:
         if not location.succeeded:
             return self._impossible({"best_location": location})
         loc = location.value_or_none()
         svc = get_services()
         school = await svc.school_lookup.find_nearest(
-            f"{loc.lat},{loc.lon}", child_age=12,
+            f"{loc.lat},{loc.lon}",
+            child_age=12,
             acceptable=tuple(SchoolGender(v) for v in self._acceptable),
         )
         if school is None:

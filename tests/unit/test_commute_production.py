@@ -24,6 +24,7 @@ def _fresh_db():
     import sqlite3
 
     import dag.persistence as per
+
     saved = per._get_db
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -31,6 +32,7 @@ def _fresh_db():
     per.init_db()
     yield
     per._get_db = saved
+
 
 @pytest.fixture(autouse=True)
 def _clear():
@@ -45,14 +47,16 @@ def _mock():
 
     class _SuccessRouter:
         async def route(self, origin, destination, *, has_car, max_walk_minutes):
-            return Attempt.succeeded(Commute(
-                person=Person(name="Test", has_car=has_car),
-                label="Test Commute",
-                destination=PlaceOfInterest(label="Dest", postcode=str(destination)),
-                duration=Quantity(30, "minute"),
-                daily_cost=Money("5.0", "GBP"),
-                mode="transit",
-            ))
+            return Attempt.succeeded(
+                Commute(
+                    person=Person(name="Test", has_car=has_car),
+                    label="Test Commute",
+                    destination=PlaceOfInterest(label="Dest", postcode=str(destination)),
+                    duration=Quantity(30, "minute"),
+                    daily_cost=Money("5.0", "GBP"),
+                    mode="transit",
+                )
+            )
 
     svc = make_services(commute_router=_SuccessRouter())
     token = _sp.set(svc)
@@ -84,7 +88,7 @@ async def test_production_commute_flow():
     prop.rightmove_bedrooms.push("3", "Rightmove")
     prop.rightmove_price.push("500000", "Rightmove")
     prop.rightmove_location.push(GeoPoint(51.5, -0.1), "Rightmove map")
-    register_property(rid, prop)
+    prop.postcode.push("TE1 1ST", "test")
 
     # Run processor — this is what the production _processor task does
     await flush_processor()
@@ -109,6 +113,8 @@ async def test_production_commute_flow():
         )
         assert isinstance(dur, int), f"Duration must be int, got {type(dur).__name__}"
         assert dur > 0, f"Duration must be positive, got {dur}"
+
+
 @pytest.mark.asyncio
 async def test_school_commutes_resolve():
     """George's school commutes must succeed through the production flush_processor path.
@@ -125,7 +131,7 @@ async def test_school_commutes_resolve():
     prop.rightmove_url.push("https://rightmove.co.uk/001", "Browser")
     prop.rightmove_bedrooms.push("3", "Rightmove")
     prop.rightmove_price.push("500000", "Rightmove")
-    prop.rightmove_location.push(GeoPoint(51.5, -0.1), "Rightmove map")
+    prop.postcode.push("TE1 1ST", "test")
     register_property(rid, prop)
 
     await flush_processor()
@@ -149,9 +155,7 @@ async def test_school_commutes_resolve():
         assert key in commutes, f"Missing school commute: {key!r}"
         c = commutes[key]["commute"]
         assert c.get("succeeded"), (
-            f"{key} should succeed.  "
-            f"pending={c.get('pending')} impossible={c.get('impossible')} "
-            f"error={c.get('error')}"
+            f"{key} should succeed.  pending={c.get('pending')} impossible={c.get('impossible')} error={c.get('error')}"
         )
         # Verify is_child flag
         assert c.get("is_child") is True, f"{key} must have is_child=True"
@@ -159,8 +163,7 @@ async def test_school_commutes_resolve():
         # Verify commute data is parseable by frontend
         dur = _commute_duration(c)
         assert dur is not None, (
-            f"{key} duration not parseable.  "
-            f"succeeded={c.get('succeeded')} value={c.get('value')!r}"
+            f"{key} duration not parseable.  succeeded={c.get('succeeded')} value={c.get('value')!r}"
         )
         assert isinstance(dur, int), f"{key} duration must be int, got {type(dur).__name__}"
         assert dur > 0, f"{key} duration must be positive, got {dur}"

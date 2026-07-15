@@ -22,33 +22,37 @@ def make_default_persons() -> list[Person]:
     """Default set of persons with their commute preferences."""
     return [
         Person(
-            name="Simon", has_car=True, bus_walk_penalty_minutes=20,
+            name="Simon",
+            has_car=True,
+            bus_walk_penalty_minutes=20,
             deposit_equity=Money("177000", "GBP"),
             places_of_interest=(
-                PlaceOfInterest(label="Pimlico", postcode=settings.simon_postcode,
-                                trips_per_week=1, weeks_per_year=46),
-                PlaceOfInterest(label="Bracknell", postcode=settings.bracknell_postcode,
-                                trips_per_week=1, weeks_per_year=46),
-                PlaceOfInterest(label="Dad", postcode="OX7 5GZ",
-                                trips_per_week=0, weeks_per_year=46),
+                PlaceOfInterest(label="Pimlico", postcode=settings.simon_postcode, trips_per_week=1, weeks_per_year=46),
+                PlaceOfInterest(
+                    label="Bracknell", postcode=settings.bracknell_postcode, trips_per_week=1, weeks_per_year=46
+                ),
+                PlaceOfInterest(label="Dad", postcode="OX7 5GZ", trips_per_week=0, weeks_per_year=46),
             ),
         ),
         Person(
-            name="Lorena", has_car=False, bus_walk_penalty_minutes=15,
+            name="Lorena",
+            has_car=False,
+            bus_walk_penalty_minutes=15,
             deposit_equity=Money("0", "GBP"),
             places_of_interest=(
-                PlaceOfInterest(label="Aldgate", postcode=settings.lorena_postcode,
-                                trips_per_week=2, weeks_per_year=46),
+                PlaceOfInterest(
+                    label="Aldgate", postcode=settings.lorena_postcode, trips_per_week=2, weeks_per_year=46
+                ),
             ),
         ),
         Person(
-            name="George", has_car=False, is_child=True,
+            name="George",
+            has_car=False,
+            is_child=True,
             acceptable_schools=("mixed", "boys", "girls"),
             places_of_interest=(
-                PlaceOfInterest(label="Primary School", postcode="",
-                                trips_per_week=5, weeks_per_year=39),
-                PlaceOfInterest(label="Secondary School", postcode="",
-                                trips_per_week=5, weeks_per_year=39),
+                PlaceOfInterest(label="Primary School", postcode="", trips_per_week=5, weeks_per_year=39),
+                PlaceOfInterest(label="Secondary School", postcode="", trips_per_week=5, weeks_per_year=39),
             ),
         ),
     ]
@@ -56,6 +60,8 @@ def make_default_persons() -> list[Person]:
 
 def make_default_financials() -> dict[str, Any]:
     return {
+        "petrol_mpg": 45,
+        "petrol_cost_per_litre": 1.45,
         "current_home_sale_price": 0,
         "current_home_outstanding_mortgage": 0,
         "mortgage_rate": 0.0495,

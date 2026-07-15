@@ -16,13 +16,26 @@ export interface GeoPoint {
   lon: number
 }
 
+export interface JourneyLeg {
+  mode: string
+  duration_minutes: number
+  start_station?: string
+  end_station?: string
+  line_name?: string
+}
+export interface CostGroup {
+  legs: JourneyLeg[]
+  operator?: string
+  cost?: { amount: number; currency: string } | number | null
+}
 export interface CommuteValue {
-  person?: Record<string, unknown>
   label?: string
-  destination?: Record<string, unknown>
+  mode?: string
   duration?: { value: number; unit: string }
   daily_cost?: { amount: number; currency: string }
-  details?: unknown[]
+  details?: CostGroup[]
+  route_description?: string
+  is_child?: boolean
 }
 
 export interface SchoolValue {
@@ -33,9 +46,15 @@ export interface SchoolValue {
 }
 
 export interface MonthlyCostSummary {
-  simon_daily_gbp: number
-  lorena_daily_gbp: number
-  bracknell_daily_gbp: number
+  yearly_total_gbp: number
+  formula_explanation: string
+}
+export interface PersonCommuteCost {
+  daily_gbp: number
+  yearly_gbp: number
+}
+export interface CommuteBreakdown {
+  persons: Record<string, PersonCommuteCost>
   yearly_total_gbp: number
   formula_explanation: string
 }
@@ -73,6 +92,7 @@ export interface PropertyDetail {
     rightmove_location: AttemptValue<GeoPoint>
     precise_location: AttemptValue<GeoPoint>
   }
+  epc?: AttemptValue<{ band: string; potential?: string }>
   commutes: Record<string, AttemptValue<CommuteValue>>
   schools: {
     primary: { school: AttemptValue<SchoolValue> }
@@ -82,7 +102,8 @@ export interface PropertyDetail {
     council_tax: AttemptValue<Record<string, unknown>>
     monthly_mortgage: AttemptValue<number>
     monthly_sinking_fund: AttemptValue<number>
-    monthly_commute_cost: AttemptValue<MonthlyCostSummary>
+    monthly_commute_cost: AttemptValue<CommuteBreakdown>
+    stamp_duty: AttemptValue<number>
     total_monthly_housing_cost: AttemptValue<number>
   }
   area: {

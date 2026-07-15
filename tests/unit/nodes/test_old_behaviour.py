@@ -4,6 +4,7 @@ the old enrichment pipeline did.
 These tests exercise actual compute logic — not empty-deps — using
 service fakes at the boundary (not mocking every function).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -13,6 +14,7 @@ import pytest
 def _fake_services():
     from houses.services_provider import _request_services as _sp
     from tests.helpers import make_services
+
     token = _sp.set(make_services())
     yield
     _sp.reset(token)
@@ -41,10 +43,12 @@ class TestSchoolNodes:
 
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
+
         svc = make_services(school_lookup=AssertingService())
         token = _sp.set(svc)
         try:
             from dag.derived_node import flush_processor
+
             await flush_processor()
             await flush_processor()
             await node.attempt()
@@ -71,10 +75,12 @@ class TestSchoolNodes:
 
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
+
         svc = make_services(school_lookup=AssertingService())
         token = _sp.set(svc)
         try:
             from dag.derived_node import flush_processor
+
             await flush_processor()
             await flush_processor()
             await node.attempt()
@@ -103,19 +109,21 @@ class TestCouncilTaxNode:
                 captured["postcode"] = postcode
                 from dag.attempt import Attempt
                 from houses.council_tax_info import CouncilTaxInfo
+
                 return Attempt.succeeded(CouncilTaxInfo(band="D", yearly_cost=1800.0))
 
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
+
         svc = make_services(council_tax_service=CapturingService())
         token = _sp.set(svc)
         try:
             from dag.derived_node import flush_processor
+
             await flush_processor()
             await flush_processor()
             await node.attempt()
-            assert captured.get("postcode") == "UB2 4GN", \
-                f"Expected 'UB2 4GN', got {captured.get('postcode')!r}"
+            assert captured.get("postcode") == "UB2 4GN", f"Expected 'UB2 4GN', got {captured.get('postcode')!r}"
         finally:
             _sp.reset(token)
 
@@ -129,6 +137,7 @@ class TestCouncilTaxNode:
         node = CouncilTaxNode("ct2", best_address=addr, postcode_node=pc)
         addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
         from dag.derived_node import flush_processor
+
         await flush_processor()
         await flush_processor()
         a = await node.attempt()
@@ -176,6 +185,7 @@ class TestTownNode:
         node = TownNode("tn", best_address=addr)
         addr.push("48 Acacia Avenue, Southall, UB2 5AD", "test")
         from dag.derived_node import flush_processor
+
         await flush_processor()
         await flush_processor()
         a = await node.attempt()

@@ -117,6 +117,7 @@ class FakeSchoolLookup:
 
     async def school_commute(self, postcode: str, school: School) -> Commute | None:
         from houses.model.domain import Commute, Person, PlaceOfInterest
+
         return Commute(
             person=Person(name="George", has_car=False, is_child=True),
             label=school.name,
@@ -125,14 +126,14 @@ class FakeSchoolLookup:
             daily_cost=Money("0", "GBP"),
         )
 
+
 class FakeWalkability:
     def __init__(self, walk_to_town_minutes: int = 10, amenities: str = ""):
         self.walk_to_town_minutes = walk_to_town_minutes
         self.amenities = amenities
 
     async def enrich(self, lat: float, lng: float, address: str) -> dict[str, Any]:
-        return {"walk_to_town_minutes": self.walk_to_town_minutes,
-                "amenities": self.amenities}
+        return {"walk_to_town_minutes": self.walk_to_town_minutes, "amenities": self.amenities}
 
 
 class FakeTownDesc:
@@ -174,12 +175,18 @@ class FakeRailFare:
 
 
 _DEFAULT_SCHOOL = School(
-    urn="123", name="Test School", phase="primary",
-    gender=SchoolGender.MIXED, type_of_establishment="community school",
-    postcode="SW1V 2QQ", website="https://example.com",
-    ofsted_rating="Good", inspection_year="2022",
+    urn="123",
+    name="Test School",
+    phase="primary",
+    gender=SchoolGender.MIXED,
+    type_of_establishment="community school",
+    postcode="SW1V 2QQ",
+    website="https://example.com",
+    ofsted_rating="Good",
+    inspection_year="2022",
     coords=GeoPoint(lat=51.5, lon=-0.13),
-    statutory_low_age=None, statutory_high_age=None,
+    statutory_low_age=None,
+    statutory_high_age=None,
 )
 
 

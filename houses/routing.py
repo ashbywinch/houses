@@ -220,6 +220,7 @@ def _is_london_area(postcode: str) -> bool:
             pass
     return False
 
+
 # ---------------------------------------------------------------------------
 # Walking — Google Routes walking mode
 # ---------------------------------------------------------------------------
@@ -257,8 +258,9 @@ async def _walk_to_station_minutes(
     return round(int(routes[0].get("duration", "0s").rstrip("s")) / 60)
 
 
-async def _google_route_commute(origin: str | GeoPoint, dest: str | GeoPoint,
-                                 mode: str, max_walk_minutes: int | None = None) -> Commute | None:
+async def _google_route_commute(
+    origin: str | GeoPoint, dest: str | GeoPoint, mode: str, max_walk_minutes: int | None = None
+) -> Commute | None:
     """Try walking or driving via Google Routes API.
 
     Skips the API call entirely when the straight-line distance makes
@@ -295,12 +297,9 @@ async def _google_route_commute(origin: str | GeoPoint, dest: str | GeoPoint,
         leg = JourneyLeg(mode=LegMode.WALK, duration_minutes=duration_min)
         daily = Money("0", "GBP")
     else:
-        leg = JourneyLeg(mode=LegMode.DRIVE, duration_minutes=duration_min)
-        round_trip_km = (distance_meters / 1000) * 2
-        litres_per_100km = 235.214 / settings.petrol_mpg
-        litres_used = (round_trip_km / 100) * litres_per_100km
-        cost = round(litres_used * settings.petrol_price_per_litre, 2)
-        daily = Money(str(cost), "GBP")
+        distance_km = distance_meters / 1000
+        leg = JourneyLeg(mode=LegMode.DRIVE, duration_minutes=duration_min, distance_km=distance_km)
+        daily = Money("0", "GBP")
     return Commute(
         destination_label="",
         destination_postcode=dest_str,
@@ -330,8 +329,11 @@ async def _tfl_transit_commute(origin_postcode: str, dest_postcode: str, has_car
     """
     label = dest_postcode
     no_bus = await TransitRoute(
-        origin_postcode, dest_postcode, label,
-        park_and_ride=has_car, fare_lookup=_bus_fare_for,
+        origin_postcode,
+        dest_postcode,
+        label,
+        park_and_ride=has_car,
+        fare_lookup=_bus_fare_for,
     ).plan()
 
     # When the traveler has a car, park-and-ride is preferred over bus.

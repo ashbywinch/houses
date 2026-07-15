@@ -9,12 +9,6 @@ export function fetchAllSummaries(): Promise<Record<string, PropertySummary>> {
   })
 }
 
-export function fetchPropertySummary(rid: string): Promise<PropertySummary> {
-  return fetch(`${BASE}/properties/${encodeURIComponent(rid)}`).then(r => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`)
-    return r.json()
-  })
-}
 
 export function fetchPropertyDetail(rid: string): Promise<PropertyDetail> {
   return fetch(`${BASE}/properties/${encodeURIComponent(rid)}/detail`).then(r => {
@@ -39,8 +33,10 @@ export function patchLocation(rid: string, lat: number, lon: number): Promise<Re
   })
 }
 
-export function fetchSettings(): Promise<Record<string, unknown>> {
-  return fetch(`${BASE}/settings/decomposed`).then(r => r.json())
+export async function fetchSettings(): Promise<Record<string, unknown>> {
+  const r = await fetch(`${BASE}/settings`)
+  if (!r.ok) throw new Error(`Failed to fetch settings: ${r.status}`)
+  return r.json()
 }
 
 export function patchPersons(persons: unknown[]): Promise<Response> {

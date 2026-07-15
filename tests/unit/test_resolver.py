@@ -122,6 +122,7 @@ class TestDerivedNodeStaleness:
         await flush_processor()  # refresh it
         assert (await node.to_json())["stale"] is False
         assert (await node.attempt()).value_or_none() == 18
+
     @pytest.mark.asyncio
     async def test_persisted_stale_is_always_false(self):
         """When persisted (immediately after compute), ``stale`` is

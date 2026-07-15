@@ -21,6 +21,7 @@ def flush_all() -> None:
     import asyncio
 
     from dag.derived_node import flush_processor
+
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
@@ -30,6 +31,7 @@ def flush_all() -> None:
         asyncio.set_event_loop(loop)
     loop.run_until_complete(flush_processor())
     loop.run_until_complete(flush_processor())
+
 
 def _make_mock_services():
     return make_services(
@@ -63,10 +65,7 @@ def _isolate_api_cache():
         set_cache_dir(tmp)
         yield
         files = list(Path(tmp).iterdir())
-        assert not files, (
-            f"Unit test created {len(files)} cache file(s). "
-            f"Cache files: {[f.name for f in files]}"
-        )
+        assert not files, f"Unit test created {len(files)} cache file(s). Cache files: {[f.name for f in files]}"
 
 
 @pytest.fixture(autouse=True)
@@ -82,6 +81,7 @@ def _sqlite_memory():
     import sqlite3
 
     import dag.persistence as per
+
     saved = per._get_db
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -95,6 +95,7 @@ def _sqlite_memory():
 def _mock_services():
     """Set mock services AFTER _sqlite_memory has switched to in-memory DB."""
     from houses.services_provider import _request_services as _sp
+
     token = _sp.set(_make_mock_services())
     yield
     _sp.reset(token)
@@ -103,5 +104,6 @@ def _mock_services():
 @pytest.fixture(autouse=True)
 def _isolate_settings_sources():
     from houses.services import _SETTINGS_SOURCE_CACHE
+
     _SETTINGS_SOURCE_CACHE.clear()
     yield

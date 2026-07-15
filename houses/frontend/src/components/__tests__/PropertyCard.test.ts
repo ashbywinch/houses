@@ -1,8 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import PropertyCard from '../PropertyCard.vue'
 import type { PropertySummary } from '../../types'
 
+function mountCard(props: { rid: string; data: PropertySummary }) {
+  return mount(PropertyCard, { props, global: { plugins: [createPinia()] } })
+}
 function makeSummary(overrides?: Partial<PropertySummary>): PropertySummary {
   return {
     rid: '123',
@@ -35,7 +39,7 @@ describe('PropertyCard commute filtering', () => {
         },
       },
     })
-    const wrapper = mount(PropertyCard, { props: { rid: '123', data: summary } })
+    const wrapper = mountCard({ rid: '123', data: summary })
     expect(wrapper.text()).toContain('Pimlico')
   })
 
@@ -51,7 +55,7 @@ describe('PropertyCard commute filtering', () => {
         },
       },
     })
-    const wrapper = mount(PropertyCard, { props: { rid: '123', data: summary } })
+    const wrapper = mountCard({ rid: '123', data: summary })
     expect(wrapper.text()).not.toContain('Primary School')
   })
 
@@ -74,7 +78,7 @@ describe('PropertyCard commute filtering', () => {
         },
       },
     })
-    const wrapper = mount(PropertyCard, { props: { rid: '123', data: summary } })
+    const wrapper = mountCard({ rid: '123', data: summary })
     expect(wrapper.text()).toContain('Pimlico')
     expect(wrapper.text()).not.toContain('Primary School')
   })
@@ -103,25 +107,25 @@ describe('PropertyCard commute filtering', () => {
         },
       },
     })
-    const wrapper = mount(PropertyCard, { props: { rid: '123', data: summary } })
+    const wrapper = mountCard({ rid: '123', data: summary })
     expect(wrapper.text()).toContain('Test Primary')
   })
 })
 
 describe('PropertyCard basic rendering', () => {
   it('renders price and bedrooms', () => {
-    const wrapper = mount(PropertyCard, { props: { rid: '123', data: makeSummary() } })
+    const wrapper = mountCard({ rid: '123', data: makeSummary() })
     expect(wrapper.text()).toContain('£500,000')
     expect(wrapper.text()).toContain('3 bed')
   })
 
   it('renders walk time', () => {
-    const wrapper = mount(PropertyCard, { props: { rid: '123', data: makeSummary() } })
+    const wrapper = mountCard({ rid: '123', data: makeSummary() })
     expect(wrapper.text()).toContain('15')
   })
 
   it('renders town name', () => {
-    const wrapper = mount(PropertyCard, { props: { rid: '123', data: makeSummary() } })
+    const wrapper = mountCard({ rid: '123', data: makeSummary() })
     expect(wrapper.text()).toContain('London')
   })
 
@@ -129,12 +133,12 @@ describe('PropertyCard basic rendering', () => {
     const summary = makeSummary({
       best_address: { succeeded: false, value: null, error: 'fail', provenance: { label: 'test' } },
     })
-    const wrapper = mount(PropertyCard, { props: { rid: '123', data: summary } })
+    const wrapper = mountCard({ rid: '123', data: summary })
     expect(wrapper.text()).toContain('123')
   })
 
   it('shows total monthly cost', () => {
-    const wrapper = mount(PropertyCard, { props: { rid: '123', data: makeSummary() } })
+    const wrapper = mountCard({ rid: '123', data: makeSummary() })
     expect(wrapper.text()).toContain('£2,500')
   })
 })
@@ -145,7 +149,7 @@ describe('PropertyCard error handling', () => {
       rightmove_price: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
       total_monthly_cost: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
     })
-    const wrapper = mount(PropertyCard, { props: { rid: '123', data: summary } })
+    const wrapper = mountCard({ rid: '123', data: summary })
     // No price on the card header (the £500k section)
     expect(wrapper.text()).not.toContain('£500,000')
     // Total monthly shows 'unknown' when data is missing
@@ -154,7 +158,7 @@ describe('PropertyCard error handling', () => {
 
 
   it('handles empty commutes', () => {
-    const wrapper = mount(PropertyCard, { props: { rid: '123', data: makeSummary() } })
+    const wrapper = mountCard({ rid: '123', data: makeSummary() })
     expect(wrapper.find('.card__commutes').exists()).toBe(true)
   })
 })

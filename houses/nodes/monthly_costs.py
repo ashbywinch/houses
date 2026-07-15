@@ -4,44 +4,68 @@ from decimal import Decimal
 
 from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
+from dag.node import Node
 
 
 class CommuteBreakdownNode(DerivedNode[dict]):
-    def __init__(self, node_id: str, *,
-                 simon_office, simon_bracknell, lorena_office,
-                 persons_source):
-        super().__init__(node_id, dict,
-                         (simon_office, simon_bracknell, lorena_office,
-                          persons_source))
+    """Aggregates commute costs across all persons and POIs."""
 
-    def compute(self, simon_office: Attempt[dict],
-                simon_bracknell: Attempt[dict],
-                lorena_office: Attempt[dict],
-                persons: Attempt[list]) -> Attempt[dict]:
-        yearly = 0.0
-        persons_list = persons.value_or_none() if persons.succeeded else []
+    def __init__(self, node_id: str, *, commute_selectors: dict[str, Node], persons_source):
+        self._commute_selectors = commute_selectors
+        # persons_source is always the last dep
+        super().__init__(node_id, dict, tuple(commute_selectors.values()) + (persons_source,))
+        self._persons_source = persons_source
 
-        for commute_attempt in [simon_office, simon_bracknell, lorena_office]:
-            if not commute_attempt.succeeded:
-                continue
-            val = commute_attempt.value_or_none() or {}
-            dc = val.get("daily_cost") or {}
-            daily = float(dc.get("amount", 0))
-            commute_label = val.get("label", "")
+    def compute(self, *args: Attempt[dict]) -> Attempt[dict]:
+        # Last arg is always persons_source, the rest are commute selectors
+        if not args:
+            return Attempt.succeeded(
+                {
+                    "persons": {},
+                    "yearly_total_gbp": 0.0,
+                    "formula_explanation": "No commute data",
+                }
+            )
+        persons_attempt = args[-1]
+        commute_attempts = args[:-1]
 
-            # Look up trips/week for the POI matching this commute's label
-            trips = 1
-            weeks = 46
-            for p in persons_list:
-                if hasattr(p, 'places_of_interest'):
-                    for poi in (p.places_of_interest or ()):
-                        if poi.label and poi.label == commute_label:
-                            trips = poi.trips_per_week
-                            weeks = poi.weeks_per_year
-                            break
-            yearly += daily * trips * weeks
-
-        return Attempt.succeeded({"yearly_total_gbp": round(yearly, 2)})
+        persons_list = persons_attempt.value_or_none() if persons_attempt.succeeded else []
+        yearly_total = 0.0
+        per_person: dict[str, dict] = {}
+        selector_values = list(self._commute_selectors.values())
+        for p in persons_list or []:
+            person_yearly = 0.0
+            amount = 0.0
+            pois = p.get("places_of_interest", ()) if isinstance(p, dict) else getattr(p, "places_of_interest", ())
+            name = p.get("name") if isinstance(p, dict) else getattr(p, "name", "?")
+            for poi in pois or ():
+                key = f"{name}/{poi.label}"
+                commute_node = self._commute_selectors.get(key)
+                if commute_node is None:
+                    continue
+                idx = selector_values.index(commute_node) if commute_node in selector_values else -1
+                attempt = (
+                    commute_attempts[idx] if idx >= 0 and idx < len(commute_attempts) else commute_node.latest_attempt()
+                )
+                if not attempt.succeeded:
+                    continue
+                val = attempt.value_or_none()
+                if not val:
+                    continue
+                daily = getattr(val, "daily_cost", None)
+                daily_amount = float(daily.amount) if daily is not None else 0.0
+                amount = daily_amount
+                yearly_person_poi = daily_amount * poi.trips_per_week * poi.weeks_per_year
+                person_yearly += yearly_person_poi
+                yearly_total += yearly_person_poi
+            per_person[name] = {"daily_gbp": amount, "yearly_gbp": person_yearly}
+        return Attempt.succeeded(
+            {
+                "persons": per_person,
+                "yearly_total_gbp": yearly_total,
+                "formula_explanation": "Aggregated from DAG nodes",
+            }
+        )
 
     async def build_provenance(self):
         return Provenance(label="commute_breakdown")
@@ -62,6 +86,7 @@ class StampDutyNode(DerivedNode[float]):
         except (ValueError, TypeError):
             return Attempt.impossible(f"bad price: {p_str}")
         from houses.stamp_duty import stamp_duty_land_tax
+
         return Attempt.succeeded(stamp_duty_land_tax(p))
 
     async def build_provenance(self):
@@ -69,15 +94,12 @@ class StampDutyNode(DerivedNode[float]):
 
 
 class MonthlyMortgagePaymentNode(DerivedNode[float]):
-    def __init__(self, node_id: str, *,
-                 rightmove_price, stamp_duty_node, persons_source, financial_source):
-        super().__init__(node_id, float,
-                         (rightmove_price, stamp_duty_node, persons_source, financial_source))
+    def __init__(self, node_id: str, *, rightmove_price, stamp_duty_node, persons_source, financial_source):
+        super().__init__(node_id, float, (rightmove_price, stamp_duty_node, persons_source, financial_source))
 
-    def compute(self, price: Attempt[str],
-                stamp_duty: Attempt[float],
-                persons: Attempt[list],
-                financial: Attempt[dict]) -> Attempt[float]:
+    def compute(
+        self, price: Attempt[str], stamp_duty: Attempt[float], persons: Attempt[list], financial: Attempt[dict]
+    ) -> Attempt[float]:
         if not price.succeeded:
             return Attempt.succeeded(0.0)
         p_str = price.value_or_none() or "0"
@@ -93,11 +115,11 @@ class MonthlyMortgagePaymentNode(DerivedNode[float]):
         sd_val = stamp_duty.value_or_none() if stamp_duty.succeeded else 0.0
         total_equity = 0.0
         if persons.succeeded:
-            for person in (persons.value_or_none() or []):
+            for person in persons.value_or_none() or []:
                 if not person.is_child:
                     eq = person.deposit_equity
                     if eq is not None:
-                        total_equity += float(eq.amount) if hasattr(eq, 'amount') else float(eq)
+                        total_equity += float(eq.amount) if hasattr(eq, "amount") else float(eq)
 
         # Mortgage principal = price + stamp_duty - total_equity
         principal = p + sd_val - total_equity
@@ -121,12 +143,10 @@ class MonthlyMortgagePaymentNode(DerivedNode[float]):
 
 
 class YearlySinkingFundNode(DerivedNode[float]):
-    def __init__(self, node_id: str, *,
-                 rightmove_price, financial_source):
+    def __init__(self, node_id: str, *, rightmove_price, financial_source):
         super().__init__(node_id, float, (rightmove_price, financial_source))
 
-    def compute(self, price: Attempt[str],
-                financial: Attempt[dict]) -> Attempt[float]:
+    def compute(self, price: Attempt[str], financial: Attempt[dict]) -> Attempt[float]:
         if not price.succeeded and not financial.succeeded:
             return Attempt.succeeded(0.0)
         p_str = (price.value_or_none() or "0") if price.succeeded else "0"
@@ -145,20 +165,36 @@ class YearlySinkingFundNode(DerivedNode[float]):
 
 
 class TotalMonthlyHousingCostNode(DerivedNode[float]):
-    def __init__(self, node_id: str, *,
-                 monthly_mortgage_node, yearly_sinking_fund_node,
-                 financial_source, commute_breakdown_node,
-                 council_tax_node):
-        super().__init__(node_id, float,
-                         (monthly_mortgage_node, yearly_sinking_fund_node,
-                          financial_source, commute_breakdown_node,
-                          council_tax_node))
+    def __init__(
+        self,
+        node_id: str,
+        *,
+        monthly_mortgage_node,
+        yearly_sinking_fund_node,
+        financial_source,
+        commute_breakdown_node,
+        council_tax_node,
+    ):
+        super().__init__(
+            node_id,
+            float,
+            (
+                monthly_mortgage_node,
+                yearly_sinking_fund_node,
+                financial_source,
+                commute_breakdown_node,
+                council_tax_node,
+            ),
+        )
 
-    def compute(self, mortgage: Attempt[float],
-                sinking: Attempt[float],
-                financial: Attempt[dict],
-                commute: Attempt[dict],
-                council_tax: Attempt[dict]) -> Attempt[float]:
+    def compute(
+        self,
+        mortgage: Attempt[float],
+        sinking: Attempt[float],
+        financial: Attempt[dict],
+        commute: Attempt[dict],
+        council_tax: Attempt[dict],
+    ) -> Attempt[float]:
         total = 0.0
         if mortgage.succeeded:
             total += mortgage.value_or_none() or 0.0
@@ -171,5 +207,6 @@ class TotalMonthlyHousingCostNode(DerivedNode[float]):
             ct_val = council_tax.value_or_none() or {}
             total += ct_val.get("cost", 0.0) / 12
         return Attempt.succeeded(round(total, 2))
+
     async def build_provenance(self):
         return Provenance(label="total_monthly_formula")

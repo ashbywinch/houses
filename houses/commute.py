@@ -53,9 +53,10 @@ class JourneyLeg:
 
     mode: LegMode
     duration_minutes: int
-    start_station: str = ""  # departure point name from TfL
-    end_station: str = ""  # arrival point name from TfL
-    line_name: str = ""  # transit route name from TfL (e.g. "Bakerloo", "Great Western Railway")
+    distance_km: float = 0.0
+    start_station: str = ""
+    end_station: str = ""
+    line_name: str = ""
 
 
 @dataclass(frozen=True)

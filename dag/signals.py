@@ -33,6 +33,12 @@ class Signal:
     def emit(self) -> None:
         for handler in list(self._handlers):
             handler()
+        # Sweep handlers whose Slot's weakref has died
+        self._handlers = [
+            h for h in self._handlers
+            if not isinstance(h, Slot) or h._ref() is not None
+            or h._callback is not None
+        ]
 
     def _disconnect(self, handler: Callable) -> None:
         if handler in self._handlers:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import fields, is_dataclass
+from dataclasses import fields, is_dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import Enum
@@ -13,6 +13,7 @@ from dag.derived_node import DerivedNode
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute
+from houses.stations import Station
 
 
 def format_duration(minutes: int | None) -> str:
@@ -58,7 +59,8 @@ def _serialize_value(val: Any) -> Any:
                 "duration": {"value": int(val.duration.magnitude), "unit": "minute"},
                 "daily_cost": (
                     {"amount": float(dc.amount), "currency": str(dc.currency)}
-                    if dc else {"amount": 0, "currency": "GBP"}
+                    if dc
+                    else {"amount": 0, "currency": "GBP"}
                 ),
                 "label": val.label,
                 "mode": val.mode,
@@ -107,6 +109,7 @@ class _CommuteInputNode(UserInputNode[dict]):
         self._persisted_at = datetime.now(UTC)
         self._db_created_at = datetime.now(UTC).isoformat()
         self.changed.emit()
+
     async def attempt(self) -> Attempt[Commute]:
         if self._value is not None:
             return Attempt.succeeded(self._value)
@@ -116,38 +119,147 @@ class _CommuteInputNode(UserInputNode[dict]):
         return Provenance.from_label(self._source_label)
 
 
-class RailFareNode(DerivedNode[dict]):
-    """Computes the National Rail fare for a commute when TfL has no price."""
+class RailFareNode(DerivedNode[Commute]):
+    """Computes National Rail fare for a commute when TfL has no price.
 
-    def __init__(self, node_id: str, *, commute_node, best_location, person_name):
-        super().__init__(node_id, dict, (commute_node, best_location, person_name))
+    Extracts the destination London terminal from the TfL route legs
+    (the last heavy-rail leg), then looks up the fare from the property's
+    nearest station to that terminal.  This avoids geocoding POI postcodes
+    to find stations — the NR fare system uses terminal zones (PAD, VIC,
+    WAT, …) as destinations, and the route already tells us which one.
+    """
 
-    async def compute(self, commute_attempt: Attempt[dict],
-                       location_attempt: Attempt[GeoPoint],
-                       name_attempt: Attempt[str]) -> Attempt[dict]:
-        if not commute_attempt.succeeded:
-            return commute_attempt
-        val = commute_attempt.value_or_none() or {}
-        dc = val.get("daily_cost") or {}
-        if float(dc.get("amount", 0)) > 0:
-            return commute_attempt
-        from houses.commute import Commute as OldCommute
-        from houses.rail_fares import enrich_rail_fares
-        person_name = (name_attempt.value_or_none() or "").lower()
-        dest_postcode = val.get("label", "")
-        old = OldCommute("", dest_postcode, val.get("duration", {}).get("value"), None)
-        dummy = OldCommute("", "", None, None)
-        simon = old if person_name == "simon" else dummy
-        lorena = old if person_name == "lorena" else dummy
-        enriched, _ = await enrich_rail_fares({person_name}, dest_postcode, dest_postcode, simon, lorena)
-        result = enriched if person_name == "simon" else _
-        if result.daily_cost_gbp is not None and float(result.daily_cost_gbp.amount) > 0:
-            val["daily_cost"] = {"amount": float(result.daily_cost_gbp.amount), "currency": "GBP"}
-        return Attempt.succeeded(val)
+    def __init__(self, node_id: str, *, transit_result, best_location):
+        self.transit_result = transit_result
+        self.best_location = best_location
+        super().__init__(node_id, Commute, (transit_result,))
 
-class CommuteSelectorNode(DerivedNode[dict]):
-    def __init__(self, node_id: str, *, origin, poi, transit_result, bus_result,
-                 walk_leg_check, is_child: bool = False, rail_fare_node=None):
+    def _get_active_deps(self):
+        deps = [self.transit_result]
+        transit_attempt = self.transit_result.latest_attempt()
+        if transit_attempt.succeeded:
+            val = transit_attempt.value_or_none()
+            if val is None:
+                deps.append(self.best_location)
+            elif isinstance(val, dict):
+                dc = val.get("daily_cost") or {}
+                if float(dc.get("amount", 0)) == 0:
+                    deps.append(self.best_location)
+            else:
+                if float(val.daily_cost.amount) == 0:
+                    deps.append(self.best_location)
+        return tuple(deps)
+
+    async def compute(
+        self, transit_attempt: Attempt[dict | Commute], location: Attempt[GeoPoint] = None
+    ) -> Attempt[Commute]:
+        if not transit_attempt.succeeded:
+            return Attempt.impossible("transit not succeeded")
+        val = transit_attempt.value_or_none()
+        if val is None:
+            return Attempt.impossible("transit value is None")
+
+        # Normalise to Commute (TransitNode currently returns dict)
+        if isinstance(val, dict):
+            dc = val.get("daily_cost") or {}
+            if float(dc.get("amount", 0)) > 0:
+                return transit_attempt  # type: ignore[return-value]
+            if not location or not location.succeeded:
+                return Attempt.impossible("best_location not available")
+
+            from houses.rail_fare_registry import get_rail_fare_registry
+            from houses.transit_route import FALLBACK_TUBE_SINGLE_GBP, get_tube_leg_fare
+
+            registry = get_rail_fare_registry()
+
+            origin = registry.nearest_station(location.value_or_none())
+            if not origin:
+                return Attempt.impossible("origin station not found near property")
+
+            details = val.get("details") or []
+            terminal_station: Station | None = None
+            for leg in reversed(details):
+                mode = leg.get("mode", "")
+                dest_name = leg.get("destination", "")
+                if mode in ("train", "tube", "dlr", "overground") and dest_name:
+                    stn = registry._station_registry.find(dest_name)
+                    if stn:
+                        terminal_station = stn
+                        break
+
+            if terminal_station is None:
+                return Attempt.impossible("terminal station not found in route legs")
+
+            fare = registry.fare_between(origin, terminal_station)
+            if fare is None:
+                dummy_lon = Station("London Terminals", "LON", GeoPoint(0, 0))
+                fare = registry.fare_between(origin, dummy_lon)
+            if fare is None:
+                return Attempt.impossible(f"no fare {origin.crs}→{terminal_station.crs}")
+            tube_fare = await get_tube_leg_fare(terminal_station, "") or Money(FALLBACK_TUBE_SINGLE_GBP, "GBP")
+            total = (fare + tube_fare) * 2
+            val["daily_cost"] = {"amount": float(total.amount), "currency": "GBP"}
+            # Can't return a Commute without reconstructing one from dict,
+            # so return the Attempt at type:ignore (callers do not assert type)
+            return Attempt.succeeded(val)  # type: ignore[return-value]
+
+        # Commute path (once TransitNode is refactored)
+        commute = val
+        if float(commute.daily_cost.amount) > 0:
+            return transit_attempt
+        if not location or not location.succeeded:
+            return Attempt.impossible("best_location not available")
+
+        from houses.rail_fare_registry import get_rail_fare_registry
+        from houses.transit_route import FALLBACK_TUBE_SINGLE_GBP, get_tube_leg_fare
+
+        registry = get_rail_fare_registry()
+
+        origin = registry.nearest_station(location.value_or_none())
+        if not origin:
+            return Attempt.impossible("origin station not found near property")
+
+        details = commute.details  # tuple[CostGroup, ...]
+        terminal_station: Station | None = None
+        for cg in reversed(details):
+            for leg in reversed(cg.legs):
+                mode_name = leg.mode.name.lower()
+                if mode_name in ("train", "tube", "dlr", "overground") and leg.end_station:
+                    stn = registry._station_registry.find(leg.end_station)
+                    if stn:
+                        terminal_station = stn
+                        break
+            if terminal_station:
+                break
+
+        if terminal_station is None:
+            return Attempt.impossible("terminal station not found in route legs")
+
+        fare = registry.fare_between(origin, terminal_station)
+        if fare is None:
+            dummy_lon = Station("London Terminals", "LON", GeoPoint(0, 0))
+            fare = registry.fare_between(origin, dummy_lon)
+        if fare is None:
+            return Attempt.impossible(f"no fare {origin.crs}→{terminal_station.crs}")
+        tube_fare = await get_tube_leg_fare(terminal_station, "") or Money(FALLBACK_TUBE_SINGLE_GBP, "GBP")
+        total = (fare + tube_fare) * 2
+        new_commute = replace(commute, daily_cost=Money(str(total.amount), "GBP"))
+        return Attempt.succeeded(new_commute)
+
+
+class CommuteSelectorNode(DerivedNode[Commute]):
+    def __init__(
+        self,
+        node_id: str,
+        *,
+        origin,
+        poi,
+        transit_result,
+        bus_result,
+        walk_leg_check,
+        is_child: bool = False,
+        rail_fare_node=None,
+    ):
         # Set named attrs BEFORE super().__init__ so _get_active_deps() can access them
         # (DerivedNode.__init__ calls _is_stale() which calls _get_active_deps())
         self.origin = origin
@@ -160,61 +272,71 @@ class CommuteSelectorNode(DerivedNode[dict]):
         deps = (origin, poi, transit_result, bus_result)
         if rail_fare_node is not None:
             deps = deps + (rail_fare_node,)
-        super().__init__(node_id, dict, deps)
+        super().__init__(node_id, Commute, deps)
 
     def _get_active_deps(self):
         deps = [self.origin, self.poi, self.transit_result]
 
         # Bus leg augment active when transit has an excessive walk leg
         walk_check_attempt = self.walk_leg_check.latest_attempt()
-        if self.bus_result is not None and walk_check_attempt.succeeded:
-            if walk_check_attempt.value:  # True = walk too long
-                deps.append(self.bus_result)
+        if self.bus_result is not None and walk_check_attempt.succeeded and walk_check_attempt.value:
+            deps.append(self.bus_result)
 
-        # Rail fare active when transit cost is £0
+        # Rail fare active when transit cost is £0 and the commute uses
+        # rail-based modes (not drive/walk/cycle, which have no rail legs
+        # from which to extract a destination terminal).
         transit_attempt = self.transit_result.latest_attempt()
+        val = transit_attempt.value_or_none()
         if self.rail_fare_node is not None and transit_attempt.succeeded:
-            cost = (transit_attempt.value_or_none() or {}).get("daily_cost", {}).get("amount", 0)
-            if float(cost) == 0:
+            mode = val.mode if val else ""
+            cost = float(val.daily_cost.amount) if val and val.daily_cost else 0
+            if cost == 0 and mode in ("transit", "train", "tube", "bus", "dlr", "overground", "tram"):
                 deps.append(self.rail_fare_node)
-
         return tuple(deps)
 
-    def compute(self, origin: Attempt[GeoPoint],
-                poi: Attempt[str],
-                transit: Attempt[dict],
-                bus: Attempt[dict] = None,
-                rail_fare: Attempt[dict] = None) -> Attempt[dict]:
+    def compute(
+        self,
+        origin: Attempt[GeoPoint],
+        poi: Attempt[str],
+        transit: Attempt[Commute],
+        bus: Attempt[Commute] = None,
+        rail_fare: Attempt[Commute] = None,
+    ) -> Attempt[Commute]:
         if not origin.succeeded or not poi.succeeded:
             return self._impossible({"origin": origin, "poi": poi})
 
         selected = None
         if transit.succeeded:
-            selected = transit
+            if bus is not None and bus.succeeded:
+                transit_dur = transit.value_or_none().duration.magnitude
+                bus_dur = bus.value_or_none().duration.magnitude
+                selected = bus if bus_dur < transit_dur - 5 else transit
+            else:
+                selected = transit
         elif bus is not None and bus.succeeded:
             selected = bus
 
         if selected is not None:
-            val = selected.value_or_none() or {}
-            if isinstance(val, dict):
-                dc = val.get("daily_cost") or {}
-                if dc.get("amount", 0) == 0 and rail_fare is not None and rail_fare.succeeded:
-                    return rail_fare
+            val = selected.value_or_none()
+            dc = val.daily_cost if val else None
+            if (dc is None or dc.amount == 0) and rail_fare is not None and rail_fare.succeeded:
+                return rail_fare
             return selected
 
         return self._impossible({"transit_result": transit, "bus_result": bus})
-
 
     async def to_json(self) -> dict:
         attempt = await self.attempt()
         result: dict = {
             "status": attempt.status,
-            "value": _serialize_value(attempt.value_or_none()) if attempt.succeeded else None,
+            "value": None,
             "is_child": self.is_child,
         }
         result["succeeded"] = attempt.succeeded
         result["pending"] = attempt.pending
         result["impossible"] = attempt.impossible
+        if attempt.succeeded:
+            result["value"] = self._adapter.dump_python(attempt.value_or_none(), mode="json")
         if attempt.impossible:
             result["error"] = attempt.error
         result["provenance"] = (await self.build_provenance()).to_dict()

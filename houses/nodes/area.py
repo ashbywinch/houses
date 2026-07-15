@@ -13,8 +13,7 @@ class WalkabilityNode(DerivedNode[dict]):
         deps: tuple[Node, ...] = (best_location, best_address)
         super().__init__(node_id, dict, deps)
 
-    async def compute(self, location: Attempt[GeoPoint],
-                      address: Attempt[str]) -> Attempt[dict]:
+    async def compute(self, location: Attempt[GeoPoint], address: Attempt[str]) -> Attempt[dict]:
         if not location.succeeded:
             return self._impossible({"best_location": location})
         loc = location.value_or_none()

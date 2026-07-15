@@ -2,6 +2,7 @@
 
 Uses SQLite in-memory database (no filesystem dependencies).
 """
+
 from __future__ import annotations
 
 import json
@@ -58,8 +59,9 @@ class TestSerialisation:
         assert result["x"] == 3
         assert result["y"] == 4
 
-    def test_empty_string_deserialises_to_none(self):
-        assert _deserialize_value("") is None
+    def test_empty_string_roundtrips(self):
+        """Empty string should round-trip as empty string, not None."""
+        assert _deserialize_value("") == ""
 
     def test_none_string_preserved_as_string(self):
         assert _deserialize_value("None") == "None"

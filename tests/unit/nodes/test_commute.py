@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from money import Money
 
+import dag.user_input_node  # noqa: F401 — register Money/Quantity pydantic schemas
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode, flush_processor
 from dag.user_input_node import UserInputNode
@@ -16,8 +17,7 @@ def _succeeded_walk_check(val: bool = False) -> DerivedNode:
     from houses.nodes.transit import WalkLegCheckNode
 
     t = UserInputNode[dict]("_wc_t", dict)
-    p = UserInputNode[list]("_wc_p", list)
-    w = WalkLegCheckNode("_wc", transit_node=t, persons_source=p)
+    w = WalkLegCheckNode("_wc", transit_node=t)
     w._attempt = Attempt.succeeded(val)
     return w
 
@@ -88,6 +88,80 @@ class TestCommuteSelectorNode:
 
         a = await node.attempt()
         assert a.pending
+
+    @pytest.mark.asyncio
+    async def test_bus_selected_when_five_minutes_faster(self):
+        """When bus is >=5 min faster than transit, bus is chosen."""
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
+
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = commute_input_node("transit")
+        bus = commute_input_node("bus")
+        walk_check = _succeeded_walk_check(True)
+
+        node = CommuteSelectorNode(
+            "commute_selector",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            bus_result=bus,
+            walk_leg_check=walk_check,
+        )
+
+        origin.push(GeoPoint(51.5, -0.1), "user")
+        office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
+        poi.push(office_poi, "config")
+
+        # Bus is 8 min faster (>=5 threshold) → bus wins
+        transit_commute = _make_commute(duration_min=40, cost_gbp=4.50)
+        bus_commute = _make_commute(duration_min=32, cost_gbp=2.00)
+
+        transit.push(transit_commute, "TfL")
+        bus.push(bus_commute, "Bus")
+
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded
+        assert a.value_or_none() == bus_commute
+
+    @pytest.mark.asyncio
+    async def test_transit_selected_when_bus_only_four_minutes_faster(self):
+        """When bus is only 4 min faster (<5 threshold), transit is chosen."""
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
+
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = commute_input_node("transit")
+        bus = commute_input_node("bus")
+        walk_check = _succeeded_walk_check(True)
+
+        node = CommuteSelectorNode(
+            "commute_selector",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            bus_result=bus,
+            walk_leg_check=walk_check,
+        )
+
+        origin.push(GeoPoint(51.5, -0.1), "user")
+        office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
+        poi.push(office_poi, "config")
+
+        # Bus is 4 min faster (<5 threshold) → transit wins
+        transit_commute = _make_commute(duration_min=40, cost_gbp=4.50)
+        bus_commute = _make_commute(duration_min=36, cost_gbp=2.00)
+
+        transit.push(transit_commute, "TfL")
+        bus.push(bus_commute, "Bus")
+
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded
+        assert a.value_or_none() == transit_commute
 
     @pytest.mark.asyncio
     async def test_impossible_when_both_fail(self):
@@ -209,6 +283,157 @@ class TestCommuteSelectorNode:
         assert j["value"] is not None
         assert "error" not in j
 
+    @pytest.mark.asyncio
+    async def test_picks_bus_when_much_faster(self):
+        """When bus is >=5 min faster than transit, bus is selected."""
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
+
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = commute_input_node("transit")
+        bus = commute_input_node("bus")
+        walk_check = _succeeded_walk_check(True)
+
+        node = CommuteSelectorNode(
+            "commute_selector",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            bus_result=bus,
+            walk_leg_check=walk_check,
+        )
+
+        origin.push(GeoPoint(51.5, -0.1), "user")
+        office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
+        poi.push(office_poi, "config")
+
+        transit_commute = _make_commute(duration_min=50, cost_gbp=4.50)
+        bus_commute = _make_commute(duration_min=30, cost_gbp=2.00)
+
+        transit.push(transit_commute, "TfL")
+        bus.push(bus_commute, "Bus")
+
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded
+        assert a.value_or_none() == bus_commute
+
+    @pytest.mark.asyncio
+    async def test_rejects_bus_when_not_faster(self):
+        """When bus is only 2 min faster (<5 threshold), transit is selected."""
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
+
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = commute_input_node("transit")
+        bus = commute_input_node("bus")
+        walk_check = _succeeded_walk_check(True)
+
+        node = CommuteSelectorNode(
+            "commute_selector",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            bus_result=bus,
+            walk_leg_check=walk_check,
+        )
+
+        origin.push(GeoPoint(51.5, -0.1), "user")
+        office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
+        poi.push(office_poi, "config")
+
+        transit_commute = _make_commute(duration_min=35, cost_gbp=4.50)
+        bus_commute = _make_commute(duration_min=33, cost_gbp=2.00)
+
+        transit.push(transit_commute, "TfL")
+        bus.push(bus_commute, "Bus")
+
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded
+        assert a.value_or_none() == transit_commute
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_bus_when_transit_fails(self):
+        """When transit is impossible and bus succeeds, bus is selected."""
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
+
+        # A DerivedNode with no deps that computes to impossible.
+        # This way transit.succeeded is False (not pending), so
+        # DerivedNode.refresh() proceeds to compute().
+        class _FailingTransit(DerivedNode[dict]):
+            def __init__(self):
+                super().__init__("ft", dict, ())
+
+            def compute(self):
+                return Attempt.impossible("no transit route")
+
+            async def to_json(self):
+                return {"status": "impossible"}
+
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = _FailingTransit()
+        bus = commute_input_node("bus")
+        walk_check = _succeeded_walk_check(True)
+
+        node = CommuteSelectorNode(
+            "commute_selector",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            bus_result=bus,
+            walk_leg_check=walk_check,
+        )
+
+        origin.push(GeoPoint(51.5, -0.1), "user")
+        office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
+        poi.push(office_poi, "config")
+
+        bus_commute = _make_commute(duration_min=30, cost_gbp=2.00)
+        bus.push(bus_commute, "Bus")
+
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded
+        assert a.value_or_none() == bus_commute
+
+    @pytest.mark.asyncio
+    async def test_picks_transit_when_bus_missing(self):
+        """When transit succeeds and bus is not an active dep (walk check false), transit is selected."""
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
+
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = commute_input_node("transit")
+        bus = commute_input_node("bus")
+        walk_check = _succeeded_walk_check(False)  # bus not active
+
+        node = CommuteSelectorNode(
+            "commute_selector",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            bus_result=bus,
+            walk_leg_check=walk_check,
+        )
+
+        origin.push(GeoPoint(51.5, -0.1), "user")
+        office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
+        poi.push(office_poi, "config")
+
+        transit_commute = _make_commute(duration_min=32, cost_gbp=4.50)
+        transit.push(transit_commute, "TfL")
+
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded
+        assert a.value_or_none() == transit_commute
+
 
 class TestDynamicDeps:
     """Dynamic dependency tests for CommuteSelectorNode."""
@@ -217,15 +442,15 @@ class TestDynamicDeps:
     async def test_cost_gt_zero_rail_fare_pending_computes(self):
         """Cost > 0 means rail_fare is not an active dep, so node computes
         even when rail_fare is pending."""
-        from houses.nodes.commute import CommuteSelectorNode
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
 
         origin = UserInputNode[GeoPoint]("origin", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
-        transit = UserInputNode[dict]("transit", dict)
-        bus = UserInputNode[dict]("bus", dict)
+        transit = commute_input_node("transit")
+        bus = commute_input_node("bus")
         walk_check = _succeeded_walk_check(False)
 
-        rail_fare = UserInputNode[dict]("rail_fare", dict)  # never pushed → pending
+        rail_fare = commute_input_node("rail_fare")  # never pushed → pending
 
         node = CommuteSelectorNode(
             "commute_selector",
@@ -240,7 +465,7 @@ class TestDynamicDeps:
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
         # cost_gbp > 0 so rail_fare is NOT an active dep
-        transit.push({"daily_cost": {"amount": 4.50, "currency": "GBP"}}, "TfL")
+        transit.push(_make_commute(duration_min=32, cost_gbp=4.50), "TfL")
 
         await flush_processor()
 
@@ -252,15 +477,15 @@ class TestDynamicDeps:
     async def test_cost_zero_rail_fare_pending_blocks(self):
         """Cost = 0 means rail_fare IS an active dep, so the node blocks
         until rail_fare resolves."""
-        from houses.nodes.commute import CommuteSelectorNode
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
 
         origin = UserInputNode[GeoPoint]("origin", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
-        transit = UserInputNode[dict]("transit", dict)
-        bus = UserInputNode[dict]("bus", dict)
+        transit = commute_input_node("transit")
+        bus = commute_input_node("bus")
         walk_check = _succeeded_walk_check(False)
 
-        rail_fare = UserInputNode[dict]("rail_fare", dict)
+        rail_fare = commute_input_node("rail_fare")
 
         node = CommuteSelectorNode(
             "commute_selector",
@@ -275,7 +500,7 @@ class TestDynamicDeps:
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
         # cost_gbp = 0 so rail_fare IS an active dep (but still pending)
-        transit.push({"daily_cost": {"amount": 0, "currency": "GBP"}}, "TfL")
+        transit.push(_make_commute(duration_min=32, cost_gbp=0), "TfL")
 
         await flush_processor()
 
@@ -283,11 +508,12 @@ class TestDynamicDeps:
         assert a.pending, "Should block when rail_fare is an active dep and pending"
 
         # Now resolve rail_fare
-        rail_fare.push({"daily_cost": {"amount": 5.00, "currency": "GBP"}}, "NR")
+        rail_fare.push(_make_commute(duration_min=30, cost_gbp=5.00), "NR")
         await flush_processor()
 
         a = await node.attempt()
         assert a.succeeded, "Should resolve once rail_fare completes"
+
     async def test_walk_too_long_bus_pending_blocks(self):
         """Walk check True = bus_result is active, so node blocks when bus is pending."""
         from houses.nodes.commute import CommuteSelectorNode, commute_input_node
@@ -358,12 +584,10 @@ class TestWalkLegCheckNode:
         from houses.nodes.transit import WalkLegCheckNode
 
         transit = UserInputNode[dict]("transit", dict)
-        persons = UserInputNode[list]("persons", list)
-        node = WalkLegCheckNode("walk_check", transit_node=transit, persons_source=persons)
+        node = WalkLegCheckNode("walk_check", transit_node=transit, max_walk=30)
 
-        # walk_time=10m, bus_walk_penalty_minutes=30 → 10 < 30 → False
+        # walk_time=10m, max_walk=30 → 10 < 30 → False
         transit.push({"walk_time": 10}, "TfL")
-        persons.push([_make_person(bus_walk_penalty_minutes=30)], "persons")
         await flush_processor()
 
         a = await node.attempt()
@@ -375,12 +599,10 @@ class TestWalkLegCheckNode:
         from houses.nodes.transit import WalkLegCheckNode
 
         transit = UserInputNode[dict]("transit", dict)
-        persons = UserInputNode[list]("persons", list)
-        node = WalkLegCheckNode("walk_check", transit_node=transit, persons_source=persons)
+        node = WalkLegCheckNode("walk_check", transit_node=transit, max_walk=30)
 
-        # walk_time=45m, bus_walk_penalty_minutes=30 → 45 > 30 → True
+        # walk_time=45m, max_walk=30 → 45 > 30 → True
         transit.push({"walk_time": 45}, "TfL")
-        persons.push([_make_person(bus_walk_penalty_minutes=30)], "persons")
         await flush_processor()
 
         a = await node.attempt()
@@ -394,8 +616,7 @@ class TestWalkLegCheckNode:
 def _make_person(bus_walk_penalty_minutes: int = 30, name: str = "Simon"):
     """Create a minimal Person-like object with the attributes WalkLegCheckNode reads."""
     office = PlaceOfInterest("Office", "SW1V 2QQ")
-    return Person(name, True, places_of_interest=(office,),
-                  bus_walk_penalty_minutes=bus_walk_penalty_minutes)
+    return Person(name, True, places_of_interest=(office,), bus_walk_penalty_minutes=bus_walk_penalty_minutes)
 
 
 def _make_commute(duration_min=32, cost_gbp=4.50):
@@ -409,24 +630,33 @@ def _make_commute(duration_min=32, cost_gbp=4.50):
         destination=office,
         duration=Quantity(duration_min, "minute"),
         daily_cost=Money(str(cost_gbp), "GBP"),
-        details=(CostGroup(legs=(), operator="TfL", cost=Money(str(cost_gbp), "GBP")),)
+        details=(CostGroup(legs=(), operator="TfL", cost=Money(str(cost_gbp), "GBP")),),
     )
+
 
 @pytest.mark.asyncio
 async def test_commute_selector_init_with_persisted_result():
     """Constructing a CommuteSelectorNode that loads a persisted result
     must not crash when _is_stale() calls _get_active_deps() before
     the subclass has set its named attributes."""
-    from houses.nodes.commute import CommuteSelectorNode
+    from pydantic import TypeAdapter
+
     from dag.persistence import save_node_result
+    from houses.model.domain import Commute as CommuteDomain
+    from houses.nodes.commute import CommuteSelectorNode
 
-    NODE_ID = "test_init_crash_persisted"
+    node_id = "test_init_crash_persisted"
 
-    # Persist a result so the node loads from DB and _is_stale() is called
-    save_node_result(NODE_ID, {
-        "status": "succeeded",
-        "value": {"daily_cost": {"amount": 5.0, "currency": "GBP"}},
-    })
+    # Persist a valid Commute dict so the node can load it with TypeAdapter(Commute)
+    commute = _make_commute(duration_min=5, cost_gbp=5.0)
+    value_dict = TypeAdapter(CommuteDomain).dump_python(commute, mode="json")
+    save_node_result(
+        node_id,
+        {
+            "status": "succeeded",
+            "value": value_dict,
+        },
+    )
 
     origin = UserInputNode[GeoPoint]("origin_crash", GeoPoint)
     poi = UserInputNode[PlaceOfInterest]("poi_crash", PlaceOfInterest)
@@ -435,7 +665,7 @@ async def test_commute_selector_init_with_persisted_result():
     walk_check = _succeeded_walk_check(False)
 
     node = CommuteSelectorNode(
-        NODE_ID,
+        node_id,
         origin=origin,
         poi=poi,
         transit_result=transit,
@@ -443,3 +673,233 @@ async def test_commute_selector_init_with_persisted_result():
         walk_leg_check=walk_check,
     )
     assert node is not None
+
+
+class TestFareBetween:
+    """RailFareRegistry.fare_between — exact pair lookup."""
+
+    def test_fare_between_exact_match(self):
+        """Direct station pair returns the fare."""
+        from houses.rail_fares import RailFareRegistry
+        from houses.stations import Station
+
+        reg = RailFareRegistry()
+        reg._fares_by_pair = {
+            frozenset({"MAI", "PAD"}): Money(16.40, "GBP"),
+        }
+
+        maidenhead = Station("Maidenhead", "MAI", GeoPoint(51.52, -0.72))
+        paddington = Station("London Paddington", "PAD", GeoPoint(51.52, -0.18))
+
+        fare = reg.fare_between(maidenhead, paddington)
+        assert fare is not None
+        assert float(fare.amount) == 16.40
+
+    def test_fare_between_no_match(self):
+        """Returns None when no pair matches (no LON fallback either)."""
+        from houses.rail_fares import RailFareRegistry
+        from houses.stations import Station
+
+        reg = RailFareRegistry()
+        reg._fares_by_pair = {
+            frozenset({"MAI", "LON"}): Money(15.00, "GBP"),
+        }
+
+        # ABW (Aberystwyth) has no LON entry, so no fallback match
+        aber = Station("Aberystwyth", "ABW", GeoPoint(52.41, -4.08))
+        oxford = Station("Oxford", "OXF", GeoPoint(51.75, -1.26))
+
+        fare = reg.fare_between(aber, oxford)
+        assert fare is None
+
+    def test_fare_between_reverse_match(self):
+        """Fares are symmetric — reverse pair also matches."""
+        from houses.rail_fares import RailFareRegistry
+        from houses.stations import Station
+
+        reg = RailFareRegistry()
+        reg._fares_by_pair = {
+            frozenset({"PAD", "MAI"}): Money(16.40, "GBP"),
+        }
+
+        maidenhead = Station("Maidenhead", "MAI", GeoPoint(51.52, -0.72))
+        paddington = Station("London Paddington", "PAD", GeoPoint(51.52, -0.18))
+
+        fare = reg.fare_between(maidenhead, paddington)
+        assert fare is not None
+        assert float(fare.amount) == 16.40
+
+
+class TestDerivedNodeProvenance:
+    """DerivedNode.build_provenance uses last path segment as label."""
+
+    @pytest.mark.asyncio
+    async def test_provenance_label_uses_last_path_segment(self):
+        from dag.derived_node import DerivedNode
+        from dag.user_input_node import UserInputNode
+
+        dep = UserInputNode[float]("dep", float)
+        dep.push(42.0, "test")
+        await flush_processor()
+
+        class TestNode(DerivedNode[float]):
+            def compute(self, val):
+                return val
+
+            def to_json(self):
+                return {"status": "succeeded", "value": self._attempt.value_or_none()}
+
+        node = TestNode("rid/person/poi/test_node", float, (dep,))
+        await flush_processor()
+
+        prov = await node.build_provenance()
+        assert prov.label == "Test Node", f"Expected 'Test Node', got '{prov.label}'"
+        assert "dep" in prov.sources
+
+
+class TestRailFareNode:
+    """RailFareNode — fare enrichment, pass-through, and missing-dependency behavior."""
+
+    @pytest.mark.asyncio
+    async def test_pending_when_no_transit(self):
+        """Node stays pending when transit has no result yet."""
+        from houses.nodes.commute import RailFareNode
+
+        transit = UserInputNode[Commute]("rf_pend", Commute)
+        location = UserInputNode[GeoPoint]("rf_pend_loc", GeoPoint)
+        # transit NOT pushed — node should remain pending
+
+        node = RailFareNode("rf_pend_test", transit_result=transit, best_location=location)
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.pending, f"Expected pending, got {a.status}"
+
+    @pytest.mark.asyncio
+    async def test_impossible_when_location_missing(self):
+        """Node returns impossible when location dep isn't activated (cost > 0)."""
+        from houses.nodes.commute import RailFareNode
+
+        transit = UserInputNode[Commute]("rf_skip", Commute)
+        location = UserInputNode[GeoPoint]("rf_skip_loc", GeoPoint)
+
+        transit.push(_make_commute(cost_gbp=5.0), "TfL")
+
+        node = RailFareNode("rf_skip_test", transit_result=transit, best_location=location)
+        # Transit cost is non-zero, so location won't be activated
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded  # passes through transit_attempt
+        val = a.value_or_none()
+        assert val is not None
+        assert val.daily_cost.amount == 5.0  # unchanged from transit
+
+    @pytest.mark.asyncio
+    async def test_enriches_commute_with_rail_fare(self, tmp_path):
+        """Commute with zero daily cost and train leg gets NR fare added (17.00 + 2.80) × 2 → 39.60."""
+        from unittest.mock import patch
+
+        from pint import Quantity
+
+        from houses.commute import JourneyLeg, LegMode
+        from houses.nodes.commute import RailFareNode
+        from houses.rail_fare_registry import _request_rail_fares
+        from houses.rail_fares import RailFareRegistry
+        from houses.stations import StationRegistry
+
+        # Set up registry with stations and fare
+        stations_csv = tmp_path / "stations.csv"
+        stations_csv.write_text(
+            "stationName,crsCode,lat,long\nWoking,WOK,51.317,-0.556\nFenchurch Street,FST,51.511,-0.079\n"
+        )
+        fares_csv = tmp_path / "fares.csv"
+        fares_csv.write_text("origin_crs,dest_crs,single_fare_gbp\nWOK,FST,17.00\n")
+
+        reg = RailFareRegistry(
+            station_registry=StationRegistry(_stations_csv=stations_csv),
+            _fares_csv=fares_csv,
+        )
+        _request_rail_fares.set(reg)
+
+        transit = UserInputNode[Commute]("rf_fare", Commute)
+        location = UserInputNode[GeoPoint]("rf_fare_loc", GeoPoint)
+
+        office = PlaceOfInterest("Office", "EC3A 7LP")
+        person = Person("Lorena", True, places_of_interest=(office,))
+        commute = Commute(
+            person=person,
+            label=office.label,
+            destination=office,
+            duration=Quantity(78, "minute"),
+            daily_cost=Money("0", "GBP"),
+            details=(
+                CostGroup(
+                    legs=(
+                        JourneyLeg(
+                            mode=LegMode.BUS, duration_minutes=10, start_station="", end_station="", line_name=""
+                        ),
+                        JourneyLeg(
+                            mode=LegMode.TRAIN,
+                            duration_minutes=30,
+                            start_station="WOK",
+                            end_station="Fenchurch Street",
+                            line_name="Great Western Railway",
+                        ),
+                    ),
+                    operator="TfL",
+                    cost=Money("0", "GBP"),
+                ),
+            ),
+        )
+
+        transit.push(commute, "TfL")
+        location.push(GeoPoint(51.317, -0.556), "geocode")
+
+        node = RailFareNode("rf_fare_test", transit_result=transit, best_location=location)
+
+        with patch("houses.transit_route.get_tube_leg_fare", return_value=None):
+            await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded, f"Expected succeeded, got {a.status}: {a.error}"
+        val = a.value_or_none()
+        assert val is not None
+        # (17.00 + 2.80) × 2 = 39.60
+        assert float(val.daily_cost.amount) == 39.60
+
+
+@pytest.mark.asyncio
+async def test_commute_selector_impossible_without_bus():
+    """When transit fails and bus_result is not an active dep
+    (default None in compute), _impossible() must not crash."""
+    from houses.nodes.commute import CommuteSelectorNode
+
+    origin = UserInputNode[GeoPoint]("origin_nb", GeoPoint)
+    poi = UserInputNode[PlaceOfInterest]("poi_nb", PlaceOfInterest)
+    transit = UserInputNode[dict]("transit_nb", dict)
+    walk_check = _succeeded_walk_check(False)
+
+    # Provide a bus node so the constructor doesn't get None as dep,
+    # but walk_check returns False so bus is NOT an active dep.
+    bus = UserInputNode[dict]("bus_nb", dict)
+    # Don't push bus — it'll be pending, but not added to active deps
+
+    node = CommuteSelectorNode(
+        "commute_nb",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=bus,
+        walk_leg_check=walk_check,
+    )
+
+    origin.push(GeoPoint(51.5, -0.1), "user")
+    poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
+    # Don't push transit — it'll be pending, so the selector can't
+    # pick any route.  Crash was in _impossible() receiving None
+    # for non-active deps.
+    await flush_processor()
+
+    a = await node.attempt()
+    assert a.pending, f"Expected pending, got {a.status}: {a.error}"

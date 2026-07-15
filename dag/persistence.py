@@ -64,7 +64,7 @@ def _serialize_value(val: Any) -> str:
 
 
 def _deserialize_value(raw: str) -> Any:
-    if not raw:
+    if raw is None:  # was: if not raw — empty string "" should not be treated as None
         return None
     try:
         d = json.loads(raw)

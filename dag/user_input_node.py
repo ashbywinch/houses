@@ -7,11 +7,13 @@ from pydantic_core import core_schema
 from dag.attempt import Attempt, Provenance
 from dag.node import Node
 
-# Register Money's pydantic schema so TypeAdapter(list[Person]) works.
-# This IS the correct pydantic v2 approach for third-party types:
-# __get_pydantic_core_schema__ is an explicit protocol they support.
+# Register pydantic schemas for third-party types (Money, Quantity) so
+# TypeAdapter can handle them automatically.  This IS the correct
+# pydantic v2 approach — __get_pydantic_core_schema__ is an explicit
+# protocol they support.
 try:
     from money import Money
+    from pint import Quantity
     from pydantic_core import core_schema
 
     if not hasattr(Money, "__get_pydantic_core_schema__"):
@@ -32,6 +34,49 @@ try:
             )
 
         Money.__get_pydantic_core_schema__ = _money_schema
+
+    if not hasattr(Quantity, "__get_pydantic_core_schema__"):
+        def _quantity_schema(_source, _handler):
+            def validate(v):
+                if isinstance(v, Quantity):
+                    return v
+                if isinstance(v, dict):
+                    return Quantity(v.get("value", 0), v.get("unit", ""))
+                raise ValueError(f"Cannot convert {type(v)} to Quantity")
+
+            def serialize(q):
+                m = float(q.magnitude)
+                return {"value": int(m) if m == int(m) else m, "unit": str(q.units)}
+
+            return core_schema.no_info_plain_validator_function(
+                validate,
+                serialization=core_schema.plain_serializer_function_ser_schema(serialize),
+            )
+
+        Quantity.__get_pydantic_core_schema__ = _quantity_schema
+
+    from houses.commute import LegMode
+
+    if not hasattr(LegMode, "__get_pydantic_core_schema__"):
+        def _legmode_schema(_source, _handler):
+            def validate(v):
+                if isinstance(v, LegMode):
+                    return v
+                if isinstance(v, str):
+                    return LegMode[v.upper()]
+                if isinstance(v, int):
+                    return LegMode(v)
+                raise ValueError(f"Cannot convert {type(v)} to LegMode")
+
+            def serialize(lm):
+                return lm.name.lower()
+
+            return core_schema.no_info_plain_validator_function(
+                validate,
+                serialization=core_schema.plain_serializer_function_ser_schema(serialize),
+            )
+
+        LegMode.__get_pydantic_core_schema__ = _legmode_schema
 except ImportError:
     pass
 
@@ -58,7 +103,11 @@ class UserInputNode(Node[T], Generic[T]):
             self._source_label = self._load_persisted_label()
 
     def _load_persisted_label(self) -> str:
-        """Read the source_label from the last persisted result."""
+        from dag.persistence import latest_node_result
+        result = latest_node_result(self._id)
+        if result is not None:
+            return result.get("source_label", "")
+        return ""
     def push(self, value: T, source_label: str = "") -> None:
         """Set a new value and persist.
 

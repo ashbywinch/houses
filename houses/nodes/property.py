@@ -18,6 +18,8 @@ from houses.nodes.monthly_costs import (
     TotalMonthlyHousingCostNode,
     YearlySinkingFundNode,
 )
+from houses.nodes.park_and_ride import ParkAndRideAugmentNode
+from houses.nodes.petrol import PetrolCostAugmentNode
 from houses.nodes.schools import PrimarySchoolNode, SchoolLocationNode, SecondarySchoolNode
 from houses.nodes.transit import TransitNode, WalkLegCheckNode
 from houses.services_provider import get_services
@@ -102,7 +104,7 @@ class PropertyNodes:
         # ── School Nodes ───────────────────────────────────────────────
         # Find the first child person's acceptable school types
         _school_acceptable = ("mixed",)
-        for p in (self._svc.persons_source._value or []):
+        for p in self._svc.persons_source._value or []:
             if p.is_child:
                 _school_acceptable = p.acceptable_schools
                 break
@@ -138,13 +140,6 @@ class PropertyNodes:
             rightmove_price=self.rightmove_price,
             financial_source=self._svc.financial_source,
         )
-        self.commute_breakdown = CommuteBreakdownNode(
-            f"{rid}/commute_breakdown",
-            simon_office=self.commute_simon_office,
-            simon_bracknell=self.commute_simon_bracknell,
-            lorena_office=self.commute_lorena_office,
-            persons_source=self._svc.persons_source,
-        )
         self.total_monthly_cost = TotalMonthlyHousingCostNode(
             f"{rid}/total_monthly_cost",
             monthly_mortgage_node=self.monthly_mortgage,
@@ -156,13 +151,21 @@ class PropertyNodes:
 
         # ── Signal wiring ──────────────────────────────────────────────
         all_nodes: list = [
-            self.rightmove_url, self.rightmove_address,
-            self.rightmove_bedrooms, self.rightmove_price,
-            self.rightmove_location, self.precise_location,
-            self.corrected_address, self.user_entered_address, self.postcode,
-            self.comment_status, self.comment_status_reason,
-            self.comment_group_notes, self.comment_ashby_comments,
-            self.comment_ashby_works, self.comment_design_needed,
+            self.rightmove_url,
+            self.rightmove_address,
+            self.rightmove_bedrooms,
+            self.rightmove_price,
+            self.rightmove_location,
+            self.precise_location,
+            self.corrected_address,
+            self.user_entered_address,
+            self.postcode,
+            self.comment_status,
+            self.comment_status_reason,
+            self.comment_group_notes,
+            self.comment_ashby_comments,
+            self.comment_ashby_works,
+            self.comment_design_needed,
             self.comment_planning_needed,
         ]
         self._slots: list[Slot] = []
@@ -176,7 +179,7 @@ class PropertyNodes:
         self._bus_augment_nodes = []
         self.commute_selectors = {}
 
-        for p_info in (self._svc.persons_source._value or []):
+        for p_info in self._svc.persons_source._value or []:
             p_name = p_info.name
             pois = p_info.places_of_interest
             for poi in pois:
@@ -186,9 +189,13 @@ class PropertyNodes:
 
                 is_child = p_info.is_child
                 if is_child:
-                    school_node = (self.primary_school if "Primary" in label
-                                   else self.secondary_school if "Secondary" in label
-                                   else None)
+                    school_node = (
+                        self.primary_school
+                        if "Primary" in label
+                        else self.secondary_school
+                        if "Secondary" in label
+                        else None
+                    )
                     if school_node is None:
                         continue
                     poi_src = SchoolLocationNode(
@@ -203,14 +210,30 @@ class PropertyNodes:
                     f"{self.rid}/{key}/computed_transit",
                     best_location=self.best_location,
                     poi=poi_src,
-                    persons_source=self._svc.persons_source,
+                    has_car=p_info.has_car,
+                    max_walk=p_info.bus_walk_penalty_minutes,
                 )
                 self._transit_nodes.append(transit_node)
+
+                park_and_ride = ParkAndRideAugmentNode(
+                    f"{self.rid}/{key}/park_and_ride",
+                    transit_node=transit_node,
+                    best_location=self.best_location,
+                    postcode_node=self.postcode,
+                    has_car=p_info.has_car,
+                    max_walk=p_info.bus_walk_penalty_minutes,
+                )
+
+                petrol_cost = PetrolCostAugmentNode(
+                    f"{self.rid}/{key}/petrol_cost",
+                    commute_node=park_and_ride,
+                    financial_source=self._svc.financial_source,
+                )
 
                 walk_check = WalkLegCheckNode(
                     f"{self.rid}/{key}/walk_check",
                     transit_node=transit_node,
-                    persons_source=self._svc.persons_source,
+                    max_walk=p_info.bus_walk_penalty_minutes,
                 )
 
                 bus_route = BusRouteNode(
@@ -237,21 +260,19 @@ class PropertyNodes:
                 # Create a RailFareNode for non-child commutes to apply NR fares
                 rail_fare_node = None
                 if not is_child:
-                    name_node = UserInputNode[str](f"{self.rid}/{key}/person_name", str)
-                    name_node.push(p_name, "persons_source")
                     from houses.nodes.commute import RailFareNode
+
                     rail_fare_node = RailFareNode(
                         f"{self.rid}/{key}/rail_fare",
-                        commute_node=transit_node,
+                        transit_result=transit_node,
                         best_location=self.best_location,
-                        person_name=name_node,
                     )
 
                 selector = CommuteSelectorNode(
                     f"{self.rid}/{key}/commute",
                     origin=self.best_location,
                     poi=poi_src,
-                    transit_result=transit_node,
+                    transit_result=petrol_cost,
                     bus_result=bus_augment,
                     walk_leg_check=walk_check,
                     is_child=is_child,
@@ -259,31 +280,11 @@ class PropertyNodes:
                 )
                 self.commute_selectors[key] = selector
 
-        # Look up commute selectors by the actual POI labels from the
-        # persons config, so CommuteBreakdownNode deps resolve correctly.
-        simon_office_key = None
-        bracknell_key = None
-        lorena_office_key = None
-        for key in self.commute_selectors:
-            parts = key.split("/", 1)
-            if len(parts) != 2:
-                continue
-            p_name, label = parts
-            if p_name == "Simon" and label == "Bracknell":
-                bracknell_key = key
-            elif p_name == "Simon" and simon_office_key is None:
-                simon_office_key = key  # first non-Bracknell Simon commute
-            elif p_name == "Lorena" and lorena_office_key is None:
-                lorena_office_key = key  # first Lorena commute
-
-        def fallback(rid, key):
-            return UserInputNode[dict](f"{rid}/{key}/fallback", dict)
-        self.commute_simon_office = self.commute_selectors.get(
-            simon_office_key, fallback(self.rid, "simon_office"))
-        self.commute_simon_bracknell = self.commute_selectors.get(
-            bracknell_key, fallback(self.rid, "simon_bracknell"))
-        self.commute_lorena_office = self.commute_selectors.get(
-            lorena_office_key, fallback(self.rid, "lorena_office"))
+        self.commute_breakdown = CommuteBreakdownNode(
+            f"{self.rid}/commute_breakdown",
+            commute_selectors=self.commute_selectors,
+            persons_source=self._svc.persons_source,
+        )
 
     def _on_node_changed(self) -> None:
         self.changed.emit()
@@ -308,10 +309,7 @@ class PropertyNodes:
             "rightmove_bedrooms": await self.rightmove_bedrooms.to_json(),
             "total_monthly_cost": await self.total_monthly_cost.to_json(),
             "town_name": await self.town_name.to_json(),
-            "commutes": {
-                k: {"commute": await v.to_json()}
-                for k, v in self.commute_selectors.items()
-            },
+            "commutes": {k: {"commute": await v.to_json()} for k, v in self.commute_selectors.items()},
             "schools": {
                 "primary": {
                     "school": await self.primary_school.to_json(),
@@ -331,8 +329,7 @@ class PropertyNodes:
             return {
                 "status": "succeeded",
                 "value": monthly,
-                "provenance": {"label": "formula:monthly_sinking",
-                               "description": f"{yearly_value}/12*2/3"},
+                "provenance": {"label": "formula:monthly_sinking", "description": f"{yearly_value}/12*2/3"},
             }
         return yearly
 
@@ -344,18 +341,15 @@ class PropertyNodes:
             "rightmove_url": await self.rightmove_url.to_json(),
             "rightmove_price": await self.rightmove_price.to_json(),
             "rightmove_bedrooms": await self.rightmove_bedrooms.to_json(),
-            "postcode": await self.postcode.to_json(),
             "town_name": await self.town_name.to_json(),
+            "epc": await self.epc.to_json(),
             "location": {
                 "best_location": await self.best_location.to_json(),
                 "geocode": await self.geocode.to_json(),
                 "rightmove_location": await self.rightmove_location.to_json(),
                 "precise_location": await self.precise_location.to_json(),
             },
-            "commutes": {
-                k: await v.to_json()
-                for k, v in self.commute_selectors.items()
-            },
+            "commutes": {k: await v.to_json() for k, v in self.commute_selectors.items()},
             "schools": {
                 "primary": {
                     "school": await self.primary_school.to_json(),

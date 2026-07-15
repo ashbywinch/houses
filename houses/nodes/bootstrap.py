@@ -54,13 +54,12 @@ def _upgrade_address(address: str, postcode: str) -> str:
         return address
     m = _OUTCODE_RE.search(address)
     if m:
-        before = address[:m.start()].rstrip(", ").rstrip()
+        before = address[: m.start()].rstrip(", ").rstrip()
         return f"{before}, {postcode}"
     return f"{address}, {postcode}"
 
 
-def bootstrap_from_row(row: dict[str, Any],
-                       sources: dict[str, UserInputNode]) -> int:
+def bootstrap_from_row(row: dict[str, Any], sources: dict[str, UserInputNode]) -> int:
     pushed = 0
 
     address = (row.get("Address") or "").strip()
@@ -129,14 +128,6 @@ def bootstrap_from_row(row: dict[str, Any],
     if postcode and "postcode" in sources:
         sources["postcode"].push(postcode, "Sheet")
         pushed += 1
-
-    if postcode and "user_entered_address" in sources and address:
-        upgraded = _upgrade_address(address, postcode)
-        if upgraded != address:
-            sources["user_entered_address"].push(
-                upgraded,
-                "User correction",
-            )
 
     for source_key, col_name in COMMENT_COLUMNS.items():
         if source_key not in sources:

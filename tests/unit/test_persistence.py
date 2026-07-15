@@ -8,6 +8,7 @@ The ``_sqlite_memory`` autouse fixture in tests/unit/conftest.py sets up
 an in-memory SQLite database for ``dag.persistence``, so every test
 here runs isolated from the real database.
 """
+
 from __future__ import annotations
 
 import json
@@ -45,8 +46,8 @@ class TestGeoPointSerialisation:
     def test_none_serialises_to_empty(self):
         assert _serialize_value(None) == ""
 
-    def test_none_via_empty_deserialises_to_none(self):
-        assert _deserialize_value("") is None
+    def test_empty_string_deserialises_to_empty_string(self):
+        assert _deserialize_value("") == ""
 
     def test_string_none_preserved(self):
         assert _deserialize_value("None") == "None"
@@ -55,10 +56,6 @@ class TestGeoPointSerialisation:
         """Empty string serialises the same as None (bare empty string, not JSON-quoted)."""
         s = _serialize_value("")
         assert s == ""
-
-    def test_empty_string_deserialises_to_none(self):
-        """Empty string via _deserialize_value returns None (not the empty string)."""
-        assert _deserialize_value("") is None
 
     def test_quoted_empty_string_deserialises_to_empty(self):
         """Pre-serialised JSON empty string ``'""'`` round-trips to an empty string."""
@@ -125,8 +122,7 @@ class TestGeoPointPersistence:
         per.init_db()
         conn = per._get_db()
         conn.execute(
-            "INSERT INTO node_results (node_id, result_json, created_at)"
-            " VALUES (?, ?, ?)",
+            "INSERT INTO node_results (node_id, result_json, created_at) VALUES (?, ?, ?)",
             (
                 f"{RID}/best_location",
                 json.dumps({"value": "None", "status": "succeeded"}),

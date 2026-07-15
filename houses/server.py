@@ -108,7 +108,6 @@ app.mount("/static", StaticFiles(directory="houses/static"), name="static")
 app.include_router(api_router)
 
 
-
 @app.middleware("http")
 async def _request_context(request, call_next):
     """Set up per-request context (geo cache, geo state, services, bus fares)."""
@@ -201,6 +200,7 @@ async def upsert_property(
 
         # ── Seed the DAG (no sheet writes, no old enrichment) ─────────
         from houses.property import EnrichedProperty
+
         enriched = EnrichedProperty(
             url=payload.url or (scraped.url if scraped else ""),
             address=address or (scraped.address if scraped else ""),
@@ -214,13 +214,17 @@ async def upsert_property(
         if rid2:
             try:
                 prop = PropertyNodes(rid2)
-                push_enriched_property(rid2, enriched, {
-                    "rightmove_address": prop.rightmove_address,
-                    "rightmove_url": prop.rightmove_url,
-                    "rightmove_bedrooms": prop.rightmove_bedrooms,
-                    "rightmove_price": prop.rightmove_price,
-                    "rightmove_location": prop.rightmove_location,
-                })
+                push_enriched_property(
+                    rid2,
+                    enriched,
+                    {
+                        "rightmove_address": prop.rightmove_address,
+                        "rightmove_url": prop.rightmove_url,
+                        "rightmove_bedrooms": prop.rightmove_bedrooms,
+                        "rightmove_price": prop.rightmove_price,
+                        "rightmove_location": prop.rightmove_location,
+                    },
+                )
                 register_property(rid2, prop)
                 logger.info("Seeded DAG for %s", rid2)
             except Exception as e:

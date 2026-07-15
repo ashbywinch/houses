@@ -8,11 +8,11 @@ class TestPropertyApi:
     def _setup(self):
         from fastapi.testclient import TestClient
 
+        from houses.property_registry import _registry
         from houses.server import app
-        from houses.web.api_router import _registry, api_router
 
         _registry.clear()
-        app.include_router(api_router)
+        # Routes already registered by server.py — no app.include_router needed
         return TestClient(app), _registry
 
     def test_get_property_returns_json(self):
@@ -80,9 +80,7 @@ class TestSettingsApi:
         from fastapi.testclient import TestClient
 
         from houses.server import app
-        from houses.web.api_router import api_router
 
-        app.include_router(api_router)
         return TestClient(app)
 
     def test_patch_persons_with_list(self):

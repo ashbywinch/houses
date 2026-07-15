@@ -26,7 +26,7 @@ houses/
 ├── context.py             # ContextVar per-request state
 ├── config.py              # pydantic-settings configuration
 ├── location.py            # Geocoding (postcodes.io, ORS, Google, Nominatim)
-├── attempt.py             # Attempt[T] result monad
+├── services.py            # DI protocols + Services container (ports + adapters)
 ├── endpoint_client.py     # Reusable API client with Retry-After
 ├── transit_route.py       # TfL API + park-and-ride
 ├── commute.py             # Commute value objects

@@ -114,7 +114,6 @@ async def find_nearest(
     return candidates[0][1]
 
 
-
 # ---------------------------------------------------------------------------
 # School commute
 # ---------------------------------------------------------------------------
@@ -129,7 +128,5 @@ async def compute_school_commute(property_postcode: str, school: School) -> Comm
     """
     result = await _routing.get_commute(property_postcode, school.postcode, has_car=False, max_walk_minutes=20)
     if result.impossible:
-        logger.debug(
-            "School commute for %s → %s: %s", property_postcode, school.postcode, result.error
-        )
+        logger.debug("School commute for %s → %s: %s", property_postcode, school.postcode, result.error)
     return result.value_or_none()

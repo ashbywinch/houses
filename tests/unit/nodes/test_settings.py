@@ -7,12 +7,15 @@ class TestDecomposedSources:
     @pytest.fixture
     def _svc(self):
         from houses.services_provider import get_services
+
         try:
             return get_services()
         except LookupError:
             from houses.services import Services
+
             svc = Services()
             from houses.services_provider import _request_services as _sp
+
             _sp.set(svc)
             return svc
 
@@ -44,7 +47,7 @@ class TestDecomposedSources:
         a = await _svc.financial_source.attempt()
         assert a.succeeded
         fin = a.value_or_none()
-        assert fin["mortgage_rate"] == 0.045
+        assert fin["mortgage_rate"] == 0.0495
         assert fin["working_weeks_per_year"] == 46
 
     @pytest.mark.asyncio

@@ -15,9 +15,8 @@ class TestTransitNode:
 
         loc = UserInputNode[GeoPoint]("loc", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
-        persons = UserInputNode[list]("persons", list)
 
-        node = TransitNode("tn", best_location=loc, poi=poi, persons_source=persons)
+        node = TransitNode("tn", best_location=loc, poi=poi, has_car=False, max_walk=30)
         a = await node.attempt()
         assert a.pending
 
@@ -27,11 +26,10 @@ class TestTransitNode:
 
         loc = UserInputNode[GeoPoint]("loc2", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi2", PlaceOfInterest)
-        persons = UserInputNode[list]("persons2", list)
 
         loc.push(GeoPoint(51.5, -0.1), "test")
         await flush_processor()
-        node = TransitNode("tn2", best_location=loc, poi=poi, persons_source=persons)
+        node = TransitNode("tn2", best_location=loc, poi=poi, has_car=False, max_walk=30)
         a = await node.attempt()
         assert a.pending
 
@@ -42,15 +40,14 @@ class TestWalkLegCheckNode:
         from houses.nodes.transit import WalkLegCheckNode
 
         transit = UserInputNode[dict]("transit_w", dict)
-        persons = UserInputNode[list]("persons_w", list)
 
-        node = WalkLegCheckNode("wlc", transit_node=transit, persons_source=persons)
+        node = WalkLegCheckNode("wlc", transit_node=transit, max_walk=30)
         transit.push({}, "test")
-        persons.push([], "test")
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() is False
+
 
 class TestTransitNodeJson:
     @pytest.mark.asyncio
@@ -60,9 +57,8 @@ class TestTransitNodeJson:
 
         loc = UserInputNode[GeoPoint]("loc_tj", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi_tj", PlaceOfInterest)
-        persons = UserInputNode[list]("persons_tj", list)
 
-        node = TransitNode("tn_json", best_location=loc, poi=poi, persons_source=persons)
+        node = TransitNode("tn_json", best_location=loc, poi=poi, has_car=False, max_walk=30)
         j = await node.to_json()
         assert "succeeded" in j, "Missing succeeded field"
         assert "pending" in j, "Missing pending field"

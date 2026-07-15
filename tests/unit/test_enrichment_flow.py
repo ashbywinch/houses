@@ -5,6 +5,7 @@ Replaces the old ``test_enrichment_flow.py`` that depended on the deleted
 ``houses.model.resolver`` modules.  Every test now exercises the DAG
 (``dag/``) backed processor pipeline.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -275,7 +276,6 @@ class TestEnrichmentApi:
         assert result["fresh"]
         assert not result["nodes"].get("best_address", True)
 
-
     @pytest.mark.asyncio
     async def test_detail_includes_enriched_nodes(self):
         """GET /api/properties/{rid}/detail includes school / commute / cost nodes."""
@@ -382,20 +382,22 @@ class TestEnrichmentBootstrap:
             approx_longitude=None,
         )
 
-        push_enriched_property(RID * 2, enriched, {
-            "rightmove_address": prop.rightmove_address,
-            "rightmove_url": prop.rightmove_url,
-            "rightmove_bedrooms": prop.rightmove_bedrooms,
-            "rightmove_price": prop.rightmove_price,
-            "rightmove_location": prop.rightmove_location,
-        })
+        push_enriched_property(
+            RID * 2,
+            enriched,
+            {
+                "rightmove_address": prop.rightmove_address,
+                "rightmove_url": prop.rightmove_url,
+                "rightmove_bedrooms": prop.rightmove_bedrooms,
+                "rightmove_price": prop.rightmove_price,
+                "rightmove_location": prop.rightmove_location,
+            },
+        )
 
-        assert (await prop.rightmove_address.attempt()).value_or_none() == \
-            "Pembroke Avenue, Hersham, KT12"
+        assert (await prop.rightmove_address.attempt()).value_or_none() == "Pembroke Avenue, Hersham, KT12"
         assert (await prop.rightmove_bedrooms.attempt()).value_or_none() == "3"
         assert (await prop.rightmove_price.attempt()).value_or_none() == "300000"
-        assert (await prop.rightmove_url.attempt()).value_or_none() == \
-            "https://rightmove.co.uk/properties/999"
+        assert (await prop.rightmove_url.attempt()).value_or_none() == "https://rightmove.co.uk/properties/999"
 
     @pytest.mark.asyncio
     async def test_import_with_approx_location(self):
@@ -418,6 +420,7 @@ class TestEnrichmentBootstrap:
         )
 
         from houses.property import EnrichedProperty
+
         enriched = EnrichedProperty(
             url="",
             address="Some Road, Hersham",
@@ -427,10 +430,14 @@ class TestEnrichmentBootstrap:
             approx_latitude=51.37,
             approx_longitude=-0.4,
         )
-        push_enriched_property("test_approx", enriched, {
-            "rightmove_address": rm_addr,
-            "rightmove_location": rm_loc,
-        })
+        push_enriched_property(
+            "test_approx",
+            enriched,
+            {
+                "rightmove_address": rm_addr,
+                "rightmove_location": rm_loc,
+            },
+        )
         rm_addr.push("Some Road, Hersham", "Rightmove")
 
         await flush_processor()

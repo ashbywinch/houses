@@ -6,7 +6,8 @@ from fastapi import APIRouter, Body, HTTPException, WebSocket
 
 from houses.geo import GeoPoint
 from houses.nodes.bootstrap import seed_registry_from_sheet
-from houses.property_registry import _registry
+from houses.property_registry import get_property as get_registry_property
+from houses.property_registry import list_properties as list_registry_properties
 from houses.services_provider import get_services
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,7 @@ api_router = APIRouter(prefix="/api")
 @api_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     from houses.web.broadcaster import register_client
+
     await register_client(websocket)
 
 
@@ -26,9 +28,7 @@ async def staleness_check(rid: str, nodes: str = ""):
 
     Returns ``{"rid": str, "nodes": {node_id: bool, ...}, "fresh": bool}``.
     """
-    from houses.property_registry import _registry
-
-    prop = _registry.get(rid)
+    prop = get_registry_property(rid)
     if prop is None:
         return {"rid": rid, "nodes": {}, "fresh": False, "error": "property not found"}
 
@@ -58,13 +58,14 @@ async def staleness_check(rid: str, nodes: str = ""):
 
 @api_router.get("/properties")
 async def list_properties():
-    return {"properties": list(_registry.keys())}
+    return {"properties": list_registry_properties()}
 
 
 def _score_from_summary(s: dict) -> int:
     """Compute card score matching old ``card_data`` formula:
     green=2, orange=1, red=-1, muted=0, summed across 8 metrics.
     """
+
     def _commute_score(minutes: int | None, bracknell: bool = False) -> int:
         if minutes is None:
             return 0
@@ -117,7 +118,10 @@ def _score_from_summary(s: dict) -> int:
 @api_router.get("/properties/all")
 async def get_all_properties():
     results: dict[str, dict] = {}
-    for rid, prop in _registry.items():
+    for rid in list_registry_properties():
+        prop = get_registry_property(rid)
+        if prop is None:
+            continue
         results[rid] = await prop.to_json_summary()
     scored = sorted(results.items(), key=lambda kv: _score_from_summary(kv[1]), reverse=True)
     return dict(scored)
@@ -125,7 +129,7 @@ async def get_all_properties():
 
 @api_router.get("/properties/{rid}")
 async def get_property(rid: str):
-    prop = _registry.get(rid)
+    prop = get_registry_property(rid)
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
     return await prop.to_json()
@@ -133,7 +137,7 @@ async def get_property(rid: str):
 
 @api_router.get("/properties/{rid}/detail")
 async def get_property_detail(rid: str):
-    prop = _registry.get(rid)
+    prop = get_registry_property(rid)
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
     return await prop.to_json_detail()
@@ -141,7 +145,7 @@ async def get_property_detail(rid: str):
 
 @api_router.patch("/properties/{rid}/address")
 async def patch_address(rid: str, body: dict):
-    prop = _registry.get(rid)
+    prop = get_registry_property(rid)
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
 
@@ -151,7 +155,7 @@ async def patch_address(rid: str, body: dict):
 
 @api_router.patch("/properties/{rid}/location")
 async def patch_location(rid: str, body: dict):
-    prop = _registry.get(rid)
+    prop = get_registry_property(rid)
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
     lat = body.get("lat")
@@ -166,7 +170,7 @@ async def patch_location(rid: str, body: dict):
 @api_router.post("/seed")
 async def seed_properties():
     count = seed_registry_from_sheet()
-    return {"seeded": count, "total": len(_registry)}
+    return {"seeded": count, "total": len(list_registry_properties())}
 
 
 @api_router.get("/settings")
@@ -182,11 +186,20 @@ async def get_settings():
 @api_router.patch("/settings/persons")
 async def patch_persons(body: list = Body()):  # noqa: B008
     from houses.model.domain import Person, PlaceOfInterest
+
     persons = [
-        Person(**{k: (
-            tuple(PlaceOfInterest(**poi) if isinstance(poi, dict) else poi
-                  for poi in v) if k == "places_of_interest" else v
-        ) for k, v in p.items()}) if isinstance(p, dict) else p
+        Person(
+            **{
+                k: (
+                    tuple(PlaceOfInterest(**poi) if isinstance(poi, dict) else poi for poi in v)
+                    if k == "places_of_interest"
+                    else v
+                )
+                for k, v in p.items()
+            }
+        )
+        if isinstance(p, dict)
+        else p
         for p in body
     ]
     get_services().persons_source.push(persons, "user")

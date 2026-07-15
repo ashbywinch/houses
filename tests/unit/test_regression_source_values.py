@@ -18,6 +18,7 @@ def _fresh_db():
     import sqlite3
 
     import dag.persistence as per
+
     saved = per._get_db
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -38,11 +39,16 @@ def _mock():
 
     class _SuccessRouter:
         async def route(self, origin, destination, *, has_car, max_walk_minutes):
-            return Attempt.succeeded(Commute(
-                person=Person(name="T", has_car=has_car),
-                label="Test", destination=PlaceOfInterest(label="D", postcode=str(destination)),
-                duration=Quantity(30, "minute"), daily_cost=Money("5.0", "GBP"), mode="transit",
-            ))
+            return Attempt.succeeded(
+                Commute(
+                    person=Person(name="T", has_car=has_car),
+                    label="Test",
+                    destination=PlaceOfInterest(label="D", postcode=str(destination)),
+                    duration=Quantity(30, "minute"),
+                    daily_cost=Money("5.0", "GBP"),
+                    mode="transit",
+                )
+            )
 
     svc = make_services(commute_router=_SuccessRouter())
     token = _sp.set(svc)
@@ -91,6 +97,5 @@ async def test_push_happens_without_old_table():
     for key, cd in commutes.items():
         c = cd["commute"]
         assert c.get("succeeded"), (
-            f"Commute {key!r} should succeed after push. "
-            f"pending={c.get('pending')} impossible={c.get('impossible')}"
+            f"Commute {key!r} should succeed after push. pending={c.get('pending')} impossible={c.get('impossible')}"
         )

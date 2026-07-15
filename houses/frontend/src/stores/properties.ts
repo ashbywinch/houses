@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { PropertyDetail, PropertySummary } from '../types'
-import { fetchAllSummaries, fetchPropertyDetail } from '../services/api'
+import { fetchAllSummaries, fetchPropertyDetail, fetchSettings } from '../services/api'
 
 export const usePropertiesStore = defineStore('properties', () => {
   const rids = ref<string[]>([])
@@ -9,6 +9,7 @@ export const usePropertiesStore = defineStore('properties', () => {
   const details = ref<Record<string, PropertyDetail>>({})
   const loading = ref(false)
   const error = ref<string | null>(null)
+  const settings = ref<{ commute_thresholds?: { good: number; warn: number } }>({})
 
   async function loadAll() {
     loading.value = true
@@ -24,9 +25,17 @@ export const usePropertiesStore = defineStore('properties', () => {
     }
   }
 
-  async function loadDetail(rid: string) {
-    const existing = details.value[rid]
-    if (existing) return existing
+  async function loadSettings() {
+    try {
+      settings.value = await fetchSettings()
+    } catch {
+      // defaults used
+    }
+  }
+  loadSettings()
+
+  async function loadDetail(rid: string, force = false) {
+    if (!force && details.value[rid]) return details.value[rid]
     loading.value = true
     error.value = null
     try {
@@ -49,5 +58,5 @@ export const usePropertiesStore = defineStore('properties', () => {
     details.value[rid] = data
   }
 
-  return { rids, summaries, details, loading, error, loadAll, loadDetail, updateSummary, updateDetail }
+  return { rids, summaries, details, settings, loading, error, loadAll, loadDetail, updateSummary, updateDetail }
 })

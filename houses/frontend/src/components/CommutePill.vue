@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { usePropertiesStore } from '../stores/properties'
+import { commuteColour } from '../utils/commute'
 
+const store = usePropertiesStore()
 const props = defineProps<{
   label: string
   duration: number | null
@@ -9,14 +12,16 @@ const props = defineProps<{
   goodMax?: number
   fineMax?: number
 }>()
-
 const colour = computed(() => {
   const d = props.duration
-  const good = props.goodMax ?? 45
-  const fine = props.fineMax ?? 75
   if (d === null) return 'pill--muted'
-  if (d <= good) return 'pill--good'
-  if (d <= fine) return 'pill--warn'
+  const c = commuteColour(
+    d,
+    props.goodMax ?? store.settings.commute_thresholds?.good ?? 45,
+    props.fineMax ?? store.settings.commute_thresholds?.warn ?? 75,
+  )
+  if (c === 'green') return 'pill--good'
+  if (c === 'orange') return 'pill--warn'
   return 'pill--bad'
 })
 

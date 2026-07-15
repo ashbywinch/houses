@@ -26,4 +26,5 @@ def get_sheets_client() -> Any | None:
     if client is not None:
         return client
     from houses.sheets import _real_get_client
+
     return _real_get_client()

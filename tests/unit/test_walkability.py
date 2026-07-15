@@ -71,6 +71,7 @@ class TestExtractTown:
 
             async def mock_rev(_lat, _lng):
                 from houses.geo import GeoPoint
+
                 return GeoPoint(51.5, -0.1)
 
             async def mock_dur(_lat, _lng, _centre):
@@ -82,8 +83,7 @@ class TestExtractTown:
                 # Address has no town to extract — should fall back to reverse geocode
                 result = await enrich_walkability(51.5, -0.1, "Some Street, SW1V 2QQ")
                 assert result["walk_to_town_minutes"] == 15, (
-                    f"Expected 15 from reverse geocode fallback, "
-                    f"got {result['walk_to_town_minutes']}"
+                    f"Expected 15 from reverse geocode fallback, got {result['walk_to_town_minutes']}"
                 )
             finally:
                 w._find_town_centre_by_reverse_geocode = original_rev

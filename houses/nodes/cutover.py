@@ -18,8 +18,7 @@ from houses.property import EnrichedProperty
 logger = logging.getLogger(__name__)
 
 
-def push_enriched_property(rid: str, enriched: EnrichedProperty,
-                           sources: dict[str, UserInputNode]) -> None:
+def push_enriched_property(rid: str, enriched: EnrichedProperty, sources: dict[str, UserInputNode]) -> None:
     """Push an EnrichedProperty's fields to the new DAG UserInputNodes.
 
     Args:

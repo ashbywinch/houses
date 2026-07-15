@@ -104,8 +104,9 @@ class School:
             ofsted_rating=(row.get(cls._COL_OFSTED) or "").strip(),
             inspection_year=(row.get(cls._COL_INSPECTION_YEAR) or "").strip(),
             coords=coords,
-            url=(f"https://get-information-schools.service.gov.uk"
-                  f"/Establishments/Establishment/Details/{urn}") if urn else "",
+            url=(f"https://get-information-schools.service.gov.uk/Establishments/Establishment/Details/{urn}")
+            if urn
+            else "",
         )
 
     def accepts_any(self, acceptable: tuple[SchoolGender, ...]) -> bool:

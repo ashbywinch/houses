@@ -12,6 +12,19 @@ from dag.signals import Signal
 T = TypeVar("T")
 
 
+def _humanify(name: str) -> str:
+    """Convert a code-style identifier to a human-friendly label.
+
+    >>> _humanify("rail_fare")
+    'Rail Fare'
+    >>> _humanify("best_location")
+    'Best Location'
+    >>> _humanify("computed_transit")
+    'Computed Transit'
+    """
+    return " ".join(w.capitalize() for w in name.replace("-", " ").split("_"))
+
+
 class Node(ABC, Generic[T]):
     """Base class for all DAG nodes."""
 
@@ -20,6 +33,8 @@ class Node(ABC, Generic[T]):
         self._value_type = value_type
         self._adapter = TypeAdapter(value_type)
         self.changed = Signal()
+        raw = node_id.rstrip("/").split("/")[-1]
+        self.display_name: str = _humanify(raw)
         self._computed_at: datetime | None = None
         self._persisted_at: datetime | None = None
         self._db_created_at: str = ""
@@ -35,12 +50,9 @@ class Node(ABC, Generic[T]):
                 val = self._adapter.validate_python(stored["value"])
                 attempt: Attempt[T] = Attempt.succeeded(val)
             elif status == "pending":
-                # A pending result means computation never finished — treat as
-                # not cached so the processor can retry.
                 return None
             else:
                 attempt = Attempt.impossible(stored.get("error", "unknown"))
-            # Parse ISO timestamps from DB into proper datetime objects
             persisted = stored.get("_persisted_at", "")
             if persisted:
                 try:
@@ -70,27 +82,23 @@ class Node(ABC, Generic[T]):
     @abstractmethod
     async def build_provenance(self) -> Provenance:
         """Build provenance by walking dependency nodes.
-
-        Returns a ``Provenance`` tree describing where this node's
-        value came from.  The tree is computed dynamically — it is
-        not cached on the ``Attempt`` object.
-        """
+        Subclasses override this to return a Provenance describing
+        how this node's value was derived."""
         ...
 
     async def to_json(self) -> dict:
         attempt = await self.attempt()
-        result: dict[str, Any] = {
+        result: dict = {
             "status": attempt.status,
-            "value": self._adapter.dump_python(attempt.value)
-            if attempt.succeeded else None,
+            "value": self._adapter.dump_python(attempt.value) if attempt.succeeded else None,
         }
         result["succeeded"] = attempt.succeeded
         result["pending"] = attempt.pending
         result["impossible"] = attempt.impossible
-        result["stale"] = False
         if attempt.impossible:
             result["error"] = attempt.error
-        result["provenance"] = (await self.build_provenance()).to_dict()
+        if not attempt.pending:
+            result["provenance"] = (await self.build_provenance()).to_dict()
         return result
 
     def _persist(self, result_dict: dict,
@@ -101,8 +109,6 @@ class Node(ABC, Generic[T]):
         now = datetime.now(UTC)
         self._persisted_at = now
         self._db_created_at = now.isoformat()
-        # Keep stale-check state in sync so _is_stale() sees the new
-        # dep timestamps immediately, preventing re-queue loops.
         if dep_timestamps is not None:
             self._loaded_dep_timestamps = dep_timestamps
 
@@ -112,7 +118,9 @@ class Node(ABC, Generic[T]):
         if extra:
             parts.append(extra)
         for name, attempt in dep_attempts.items():
-            if not attempt.succeeded:
+            if attempt is None:
+                parts.append(f"{name}: not available")
+            elif not attempt.succeeded:
                 detail = attempt.error or "unknown"
                 parts.append(f"{name}: {detail}")
         return Attempt.impossible("; ".join(parts))

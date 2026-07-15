@@ -54,6 +54,7 @@ async def test_geocode_simple_address(_mock_http_requests):
     assert any("maps.googleapis.com" in c for c in _mock_http_requests.calls)
     assert result.value_or_none() == GeoPoint(51.5, -0.7)
 
+
 @pytest.mark.asyncio
 async def test_geocode_caches_result():
     """Geocoding the same address twice returns correct coordinates via the fake."""
@@ -175,8 +176,9 @@ async def test_geocode_normalises_case(_mock_http_requests):
     await flush_processor()
     result = await node.attempt()
     assert result.value_or_none() == GeoPoint(51.5, -0.1)
-    assert any("maps.googleapis.com/maps/api/geocode" in c and "rg14" in c
-               for c in _mock_http_requests.calls), "Google Maps API should be called with lowercase address"
+    assert any("maps.googleapis.com/maps/api/geocode" in c and "rg14" in c for c in _mock_http_requests.calls), (
+        "Google Maps API should be called with lowercase address"
+    )
 
 
 class TestGeocodeNodeFullAddress:
@@ -192,15 +194,12 @@ class TestGeocodeNodeFullAddress:
     async def test_full_address_resolves_to_sensible_area(self, _mock_http_requests):
         """Full address should resolve to coordinates near the property."""
         _mock_http_requests.add_rule(
-            lambda url: "maps.googleapis.com/maps/api/geocode" in url
-            and "Shoppenhangers" in url,
+            lambda url: "maps.googleapis.com/maps/api/geocode" in url and "Shoppenhangers" in url,
             lambda request: Response(
                 200,
                 json={
                     "status": "OK",
-                    "results": [
-                        {"geometry": {"location": {"lat": 51.52, "lng": -0.73}}}
-                    ],
+                    "results": [{"geometry": {"location": {"lat": 51.52, "lng": -0.73}}}],
                 },
             ),
         )

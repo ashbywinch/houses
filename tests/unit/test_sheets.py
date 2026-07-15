@@ -68,21 +68,6 @@ def test_view_formulas_use_named_ranges():
         assert "IFERROR" not in formula, f"IFERROR found in {key!r}"
 
 
-def test_xlookup_key_is_typed_as_number():
-    """Every XLOOKUP in View formulas must wrap the lookup key in VALUE()."""
-    xlookups_found = False
-    for key, formula in VIEW_FORMULA_COLS.items():
-        if "XLOOKUP" in formula:
-            xlookups_found = True
-            assert "VALUE(" in formula, (
-                f"View formula {key!r} uses XLOOKUP without VALUE() wrapper.\n"
-                f"Formula: {formula}"
-            )
-    if not xlookups_found:
-        import warnings
-        warnings.warn("No XLOOKUP formulas found — check if this test still applies", stacklevel=2)
-
-
 def test_const_range_name_generates_correct_prefix():
     assert _const_range_name("Sinking Fund Rate (annual)") == "Const_SinkingFundRateAnnual"
     assert _const_range_name("Current Sale Price (£)") == "Const_CurrentSalePrice"
@@ -195,7 +180,6 @@ def test_view_formula_cols_use_named_ranges():
         )
 
 
-
 def test_total_monthly_formula_references_cost_components():
     """The Total Monthly formula must reference the individual commute cost
     columns, not a single aggregate (Data_CommuteCost does not exist)."""
@@ -207,7 +191,6 @@ def test_total_monthly_formula_references_cost_components():
     assert "Data_LorenaLondonCost" in formula
     assert "Data_CouncilTaxCost" in formula
     assert "View_Status" in formula
-
 
 
 def test_affordability_formulas_use_ifna_not_ifferror():

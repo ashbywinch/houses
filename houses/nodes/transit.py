@@ -7,11 +7,11 @@ from enum import Enum
 from money import Money
 from pint import Quantity
 
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.geo import GeoPoint
-from houses.model.domain import Commute
+from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.services_provider import get_services
 
 logger = logging.getLogger(__name__)
@@ -21,10 +21,12 @@ logger = logging.getLogger(__name__)
 class CommuteLeg:
     """One segment of a commute, carrying TfL line / route name where available."""
 
-    mode: str  # walk, bus, tube, train, dlr, overground, drive, cycle
+    mode: str  # walk, bus, tube, train, dlr, overground, drive, cycle, park
     duration: Quantity
     line_name: str = ""  # e.g. "Bakerloo", "Great Western Railway"
     destination: str = ""  # e.g. "Oxford Circus", "Paddington"
+    cost: float | None = None  # attributed cost (parking fees, etc.)
+    operator: str = ""  # operator name for cost-bearing legs, e.g. "ParkCo"
 
 
 @dataclass(frozen=True)
@@ -41,24 +43,40 @@ class CommuteResult:
 
 
 _LEG_MODE_LABEL = {
-    "walk": "Walk", "bus": "Bus", "tube": "Tube", "train": "Train",
-    "dlr": "DLR", "overground": "Overground", "tram": "Tram",
-    "drive": "Drive", "cycle": "Cycle", "park": "Park",
+    "walk": "Walk",
+    "bus": "Bus",
+    "tube": "Tube",
+    "train": "Train",
+    "dlr": "DLR",
+    "overground": "Overground",
+    "tram": "Tram",
+    "drive": "Drive",
+    "cycle": "Cycle",
+    "park": "Park",
 }
 
 
 def _build_details(commute: Commute) -> tuple[CommuteLeg, ...]:
-    """Convert a Commute's cost groups into CommuteLeg tuples."""
+    """Convert a Commute's cost groups into CommuteLeg tuples.
+
+    Each CostGroup may carry a cost (parking fees, etc.) and an operator
+    name; these are attached to the first leg in the group.
+    """
     legs: list[CommuteLeg] = []
     for cg in commute.details:
-        for leg in cg.legs:
-            mode_name = leg.mode.name.lower() if hasattr(leg.mode, 'name') else str(leg.mode)
-            legs.append(CommuteLeg(
-                mode=mode_name,
-                duration=Quantity(leg.duration_minutes, "minute"),
-                line_name=leg.line_name,
-                destination=leg.end_station,
-            ))
+        cg_cost = float(cg.cost.amount) if cg.cost else None
+        for i, leg in enumerate(cg.legs):
+            mode_name = leg.mode.name.lower() if hasattr(leg.mode, "name") else str(leg.mode)
+            legs.append(
+                CommuteLeg(
+                    mode=mode_name,
+                    duration=Quantity(leg.duration_minutes, "minute"),
+                    line_name=leg.line_name,
+                    destination=leg.end_station,
+                    cost=cg_cost if i == 0 else None,
+                    operator=cg.operator if i == 0 else "",
+                )
+            )
     return tuple(legs)
 
 
@@ -76,202 +94,75 @@ def _route_description(legs: tuple[CommuteLeg, ...]) -> str:
     return " → ".join(parts)
 
 
-def _serialize_commute_result(cr: CommuteResult) -> dict:
-    walk_time = sum(
-        int(leg.duration.magnitude) for leg in cr.details if leg.mode == "walk"
-    )
-    return {
-        "duration": {"value": int(cr.duration.magnitude), "unit": "minute"},
-        "daily_cost": (
-            {"amount": float(cr.daily_cost.amount), "currency": str(cr.daily_cost.currency)}
-            if cr.daily_cost else {"amount": 0, "currency": "GBP"}
-        ),
-        "label": cr.label,
-        "mode": cr.mode,
-        "route_description": cr.route_description,
-        "is_child": cr.is_child,
-        "source_url": cr.source_url,
-        "destination_url": cr.destination_url,
-        "walk_time": walk_time,
-    }
-
-
-def _deserialize_commute_result(data: dict) -> CommuteResult:
-    dur = data.get("duration", {})
-    dc = data.get("daily_cost") or {}
-    return CommuteResult(
-        duration=Quantity(dur.get("value", 0), "minute"),
-        daily_cost=(
-            Money(dc["amount"], dc["currency"])
-            if dc.get("amount") else None
-        ),
-        label=data.get("label", ""),
-        mode=data.get("mode", "transit"),
-        route_description=data.get("route_description", ""),
-        is_child=data.get("is_child", False),
-        source_url=data.get("source_url", ""),
-        destination_url=data.get("destination_url", ""),
-    )
-
 class WalkLegCheckNode(DerivedNode[bool]):
-    def __init__(self, node_id: str, *, transit_node, persons_source):
-        super().__init__(node_id, bool, (transit_node, persons_source))
+    def __init__(self, node_id: str, *, transit_node, max_walk: int = 30):
+        super().__init__(node_id, bool, (transit_node,))
+        self._max_walk = max_walk
 
-    def compute(self, transit: Attempt[dict],
-                persons: Attempt[list]) -> Attempt[bool]:
-        if not transit.succeeded or not persons.succeeded:
+    def compute(self, transit: Attempt[dict]) -> Attempt[bool]:
+        if not transit.succeeded:
             return Attempt.succeeded(False)
-
         val = transit.value_or_none() or {}
         walk_time = val.get("walk_time", 0)
-
-        # Extract max walk from persons (in minutes)
-        max_walk = 30  # default
-        for p in (persons.value_or_none() or []):
-            max_walk = min(max_walk, getattr(p, 'bus_walk_penalty_minutes', 30))
-
-        # walk_time and max_walk are both in minutes
-        return Attempt.succeeded(walk_time > max_walk)
+        return Attempt.succeeded(walk_time > self._max_walk)
 
 
-class TransitNode(DerivedNode[dict]):
+class TransitNode(DerivedNode[Commute]):
     """Computes a transit commute from best_location to a POI postcode.
 
-    Persists and loads a serialised dict (not CommuteResult directly)
-    so the value survives restarts without needing to reconstruct
-    Money/Quantity types on every load.  The dict is lazily deserialised
-    back to CommuteResult for consumption in ``to_json()``.
+    The value type is ``Commute`` (houses.model.domain), serialised via
+    ``TypeAdapter`` through the base ``Node`` persistence layer.
     """
 
-    def __init__(self, node_id: str, *, best_location, poi, persons_source, best_address=None):
-        deps: tuple[Node, ...] = (best_location, poi, persons_source)
+    def __init__(self, node_id: str, *, best_location, poi, has_car: bool, max_walk: int, best_address=None):
+        deps: tuple[Node, ...] = (best_location, poi)
         if best_address is not None:
             deps = deps + (best_address,)
-        super().__init__(node_id, dict, deps)
+        super().__init__(node_id, Commute, deps)
+        self.display_name = "TfL API"
+        self._has_car = has_car
+        self._max_walk = max_walk
         self._best_address = best_address
-        self._commute_cache: CommuteResult | None = None
-        # Upgrade a dict cached value to CommuteResult if loaded from DB
-        if self._attempt.succeeded:
-            val = self._attempt.value
-            if isinstance(val, dict):
-                self._commute_cache = _deserialize_commute_result(val)
 
-    async def compute(self, location: Attempt[GeoPoint],
-                      poi: Attempt[str],
-                      persons: Attempt[list],
-                      best_address: Attempt[str] = None) -> Attempt[dict]:
+    async def compute(
+        self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest], best_address: Attempt[str] = None
+    ) -> Attempt[Commute]:
         if not location.succeeded:
             return self._impossible({"best_location": location})
         if not poi.succeeded:
             return self._impossible({"poi": poi})
-        if not persons.succeeded:
-            return self._impossible({"persons_source": persons})
         loc = location.value_or_none()
-        dest_postcode = poi.value_or_none()
-
-        # Extract person name from node_id: {rid}/{person}/{poi_label}/computed_transit
-        name = self._id.split("/")[1]
-        persons_list = persons.value_or_none() or []
-        has_car = False
-        is_child = False
-        max_walk = 30
-        for p in persons_list:
-            if p.name == name:
-                has_car = p.has_car
-                is_child = p.is_child
-                max_walk = p.bus_walk_penalty_minutes
-                break
+        poi_val = poi.value_or_none()
+        dest_postcode = poi_val.postcode if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
 
         svc = get_services()
         commute = await svc.commute_router.route(
             loc,
             dest_postcode,
-            has_car=has_car,
-            max_walk_minutes=max_walk,
+            has_car=self._has_car,
+            max_walk_minutes=self._max_walk,
         )
         if commute.succeeded:
             val = commute.value_or_none()
-            details = _build_details(val)
             parts = self._id.split("/")
             label = parts[2] if len(parts) >= 3 else (val.destination.label or "")
-            raw_mode = val.mode if hasattr(val, 'mode') else "transit"
+            raw_mode = val.mode if hasattr(val, "mode") else "transit"
             mode = raw_mode.name.lower() if isinstance(raw_mode, Enum) else str(raw_mode)
-            if details and all(leg.mode == "walk" for leg in details):
+            if val.details and all(leg.mode.name.lower() == "walk" for cg in val.details for leg in cg.legs):
                 mode = "walk"
-            daily_cost = val.daily_cost
-            if not is_child and (daily_cost is None or float(daily_cost.amount) == 0):
-                address = dest_postcode
-                if best_address is not None and best_address.succeeded:
-                    addr_val = best_address.value_or_none()
-                    if addr_val:
-                        address = addr_val
-                daily_cost = await self._apply_nr_fare(
-                    val, dest_postcode, address, name, details,
-                )
+            daily_cost = val.daily_cost or Money("0", "GBP")
 
-            cr = CommuteResult(
-                duration=Quantity(int(val.duration.magnitude), "minute") if val.duration else Quantity(0, "minute"),
-                daily_cost=daily_cost or Money("0", "GBP"),
+            result = Commute(
+                person=Person(name="", has_car=self._has_car),
                 label=label,
+                destination=PlaceOfInterest(label=label, postcode=val.destination.postcode),
+                duration=val.duration,
+                daily_cost=daily_cost,
                 mode=mode,
-                details=details,
-                route_description=_route_description(details),
-                is_child=is_child,
+                details=val.details,
             )
-            self._commute_cache = cr
-            return Attempt.succeeded(_serialize_commute_result(cr))
+            return Attempt.succeeded(result)
         return self._impossible({"commute": commute})
-
-    async def _apply_nr_fare(self, commute, dest_postcode, address, person_name, details,
-                              _registry=None, _geocode=None, _tube_fare_fn=None):
-        from houses.commute import Commute as OldCommute
-        from houses.commute import CostGroup, JourneyLeg
-        from houses.rail_fares import enrich_rail_fares
-
-        # Allow test injection via instance variables
-        _registry = _registry or getattr(self, '_nr_registry', None)
-        _geocode = _geocode or getattr(self, '_nr_geocode', None)
-        _tube_fare_fn = _tube_fare_fn or getattr(self, '_nr_tube_fare', None)
-
-        cost_groups = []
-        for d in details:
-            cost_groups.append(CostGroup(
-                legs=(JourneyLeg(mode=d.mode, duration_minutes=int(d.duration.magnitude)),),
-                cost=0.0,
-            ))
-        old_commute = OldCommute(
-            destination_label=getattr(commute, 'destination_label', ''),
-            destination_postcode=dest_postcode,
-            duration_minutes=int(commute.duration.magnitude) if commute.duration else None,
-            daily_cost_gbp=None,
-            cost_groups=tuple(cost_groups),
-        )
-        dummy = OldCommute(
-            destination_label="", destination_postcode="",
-            duration_minutes=None, daily_cost_gbp=None,
-        )
-
-        name_lower = person_name.lower()
-        if name_lower == "simon":
-            enriched, _ = await enrich_rail_fares(
-                enabled={"simon"}, postcode=address, address=address,
-                simon=old_commute, lorena=dummy,
-                _registry=_registry, _geocode=_geocode, _tube_fare_fn=_tube_fare_fn,
-            )
-            result = enriched
-        elif name_lower == "lorena":
-            _, enriched = await enrich_rail_fares(
-                enabled={"lorena"}, postcode=address, address=address,
-                simon=dummy, lorena=old_commute,
-                _registry=_registry, _geocode=_geocode, _tube_fare_fn=_tube_fare_fn,
-            )
-            result = enriched
-        else:
-            return commute.daily_cost
-
-        if result.daily_cost_gbp is not None and float(result.daily_cost_gbp.amount) > 0:
-            return result.daily_cost_gbp
-        return commute.daily_cost
 
     async def to_json(self) -> dict:
         attempt = await self.attempt()
@@ -283,20 +174,13 @@ class TransitNode(DerivedNode[dict]):
         result["pending"] = attempt.pending
         result["impossible"] = attempt.impossible
         if attempt.succeeded:
-            cr = self._commute_cache
-            if cr is None and isinstance(attempt.value, dict):
-                cr = _deserialize_commute_result(attempt.value)
-            if cr is not None:
-                result["value"] = _serialize_commute_result(cr)
-            else:
-                result["value"] = attempt.value
+            raw = attempt.value_or_none()
+            result["value"] = self._adapter.dump_python(raw)
+            legs = _build_details(raw)
+            result["value"]["walk_time"] = sum(int(leg.duration.magnitude) for leg in legs if leg.mode == "walk")
+            result["value"]["route_description"] = _route_description(legs)
+            result["value"]["is_child"] = False
         if attempt.impossible:
             result["error"] = attempt.error
         result["provenance"] = (await self.build_provenance()).to_dict()
         return result
-
-    async def build_provenance(self):
-        description = ""
-        if self._commute_cache:
-            description = f"transit to {self._commute_cache.label}"
-        return Provenance(label="TfL API", description=description)

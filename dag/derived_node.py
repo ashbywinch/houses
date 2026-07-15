@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from abc import abstractmethod
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -10,6 +11,7 @@ from typing import Generic, TypeVar
 from dag.attempt import Attempt, Provenance
 from dag.node import Node
 from dag.signals import Slot
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -46,8 +48,8 @@ async def _processor() -> None:
             await node.refresh()
             if _after_refresh is not None:
                 _after_refresh(node)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.exception("DAG processor failed for %s: %s", node._id, exc)
         await asyncio.sleep(0)
 
 
@@ -137,8 +139,8 @@ class DerivedNode(Node[T], Generic[T]):
         sources: dict[str, Provenance] = {}
         for dep in self._get_active_deps():
             sources[dep._id] = await dep.build_provenance()
-        return Provenance.composite(self._id, sources)
-
+        description = self._attempt.error if self._attempt.impossible else ""
+        return Provenance(label=self.display_name, description=description, sources=sources)
     async def to_json(self) -> dict:
         result = await super().to_json()
         if not self._attempt.pending:

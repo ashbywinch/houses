@@ -16,10 +16,7 @@ class BestAddressNode(DerivedNode[str]):
     sheet address pushes to it).
     """
 
-    def __init__(self, node_id: str, *,
-                 user_entered_address,
-                 corrected_address,
-                 rightmove_address):
+    def __init__(self, node_id: str, *, user_entered_address, corrected_address, rightmove_address):
         super().__init__(node_id, str, (rightmove_address,))
         self._user_entered = user_entered_address
         self._corrected = corrected_address
@@ -27,6 +24,7 @@ class BestAddressNode(DerivedNode[str]):
         self._corrected_ts: str = ""
 
         from dag.signals import Slot
+
         for src in (user_entered_address, corrected_address):
             slot = Slot(self._on_dep_changed)
             self._slots.append(slot)
@@ -46,8 +44,7 @@ class BestAddressNode(DerivedNode[str]):
                 return True
         return False
 
-    async def compute(self,
-                      rightmove: Attempt[str]) -> Attempt[str]:
+    async def compute(self, rightmove: Attempt[str]) -> Attempt[str]:
         # Snapshot timestamps for optional sources
         self._user_entered_ts = self._user_entered._db_created_at
         self._corrected_ts = self._corrected._db_created_at
@@ -61,9 +58,8 @@ class BestAddressNode(DerivedNode[str]):
             return corrected_attempt
         if rightmove.succeeded:
             return rightmove
-        return self._impossible(
-            {"rightmove_address": rightmove}
-        )
+        return self._impossible({"rightmove_address": rightmove})
+
 
 class BestLocationNode(DerivedNode[GeoPoint]):
     """Selects the best location from available sources.
@@ -75,8 +71,7 @@ class BestLocationNode(DerivedNode[GeoPoint]):
     Only best_address is a hard dependency.
     """
 
-    def __init__(self, node_id: str, *, precise_location, rightmove_location,
-                 best_address, geocode=None):
+    def __init__(self, node_id: str, *, precise_location, rightmove_location, best_address, geocode=None):
         # Only best_address is a hard dep
         super().__init__(node_id, GeoPoint, (best_address,))
         self._precise_location = precise_location
@@ -87,6 +82,7 @@ class BestLocationNode(DerivedNode[GeoPoint]):
         self._geocode_ts_at_compute: str = ""
 
         from dag.signals import Slot
+
         for src in (precise_location, rightmove_location):
             slot = Slot(self._on_dep_changed)
             self._slots.append(slot)
@@ -114,8 +110,7 @@ class BestLocationNode(DerivedNode[GeoPoint]):
                 return True
         return False
 
-    async def compute(self,
-                      address: Attempt[str]) -> Attempt[GeoPoint]:
+    async def compute(self, address: Attempt[str]) -> Attempt[GeoPoint]:
         # Snapshot timestamps for optional sources so _is_stale() can
         # detect future changes after this recompute.
         self._precise_ts_at_compute = self._precise_location._db_created_at
@@ -142,11 +137,6 @@ class BestLocationNode(DerivedNode[GeoPoint]):
         if address.succeeded and is_single_property_address(address.value_or_none()):
             return self._impossible(
                 {"best_address": address},
-                extra=(
-                    f"address '{address.value_or_none()}' is single-property "
-                    "but all geocoding sources failed"
-                ),
+                extra=(f"address '{address.value_or_none()}' is single-property but all geocoding sources failed"),
             )
-        return self._impossible(
-            {"best_address": address}
-        )
+        return self._impossible({"best_address": address})

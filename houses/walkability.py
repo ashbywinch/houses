@@ -84,9 +84,7 @@ KNOWN_COUNTIES = frozenset(
 def _extract_town(address: str) -> str:
     parts = [p.strip() for p in address.split(",")]
     # Use search() so postcodes embedded in a segment (e.g. "Surrey. KT9 2HN") are detected.
-    filtered = [p for p in parts if p
-                and not _POSTCODE_FULL_RE.search(p)
-                and not _POSTCODE_OUTCODE_RE.search(p)]
+    filtered = [p for p in parts if p and not _POSTCODE_FULL_RE.search(p) and not _POSTCODE_OUTCODE_RE.search(p)]
     non_county = [p for p in filtered if p.lower().strip() not in KNOWN_COUNTIES]
     candidate = non_county[-1] if non_county else (filtered[-1] if filtered else "")
     # Strip trailing descriptions like " - Backing the River Wye"
@@ -99,6 +97,7 @@ async def _extract_town_centre(lat: float, lng: float, town: str) -> GeoPoint | 
     """Resolve a town name to coordinates, used for walkability enrichment."""
     loc = await PropertyLocation.from_town(town)
     return loc.coordinates.value_or_none()
+
 
 async def _find_town_centre_by_reverse_geocode(lat: float, lng: float) -> GeoPoint | None:
     """Use ORS Pelias reverse geocode to find the nearest town and its centre."""

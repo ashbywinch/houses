@@ -151,6 +151,7 @@ class PropertyLocation:
             return cls(coordinates=Attempt.impossible("empty town name"))
 
         from houses.services_provider import get_services
+
         result = await get_services().geocoder.geocode_address(f"{town}, UK")
         coords = result.value_or_none()
         if coords is not None:
@@ -261,7 +262,9 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
                 _get_geo_state().google_exhausted = True
             logger.warning(
                 "Google Maps cached result for '%s' rejected: status=%s msg=%s",
-                address, data.get("status"), data.get("error_message", ""),
+                address,
+                data.get("status"),
+                data.get("error_message", ""),
             )
         else:
             try:
@@ -281,7 +284,9 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
                         _get_geo_state().google_exhausted = True
                     logger.warning(
                         "Google Maps API response for '%s': status=%s msg=%s",
-                        address, data.get("status"), data.get("error_message", ""),
+                        address,
+                        data.get("status"),
+                        data.get("error_message", ""),
                     )
             except Exception as exc:
                 logger.warning("Google Maps geocoding failed for '%s': %s", address, exc)

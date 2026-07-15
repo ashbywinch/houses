@@ -269,6 +269,8 @@ class Row:
         """Build a full positional row matching HEADERS order, for appending new rows."""
         enriched = cls.from_property(property_)
         return [enriched.get(h, "") for h in cls.HEADERS]
+
+
 # ── Sheet-level operations ──────────────────────────────────────────────
 
 
@@ -276,4 +278,3 @@ def ensure_headers(worksheet: gspread.Worksheet) -> None:
     """Write column headers to a worksheet if it's empty."""
     if worksheet.row_count == 0 or not worksheet.get_all_values():
         worksheet.append_row(Row.HEADERS, value_input_option="USER_ENTEred")
-

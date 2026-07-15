@@ -59,6 +59,7 @@ class TestAttempt:
 
     def test_get_raises_on_impossible(self):
         import pytest
+
         a = Attempt.impossible("fail")
         with pytest.raises(ValueError):
             a.get()
@@ -118,21 +119,25 @@ class TestAttempt:
 class TestProvenance:
     def test_default_label(self):
         from dag.attempt import Provenance
+
         p = Provenance()
         assert p.label == ""
 
     def test_label_only(self):
         from dag.attempt import Provenance
+
         p = Provenance("TfL API")
         assert p.label == "TfL API"
 
     def test_from_label(self):
         from dag.attempt import Provenance
+
         p = Provenance.from_label("Rightmove")
         assert p.label == "Rightmove"
 
     def test_composite(self):
         from dag.attempt import Provenance
+
         inner = Provenance("inner")
         outer = Provenance.composite("outer", {"dep": inner})
         assert outer.label == "outer"
@@ -140,18 +145,21 @@ class TestProvenance:
 
     def test_to_dict_flat(self):
         from dag.attempt import Provenance
+
         p = Provenance("test")
         d = p.to_dict()
         assert d == {"label": "test"}
 
     def test_to_dict_with_description(self):
         from dag.attempt import Provenance
+
         p = Provenance("test", description="hello")
         d = p.to_dict()
         assert d == {"label": "test", "description": "hello"}
 
     def test_to_dict_with_sources(self):
         from dag.attempt import Provenance
+
         inner = Provenance("inner")
         outer = Provenance.composite("outer", {"dep": inner})
         d = outer.to_dict()

@@ -26,9 +26,20 @@ The watcher runs as a persistent background process (`crg-watch`). No manual
 
 ```bash
 make setup && make run          # Install + start dev server
-make test                       # Run unit tests
-make test-integration           # Integration tests
+make test                       # Run unit + integration + frontend typecheck/tests
+make test-integration           # Integration tests only
 ```
+
+## Running (AI MUST follow)
+
+- **Always use ``make run``** to start the dev environment. It starts both the
+  backend (uvicorn ``--reload`` on :8080) and frontend (Vite on :5173) with
+  proper process trapping.
+- **NEVER start a dev server via ``bash`` with ``&``** — the process dies when
+  bash reaps the background job. The Makefile handles this correctly.
+- **NEVER kill the server.** Auto-reload handles code changes. If the server
+  isn't responding (port conflict, stale process), ask the user what to do —
+  don't kill and restart unilaterally.
 
 ## Decision Tree
 

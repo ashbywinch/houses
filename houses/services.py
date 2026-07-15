@@ -42,6 +42,7 @@ class GeocodingService(Protocol):
 
     async def geocode_address(self, address: str) -> Attempt[GeoPoint]: ...
 
+
 class CommuteRoutingService(Protocol):
     """Generic routing from an origin to a destination."""
 
@@ -53,6 +54,8 @@ class CommuteRoutingService(Protocol):
         has_car: bool,
         max_walk_minutes: int,
     ) -> Attempt[Commute]: ...
+
+
 class SchoolLookupService(Protocol):
     """Find nearest suitable school and compute its commute."""
 
@@ -104,10 +107,24 @@ class RailFareService(Protocol):
     ) -> tuple[Commute | None, Commute | None]: ...
 
 
+class DriveTimeService(Protocol):
+    """Estimate driving time from an origin postcode to a station."""
+
+    async def estimate(self, origin_postcode: str, station_name: str) -> int | None: ...
+
+
+class _DefaultDriveTimeService:
+    async def estimate(self, origin_postcode: str, station_name: str) -> int | None:
+        from houses.transit_route import _get_drive_minutes
+
+        return await _get_drive_minutes(origin_postcode, station_name)
+
+
 class PersistenceService(Protocol):
     """Persistence operations for the DAG node store."""
 
     def load_property_data(self, rid: str) -> Any: ...
+
 
 # Settings sources are cached by node_id so that the same UserInputNode
 # instance is returned on every Services() construction.  This means
@@ -127,7 +144,10 @@ def _make_settings_source(node_id: str, value_type: type, default_factory):
         node._source_label = persisted.get("source_label", "db")
     else:
         node.push(default_factory(), "config")
+    _SETTINGS_SOURCE_CACHE[node_id] = node
     return node
+
+
 # ── Default implementations (thin wrappers around real modules) ────────
 
 
@@ -140,7 +160,6 @@ class _DefaultGeocoder:
 
 
 class _DefaultCommuteRouter:
-
     async def route(
         self,
         origin: str | GeoPoint,
@@ -150,21 +169,22 @@ class _DefaultCommuteRouter:
         max_walk_minutes: int,
     ) -> Attempt[Commute]:
         from houses.routing import get_commute
-        result = await get_commute(origin, destination, has_car=has_car,
-                                   max_walk_minutes=max_walk_minutes)
+
+        result = await get_commute(origin, destination, has_car=has_car, max_walk_minutes=max_walk_minutes)
         if not result.succeeded:
             return Attempt.impossible(result.error or "route failed")
         old = result.value_or_none()
-        return Attempt.succeeded(Commute(
-            person=Person(name="", has_car=has_car),
-            label=old.destination_label,
-            destination=PlaceOfInterest(label=old.destination_label,
-                                         postcode=old.destination_postcode),
-            duration=Quantity(old.duration_minutes or 0, "minute"),
-            daily_cost=old.daily_cost_gbp or Money("0", "GBP"),
-            mode=old.mode.name.lower() if isinstance(old.mode, Enum) else str(old.mode),
-            details=old.cost_groups,
-        ))
+        return Attempt.succeeded(
+            Commute(
+                person=Person(name="", has_car=has_car),
+                label=old.destination_label,
+                destination=PlaceOfInterest(label=old.destination_label, postcode=old.destination_postcode),
+                duration=Quantity(old.duration_minutes or 0, "minute"),
+                daily_cost=old.daily_cost_gbp or Money("0", "GBP"),
+                mode=old.mode.name.lower() if isinstance(old.mode, Enum) else str(old.mode),
+                details=old.cost_groups,
+            )
+        )
 
 
 class _DefaultSchoolLookup:
@@ -179,6 +199,8 @@ class _DefaultSchoolLookup:
 
     async def school_commute(self, postcode: str, school: School) -> Commute | None:
         return await compute_school_commute(postcode, school)
+
+
 class _DefaultWalkability:
     async def enrich(self, lat: float, lng: float, address: str) -> dict[str, Any]:
         return await enrich_walkability(lat, lng, address)
@@ -209,12 +231,14 @@ class _DefaultRailFare:
         lorena: Commute | None,
     ) -> tuple[Commute | None, Commute | None]:
         from houses.rail_fares import enrich_rail_fares
+
         return await enrich_rail_fares(enabled, postcode, address, simon, lorena)
 
 
 class _DefaultPersistence:
     def load_property_data(self, rid: str) -> Any:
         from dag.persistence import load_node_data
+
         return load_node_data(rid)
 
 
@@ -233,10 +257,13 @@ class Services:
     rail_fare_service: RailFareService = dataclasses.field(default_factory=_DefaultRailFare)
     persistence: PersistenceService = dataclasses.field(default_factory=_DefaultPersistence)
 
+    drive_time_service: DriveTimeService = dataclasses.field(default_factory=_DefaultDriveTimeService)
     persons_source: UserInputNode[list[Person]] = dataclasses.field(
-        default_factory=lambda: _make_settings_source("persons", list[Person], make_default_persons))
+        default_factory=lambda: _make_settings_source("persons", list[Person], make_default_persons)
+    )
     financial_source: UserInputNode[dict] = dataclasses.field(
-        default_factory=lambda: _make_settings_source("financial", dict, make_default_financials))
+        default_factory=lambda: _make_settings_source("financial", dict, make_default_financials)
+    )
     commute_thresholds_source: UserInputNode[dict] = dataclasses.field(
-        default_factory=lambda: _make_settings_source("commute_thresholds", dict, make_default_thresholds))
-
+        default_factory=lambda: _make_settings_source("commute_thresholds", dict, make_default_thresholds)
+    )

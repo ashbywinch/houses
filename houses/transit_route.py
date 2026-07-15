@@ -498,7 +498,9 @@ class TransitRoute:
             arr_raw = bus_leg.get("arrivalPoint", {})
             dep_point = {"lat": dep_raw["lat"], "lon": dep_raw["lon"]} if dep_raw.get("lat") else None
             arr_point = {"lat": arr_raw["lat"], "lon": arr_raw["lon"]} if arr_raw.get("lat") else None
-            leg_cost = self._fare_lookup(dep, arr, dep_point=dep_point, arr_point=arr_point) if self._fare_lookup else None  # noqa: E501
+            leg_cost = (
+                self._fare_lookup(dep, arr, dep_point=dep_point, arr_point=arr_point) if self._fare_lookup else None
+            )  # noqa: E501
             if leg_cost is not None:
                 total_bus_cost += leg_cost
 
@@ -560,8 +562,8 @@ class TransitRoute:
 
         parking_group = CostGroup(
             legs=(JourneyLeg(mode=LegMode.PARK, duration_minutes=0),),
-            operator="ParkCo",
-            cost=car_park.daily_cost,  # store Money, not float — avoids precision leaks
+            operator=f"ParkCo: {car_park.name}",
+            cost=car_park.daily_cost,
         )
         return parking_cost, new_cost, [parking_group]
 

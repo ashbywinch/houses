@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { PropertySummary } from '../types'
 import CommutePill from './CommutePill.vue'
+import { simpleOfsted, ofstedClass } from '../utils/format'
 
 const props = defineProps<{
   rid: string
@@ -60,21 +61,6 @@ function commuteLabel(c: unknown, key: string): string {
   return key.split("/").slice(1).join("/")
 }
 
-function simpleOfsted(rating: string | null): string {
-  if (!rating) return ''
-  // Ofsted API returns strings like "Good, Behaviour Outstanding, ..."
-  // Only show the overall rating on the card
-  return rating.split(',')[0].trim()
-}
-
-function ofstedClass(rating: string | null): string {
-  const main = simpleOfsted(rating)
-  if (main === 'Outstanding') return 'pill--good'
-  if (main === 'Good') return 'pill--warn'
-  if (main === 'Requires Improvement' || main === 'Inadequate') return 'pill--bad'
-  return 'pill--muted'
-}
-
 function isChildCommute(c: unknown): boolean {
   return (c as Record<string, unknown> | undefined)?.is_child === true
 }
@@ -107,7 +93,7 @@ function schoolCommute(commutes: Record<string, { commute: unknown }> | undefine
         <span class="commute-unit">
           <span class="card__metric-label">{{ data.town_name?.value || 'Town' }}</span>
           <a :href="dirUrl(location.lat, location.lon, data.town_name?.value || 'Town')" class="pill-link" target="_blank" rel="noopener">
-            <CommutePill :label="''" :duration="Math.round(data.walkability.value.walk_to_town_minutes)" mode="walk" :cost="null" :goodMax="15" :fineMax="30" />
+            <CommutePill :label="''" :duration="Math.round((data.walkability.value as Record<string, unknown>)?.walk_to_town_minutes as number)" mode="walk" :cost="null" :goodMax="15" :fineMax="30" />
           </a>
         </span>
       </div>
@@ -129,7 +115,8 @@ function schoolCommute(commutes: Record<string, { commute: unknown }> | undefine
       <!-- Schools (walk times from child commutes, Ofsted last) -->
       <div v-if="data.schools" class="card__row card__row--section card__schools">
         <div v-if="data.schools.primary.school.succeeded" class="school-line">
-          <a :href="data.schools.primary.school.value!.url || `https://get-information-schools.service.gov.uk/Establishments/Establishment/Details/${rid}`" target="_blank" class="school__name">{{ data.schools.primary.school.value!.name }}</a>
+          <a v-if="data.schools.primary.school.value!.url" :href="data.schools.primary.school.value!.url" target="_blank" class="school__name">{{ data.schools.primary.school.value!.name }}</a>
+          <span v-else class="school__name">{{ data.schools.primary.school.value!.name }}</span>
           <span v-if="location && commuteDuration(schoolCommute(data.commutes, 'Primary'))" class="pill-link">
             <a :href="dirUrl(location.lat, location.lon, data.schools.primary.school.value!.name)" target="_blank" rel="noopener">
               <CommutePill :label="''" :duration="commuteDuration(schoolCommute(data.commutes, 'Primary'))" mode="walk" :cost="null" :goodMax="15" :fineMax="30" />
@@ -138,11 +125,12 @@ function schoolCommute(commutes: Record<string, { commute: unknown }> | undefine
           <span class="pill pill--sm" :class="ofstedClass(data.schools.primary.school.value!.ofsted)">{{ simpleOfsted(data.schools.primary.school.value!.ofsted) }}</span>
         </div>
         <div v-if="data.schools.secondary.school.succeeded" class="school-line">
-          <a :href="data.schools.secondary.school.value!.url || `https://get-information-schools.service.gov.uk/Establishments/Establishment/Details/${rid}`" target="_blank" class="school__name">{{ data.schools.secondary.school.value!.name }}</a>
+          <a v-if="data.schools.secondary.school.value!.url" :href="data.schools.secondary.school.value!.url" target="_blank" class="school__name">{{ data.schools.secondary.school.value!.name }}</a>
+          <span v-else class="school__name">{{ data.schools.secondary.school.value!.name }}</span>
           <span v-if="location && commuteDuration(schoolCommute(data.commutes, 'Secondary'))" class="pill-link">
             <a :href="dirUrl(location.lat, location.lon, data.schools.secondary.school.value!.name)" target="_blank" rel="noopener">
-              <CommutePill :label="''" :duration="commuteDuration(schoolCommute(data.commutes, 'Secondary'))" mode="walk" :cost="null" :goodMax="15" :fineMax="30" />
-            </a>
+            <CommutePill :label="''" :duration="commuteDuration(schoolCommute(data.commutes, 'Secondary'))" mode="walk" :cost="null" :goodMax="15" :fineMax="30" />
+          </a>
           </span>
           <span class="pill pill--sm" :class="ofstedClass(data.schools.secondary.school.value!.ofsted)">{{ simpleOfsted(data.schools.secondary.school.value!.ofsted) }}</span>
         </div>

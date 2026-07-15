@@ -17,8 +17,11 @@ class TestMonthlyMortgagePaymentNode:
         persons = UserInputNode[list]("ps_mm", list)
 
         node = MonthlyMortgagePaymentNode(
-            "mm", rightmove_price=price, stamp_duty_node=sd,
-            persons_source=persons, financial_source=fin,
+            "mm",
+            rightmove_price=price,
+            stamp_duty_node=sd,
+            persons_source=persons,
+            financial_source=fin,
         )
         price.push("0", "test")
         sd.push(0.0, "test")
@@ -29,6 +32,7 @@ class TestMonthlyMortgagePaymentNode:
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() == 0.0
+
     @pytest.mark.asyncio
     async def test_computes_with_valid_data(self):
         from houses.nodes.monthly_costs import MonthlyMortgagePaymentNode
@@ -39,22 +43,29 @@ class TestMonthlyMortgagePaymentNode:
         persons = UserInputNode[list]("ps_mm2", list)
 
         node = MonthlyMortgagePaymentNode(
-            "mm2", rightmove_price=price, stamp_duty_node=sd,
-            persons_source=persons, financial_source=fin,
+            "mm2",
+            rightmove_price=price,
+            stamp_duty_node=sd,
+            persons_source=persons,
+            financial_source=fin,
         )
         price.push("300000", "test")
         sd.push(0.0, "test")
         persons.push([], "test")
-        fin.push({
-            "mortgage_rate": 0.045,
-            "mortgage_term_years": 30,
-        }, "test")
+        fin.push(
+            {
+                "mortgage_rate": 0.045,
+                "mortgage_term_years": 30,
+            },
+            "test",
+        )
         await flush_processor()
         await flush_processor()
 
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() > 0
+
 
 class TestYearlySinkingFundNode:
     @pytest.mark.asyncio
@@ -65,7 +76,9 @@ class TestYearlySinkingFundNode:
         fin = UserInputNode[dict]("fin_ys", dict)
 
         node = YearlySinkingFundNode(
-            "ys", rightmove_price=price, financial_source=fin,
+            "ys",
+            rightmove_price=price,
+            financial_source=fin,
         )
         price.push("0", "test")
         fin.push({}, "test")
@@ -83,7 +96,9 @@ class TestYearlySinkingFundNode:
         fin = UserInputNode[dict]("fin_ys2", dict)
 
         node = YearlySinkingFundNode(
-            "ys2", rightmove_price=price, financial_source=fin,
+            "ys2",
+            rightmove_price=price,
+            financial_source=fin,
         )
         price.push("500000", "test")
         fin.push({"sinking_fund_rate": 0.01}, "test")
@@ -100,23 +115,15 @@ class TestCommuteBreakdownNode:
     async def test_returns_defaults_when_no_commutes(self):
         from houses.nodes.monthly_costs import CommuteBreakdownNode
 
-        src_simon = UserInputNode[dict]("simon", dict)
-        src_brac = UserInputNode[dict]("brac", dict)
-        src_lorena = UserInputNode[dict]("lorena", dict)
         persons = UserInputNode[list]("persons_cb", list)
+        selectors = {}
 
         node = CommuteBreakdownNode(
             "cb",
-            simon_office=src_simon,
-            simon_bracknell=src_brac,
-            lorena_office=src_lorena,
+            commute_selectors=selectors,
             persons_source=persons,
         )
-        src_simon.push({}, "test")
-        src_brac.push({}, "test")
-        src_lorena.push({}, "test")
         persons.push([{"name": "Simon", "places_of_interest": []}], "test")
-        await flush_processor()
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded

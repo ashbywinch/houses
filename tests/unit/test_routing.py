@@ -28,7 +28,6 @@ class TestWalkCommuteFailsFast:
             settings.google_maps_api_key = original
 
 
-
 @pytest.mark.asyncio
 async def test_find_nearest_handles_coordinate_string(monkeypatch):
     """find_nearest must accept a 'lat,lon' coordinate string and use it
@@ -39,19 +38,28 @@ async def test_find_nearest_handles_coordinate_string(monkeypatch):
 
     # Fake school at a known location
     fake_school = School(
-        urn="1", name="Test Primary", phase="Primary",
-        gender=SchoolGender.MIXED, type_of_establishment="community school",
-        postcode="SW1V 2QQ", website="",
-        ofsted_rating="Good", inspection_year="2022",
+        urn="1",
+        name="Test Primary",
+        phase="Primary",
+        gender=SchoolGender.MIXED,
+        type_of_establishment="community school",
+        postcode="SW1V 2QQ",
+        website="",
+        ofsted_rating="Good",
+        inspection_year="2022",
         coords=GeoPoint(lat=51.5, lon=-0.13),
-        statutory_low_age=4, statutory_high_age=11,
+        statutory_low_age=4,
+        statutory_high_age=11,
     )
     geocode_called = False
+
     async def fake_geocode(_input):
         nonlocal geocode_called
         geocode_called = True
         from dag.attempt import Attempt
+
         return Attempt.pending()  # geocode can't parse coordinate strings
+
     monkeypatch.setattr("houses.schools.geocode", fake_geocode)
     monkeypatch.setattr("houses.schools._geocode_address", fake_geocode)
     monkeypatch.setattr("houses.schools._load_schools", lambda: [fake_school])
@@ -61,6 +69,7 @@ async def test_find_nearest_handles_coordinate_string(monkeypatch):
     assert result is not None, "find_nearest should find a school from coordinate input"
     assert result.name == "Test Primary"
     assert not geocode_called, "find_nearest should NOT call geocode when given coordinates"
+
 
 # ── Congestion zone ─────────────────────────────────────────────────────
 
@@ -557,17 +566,20 @@ async def test_replace_walk_with_bus_short_walk_no_replace():
     result = await _replace_walk_with_bus(original, "GU22 8RU", "EC3A 7LP", 9, _bus_alternative=_bus_route())
     assert result is original
 
+
 class TestAddressWaypoint:
     """_address_waypoint must handle postcodes, GeoPoints, and coordinate strings."""
 
     def test_postcode_returns_address_waypoint(self):
         from houses.routing import _address_waypoint
+
         result = _address_waypoint("SW1V 2QQ")
         assert result == {"address": "SW1V 2QQ"}
 
     def test_geopoint_returns_location_waypoint(self):
         from houses.geo import GeoPoint
         from houses.routing import _address_waypoint
+
         gp = GeoPoint(lat=51.5, lon=-0.13)
         result = _address_waypoint(gp)
         assert result == {"location": {"latLng": {"latitude": 51.5, "longitude": -0.13}}}
@@ -575,10 +587,12 @@ class TestAddressWaypoint:
     def test_coordinate_string_returns_location_waypoint(self):
         """'lat,lon' strings must use location format, not address."""
         from houses.routing import _address_waypoint
+
         result = _address_waypoint("51.5,-0.13")
         assert result == {"location": {"latLng": {"latitude": 51.5, "longitude": -0.13}}}
 
     def test_invalid_coordinate_string_falls_back_to_address(self):
         from houses.routing import _address_waypoint
+
         result = _address_waypoint("not-a-coordinate")
         assert result == {"address": "not-a-coordinate"}

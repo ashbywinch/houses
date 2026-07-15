@@ -65,3 +65,77 @@ class TestUpgradeAddress:
         """Multiple commas in address — only trailing outcode replaced."""
         result = self.upgrade("Flat 3, 123 High Street, London, SW20", "SW20 9NB")
         assert result == "Flat 3, 123 High Street, London, SW20 9NB"
+
+
+class TestIsOutcode:
+    """is_outcode — validate partial postcode (outcode) strings."""
+
+    def test_outcode_matches_sl6(self):
+        from houses.location import is_outcode
+
+        assert is_outcode("SL6")
+
+    def test_outcode_matches_sw1e(self):
+        from houses.location import is_outcode
+
+        assert is_outcode("SW1E")
+
+    def test_outcode_matches_ec3a(self):
+        from houses.location import is_outcode
+
+        assert is_outcode("EC3A")
+
+    def test_full_postcode_does_not_match(self):
+        from houses.location import is_outcode
+
+        assert not is_outcode("RG14 1AA")
+
+    def test_full_postcode_no_space_does_not_match(self):
+        from houses.location import is_outcode
+
+        assert not is_outcode("RG141AA")
+
+    def test_empty_does_not_match(self):
+        from houses.location import is_outcode
+
+        assert not is_outcode("")
+
+    def test_not_a_postcode_does_not_match(self):
+        from houses.location import is_outcode
+
+        assert not is_outcode("not a postcode")
+
+
+class TestEndPostcodePattern:
+    """_END_PC_RE — strips trailing postcodes from address strings."""
+
+    def test_full_postcode_matches(self):
+        from houses.location import _END_PC_RE
+
+        assert _END_PC_RE.search(", RG14 1AA")
+
+    def test_outcode_matches(self):
+        from houses.location import _END_PC_RE
+
+        assert _END_PC_RE.search(", SL6")
+
+    def test_london_outcode_matches(self):
+        from houses.location import _END_PC_RE
+
+        assert _END_PC_RE.search(", SW1E")
+
+    def test_no_postcode_does_not_match(self):
+        from houses.location import _END_PC_RE
+
+        assert not _END_PC_RE.search("Some Road, Town")
+
+    def test_empty_string_does_not_match(self):
+        from houses.location import _END_PC_RE
+
+        assert not _END_PC_RE.search("")
+
+    def test_postcode_without_comma_does_not_match(self):
+        """Pattern requires a leading comma — a bare postcode shouldn't match."""
+        from houses.location import _END_PC_RE
+
+        assert not _END_PC_RE.search("RG14 1AA")

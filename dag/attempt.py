@@ -12,6 +12,7 @@ on ``Attempt`` objects.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import TypeVar
@@ -126,26 +127,23 @@ class Attempt[T](metaclass=_AttemptMeta):
         return self._value  # type: ignore[return-value]
 
     # ── Transform ─────────────────────────────────────────────────────
-
-    def map(self, fn: callable[[T], U]) -> Attempt[U]:
+    def map(self, fn: Callable[[T], U]) -> Attempt[U]:
         """Transform the value if Succeeded; pass through otherwise."""
         if self.succeeded:
             return Attempt.succeeded(fn(self._value))  # type: ignore[arg-type]
         return self  # type: ignore[return-value]
-
-    def bind(self, fn: callable[[T], Attempt[U]]) -> Attempt[U]:
+    def bind(self, fn: Callable[[T], Attempt[U]]) -> Attempt[U]:
         """Chain a fallible transform; ``fn`` returns ``Attempt[U]``."""
         if self.succeeded:
             return fn(self._value)  # type: ignore[arg-type]
         return self  # type: ignore[return-value]
 
     # ── Exhaustive match ──────────────────────────────────────────────
-
     def match(
         self,
-        on_succeeded: callable[[T], R],
-        on_pending: callable[[], R],
-        on_impossible: callable[[str], R],
+        on_succeeded: Callable[[T], R],
+        on_pending: Callable[[], R],
+        on_impossible: Callable[[str], R],
     ) -> R:
         """Handle every state explicitly.
 

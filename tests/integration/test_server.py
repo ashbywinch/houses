@@ -110,5 +110,3 @@ class TestInjectProperty:
         assert data["url"] == self.MAIDENHEAD_PAYLOAD["url"]
         assert data["address"] == self.MAIDENHEAD_PAYLOAD["address"]
         assert data["postcode"] == "SL6"
-
-

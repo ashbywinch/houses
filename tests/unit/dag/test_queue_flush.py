@@ -51,7 +51,6 @@ def _clear_queue():
 
 
 class TestBasicFlush:
-
     @pytest.mark.asyncio
     async def test_linear_chain(self):
         src = UserInputNode[int]("src2", int)
@@ -87,7 +86,6 @@ class TestBasicFlush:
 
 
 class TestRequeueOnPendingDeps:
-
     @pytest.mark.asyncio
     async def test_diamond_deps(self):
         src = UserInputNode[int]("sd", int)
