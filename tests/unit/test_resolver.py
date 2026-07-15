@@ -134,7 +134,6 @@ class TestDerivedNodeStaleness:
         await node.attempt()
 
         loaded = latest_node_result("psiaf_double")
-        assert loaded is not None
         assert loaded["stale"] is False
         assert loaded["value"] == 14
 

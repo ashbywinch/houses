@@ -55,6 +55,13 @@ class Node(ABC, Generic[T]):
             return attempt
         return None
 
+    def latest_attempt(self) -> Attempt:
+        """Synchronous access to the last known attempt.
+        Override in subclasses that cache the attempt object."""
+        raise RuntimeError(
+            f"{type(self).__name__} does not support sync attempt access"
+        )
+
     @abstractmethod
     async def attempt(self) -> Attempt[T]:
         """Compute or retrieve the current value."""

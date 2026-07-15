@@ -85,3 +85,8 @@ class UserInputNode(Node[T], Generic[T]):
 
     async def build_provenance(self) -> Provenance:
         return Provenance.from_label(self._source_label)
+
+    def latest_attempt(self) -> Attempt:
+        if self._value is not None:
+            return Attempt.succeeded(self._value)
+        return Attempt.pending()

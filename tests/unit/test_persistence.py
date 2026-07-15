@@ -87,7 +87,6 @@ class TestGeoPointPersistence:
     def test_none_value_saves_and_loads_as_none(self):
         save_node_result(f"{RID}/best_location", {"value": None, "status": "succeeded"})
         loaded = latest_node_result(f"{RID}/best_location")
-        assert loaded is not None
         assert loaded["value"] is None
 
     def test_geopoint_via_serialised_dict_roundtrips(self):
@@ -100,7 +99,6 @@ class TestGeoPointPersistence:
             {"value": serialised, "status": "succeeded", "source": "manual"},
         )
         loaded = latest_node_result(f"{RID}/best_location")
-        assert loaded is not None
         reconstructed = _deserialize_value(json.dumps(loaded["value"]))
         assert reconstructed == gp
         assert isinstance(reconstructed, GeoPoint)
@@ -114,7 +112,6 @@ class TestGeoPointPersistence:
             {"value": serialised, "status": "succeeded", "source": "rightmove_map"},
         )
         loaded = latest_node_result(f"{RID}/rightmove_location")
-        assert loaded is not None
         reconstructed = _deserialize_value(json.dumps(loaded["value"]))
         assert reconstructed == gp
 
@@ -138,7 +135,6 @@ class TestGeoPointPersistence:
         )
         conn.commit()
         loaded = latest_node_result(f"{RID}/best_location")
-        assert loaded is not None
         assert loaded["value"] == "None"
         assert isinstance(loaded["value"], str)
 
@@ -146,7 +142,6 @@ class TestGeoPointPersistence:
         """A plain string node with ``value: None`` loads back as None."""
         save_node_result(f"{RID}/best_address", {"value": None, "status": "succeeded"})
         loaded = latest_node_result(f"{RID}/best_address")
-        assert loaded is not None
         assert loaded["value"] is None
 
     def test_two_geopoint_nodes_independent(self):
@@ -159,7 +154,6 @@ class TestGeoPointPersistence:
         save_node_result(f"{RID}/second", {"value": sb, "status": "succeeded"})
         la = latest_node_result(f"{RID}/first")
         lb = latest_node_result(f"{RID}/second")
-        assert la is not None and lb is not None
         ra = _deserialize_value(json.dumps(la["value"]))
         rb = _deserialize_value(json.dumps(lb["value"]))
         assert ra == gp_a
@@ -172,6 +166,5 @@ class TestGeoPointPersistence:
         save_node_result(f"{RID}/point", {"value": old_gp, "status": "succeeded"})
         save_node_result(f"{RID}/point", {"value": new_gp, "status": "succeeded"})
         loaded = latest_node_result(f"{RID}/point")
-        assert loaded is not None
         reconstructed = _deserialize_value(json.dumps(loaded["value"]))
         assert reconstructed == GeoPoint(lat=3.0, lon=4.0)

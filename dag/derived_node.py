@@ -75,6 +75,12 @@ class DerivedNode(Node[T], Generic[T]):
         if self._attempt.pending or self._is_stale():
             _stale_queue.put_nowait(self)
 
+    def _get_active_deps(self) -> tuple[Node, ...]:
+        return self._deps
+
+    def latest_attempt(self) -> Attempt:
+        return self._attempt
+
     def _on_dep_changed(self) -> None:
         if not self._is_stale():
             return
@@ -84,7 +90,7 @@ class DerivedNode(Node[T], Generic[T]):
     def _is_stale(self) -> bool:
         if self._attempt.pending:
             return True
-        for dep in self._deps:
+        for dep in self._get_active_deps():
             if dep._persisted_at is not None and self._computed_at is not None \
                     and dep._persisted_at > self._computed_at:
                 return True
@@ -104,7 +110,8 @@ class DerivedNode(Node[T], Generic[T]):
     async def refresh(self) -> None:
         if not self._is_stale():
             return
-        dep_attempts = [await dep.attempt() for dep in self._deps]
+        active_deps = self._get_active_deps()
+        dep_attempts = [await dep.attempt() for dep in active_deps]
         if any(a.pending for a in dep_attempts):
             return
         try:
@@ -115,7 +122,7 @@ class DerivedNode(Node[T], Generic[T]):
             result = Attempt.impossible(f"{self._id}: {e}")
         self._attempt = result
         self._computed_at = datetime.now(UTC)
-        dep_timestamps = {dep._id: dep._db_created_at for dep in self._deps}
+        dep_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
         try:
             result_dict = await self.to_json()
         except Exception as e:
@@ -128,7 +135,7 @@ class DerivedNode(Node[T], Generic[T]):
 
     async def build_provenance(self) -> Provenance:
         sources: dict[str, Provenance] = {}
-        for dep in self._deps:
+        for dep in self._get_active_deps():
             sources[dep._id] = await dep.build_provenance()
         return Provenance.composite(self._id, sources)
 

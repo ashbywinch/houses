@@ -32,6 +32,10 @@ class FakeGeocoder:
         self.postcode_calls: list[str] = []
         self.address_calls: list[str] = []
 
+    @property
+    def call_count(self) -> int:
+        return len(self.address_calls) + len(self.postcode_calls)
+
     async def geocode_postcode(self, postcode: str) -> Attempt[GeoPoint]:
         self.postcode_calls.append(postcode)
         return Attempt.succeeded(self.result) if self.result else Attempt.impossible("no result")

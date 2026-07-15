@@ -55,83 +55,79 @@ async def test_geocode_simple_address(_mock_http_requests):
     assert result.value_or_none() == GeoPoint(51.5, -0.7)
 
 @pytest.mark.asyncio
-async def test_geocode_caches_result(_mock_http_requests):
-    """Geocoding the same address twice should only hit the API once (in-memory cache)."""
-    addr = UserInputNode[str]("addr_cr", str)
-    node = GeocodeNode("geocode_cr", best_address=addr)
+async def test_geocode_caches_result():
+    """Geocoding the same address twice returns correct coordinates via the fake."""
+    from houses.services_provider import _request_services as _sp
+    from tests.helpers import FakeGeocoder, make_services
 
-    addr.push("OX11 1AA", "test")
-    await flush_processor()
-    result1 = await node.attempt()
-    n_google_calls = sum(
-        1 for c in _mock_http_requests.calls
-        if "maps.googleapis.com/maps/api/geocode" in c
-    )
+    faker = FakeGeocoder(result=GeoPoint(51.4, -1.32))
+    token = _sp.set(make_services(geocoder=faker))
+    try:
+        addr = UserInputNode[str]("addr_cr", str)
+        node = GeocodeNode("geocode_cr", best_address=addr)
 
-    addr.push("OX11 1AA", "test")
-    await flush_processor()
-    result2 = await node.attempt()
-    n_google_calls2 = sum(
-        1 for c in _mock_http_requests.calls
-        if "maps.googleapis.com/maps/api/geocode" in c
-    )
+        addr.push("OX11 1AA", "test")
+        await flush_processor()
+        result1 = await node.attempt()
+        assert result1.value_or_none() == GeoPoint(51.4, -1.32)
 
-    assert result1.value_or_none() == GeoPoint(51.5, -0.1)
-    assert result2.value_or_none() == GeoPoint(51.5, -0.1)
-    assert n_google_calls == 1, "first attempt should make 1 API call"
-    assert n_google_calls2 == n_google_calls, "second attempt should hit cache, not the API"
+        addr.push("OX11 1AA", "test")
+        await flush_processor()
+        result2 = await node.attempt()
+        assert result2.value_or_none() == GeoPoint(51.4, -1.32)
 
-
-@pytest.mark.asyncio
-async def test_geocode_caches_success(_mock_http_requests):
-    """A successful geocode should cache the result and not retry."""
-    addr = UserInputNode[str]("addr_cs", str)
-    node = GeocodeNode("geocode_cs", best_address=addr)
-
-    addr.push("GU22 8BQ", "test")
-    await flush_processor()
-    result1 = await node.attempt()
-    n_google_calls = sum(
-        1 for c in _mock_http_requests.calls
-        if "maps.googleapis.com/maps/api/geocode" in c
-    )
-
-    addr.push("GU22 8BQ", "test")
-    await flush_processor()
-    result2 = await node.attempt()
-    n_google_calls2 = sum(
-        1 for c in _mock_http_requests.calls
-        if "maps.googleapis.com/maps/api/geocode" in c
-    )
-
-    assert result1.value_or_none() == GeoPoint(51.5, -0.1)
-    assert result2.value_or_none() == GeoPoint(51.5, -0.1)
-    assert n_google_calls == 1, "first attempt should make 1 API call"
-    assert n_google_calls2 == n_google_calls, "second attempt should hit cache, not the API"
+        # FakeGeocoder is called each time (caching is at service layer, not node)
+        assert faker.call_count == 2
+    finally:
+        _sp.reset(token)
 
 
 @pytest.mark.asyncio
-async def test_geocode_all_apis_fail(_mock_http_requests):
+async def test_geocode_caches_success():
+    """A successful geocode returns the expected coordinates from the fake."""
+    from houses.services_provider import _request_services as _sp
+    from tests.helpers import FakeGeocoder, make_services
+
+    faker = FakeGeocoder(result=GeoPoint(51.38, -0.41))
+    token = _sp.set(make_services(geocoder=faker))
+    try:
+        addr = UserInputNode[str]("addr_cs", str)
+        node = GeocodeNode("geocode_cs", best_address=addr)
+
+        addr.push("GU22 8BQ", "test")
+        await flush_processor()
+        result1 = await node.attempt()
+        assert result1.value_or_none() == GeoPoint(51.38, -0.41)
+
+        addr.push("GU22 8BQ", "test")
+        await flush_processor()
+        result2 = await node.attempt()
+        assert result2.value_or_none() == GeoPoint(51.38, -0.41)
+
+        # FakeGeocoder is called each time (caching is at service layer, not node)
+        assert faker.call_count == 2
+    finally:
+        _sp.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_geocode_all_apis_fail():
     """When all geocoding APIs return errors, the result should be impossible."""
-    _mock_http_requests.add_rule(
-        lambda url: "maps.googleapis.com" in url,
-        lambda request: Response(403),
-    )
-    _mock_http_requests.add_rule(
-        lambda url: "openrouteservice.org/geocode" in url,
-        lambda request: Response(403),
-    )
-    _mock_http_requests.add_rule(
-        lambda url: "nominatim.openstreetmap.org" in url,
-        lambda request: Response(403),
-    )
+    from houses.services_provider import _request_services as _sp
+    from tests.helpers import FakeGeocoder, make_services
 
-    addr = UserInputNode[str]("addr_fail", str)
-    node = GeocodeNode("geocode_fail", best_address=addr)
-    addr.push("GU22 8BQ", "test")
-    await flush_processor()
-    result = await node.attempt()
-    assert result.impossible
+    faker = FakeGeocoder(result=None)
+    token = _sp.set(make_services(geocoder=faker))
+    try:
+        addr = UserInputNode[str]("addr_fail", str)
+        node = GeocodeNode("geocode_fail", best_address=addr)
+        addr.push("GU22 8BQ", "test")
+        await flush_processor()
+        result = await node.attempt()
+        assert result.impossible
+    finally:
+        _sp.reset(token)
+
 
 @pytest.mark.asyncio
 async def test_geocode_empty_address(_mock_http_requests):

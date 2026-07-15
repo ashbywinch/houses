@@ -293,8 +293,10 @@ class TestEnrichmentApi:
         await flush_processor()
 
         detail = await get_property_detail(RID)
-        assert "best_address" in detail
-        assert "best_location" in detail.get("location", {})
+        assert detail["best_address"]["status"] == "succeeded"
+        assert detail["best_address"]["value"] == "10 High St, Southall, UB2 5AD"
+        assert detail["location"]["best_location"]["status"] == "succeeded"
+        assert detail["location"]["best_location"]["value"] == {"lat": 51.5, "lon": -0.1}
 
     @pytest.mark.asyncio
     async def test_list_properties_returns_registered_rid(self):

@@ -253,6 +253,7 @@ class PropertyNodes:
                     poi=poi_src,
                     transit_result=transit_node,
                     bus_result=bus_augment,
+                    walk_leg_check=walk_check,
                     is_child=is_child,
                     rail_fare_node=rail_fare_node,
                 )

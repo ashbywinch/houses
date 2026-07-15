@@ -3,15 +3,12 @@
 Replaces the retired ``houses.enricher`` module.  Tests the three-node
 pipeline — TransitNode → CommuteSelectorNode → CommuteBreakdownNode —
 backed by ``FakeCommuteRouter`` with canned results.
-
-The parking-and-ride tests for ``houses.transit_route`` are kept from the
-old test file.
 """
 
 from __future__ import annotations
 
 import copy
-from unittest.mock import patch
+from houses.transit_route import _apply_park_and_ride_to_journeys, _format_route_summary
 
 import pytest
 from money import Money
@@ -21,111 +18,6 @@ from dag.derived_node import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
-
-# ======================================================================
-# Park-and-ride (kept from restored file — tests surviving transit_route)
-# ======================================================================
-
-
-class TestParkAndRide:
-    """_apply_park_and_ride_to_journeys — replaces long walks with driving."""
-
-    LONG_WALK_DATA = {
-        "journeys": [
-            {
-                "duration": 87,
-                "legs": [
-                    {
-                        "mode": {"name": "walking"},
-                        "duration": 35,
-                        "arrivalPoint": {"commonName": "Maidenhead Rail Station"},
-                        "instruction": {"summary": "Walk to Maidenhead Rail Station"},
-                    },
-                    {
-                        "mode": {"name": "national-rail"},
-                        "duration": 20,
-                        "arrivalPoint": {"commonName": "London Paddington Rail Station"},
-                        "instruction": {"summary": "Great Western Railway to London Paddington"},
-                    },
-                    {
-                        "mode": {"name": "walking"},
-                        "duration": 7,
-                        "arrivalPoint": {"commonName": "SW1V 2QQ"},
-                        "instruction": {"summary": "Walk to SW1V 2QQ"},
-                    },
-                ],
-            }
-        ]
-    }
-
-    SHORT_WALK_DATA = {
-        "journeys": [
-            {
-                "duration": 60,
-                "legs": [
-                    {
-                        "mode": {"name": "walking"},
-                        "duration": 10,
-                        "arrivalPoint": {"commonName": "Weybridge Rail Station"},
-                        "instruction": {"summary": "Walk to Weybridge Rail Station"},
-                    },
-                    {
-                        "mode": {"name": "national-rail"},
-                        "duration": 25,
-                        "arrivalPoint": {"commonName": "London Waterloo Rail Station"},
-                        "instruction": {"summary": "South Western Railway to London Waterloo"},
-                    },
-                ],
-            }
-        ]
-    }
-
-    @pytest.mark.asyncio
-    async def test_replaces_long_walk_with_drive(self):
-        data = copy.deepcopy(self.LONG_WALK_DATA)
-        with patch("houses.transit_route._get_drive_minutes", return_value=10):
-            result = await _apply_park_and_ride_to_journeys(data, "SL6 3YZ", max_walk_minutes=20)
-        legs = result["journeys"][0]["legs"]
-        assert legs[0]["mode"]["name"] == "driving"
-        assert result["journeys"][0]["duration"] == 62
-
-    @pytest.mark.asyncio
-    async def test_skips_short_walk(self):
-        data = copy.deepcopy(self.SHORT_WALK_DATA)
-        with patch("houses.transit_route._get_drive_minutes", return_value=3):
-            result = await _apply_park_and_ride_to_journeys(data, "KT13 0TD", max_walk_minutes=20)
-        legs = result["journeys"][0]["legs"]
-        assert legs[0]["mode"]["name"] == "walking"
-        assert legs[0]["duration"] == 10
-
-    @pytest.mark.asyncio
-    async def test_skips_non_walking_first_leg(self):
-        data = {"journeys": [{"duration": 45, "legs": [{"mode": {"name": "national-rail"}, "duration": 20}]}]}
-        with patch("houses.transit_route._get_drive_minutes") as mock_drive:
-            result = await _apply_park_and_ride_to_journeys(data, "SL6", 20)
-        mock_drive.assert_not_called()
-        assert result["journeys"][0]["legs"][0]["mode"]["name"] == "national-rail"
-
-    @pytest.mark.asyncio
-    async def test_skips_when_drive_lookup_fails(self):
-        data = copy.deepcopy(self.LONG_WALK_DATA)
-        with patch("houses.transit_route._get_drive_minutes", return_value=None):
-            result = await _apply_park_and_ride_to_journeys(data, "SL6 3YZ", max_walk_minutes=20)
-        legs = result["journeys"][0]["legs"]
-        assert legs[0]["mode"]["name"] == "walking"
-        assert legs[0]["duration"] == 35
-
-    @pytest.mark.asyncio
-    async def test_format_includes_drive_in_route_after_park_and_ride(self):
-        data = copy.deepcopy(self.LONG_WALK_DATA)
-        with patch("houses.transit_route._get_drive_minutes", return_value=10):
-            result = await _apply_park_and_ride_to_journeys(data, "SL6 3YZ", max_walk_minutes=20)
-        best = min(result["journeys"], key=lambda j: j.get("duration", 9999))
-        summary = _format_route_summary(best)
-        assert "Drive to Maidenhead (10m)" in summary
-        assert "Train to Paddington (20m)" in summary
-        assert "walk 7m" in summary
-
 
 # ======================================================================
 # DAG-based commute computation (replaces old houses.enricher tests)
@@ -368,7 +260,8 @@ class TestCommuteSelectorPipeline:
         bus = commute_input_node("csel_b1")
 
         node = CommuteSelectorNode("csel1", origin=origin, poi=poi,
-                                   transit_result=transit, bus_result=bus)
+                                   transit_result=transit, bus_result=bus,
+                                   walk_leg_check=_succeeded_walk_check(False))
 
         origin.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -396,7 +289,8 @@ class TestCommuteSelectorPipeline:
         bus = commute_input_node("csel_b2")
 
         node = CommuteSelectorNode("csel2", origin=origin, poi=poi,
-                                   transit_result=transit, bus_result=bus)
+                                   transit_result=transit, bus_result=bus,
+                                   walk_leg_check=_succeeded_walk_check(False))
 
         origin.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -421,7 +315,8 @@ class TestCommuteSelectorPipeline:
         bus = commute_input_node("csel_b3")
 
         node = CommuteSelectorNode("csel3", origin=origin, poi=poi,
-                                   transit_result=transit, bus_result=bus)
+                                   transit_result=transit, bus_result=bus,
+                                   walk_leg_check=_succeeded_walk_check(False))
 
         origin.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -442,7 +337,8 @@ class TestCommuteSelectorPipeline:
         bus = commute_input_node("csel_b4")
 
         node = CommuteSelectorNode("csel4", origin=origin, poi=poi,
-                                   transit_result=transit, bus_result=bus)
+                                   transit_result=transit, bus_result=bus,
+                                   walk_leg_check=_succeeded_walk_check(False))
 
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
 
@@ -462,7 +358,8 @@ class TestCommuteSelectorPipeline:
         bus = commute_input_node("csel_b5")
 
         node = CommuteSelectorNode("csel5", origin=origin, poi=poi,
-                                   transit_result=transit, bus_result=bus)
+                                   transit_result=transit, bus_result=bus,
+                                   walk_leg_check=_succeeded_walk_check(False))
 
         origin.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -473,7 +370,11 @@ class TestCommuteSelectorPipeline:
 
         j = await node.to_json()
         assert j["status"] == "succeeded"
-        assert j["value"] is not None
+        val = j["value"]
+        assert isinstance(val, dict), "value should be a dict"
+        assert "duration" in val, "value missing duration"
+        assert "daily_cost" in val, "value missing daily_cost"
+        assert val.get("daily_cost", {}).get("amount") == 4.5
         assert j["is_child"] is False
         assert "error" not in j
         assert "provenance" in j
@@ -490,7 +391,8 @@ class TestCommuteSelectorPipeline:
         bus = CommuteDictInput("csel_b6")
 
         node = CommuteSelectorNode("csel6", origin=origin, poi=poi,
-                                   transit_result=transit, bus_result=bus)
+                                   transit_result=transit, bus_result=bus,
+                                   walk_leg_check=_succeeded_walk_check(False))
 
         origin.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -802,3 +704,115 @@ class TestEnrichRailFares:
         )
         assert simon_result.daily_cost_gbp == Money("40.4", "GBP")
         assert lorena_result.daily_cost_gbp == Money("36.0", "GBP")
+
+
+class TestParkAndRide:
+    """_apply_park_and_ride_to_journeys — replaces long walks with driving.
+    Uses DI (``_drive_fn``) instead of ``patch``."""
+
+    LONG_WALK_DATA = {
+        "journeys": [
+            {
+                "duration": 87,
+                "legs": [
+                    {"mode": {"name": "walking"}, "duration": 35,
+                     "arrivalPoint": {"commonName": "Maidenhead Rail Station"},
+                     "instruction": {"summary": "Walk to Maidenhead Rail Station"}},
+                    {"mode": {"name": "national-rail"}, "duration": 20,
+                     "arrivalPoint": {"commonName": "London Paddington Rail Station"},
+                     "instruction": {"summary": "Great Western Railway to London Paddington"}},
+                    {"mode": {"name": "walking"}, "duration": 7,
+                     "arrivalPoint": {"commonName": "SW1V 2QQ"},
+                     "instruction": {"summary": "Walk to SW1V 2QQ"}},
+                ],
+            }
+        ]
+    }
+
+    SHORT_WALK_DATA = {
+        "journeys": [
+            {
+                "duration": 60,
+                "legs": [
+                    {"mode": {"name": "walking"}, "duration": 10,
+                     "arrivalPoint": {"commonName": "Weybridge Rail Station"},
+                     "instruction": {"summary": "Walk to Weybridge Rail Station"}},
+                    {"mode": {"name": "national-rail"}, "duration": 25,
+                     "arrivalPoint": {"commonName": "London Waterloo Rail Station"},
+                     "instruction": {"summary": "South Western Railway to London Waterloo"}},
+                ],
+            }
+        ]
+    }
+
+    async def _drive_10(self, _origin, _station):
+        return 10
+
+    async def _drive_3(self, _origin, _station):
+        return 3
+
+    async def _drive_none(self, _origin, _station):
+        return None
+
+    @pytest.mark.asyncio
+    async def test_replaces_long_walk_with_drive(self):
+        data = copy.deepcopy(self.LONG_WALK_DATA)
+        result = await _apply_park_and_ride_to_journeys(
+            data, "SL6 3YZ", max_walk_minutes=20, _drive_fn=self._drive_10)
+        legs = result["journeys"][0]["legs"]
+        assert legs[0]["mode"]["name"] == "driving"
+        assert result["journeys"][0]["duration"] == 62
+
+    @pytest.mark.asyncio
+    async def test_skips_short_walk(self):
+        data = copy.deepcopy(self.SHORT_WALK_DATA)
+        result = await _apply_park_and_ride_to_journeys(
+            data, "KT13 0TD", max_walk_minutes=20, _drive_fn=self._drive_3)
+        legs = result["journeys"][0]["legs"]
+        assert legs[0]["mode"]["name"] == "walking"
+        assert legs[0]["duration"] == 10
+
+    @pytest.mark.asyncio
+    async def test_skips_non_walking_first_leg(self):
+        data = {"journeys": [{"duration": 45, "legs": [{"mode": {"name": "national-rail"}, "duration": 20}]}]}
+        calls = []
+        async def _check_not_called(_o, _s):
+            calls.append(1)
+            return 10
+        result = await _apply_park_and_ride_to_journeys(data, "SL6", 20, _drive_fn=_check_not_called)
+        assert len(calls) == 0
+        assert result["journeys"][0]["legs"][0]["mode"]["name"] == "national-rail"
+
+    @pytest.mark.asyncio
+    async def test_skips_when_drive_lookup_fails(self):
+        data = copy.deepcopy(self.LONG_WALK_DATA)
+        result = await _apply_park_and_ride_to_journeys(
+            data, "SL6 3YZ", max_walk_minutes=20, _drive_fn=self._drive_none)
+        legs = result["journeys"][0]["legs"]
+        assert legs[0]["mode"]["name"] == "walking"
+        assert legs[0]["duration"] == 35
+
+    @pytest.mark.asyncio
+    async def test_format_includes_drive_in_route_after_park_and_ride(self):
+        data = copy.deepcopy(self.LONG_WALK_DATA)
+        result = await _apply_park_and_ride_to_journeys(
+            data, "SL6 3YZ", max_walk_minutes=20, _drive_fn=self._drive_10)
+        best = min(result["journeys"], key=lambda j: j.get("duration", 9999))
+        summary = _format_route_summary(best)
+        assert "Drive to Maidenhead (10m)" in summary
+        assert "Train to Paddington (20m)" in summary
+        assert "walk 7m" in summary
+
+
+def _succeeded_walk_check(val: bool = False) -> "DerivedNode":
+    """Build a minimal walk-check node whose ``_attempt`` is already resolved."""
+    from dag.attempt import Attempt
+    from dag.derived_node import DerivedNode
+    from dag.user_input_node import UserInputNode
+    from houses.nodes.transit import WalkLegCheckNode
+
+    t = UserInputNode[dict]("_wc_t", dict)
+    p = UserInputNode[list]("_wc_p", list)
+    w = WalkLegCheckNode("_wc", transit_node=t, persons_source=p)
+    w._attempt = Attempt.succeeded(val)
+    return w

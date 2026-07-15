@@ -209,12 +209,14 @@ class TestCommuteData:
             if not c.get("succeeded"):
                 continue
             val = c.get("value")
-            assert val is not None, f"{key} succeeded but value is None"
+            assert isinstance(val, dict), f"{key} value should be a dict"
+            assert "duration" in val, f"{key} value missing duration"
+            assert "daily_cost" in val, f"{key} value missing daily_cost"
             # Duration
             dur = val.get("duration", {})
             assert "value" in dur, f"{key} duration missing value"
             assert dur.get("unit") == "minute", f"{key} duration unit not minute"
-            assert isinstance(dur["value"], int) or dur["value"] > 0
+            assert isinstance(dur["value"], int) and dur["value"] > 0
             # Daily cost
             dc = val.get("daily_cost", {})
             assert "amount" in dc, f"{key} daily_cost missing amount"
@@ -266,15 +268,12 @@ class TestSchoolData:
 
         for phase in ("primary", "secondary"):
             school_node = s["schools"][phase]["school"]
-            if not school_node.get("succeeded"):
-                continue
             val = school_node.get("value")
-            assert val is not None, f"{phase} school succeeded but value is None"
-            for field in ("name", "ofsted", "url"):
-                assert field in val, f"{phase} school value missing '{field}'"
-            assert isinstance(val.get("name"), str)
-            assert isinstance(val.get("ofsted"), str)
-            assert "walk_minutes" in val, f"{phase} school value missing 'walk_minutes'"
+            assert isinstance(val, dict), f"{phase} school value should be a dict"
+            assert "name" in val, f"{phase} school value missing name"
+            assert "ofsted" in val, f"{phase} school value missing ofsted"
+            assert "url" in val, f"{phase} school value missing url"
+            assert "walk_minutes" in val, f"{phase} school value missing walk_minutes"
 
     @pytest.mark.asyncio
     async def test_school_data_envelope(self, prop):

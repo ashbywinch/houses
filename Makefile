@@ -16,6 +16,7 @@ NC := \033[0m
 help:
 	@echo "Available commands:"
 	@echo "  ${GREEN}make setup${NC}              Create venv and install dependencies"
+	@echo "  ${GREEN}make run-prod${NC}           Serve backend + built frontend (no Vite)"
 	@echo "  ${GREEN}make run${NC}                Start backend + frontend dev server"
 	@echo "  ${GREEN}make test${NC}               Run unit + integration tests (fast, mocked APIs)"
 	@echo "  ${GREEN}make test-all${NC}           Run all tests including e2e (hits real APIs)"
@@ -36,7 +37,24 @@ run: setup frontend-setup
 	@echo "${YELLOW}Backend: http://127.0.0.1:8080  Frontend: http://localhost:5173${NC}"
 	@trap 'kill 0' EXIT; \
 		cd houses/frontend && npm run dev & \
-		$(UV) run uvicorn houses.server:app --host 0.0.0.0 --port 8080 --reload
+		$(UV) run python -m houses
+
+run-prod: setup frontend-build
+	@echo "${YELLOW}Serving frontend build + backend on http://127.0.0.1:8080${NC}"
+	@$(UV) run python -c "
+import uvicorn
+from houses.config import settings
+from houses.server import app
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
+
+# Mount the frontend build output for production
+build_dir = Path('houses/frontend/dist')
+if build_dir.exists():
+    app.mount('/', StaticFiles(directory=str(build_dir), html=True), name='frontend')
+
+uvicorn.run(app, host=settings.host, port=settings.port, reload=False)
+"
 
 FRONTEND := houses/frontend
 NPM := npm

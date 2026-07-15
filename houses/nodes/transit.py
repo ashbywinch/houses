@@ -77,6 +77,9 @@ def _route_description(legs: tuple[CommuteLeg, ...]) -> str:
 
 
 def _serialize_commute_result(cr: CommuteResult) -> dict:
+    walk_time = sum(
+        int(leg.duration.magnitude) for leg in cr.details if leg.mode == "walk"
+    )
     return {
         "duration": {"value": int(cr.duration.magnitude), "unit": "minute"},
         "daily_cost": (
@@ -89,6 +92,7 @@ def _serialize_commute_result(cr: CommuteResult) -> dict:
         "is_child": cr.is_child,
         "source_url": cr.source_url,
         "destination_url": cr.destination_url,
+        "walk_time": walk_time,
     }
 
 
@@ -109,14 +113,25 @@ def _deserialize_commute_result(data: dict) -> CommuteResult:
         destination_url=data.get("destination_url", ""),
     )
 
-
 class WalkLegCheckNode(DerivedNode[bool]):
     def __init__(self, node_id: str, *, transit_node, persons_source):
         super().__init__(node_id, bool, (transit_node, persons_source))
 
     def compute(self, transit: Attempt[dict],
                 persons: Attempt[list]) -> Attempt[bool]:
-        return Attempt.succeeded(False)
+        if not transit.succeeded or not persons.succeeded:
+            return Attempt.succeeded(False)
+
+        val = transit.value_or_none() or {}
+        walk_time = val.get("walk_time", 0)
+
+        # Extract max walk from persons (in minutes)
+        max_walk = 30  # default
+        for p in (persons.value_or_none() or []):
+            max_walk = min(max_walk, getattr(p, 'bus_walk_penalty_minutes', 30))
+
+        # walk_time and max_walk are both in minutes
+        return Attempt.succeeded(walk_time > max_walk)
 
 
 class TransitNode(DerivedNode[dict]):

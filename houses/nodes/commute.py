@@ -147,18 +147,43 @@ class RailFareNode(DerivedNode[dict]):
 
 class CommuteSelectorNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, origin, poi, transit_result, bus_result,
-                 is_child: bool = False, rail_fare_node=None):
+                 walk_leg_check, is_child: bool = False, rail_fare_node=None):
+        # Set named attrs BEFORE super().__init__ so _get_active_deps() can access them
+        # (DerivedNode.__init__ calls _is_stale() which calls _get_active_deps())
+        self.origin = origin
+        self.poi = poi
+        self.transit_result = transit_result
+        self.bus_result = bus_result
+        self.walk_leg_check = walk_leg_check
+        self.is_child = is_child
+        self.rail_fare_node = rail_fare_node
         deps = (origin, poi, transit_result, bus_result)
         if rail_fare_node is not None:
             deps = deps + (rail_fare_node,)
         super().__init__(node_id, dict, deps)
-        self._is_child = is_child
-        self._rail_fare_node = rail_fare_node
+
+    def _get_active_deps(self):
+        deps = [self.origin, self.poi, self.transit_result]
+
+        # Bus leg augment active when transit has an excessive walk leg
+        walk_check_attempt = self.walk_leg_check.latest_attempt()
+        if self.bus_result is not None and walk_check_attempt.succeeded:
+            if walk_check_attempt.value:  # True = walk too long
+                deps.append(self.bus_result)
+
+        # Rail fare active when transit cost is £0
+        transit_attempt = self.transit_result.latest_attempt()
+        if self.rail_fare_node is not None and transit_attempt.succeeded:
+            cost = (transit_attempt.value_or_none() or {}).get("daily_cost", {}).get("amount", 0)
+            if float(cost) == 0:
+                deps.append(self.rail_fare_node)
+
+        return tuple(deps)
 
     def compute(self, origin: Attempt[GeoPoint],
                 poi: Attempt[str],
                 transit: Attempt[dict],
-                bus: Attempt[dict],
+                bus: Attempt[dict] = None,
                 rail_fare: Attempt[dict] = None) -> Attempt[dict]:
         if not origin.succeeded or not poi.succeeded:
             return self._impossible({"origin": origin, "poi": poi})
@@ -166,7 +191,7 @@ class CommuteSelectorNode(DerivedNode[dict]):
         selected = None
         if transit.succeeded:
             selected = transit
-        elif bus.succeeded:
+        elif bus is not None and bus.succeeded:
             selected = bus
 
         if selected is not None:
@@ -179,12 +204,13 @@ class CommuteSelectorNode(DerivedNode[dict]):
 
         return self._impossible({"transit_result": transit, "bus_result": bus})
 
+
     async def to_json(self) -> dict:
         attempt = await self.attempt()
         result: dict = {
             "status": attempt.status,
             "value": _serialize_value(attempt.value_or_none()) if attempt.succeeded else None,
-            "is_child": self._is_child,
+            "is_child": self.is_child,
         }
         result["succeeded"] = attempt.succeeded
         result["pending"] = attempt.pending

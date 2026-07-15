@@ -247,7 +247,9 @@ async def _apply_park_and_ride_to_journeys(
     data: dict,
     origin_postcode: str,
     max_walk_minutes: int,
+    _drive_fn=None,
 ) -> dict:
+    get_drive = _drive_fn if _drive_fn is not None else _get_drive_minutes
     journeys = data.get("journeys", [])
     if not journeys:
         return data
@@ -272,7 +274,7 @@ async def _apply_park_and_ride_to_journeys(
         if not station_name:
             logger.debug("park_and_ride: walk leg has no arrivalPoint — skipping")
             continue
-        drive_minutes = await _get_drive_minutes(origin_postcode, station_name)
+        drive_minutes = await get_drive(origin_postcode, station_name)
         if drive_minutes is None:
             logger.debug(
                 "park_and_ride: ORS returned None for '%s' -> '%s' — keeping walk",
