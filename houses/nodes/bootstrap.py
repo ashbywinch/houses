@@ -149,7 +149,6 @@ def bootstrap_from_row(row: dict[str, Any], sources: dict[str, UserInputNode]) -
 
 def seed_registry_from_sheet() -> int:
     from dag.persistence import property_rids
-    from houses.property_registry import register_property
 
     db_rids = property_rids()
     if db_rids:
