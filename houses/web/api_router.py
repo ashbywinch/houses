@@ -167,6 +167,24 @@ async def patch_location(rid: str, body: dict):
     return {"status": "ok"}
 
 
+@api_router.patch("/properties/{rid}/triage")
+async def patch_triage(rid: str, body: dict):
+    prop = get_registry_property(rid)
+    if prop is None:
+        raise HTTPException(status_code=404, detail=f"Property {rid} not found")
+    if "favourite" in body:
+        prop.favourite.push(bool(body["favourite"]), "user")
+    if "dismissed" in body:
+        prop.dismissed.push(bool(body["dismissed"]), "user")
+    if "is_viewed" in body:
+        prop.is_viewed.push(bool(body["is_viewed"]), "user")
+    if "user_notes" in body:
+        prop.user_notes.push(str(body["user_notes"]), "user")
+    if "triage_status" in body:
+        prop.triage_status.push(str(body["triage_status"]), "user")
+    return {"status": "ok"}
+
+
 @api_router.post("/seed")
 async def seed_properties():
     count = seed_registry_from_sheet()

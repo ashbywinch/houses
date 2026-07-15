@@ -54,3 +54,17 @@ export function patchFinancial(financial: Record<string, unknown>): Promise<Resp
     body: JSON.stringify(financial),
   })
 }
+
+export async function patchTriage(rid: string, data: Partial<{
+  favourite: boolean;
+  dismissed: boolean;
+  is_viewed: boolean;
+  user_notes: string;
+  triage_status: string;
+}>): Promise<Response> {
+  return fetch(`${BASE}/properties/${encodeURIComponent(rid)}/triage`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}

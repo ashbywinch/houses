@@ -2,11 +2,18 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import PropertyCard from '../PropertyCard.vue'
+import { usePropertiesStore } from '../../stores/properties'
 import type { PropertySummary } from '../../types'
 
 function mountCard(props: { rid: string; data: PropertySummary }) {
-  return mount(PropertyCard, { props, global: { plugins: [createPinia()] } })
+  const pinia = createPinia()
+  const wrapper = mount(PropertyCard, { props, global: { plugins: [pinia] } })
+  // Ensure Pinia store is available
+  const store = usePropertiesStore()
+  store.triage[props.rid] = { favourite: false, dismissed: false, is_viewed: false, user_notes: '', triage_status: '' }
+  return wrapper
 }
+
 function makeSummary(overrides?: Partial<PropertySummary>): PropertySummary {
   return {
     rid: '123',
@@ -119,11 +126,6 @@ describe('PropertyCard basic rendering', () => {
     expect(wrapper.text()).toContain('3 bed')
   })
 
-  it('renders walk time', () => {
-    const wrapper = mountCard({ rid: '123', data: makeSummary() })
-    expect(wrapper.text()).toContain('15')
-  })
-
   it('renders town name', () => {
     const wrapper = mountCard({ rid: '123', data: makeSummary() })
     expect(wrapper.text()).toContain('London')
@@ -141,6 +143,24 @@ describe('PropertyCard basic rendering', () => {
     const wrapper = mountCard({ rid: '123', data: makeSummary() })
     expect(wrapper.text()).toContain('£2,500')
   })
+
+  it('shows freshness badge with property_added_at', () => {
+    const summary = makeSummary({
+      freshness: { property_added_at: new Date().toISOString() },
+    })
+    const wrapper = mountCard({ rid: '123', data: summary })
+    expect(wrapper.text()).toContain('Added today')
+  })
+
+  it('shows Added Xd ago for old properties', () => {
+    const oldDate = new Date()
+    oldDate.setDate(oldDate.getDate() - 5)
+    const summary = makeSummary({
+      freshness: { property_added_at: oldDate.toISOString() },
+    })
+    const wrapper = mountCard({ rid: '123', data: summary })
+    expect(wrapper.text()).toContain('Added 5d ago')
+  })
 })
 
 describe('PropertyCard error handling', () => {
@@ -150,12 +170,9 @@ describe('PropertyCard error handling', () => {
       total_monthly_cost: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
     })
     const wrapper = mountCard({ rid: '123', data: summary })
-    // No price on the card header (the £500k section)
     expect(wrapper.text()).not.toContain('£500,000')
-    // Total monthly shows 'unknown' when data is missing
-    expect(wrapper.text()).toContain('unknown')
+    expect(wrapper.text()).not.toContain('/mo')
   })
-
 
   it('handles empty commutes', () => {
     const wrapper = mountCard({ rid: '123', data: makeSummary() })

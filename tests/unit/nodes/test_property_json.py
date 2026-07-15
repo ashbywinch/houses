@@ -91,10 +91,20 @@ class TestSummaryShape:
             "rightmove_bedrooms",
             "total_monthly_cost",
             "walkability",
+            "epc",
         ):
             assert "status" in s[key], f"{key} missing status"
             assert "value" in s[key], f"{key} missing value"
             assert "provenance" in s[key], f"{key} missing provenance"
+
+        # triage fields should all be wrapped (including user_notes and triage_status)
+        assert "triage" in s
+        for tkey in ("favourite", "dismissed", "is_viewed", "user_notes", "triage_status"):
+            assert "status" in s["triage"][tkey], f"triage.{tkey} missing status"
+            assert "value" in s["triage"][tkey], f"triage.{tkey} missing value"
+
+        assert "freshness" in s
+        assert "property_added_at" in s["freshness"]
 
 
 class TestDetailShape:

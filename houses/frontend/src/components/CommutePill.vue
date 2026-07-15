@@ -53,12 +53,13 @@ function formatDuration(minutes: number | null): string {
 .pill {
   display: inline-flex;
   align-items: center;
-  padding: 2px 10px;
+  padding: 6px 12px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   line-height: 1.6;
   white-space: nowrap;
+  min-height: 44px;
 }
 .pill--good { background: var(--green-bg); color: var(--green); }
 .pill--warn { background: var(--orange-bg); color: var(--orange); }

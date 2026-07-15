@@ -63,6 +63,23 @@ export interface CommuteSummary {
   commute: AttemptValue<CommuteValue> & { is_child?: boolean }
 }
 
+export interface TriageEntry {
+  favourite: boolean
+  dismissed: boolean
+  is_viewed: boolean
+  user_notes: string
+  triage_status: string
+}
+
+/** Raw triage shape returned by the API — AttemptValue-wrapped, not yet extracted */
+export interface TriageResponse {
+  favourite: AttemptValue<boolean>
+  dismissed: AttemptValue<boolean>
+  is_viewed: AttemptValue<boolean>
+  user_notes: AttemptValue<string>
+  triage_status: AttemptValue<string>
+}
+
 export interface PropertySummary {
   rid: string
   best_address: AttemptValue<string>
@@ -77,6 +94,11 @@ export interface PropertySummary {
   town_name?: AttemptValue<string>
   total_monthly_cost: AttemptValue<number>
   walkability: AttemptValue<Record<string, unknown>>
+  epc?: AttemptValue<{ band: string; potential?: string }>
+  triage?: TriageResponse
+  freshness?: {
+    property_added_at: string | null
+  }
 }
 
 export interface PropertyDetail {

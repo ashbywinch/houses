@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { PropertyDetail, PropertySummary } from '../types'
-import { fetchAllSummaries, fetchPropertyDetail, fetchSettings } from '../services/api'
+import type { PropertyDetail, PropertySummary, TriageEntry } from '../types'
+import { fetchAllSummaries, fetchPropertyDetail, fetchSettings, patchTriage } from '../services/api'
 
 export const usePropertiesStore = defineStore('properties', () => {
   const rids = ref<string[]>([])
@@ -10,6 +10,7 @@ export const usePropertiesStore = defineStore('properties', () => {
   const loading = ref(false)
   const error = ref<string | null>(null)
   const settings = ref<{ commute_thresholds?: { good: number; warn: number } }>({})
+  const triage = ref<Record<string, TriageEntry>>({})
 
   async function loadAll() {
     loading.value = true
@@ -18,6 +19,20 @@ export const usePropertiesStore = defineStore('properties', () => {
       const data = await fetchAllSummaries()
       summaries.value = data
       rids.value = Object.keys(data)
+      // Populate triage from response — extract values from AttemptValue wrappers
+      for (const rid of rids.value) {
+        const entry = data[rid]
+        const t = entry?.triage
+        if (t) {
+          triage.value[rid] = {
+            favourite: t.favourite?.value ?? false,
+            dismissed: t.dismissed?.value ?? false,
+            is_viewed: t.is_viewed?.value ?? false,
+            user_notes: t.user_notes?.value ?? '',
+            triage_status: t.triage_status?.value ?? '',
+          }
+        }
+      }
     } catch (e) {
       error.value = String(e)
     } finally {
@@ -50,6 +65,19 @@ export const usePropertiesStore = defineStore('properties', () => {
     }
   }
 
+  async function toggleTriage(rid: string, field: keyof TriageEntry, value: boolean | string) {
+    await patchTriage(rid, { [field]: value })
+    if (!triage.value[rid]) {
+      triage.value[rid] = { favourite: false, dismissed: false, is_viewed: false, user_notes: '', triage_status: '' }
+    }
+    const t = triage.value[rid]
+    if (field === 'favourite') t.favourite = value as boolean
+    else if (field === 'dismissed') t.dismissed = value as boolean
+    else if (field === 'is_viewed') t.is_viewed = value as boolean
+    else if (field === 'user_notes') t.user_notes = value as string
+    else if (field === 'triage_status') t.triage_status = value as string
+  }
+
   function updateSummary(rid: string, data: PropertySummary) {
     summaries.value[rid] = data
   }
@@ -58,5 +86,5 @@ export const usePropertiesStore = defineStore('properties', () => {
     details.value[rid] = data
   }
 
-  return { rids, summaries, details, settings, loading, error, loadAll, loadDetail, updateSummary, updateDetail }
+  return { rids, summaries, details, triage, settings, loading, error, loadAll, loadDetail, updateSummary, updateDetail, toggleTriage }
 })

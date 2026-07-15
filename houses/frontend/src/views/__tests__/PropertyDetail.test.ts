@@ -1,10 +1,17 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { usePropertiesStore } from '../../stores/properties'
 import PropertyDetail from '../PropertyDetail.vue'
 import type { PropertyDetail as PropertyDetailType } from '../../types'
+
+// Mock the API module so fetch-based calls don't fail in test environment
+vi.mock('../../services/api', () => ({
+  patchTriage: vi.fn().mockResolvedValue({ ok: true }),
+  patchAddress: vi.fn(),
+  patchLocation: vi.fn(),
+}))
 
 function makeDetail(): PropertyDetailType {
   return {
@@ -83,6 +90,11 @@ describe('PropertyDetail renders commute legs from CostGroups', () => {
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
 
+    // Click accordion header to expand commute details
+    const header = wrapper.find('.commute-accordion__header')
+    await header.trigger('click')
+    await wrapper.vm.$nextTick()
+
     const text = wrapper.text()
     expect(text).toContain('walk')
     expect(text).toContain('train')
@@ -126,6 +138,11 @@ describe('PropertyDetail renders commute legs from CostGroups', () => {
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
 
+    // Click accordion header to expand
+    const header = wrapper.find('.commute-accordion__header')
+    await header.trigger('click')
+    await wrapper.vm.$nextTick()
+
     const text = wrapper.text()
     expect(text).toContain('train')
     expect(text).toContain('30 min')
@@ -133,5 +150,177 @@ describe('PropertyDetail renders commute legs from CostGroups', () => {
     expect(text).not.toContain('NaN')
     // Should show the raw-number cost
     expect(text).toContain('15.50')
+  })
+})
+
+describe('PropertyDetail town description', () => {
+  it('renders description text not JSON object', async () => {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/property/:rid', component: PropertyDetail }],
+    })
+    router.push('/property/123')
+    await router.isReady()
+
+    const wrapper = mount(PropertyDetail, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+
+    const store = usePropertiesStore()
+    const detail = makeDetail()
+    // Town description comes from the backend as {description: string}
+    detail.area.town_description = {
+      succeeded: true,
+      value: { description: 'Leafy and affluent with village-like charm.' },
+      error: null,
+      provenance: { label: 'llm' },
+    } as any
+    store.details['123'] = detail
+    store.loading = false
+
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    const text = wrapper.text()
+    // Should show the description text as a readable sentence, not JSON
+    expect(text).toContain('Leafy and affluent')
+    expect(text).not.toContain('[object Object]')
+    expect(text).not.toContain('{"description"')
+    expect(text).not.toContain('"description"')
+  })
+})
+
+describe('PropertyDetail notes', () => {
+  it('initializes userNotes from existing triage data', async () => {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/property/:rid', component: PropertyDetail }],
+    })
+    router.push('/property/123')
+    await router.isReady()
+
+    const wrapper = mount(PropertyDetail, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+
+    const store = usePropertiesStore()
+    const detail = makeDetail()
+    store.details['123'] = detail
+    store.triage['123'] = {
+      favourite: false,
+      dismissed: false,
+      is_viewed: false,
+      user_notes: 'Existing note from previous session',
+      triage_status: '',
+    }
+    store.loading = false
+
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    // The textarea should contain the existing notes
+    const textarea = wrapper.find('textarea')
+    expect(textarea.exists()).toBe(true)
+    expect((textarea.element as HTMLTextAreaElement).value).toContain('Existing note')
+  })
+
+  it('updates store triage after saving notes', async () => {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/property/:rid', component: PropertyDetail }],
+    })
+    router.push('/property/123')
+    await router.isReady()
+
+    const wrapper = mount(PropertyDetail, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+
+    const store = usePropertiesStore()
+    store.details['123'] = makeDetail()
+    store.loading = false
+
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    // Type in the textarea
+    const textarea = wrapper.find('textarea')
+    await textarea.setValue('New test note')
+
+    // Click Save
+    const saveBtn = wrapper.findAll('button').filter(b => b.text().includes('Save Notes'))
+    if (saveBtn.length > 0) {
+      await saveBtn[0].trigger('click')
+    }
+    await wrapper.vm.$nextTick()
+
+    // Store should have the note
+    expect(store.triage['123']?.user_notes).toBe('New test note')
+  })
+})
+
+describe('PropertyDetail map embed', () => {
+  it('renders embedded map iframe when location is available', async () => {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/property/:rid', component: PropertyDetail }],
+    })
+    router.push('/property/123')
+    await router.isReady()
+
+    const wrapper = mount(PropertyDetail, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+
+    const store = usePropertiesStore()
+    const detail = makeDetail()
+    store.details['123'] = detail
+    store.loading = false
+
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    const iframe = wrapper.find('iframe')
+    expect(iframe.exists()).toBe(true)
+    const src = iframe.attributes('src') ?? ''
+    expect(src).toContain('openstreetmap.org/export/embed')
+    expect(src).toContain('51.5')
+    expect(src).toContain('-0.1')
+  })
+
+  it('shows placeholder when no location data', async () => {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/property/:rid', component: PropertyDetail }],
+    })
+    router.push('/property/123')
+    await router.isReady()
+
+    const wrapper = mount(PropertyDetail, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+
+    const store = usePropertiesStore()
+    const detail = makeDetail()
+    // Remove location data
+    detail.location.best_location = { succeeded: false, value: null, error: 'no data', provenance: { label: 'test' } }
+    store.details['123'] = detail
+    store.loading = false
+
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('iframe').exists()).toBe(false)
+    expect(wrapper.text()).toContain('No location data')
   })
 })

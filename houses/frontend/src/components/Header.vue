@@ -5,9 +5,12 @@ defineProps<{ title: string }>()
 <template>
   <header class="header">
     <div class="header__inner">
-      <h1 class="header__title">{{ title }}</h1>
-      <div class="header__actions">
+      <div class="header__actions header__actions--left">
         <slot name="actions" />
+      </div>
+      <h1 class="header__title">{{ title }}</h1>
+      <div class="header__actions header__actions--right">
+        <slot name="actions-right" />
       </div>
     </div>
   </header>

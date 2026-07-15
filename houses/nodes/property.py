@@ -57,6 +57,13 @@ class PropertyNodes:
         self.comment_design_needed = UserInputNode[str](f"{rid}/design_needed", str)
         self.comment_planning_needed = UserInputNode[str](f"{rid}/planning_needed", str)
 
+        # Triage state (app-only, not synced to sheet)
+        self.favourite = UserInputNode[bool](f"{rid}/favourite", bool)
+        self.dismissed = UserInputNode[bool](f"{rid}/dismissed", bool)
+        self.is_viewed = UserInputNode[bool](f"{rid}/is_viewed", bool)
+        self.user_notes = UserInputNode[str](f"{rid}/user_notes", str)
+        self.triage_status = UserInputNode[str](f"{rid}/triage_status", str)
+
         # ── Location DerivedNodes ─────────────────────────────────────
         self.best_address = BestAddressNode(
             f"{rid}/best_address",
@@ -167,6 +174,12 @@ class PropertyNodes:
             self.comment_ashby_works,
             self.comment_design_needed,
             self.comment_planning_needed,
+            # Triage state
+            self.favourite,
+            self.dismissed,
+            self.is_viewed,
+            self.user_notes,
+            self.triage_status,
         ]
         self._slots: list[Slot] = []
         for node in all_nodes:
@@ -301,7 +314,8 @@ class PropertyNodes:
         }
 
     async def to_json_summary(self) -> dict[str, Any]:
-        return {
+        from dag.persistence import property_created_at
+        result = {
             "rid": self.rid,
             "best_address": await self.best_address.to_json(),
             "best_location": await self.best_location.to_json(),
@@ -319,7 +333,19 @@ class PropertyNodes:
                 },
             },
             "walkability": await self.walkability.to_json(),
+            "epc": await self.epc.to_json(),
+            "triage": {
+                "favourite": await self.favourite.to_json(),
+                "dismissed": await self.dismissed.to_json(),
+                "is_viewed": await self.is_viewed.to_json(),
+                "user_notes": await self.user_notes.to_json(),
+                "triage_status": await self.triage_status.to_json(),
+            },
         }
+        result["freshness"] = {
+            "property_added_at": property_created_at(self.rid),
+        }
+        return result
 
     async def _monthly_sinking(self) -> dict:
         yearly = await self.yearly_sinking_fund.to_json()
@@ -369,6 +395,13 @@ class PropertyNodes:
             "area": {
                 "walkability": await self.walkability.to_json(),
                 "town_description": await self.town_desc.to_json(),
+            },
+            "triage": {
+                "favourite": await self.favourite.to_json(),
+                "dismissed": await self.dismissed.to_json(),
+                "is_viewed": await self.is_viewed.to_json(),
+                "user_notes": await self.user_notes.to_json(),
+                "triage_status": await self.triage_status.to_json(),
             },
             "comments": {
                 "status": await self.comment_status.to_json(),

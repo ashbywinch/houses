@@ -33,11 +33,11 @@ button { font: inherit; cursor: pointer; border: none; background: none; }
   --red-bg: #ffebee;
   --blue: #1565c0;
   --blue-bg: #e3f2fd;
-  --muted: #9e9e9e;
+  --muted: #757575;
   --muted-bg: #f0f0f0;
   --text: #1a1a1a;
   --text-secondary: #666;
-  --text-muted: #999;
+  --text-muted: #757575;
   --border: #e0e0e0;
   --divider: #eee;
   --card-bg: #fff;

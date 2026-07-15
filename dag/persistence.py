@@ -149,3 +149,19 @@ def _table_exists(name: str) -> bool:
         (name,),
     ).fetchone()
     return row is not None
+
+
+def property_created_at(rid: str) -> str | None:
+    """Return the ISO-8601 timestamp of the earliest node_result for a property.
+
+    This is when the property was first added (the first UserInputNode push).
+    Returns None if no node_results exist for this RID.
+    """
+    if not _table_exists("node_results"):
+        return None
+    conn = _get_db()
+    row = conn.execute(
+        "SELECT MIN(created_at) FROM node_results WHERE node_id LIKE ?",
+        (f"{rid}/%",),
+    ).fetchone()
+    return row[0] if row and row[0] else None

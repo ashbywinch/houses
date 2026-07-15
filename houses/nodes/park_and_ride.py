@@ -115,21 +115,27 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         first_leg = first_cg.legs[0]
         new_first_leg = replace(first_leg, mode=LegMode.DRIVE, duration_minutes=drive_minutes)
         new_first_cg = replace(first_cg, legs=(new_first_leg,) + first_cg.legs[1:])
-
         # Build the parking CostGroup
         new_parking_group = CostGroup(
             legs=(JourneyLeg(mode=LegMode.PARK, duration_minutes=0),),
             operator=car_park.name,
             cost=car_park.daily_cost,
         )
+
+        # Attribute the original transit fare to the first transit CostGroup
+        # (those after the access leg and parking group) if it has no cost.
+        transit_groups = list(commute.details[1:])
+        if transit_groups and transit_groups[0].cost is None and existing_cost > 0:
+            transit_groups[0] = replace(
+                transit_groups[0],
+                cost=Money(str(existing_cost), "GBP"),
+            )
+
         new_commute = replace(
             commute,
             daily_cost=Money(str(new_cost), "GBP"),
-            details=(new_first_cg, new_parking_group) + commute.details[1:],
+            details=(new_first_cg, new_parking_group, *transit_groups),
         )
-
-        self._car_park_name = car_park.name or "unknown car park"
-        return Attempt.succeeded(new_commute)
 
     async def build_provenance(self) -> Provenance:
         sources: dict[str, Provenance] = {}

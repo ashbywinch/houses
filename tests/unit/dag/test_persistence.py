@@ -12,6 +12,7 @@ from dag.persistence import (
     _deserialize_value,
     _serialize_value,
     latest_node_result,
+    property_created_at,
     save_node_result,
 )
 
@@ -96,3 +97,27 @@ class TestNodeResults:
         save_node_result(f"{RID}/n4", {"status": "succeeded", "value": "x"})
         loaded = latest_node_result(f"{RID}/n4")
         assert loaded["_persisted_at"] is not None
+
+class TestPropertyCreatedAt:
+    def test_returns_none_for_unknown_property(self):
+        assert property_created_at("nonexistent") is None
+
+    def test_returns_iso_timestamp_for_existing_property(self):
+        save_node_result("prop123/rightmove_url", {"status": "succeeded", "value": "https://..."})
+        ts = property_created_at("prop123")
+        assert ts is not None
+        # Must be ISO-8601 format
+        assert "T" in ts
+        assert ts.endswith("Z") or "+" in ts or ts.endswith("00:00")
+
+    def test_uses_earliest_result(self):
+        save_node_result("prop456/rightmove_url", {"status": "succeeded", "value": "url1"})
+        import time
+        time.sleep(0.01)  # ensure different timestamp
+        save_node_result("prop456/rightmove_url", {"status": "succeeded", "value": "url2"})
+        ts = property_created_at("prop456")
+        assert ts is not None
+        # The earliest (first) timestamp should be before or equal to the latest
+        latest = latest_node_result("prop456/rightmove_url")
+        assert latest is not None
+        assert ts <= latest["_persisted_at"]

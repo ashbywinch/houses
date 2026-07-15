@@ -111,3 +111,59 @@ describe('properties store loadDetail', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })
+
+describe('properties store triage state', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.mocked(api.fetchAllSummaries).mockResolvedValue({
+      'prop1': {
+        rid: 'prop1',
+        best_address: { succeeded: true, value: '1 Main St', error: null, provenance: { label: 'test' } },
+        best_location: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 'test' } },
+        rightmove_price: { succeeded: true, value: '500000', error: null, provenance: { label: 'test' } },
+        rightmove_bedrooms: { succeeded: true, value: '3', error: null, provenance: { label: 'test' } },
+        total_monthly_cost: { succeeded: true, value: 2500, error: null, provenance: { label: 'test' } },
+        walkability: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
+        town_name: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
+        commutes: {},
+        schools: {
+          primary: { school: { succeeded: false, value: null, error: null, provenance: { label: 'test' } } },
+          secondary: { school: { succeeded: false, value: null, error: null, provenance: { label: 'test' } } },
+        },
+        // Simulate API returning AttemptValue-wrapped triage (as the backend actually does)
+        triage: {
+          favourite: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
+          dismissed: { succeeded: true, value: true, error: null, provenance: { label: 'test' } },
+          is_viewed: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
+          user_notes: { succeeded: true, value: 'some notes', error: null, provenance: { label: 'test' } },
+          triage_status: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
+        },
+      },
+    })
+  })
+
+  it('extracts raw boolean/string values from AttemptValue wrappers', async () => {
+    const store = usePropertiesStore()
+    await store.loadAll()
+
+    const t = store.triage['prop1']
+    // These should be booleans, not AttemptValue objects
+    expect(t.favourite).toBe(false)       // value was null → false
+    expect(t.dismissed).toBe(true)        // value was true → true
+    expect(t.is_viewed).toBe(false)       // value was null → false
+    expect(t.user_notes).toBe('some notes') // string
+    expect(t.triage_status).toBe('')      // value was null → ''
+  })
+
+  it('triages are booleans not objects so toggle logic works', async () => {
+    const store = usePropertiesStore()
+    await store.loadAll()
+
+    const t = store.triage['prop1']
+    // The card checks `triage?.favourite` for truthiness — an AttemptValue object
+    // is always truthy, a boolean false is falsy. This test verifies booleans.
+    expect(typeof t.favourite).toBe('boolean')
+    expect(typeof t.dismissed).toBe('boolean')
+    expect(typeof t.is_viewed).toBe('boolean')
+  })
+})
