@@ -67,18 +67,21 @@ def _no_sheet_writes():
 
 
 @pytest.fixture(autouse=True)
-def _mock_services():
-    """Set mock services AFTER _sqlite_memory has switched to in-memory DB."""
+def _isolate_settings_sources():
+    """Clear the settings-source cache so _make_settings_source always
+    reads from the per-test in-memory DB or factory, never stale state."""
+    from houses.services import _SETTINGS_SOURCE_CACHE
+
+    _SETTINGS_SOURCE_CACHE.clear()
+    yield
+    _SETTINGS_SOURCE_CACHE.clear()
+
+
+@pytest.fixture(autouse=True)
+def _mock_services(_sqlite_memory, _isolate_settings_sources):
+    """Set mock services AFTER in-memory DB and empty settings cache."""
     from houses.services_provider import _request_services as _sp
 
     token = _sp.set(_make_mock_services())
     yield
     _sp.reset(token)
-
-
-@pytest.fixture(autouse=True)
-def _isolate_settings_sources():
-    from houses.services import _SETTINGS_SOURCE_CACHE
-
-    _SETTINGS_SOURCE_CACHE.clear()
-    yield
