@@ -9,7 +9,7 @@ from pint import Quantity
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
-from dag.node import Node
+from houses.commute import LegMode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.services_provider import get_services
@@ -99,11 +99,17 @@ class WalkLegCheckNode(DerivedNode[bool]):
         super().__init__(node_id, bool, (transit_node,))
         self._max_walk = max_walk
 
-    def compute(self, transit: Attempt[dict]) -> Attempt[bool]:
+    def compute(self, transit: Attempt[Commute]) -> Attempt[bool]:
         if not transit.succeeded:
             return Attempt.succeeded(False)
-        val = transit.value_or_none() or {}
-        walk_time = val.get("walk_time", 0)
+        val = transit.value_or_none()
+        if val is None:
+            return Attempt.succeeded(False)
+        if val.details and val.details[0].legs:
+            first_leg = val.details[0].legs[0]
+            walk_time = first_leg.duration_minutes if first_leg.mode == LegMode.WALK else 0
+        else:
+            walk_time = 0
         return Attempt.succeeded(walk_time > self._max_walk)
 
 
