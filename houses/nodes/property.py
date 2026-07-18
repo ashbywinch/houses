@@ -7,7 +7,9 @@ from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 from houses.nodes.area import TownDescNode, TownNode, WalkabilityNode
 from houses.nodes.bus import BodsFareNode, BusLegAugmentNode, BusRouteNode
-from houses.nodes.commute import CommuteSelectorNode
+from houses.nodes.commute import CommuteSelectorNode, _bus_condition, _needs_rail_fare, commute_input_node
+from dag.if_then_else import IfThenElseNode
+from houses.model.domain import Commute
 from houses.nodes.epc_node import CouncilTaxNode, EpcNode
 from houses.nodes.geocode import GeocodeNode
 from houses.nodes.location import BestAddressNode, BestLocationNode
@@ -270,6 +272,15 @@ class PropertyNodes:
                 )
                 self._bus_augment_nodes.append(bus_augment)
 
+                # Wrap bus_augment in IfThenElseNode — only active when walk is too long
+                bus_if = IfThenElseNode(
+                    f"{self.rid}/{key}/bus_if",
+                    Commute,
+                    condition_sources=(walk_check,),
+                    condition_fn=_bus_condition,
+                    then_branch=bus_augment,
+                )
+
                 # Create a RailFareNode for non-child commutes to apply NR fares
                 rail_fare_node = None
                 if not is_child:
@@ -281,15 +292,34 @@ class PropertyNodes:
                         best_location=self.best_location,
                     )
 
+                # Wrap rail_fare in IfThenElseNode — only active when NR fare is needed
+                if is_child:
+                    # Children don't get NR fares — dummy IfThenElse that always returns None
+                    _dummy = commute_input_node(f"{self.rid}/{key}/rail_fare_dummy")
+                    rail_fare_result = IfThenElseNode(
+                        f"{self.rid}/{key}/rail_fare_noop",
+                        Commute,
+                        condition_sources=(),
+                        condition_fn=lambda: False,
+                        then_branch=_dummy,
+                    )
+                else:
+                    rail_fare_result = IfThenElseNode(
+                        f"{self.rid}/{key}/rail_fare_if",
+                        Commute,
+                        condition_sources=(transit_node,),
+                        condition_fn=_needs_rail_fare,
+                        then_branch=rail_fare_node,
+                    )
+
                 selector = CommuteSelectorNode(
                     f"{self.rid}/{key}/commute",
                     origin=self.best_location,
                     poi=poi_src,
                     transit_result=petrol_cost,
-                    bus_result=bus_augment,
-                    walk_leg_check=walk_check,
+                    bus_result=bus_if,
+                    rail_fare_result=rail_fare_result,
                     is_child=is_child,
-                    rail_fare_node=rail_fare_node,
                 )
                 self.commute_selectors[key] = selector
 
@@ -315,6 +345,7 @@ class PropertyNodes:
 
     async def to_json_summary(self) -> dict[str, Any]:
         from dag.persistence import property_created_at
+
         result = {
             "rid": self.rid,
             "best_address": await self.best_address.to_json(),

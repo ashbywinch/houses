@@ -16,6 +16,7 @@ from pint import Quantity
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode, flush_processor
 from dag.user_input_node import UserInputNode
+from dag.if_then_else import IfThenElseNode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.transit_route import _apply_park_and_ride_to_journeys, _format_route_summary
@@ -238,14 +239,13 @@ class TestCommuteSelectorPipeline:
         poi = UserInputNode[PlaceOfInterest]("csel_p1", PlaceOfInterest)
         transit = commute_input_node("csel_t1")
         bus = commute_input_node("csel_b1")
-
         node = CommuteSelectorNode(
             "csel1",
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=_succeeded_walk_check(False),
+            bus_result=_noop_if("csel1"),
+            rail_fare_result=_noop_if("csel1_rf"),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
@@ -278,8 +278,8 @@ class TestCommuteSelectorPipeline:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=_succeeded_walk_check(False),
+            bus_result=_noop_if("csel2"),
+            rail_fare_result=_noop_if("csel2_rf"),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
@@ -309,8 +309,8 @@ class TestCommuteSelectorPipeline:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=_succeeded_walk_check(False),
+            bus_result=_noop_if("csel3"),
+            rail_fare_result=_noop_if("csel3_rf"),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
@@ -336,8 +336,8 @@ class TestCommuteSelectorPipeline:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=_succeeded_walk_check(False),
+            bus_result=_noop_if("csel4"),
+            rail_fare_result=_noop_if("csel4_rf"),
         )
 
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -362,8 +362,8 @@ class TestCommuteSelectorPipeline:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=_succeeded_walk_check(False),
+            bus_result=_noop_if("csel5"),
+            rail_fare_result=_noop_if("csel5_rf"),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
@@ -399,8 +399,8 @@ class TestCommuteSelectorPipeline:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=_succeeded_walk_check(False),
+            bus_result=_noop_if("csel6"),
+            rail_fare_result=_noop_if("csel6_rf"),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
@@ -890,3 +890,17 @@ def _succeeded_walk_check(val: bool = False) -> DerivedNode:
     w = WalkLegCheckNode("_wc", transit_node=t, max_walk=30)
     w._attempt = Attempt.succeeded(val)
     return w
+
+
+def _noop_if(name: str = "noop") -> IfThenElseNode:
+    """IfThenElseNode that always returns None (no branch activated)."""
+    cond = UserInputNode[bool](f"_{name}_cond", bool)
+    dummy = UserInputNode[str](f"_{name}_dummy", str)
+    cond.push(False, "setup")
+    return IfThenElseNode(
+        f"_{name}",
+        Commute,
+        condition_sources=(cond,),
+        condition_fn=lambda a: False,
+        then_branch=dummy,
+    )

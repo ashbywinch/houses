@@ -64,7 +64,12 @@ class CostGroup:
     """A contiguous set of legs priced as a single unit, by one operator.
 
     One TfL tap-in/tap-out covers tube→walk→tube as one CostGroup.
-    A boring CostGroup (walking to/from transit) has no operator and no cost.
+    An NR ticket covering train→tube is another CostGroup.
+
+    ``cost`` is the price of the WHOLE group — a single product from one
+    operator.  NEVER add to an existing CostGroup's cost; create a new
+    CostGroup for each separately-priced product.  The commute's total
+    cost is the SUM of all its CostGroups' costs.
     """
 
     legs: tuple[JourneyLeg, ...]

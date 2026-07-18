@@ -6,8 +6,9 @@ from money import Money
 import dag.user_input_node  # noqa: F401 — register Money/Quantity pydantic schemas
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode, flush_processor
+from dag.if_then_else import IfThenElseNode
 from dag.user_input_node import UserInputNode
-from houses.commute import CostGroup
+from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 
@@ -38,8 +39,8 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=walk_check,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_noop_if(),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -73,8 +74,8 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=walk_check,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_noop_if(),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -105,8 +106,8 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=walk_check,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_noop_if(),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -142,8 +143,8 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=walk_check,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_noop_if(),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -178,8 +179,8 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=walk_check,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_noop_if(),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -206,8 +207,8 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=walk_check,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_noop_if(),
         )
 
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -233,8 +234,8 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=walk_check,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_noop_if(),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -267,8 +268,8 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=walk_check,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_noop_if(),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -299,8 +300,8 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=walk_check,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_noop_if(),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -335,8 +336,8 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=walk_check,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_noop_if(),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -384,8 +385,8 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=walk_check,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_noop_if(),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -417,8 +418,8 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=walk_check,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_noop_if(),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -457,9 +458,8 @@ class TestDynamicDeps:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=walk_check,
-            rail_fare_node=rail_fare,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_rail_fare_if(transit, rail_fare),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -492,11 +492,9 @@ class TestDynamicDeps:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=walk_check,
-            rail_fare_node=rail_fare,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_rail_fare_if(transit, rail_fare),
         )
-
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
         # cost_gbp = 0 so rail_fare IS an active dep (but still pending)
@@ -529,8 +527,8 @@ class TestDynamicDeps:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=walk_check,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_noop_if(),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -560,8 +558,8 @@ class TestDynamicDeps:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=walk_check,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_noop_if(),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -574,6 +572,7 @@ class TestDynamicDeps:
         a = await node.attempt()
         assert a.succeeded, "Should compute without bus when walk is fine"
         assert a.value_or_none() is not None
+
     @pytest.mark.asyncio
     async def test_rail_fare_applied_when_walk_check_impossible(self):
         """When walk_check is impossible (not False), bus is not active.
@@ -606,9 +605,8 @@ class TestDynamicDeps:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=walk_check,
-            rail_fare_node=rail_fare,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_rail_fare_if(transit, rail_fare),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -626,9 +624,7 @@ class TestDynamicDeps:
         val = a.value_or_none()
         assert val is not None
         # The commute should have the rail_fare cost (£41), not the transit cost (£0)
-        assert float(val.daily_cost.amount) == 41.0, (
-            f"Expected rail_fare cost £41.0, got £{val.daily_cost.amount}"
-        )
+        assert float(val.daily_cost.amount) == 41.0, f"Expected rail_fare cost £41.0, got £{val.daily_cost.amount}"
 
     @pytest.mark.asyncio
     async def test_rail_fare_applied_when_transit_has_unpriced_legs(self):
@@ -649,17 +645,17 @@ class TestDynamicDeps:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            bus_result=bus,
-            walk_leg_check=walk_check,
-            rail_fare_node=rail_fare,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_rail_fare_if(transit, rail_fare),
         )
-
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
 
         # Transit has cost > 0 (parking) but the train leg CostGroup has cost=None
         from pint import Quantity
-        from houses.commute import CostGroup, JourneyLeg, LegMode
+
+        from houses.commute import CostGroup, LegMode
+
         office = PlaceOfInterest("Office", "SW1V 2QQ")
         person = Person("Simon", True, places_of_interest=(office,))
         train_leg = JourneyLeg(mode=LegMode.TRAIN, duration_minutes=30, end_station="London Waterloo")
@@ -686,23 +682,32 @@ class TestDynamicDeps:
         assert a.succeeded, "Should compute when rail_fare resolved"
         val = a.value_or_none()
         assert val is not None
-        # The commute should include the rail_fare cost (£41), not just parking
-        assert float(val.daily_cost.amount) == 41.0, (
-            f"Expected rail_fare cost £41.0, got £{val.daily_cost.amount}"
-        )
+        # The commute should include both parking (10.90) and rail_fare (41.0) costs
+        assert float(val.daily_cost.amount) == 51.90, f"Expected merged cost £51.90, got £{val.daily_cost.amount}"
+
 
 class TestWalkLegCheckNode:
     """Direct WalkLegCheckNode tests."""
 
     @pytest.mark.asyncio
     async def test_walk_less_than_max(self):
+        from houses.commute import CostGroup
         from houses.nodes.transit import WalkLegCheckNode
 
-        transit = UserInputNode[dict]("transit", dict)
-        node = WalkLegCheckNode("walk_check", transit_node=transit, max_walk=30)
-
-        # walk_time=10m, max_walk=30 → 10 < 30 → False
-        transit.push({"walk_time": 10}, "TfL")
+        walk_leg = JourneyLeg(mode=LegMode.WALK, duration_minutes=10)
+        transit_commute = _make_commute(duration_min=32, cost_gbp=4.50)
+        transit_commute = Commute(
+            person=transit_commute.person,
+            label=transit_commute.label,
+            destination=transit_commute.destination,
+            duration=transit_commute.duration,
+            daily_cost=transit_commute.daily_cost,
+            mode=transit_commute.mode,
+            details=(CostGroup(legs=(walk_leg,), operator="", cost=None),),
+        )
+        transit = UserInputNode[Commute]("transit_wl", Commute)
+        node = WalkLegCheckNode("walk_check_wl", transit_node=transit, max_walk=30)
+        transit.push(transit_commute, "TfL")
         await flush_processor()
 
         a = await node.attempt()
@@ -711,13 +716,23 @@ class TestWalkLegCheckNode:
 
     @pytest.mark.asyncio
     async def test_walk_exceeds_max(self):
+        from houses.commute import CostGroup
         from houses.nodes.transit import WalkLegCheckNode
 
-        transit = UserInputNode[dict]("transit", dict)
-        node = WalkLegCheckNode("walk_check", transit_node=transit, max_walk=30)
-
-        # walk_time=45m, max_walk=30 → 45 > 30 → True
-        transit.push({"walk_time": 45}, "TfL")
+        walk_leg = JourneyLeg(mode=LegMode.WALK, duration_minutes=45)
+        transit_commute = _make_commute(duration_min=32, cost_gbp=4.50)
+        transit_commute = Commute(
+            person=transit_commute.person,
+            label=transit_commute.label,
+            destination=transit_commute.destination,
+            duration=transit_commute.duration,
+            daily_cost=transit_commute.daily_cost,
+            mode=transit_commute.mode,
+            details=(CostGroup(legs=(walk_leg,), operator="", cost=None),),
+        )
+        transit = UserInputNode[Commute]("transit_we", Commute)
+        node = WalkLegCheckNode("walk_check_we", transit_node=transit, max_walk=30)
+        transit.push(transit_commute, "TfL")
         await flush_processor()
 
         a = await node.attempt()
@@ -737,15 +752,58 @@ def _make_person(bus_walk_penalty_minutes: int = 30, name: str = "Simon"):
 def _make_commute(duration_min=32, cost_gbp=4.50):
     from pint import Quantity
 
+    from houses.commute import LegMode
+
     office = PlaceOfInterest("Office", "SW1V 2QQ")
     person = Person("Simon", True, places_of_interest=(office,))
+    leg = JourneyLeg(mode=LegMode.TRAIN, duration_minutes=duration_min, end_station="London Paddington")
     return Commute(
         person=person,
         label=office.label,
         destination=office,
         duration=Quantity(duration_min, "minute"),
         daily_cost=Money(str(cost_gbp), "GBP"),
-        details=(CostGroup(legs=(), operator="TfL", cost=Money(str(cost_gbp), "GBP")),),
+        details=(CostGroup(legs=(leg,), operator="TfL", cost=Money(str(cost_gbp), "GBP")),),
+    )
+
+
+def _bus_if(walk_check: DerivedNode, bus_node: Node) -> IfThenElseNode:
+    """Wrap a bus node in IfThenElseNode activated when walk check is True."""
+    from houses.nodes.commute import _bus_condition
+
+    return IfThenElseNode(
+        f"_bus_if_{id(bus_node)}",
+        Commute,
+        condition_sources=(walk_check,),
+        condition_fn=_bus_condition,
+        then_branch=bus_node,
+    )
+
+
+def _noop_if(name: str = "noop") -> IfThenElseNode:
+    """IfThenElseNode that always returns None (no branch activated)."""
+    cond = UserInputNode[bool](f"_{name}_cond", bool)
+    dummy = UserInputNode[str](f"_{name}_dummy", str)
+    cond.push(False, "setup")
+    return IfThenElseNode(
+        f"_{name}",
+        Commute,
+        condition_sources=(cond,),
+        condition_fn=lambda a: False,
+        then_branch=dummy,
+    )
+
+
+def _rail_fare_if(transit_node: Node, rail_fare_node: Node) -> IfThenElseNode:
+    """Wrap a rail_fare node in IfThenElseNode activated when NR fare is needed."""
+    from houses.nodes.commute import _needs_rail_fare
+
+    return IfThenElseNode(
+        f"_rf_if_{id(rail_fare_node)}",
+        Commute,
+        condition_sources=(transit_node,),
+        condition_fn=_needs_rail_fare,
+        then_branch=rail_fare_node,
     )
 
 
@@ -784,10 +842,9 @@ async def test_commute_selector_init_with_persisted_result():
         origin=origin,
         poi=poi,
         transit_result=transit,
-        bus_result=bus,
-        walk_leg_check=walk_check,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_noop_if("crash"),
     )
-    assert node is not None
 
 
 class TestFareBetween:
@@ -917,7 +974,7 @@ class TestRailFareNode:
 
         from pint import Quantity
 
-        from houses.commute import JourneyLeg, LegMode
+        from houses.commute import LegMode
         from houses.nodes.commute import RailFareNode
         from houses.rail_fare_registry import _request_rail_fares
         from houses.rail_fares import RailFareRegistry
@@ -986,9 +1043,7 @@ class TestRailFareNode:
         transit_cg = next((cg for cg in val.details if cg.operator == "TfL"), None)
         assert transit_cg is not None, "TfL CostGroup should exist"
         assert transit_cg.cost is not None, "TfL CostGroup should have cost attributed"
-        assert float(transit_cg.cost.amount) == 39.60, (
-            f"Expected TfL CostGroup cost £39.60, got {transit_cg.cost}"
-        )
+        assert float(transit_cg.cost.amount) == 39.60, f"Expected TfL CostGroup cost £39.60, got {transit_cg.cost}"
 
 
 @pytest.mark.asyncio
@@ -1012,8 +1067,8 @@ async def test_commute_selector_impossible_without_bus():
         origin=origin,
         poi=poi,
         transit_result=transit,
-        bus_result=bus,
-        walk_leg_check=walk_check,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_noop_if("nb"),
     )
 
     origin.push(GeoPoint(51.5, -0.1), "user")

@@ -78,6 +78,14 @@ class RailFareRegistry:
         """Look up a station by CRS code."""
         return self._station_registry.find_by_crs(crs)
 
+
+    def find_station(self, name: str) -> Station | None:
+        """Look up a station by name (suffix- and case-insensitive).
+
+        Delegates to ``StationRegistry.find()`` — strips common suffixes
+        like " Rail Station", " Station", etc.
+        """
+        return self._station_registry.find(name)
     def fare_between(self, origin: Station, destination: Station) -> Money | None:
         """Return the single fare between two stations.
 
