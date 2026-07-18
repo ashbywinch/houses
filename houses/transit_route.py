@@ -10,13 +10,15 @@ from datetime import datetime, timedelta
 
 import httpx
 from money import Money
+from pint import Quantity
 
 from dag.attempt import Attempt
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.car_park import CarParkRegistry
-from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
+from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.location import _geocode_address, geocode
+from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.retry import retry_async
 from houses.stations import Station
 from houses.stations import find as find_station
@@ -434,12 +436,13 @@ class TransitRoute:
             cost_groups.extend(parking_groups)
 
         result = Commute(
-            destination_label=self._label,
-            destination_postcode=self._destination,
-            duration_minutes=duration_minutes,
-            daily_cost_gbp=daily_cost_gbp,
+            person=Person(name="", has_car=False),
+            label=self._label,
+            destination=PlaceOfInterest(label=self._label, postcode=self._destination),
+            duration=Quantity(duration_minutes, "minute") if duration_minutes is not None else None,
+            daily_cost=daily_cost_gbp,
             mode="transit",
-            cost_groups=tuple(cost_groups),
+            details=tuple(cost_groups),
         )
         if duration_minutes is not None:
             return Attempt.succeeded(result)

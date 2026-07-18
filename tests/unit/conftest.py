@@ -12,13 +12,7 @@ from dag.derived_node import flush_processor
 from houses.api_cache import set_cache_dir
 from houses.config import settings
 from tests.helpers import FakeCommuteRouter, FakeSchoolLookup, make_services
-
-# Critical isolation fixtures (in-memory DB, isolated scheduler) live in
-# isolation_fixtures.py so they can't be accidentally broken by import edits.
-from tests.unit.isolation_fixtures import (  # noqa: F401, F811
-    _inject_test_scheduler,
-    _sqlite_memory,
-)
+from tests.unit.isolation_fixtures import _inject_test_scheduler, _sqlite_memory  # noqa: F401, F811
 
 
 def flush_all() -> None:
@@ -78,10 +72,9 @@ def _isolate_settings_sources():
 
 
 @pytest.fixture(autouse=True)
-def _mock_services(_sqlite_memory, _isolate_settings_sources):
+def _mock_services(_sqlite_memory, _isolate_settings_sources):  # noqa: F811
     """Set mock services AFTER in-memory DB and empty settings cache."""
     from houses.services_provider import _request_services as _sp
-
     token = _sp.set(_make_mock_services())
     yield
     _sp.reset(token)

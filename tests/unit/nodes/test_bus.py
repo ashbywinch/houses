@@ -48,9 +48,13 @@ class TestBodsFareNode:
 class TestBusLegAugmentNode:
     @pytest.mark.asyncio
     async def test_succeeds_when_walk_ok(self):
+        from money import Money
+        from pint import Quantity
+
+        from houses.model.domain import Commute, Person, PlaceOfInterest
         from houses.nodes.bus import BusLegAugmentNode
 
-        transit = UserInputNode[dict]("t_bl", dict)
+        transit = UserInputNode[Commute]("t_bl", Commute)
         walk = UserInputNode[bool]("w_bl", bool)
         route = UserInputNode[dict]("r_bl", dict)
         fare = UserInputNode[dict]("f_bl", dict)
@@ -62,7 +66,15 @@ class TestBusLegAugmentNode:
             bus_route_node=route,
             bods_fare_node=fare,
         )
-        transit.push({"augmented": True}, "test")
+        commute = Commute(
+            person=Person(name="", has_car=False),
+            label="Test",
+            destination=PlaceOfInterest(label="", postcode=""),
+            duration=Quantity(30, "minute"),
+            daily_cost=Money("0", "GBP"),
+            mode="transit",
+        )
+        transit.push(commute, "test")
         walk.push(False, "test")
         route.push({}, "test")
         fare.push({}, "test")
@@ -70,4 +82,4 @@ class TestBusLegAugmentNode:
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
-        assert a.value_or_none()["augmented"] is True
+        assert a.value_or_none() == commute

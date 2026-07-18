@@ -27,7 +27,8 @@ const sortOptions = [
 
 function priceNum(rid: string) {
   const p = store.summaries[rid]?.rightmove_price
-  return p?.succeeded && p.value ? Number(p.value) : Infinity
+  if (!p?.succeeded || !p.value) return Infinity
+  return typeof p.value === 'string' ? Number(p.value) : p.value.amount
 }
 function bedroomNum(rid: string) {
   const b = store.summaries[rid]?.rightmove_bedrooms
@@ -35,7 +36,8 @@ function bedroomNum(rid: string) {
 }
 function monthlyCostNum(rid: string) {
   const m = store.summaries[rid]?.total_monthly_cost
-  return m?.succeeded && m.value != null ? m.value : Infinity
+  if (!m?.succeeded || m.value == null) return Infinity
+  return typeof m.value === 'number' ? m.value : m.value.amount
 }
 function bestCommuteMin(rid: string) {
   const commutes = store.summaries[rid]?.commutes
@@ -74,7 +76,7 @@ function allLocations() {
   for (const rid of store.rids) {
     const s = store.summaries[rid]
     if (s?.best_location?.succeeded && s.best_location.value) {
-      const p = s.rightmove_price?.value ? `£${Number(s.rightmove_price.value).toLocaleString()}` : ''
+      const p = s.rightmove_price?.value?.amount ? `£${Number(s.rightmove_price.value.amount).toLocaleString()}` : ''
       locs.push({
         lat: s.best_location.value.lat,
         lon: s.best_location.value.lon,

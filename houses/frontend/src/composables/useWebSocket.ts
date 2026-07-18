@@ -30,6 +30,21 @@ export function useWebSocket(factory?: (url: string) => WebSocket) {
         const msg = JSON.parse(event.data)
         if (msg.type === 'property_updated' && msg.rid) {
           store.updateSummary(msg.rid, msg.data)
+          // Extract triage from response using same pattern as loadAll()
+          const t = msg.data?.triage
+          if (t) {
+            store.triage[msg.rid] = {
+              favourite: t.favourite?.value ?? false,
+              dismissed: t.dismissed?.value ?? false,
+              is_viewed: t.is_viewed?.value ?? false,
+              user_notes: t.user_notes?.value ?? '',
+              triage_status: t.triage_status?.value ?? '',
+            }
+          }
+          // Ensure rid is in the list
+          if (!store.rids.includes(msg.rid)) {
+            store.rids.push(msg.rid)
+          }
         }
       } catch {
         // ignore parse errors

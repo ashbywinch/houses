@@ -22,7 +22,7 @@ const location = computed(() => props.data.best_location.succeeded
   : null)
 
 const price = computed(() => props.data.rightmove_price.succeeded
-  ? props.data.rightmove_price.value
+  ? props.data.rightmove_price.value?.amount ?? null
   : null)
 
 const bedrooms = computed(() => props.data.rightmove_bedrooms.succeeded
@@ -30,7 +30,7 @@ const bedrooms = computed(() => props.data.rightmove_bedrooms.succeeded
   : null)
 
 const monthlyCost = computed(() => props.data.total_monthly_cost.succeeded
-  ? props.data.total_monthly_cost.value
+  ? props.data.total_monthly_cost.value?.amount ?? null
   : null)
 
 // Border color based on triage state
@@ -150,7 +150,7 @@ async function toggleViewed() {
       <!-- Row 2: Price + bedrooms | Freshness -->
       <div class="card__row card__row--specs">
         <span class="card__specs">
-          <span v-if="price" class="card__price">£{{ Number(price).toLocaleString() }}</span>
+          <span v-if="price" class="card__price">£{{ price.toLocaleString() }}</span>
           <span v-if="bedrooms" class="card__bedrooms">{{ bedrooms }} bed</span>
         </span>
         <span v-if="freshnessLabel" class="pill pill--sm" :class="freshnessClass">{{ freshnessLabel }}</span>

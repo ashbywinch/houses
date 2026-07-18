@@ -32,10 +32,10 @@ async def test_primary_school_impossible_without_location():
     addr = UserInputNode[str]("addr_ps", str)
     addr.push("10 High St, SW1V 2QQ", "test")
     await flush_processor()
-    await flush_processor()
     node = PrimarySchoolNode("ps", best_location=loc, best_address=addr)
+    await flush_processor()
     a = await node.attempt()
-    assert not a.succeeded
+    assert a.impossible or a.pending  # location dep is pending → impossible or pending
 
 
 @pytest.mark.asyncio
@@ -46,10 +46,10 @@ async def test_secondary_school_impossible_without_location():
     addr = UserInputNode[str]("addr_ss", str)
     addr.push("10 High St, SW1V 2QQ", "test")
     await flush_processor()
-    await flush_processor()
     node = SecondarySchoolNode("ss", best_location=loc, best_address=addr)
+    await flush_processor()
     a = await node.attempt()
-    assert not a.succeeded
+    assert a.impossible or a.pending
 
 
 @pytest.mark.asyncio
@@ -59,11 +59,11 @@ async def test_primary_school_impossible_without_address():
     loc = UserInputNode[GeoPoint]("loc_ps2", GeoPoint)
     loc.push(GeoPoint(51.5, -0.1), "test")
     await flush_processor()
-    await flush_processor()
     addr = UserInputNode[str]("addr_ps2", str)
     node = PrimarySchoolNode("ps2", best_location=loc, best_address=addr)
+    await flush_processor()
     a = await node.attempt()
-    assert not a.succeeded
+    assert a.impossible or a.pending
 
 
 @pytest.mark.asyncio
@@ -73,11 +73,11 @@ async def test_secondary_school_impossible_without_address():
     loc = UserInputNode[GeoPoint]("loc_ss2", GeoPoint)
     loc.push(GeoPoint(51.5, -0.1), "test")
     await flush_processor()
-    await flush_processor()
     addr = UserInputNode[str]("addr_ss2", str)
     node = SecondarySchoolNode("ss2", best_location=loc, best_address=addr)
+    await flush_processor()
     a = await node.attempt()
-    assert not a.succeeded
+    assert a.impossible or a.pending
 
 
 @pytest.mark.asyncio

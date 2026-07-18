@@ -48,6 +48,11 @@ class IfThenElseNode(DerivedNode[T], Generic[T]):
             return self._condition_sources + (self._else_branch,)
         return self._condition_sources
 
+    @property
+    def _skip_impossible_dep_check(self) -> bool:
+        """Condition sources may be impossible — condition_fn handles this."""
+        return True
+
     def compute(self, *args: Attempt) -> Attempt[T]:
         # If a branch was activated, the last arg is the branch result.
         if len(args) > len(self._condition_sources):

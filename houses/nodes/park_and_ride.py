@@ -11,15 +11,16 @@ from __future__ import annotations
 from dataclasses import replace
 
 from money import Money
+from pint import Quantity
 
 from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
 from dag.node import Node
+from houses.car_park import CarParkRegistry
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.geo import GeoPoint
-from houses.car_park import CarParkRegistry
-from houses.stations import StationRegistry
 from houses.model.domain import Commute
+from houses.stations import StationRegistry
 
 
 class ParkAndRideAugmentNode(DerivedNode[Commute]):
@@ -58,8 +59,6 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
     async def compute(
         self, transit: Attempt[Commute], location: Attempt[GeoPoint] = None, postcode_attempt: Attempt[str] = None
     ) -> Attempt[Commute]:
-        if not transit.succeeded:
-            return self._impossible({"transit_node": transit})
 
         commute = transit.value_or_none()
         if commute is None:
@@ -136,10 +135,17 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
             if has_transit:
                 new_first_cg = replace(new_first_cg, cost=Money(str(existing_cost), "GBP"))
 
+        new_details = (new_first_cg, new_parking_group)
+        # Recalculate duration from replaced legs
+        new_duration = Quantity(
+            sum(leg.duration_minutes for cg in new_details for leg in cg.legs),
+            "minute"
+        )
         new_commute = replace(
             commute,
             daily_cost=Money(str(new_cost), "GBP"),
-            details=(new_first_cg, new_parking_group),
+            details=new_details,
+            duration=new_duration,
         )
 
         self._car_park_name = car_park.name or "unknown car park"

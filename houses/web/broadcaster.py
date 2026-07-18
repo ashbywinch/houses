@@ -53,7 +53,7 @@ async def _broadcaster() -> None:
             summary = await prop.to_json_summary()
             msg = json.dumps({"type": "property_updated", "rid": rid, "data": summary})
             dead: list[WebSocket] = []
-            for ws in _websocket_clients:
+            for ws in list(_websocket_clients):
                 try:
                     await ws.send_text(msg)
                 except Exception:

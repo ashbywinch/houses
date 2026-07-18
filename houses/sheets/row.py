@@ -15,7 +15,8 @@ from typing import ClassVar
 import gspread
 from money import Money
 
-from houses.commute import Commute, LegMode
+from houses.commute import LegMode, _render_leg_description
+from houses.model.domain import Commute
 from houses.property import EnrichedProperty
 from houses.school import School
 
@@ -146,7 +147,9 @@ class Row:
 
     @classmethod
     def _fmt_duration(cls, t: Commute | None) -> str:
-        return str(t.duration_minutes) if t and t.duration_minutes is not None else ""
+        if t and t.duration is not None:
+            return str(int(t.duration.magnitude))
+        return ""
 
     @classmethod
     def _fmt_cost(cls, val: Money | float | None) -> str:
@@ -167,10 +170,10 @@ class Row:
 
     @classmethod
     def _fmt_walk(cls, commute: Commute | None) -> str:
-        if commute and commute.duration_minutes is not None and commute.cost_groups:
-            legs = commute.cost_groups[0].legs
+        if commute and commute.details:
+            legs = commute.details[0].legs
             if legs and legs[0].mode == LegMode.WALK:
-                return str(commute.duration_minutes)
+                return str(int(commute.duration.magnitude))
         return ""
 
     @classmethod
@@ -181,17 +184,17 @@ class Row:
 
     @classmethod
     def _fmt_bus(cls, commute: Commute | None) -> str:
-        if commute and commute.duration_minutes is not None and commute.cost_groups:
-            legs = commute.cost_groups[0].legs
+        if commute and commute.details:
+            legs = commute.details[0].legs
             if legs and legs[0].mode == LegMode.BUS:
-                return str(commute.duration_minutes)
+                return str(int(commute.duration.magnitude))
         return ""
 
     @classmethod
     def _fmt_bus_route(cls, commute: Commute | None) -> str:
         """Extract bus route description from a commute, or empty string."""
-        if commute and commute.cost_groups:
-            for group in commute.cost_groups:
+        if commute and commute.details:
+            for group in commute.details:
                 for leg in group.legs:
                     if leg.mode == LegMode.BUS:
                         return leg.line_name or "bus"
@@ -200,6 +203,32 @@ class Row:
                     if "bus" in desc.lower():
                         return desc
         return ""
+
+    @classmethod
+    def _build_route_summary(cls, commute: Commute) -> str:
+        """Build a route summary string from a Commute's detail CostGroups."""
+        all_legs = [leg for group in commute.details for leg in group.legs]
+        parts: list[str] = []
+        total = len(all_legs)
+        for idx, leg in enumerate(all_legs):
+            desc = _render_leg_description(leg)
+            if leg.mode == LegMode.WALK and idx == total - 1:
+                parts.append(f"walk {leg.duration_minutes}m")
+            else:
+                parts.append(f"{desc} ({leg.duration_minutes}m)")
+        return " \u2192 ".join(parts)
+
+    @classmethod
+    def _calc_non_rail_cost(cls, commute: Commute) -> float:
+        """Sum of costs from non-TfL cost groups."""
+        total = 0.0
+        for cg in commute.details:
+            if cg.cost is not None and cg.operator != "TfL":
+                if isinstance(cg.cost, Money):
+                    total += float(cg.cost.amount)
+                else:
+                    total += cg.cost
+        return total
 
     # ── Domain-to-sheet mapping ─────────────────────────────────────
 
@@ -222,20 +251,20 @@ class Row:
         r["Rightmove ID"] = property_.rid
         r["Simon London (min)"] = cls._fmt_duration(property_.simon_commute)
         r["Simon London Cost (£)"] = cls._fmt_cost(
-            property_.simon_commute.daily_cost_gbp if property_.simon_commute else None
+            property_.simon_commute.daily_cost if property_.simon_commute else None
         )
-        r["Simon London Route"] = property_.simon_commute.summary() if property_.simon_commute else ""
+        r["Simon London Route"] = cls._build_route_summary(property_.simon_commute) if property_.simon_commute else ""
         r["Simon Parking Cost (£)"] = cls._fmt_cost(
-            property_.simon_commute.non_rail_cost() if property_.simon_commute else None
+            cls._calc_non_rail_cost(property_.simon_commute) if property_.simon_commute else None
         )
         r["Lorena London (min)"] = cls._fmt_duration(property_.lorena_commute)
         r["Lorena London Cost (£)"] = cls._fmt_cost(
-            property_.lorena_commute.daily_cost_gbp if property_.lorena_commute else None
+            property_.lorena_commute.daily_cost if property_.lorena_commute else None
         )
-        r["Lorena London Route"] = property_.lorena_commute.summary() if property_.lorena_commute else ""
-        bt = property_.petrol.duration_minutes if property_.petrol else None
+        r["Lorena London Route"] = cls._build_route_summary(property_.lorena_commute) if property_.lorena_commute else ""
+        bt = int(property_.petrol.duration.magnitude) if property_.petrol else None
         r["Bracknell Time (min)"] = str(bt) if bt is not None else ""
-        r["Bracknell Cost (£)"] = cls._fmt_cost(property_.petrol.daily_cost_gbp if property_.petrol else None)
+        r["Bracknell Cost (£)"] = cls._fmt_cost(property_.petrol.daily_cost if property_.petrol else None)
         r["Primary School"] = property_.primary_school.name if property_.primary_school else ""
         r["Primary Distance (km)"] = cls._fmt_dist(property_.primary_school_distance_km)
         r["Primary Walk (min)"] = cls._fmt_walk(property_.primary_school_commute)

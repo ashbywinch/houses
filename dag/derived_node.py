@@ -11,7 +11,7 @@ from typing import Generic, TypeVar
 
 from dag.attempt import Attempt, Provenance
 from dag.node import Node
-from dag.signals import Slot
+from dag.signals import Connection, Slot
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +26,11 @@ class RefreshScheduler:
     Production: ``AsyncQueueScheduler`` — background ``asyncio.Queue``.
     Tests: provide an isolated instance with ``set_scheduler()``.
     """
-
     def register(self, node: DerivedNode) -> None:
         """Called when a DerivedNode is created."""
+
+    def unregister(self, node: DerivedNode) -> None:
+        """Called when a DerivedNode is disconnected (cleanup)."""
 
     def schedule(self, node: DerivedNode) -> None:
         """Request that *node* be refreshed when convenient."""
@@ -47,6 +49,9 @@ class AsyncQueueScheduler(RefreshScheduler):
     def register(self, node: DerivedNode) -> None:
         if node._attempt.pending or node._is_stale():
             self._queue.put_nowait(node)
+
+    def unregister(self, node: DerivedNode) -> None:
+        pass  # Can't remove from asyncio.Queue; stale refreshes are harmless
 
     def schedule(self, node: DerivedNode) -> None:
         self._queue.put_nowait(node)
@@ -71,7 +76,7 @@ class AsyncQueueScheduler(RefreshScheduler):
             await asyncio.sleep(0)
 
 
-class TestScheduler(RefreshScheduler):
+class _TestScheduler(RefreshScheduler):
     """Isolated scheduler for tests — no global state.
 
     Each test creates its own instance via ``set_scheduler()``.
@@ -85,8 +90,12 @@ class TestScheduler(RefreshScheduler):
         if node._attempt.pending or node._is_stale():
             self._pending.append(node)
 
+    def unregister(self, node: DerivedNode) -> None:
+        self._pending = [n for n in self._pending if n is not node]
+
     def schedule(self, node: DerivedNode) -> None:
         self._pending.append(node)
+
     async def process_pending(self) -> None:
         while self._pending:
             todo, self._pending = self._pending, []
@@ -145,19 +154,26 @@ class DerivedNode(Node[T], Generic[T]):
         super().__init__(node_id, value_type)
         self._deps = deps
         self._attempt: Attempt[T] = Attempt.pending()
+        self._connections: list[Connection] = []
         self._slots: list[Slot] = []
 
         loaded = self._load_attempt_from_db()
         if loaded is not None and loaded.succeeded:
             self._attempt = loaded
-
         for dep in deps:
             slot = Slot(self._on_dep_changed)
             self._slots.append(slot)
-            dep.changed.connect(slot)
+            conn = dep.changed.connect(slot)
+            self._connections.append(conn)
 
         _get_scheduler().register(self)
 
+    def disconnect(self) -> None:
+        """Disconnect all signal connections and unregister from the scheduler."""
+        for conn in self._connections:
+            conn.disconnect()
+        self._connections.clear()
+        _get_scheduler().unregister(self)
     def _get_active_deps(self) -> tuple[Node, ...]:
         return self._deps
 
@@ -189,6 +205,17 @@ class DerivedNode(Node[T], Generic[T]):
     async def attempt(self) -> Attempt[T]:
         return self._attempt
 
+    @property
+    def _skip_impossible_dep_check(self) -> bool:
+        """Override in subclasses whose compute() handles failed deps gracefully.
+
+        When True, the generic impossible-dep short-circuit in refresh() is
+        skipped, allowing compute() to receive impossible dep attempts and
+        handle them (e.g., IfThenElseNode falls back to else branch,
+        CommuteSelectorNode falls back to bus when transit fails).
+        """
+        return False
+
     async def refresh(self) -> None:
         if not self._is_stale():
             return
@@ -196,6 +223,14 @@ class DerivedNode(Node[T], Generic[T]):
         dep_attempts = [await dep.attempt() for dep in active_deps]
         if any(a.pending for a in dep_attempts):
             return
+        if not self._skip_impossible_dep_check:
+            impossible_deps = [a for a in dep_attempts if a.impossible]
+            if impossible_deps:
+                errors = "; ".join(a.error or "unknown" for a in impossible_deps)
+                self._attempt = Attempt.impossible(f"dep failed: {errors}")
+                self._computed_at = datetime.now(UTC)
+                self.changed.emit()
+                return
         try:
             result = self.compute(*dep_attempts)
             if iscoroutine(result):

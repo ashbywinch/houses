@@ -4,6 +4,8 @@ import logging
 import re
 from typing import Any
 
+from money import Money
+
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 from houses.nodes.property import PropertyNodes
@@ -19,6 +21,7 @@ SOURCE_LABELS: dict[str, str] = {
     "rightmove_price": "Rightmove",
     "rightmove_location": "Rightmove map",
     "precise_location": "User location",
+    "actual_postcode": "Rightmove",
     "corrected_address": "User correction",
     "user_entered_address": "User correction",
 }
@@ -81,8 +84,10 @@ def bootstrap_from_row(row: dict[str, Any], sources: dict[str, UserInputNode]) -
         pushed += 1
 
     if price and "rightmove_price" in sources:
-        sources["rightmove_price"].push(price, SOURCE_LABELS["rightmove_price"])
-        pushed += 1
+        cleaned = re.sub(r"[^0-9.]", "", price)
+        if cleaned:
+            sources["rightmove_price"].push(Money(cleaned, "GBP"), SOURCE_LABELS["rightmove_price"])
+            pushed += 1
 
     approx_lat = (row.get("Approx Latitude (est)") or "").strip()
     approx_lng = (row.get("Approx Longitude (est)") or "").strip()
@@ -127,6 +132,11 @@ def bootstrap_from_row(row: dict[str, Any], sources: dict[str, UserInputNode]) -
 
     if postcode and "postcode" in sources:
         sources["postcode"].push(postcode, "Sheet")
+        pushed += 1
+
+    actual_postcode = (row.get("Actual Postcode") or "").strip()
+    if actual_postcode and "actual_postcode" in sources:
+        sources["actual_postcode"].push(actual_postcode, SOURCE_LABELS["actual_postcode"])
         pushed += 1
 
     for source_key, col_name in COMMENT_COLUMNS.items():

@@ -6,6 +6,8 @@ PYTHON := .venv/bin/python
 UV := uv
 RUFF := .venv/bin/ruff
 PYTEST := .venv/bin/pytest
+OMP_CONFIG_DIR ?= $(HOME)/Documents/code/omp-config
+
 
 # Colors
 GREEN := \033[0;32m
@@ -28,23 +30,29 @@ help:
 	@echo "  ${GREEN}make coverage${NC}           Run tests with coverage report"
 	@echo "  ${GREEN}make clean${NC}              Clean up generated files"
 
-setup:
+setup: omp-config-install
 	@$(UV) --version >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
 	@$(UV) sync --all-extras
 	@echo "${GREEN}✓ Setup complete${NC}"
 
+omp-config-install:
+	$(MAKE) -C $(OMP_CONFIG_DIR) install
+
 run: setup frontend-setup
 	@echo "${YELLOW}Backend: http://127.0.0.1:8080  Frontend: http://localhost:5173${NC}"
 	@mkdir -p .logs; \
-		cd houses/frontend && npm run dev > ../../.logs/frontend.log 2>&1 & \
-		$(UV) run python -m houses > .logs/backend.log 2>&1
+		nohup sh -c 'cd houses/frontend && npm run dev' > .logs/frontend.log 2>&1 & echo $$! > .logs/frontend.pid; \
+		nohup uv run python -m houses > .logs/backend.log 2>&1 & echo $$! > .logs/backend.pid;
+
+stop:
+	@echo "Stopping dev processes..."
+	@test -f .logs/backend.pid && kill $$(cat .logs/backend.pid) 2>/dev/null && rm .logs/backend.pid || true
+	@test -f .logs/frontend.pid && kill $$(cat .logs/frontend.pid) 2>/dev/null && rm .logs/frontend.pid || true
+	@echo "Stopped."
 
 run-prod: setup frontend-build
 	@echo "${YELLOW}Serving frontend build + backend on http://127.0.0.1:8080${NC}"
-	@$(UV) run python -c "import uvicorn; from houses.config import settings; from houses.server import app; from fastapi.staticfiles import StaticFiles; from pathlib import Path; build_dir = Path('houses/frontend/dist'); \
-if build_dir.exists(): app.mount('/', StaticFiles(directory=str(build_dir), html=True), name='frontend'); \
-uvicorn.run(app, host=settings.host, port=settings.port, reload=False)"
-
+	@$(UV) run python -c "import uvicorn; from houses.config import settings; from houses.server import app; from fastapi.staticfiles import StaticFiles; from pathlib import Path; build_dir = Path('houses/frontend/dist'); if build_dir.exists(): app.mount('/', StaticFiles(directory=str(build_dir), html=True), name='frontend'); uvicorn.run(app, host=settings.host, port=settings.port, reload=False)"
 FRONTEND := houses/frontend
 NPM := npm
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from money import Money
+
 from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
 from dag.node import Node
@@ -71,48 +73,47 @@ class CommuteBreakdownNode(DerivedNode[dict]):
         return Provenance(label="commute_breakdown")
 
 
-class StampDutyNode(DerivedNode[float]):
+class StampDutyNode(DerivedNode[Money]):
     """Computes Stamp Duty Land Tax from the property price."""
 
     def __init__(self, node_id: str, *, rightmove_price):
-        super().__init__(node_id, float, (rightmove_price,))
+        super().__init__(node_id, Money, (rightmove_price,))
 
-    def compute(self, price: Attempt[str]) -> Attempt[float]:
+    def compute(self, price: Attempt[Money]) -> Attempt[Money]:
         if not price.succeeded:
             return Attempt.impossible("no price")
-        p_str = price.value_or_none() or "0"
-        try:
-            p = float(p_str.replace(",", "").replace("£", ""))
-        except (ValueError, TypeError):
-            return Attempt.impossible(f"bad price: {p_str}")
+        price_val = price.value_or_none()
+        if price_val is None:
+            return Attempt.impossible("no price")
         from houses.stamp_duty import stamp_duty_land_tax
 
-        return Attempt.succeeded(stamp_duty_land_tax(p))
+        return Attempt.succeeded(stamp_duty_land_tax(price_val))
 
     async def build_provenance(self):
         return Provenance(label="stamp_duty_formula")
 
 
-class MonthlyMortgagePaymentNode(DerivedNode[float]):
+class MonthlyMortgagePaymentNode(DerivedNode[Money]):
     def __init__(self, node_id: str, *, rightmove_price, stamp_duty_node, persons_source, financial_source):
-        super().__init__(node_id, float, (rightmove_price, stamp_duty_node, persons_source, financial_source))
+        super().__init__(node_id, Money, (rightmove_price, stamp_duty_node, persons_source, financial_source))
 
     def compute(
-        self, price: Attempt[str], stamp_duty: Attempt[float], persons: Attempt[list], financial: Attempt[dict]
-    ) -> Attempt[float]:
-        if not price.succeeded:
-            return Attempt.succeeded(0.0)
-        p_str = price.value_or_none() or "0"
+        self, price: Attempt[Money], stamp_duty: Attempt[Money], persons: Attempt[list], financial: Attempt[dict]
+    ) -> Attempt[Money]:
+        if not price.succeeded or price.value_or_none() is None:
+            return Attempt.succeeded(Money("0", "GBP"))
+        price_val = price.value_or_none()
+        p = float(price_val.amount)
         fin = (financial.value_or_none() or {}) if financial.succeeded else {}
-        try:
-            p = float(p_str.replace(",", "").replace("£", ""))
-        except (ValueError, TypeError):
-            return Attempt.impossible(f"bad price: {p_str}")
         if p == 0:
-            return Attempt.succeeded(0.0)
+            return Attempt.succeeded(Money("0", "GBP"))
 
         # Total equity from all non-child persons
-        sd_val = stamp_duty.value_or_none() if stamp_duty.succeeded else 0.0
+        sd_val = (
+            float(stamp_duty.value_or_none().amount)
+            if stamp_duty.succeeded and stamp_duty.value_or_none()
+            else 0.0
+        )
         total_equity = 0.0
         if persons.succeeded:
             for person in persons.value_or_none() or []:
@@ -124,7 +125,7 @@ class MonthlyMortgagePaymentNode(DerivedNode[float]):
         # Mortgage principal = price + stamp_duty - total_equity
         principal = p + sd_val - total_equity
         if principal <= 0:
-            return Attempt.succeeded(0.0)
+            return Attempt.succeeded(Money("0", "GBP"))
 
         rate = float(fin.get("mortgage_rate", 0.045))
         term = int(fin.get("mortgage_term_years", 30))
@@ -136,35 +137,33 @@ class MonthlyMortgagePaymentNode(DerivedNode[float]):
             numerator = monthly_rate * (1 + monthly_rate) ** n_payments
             denominator = (1 + monthly_rate) ** n_payments - 1
             monthly = principal * numerator / denominator
-        return Attempt.succeeded(round(monthly, 2))
+        return Attempt.succeeded(Money(str(round(monthly, 2)), "GBP"))
 
     async def build_provenance(self):
         return Provenance(label="mortgage_formula")
 
 
-class YearlySinkingFundNode(DerivedNode[float]):
+class YearlySinkingFundNode(DerivedNode[Money]):
     def __init__(self, node_id: str, *, rightmove_price, financial_source):
-        super().__init__(node_id, float, (rightmove_price, financial_source))
+        super().__init__(node_id, Money, (rightmove_price, financial_source))
 
-    def compute(self, price: Attempt[str], financial: Attempt[dict]) -> Attempt[float]:
-        if not price.succeeded and not financial.succeeded:
-            return Attempt.succeeded(0.0)
-        p_str = (price.value_or_none() or "0") if price.succeeded else "0"
-        fin = (financial.value_or_none() or {}) if financial.succeeded else {}
-        try:
-            p = Decimal(p_str.replace(",", "").replace("£", ""))
-        except Exception:
-            return Attempt.impossible(f"bad price: {p_str}")
+    def compute(self, price: Attempt[Money], financial: Attempt[dict]) -> Attempt[Money]:
+        if not price.succeeded or price.value_or_none() is None:
+            return Attempt.succeeded(Money("0", "GBP"))
+        price_val = price.value_or_none()
+        p = price_val.amount  # Decimal
         if p == 0:
-            return Attempt.succeeded(0.0)
+            return Attempt.succeeded(Money("0", "GBP"))
+        fin = (financial.value_or_none() or {}) if financial.succeeded else {}
         rate = float(fin.get("sinking_fund_rate", 0.01))
-        return Attempt.succeeded(round(float(p) * rate, 2))
+        result = p * Decimal(str(rate))
+        return Attempt.succeeded(Money(str(round(float(result), 2)), "GBP"))
 
     async def build_provenance(self):
         return Provenance(label="sinking_fund_formula")
 
 
-class TotalMonthlyHousingCostNode(DerivedNode[float]):
+class TotalMonthlyHousingCostNode(DerivedNode[Money]):
     def __init__(
         self,
         node_id: str,
@@ -177,7 +176,7 @@ class TotalMonthlyHousingCostNode(DerivedNode[float]):
     ):
         super().__init__(
             node_id,
-            float,
+            Money,
             (
                 monthly_mortgage_node,
                 yearly_sinking_fund_node,
@@ -189,24 +188,26 @@ class TotalMonthlyHousingCostNode(DerivedNode[float]):
 
     def compute(
         self,
-        mortgage: Attempt[float],
-        sinking: Attempt[float],
+        mortgage: Attempt[Money],
+        sinking: Attempt[Money],
         financial: Attempt[dict],
         commute: Attempt[dict],
         council_tax: Attempt[dict],
-    ) -> Attempt[float]:
-        total = 0.0
-        if mortgage.succeeded:
-            total += mortgage.value_or_none() or 0.0
-        if sinking.succeeded:
-            total += (sinking.value_or_none() or 0.0) / 12 * 2 / 3
+    ) -> Attempt[Money]:
+        total = Money("0", "GBP")
+        if mortgage.succeeded and mortgage.value_or_none():
+            total += mortgage.value_or_none()
+        if sinking.succeeded and sinking.value_or_none():
+            sv = sinking.value_or_none()
+            monthly_sinking = round(float(sv.amount) / 12 * 2 / 3, 2)
+            total += Money(str(monthly_sinking), "GBP")
         if commute.succeeded:
             cb = commute.value_or_none() or {}
-            total += cb.get("yearly_total_gbp", 0.0) / 46
+            total += Money(str(cb.get("yearly_total_gbp", 0.0) / 12), "GBP")
         if council_tax.succeeded:
             ct_val = council_tax.value_or_none() or {}
-            total += ct_val.get("cost", 0.0) / 12
-        return Attempt.succeeded(round(total, 2))
+            total += Money(str(ct_val.get("yearly_cost", 0.0) / 12), "GBP")
+        return Attempt.succeeded(total)
 
     async def build_provenance(self):
         return Provenance(label="total_monthly_formula")

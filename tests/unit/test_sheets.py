@@ -1,6 +1,7 @@
 """Tests for sheet integration — column alignment invariant."""
 
 import pytest
+from money import Money
 
 from houses.sheets import (
     _FORMULA_COLUMNS,
@@ -98,9 +99,9 @@ def test_data_formula_count():
 
 
 def test_stamp_duty_known_values():
-    assert stamp_duty_land_tax(250000) == 0.0
-    assert stamp_duty_land_tax(350000) == 5000.0
-    assert stamp_duty_land_tax(550000) == 15000.0
+    assert stamp_duty_land_tax(Money("250000", "GBP")) == Money("0", "GBP")
+    assert stamp_duty_land_tax(Money("350000", "GBP")) == Money("5000", "GBP")
+    assert stamp_duty_land_tax(Money("550000", "GBP")) == Money("15000", "GBP")
 
 
 def test_data_formulas_use_named_ranges():

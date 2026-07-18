@@ -7,6 +7,7 @@ external APIs are called during tests.
 from __future__ import annotations
 
 import pytest
+from money import Money
 
 from dag.derived_node import flush_processor
 from houses.geo import GeoPoint
@@ -52,7 +53,7 @@ def prop():
     from houses.nodes.property import PropertyNodes
 
     p = PropertyNodes("test_shape")
-    p.rightmove_price.push("550000", "test")
+    p.rightmove_price.push(Money("550000", "GBP"), "test")
     p.rightmove_address.push("31 Isambard Rd", "test")
     p.rightmove_bedrooms.push("3", "test")
     p.rightmove_location.push(GeoPoint(51.48, -0.35), "rightmove")
@@ -314,7 +315,7 @@ class TestSchoolAcceptableFromPersons:
         )
 
         p = PropertyNodes("test_acc")
-        p.rightmove_price.push("550000", "test")
+        p.rightmove_price.push(Money("550000", "GBP"), "test")
         p.rightmove_address.push("31 Isambard Rd", "test")
         p.rightmove_bedrooms.push("3", "test")
         p.rightmove_location.push(GeoPoint(51.48, -0.35), "rightmove")
@@ -346,7 +347,7 @@ class TestSchoolAcceptableFromPersons:
         )
 
         p = PropertyNodes("test_acc2")
-        p.rightmove_price.push("550000", "test")
+        p.rightmove_price.push(Money("550000", "GBP"), "test")
         p.rightmove_address.push("31 Isambard Rd", "test")
         p.rightmove_bedrooms.push("3", "test")
         p.corrected_address.push("31 Isambard Rd, SW1V 2QQ", "test")

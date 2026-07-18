@@ -28,10 +28,10 @@ def _has_unpriced_transit(commute: Commute | None) -> bool:
         return False
 
     _transit_modes = {LegMode.TRAIN, LegMode.TUBE, LegMode.DLR, LegMode.OVERGROUND}
-    for cg in commute.details or ():
-        if cg.cost is None and any(leg.mode in _transit_modes for leg in cg.legs):
-            return True
-    return False
+    return any(
+        cg.cost is None and any(leg.mode in _transit_modes for leg in cg.legs)
+        for cg in commute.details or ()
+    )
 
 
 def _bus_condition(walk_check: Attempt) -> bool:
@@ -372,8 +372,8 @@ class CommuteSelectorNode(DerivedNode[Commute]):
 
         if selected is not None:
             val = selected.value_or_none()
-            # Merge rail_fare cost if available
-            if rail_fare_result.succeeded:
+            # Only merge rail_fare cost when transit was selected (not bus)
+            if selected is transit and rail_fare_result.succeeded:
                 rf_val = rail_fare_result.value_or_none()
                 if rf_val and rf_val.daily_cost and rf_val.daily_cost.amount > 0 and val:
                     new_details = _replace_transit_group(val.details, rf_val.details)
@@ -409,3 +409,8 @@ class CommuteSelectorNode(DerivedNode[Commute]):
             result["error"] = attempt.error
         result["provenance"] = (await self.build_provenance()).to_dict()
         return result
+
+    @property
+    def _skip_impossible_dep_check(self) -> bool:
+        """Transit/bus/rail dep failures are handled gracefully in compute()."""
+        return True

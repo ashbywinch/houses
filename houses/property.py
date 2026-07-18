@@ -5,13 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from houses.commute import Commute, CommuteBreakdown
+from houses.commute import CommuteBreakdown
 from houses.council_tax_info import CouncilTaxInfo
 from houses.location import resolve_house_location
 from houses.school import School
 
 if TYPE_CHECKING:
     from houses.geo import GeoPoint
+    from houses.model.domain import Commute
 
 
 @dataclass(frozen=False)

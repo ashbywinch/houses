@@ -20,8 +20,6 @@ class NearestStationNode(DerivedNode[Station | None]):
         super().__init__(node_id, Station | None, (best_location,))
 
     def compute(self, location: Attempt[GeoPoint]) -> Attempt[Station | None]:
-        if not location.succeeded:
-            return self._impossible({"best_location": location})
         from houses.rail_fare_registry import get_rail_fare_registry
 
         registry = get_rail_fare_registry()

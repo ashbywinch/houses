@@ -9,6 +9,7 @@ from pint import Quantity
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
+from dag.node import Node
 from houses.commute import LegMode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
@@ -133,10 +134,6 @@ class TransitNode(DerivedNode[Commute]):
     async def compute(
         self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest], best_address: Attempt[str] = None
     ) -> Attempt[Commute]:
-        if not location.succeeded:
-            return self._impossible({"best_location": location})
-        if not poi.succeeded:
-            return self._impossible({"poi": poi})
         loc = location.value_or_none()
         poi_val = poi.value_or_none()
         dest_postcode = poi_val.postcode if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")

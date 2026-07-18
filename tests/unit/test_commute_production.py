@@ -86,7 +86,7 @@ async def test_production_commute_flow():
     prop.rightmove_address.push("1 Test Road, TE1 1ST", "Rightmove")
     prop.rightmove_url.push("https://rightmove.co.uk/001", "Browser")
     prop.rightmove_bedrooms.push("3", "Rightmove")
-    prop.rightmove_price.push("500000", "Rightmove")
+    prop.rightmove_price.push(Money("500000", "GBP"), "Rightmove")
     prop.rightmove_location.push(GeoPoint(51.5, -0.1), "Rightmove map")
     prop.postcode.push("TE1 1ST", "test")
 
@@ -130,7 +130,7 @@ async def test_school_commutes_resolve():
     prop.rightmove_address.push("1 Test Road, TE1 1ST", "Rightmove")
     prop.rightmove_url.push("https://rightmove.co.uk/001", "Browser")
     prop.rightmove_bedrooms.push("3", "Rightmove")
-    prop.rightmove_price.push("500000", "Rightmove")
+    prop.rightmove_price.push(Money("500000", "GBP"), "Rightmove")
     prop.postcode.push("TE1 1ST", "test")
     register_property(rid, prop)
 

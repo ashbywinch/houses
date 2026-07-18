@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from money import Money
+from pint import Quantity
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
@@ -38,8 +39,13 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         if not commute.succeeded:
             return commute
         val = commute.value_or_none()
-        if not val or val.mode != "drive":
-            return commute  # only applies to drive commutes
+        if not val:
+            return commute
+
+        # Check for drive legs (handles park-and-ride which has mixed details)
+        drive_groups = [cg for cg in (val.details or ()) if any(leg.mode == LegMode.DRIVE for leg in cg.legs)]
+        if not drive_groups:
+            return commute  # no drive legs to add fuel cost to
 
         # Collect all drive legs
         drive_legs = [leg for cg in val.details for leg in cg.legs if leg.mode == LegMode.DRIVE]
@@ -63,11 +69,10 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
             # Estimate distance: 48 km/h average speed, round trip
             round_trip_km = (total_drive_min / 60.0) * 48.0 * 2
 
-        # Fuel calculation:
-        #   litres/100km = 235.214 / mpg
-        #   litres = (distance_km / 100) * litres_per_100km
-        litres_used = (round_trip_km / 100.0) * (235.214 / mpg)
-        fuel_cost = round(litres_used * cost_per_litre, 2)
+        # Fuel calculation using pint for proper Imperial gallon → litre conversion
+        # 1 imperial gallon = 4.54609 litres; US gallon is 3.78541 litres
+        fuel_volume = (Quantity(round_trip_km, "km") / Quantity(mpg, "mile / imperial_gallon")).to("liter")
+        fuel_cost = round(float(fuel_volume.magnitude) * cost_per_litre, 2)
 
         if fuel_cost <= 0:
             return commute

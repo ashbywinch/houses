@@ -1,5 +1,6 @@
 """Integration test configuration — isolated temp cache, no sheet writes, offline scraper."""
 
+
 import tempfile
 from collections.abc import Callable
 from unittest.mock import patch
@@ -9,6 +10,7 @@ from httpx import AsyncClient, Client, MockTransport, Response
 
 from houses.api_cache import set_cache_dir
 from houses.config import settings
+from tests.unit.isolation_fixtures import _sqlite_memory  # noqa: F401 — re-exported for integration tests
 
 
 def mock_httpx():
@@ -30,6 +32,7 @@ def mock_httpx():
         def add_rule(self, matcher: Callable[[str], bool], responder: Callable) -> None:
             """Register a custom matcher/responder that takes priority."""
             self._rules.insert(0, (matcher, responder))
+
 
         def handler(self, request):
             url = str(request.url)
@@ -146,6 +149,11 @@ def _mock_http_requests():
     counter, async_patch, sync_patch = mock_httpx()
     with async_patch, sync_patch:
         yield counter
+
+@pytest.fixture(autouse=True)
+def _use_sqlite_memory(_sqlite_memory):  # noqa: F811
+    """Use in-memory SQLite for DAG persistence in integration tests."""
+    pass
 
 
 @pytest.fixture(autouse=True)

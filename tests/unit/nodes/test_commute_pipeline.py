@@ -326,6 +326,10 @@ class TestFullCommutePipeline:
             postcode_node=postcode,
             has_car=True,
             max_walk=10,
+            station_registry=_FakeStationRegistry([
+                Station("Maidenhead Rail Station", "MAI", GeoPoint(51.518, -0.722)),
+                Station("London Paddington", "PAD", GeoPoint(51.515, -0.176)),
+            ]),
             car_park_registry=_FakeCarParkRegistry(
                 CarPark(name="Test Car Park", daily_cost=Money("10.00", "GBP")),
             ),

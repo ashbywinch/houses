@@ -7,6 +7,7 @@ import dag.user_input_node  # noqa: F401 — register Money/Quantity pydantic sc
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode, flush_processor
 from dag.if_then_else import IfThenElseNode
+from dag.node import Node
 from dag.user_input_node import UserInputNode
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.geo import GeoPoint
@@ -845,6 +846,7 @@ async def test_commute_selector_init_with_persisted_result():
         bus_result=_bus_if(walk_check, bus),
         rail_fare_result=_noop_if("crash"),
     )
+    node.disconnect()
 
 
 class TestFareBetween:

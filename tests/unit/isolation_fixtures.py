@@ -13,13 +13,13 @@ import sqlite3
 import pytest
 
 import dag.persistence as per
-from dag.derived_node import TestScheduler, set_scheduler
+from dag.derived_node import _TestScheduler, set_scheduler
 
 
 @pytest.fixture(autouse=True)
 def _inject_test_scheduler():
     """Each test gets an isolated scheduler — no global queue leakage."""
-    set_scheduler(TestScheduler())
+    set_scheduler(_TestScheduler())
     yield
 
 

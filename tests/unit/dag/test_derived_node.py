@@ -81,12 +81,32 @@ class TestDerivedNode:
         assert received == ["changed", "changed"]
 
     @pytest.mark.asyncio
-    async def test_dep_failure_propagates(self):
+    async def test_pending_when_dep_pending(self):
         src = UserInputNode[int]("src", int)
         node = _DoubleNode("double", deps=(src,))
 
         a = await node.attempt()
-        assert a.succeeded is False
+        assert a.pending is True
+
+    @pytest.mark.asyncio
+    async def test_impossible_when_dep_fails(self):
+        """When a dep returns Attempt.impossible, the derived node should also be impossible."""
+        # A node that returns impossible
+        class _FailingNode(DerivedNode[int]):
+            def __init__(self):
+                super().__init__("fail_src", int, ())
+                self._attempt = Attempt.impossible("always fails")
+
+            def compute(self):
+                return self._attempt
+
+        src = _FailingNode()
+        await flush_processor()
+
+        doubler = _DoubleNode("double_fail_test", deps=(src,))
+        await flush_processor()
+        a = await doubler.attempt()
+        assert a.impossible is True
 
     @pytest.mark.asyncio
     async def test_to_json(self):

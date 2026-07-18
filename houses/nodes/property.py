@@ -2,14 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from money import Money
+
+from dag.if_then_else import IfThenElseNode
 from dag.signals import Signal, Slot
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
+from houses.model.domain import Commute
 from houses.nodes.area import TownDescNode, TownNode, WalkabilityNode
 from houses.nodes.bus import BodsFareNode, BusLegAugmentNode, BusRouteNode
 from houses.nodes.commute import CommuteSelectorNode, _bus_condition, _needs_rail_fare, commute_input_node
-from dag.if_then_else import IfThenElseNode
-from houses.model.domain import Commute
 from houses.nodes.epc_node import CouncilTaxNode, EpcNode
 from houses.nodes.geocode import GeocodeNode
 from houses.nodes.location import BestAddressNode, BestLocationNode
@@ -43,12 +45,13 @@ class PropertyNodes:
         self.rightmove_url = UserInputNode[str](f"{rid}/rightmove_url", str)
         self.rightmove_address = UserInputNode[str](f"{rid}/rightmove_address", str)
         self.rightmove_bedrooms = UserInputNode[str](f"{rid}/rightmove_bedrooms", str)
-        self.rightmove_price = UserInputNode[str](f"{rid}/rightmove_price", str)
+        self.rightmove_price = UserInputNode[Money](f"{rid}/rightmove_price", Money)
         self.rightmove_location = UserInputNode[GeoPoint](f"{rid}/rightmove_location", GeoPoint)
         self.precise_location = UserInputNode[GeoPoint](f"{rid}/precise_location", GeoPoint)
         self.corrected_address = UserInputNode[str](f"{rid}/corrected_address", str)
         self.user_entered_address = UserInputNode[str](f"{rid}/user_entered_address", str)
         self.postcode = UserInputNode[str](f"{rid}/postcode", str)
+        self.actual_postcode = UserInputNode[str](f"{rid}/actual_postcode", str)
 
         # Comments from View tab
         self.comment_status = UserInputNode[str](f"{rid}/status", str)
@@ -381,12 +384,13 @@ class PropertyNodes:
     async def _monthly_sinking(self) -> dict:
         yearly = await self.yearly_sinking_fund.to_json()
         if yearly.get("status") == "succeeded" and yearly.get("value") is not None:
-            yearly_value = yearly["value"]
-            monthly = round(yearly_value / 12 * 2 / 3, 2)
+            yearly_val = yearly["value"]
+            yearly_amount = float(yearly_val["amount"])
+            monthly = round(yearly_amount / 12 * 2 / 3, 2)
             return {
                 "status": "succeeded",
                 "value": monthly,
-                "provenance": {"label": "formula:monthly_sinking", "description": f"{yearly_value}/12*2/3"},
+                "provenance": {"label": "formula:monthly_sinking", "description": f"{yearly_amount}/12*2/3"},
             }
         return yearly
 

@@ -18,7 +18,7 @@ function makeDetail(): PropertyDetailType {
     rid: '123',
     best_address: { succeeded: true, value: '1 Main St, London', error: null, provenance: { label: 'test' } },
     rightmove_url: { succeeded: true, value: '', error: null, provenance: { label: 'test' } },
-    rightmove_price: { succeeded: true, value: '500000', error: null, provenance: { label: 'test' } },
+    rightmove_price: { succeeded: true, value: {amount: 500000, currency: "GBP"}, error: null, provenance: { label: 'test' } },
     rightmove_bedrooms: { succeeded: true, value: '3', error: null, provenance: { label: 'test' } },
     postcode: { succeeded: true, value: 'SW1V 2QQ', error: null, provenance: { label: 'test' } },
     location: {
@@ -41,12 +41,12 @@ function makeDetail(): PropertyDetailType {
       secondary: { school: { succeeded: false, value: null, error: null, provenance: { label: 'test' } } },
     },
     affordability: {
-      stamp_duty: { succeeded: true, value: 20000, error: null, provenance: { label: 'test' } },
+      stamp_duty: { succeeded: true, value: {amount: 20000, currency: "GBP"}, error: null, provenance: { label: 'test' } },
       council_tax: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
-      monthly_mortgage: { succeeded: true, value: 1500, error: null, provenance: { label: 'test' } },
-      monthly_sinking_fund: { succeeded: true, value: 200, error: null, provenance: { label: 'test' } },
+      monthly_mortgage: { succeeded: true, value: {amount: 1500, currency: "GBP"}, error: null, provenance: { label: 'test' } },
+      monthly_sinking_fund: { succeeded: true, value: {amount: 200, currency: "GBP"}, error: null, provenance: { label: 'test' } },
       monthly_commute_cost: { succeeded: true, value: { persons: { Simon: { daily_gbp: 12.5, yearly_gbp: 5750 } }, yearly_total_gbp: 5750, formula_explanation: 'Aggregated' }, error: null, provenance: { label: 'test' } },
-      total_monthly_housing_cost: { succeeded: true, value: 1700, error: null, provenance: { label: 'test' } },
+      total_monthly_housing_cost: { succeeded: true, value: {amount: 1700, currency: "GBP"}, error: null, provenance: { label: 'test' } },
     },
     area: {
       walkability: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },

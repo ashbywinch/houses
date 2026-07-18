@@ -80,9 +80,9 @@ class TestPetrolCostAugmentNode:
 
         # 30 min drive with actual distance_km=24 (one-way)
         # round_trip_km = 24 * 2 = 48
-        # litres = (48/100) * (235.214/45) = 0.48 * 5.227 = 2.509
-        # cost = 2.509 * 1.45 = 3.638 → 3.64
-        # daily_cost = 5.00 + 3.64 = 8.64
+        # fuel_volume = (48 km / 45 mile/imperial_gallon).to(liter) = 3.013 L
+        # cost = 3.013 * 1.45 = 4.37
+        # daily_cost = 5.00 + 4.37 = 9.37
         commute_in.push(
             _make_commute(
                 duration_min=30, cost_gbp=5.00, mode="drive", drive_legs_minutes=[30], drive_distances_km=[24.0]
@@ -96,7 +96,7 @@ class TestPetrolCostAugmentNode:
         assert a.succeeded
         val = a.value_or_none()
         assert val is not None
-        assert float(val.daily_cost.amount) == 8.64
+        assert float(val.daily_cost.amount) == 9.37
         # No extra petrol leg — fuel cost folded into daily_cost
         assert len(val.details) == 1
         assert not any(cg.operator == "Fuel" for cg in val.details)
@@ -106,8 +106,8 @@ class TestPetrolCostAugmentNode:
         assert drive_cg.cost is not None, "Drive CostGroup should have cost attributed"
         # Original cost was 5.00, fuel added 3.64 → total 8.64
         if isinstance(drive_cg.cost, Money):
-            assert float(drive_cg.cost.amount) == 8.64, (
-                f"Expected drive CostGroup cost £8.64, got {drive_cg.cost}"
+            assert float(drive_cg.cost.amount) == 9.37, (
+                f"Expected drive CostGroup cost £9.37, got {drive_cg.cost}"
             )
 
     @pytest.mark.asyncio
@@ -197,12 +197,10 @@ class TestPetrolCostAugmentNode:
             commute_node=commute_in,
             financial_source=financial,
         )
-
-        # 60 min drive with actual distance_km=48 (one-way)
         # round_trip_km = 48 * 2 = 96
-        # litres = (96/100) * (235.214/30) = 0.96 * 7.8405 = 7.527
-        # cost = 7.527 * 1.60 = 12.043 → 12.04
-        # daily_cost = 10.00 + 12.04 = 22.04
+        # fuel_volume = (96 km / 30 mile/imperial_gallon).to(liter) = 9.038 L
+        # cost = 9.038 * 1.60 = 14.46
+        # daily_cost = 10.00 + 14.46 = 24.46
         commute_in.push(
             _make_commute(
                 duration_min=60, cost_gbp=10.00, mode="drive", drive_legs_minutes=[60], drive_distances_km=[48.0]
@@ -215,8 +213,7 @@ class TestPetrolCostAugmentNode:
         a = await node.attempt()
         assert a.succeeded
         val = a.value_or_none()
-        assert val is not None
-        assert float(val.daily_cost.amount) == 22.04
+        assert float(val.daily_cost.amount) == 24.46
         assert len(val.details) == 1
 
     @pytest.mark.asyncio
@@ -238,11 +235,10 @@ class TestPetrolCostAugmentNode:
             financial_source=financial,
         )
 
-        # 30 min drive with NO distance_km (defaults to 0.0)
         # fallback: round_trip_km = (30/60) * 48 * 2 = 48
-        # litres = (48/100) * (235.214/45) = 2.509
-        # cost = 2.509 * 1.45 = 3.638 → 3.64
-        # daily_cost = 2.00 + 3.64 = 5.64
+        # fuel_volume = (48 km / 45 mile/imperial_gallon).to(liter) = 3.013 L
+        # cost = 3.013 * 1.45 = 4.37
+        # daily_cost = 2.00 + 4.37 = 6.37
         commute_in.push(
             _make_commute(duration_min=30, cost_gbp=2.00, mode="drive", drive_legs_minutes=[30]),
             "test",
@@ -253,8 +249,7 @@ class TestPetrolCostAugmentNode:
         a = await node.attempt()
         assert a.succeeded
         val = a.value_or_none()
-        assert val is not None
-        assert float(val.daily_cost.amount) == 5.64
+        assert float(val.daily_cost.amount) == 6.37
         assert len(val.details) == 1
 
     @pytest.mark.asyncio

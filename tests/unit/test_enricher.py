@@ -15,8 +15,8 @@ from pint import Quantity
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode, flush_processor
-from dag.user_input_node import UserInputNode
 from dag.if_then_else import IfThenElseNode
+from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.transit_route import _apply_park_and_ride_to_journeys, _format_route_summary
@@ -302,7 +302,6 @@ class TestCommuteSelectorPipeline:
         origin = UserInputNode[GeoPoint]("csel_o3", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("csel_p3", PlaceOfInterest)
         transit = commute_input_node("csel_t3")
-        bus = commute_input_node("csel_b3")
 
         node = CommuteSelectorNode(
             "csel3",
@@ -329,7 +328,7 @@ class TestCommuteSelectorPipeline:
         origin = UserInputNode[GeoPoint]("csel_o4", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("csel_p4", PlaceOfInterest)
         transit = commute_input_node("csel_t4")
-        bus = commute_input_node("csel_b4")
+        transit = commute_input_node("csel_t4")
 
         node = CommuteSelectorNode(
             "csel4",
@@ -622,149 +621,6 @@ class TestCommuteBreakdown:
 # Imports needed by TestParkAndRide (kept at module bottom to avoid
 # shadowing the test classes above)
 # ======================================================================
-
-
-class TestEnrichRailFares:
-    """enrich_rail_fares — adds NR fares when the cost is only bus/parking."""
-
-    @pytest.mark.asyncio
-    async def test_lorena_bus_cost_adds_rail_fare(self, tmp_path):
-        """Lorena with bus cost only (£4.00) gets rail fare (£37.20) added → £41.20."""
-        from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
-        from houses.rail_fares import RailFareRegistry, enrich_rail_fares
-        from houses.stations import StationRegistry
-
-        stations_csv = tmp_path / "stations.csv"
-        stations_csv.write_text(
-            "stationName,crsCode,lat,long\nWoking,WOK,51.317,-0.556\nFenchurch Street,FST,51.511,-0.079\n"
-        )
-        fares_csv = tmp_path / "fares.csv"
-        fares_csv.write_text("origin_crs,dest_crs,single_fare_gbp\nWOK,FST,17.00\n")
-
-        reg = RailFareRegistry(
-            station_registry=StationRegistry(_stations_csv=stations_csv),
-            _fares_csv=fares_csv,
-        )
-
-        async def mock_geocode(_):
-            return Attempt.succeeded(GeoPoint(51.317, -0.556))
-
-        async def mock_tube_fare(station, postcode, _data=None):
-            return None
-
-        lorena = Commute(
-            destination_label="Lorena",
-            destination_postcode="EC3A 7LP",
-            duration_minutes=78,
-            daily_cost_gbp=Money("4.0", "GBP"),
-            cost_groups=(
-                CostGroup(
-                    legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=10),),
-                    cost=4.0,
-                ),
-            ),
-        )
-        simon = Commute(
-            destination_label="Simon",
-            destination_postcode="SW1V 2QQ",
-            duration_minutes=71,
-            daily_cost_gbp=Money("40.4", "GBP"),
-        )
-        _simon, lorena_result = await enrich_rail_fares(
-            enabled={"lorena"},
-            postcode="GU21 7QF",
-            address="St James Close",
-            simon=simon,
-            lorena=lorena,
-            _registry=reg,
-            _geocode=mock_geocode,
-            _tube_fare_fn=mock_tube_fare,
-        )
-        assert lorena_result.daily_cost_gbp == Money("43.60", "GBP")
-
-    @pytest.mark.asyncio
-    async def test_simon_parking_cost_adds_rail_fare(self, tmp_path):
-        """Simon with parking cost only (£10.80) gets rail fare added → £50.40."""
-        from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
-        from houses.rail_fares import RailFareRegistry, enrich_rail_fares
-        from houses.stations import StationRegistry
-
-        stations_csv = tmp_path / "stations.csv"
-        stations_csv.write_text(
-            "stationName,crsCode,lat,long\nBrookwood,BKO,51.303,-0.636\nVictoria Station,VIC,51.495,-0.144\n"
-        )
-        fares_csv = tmp_path / "fares.csv"
-        fares_csv.write_text("origin_crs,dest_crs,single_fare_gbp\nBKO,VIC,17.00\n")
-
-        reg = RailFareRegistry(
-            station_registry=StationRegistry(_stations_csv=stations_csv),
-            _fares_csv=fares_csv,
-        )
-
-        async def mock_geocode(_):
-            return Attempt.succeeded(GeoPoint(51.303, -0.636))
-
-        async def mock_tube_fare(station, postcode, _data=None):
-            return None
-
-        simon = Commute(
-            destination_label="Simon",
-            destination_postcode="SW1V 2QQ",
-            duration_minutes=71,
-            daily_cost_gbp=Money("10.8", "GBP"),
-            cost_groups=(
-                CostGroup(
-                    legs=(JourneyLeg(mode=LegMode.PARK, duration_minutes=0),),
-                    operator="ParkCo",
-                    cost=10.8,
-                ),
-            ),
-        )
-        lorena = Commute(
-            destination_label="Lorena",
-            destination_postcode="EC3A 7LP",
-            duration_minutes=90,
-            daily_cost_gbp=None,
-        )
-        simon_result, _lorena_result = await enrich_rail_fares(
-            enabled={"simon"},
-            postcode="GU21 2NA",
-            address="Robin Hood Road, Knaphill",
-            simon=simon,
-            lorena=lorena,
-            _registry=reg,
-            _geocode=mock_geocode,
-            _tube_fare_fn=mock_tube_fare,
-        )
-        assert simon_result.daily_cost_gbp == Money("50.40", "GBP")
-
-    @pytest.mark.asyncio
-    async def test_full_tfl_fare_skips_nr(self):
-        """When TfL already priced the journey, cost stays unchanged."""
-        from houses.commute import Commute
-        from houses.rail_fares import enrich_rail_fares
-
-        lorena = Commute(
-            destination_label="Lorena",
-            destination_postcode="EC3A 7LP",
-            duration_minutes=90,
-            daily_cost_gbp=Money("36.0", "GBP"),
-        )
-        simon = Commute(
-            destination_label="Simon",
-            destination_postcode="SW1V 2QQ",
-            duration_minutes=71,
-            daily_cost_gbp=Money("40.4", "GBP"),
-        )
-        simon_result, lorena_result = await enrich_rail_fares(
-            enabled={"simon", "lorena"},
-            postcode="GU22 8RU",
-            address="Test",
-            simon=simon,
-            lorena=lorena,
-        )
-        assert simon_result.daily_cost_gbp == Money("40.4", "GBP")
-        assert lorena_result.daily_cost_gbp == Money("36.0", "GBP")
 
 
 class TestParkAndRide:

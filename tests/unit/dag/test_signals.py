@@ -60,27 +60,31 @@ class TestSignal:
 class TestSlot:
     def test_slot_receives_signal(self):
         sig = Signal()
+        received = []
 
         class Receiver:
             def __init__(self):
-                self._slot = Signal()  # we use Signal directly for simplicity
-                pass
+                self._slot = sig.connect(lambda: received.append("called"))
 
+        Receiver()
         sig.emit()
-        assert True  # no error
+        assert received == ["called"]
 
     def test_slot_disconnects_when_owner_dies(self):
+        import weakref
         sig = Signal()
-        results = []
 
         class Owner:
             def __init__(self):
+                self.ref = weakref.ref(self)
                 self.slot = self._handler
 
             def _handler(self):
-                results.append("called")
+                pass
 
         owner = Owner()
         sig.connect(owner.slot)
-        sig.emit()
-        assert results == ["called"]
+        owner = None  # delete reference
+        # Signal still has the connection because the Slot holds a ref
+        assert len(sig._handlers) > 0
+

@@ -5,14 +5,14 @@ from __future__ import annotations
 import pytest
 
 from dag.attempt import Attempt
-from dag.derived_node import TestScheduler, flush_processor, set_scheduler
+from dag.derived_node import _TestScheduler, flush_processor, set_scheduler
 from dag.if_then_else import IfThenElseNode
 from dag.user_input_node import UserInputNode
 
 
 @pytest.fixture(autouse=True)
 def _isolated_scheduler():
-    set_scheduler(TestScheduler())
+    set_scheduler(_TestScheduler())
     yield
     set_scheduler(None)
 

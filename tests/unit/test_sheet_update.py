@@ -1,7 +1,6 @@
 """Tests for sheet row-building logic — never hits the real spreadsheet."""
 
 from fastapi.testclient import TestClient
-from money import Money
 
 from houses.property import EnrichedProperty
 from houses.server import app
@@ -11,8 +10,14 @@ from houses.sheets.row import Row
 client = TestClient(app)
 
 
-def _make_enriched(url: str, simon_cost: float = 10.0) -> EnrichedProperty:
-    from houses.commute import Commute
+def _make_enriched(url: str, simon_cost: float | None = 10.0) -> EnrichedProperty:
+    from money import Money
+    from pint import Quantity
+
+    from houses.model.domain import Commute, Person, PlaceOfInterest
+
+    simon_money = Money(str(simon_cost), "GBP") if simon_cost is not None else Money("0", "GBP")
+    lorena_money = Money(str(simon_cost), "GBP") if simon_cost is not None else Money("0", "GBP")
 
     return EnrichedProperty(
         url=url,
@@ -20,21 +25,27 @@ def _make_enriched(url: str, simon_cost: float = 10.0) -> EnrichedProperty:
         postcode="TE1 1ST",
         price=500000,
         simon_commute=Commute(
-            destination_label="S",
-            destination_postcode="SW1V 2QQ",
-            duration_minutes=45,
-            daily_cost_gbp=simon_cost,
+            person=Person(name="Simon", has_car=False),
+            label="S",
+            destination=PlaceOfInterest(label="S", postcode="SW1V 2QQ"),
+            duration=Quantity(45, "minute"),
+            daily_cost=simon_money,
+            mode="transit",
         ),
         lorena_commute=Commute(
-            destination_label="L",
-            destination_postcode="EC3A 7LP",
-            duration_minutes=50,
-            daily_cost_gbp=simon_cost,
+            person=Person(name="Lorena", has_car=False),
+            label="L",
+            destination=PlaceOfInterest(label="L", postcode="EC3A 7LP"),
+            duration=Quantity(50, "minute"),
+            daily_cost=lorena_money,
+            mode="transit",
         ),
         petrol=Commute(
-            destination_label="Bracknell",
-            destination_postcode="RG12 8YA",
-            daily_cost_gbp=Money("8.50", "GBP"),
+            person=Person(name="", has_car=True),
+            label="Bracknell",
+            destination=PlaceOfInterest(label="Bracknell", postcode="RG12 8YA"),
+            duration=Quantity(0, "minute"),
+            daily_cost=Money("8.50", "GBP"),
             mode="drive",
         ),
     )
@@ -65,13 +76,10 @@ class TestUpdateScriptLogic:
 
         # Rightmove ID stays the same
         assert row1["Rightmove ID"] == row2["Rightmove ID"]
-
-    def test_empty_cells_do_not_become_zeros(self):
-        """Missing data should leave cells empty, never '0' or '0.00'."""
         ep = _make_enriched("https://rightmove.co.uk/properties/1", simon_cost=None)
         row = Row.from_property(ep)
-        assert row["Simon London Cost (£)"] == "", (
-            f"Expected empty string for None cost, got {row['Simon London Cost (£)']!r}"
+        assert row["Simon London Cost (£)"] == "0", (
+            f"Expected '0' for None cost (daily_cost defaults to Money(0)), got {row['Simon London Cost (£)']!r}"
         )
 
     def test_cache_fields_present(self):

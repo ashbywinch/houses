@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from money import Money
 
 from dag.derived_node import flush_processor
 from dag.user_input_node import UserInputNode
@@ -55,14 +56,13 @@ class TestBootstrapFromRow:
         from houses.nodes.bootstrap import bootstrap_from_row
 
         sources = {
-            "rightmove_price": UserInputNode[str]("rightmove_price", str),
+            "rightmove_price": UserInputNode[Money]("rightmove_price", Money),
         }
-        row = {"Price (£)": "450000"}
+        row = {"Price (£)": "450,000"}
         bootstrap_from_row(row, sources)
         await flush_processor()
-        await flush_processor()
         a = await sources["rightmove_price"].attempt()
-        assert a.value_or_none() == "450000"
+        assert a.value_or_none() == Money("450000", "GBP")
 
     @pytest.mark.asyncio
     async def test_pushes_rightmove_location(self):

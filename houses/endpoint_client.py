@@ -127,7 +127,7 @@ class EndpointClient:
                     )
                 elif 400 <= e.status < 500:
                     self._permanently_blocked = True
-                    body = getattr(e, "read", lambda: b"")()
+                    body = e.body.decode("utf-8", errors="replace") if e.body else ""
                     logger.warning(
                         "%s: HTTP %d on attempt %d → permanently blocked. body=%s",
                         self.name,

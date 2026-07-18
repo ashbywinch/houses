@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from money import Money
 
 from dag.derived_node import flush_processor
 from dag.user_input_node import UserInputNode
@@ -11,11 +12,10 @@ class TestMonthlyMortgagePaymentNode:
     async def test_zero_when_no_price(self):
         from houses.nodes.monthly_costs import MonthlyMortgagePaymentNode
 
-        price = UserInputNode[str]("price_mm", str)
+        price = UserInputNode[Money]("price_mm", Money)
         fin = UserInputNode[dict]("fin_mm", dict)
-        sd = UserInputNode[float]("sd_mm", float)
+        sd = UserInputNode[Money]("sd_mm", Money)
         persons = UserInputNode[list]("ps_mm", list)
-
         node = MonthlyMortgagePaymentNode(
             "mm",
             rightmove_price=price,
@@ -23,25 +23,23 @@ class TestMonthlyMortgagePaymentNode:
             persons_source=persons,
             financial_source=fin,
         )
-        price.push("0", "test")
-        sd.push(0.0, "test")
+        price.push(Money("0", "GBP"), "test")
+        sd.push(Money("0", "GBP"), "test")
         persons.push([], "test")
         fin.push({}, "test")
         await flush_processor()
-        await flush_processor()
         a = await node.attempt()
         assert a.succeeded
-        assert a.value_or_none() == 0.0
+        assert a.value_or_none() == Money("0", "GBP")
 
     @pytest.mark.asyncio
     async def test_computes_with_valid_data(self):
         from houses.nodes.monthly_costs import MonthlyMortgagePaymentNode
 
-        price = UserInputNode[str]("price_mm2", str)
+        price = UserInputNode[Money]("price_mm2", Money)
         fin = UserInputNode[dict]("fin_mm2", dict)
-        sd = UserInputNode[float]("sd_mm2", float)
+        sd = UserInputNode[Money]("sd_mm2", Money)
         persons = UserInputNode[list]("ps_mm2", list)
-
         node = MonthlyMortgagePaymentNode(
             "mm2",
             rightmove_price=price,
@@ -49,8 +47,8 @@ class TestMonthlyMortgagePaymentNode:
             persons_source=persons,
             financial_source=fin,
         )
-        price.push("300000", "test")
-        sd.push(0.0, "test")
+        price.push(Money("300000", "GBP"), "test")
+        sd.push(Money("0", "GBP"), "test")
         persons.push([], "test")
         fin.push(
             {
@@ -60,11 +58,9 @@ class TestMonthlyMortgagePaymentNode:
             "test",
         )
         await flush_processor()
-        await flush_processor()
-
         a = await node.attempt()
         assert a.succeeded
-        assert a.value_or_none() > 0
+        assert a.value_or_none() > Money("0", "GBP")
 
 
 class TestYearlySinkingFundNode:
@@ -72,42 +68,37 @@ class TestYearlySinkingFundNode:
     async def test_zero_when_no_price(self):
         from houses.nodes.monthly_costs import YearlySinkingFundNode
 
-        price = UserInputNode[str]("price_ys", str)
+        price = UserInputNode[Money]("price_ys", Money)
         fin = UserInputNode[dict]("fin_ys", dict)
-
         node = YearlySinkingFundNode(
             "ys",
             rightmove_price=price,
             financial_source=fin,
         )
-        price.push("0", "test")
+        price.push(Money("0", "GBP"), "test")
         fin.push({}, "test")
-        await flush_processor()
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
-        assert a.value_or_none() == 0.0
+        assert a.value_or_none() == Money("0", "GBP")
 
     @pytest.mark.asyncio
     async def test_computes_with_price(self):
         from houses.nodes.monthly_costs import YearlySinkingFundNode
 
-        price = UserInputNode[str]("price_ys2", str)
+        price = UserInputNode[Money]("price_ys2", Money)
         fin = UserInputNode[dict]("fin_ys2", dict)
-
         node = YearlySinkingFundNode(
             "ys2",
             rightmove_price=price,
             financial_source=fin,
         )
-        price.push("500000", "test")
+        price.push(Money("500000", "GBP"), "test")
         fin.push({"sinking_fund_rate": 0.01}, "test")
         await flush_processor()
-        await flush_processor()
-
         a = await node.attempt()
         assert a.succeeded
-        assert a.value_or_none() == 5000.0
+        assert a.value_or_none() == Money("5000", "GBP")
 
 
 class TestCommuteBreakdownNode:
@@ -117,7 +108,6 @@ class TestCommuteBreakdownNode:
 
         persons = UserInputNode[list]("persons_cb", list)
         selectors = {}
-
         node = CommuteBreakdownNode(
             "cb",
             commute_selectors=selectors,
@@ -135,12 +125,11 @@ class TestTotalMonthlyHousingCostNode:
     async def test_returns_zero_when_no_data(self):
         from houses.nodes.monthly_costs import TotalMonthlyHousingCostNode
 
-        mg = UserInputNode[float]("mg", float)
-        sf = UserInputNode[float]("sf", float)
+        mg = UserInputNode[Money]("mg", Money)
+        sf = UserInputNode[Money]("sf", Money)
         fin = UserInputNode[dict]("fin_tm", dict)
         cb = UserInputNode[dict]("cb_tm", dict)
         ct = UserInputNode[dict]("ct_tm", dict)
-
         node = TotalMonthlyHousingCostNode(
             "tm",
             monthly_mortgage_node=mg,
@@ -149,16 +138,15 @@ class TestTotalMonthlyHousingCostNode:
             commute_breakdown_node=cb,
             council_tax_node=ct,
         )
-        mg.push(0.0, "test")
-        sf.push(0.0, "test")
+        mg.push(Money("0", "GBP"), "test")
+        sf.push(Money("0", "GBP"), "test")
         fin.push({}, "test")
         cb.push({}, "test")
         ct.push({}, "test")
         await flush_processor()
-        await flush_processor()
         a = await node.attempt()
         assert a.succeeded
-        assert isinstance(a.value_or_none(), float)
+        assert isinstance(a.value_or_none(), Money)
 
     @pytest.mark.asyncio
     async def test_includes_all_cost_components(self):
@@ -167,12 +155,11 @@ class TestTotalMonthlyHousingCostNode:
         named range references in VIEW_FORMULA_COLS."""
         from houses.nodes.monthly_costs import TotalMonthlyHousingCostNode
 
-        mg = UserInputNode[float]("mg2", float)
-        sf = UserInputNode[float]("sf2", float)
+        mg = UserInputNode[Money]("mg2", Money)
+        sf = UserInputNode[Money]("sf2", Money)
         fin = UserInputNode[dict]("fin2", dict)
         cb = UserInputNode[dict]("cb2", dict)
         ct = UserInputNode[dict]("ct2", dict)
-
         node = TotalMonthlyHousingCostNode(
             "tm2",
             monthly_mortgage_node=mg,
@@ -182,43 +169,33 @@ class TestTotalMonthlyHousingCostNode:
             council_tax_node=ct,
         )
 
-        # Push all deps with initial values so node is computable
-        mg.push(0.0, "test")
-        sf.push(0.0, "test")
+        # Mortgage alone contributes 1000
+        mg.push(Money("1000", "GBP"), "test")
+        sf.push(Money("0", "GBP"), "test")
+        fin.push({}, "test")
         cb.push({}, "test")
         ct.push({}, "test")
-        fin.push({}, "test")
-        await flush_processor()
-        await flush_processor()
-
-        # Mortgage alone contributes 1000
-        mg.push(1000.0, "test")
-        await flush_processor()
         await flush_processor()
         a = await node.attempt()
-        assert a.succeeded
-        assert a.value_or_none() == 1000.0
+        assert a.value_or_none() == Money("1000", "GBP")
 
         # Sinking fund: 1200 / 12 * 2 / 3 = 66.67
-        sf.push(1200.0, "test")
-        await flush_processor()
+        sf.push(Money("1200", "GBP"), "test")
         await flush_processor()
         a = await node.attempt()
-        expected = 1000.0 + 1200.0 / 12 * 2 / 3
-        assert a.value_or_none() == round(expected, 2)
+        expected = round(1000.0 + 1200.0 / 12 * 2 / 3, 2)
+        assert float(a.value_or_none().amount) == pytest.approx(expected, abs=0.01)
 
-        # Commute: yearly_total_gbp = 4600 / 46 = 100
+        # Commute: yearly_total_gbp = 4600 / 12 = 383.33
         cb.push({"yearly_total_gbp": 4600.0}, "test")
         await flush_processor()
-        await flush_processor()
         a = await node.attempt()
-        expected = 1000.0 + 1200.0 / 12 * 2 / 3 + 4600.0 / 46
-        assert a.value_or_none() == round(expected, 2)
+        expected = round(1000.0 + 1200.0 / 12 * 2 / 3 + 4600.0 / 12, 2)
+        assert float(a.value_or_none().amount) == pytest.approx(expected, abs=0.01)
 
-        # Council tax: cost 1800 / 12 = 150
-        ct.push({"band": "D", "cost": 1800.0}, "test")
-        await flush_processor()
+        # Council tax: yearly_cost 1800 / 12 = 150
+        ct.push({"band": "D", "yearly_cost": 1800.0}, "test")
         await flush_processor()
         a = await node.attempt()
-        expected = 1000.0 + 1200.0 / 12 * 2 / 3 + 4600.0 / 46 + 1800.0 / 12
-        assert a.value_or_none() == round(expected, 2)
+        expected = round(1000.0 + 1200.0 / 12 * 2 / 3 + 4600.0 / 12 + 1800.0 / 12, 2)
+        assert float(a.value_or_none().amount) == pytest.approx(expected, abs=0.01)

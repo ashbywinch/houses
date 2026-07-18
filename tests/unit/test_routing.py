@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import pytest
 from money import Money
+from pint import Quantity
 
-from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
+from houses.commute import CostGroup, JourneyLeg, LegMode
+from houses.model.domain import Commute, Person, PlaceOfInterest
 
 # ── Fail-fast when API keys are missing ─────────────────────────────────
 
@@ -103,21 +105,45 @@ class TestCongestionZone:
 # ── get_commute decision logic (backends mocked) ────────────────────────
 
 _WALK_60 = Commute(
-    destination_label="", destination_postcode="", duration_minutes=60, daily_cost_gbp=Money("0.0", "GBP")
+    person=Person(name="", has_car=False),
+    label="",
+    destination=PlaceOfInterest(label="", postcode=""),
+    duration=Quantity(60, "minute"),
+    daily_cost=Money("0.0", "GBP"),
+    mode="walk",
 )
 _WALK_20 = Commute(
-    destination_label="", destination_postcode="", duration_minutes=20, daily_cost_gbp=Money("0.0", "GBP")
+    person=Person(name="", has_car=False),
+    label="",
+    destination=PlaceOfInterest(label="", postcode=""),
+    duration=Quantity(20, "minute"),
+    daily_cost=Money("0.0", "GBP"),
+    mode="walk",
 )
 _TRANSIT_30 = Commute(
-    destination_label="", destination_postcode="", duration_minutes=30, daily_cost_gbp=Money("8.0", "GBP")
+    person=Person(name="", has_car=False),
+    label="",
+    destination=PlaceOfInterest(label="", postcode=""),
+    duration=Quantity(30, "minute"),
+    daily_cost=Money("8.0", "GBP"),
+    mode="transit",
 )
 _DRIVE_25 = Commute(
-    destination_label="", destination_postcode="", duration_minutes=25, daily_cost_gbp=Money("5.0", "GBP")
+    person=Person(name="", has_car=False),
+    label="",
+    destination=PlaceOfInterest(label="", postcode=""),
+    duration=Quantity(25, "minute"),
+    daily_cost=Money("5.0", "GBP"),
+    mode="drive",
 )
 
 # Tiebreak fixture — route with cost, used by test_returns_cost_when_tfl_has_cost
 _SLOWER_HAS_COST = Commute(
-    destination_label="", destination_postcode="", duration_minutes=25, daily_cost_gbp=Money("5.0", "GBP")
+    person=Person(name="", has_car=False),
+    label="",
+    destination=PlaceOfInterest(label="", postcode=""),
+    duration=Quantity(25, "minute"),
+    daily_cost=Money("5.0", "GBP"),
 )
 
 
@@ -143,7 +169,7 @@ class TestGetCommuteChoice:
 
         result = await get_commute("GU21 7QF", "SW1V 2QQ", has_car=False, max_walk_minutes=30)
         assert result.succeeded, f"Expected succeeded, got {result}"
-        assert result.value_or_none().duration_minutes == 20
+        assert result.value_or_none().duration.magnitude == 20
 
     @pytest.mark.asyncio
     async def test_walking_skipped_when_too_slow(self, monkeypatch):
@@ -164,7 +190,7 @@ class TestGetCommuteChoice:
 
         result = await get_commute("GU21 7QF", "SW1V 2QQ", has_car=False, max_walk_minutes=30)
         assert result.succeeded, f"Expected succeeded, got {result}"
-        assert result.value_or_none().duration_minutes == 30  # transit, not walking
+        assert result.value_or_none().duration.magnitude == 30  # transit, not walking
 
     @pytest.mark.asyncio
     async def test_driving_considered_when_has_car(self, monkeypatch):
@@ -194,7 +220,7 @@ class TestGetCommuteChoice:
 
         result = await get_commute("GU21 7QF", "RG12 8YA", has_car=True, max_walk_minutes=15)
         assert result.succeeded, f"Expected succeeded, got {result}"
-        assert result.value_or_none().duration_minutes == 25  # driving
+        assert result.value_or_none().duration.magnitude == 25  # driving
 
     @pytest.mark.asyncio
     async def test_prefers_faster_of_transit_and_drive(self, monkeypatch):
@@ -224,7 +250,7 @@ class TestGetCommuteChoice:
 
         result = await get_commute("GU21 7QF", "RG12 8YA", has_car=True, max_walk_minutes=15)
         assert result.succeeded, f"Expected succeeded, got {result}"
-        assert result.value_or_none().duration_minutes == 25  # driving is faster than transit
+        assert result.value_or_none().duration.magnitude == 25  # driving is faster than transit
 
     @pytest.mark.asyncio
     async def test_skips_driving_for_congestion_zone(self, monkeypatch):
@@ -250,7 +276,7 @@ class TestGetCommuteChoice:
 
         result = await get_commute("GU21 7QF", "SW1V 2QQ", has_car=True, max_walk_minutes=15)
         assert result.succeeded, f"Expected succeeded, got {result}"
-        assert result.value_or_none().duration_minutes == 30  # transit, not driving
+        assert result.value_or_none().duration.magnitude == 30  # transit, not driving
 
     @pytest.mark.asyncio
     async def test_returns_impossible_when_no_route(self, monkeypatch):
@@ -306,7 +332,7 @@ class TestGetCommuteChoice:
         result = await get_commute("GU21 7QF", "EC3A 7LP", has_car=False, max_walk_minutes=30)
         assert result.succeeded, f"Expected succeeded, got {result}"
         best = result.value_or_none()
-        assert best.daily_cost_gbp == Money("5.0", "GBP"), "Should return the route with a real cost"
+        assert best.daily_cost == Money("5.0", "GBP"), "Should return the route with a real cost"
 
 
 # ── TfL: no bus when has_car=True ────────────────────────────────────
@@ -319,19 +345,20 @@ class TestTflNoBusWhenHasCar:
     async def test_skips_with_bus_when_no_bus_succeeds(self, monkeypatch):
         """has_car=True + no_bus succeeds → with_bus is not compared."""
         from dag.attempt import Attempt
-        from houses.commute import Commute
 
         no_bus = Commute(
-            destination_label="",
-            destination_postcode="SW1V 2QQ",
-            duration_minutes=90,
-            daily_cost_gbp=Money("20.0", "GBP"),
+            person=Person(name="", has_car=True),
+            label="",
+            destination=PlaceOfInterest(label="", postcode="SW1V 2QQ"),
+            duration=Quantity(90, "minute"),
+            daily_cost=Money("20.0", "GBP"),
         )
         with_bus = Commute(
-            destination_label="",
-            destination_postcode="SW1V 2QQ",
-            duration_minutes=70,
-            daily_cost_gbp=Money("15.0", "GBP"),
+            person=Person(name="", has_car=True),
+            label="",
+            destination=PlaceOfInterest(label="", postcode="SW1V 2QQ"),
+            duration=Quantity(70, "minute"),
+            daily_cost=Money("15.0", "GBP"),
         )
 
         call_count = 0
@@ -349,22 +376,22 @@ class TestTflNoBusWhenHasCar:
 
         result = await _tfl_transit_commute("GU21 2NA", "EC3A 7LP", has_car=True)
         assert result is not None
-        assert result.duration_minutes == 90, (
-            f"Expected no_bus (90 min), got {result.duration_minutes} — with_bus was compared when no_bus succeeded"
+        assert result.duration.magnitude == 90, (
+            f"Expected no_bus (90 min), got {result.duration.magnitude} — with_bus was compared when no_bus succeeded"
         )
 
     @pytest.mark.asyncio
     async def test_uses_with_bus_when_no_bus_fails(self, monkeypatch):
         """has_car=True + no_bus fails → with_bus is used as last resort."""
         from dag.attempt import Attempt
-        from houses.commute import Commute
 
         no_bus = Attempt.impossible("no route found")
         with_bus = Commute(
-            destination_label="",
-            destination_postcode="SW1V 2QQ",
-            duration_minutes=70,
-            daily_cost_gbp=Money("15.0", "GBP"),
+            person=Person(name="", has_car=True),
+            label="",
+            destination=PlaceOfInterest(label="", postcode="SW1V 2QQ"),
+            duration=Quantity(70, "minute"),
+            daily_cost=Money("15.0", "GBP"),
         )
 
         call_count = 0
@@ -382,7 +409,7 @@ class TestTflNoBusWhenHasCar:
 
         result = await _tfl_transit_commute("GU21 2NA", "EC3A 7LP", has_car=True)
         assert result is not None
-        assert result.duration_minutes == 70, f"Expected with_bus (70 min) as fallback, got {result.duration_minutes}"
+        assert result.duration.magnitude == 70, f"Expected with_bus (70 min), got {result.duration.magnitude}"
 
 
 # ── Park-and-ride creates parking CostGroup ─────────────────────────
@@ -456,10 +483,11 @@ class TestSchoolCommute:
             from dag.attempt import Attempt
 
             commute = Commute(
-                destination_label="",
-                destination_postcode=dest,
-                duration_minutes=10,
-                daily_cost_gbp=Money("0.0", "GBP"),
+                person=Person(name="", has_car=False),
+                label="",
+                destination=PlaceOfInterest(label="", postcode=dest),
+                duration=Quantity(10, "minute"),
+                daily_cost=Money("0.0", "GBP"),
             )
             return Attempt.succeeded(commute)
 
@@ -482,7 +510,7 @@ class TestSchoolCommute:
         result = await compute_school_commute("SL6 1AA", school)
 
         assert result is not None
-        assert result.duration_minutes == 10
+        assert result.duration.magnitude == 10
         assert captured["has_car"] is False
         assert captured["max_walk_minutes"] == 20
         assert captured["origin"] == "SL6 1AA"
@@ -495,14 +523,19 @@ class TestSchoolCommute:
 def _tfl_complete(duration=90, cost="12.50", walk=46) -> Commute:
     """A TfL commute with walk + train + tube legs and full cost."""
     return Commute(
-        destination_label="L",
-        destination_postcode="EC3A 7LP",
-        duration_minutes=duration,
-        daily_cost_gbp=Money(cost, "GBP"),
-        cost_groups=(
+        person=Person(name="", has_car=False),
+        label="L",
+        destination=PlaceOfInterest(label="L", postcode="EC3A 7LP"),
+        duration=Quantity(duration, "minute"),
+        daily_cost=Money(cost, "GBP"),
+        details=(
             CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=walk),)),
-            CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration_minutes=42),)),
-            CostGroup(legs=(JourneyLeg(mode=LegMode.TUBE, duration_minutes=4),)),
+            CostGroup(
+                legs=(JourneyLeg(mode=LegMode.TRAIN, duration_minutes=42),),
+            ),
+            CostGroup(
+                legs=(JourneyLeg(mode=LegMode.TUBE, duration_minutes=4),),
+            ),
         ),
     )
 
@@ -510,11 +543,13 @@ def _tfl_complete(duration=90, cost="12.50", walk=46) -> Commute:
 def _bus_route() -> Commute:
     """A bus route that saves 8 min of walking for £3.80."""
     return Commute(
-        destination_label="L (Bus)",
-        destination_postcode="EC3A 7LP",
-        duration_minutes=55,
-        daily_cost_gbp=Money("3.80", "GBP"),
-        cost_groups=(
+        person=Person(name="", has_car=False),
+        label="L (Bus)",
+        destination=PlaceOfInterest(label="L (Bus)", postcode="EC3A 7LP"),
+        duration=Quantity(55, "minute"),
+        daily_cost=Money("3.80", "GBP"),
+        mode="transit",
+        details=(
             CostGroup(
                 legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=28),),
                 cost=3.80,
@@ -531,7 +566,7 @@ async def test_replace_walk_with_bus_short_walk():
     original = _tfl_complete(walk=5)
     result = await _replace_walk_with_bus(original, "GU22 8RU", "EC3A 7LP", 5)
     assert result is original
-    assert result.daily_cost_gbp == Money("12.50", "GBP")
+    assert result.daily_cost == Money("12.50", "GBP")
 
 
 @pytest.mark.asyncio
@@ -552,9 +587,9 @@ async def test_replace_walk_with_bus_replaces_walk():
     original = _tfl_complete(duration=90, cost="12.50", walk=46)
     result = await _replace_walk_with_bus(original, "GU22 8RU", "EC3A 7LP", 46, _bus_alternative=_bus_route())
     # Duration: 90 - 46 + min(15, 46-10=36) = 90 - 46 + 15 = 59
-    assert result.duration_minutes == 59
+    assert result.duration.magnitude == 59
     # Cost: TfL £12.50 + bus £3.80 = £16.30
-    assert result.daily_cost_gbp == Money("16.30", "GBP")
+    assert result.daily_cost == Money("16.30", "GBP")
 
 
 @pytest.mark.asyncio

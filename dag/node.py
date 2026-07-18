@@ -47,7 +47,12 @@ class Node(ABC, Generic[T]):
         if stored is not None:
             status = stored.get("status", "")
             if status == "succeeded":
-                val = self._adapter.validate_python(stored["value"])
+                try:
+                    val = self._adapter.validate_python(stored["value"])
+                except Exception:
+                    # Value doesn't match the current type (e.g. float persisted
+                    # before a str→Money migration).  Discard and recompute.
+                    return None
                 attempt: Attempt[T] = Attempt.succeeded(val)
             elif status == "pending":
                 return None

@@ -10,11 +10,7 @@ specific services without monkeypatching.
 from __future__ import annotations
 
 import dataclasses
-from enum import Enum
 from typing import Any, Protocol
-
-from money import Money
-from pint import Quantity
 
 from dag.attempt import Attempt
 from dag.persistence import latest_node_result
@@ -24,7 +20,7 @@ from houses.council_tax_info import CouncilTaxInfo
 from houses.epc import lookup_epc
 from houses.geo import GeoPoint
 from houses.location import _geocode_address, geocode
-from houses.model.domain import Commute, Person, PlaceOfInterest
+from houses.model.domain import Commute, Person
 from houses.nodes.settings import make_default_financials, make_default_persons, make_default_thresholds
 from houses.school import School
 from houses.school_gender import SchoolGender
@@ -120,10 +116,6 @@ class _DefaultDriveTimeService:
         return await _get_drive_minutes(origin_postcode, station_name)
 
 
-class PersistenceService(Protocol):
-    """Persistence operations for the DAG node store."""
-
-    def load_property_data(self, rid: str) -> Any: ...
 
 
 # Settings sources are cached by node_id so that the same UserInputNode
@@ -170,21 +162,7 @@ class _DefaultCommuteRouter:
     ) -> Attempt[Commute]:
         from houses.routing import get_commute
 
-        result = await get_commute(origin, destination, has_car=has_car, max_walk_minutes=max_walk_minutes)
-        if not result.succeeded:
-            return Attempt.impossible(result.error or "route failed")
-        old = result.value_or_none()
-        return Attempt.succeeded(
-            Commute(
-                person=Person(name="", has_car=has_car),
-                label=old.destination_label,
-                destination=PlaceOfInterest(label=old.destination_label, postcode=old.destination_postcode),
-                duration=Quantity(old.duration_minutes or 0, "minute"),
-                daily_cost=old.daily_cost_gbp or Money("0", "GBP"),
-                mode=old.mode.name.lower() if isinstance(old.mode, Enum) else str(old.mode),
-                details=old.cost_groups,
-            )
-        )
+        return await get_commute(origin, destination, has_car=has_car, max_walk_minutes=max_walk_minutes)
 
 
 class _DefaultSchoolLookup:
@@ -230,16 +208,9 @@ class _DefaultRailFare:
         simon: Commute | None,
         lorena: Commute | None,
     ) -> tuple[Commute | None, Commute | None]:
-        from houses.rail_fares import enrich_rail_fares
+        # NR fare enrichment is now handled by RailFareNode in the DAG pipeline
+        return simon, lorena
 
-        return await enrich_rail_fares(enabled, postcode, address, simon, lorena)
-
-
-class _DefaultPersistence:
-    def load_property_data(self, rid: str) -> Any:
-        from dag.persistence import load_node_data
-
-        return load_node_data(rid)
 
 
 # ── DI Container ──────────────────────────────────────────────────────
@@ -255,8 +226,6 @@ class Services:
     epc_service: EPCLookupService = dataclasses.field(default_factory=_DefaultEPCLookup)
     council_tax_service: CouncilTaxService = dataclasses.field(default_factory=_DefaultCouncilTax)
     rail_fare_service: RailFareService = dataclasses.field(default_factory=_DefaultRailFare)
-    persistence: PersistenceService = dataclasses.field(default_factory=_DefaultPersistence)
-
     drive_time_service: DriveTimeService = dataclasses.field(default_factory=_DefaultDriveTimeService)
     persons_source: UserInputNode[list[Person]] = dataclasses.field(
         default_factory=lambda: _make_settings_source("persons", list[Person], make_default_persons)

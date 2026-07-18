@@ -11,16 +11,18 @@ import logging
 import re
 
 from money import Money
+from pint import Quantity
 
 from dag.attempt import Attempt
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.bus_fare_reader import get_bus_fare_reader
 from houses.bus_journey import cheapest_round_trip
-from houses.commute import Commute, CostGroup, JourneyLeg, LegMode
+from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.endpoint_client import EndpointClient
 from houses.geo import GeoPoint
 from houses.http_error import HttpError
+from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.transit_route import TransitRoute
 
 logger = logging.getLogger(__name__)
@@ -292,7 +294,6 @@ async def _google_route_commute(
     distance_meters = routes[0].get("distanceMeters", 0)
 
     dest_str = dest if isinstance(dest, str) else f"{dest.lat},{dest.lon}"
-    daily = None
     if mode == "WALK":
         leg = JourneyLeg(mode=LegMode.WALK, duration_minutes=duration_min)
         daily = Money("0", "GBP")
@@ -301,18 +302,28 @@ async def _google_route_commute(
         leg = JourneyLeg(mode=LegMode.DRIVE, duration_minutes=duration_min, distance_km=distance_km)
         daily = Money("0", "GBP")
     return Commute(
-        destination_label="",
-        destination_postcode=dest_str,
-        duration_minutes=duration_min,
-        daily_cost_gbp=daily,
-        mode=LegMode.WALK if mode == "WALK" else LegMode.DRIVE,
-        cost_groups=(
+        person=Person(name="", has_car=False),
+        label="",
+        destination=PlaceOfInterest(label="", postcode=dest_str),
+        duration=Quantity(duration_min, "minute"),
+        daily_cost=daily or Money("0", "GBP"),
+        mode="walk" if mode == "WALK" else "drive",
+        details=(
             CostGroup(
                 legs=(leg,),
                 cost=daily,
             ),
         ),
     )
+
+
+def _first_walk_minutes(commute: Commute) -> int:
+    """Return the duration (minutes) of the first walk leg in a commute, or 0."""
+    for cg in commute.details:
+        for leg in cg.legs:
+            if leg.mode == LegMode.WALK:
+                return leg.duration_minutes
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +358,13 @@ async def _tfl_transit_commute(origin_postcode: str, dest_postcode: str, has_car
     if no_bus.impossible and with_bus.impossible:
         return None
 
-    empty = Commute(destination_label=label, destination_postcode=dest_postcode)
+    empty = Commute(
+        person=Person(name="", has_car=has_car),
+        label=label,
+        destination=PlaceOfInterest(label=label, postcode=dest_postcode),
+        duration=Quantity(0, "minute"),
+        daily_cost=Money("0", "GBP"),
+    )
     no_bus_val = no_bus.value_or(empty)
     with_bus_val = with_bus.value_or(empty)
     result = _pick_best_route(no_bus_val, with_bus_val)
@@ -355,15 +372,15 @@ async def _tfl_transit_commute(origin_postcode: str, dest_postcode: str, has_car
     # Bus fallback: if the chosen route has a long walk to the first
     # transit leg, try Google Routes transit as an alternative.
     # The bus only replaces the walking leg — the TfL route stays the same.
-    if result is no_bus_val and no_bus_val.duration_minutes is not None:
-        m = re.search(r"walk.*?\((\d+)m\)", no_bus_val.summary()[:60])
-        walk_to_station = int(m.group(1)) if m else 0
+    if result is no_bus_val and result.duration.magnitude > 0:
+        walk_to_station = _first_walk_minutes(result)
         if walk_to_station >= settings.bus_walk_penalty_minutes:
             result = await _replace_walk_with_bus(
                 tfl_commute=result,
                 origin_postcode=origin_postcode,
                 dest_postcode=dest_postcode,
                 walk_to_station_minutes=walk_to_station,
+                has_car=has_car,
             )
 
     return result
@@ -377,6 +394,7 @@ async def _replace_walk_with_bus(
     origin_postcode: str,
     dest_postcode: str,
     walk_to_station_minutes: int,
+    has_car: bool = False,
     _bus_alternative: Commute | None | object = _SENTINEL,
 ) -> Commute:
     """Replace the walking leg of a TfL commute with a bus, if viable.
@@ -400,32 +418,41 @@ async def _replace_walk_with_bus(
         return tfl_commute
 
     if _bus_alternative is _SENTINEL:
-        bus = await _find_bus_alternative(origin_postcode, dest_postcode)
+        bus = await _find_bus_alternative(origin_postcode, dest_postcode, has_car=has_car)
     else:
         bus = _bus_alternative
-    if bus is None or bus.non_rail_cost() is None or bus.non_rail_cost() <= 0:
+    if bus is None:
         return tfl_commute
 
-    bus_cost = bus.non_rail_cost()
+    # Inline non_rail_cost: sum non-rail costs from commute details
+    bus_costs: list[float] = []
+    for cg in bus.details:
+        if cg.cost is not None:
+            if isinstance(cg.cost, Money):
+                bus_costs.append(float(cg.cost.amount))
+            else:
+                bus_costs.append(float(cg.cost))
+    bus_cost = sum(bus_costs) if bus_costs else None
+
+    if bus_cost is None or bus_cost <= 0:
+        return tfl_commute
+
     bus_time = min(15, walk_to_station_minutes - penalty)
     savings = walk_to_station_minutes - bus_time
     if savings < penalty:
         return tfl_commute
 
-    new_duration = tfl_commute.duration_minutes - walk_to_station_minutes + bus_time
-    new_daily_cost = tfl_commute.daily_cost_gbp
-    if new_daily_cost is not None:
-        new_daily_cost = new_daily_cost + Money(str(bus_cost), "GBP")
-    else:
-        new_daily_cost = Money(str(bus_cost), "GBP")
+    new_duration = int(tfl_commute.duration.magnitude - walk_to_station_minutes + bus_time)
+    new_daily_cost = tfl_commute.daily_cost + Money(str(bus_cost), "GBP")
 
     return Commute(
-        destination_label=tfl_commute.destination_label,
-        destination_postcode=tfl_commute.destination_postcode,
-        duration_minutes=new_duration,
-        daily_cost_gbp=new_daily_cost,
+        person=tfl_commute.person,
+        label=tfl_commute.label,
+        destination=tfl_commute.destination,
+        duration=Quantity(new_duration, "minute"),
+        daily_cost=new_daily_cost,
         mode=tfl_commute.mode,
-        cost_groups=tfl_commute.cost_groups
+        details=tfl_commute.details
         + (
             CostGroup(
                 legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=bus_time),),
@@ -435,7 +462,7 @@ async def _replace_walk_with_bus(
     )
 
 
-async def _find_bus_alternative(origin: str, dest: str) -> Commute | None:
+async def _find_bus_alternative(origin: str, dest: str, has_car: bool = False) -> Commute | None:
     """Find a bus alternative via Google Routes API (for areas outside TfL coverage)."""
     body = {
         "origin": {"address": origin},
@@ -479,12 +506,16 @@ async def _find_bus_alternative(origin: str, dest: str) -> Commute | None:
     else:
         daily_cost_gbp = None
     return Commute(
-        destination_label="Lorena — Aldgate / City of London (Bus)",
-        destination_postcode=dest,
-        duration_minutes=duration_min,
-        daily_cost_gbp=daily_cost_gbp,
+        person=Person(name="", has_car=has_car),
+        label="Lorena — Aldgate / City of London (Bus)",
+        destination=PlaceOfInterest(
+            label="Lorena — Aldgate / City of London (Bus)",
+            postcode=dest,
+        ),
+        duration=Quantity(duration_min, "minute"),
+        daily_cost=daily_cost_gbp if daily_cost_gbp is not None else Money("0", "GBP"),
         mode="transit",
-        cost_groups=(
+        details=(
             CostGroup(
                 legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=duration_min or 0),),
                 cost=bus_cost_gbp,
@@ -501,11 +532,11 @@ def _pick_best_route(a: Commute, b: Commute) -> Commute:
     Uses the ``b`` result only if it saves at least
     ``bus_walk_penalty_minutes`` over ``a``.
     """
-    if b.duration_minutes is None:
+    if b.duration.magnitude == 0:
         return a
-    if a.duration_minutes is None:
+    if a.duration.magnitude == 0:
         return b
-    savings = a.duration_minutes - b.duration_minutes
+    savings = a.duration.magnitude - b.duration.magnitude
     if savings >= settings.bus_walk_penalty_minutes:
         return b
     return a
@@ -564,7 +595,7 @@ async def get_commute(
     except ValueError as e:
         failures.append(f"walk: {e}")
         walk = None
-    if walk is not None and walk.duration_minutes is not None and walk.duration_minutes <= max_walk_minutes:
+    if walk is not None and walk.duration.magnitude <= max_walk_minutes:
         return Attempt.succeeded(walk)
     if walk is not None:
         candidates.append(walk)
@@ -594,21 +625,21 @@ async def get_commute(
             candidates.append(drive)
 
     # ── 4. Pick fastest ────────────────────────────────────────────
-    valid = [c for c in candidates if c.duration_minutes is not None]
+    valid = [c for c in candidates if c.duration.magnitude > 0]
     if valid:
         # Prefer priced routes over faster non-priced ones.
         # Priority:
-        #   1. Has real cost data (non-None, non-zero)
+        #   1. Has real cost data (non-zero daily_cost)
         #   2. Faster duration
         # Google Routes may return the fastest transit option but often
-        # lacks bus/rail fare data (cost=None).  TfL has accurate
+        # lacks bus/rail fare data (cost=0).  TfL has accurate
         # pricing for London including park-and-ride.  When we have both,
         # the priced result is more useful — the NR fare fallback
         # (applied later) can only approximate a rail fare and won't
         # capture bus or parking costs.
         def _tiebreak(c: Commute) -> tuple[int, float]:
-            no_cost = 1 if (c.daily_cost_gbp is None or c.daily_cost_gbp == Money("0", "GBP")) else 0
-            return (no_cost, c.duration_minutes or 0)
+            no_cost = 1 if c.daily_cost == Money("0", "GBP") else 0
+            return (no_cost, c.duration.magnitude or 0)
 
         return Attempt.succeeded(min(valid, key=_tiebreak))
 
@@ -620,4 +651,8 @@ def _with_label(commute: Commute, label: str, postcode: str) -> Commute:
     """Set destination label on a commute (Commute is frozen, so replace)."""
     import dataclasses
 
-    return dataclasses.replace(commute, destination_label=label, destination_postcode=postcode)
+    return dataclasses.replace(
+        commute,
+        label=label,
+        destination=PlaceOfInterest(label=label, postcode=postcode),
+    )

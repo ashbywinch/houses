@@ -70,7 +70,7 @@ def prop():
     p.rightmove_address.push("48 Acacia Avenue, Southall, UB2 5AD", "Rightmove")
     p.rightmove_url.push("https://www.rightmove.co.uk/properties/12345", "Browser")
     p.rightmove_bedrooms.push("3", "Rightmove")
-    p.rightmove_price.push("450000", "Rightmove")
+    p.rightmove_price.push(Money("450000", "GBP"), "Rightmove")
     p.rightmove_location.push(GeoPoint(51.5, -0.4), "Rightmove map")
     p.postcode.push("UB2 5AD", "Rightmove")
     register_property(rid, p)

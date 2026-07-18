@@ -77,13 +77,13 @@ async function markViewed() {
 const address = computed(() => detail.value?.best_address?.value ?? rid.value)
 
 const price = computed(() => detail.value?.rightmove_price?.succeeded
-  ? detail.value.rightmove_price.value : null)
+  ? detail.value.rightmove_price.value?.amount ?? null : null)
 
 const bedrooms = computed(() => detail.value?.rightmove_bedrooms?.succeeded
   ? detail.value.rightmove_bedrooms.value : null)
 
 const monthlyCost = computed(() => detail.value?.affordability?.total_monthly_housing_cost?.succeeded
-  ? detail.value.affordability.total_monthly_housing_cost.value : null)
+  ? detail.value.affordability.total_monthly_housing_cost.value?.amount ?? null : null)
 
 // ── Phase 4.2: Surface existing data ─────────────────
 const townDescription = computed(() => {
@@ -226,7 +226,7 @@ function epcClass(band: string): string {
       <div class="summary-bar">
         <h1 class="summary-address">{{ address }}</h1>
         <div class="summary-row">
-          <span v-if="price" class="summary-price">£{{ Number(price).toLocaleString() }}</span>
+          <span v-if="price" class="summary-price">£{{ price.toLocaleString() }}</span>
           <span v-if="monthlyCost !== null" class="summary-monthly">£{{ monthlyCost.toLocaleString() }}/mo</span>
           <span v-if="bedrooms" class="summary-bedrooms">{{ bedrooms }} bed</span>
         </div>
@@ -351,7 +351,7 @@ function epcClass(band: string): string {
         <div class="costs-table">
           <div class="costs-row">
             <span class="costs-label">Mortgage</span>
-            <span class="costs-value">£{{ detail.affordability.monthly_mortgage.value ?? '?' }}</span>
+            <span class="costs-value">£{{ detail.affordability.monthly_mortgage.value?.amount ?? '?' }}</span>
           </div>
           <div class="costs-row">
             <span class="costs-label">Council Tax</span>
@@ -373,7 +373,7 @@ function epcClass(band: string): string {
           </div>
           <div class="costs-row costs-row--total">
             <span class="costs-label">Total Monthly</span>
-            <span class="costs-value">£{{ detail.affordability.total_monthly_housing_cost.value ?? '?' }}</span>
+            <span class="costs-value">£{{ detail.affordability.total_monthly_housing_cost.value?.amount ?? '?' }}</span>
           </div>
         </div>
 
@@ -395,7 +395,7 @@ function epcClass(band: string): string {
         <!-- Stamp duty -->
         <div v-if="detail.affordability.stamp_duty" class="detail-field">
           <span class="detail-field__label">Stamp Duty</span>
-          <span class="detail-field__value">£{{ detail.affordability.stamp_duty.succeeded ? detail.affordability.stamp_duty.value?.toLocaleString() : '?' }}</span>
+          <span class="detail-field__value">£{{ detail.affordability.stamp_duty.succeeded ? detail.affordability.stamp_duty.value?.amount?.toLocaleString() : '?' }}</span>
         </div>
       </section>
 

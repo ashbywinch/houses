@@ -25,46 +25,25 @@ The watcher runs as a persistent background process (`crg-watch`). No manual
 ## Quick Start
 
 ```bash
-make setup && make run          # Install + start dev server
+make setup && make run          # Install + start dev server (backgrounded)
 make test                       # Run unit + integration + frontend typecheck/tests
 make test-integration           # Integration tests only
+make stop                       # Stop dev server + frontend
 ```
 
 ## Running (AI MUST follow)
 
-- **Always use ``make run``** to start the dev environment. It starts both the
-  backend (uvicorn ``--reload`` on :8080) and frontend (Vite on :5173) with
-  proper process trapping.
-- **NEVER start a dev server via ``bash`` with ``&``** — the process dies when
-  bash reaps the background job. The Makefile handles this correctly.
-- **NEVER kill the server.** Here's why and what to do instead:
+- **Always use ``make run``** to start the dev environment.
+- **Logs**: ``cat .logs/backend.log | tail -n 30``
+- **Stop**: ``make stop``
+- **Server errors?** Read the logs. ``uvicorn --reload`` picks up code changes in ~1s. See ``never-touch-server`` rule.
+  ``uvicorn --reload`` watches all .py files. Code changes are live in ~1s.
+- **Never** restart or kill the server. ``reload`` handles it.  Read logs instead.
+- **Never** ``fuser -k 8080/tcp`` — kills the CRG watcher.
+- **Never** ``hub restart`` anything — pointless with --reload.
+- **Health check** that hangs? Stop running it. Read logs.
 
-  ### Why you must not touch the server:
-  - ``uvicorn --reload`` watches all .py files via inotify. Your code changes are
-    live within ~1 second of saving. The server never runs stale code.
-  - ``make run`` uses ``trap 'kill 0' EXIT`` — killing one process kills both
-    backend and frontend plus the code-review-graph watcher.
-  - ``fuser -k 8080/tcp`` kills indiscriminately: the working server, the CRG
-    watcher, and any connected browser. It creates daemon crash loops.
-  - Launch daemon ``restart: always`` recycles dead servers. Frequent restarts =
-    crash loop → needs manual intervention.
-
-  ### What TO do when you need server output:
-  - **Read logs**: ``launch logs houses-server --lines=30``
-  - **Check if alive**: ``curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/health``
-  - **Check port**: ``ss -tlnp | grep 8080``
-
-  ### CONSTRAINTS — follow this path when anything seems wrong:
-
-  API error, empty page, or server seems broken?
-    - Is ``curl localhost:8080/api/health`` returning 200?
-      - YES → the server is live and running your latest code. **Fix your code.**
-        Read logs: ``launch logs houses-server --lines=20``
-      - NO  → the server may be down. Check port: ``ss -tlnp | grep 8080``
-        - Port 8080 has a listener? → **Tell the user** with ``curl`` + ``launch list`` output.
-        - Port 8080 is empty?       → **Tell the user** "The dev server is not running."
-    - **In every case: do NOT stop, start, or restart anything yourself.**
-      The user controls server lifecycle. You report state.
+## Database
 
 - **NEVER delete or recreate the database.** Here's why and what to do instead:
 

@@ -9,6 +9,7 @@ Replaces the old ``test_enrichment_flow.py`` that depended on the deleted
 from __future__ import annotations
 
 import pytest
+from money import Money
 
 from dag.derived_node import flush_processor
 from dag.user_input_node import UserInputNode
@@ -235,7 +236,7 @@ class TestEnrichmentApi:
 
         prop.rightmove_address.push("10 High St", "Rightmove")
         prop.rightmove_bedrooms.push("3", "Rightmove")
-        prop.rightmove_price.push("250000", "Rightmove")
+        prop.rightmove_price.push(Money("250000", "GBP"), "Rightmove")
         await flush_processor()
         await flush_processor()
 
@@ -268,7 +269,7 @@ class TestEnrichmentApi:
 
         prop.rightmove_address.push("10 High St", "Rightmove")
         prop.rightmove_bedrooms.push("3", "Rightmove")
-        prop.rightmove_price.push("250000", "Rightmove")
+        prop.rightmove_price.push(Money("250000", "GBP"), "Rightmove")
         await flush_processor()
         await flush_processor()
 
@@ -288,7 +289,7 @@ class TestEnrichmentApi:
 
         prop.rightmove_address.push("10 High St, Southall, UB2 5AD", "Rightmove")
         prop.rightmove_bedrooms.push("3", "Rightmove")
-        prop.rightmove_price.push("250000", "Rightmove")
+        prop.rightmove_price.push(Money("250000", "GBP"), "Rightmove")
         await flush_processor()
         await flush_processor()
 
@@ -396,7 +397,7 @@ class TestEnrichmentBootstrap:
 
         assert (await prop.rightmove_address.attempt()).value_or_none() == "Pembroke Avenue, Hersham, KT12"
         assert (await prop.rightmove_bedrooms.attempt()).value_or_none() == "3"
-        assert (await prop.rightmove_price.attempt()).value_or_none() == "300000"
+        assert (await prop.rightmove_price.attempt()).value_or_none() == Money("300000", "GBP")
         assert (await prop.rightmove_url.attempt()).value_or_none() == "https://rightmove.co.uk/properties/999"
 
     @pytest.mark.asyncio
