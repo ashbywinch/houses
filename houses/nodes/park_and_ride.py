@@ -17,6 +17,8 @@ from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.geo import GeoPoint
+from houses.car_park import CarParkRegistry
+from houses.stations import StationRegistry
 from houses.model.domain import Commute
 
 
@@ -36,6 +38,8 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         postcode_node: Node,
         has_car: bool,
         max_walk: int,
+        station_registry: StationRegistry | None = None,
+        car_park_registry: CarParkRegistry | None = None,
     ):
         self.transit_node = transit_node
         self.best_location = best_location
@@ -43,6 +47,8 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         self._has_car = has_car
         self._max_walk = max_walk
         self._car_park_name: str = ""
+        self._station_registry = station_registry
+        self._car_park_registry = car_park_registry
         deps = (transit_node,)
         if has_car:
             deps = deps + (best_location, postcode_node)
@@ -92,16 +98,13 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         if drive_minutes is None:
             return transit
 
-        # Look up car park cost at that station
-        from houses.car_park import CarParkRegistry
-        from houses.stations import StationRegistry
-
-        registry = StationRegistry()
+        # Look up car park cost at that station (injected or default)
+        registry = self._station_registry or StationRegistry()
         station = registry.find(station_name)
         if station is None:
             return transit
 
-        parking = CarParkRegistry()
+        parking = self._car_park_registry or CarParkRegistry()
         car_park = parking.find_car_park(station)
         if car_park is None or car_park.daily_cost is None:
             return transit
