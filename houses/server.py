@@ -77,7 +77,9 @@ async def lifespan(_app: FastAPI):
     _reset_broadcaster()
     _reset_town_desc()
     _reset_council_tax()
-    seed_registry_from_sheet()
+    from houses.property_registry import list_properties as _list_props
+    if not _list_props():
+        logger.warning("Property registry is empty — call POST /api/admin/reseed to load from Google Sheet")
     # Start the background stale-node processor and the WebSocket broadcaster.
     # The processor eagerly recomputes nodes whose dependencies have changed;
     # the broadcaster pushes fresh property summaries to connected clients.

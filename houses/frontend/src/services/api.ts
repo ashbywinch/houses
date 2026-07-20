@@ -39,9 +39,9 @@ export async function fetchSettings(): Promise<Record<string, unknown>> {
   return r.json()
 }
 
-export function patchPersons(persons: unknown[]): Promise<Response> {
+export function putPersons(persons: unknown[]): Promise<Response> {
   return fetch(`${BASE}/settings/persons`, {
-    method: 'PATCH',
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(persons),
   })

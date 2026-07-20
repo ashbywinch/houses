@@ -201,8 +201,18 @@ async def get_settings():
     }
 
 
-@api_router.patch("/settings/persons")
-async def patch_persons(body: list = Body()):  # noqa: B008
+@api_router.put("/settings/persons")
+async def put_persons(body: list = Body()):  # noqa: B008
+    """Replace the entire persons configuration.
+
+    This is PUT (not PATCH) because it replaces the full list.
+    An empty array is rejected — at least one person is required.
+    """
+    from fastapi import HTTPException
+
+    if not body:
+        raise HTTPException(status_code=400, detail="At least one person is required")
+
     # Validate deposit_equity — the Money validator rejects bare numbers
     # (int/float) but accepts {'amount': ..., 'currency': ...} dicts.
     # We also need to CONVERT the dict to Money here because Pydantic's
@@ -215,8 +225,6 @@ async def patch_persons(body: list = Body()):  # noqa: B008
     def _validate_de(d: dict) -> dict:
         de = d.get("deposit_equity")
         if isinstance(de, (int, float)):
-            from fastapi import HTTPException
-
             raise HTTPException(
                 status_code=400,
                 detail=f"deposit_equity must be a dict or null, got {type(de).__name__}: {de}",
@@ -225,35 +233,47 @@ async def patch_persons(body: list = Body()):  # noqa: B008
             d["deposit_equity"] = _Money(de["amount"], de.get("currency", "GBP"))
         return d
 
-    persons = []
+    validated = []
     for p in body:
-        if isinstance(p, dict):
-            _validate_de(p)
-            persons.append(
-                Person(
-                    **{
-                        k: (
-                            tuple(PlaceOfInterest(**poi) if isinstance(poi, dict) else poi for poi in v)
-                            if k == "places_of_interest"
-                            else v
-                        )
-                        for k, v in p.items()
-                    }
-                )
+        if not isinstance(p, dict):
+            validated.append(p)
+            continue
+        _validate_de(p)
+        validated.append(
+            Person(
+                **{
+                    k: (
+                        tuple(PlaceOfInterest(**poi) if isinstance(poi, dict) else poi for poi in v)
+                        if k == "places_of_interest"
+                        else v
+                    )
+                    for k, v in p.items()
+                }
             )
-        else:
-            persons.append(p)
+        )
     try:
-        get_services().persons_source.push(persons, "user")
+        get_services().persons_source.push(validated, "user")
     except (ValueError, TypeError) as e:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "ok"}
 
 @api_router.patch("/settings/financial")
 async def patch_financial(body: dict):
     get_services().financial_source.push(body, "user")
+    return {"status": "ok"}
+
+
+@api_router.post("/admin/reseed")
+async def reseed_from_sheet():
+    """Re-seed the property registry from the Google Sheet.
+
+    This is intentionally NOT automatic on server start — auto-reloads
+    from code changes should not re-read the sheet.  Call this endpoint
+    explicitly after seeding the sheet with new properties.
+    """
+    from houses.nodes.bootstrap import seed_registry_from_sheet
+
+    seed_registry_from_sheet()
     return {"status": "ok"}
 
 @api_router.get("/debug/scheduler")

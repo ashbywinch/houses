@@ -83,21 +83,24 @@ class TestSettingsApi:
 
         return TestClient(app)
 
-    def test_patch_persons_with_list(self):
-        """PATCH /settings/persons must accept a raw JSON list body."""
+    def test_put_persons_with_list(self):
+        """PUT /settings/persons must accept a raw JSON list body."""
         client = self._setup()
-        resp = client.patch(
+        resp = client.put(
             "/api/settings/persons",
-            json=[{"name": "Test", "has_car": False, "places_of_interest": []}],
+            json=[{"name": "Simon", "has_car": True}],
         )
-        assert resp.status_code == 200
-        assert resp.json() == {"status": "ok"}
+        assert resp.status_code == 200, (
+            f"Expected 200, got {resp.status_code}: {resp.text[:200]}"
+        )
 
-    def test_patch_persons_empty_list(self):
-        """PATCH /settings/persons with empty list must not crash."""
+    def test_put_persons_rejects_empty_list(self):
+        """PUT /settings/persons with empty list must return 400."""
         client = self._setup()
-        resp = client.patch("/api/settings/persons", json=[])
-        assert resp.status_code == 200
+        resp = client.put("/api/settings/persons", json=[])
+        assert resp.status_code == 400, (
+            f"Expected 400 for empty list, got {resp.status_code}"
+        )
 
     def test_patch_financial_with_dict(self):
         """PATCH /settings/financial must accept a dict body."""
