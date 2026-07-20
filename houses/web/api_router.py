@@ -203,26 +203,53 @@ async def get_settings():
 
 @api_router.patch("/settings/persons")
 async def patch_persons(body: list = Body()):  # noqa: B008
+    # Validate deposit_equity — the Money validator rejects bare numbers
+    # (int/float) but accepts {'amount': ..., 'currency': ...} dicts.
+    # We also need to CONVERT the dict to Money here because Pydantic's
+    # dataclass handling doesn't call the Money schema for Money|None
+    # union fields, so dump_python() later would fail serializing a dict.
+    from money import Money as _Money
+
     from houses.model.domain import Person, PlaceOfInterest
 
-    persons = [
-        Person(
-            **{
-                k: (
-                    tuple(PlaceOfInterest(**poi) if isinstance(poi, dict) else poi for poi in v)
-                    if k == "places_of_interest"
-                    else v
-                )
-                for k, v in p.items()
-            }
-        )
-        if isinstance(p, dict)
-        else p
-        for p in body
-    ]
-    get_services().persons_source.push(persons, "user")
-    return {"status": "ok"}
+    def _validate_de(d: dict) -> dict:
+        de = d.get("deposit_equity")
+        if isinstance(de, (int, float)):
+            from fastapi import HTTPException
 
+            raise HTTPException(
+                status_code=400,
+                detail=f"deposit_equity must be a dict or null, got {type(de).__name__}: {de}",
+            )
+        if isinstance(de, dict):
+            d["deposit_equity"] = _Money(de["amount"], de.get("currency", "GBP"))
+        return d
+
+    persons = []
+    for p in body:
+        if isinstance(p, dict):
+            _validate_de(p)
+            persons.append(
+                Person(
+                    **{
+                        k: (
+                            tuple(PlaceOfInterest(**poi) if isinstance(poi, dict) else poi for poi in v)
+                            if k == "places_of_interest"
+                            else v
+                        )
+                        for k, v in p.items()
+                    }
+                )
+            )
+        else:
+            persons.append(p)
+    try:
+        get_services().persons_source.push(persons, "user")
+    except (ValueError, TypeError) as e:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok"}
 
 @api_router.patch("/settings/financial")
 async def patch_financial(body: dict):
