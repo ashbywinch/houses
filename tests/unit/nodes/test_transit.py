@@ -77,3 +77,46 @@ class TestTransitNodeJson:
         assert j["succeeded"] is False
         assert j["impossible"] is False
         assert j["status"] == "pending"
+
+
+    @pytest.mark.asyncio
+    async def test_provenance_includes_input_values(self):
+        """When a transit commute fails, the provenance should include the
+        input values (origin coordinates, destination postcode) so developers
+        can see what inputs caused the failure without tracing code.
+
+        This relies on UserInputNode.build_provenance() including value,
+        and Provenance.to_dict() serializing it.
+        """
+        from houses.geo import GeoPoint
+        from houses.model.domain import PlaceOfInterest
+        from houses.nodes.transit import TransitNode
+
+        loc = UserInputNode[GeoPoint]("loc_ti", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi_ti", PlaceOfInterest)
+
+        node = TransitNode("tn_inputs", best_location=loc, poi=poi, has_car=False, max_walk=30)
+
+        loc.push(GeoPoint(51.6, -1.25), "test")
+        poi.push(PlaceOfInterest(label="Aldgate", postcode="EC3A 7LP"), "test")
+
+        await node.refresh()
+        j = await node.to_json()
+
+        # The provenance should contain the dependency values
+        prov = j.get("provenance", {})
+        sources = prov.get("sources", {})
+
+        # Check the POI source includes its value (the postcode)
+        poi_source = sources.get("poi_ti", {})
+        assert "value" in poi_source, (
+            f"POI provenance should include 'value' with the postcode. "
+            f"Got keys: {list(poi_source.keys())}"
+        )
+
+        # Check the location source includes its value (the GeoPoint)
+        loc_source = sources.get("loc_ti", {})
+        assert "value" in loc_source, (
+            f"Location provenance should include 'value' with the GeoPoint. "
+            f"Got keys: {list(loc_source.keys())}"
+        )

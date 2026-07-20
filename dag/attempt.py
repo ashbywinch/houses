@@ -191,6 +191,7 @@ class Provenance:
 
     label: str = ""
     description: str = ""
+    value: Any = None
     sources: dict[str, Provenance] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -198,6 +199,14 @@ class Provenance:
         result: dict = {"label": self.label}
         if self.description:
             result["description"] = self.description
+        if self.value is not None:
+            # Omit the value if it's not JSON-serializable or too large
+            try:
+                import json as _json
+                _json.dumps(self.value)
+                result["value"] = self.value
+            except (TypeError, ValueError, OverflowError):
+                result["value"] = str(self.value)
         if self.sources:
             result["sources"] = {
                 k: v.to_dict() for k, v in self.sources.items()
