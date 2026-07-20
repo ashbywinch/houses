@@ -29,6 +29,25 @@ class TestWalkCommuteFailsFast:
         finally:
             settings.google_maps_api_key = original
 
+    def test_raise_with_body_includes_response_text(self):
+        """_raise_with_body must include the response body in the error
+        message so the reason for a 400 (e.g. "LatLng cannot be specified
+        as an Address Waypoint") appears in the traceback."""
+        import httpx
+        from houses.routing import _raise_with_body
+
+        resp = httpx.Response(
+            status_code=400,
+            text='{"error":"bad request"}',
+            request=httpx.Request("POST", "http://example.com/api"),
+        )
+        with pytest.raises(httpx.HTTPStatusError) as exc:
+            _raise_with_body(resp)
+        assert '{"error":"bad request"}' in str(exc.value), (
+            f"Response body should be appended to error message. "
+            f"Got: {str(exc.value)}"
+        )
+
 
 
 @pytest.mark.asyncio

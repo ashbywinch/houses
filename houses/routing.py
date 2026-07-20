@@ -61,6 +61,22 @@ ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-car
 
 
 
+def _raise_with_body(resp: httpx.Response) -> None:
+    """Call ``raise_for_status()`` with the response body appended.
+
+    httpx.HTTPStatusError.__str__() only includes the status code and
+    URL, not the response body.  When Google Routes rejects a request
+    (e.g. 400 with 'LatLng cannot be specified as an Address Waypoint'),
+    the body is the only place the reason appears.
+    """
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        body = resp.text[:1000]
+        raise httpx.HTTPStatusError(
+            f"{e} — {body}", request=e.request, response=e.response
+        ) from e
+
 async def _google_routes_post(
     body: dict,
     field_mask: str,
@@ -89,7 +105,7 @@ async def _google_routes_post(
         resp = await client.post(GOOGLE_ROUTES_URL, json=body, headers=headers)
         if resp.status_code == 429:
             raise HttpError(429, "rate limited", headers=dict(resp.headers))
-        resp.raise_for_status()
+        _raise_with_body(resp)
         data = resp.json()
         set_cached("POST", GOOGLE_ROUTES_URL, None, key, data)
         return data
