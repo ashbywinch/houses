@@ -19,6 +19,10 @@ class WalkabilityNode(DerivedNode[dict]):
         result = await svc.walkability_service.enrich(loc.lat, loc.lon, address.value_or_none() or "")
         return Attempt.succeeded(result)
 
+    def _is_transient_error(self, exc: Exception) -> bool:
+        from houses.helpers import is_transient_error as _ite
+        return _ite(exc)
+
     async def build_provenance(self):
         return Provenance(label="walkability")
 
@@ -32,6 +36,10 @@ class TownDescNode(DerivedNode[dict]):
         svc = get_services()
         desc = await svc.town_desc_service.describe("", f"{loc.lat},{loc.lon}")
         return Attempt.succeeded({"description": desc})
+
+    def _is_transient_error(self, exc: Exception) -> bool:
+        from houses.helpers import is_transient_error as _ite
+        return _ite(exc)
 
     async def build_provenance(self):
         return Provenance(label="LLM")

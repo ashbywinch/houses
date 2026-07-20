@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head><title>Vue CDN Test</title></head>
+<body>
+<div id="app">Loading...</div>
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<script>
+try {
+  const app = Vue.createApp({ template: '<h1>Hello World</h1>' });
+  app.mount('#app');
+  document.title = 'SUCCESS';
+} catch(e) {
+  document.body.innerHTML = '<pre>ERROR: ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 3).join('\n') + '</pre>';
+}
+</script>
+</body>
+</html>

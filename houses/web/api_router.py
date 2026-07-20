@@ -228,3 +228,47 @@ async def patch_persons(body: list = Body()):  # noqa: B008
 async def patch_financial(body: dict):
     get_services().financial_source.push(body, "user")
     return {"status": "ok"}
+
+@api_router.get("/debug/scheduler")
+async def debug_scheduler():
+    """Dump the entire scheduler queue — for debugging stalled background processing."""
+    from dag.derived_node import AsyncQueueScheduler as _AsyncQueueScheduler
+    from dag.derived_node import _get_scheduler
+
+    sched = _get_scheduler()
+    if not isinstance(sched, _AsyncQueueScheduler):
+        return {"type": type(sched).__name__, "error": "not AsyncQueueScheduler"}
+
+    queue_snapshot = []
+    while not sched._queue.empty():
+        try:
+            ev = sched._queue.get_nowait()
+            queue_snapshot.append({
+                "node_id": ev.node_id,
+                "scheduled_at": ev.scheduled_at,
+            })
+            sched._queue.put_nowait(ev)
+        except Exception:
+            break
+
+    return {
+        "queue_size": len(queue_snapshot),
+        "scheduled_count": len(sched._scheduled),
+        "wakeup_set": sched._wakeup.is_set(),
+        "queue": queue_snapshot[:500],
+    }
+
+@api_router.get("/debug/memory")
+async def debug_memory():
+    """Count Python objects by type — helps diagnose memory leaks."""
+    import gc
+    from collections import Counter
+
+    gc.collect()
+    obj_counts = Counter(type(o).__name__ for o in gc.get_objects())
+    top = obj_counts.most_common(30)
+
+    return {
+        "total_objects": sum(obj_counts.values()),
+        "top_types": [{"type": t, "count": c} for t, c in top],
+    }

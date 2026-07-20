@@ -8,6 +8,8 @@ import re
 from collections import namedtuple
 from pathlib import Path
 
+import httpx
+
 from dag.attempt import Attempt
 from houses.api_cache import cached_sync_client, get_cached, set_cached
 from houses.council_tax_info import CouncilTaxInfo
@@ -29,6 +31,10 @@ COUNCIL_TAX_CSV = "data/council_tax_rates.csv"
 
 # In-memory cache: lowercased authority name -> Band D rate (float)
 _cached_rates: dict[str, float] | None = None
+def _reset():
+    """Clear the cached council tax rates for test isolation."""
+    global _cached_rates
+    _cached_rates = None
 
 
 def _load_rates() -> dict[str, float]:
@@ -220,6 +226,8 @@ async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[Counci
     except ImportError:
         logger.warning("uk-property-apis not installed; skipping council tax lookup")
         return Attempt.impossible("uk-property-apis not installed")
+    except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
+        raise  # transient — let DAG retry handle it
     except Exception as e:
         logger.warning("VOA council tax lookup failed for %s: %s", postcode, e)
         return Attempt.impossible(f"VOA lookup failed: {e}")

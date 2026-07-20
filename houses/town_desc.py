@@ -4,11 +4,13 @@ import httpx
 
 from houses.api_cache import cached_async_client, with_cache
 from houses.config import settings
-from houses.retry import retry_async
 
 logger = logging.getLogger(__name__)
 
 _town_cache: dict[str, str] = {}
+def _reset():
+    """Clear the town description cache for test isolation."""
+    _town_cache.clear()
 
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -52,15 +54,12 @@ async def generate_town_description(town_name: str, postcode: str) -> str:
         }
 
         async def _fetch():
-            resp: object = await retry_async(
-                lambda: cached_async_client(timeout=15.0).post(
+            async with cached_async_client(timeout=15.0) as client:
+                resp = await client.post(
                     API_URL,
                     json=body,
                     headers={"Authorization": f"Bearer {settings.llm_api_key}"},
-                ),
-                max_retries=2,
-                base_delay=1.0,
-            )
+                )
             assert isinstance(resp, httpx.Response)
             resp.raise_for_status()
             return resp.json()
@@ -70,6 +69,8 @@ async def generate_town_description(town_name: str, postcode: str) -> str:
         description = raw.split(".")[0].strip() + "."
         _town_cache[key] = description
         return description
+    except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
+        raise  # transient — let DAG retry handle it
     except Exception:
         logger.warning("Failed to generate town description for %s", town_name, exc_info=True)
         return ""

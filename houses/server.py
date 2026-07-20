@@ -11,13 +11,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-import houses.bus_fare_reader as _bfr
-import houses.location as _loc
 import houses.services_provider as _sp
 from dag.persistence import init_db as init_dag_db
-from houses.bus_journey import BusJourneyRegistry
 from houses.config import settings
-from houses.location import _geo_state_var, _GeoState, extract_postcode, is_outcode
+from houses.location import extract_postcode, is_outcode
 from houses.nodes.bootstrap import seed_registry_from_sheet
 from houses.nodes.cutover import push_enriched_property
 from houses.nodes.property import PropertyNodes
@@ -36,6 +33,13 @@ from houses.web.api_router import api_router
 from houses.web.json_utils import asdict_serializable
 
 logger = logging.getLogger(__name__)
+
+def _on_node_refreshed(node):
+    """Broadcast per-node update after a genuine value change."""
+    import asyncio
+
+    from houses.web.broadcaster import _push_node_update
+    asyncio.create_task(_push_node_update(node))
 
 
 @asynccontextmanager
@@ -63,6 +67,16 @@ async def lifespan(_app: FastAPI):
     # leaking API keys in the server log
     logging.getLogger("httpx").setLevel(logging.WARNING)
     init_dag_db()
+    from houses.services import _reset_settings_cache
+    from houses.property_registry import _reset as _reset_property_registry
+    from houses.web.broadcaster import _reset as _reset_broadcaster
+    from houses.town_desc import _reset as _reset_town_desc
+    from houses.council_tax import _reset as _reset_council_tax
+    _reset_settings_cache()
+    _reset_property_registry()
+    _reset_broadcaster()
+    _reset_town_desc()
+    _reset_council_tax()
     seed_registry_from_sheet()
     # Start the background stale-node processor and the WebSocket broadcaster.
     # The processor eagerly recomputes nodes whose dependencies have changed;
@@ -70,12 +84,6 @@ async def lifespan(_app: FastAPI):
     from dag.derived_node import set_after_refresh
     from dag.derived_node import start_processor as _start_processor
     from houses.web.broadcaster import _broadcaster as _start_broadcaster
-    from houses.web.broadcaster import push_rid
-
-    # Wire: after each node refresh, push the property RID to the broadcast queue
-    def _on_node_refreshed(node):
-        rid = node._id.split("/")[0]
-        push_rid(rid)
 
     set_after_refresh(_on_node_refreshed)
     _proc_task = _start_processor()
@@ -110,18 +118,12 @@ app.include_router(api_router)
 
 @app.middleware("http")
 async def _request_context(request, call_next):
-    """Set up per-request context (geo cache, geo state, services, bus fares)."""
-    geo_cache_token = _loc._geo_cache_var.set({})
-    geo_state_token = _geo_state_var.set(_GeoState())
+    """Set up per-request context (services container)."""
     svc_token = _sp._request_services.set(Services())
-    bus_token = _bfr._request_bus_fares.set(BusJourneyRegistry())
     try:
         return await call_next(request)
     finally:
-        _bfr._request_bus_fares.reset(bus_token)
         _sp._request_services.reset(svc_token)
-        _geo_state_var.reset(geo_state_token)
-        _loc._geo_cache_var.reset(geo_cache_token)
 
 
 @app.get("/properties")

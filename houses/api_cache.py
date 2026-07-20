@@ -114,9 +114,9 @@ async def with_cache(
 class CachingTransport(httpx.AsyncBaseTransport):
     """httpx async transport that checks the disk cache before making HTTP calls.
 
-    On a cache hit the stored JSON is returned directly.  On a miss the
-    request is forwarded to ``_inner`` and the response is cached before
-    being returned.
+    On a cache hit the stored JSON is returned with its original HTTP status.
+    On a miss the request is forwarded to ``_inner`` and the response is cached
+    before being returned (including non-2xx so re-processing doesn't hit APIs).
 
     Stores raw response bodies (not wrapped) so that enrichment functions
     using ``get_cached`` directly remain compatible.
@@ -133,15 +133,22 @@ class CachingTransport(httpx.AsyncBaseTransport):
 
         cached = get_cached(request.method, url_path, params, body)
         if cached is not None:
+            if isinstance(cached, dict) and "_cached_status" in cached:
+                return httpx.Response(cached["_cached_status"], json=cached["_cached_body"])
             return httpx.Response(200, json=cached)
 
         response = await self._inner.handle_async_request(request)
-        if response.is_success:
-            try:
-                data = response.json()
+        # Cache ALL responses (including errors) so re-processing stale
+        # nodes doesn't make fresh API calls on every restart.
+        try:
+            data = response.json()
+            if response.is_success:
                 set_cached(request.method, url_path, params, body, data)
-            except Exception:
-                pass
+            else:
+                set_cached(request.method, url_path, params, body,
+                           {"_cached_status": response.status_code, "_cached_body": data})
+        except Exception:
+            pass
         return response
 
 

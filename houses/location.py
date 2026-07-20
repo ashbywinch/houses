@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import logging
 import re
 from dataclasses import dataclass, replace
@@ -14,11 +13,10 @@ from dag.attempt import Attempt
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.config import settings
 from houses.geo import GeoPoint
-from houses.retry import retry_async
 
 logger = logging.getLogger(__name__)
 
-# ── Geocoding API state (per-request via contextvars) ─────────────
+# ── Geocoding API state (per-request via Services) ─────────────
 
 
 class _GeoState:
@@ -28,17 +26,14 @@ class _GeoState:
     nominatim_last_call: float = 0.0
 
 
-_GEO_STATE_SENTINEL: _GeoState = _GeoState()
-
-_geo_state_var: contextvars.ContextVar[_GeoState] = contextvars.ContextVar("geo_state", default=_GEO_STATE_SENTINEL)
 
 
 def _get_geo_state() -> _GeoState:
-    state = _geo_state_var.get()
-    if state is _GEO_STATE_SENTINEL:
-        state = _GeoState()
-        _geo_state_var.set(state)
-    return state
+    from houses.services_provider import get_services
+    svc = get_services()
+    if svc.geo_state is None:
+        svc.geo_state = _GeoState()
+    return svc.geo_state
 
 
 # ── URL constants ────────────────────────────────────────────────
@@ -57,17 +52,20 @@ _TOWN_SUFFIXES = re.compile(
     re.IGNORECASE,
 )
 
-# ── In-memory geocode cache (per-request via contextvars) ─────────
+# ── In-memory geocode cache (per-request via Services) ─────────
 
-_geo_cache_var: contextvars.ContextVar[dict[str, Attempt[GeoPoint]]] = contextvars.ContextVar("geo_cache", default=None)  # type: ignore[arg-type]
+
+def _geo_cache() -> dict:
+    from houses.services_provider import get_services
+    svc = get_services()
+    if svc.geo_cache is None:
+        svc.geo_cache = {}
+    return svc.geo_cache
 
 
 def _cache_result(key: str, result: Attempt[GeoPoint]) -> None:
     """Store a geocode result in the per-request cache."""
-    cache = _geo_cache_var.get()
-    if cache is None:
-        cache = {}
-        _geo_cache_var.set(cache)
+    cache = _geo_cache()
     cache[key] = result
 
 
@@ -178,11 +176,10 @@ async def _geocode_nominatim(query: str) -> Attempt[GeoPoint]:
     if _get_geo_state().nominatim_exhausted:
         return Attempt.impossible("rate limit exhausted")
     cache_key = f"nom::{query.strip().upper()}"
-    cache = _geo_cache_var.get()
-    if cache is not None:
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
+    cache = _geo_cache()
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
     clean = _END_PC_RE.sub("", query).strip()
     now = asyncio.get_event_loop().time()
     since_last = now - _get_geo_state().nominatim_last_call
@@ -233,11 +230,10 @@ async def _geocode_nominatim(query: str) -> Attempt[GeoPoint]:
 async def _geocode_address(address: str) -> Attempt[GeoPoint]:
     """Geocode a free-form UK address via Google Maps, ORS, then Nominatim."""
     cache_key = f"addr::{address.strip().upper()}"
-    cache = _geo_cache_var.get()
-    if cache is not None:
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
+    cache = _geo_cache()
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
     # ── 1: Google Maps Geocoding ──────────────────────────────────
     # Note: No pre-check for the API key. Just try the call — the mock
     # transport handles it in tests, and in production a missing key
@@ -309,15 +305,10 @@ async def _geocode_address(address: str) -> Attempt[GeoPoint]:
         else:
             try:
                 async with cached_async_client(timeout=10.0) as client:
-                    resp = await retry_async(
-                        lambda: client.get(
-                            ORS_GEOCODE_URL,
-                            params=params,
-                            headers={"Authorization": settings.ors_api_key},
-                        ),
-                        max_retries=2,
-                        base_delay=0.5,
-                        exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+                    resp = await client.get(
+                        ORS_GEOCODE_URL,
+                        params=params,
+                        headers={"Authorization": settings.ors_api_key},
                     )
                     resp.raise_for_status()
                     data = resp.json()
@@ -348,11 +339,10 @@ async def _geocode_postcode(postcode: str) -> Attempt[GeoPoint]:
     key = postcode.strip().upper()
     if not key:
         return Attempt.impossible("empty postcode")
-    cache = _geo_cache_var.get()
-    if cache is not None:
-        cached = cache.get(key)
-        if cached is not None:
-            return cached
+    cache = _geo_cache()
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
 
     is_outcode = bool(_OUTCODE_RE.match(key))
     url = f"{OUTCODES_IO_URL}/{key}" if is_outcode else f"{POSTCODES_IO_URL}/{key}"
@@ -369,12 +359,7 @@ async def _geocode_postcode(postcode: str) -> Attempt[GeoPoint]:
     else:
         try:
             async with cached_async_client(timeout=10.0) as client:
-                resp = await retry_async(
-                    lambda: client.get(url),
-                    max_retries=2,
-                    base_delay=0.5,
-                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-                )
+                resp = await client.get(url)
                 resp.raise_for_status()
                 data = resp.json()
                 set_cached("GET", url, None, None, data)

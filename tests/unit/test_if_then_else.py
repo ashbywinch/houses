@@ -5,14 +5,14 @@ from __future__ import annotations
 import pytest
 
 from dag.attempt import Attempt
-from dag.derived_node import _TestScheduler, flush_processor, set_scheduler
+from dag.derived_node import AsyncQueueScheduler, flush_processor, set_scheduler
 from dag.if_then_else import IfThenElseNode
 from dag.user_input_node import UserInputNode
 
 
 @pytest.fixture(autouse=True)
 def _isolated_scheduler():
-    set_scheduler(_TestScheduler())
+    set_scheduler(AsyncQueueScheduler(respect_time=False))
     yield
     set_scheduler(None)
 

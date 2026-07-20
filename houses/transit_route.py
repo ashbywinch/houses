@@ -19,7 +19,6 @@ from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.location import _geocode_address, geocode
 from houses.model.domain import Commute, Person, PlaceOfInterest
-from houses.retry import retry_async
 from houses.stations import Station
 from houses.stations import find as find_station
 
@@ -226,22 +225,19 @@ async def _get_drive_minutes(origin_postcode: str, station_name: str) -> int | N
             cached = get_cached("POST", ORS_DIRECTIONS_URL, None, json.dumps(body, sort_keys=True))
             if cached is not None:
                 return round(cached["routes"][0]["summary"]["duration"] / 60)
-            resp = await retry_async(
-                lambda: client.post(
-                    ORS_DIRECTIONS_URL,
-                    headers={"Authorization": settings.ors_api_key, "Content-Type": "application/json"},
-                    json=body,
-                ),
-                max_retries=2,
-                base_delay=1.0,
-                exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+            resp = await client.post(
+                ORS_DIRECTIONS_URL,
+                headers={"Authorization": settings.ors_api_key, "Content-Type": "application/json"},
+                json=body,
             )
             resp.raise_for_status()
             data = resp.json()
             set_cached("POST", ORS_DIRECTIONS_URL, None, json.dumps(body, sort_keys=True), data)
             return round(data["routes"][0]["summary"]["duration"] / 60)
     except Exception:
-        logger.warning("Park-and-ride ORS lookup failed for %s → %s", origin_postcode, station_name)
+        logger.warning(
+            "Park-and-ride ORS lookup failed for %s → %s (url=%s)", origin_postcode, station_name, ORS_DIRECTIONS_URL
+        )
         return None
 
 
@@ -389,27 +385,21 @@ class TransitRoute:
         else:
             try:
                 async with cached_async_client(timeout=20.0) as client:
-                    resp = await retry_async(
-                        lambda: client.get(url, params=params),
-                        max_retries=2,
-                        base_delay=1.0,
-                        exceptions=(httpx.HTTPStatusError, httpx.RequestError),
-                    )
+                    resp = await client.get(url, params=params)
                     resp.raise_for_status()
                     data = resp.json()
                     set_cached("GET", url, cache_params, None, data)
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 300:
-                    # Cache the 300 response itself so we don't hammer the API
-                    # on subsequent requests — the cache-hit path above knows
-                    # how to handle disambiguation results.
                     with contextlib.suppress(Exception):
                         set_cached("GET", url, cache_params, None, e.response.json())
                     data = await self._geocode_fallback(params)
+                elif e.response.status_code == 429 or (500 <= e.response.status_code < 600):
+                    raise  # transient — let DAG retry handle it
                 elif e.response.status_code != 404:
-                    logger.error("TfL API HTTP error for %s: %s", self._label, e)
-            except httpx.RequestError as e:
-                logger.error("TfL API request failed for %s: %s", self._label, e)
+                    logger.error("TfL API HTTP error for %s (url=%s): %s", self._label, url, e)
+            except httpx.RequestError:
+                raise  # transient — let DAG retry handle it
             except (KeyError, IndexError, TypeError) as e:
                 logger.error("TfL API unexpected response for %s: %s", self._label, e)
 

@@ -284,6 +284,57 @@ class TestCommuteSelectorNode:
         assert j["status"] == "succeeded"
         assert j["value"] is not None
         assert "error" not in j
+        assert j.get("is_child") is False, "Default is_child should be False"
+
+    @pytest.mark.asyncio
+    async def test_is_child_flag_in_json(self):
+        """CommuteSelectorNode with is_child=True must propagate the flag
+        into both the outer wrapper AND the inner Commute value.
+
+        A bug in ComputedTransitNode hardcodes is_child=False on the Commute
+        object, so the selector must overwrite it after selection.
+        """
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
+
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = commute_input_node("transit")
+        bus = commute_input_node("bus")
+        walk_check = _succeeded_walk_check(False)
+
+        node = CommuteSelectorNode(
+            "commute_selector_child",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            bus_result=_bus_if(walk_check, bus),
+            rail_fare_result=_noop_if(),
+            is_child=True,
+        )
+
+        origin.push(GeoPoint(51.5, -0.1), "user")
+        poi.push(PlaceOfInterest("School", "SW1V 2QQ"), "config")
+        transit.push(_make_commute(duration_min=10, cost_gbp=0), "walk")
+        bus.push(None, "none")
+
+        await flush_processor()
+
+        j = await node.to_json()
+        assert j["status"] == "succeeded"
+        # Outer wrapper must propagate is_child
+        assert j.get("is_child") is True, (
+            f"outer is_child should be True, got {j.get('is_child')}"
+        )
+        # Inner Commute value must also carry is_child=True so the
+        # frontend's schoolWalkMin() can identify it as a school commute.
+        val = j.get("value")
+        assert val is not None
+        assert val.get("is_child") is True, (
+            f"value.is_child should be True for child commutes, "
+            f"got {val.get('is_child')}. "
+            f"The CommuteSelectorNode must override the transit node's "
+            f"hardcoded is_child=False."
+        )
 
     @pytest.mark.asyncio
     async def test_picks_bus_when_much_faster(self):
@@ -978,7 +1029,7 @@ class TestRailFareNode:
 
         from houses.commute import LegMode
         from houses.nodes.commute import RailFareNode
-        from houses.rail_fare_registry import _request_rail_fares
+        from houses.services_provider import get_services
         from houses.rail_fares import RailFareRegistry
         from houses.stations import StationRegistry
 
@@ -994,7 +1045,7 @@ class TestRailFareNode:
             station_registry=StationRegistry(_stations_csv=stations_csv),
             _fares_csv=fares_csv,
         )
-        _request_rail_fares.set(reg)
+        get_services().rail_fare_registry = reg
 
         transit = UserInputNode[Commute]("rf_fare", Commute)
         location = UserInputNode[GeoPoint]("rf_fare_loc", GeoPoint)

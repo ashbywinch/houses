@@ -372,6 +372,11 @@ class CommuteSelectorNode(DerivedNode[Commute]):
 
         if selected is not None:
             val = selected.value_or_none()
+            if val is not None:
+                # Override is_child on the Commute value — the transit node
+                # hardcodes False, but the selector knows the correct value
+                # (e.g. George's school commutes should have is_child=True).
+                val = replace(val, is_child=self.is_child)
             # Only merge rail_fare cost when transit was selected (not bus)
             if selected is transit and rail_fare_result.succeeded:
                 rf_val = rail_fare_result.value_or_none()
@@ -389,7 +394,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
                         details=new_details,
                     )
                     return Attempt.succeeded(merged)
-            return selected
+            return Attempt.succeeded(val)
 
         return self._impossible({"transit_result": transit, "bus_result": bus_result})
 

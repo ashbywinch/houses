@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head><title>Test</title></head>
+<body>
+<div id="app">Loading...</div>
+<script type="module">
+console.log('Module loaded');
+const vueUrl = 'http://localhost:5173/node_modules/.vite/deps/vue.js?v=' + Date.now();
+console.log('Fetching Vue from:', vueUrl);
+try {
+  const mod = await import(vueUrl);
+  console.log('Vue loaded, keys:', Object.keys(mod).slice(0, 10));
+  const app = mod.createApp({ template: '<h1>Hello World</h1>' });
+  app.mount('#app');
+  console.log('Mounted successfully');
+} catch(e) {
+  document.body.innerHTML = '<pre>ERROR: ' + e.message + '\n' + (e.stack || '').split('\n').slice(0, 5).join('\n') + '</pre>';
+}
+</script>
+</body>
+</html>

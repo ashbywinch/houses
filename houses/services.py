@@ -123,6 +123,9 @@ class _DefaultDriveTimeService:
 # a PATCH to /api/settings/financial updates the canonical node that
 # all PropertyNodes reference, without needing a server restart.
 _SETTINGS_SOURCE_CACHE: dict[str, UserInputNode] = {}
+def _reset_settings_cache():
+    """Clear the settings source cache for test isolation."""
+    _SETTINGS_SOURCE_CACHE.clear()
 
 
 def _make_settings_source(node_id: str, value_type: type, default_factory):
@@ -131,9 +134,17 @@ def _make_settings_source(node_id: str, value_type: type, default_factory):
     node = UserInputNode(node_id, value_type)
     persisted = latest_node_result(node_id)
     if persisted and persisted.get("status") == "succeeded":
+        source_label = persisted.get("source_label", "db")
+        if source_label == "tests":
+            raise RuntimeError(
+                f"Stale test data (source_label='tests') found in production DB "
+                f"for settings node '{node_id}'. "
+                f"Test data leaked from a test run that bypassed DB isolation. "
+                f"Remove the offending row from node_results to recover."
+            )
         val = node._adapter.validate_python(persisted["value"])
         node._value = val
-        node._source_label = persisted.get("source_label", "db")
+        node._source_label = source_label
     else:
         node.push(default_factory(), "config")
     _SETTINGS_SOURCE_CACHE[node_id] = node
@@ -236,3 +247,8 @@ class Services:
     commute_thresholds_source: UserInputNode[dict] = dataclasses.field(
         default_factory=lambda: _make_settings_source("commute_thresholds", dict, make_default_thresholds)
     )
+    # Per-request mutable state (lazily initialized by accessors)
+    geo_state: Any | None = None
+    geo_cache: dict | None = None
+    bus_fare_registry: Any | None = None
+    rail_fare_registry: Any | None = None

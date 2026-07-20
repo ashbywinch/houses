@@ -29,6 +29,39 @@ class TestWalkCommuteFailsFast:
         finally:
             settings.google_maps_api_key = original
 
+    @pytest.mark.asyncio
+    async def test_returns_none_for_long_distance_walk_with_postcode(self):
+        """When dest is a postcode string (not GeoPoint) and walking is
+        infeasible, _google_route_commute must skip the API call and
+        return None, rather than sending a WALK request for an 80 km
+        journey and getting a 400 from Google Routes API.
+
+        The distance check at line 268 only fires when both origin AND
+        dest are GeoPoint objects.  With a string postcode dest it's
+        bypassed, so the API is called for absurdly long walks.
+        """
+        from houses.geo import GeoPoint
+        from houses.routing import _google_route_commute
+        from houses.config import settings
+
+        # Didcot-ish origin (far from Aldgate postcode EC3A 7LP)
+        origin = GeoPoint(51.6, -1.25)
+        # String postcode that is ~80 km away — too far to walk
+        dest_postcode = "EC3A 7LP"
+
+        original_key = settings.google_maps_api_key
+        try:
+            settings.google_maps_api_key = "test-key"
+            result = await _google_route_commute(origin, dest_postcode, "WALK", max_walk_minutes=30)
+            assert result is None, (
+                f"Expected None (skip API for long walk with string postcode), "
+                f"got {result}. "
+                f"The distance check must geocode the postcode before deciding "
+                f"whether to call the API."
+            )
+        finally:
+            settings.google_maps_api_key = original_key
+
 
 @pytest.mark.asyncio
 async def test_find_nearest_handles_coordinate_string(monkeypatch):

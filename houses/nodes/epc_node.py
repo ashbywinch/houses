@@ -20,6 +20,10 @@ class EpcNode(DerivedNode[dict]):
             return Attempt.succeeded({"band": band, "potential": band})
         return Attempt.impossible("no EPC data")
 
+    def _is_transient_error(self, exc: Exception) -> bool:
+        from houses.helpers import is_transient_error as _ite
+        return _ite(exc)
+
     async def build_provenance(self):
         return Provenance(label="EPC API")
 
@@ -43,6 +47,10 @@ class CouncilTaxNode(DerivedNode[dict]):
             val = result.value_or_none()
             return Attempt.succeeded({"band": val.band, "yearly_cost": val.yearly_cost})
         return Attempt.impossible("no council tax data")
+
+    def _is_transient_error(self, exc: Exception) -> bool:
+        from houses.helpers import is_transient_error as _ite
+        return _ite(exc)
 
     async def build_provenance(self):
         return Provenance(label="Council Tax")

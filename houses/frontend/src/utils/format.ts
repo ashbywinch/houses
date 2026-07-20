@@ -1,4 +1,5 @@
 export function simpleOfsted(rating: string): string {
+    if (!rating) return ''
     return rating.split(',')[0].trim()
 }
 

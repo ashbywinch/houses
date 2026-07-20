@@ -17,6 +17,11 @@ logger = logging.getLogger(__name__)
 
 _broadcast_queue: asyncio.Queue[str] = asyncio.Queue()
 _websocket_clients: set[WebSocket] = set()
+def _reset():
+    """Reset broadcast queue and websocket clients for test isolation."""
+    global _broadcast_queue
+    _broadcast_queue = asyncio.Queue()
+    _websocket_clients.clear()
 
 
 async def register_client(ws: WebSocket) -> None:
@@ -33,13 +38,31 @@ async def register_client(ws: WebSocket) -> None:
         _websocket_clients.discard(ws)
 
 
+async def _push_node_update(node) -> None:
+    """Push a node's latest value to all WebSocket clients."""
+
+    rid = node._id.split("/")[0]
+    try:
+        data = await node.to_json()
+    except Exception:
+        return
+    msg = json.dumps({"type": "node_updated", "rid": rid, "node_id": node._id, "data": data})
+    dead: list[WebSocket] = []
+    for ws in list(_websocket_clients):
+        try:
+            await ws.send_text(msg)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        _websocket_clients.discard(ws)
+
 def push_rid(rid: str) -> None:
-    """Push a property RID to the broadcast queue."""
+    """Push a property RID to the broadcast queue (add/delete events only)."""
     _broadcast_queue.put_nowait(rid)
 
 
 async def _broadcaster() -> None:
-    """Pop completed RIDs from the queue and push summaries."""
+    """Pop completed RIDs from the queue and push full-property summaries."""
     from houses.property_registry import get_property
 
     while True:

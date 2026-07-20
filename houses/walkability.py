@@ -12,7 +12,6 @@ from houses.api_cache import cached_async_client, with_cache
 from houses.config import settings
 from houses.geo import GeoPoint
 from houses.location import PropertyLocation
-from houses.retry import retry_async
 
 logger = logging.getLogger(__name__)
 
@@ -142,26 +141,26 @@ async def _walk_duration(
         async with cached_async_client(timeout=15.0) as client:
 
             async def _fetch():
-                resp = await retry_async(
-                    lambda: client.post(
-                        ORS_WALKING_URL,
-                        headers={
-                            "Authorization": settings.ors_api_key,
-                            "Content-Type": "application/json",
-                        },
-                        json=body,
-                    ),
-                    max_retries=2,
-                    base_delay=1.0,
-                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+                resp = await client.post(
+                    ORS_WALKING_URL,
+                    headers={
+                        "Authorization": settings.ors_api_key,
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
                 )
                 resp.raise_for_status()
                 return resp.json()
 
             data = await with_cache("POST", ORS_WALKING_URL, body=body, fetch=_fetch)
         return round(data["routes"][0]["summary"]["duration"] / 60)
-    except (httpx.HTTPStatusError, httpx.RequestError, KeyError, IndexError) as e:
-        logger.warning("ORS walk directions failed: %s", e)
+    except (KeyError, IndexError) as e:
+        logger.warning("ORS walk directions failed for (%.4f, %.4f): %s", lat, lng, e)
+        return None
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 429 or (500 <= e.response.status_code < 600):
+            raise  # transient — let DAG retry handle it
+        logger.warning("ORS walk directions failed for (%.4f, %.4f): %s", lat, lng, e)
         return None
 
 
@@ -189,19 +188,14 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
         async with cached_async_client(timeout=15.0) as client:
 
             async def _fetch_places():
-                resp = await retry_async(
-                    lambda: client.post(
-                        GOOGLE_MAPS_PLACES_URL,
-                        headers={
-                            "X-Goog-Api-Key": settings.google_maps_api_key,
-                            "X-Goog-FieldMask": "places.displayName,places.types,places.location",
-                            "Content-Type": "application/json",
-                        },
-                        json=places_body,
-                    ),
-                    max_retries=2,
-                    base_delay=1.0,
-                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+                resp = await client.post(
+                    GOOGLE_MAPS_PLACES_URL,
+                    headers={
+                        "X-Goog-Api-Key": settings.google_maps_api_key,
+                        "X-Goog-FieldMask": "places.displayName,places.types,places.location",
+                        "Content-Type": "application/json",
+                    },
+                    json=places_body,
                 )
                 resp.raise_for_status()
                 return resp.json()
@@ -211,9 +205,14 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
         if result:
             return result
     except httpx.HTTPStatusError as exc:
-        logger.warning("Google Places API failed (%s), falling back to Overpass", exc.response.status_code)
+        status = exc.response.status_code
+        if status == 429 or (500 <= status < 600):
+            raise  # transient — let DAG retry handle it
+        logger.warning("Google Places API failed (%s), falling back to Overpass", status)
         google_failed = True
-    except (httpx.RequestError, KeyError, IndexError) as e:
+    except httpx.RequestError:
+        raise  # transient — let DAG retry handle it
+    except (KeyError, IndexError) as e:
         logger.warning("Google Places API failed (%s), falling back to Overpass", e)
         google_failed = True
 

@@ -39,6 +39,9 @@ class Node(ABC, Generic[T]):
         self._persisted_at: datetime | None = None
         self._db_created_at: str = ""
         self._loaded_dep_timestamps: dict[str, str] = {}
+        self._retry_at: datetime | None = None
+        self._retry_count: int = 0
+        self._max_retries: int = 3
 
     def _load_attempt_from_db(self) -> Attempt[T] | None:
         from dag.persistence import latest_node_result
@@ -55,6 +58,10 @@ class Node(ABC, Generic[T]):
                     return None
                 attempt: Attempt[T] = Attempt.succeeded(val)
             elif status == "pending":
+                retry_at = stored.get("retry_at")
+                if retry_at:
+                    self._retry_at = datetime.fromisoformat(retry_at)
+                    self._retry_count = stored.get("retry_count", 0)
                 return None
             else:
                 attempt = Attempt.impossible(stored.get("error", "unknown"))
@@ -110,13 +117,13 @@ class Node(ABC, Generic[T]):
                  dep_timestamps: dict[str, str] | None = None) -> None:
         from dag.persistence import save_node_result
 
-        save_node_result(self._id, result_dict, dep_timestamps)
-        now = datetime.now(UTC)
+        now_str = datetime.now(UTC).isoformat()
+        save_node_result(self._id, result_dict, dep_timestamps, created_at=now_str)
+        now = datetime.fromisoformat(now_str)
         self._persisted_at = now
-        self._db_created_at = now.isoformat()
+        self._db_created_at = now_str
         if dep_timestamps is not None:
             self._loaded_dep_timestamps = dep_timestamps
-
     def _impossible(self, dep_attempts: dict[str, Attempt[T]],
                     extra: str = "") -> Attempt[T]:
         parts = [self._id]

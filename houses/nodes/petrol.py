@@ -72,12 +72,13 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         # Fuel calculation using pint for proper Imperial gallon → litre conversion
         # 1 imperial gallon = 4.54609 litres; US gallon is 3.78541 litres
         fuel_volume = (Quantity(round_trip_km, "km") / Quantity(mpg, "mile / imperial_gallon")).to("liter")
-        fuel_cost = round(float(fuel_volume.magnitude) * cost_per_litre, 2)
+        fuel_cost_amount = round(float(fuel_volume.magnitude) * cost_per_litre, 2)
 
-        if fuel_cost <= 0:
+        if fuel_cost_amount <= 0:
             return commute
 
-        new_daily_cost = round(float(val.daily_cost.amount) + fuel_cost, 2)
+        fuel_cost = Money(str(fuel_cost_amount), "GBP")
+        new_daily_cost = val.daily_cost + fuel_cost
 
         # Attribute fuel cost to the drive CostGroup(s)
         from dataclasses import replace as _replace_cg
@@ -85,14 +86,13 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         for i, cg in enumerate(new_details):
             has_drive = any(leg.mode == LegMode.DRIVE for leg in cg.legs)
             if has_drive:
-                old_cost = float(cg.cost.amount) if isinstance(cg.cost, Money) else (cg.cost or 0)
-                new_cost = round(old_cost + fuel_cost, 2)
-                new_details[i] = _replace_cg(cg, cost=Money(str(new_cost), "GBP"))
+                new_cg_cost = cg.cost + fuel_cost if isinstance(cg.cost, Money) else fuel_cost
+                new_details[i] = _replace_cg(cg, cost=new_cg_cost)
                 break
 
         new_commute = replace(
             val,
-            daily_cost=Money(str(new_daily_cost), "GBP"),
+            daily_cost=new_daily_cost,
             details=tuple(new_details),
         )
         return Attempt.succeeded(new_commute)

@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 import re
 
+import httpx
+
 from dag.attempt import Attempt
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.config import settings
@@ -129,6 +131,8 @@ async def lookup_epc(postcode: str, address: str = "") -> str:
                 logger.debug("EPC: %s for %s", result.error, postcode)
             return result.value_or("")
 
+    except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
+        raise  # transient — let DAG retry handle it
     except Exception as e:
         logger.warning("EPC lookup failed for %s: %s", postcode, e)
         return ""

@@ -198,7 +198,6 @@ class TestFullCommutePipeline:
             commute_input_node,
         )
         from houses.nodes.transit import TransitNode, WalkLegCheckNode
-        from houses.rail_fare_registry import _request_rail_fares as _rrf
         from houses.services_provider import get_services
 
         # Inject a fake registry with known stations and fare
@@ -208,7 +207,7 @@ class TestFullCommutePipeline:
             stations=[clj, wat],
             fares={frozenset({"CLJ", "WAT"}): Money("29.30", "GBP")},
         )
-        _rrf.set(registry)
+        get_services().rail_fare_registry = registry
 
         # Source nodes
         loc = UserInputNode[GeoPoint]("loc", GeoPoint)
@@ -288,7 +287,6 @@ class TestFullCommutePipeline:
         from houses.nodes.park_and_ride import ParkAndRideAugmentNode
         from houses.nodes.petrol import PetrolCostAugmentNode
         from houses.nodes.transit import TransitNode, WalkLegCheckNode
-        from houses.rail_fare_registry import _request_rail_fares as _rrf
         from houses.services_provider import get_services
 
         # Fake registry with Maidenhead, Paddington, London Terminals
@@ -299,7 +297,7 @@ class TestFullCommutePipeline:
             stations=[mai, pad, lon],
             fares={frozenset({"MAI", "LON"}): Money("12.60", "GBP")},
         )
-        _rrf.set(registry)
+        get_services().rail_fare_registry = registry
         # Set fuel cost so PetrolCostAugmentNode passes through
         svc = get_services()
         svc.financial_source.push({"fuel_cost_per_mile": 0.15}, "test")

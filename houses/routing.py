@@ -10,6 +10,7 @@ import json
 import logging
 import re
 
+import httpx
 from money import Money
 from pint import Quantity
 
@@ -19,7 +20,6 @@ from houses.bus_fare_reader import get_bus_fare_reader
 from houses.bus_journey import cheapest_round_trip
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.config import settings
-from houses.endpoint_client import EndpointClient
 from houses.geo import GeoPoint
 from houses.http_error import HttpError
 from houses.model.domain import Commute, Person, PlaceOfInterest
@@ -33,7 +33,7 @@ def _bus_fare_for(
     arr_name: str,
     dep_point: dict[str, float] | None = None,
     arr_point: dict[str, float] | None = None,
-) -> float | None:
+) -> Money | None:
     """Look up daily round-trip bus cost between two stops.
 
     Delegates to ``BusJourneyRegistry`` which handles direct name match,
@@ -41,13 +41,13 @@ def _bus_fare_for(
     index).  No expanding-radius search — the point of taking the bus is
     to avoid long walks.
 
-    Returns the cost as a float, or ``None`` if no fare is found.
+    Returns the cost as Money, or ``None`` if no fare is found.
     """
     fares_r = get_bus_fare_reader()
     fares = fares_r.fares_for_stops(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
     cheapest = cheapest_round_trip(fares, fares_r.national_max_single)
     if cheapest is not None:
-        return float(cheapest.amount)
+        return Money(str(round(cheapest.amount, 2)), "GBP")
     return None
 
 
@@ -59,7 +59,6 @@ GOOGLE_ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
 ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-car"
 
 
-_google_routes = EndpointClient("google-routes", max_retries=3, base_delay=2.0)
 
 
 async def _google_routes_post(
@@ -68,7 +67,7 @@ async def _google_routes_post(
     *,
     timeout: float = 10.0,
 ) -> dict | None:
-    """POST to Google Routes API, caching responses and using EndpointClient retry.
+    """POST to Google Routes API, caching responses and direct HTTP call.
 
     Raises ``ValueError`` if the API key is not configured.
     """
@@ -86,18 +85,14 @@ async def _google_routes_post(
     if cached is not None:
         return cached
 
-    async def _do_post() -> dict:
-        async with cached_async_client(timeout=timeout) as client:
-            resp = await client.post(GOOGLE_ROUTES_URL, json=body, headers=headers)
-            if resp.status_code == 429:
-                raise HttpError(429, "rate limited", headers=dict(resp.headers))
-            resp.raise_for_status()
-            return resp.json()
-
-    data = await _google_routes.request(_do_post)
-    if data is not None:
+    async with cached_async_client(timeout=timeout) as client:
+        resp = await client.post(GOOGLE_ROUTES_URL, json=body, headers=headers)
+        if resp.status_code == 429:
+            raise HttpError(429, "rate limited", headers=dict(resp.headers))
+        resp.raise_for_status()
+        data = resp.json()
         set_cached("POST", GOOGLE_ROUTES_URL, None, key, data)
-    return data
+        return data
 
 
 # ---------------------------------------------------------------------------
@@ -482,7 +477,6 @@ async def _find_bus_alternative(origin: str, dest: str, has_car: bool = False) -
     duration_min = round(duration_sec / 60)
     steps = leg.get("steps", [])
     total_bus_cost = 0.0
-    bus_cost_gbp = None
     for s in steps:
         if s.get("travelMode") != "TRANSIT":
             continue
@@ -499,12 +493,8 @@ async def _find_bus_alternative(origin: str, dest: str, has_car: bool = False) -
         arr_point = {"lat": arr_coords.get("latitude"), "lon": arr_coords.get("longitude")} if arr_coords else None
         leg_cost = _bus_fare_for(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
         if leg_cost is not None:
-            total_bus_cost += leg_cost
-    if total_bus_cost > 0:
-        bus_cost_gbp = total_bus_cost
-        daily_cost_gbp = Money(str(round(total_bus_cost, 2)), "GBP")
-    else:
-        daily_cost_gbp = None
+            total_bus_cost += leg_cost.amount if isinstance(leg_cost, Money) else leg_cost
+    daily_cost_gbp = Money(str(round(total_bus_cost, 2)), "GBP") if total_bus_cost > 0 else None
     return Commute(
         person=Person(name="", has_car=has_car),
         label="Lorena — Aldgate / City of London (Bus)",
@@ -518,10 +508,10 @@ async def _find_bus_alternative(origin: str, dest: str, has_car: bool = False) -
         details=(
             CostGroup(
                 legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=duration_min or 0),),
-                cost=bus_cost_gbp,
+                cost=daily_cost_gbp,
             ),
         )
-        if bus_cost_gbp is not None
+        if daily_cost_gbp is not None
         else (),
     )
 
@@ -607,6 +597,8 @@ async def get_commute(
     if _is_london_area(dest_str):
         try:
             tfl = await _tfl_transit_commute(origin_str, dest_str, has_car)
+        except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException, HttpError):
+            raise
         except Exception as e:
             logger.warning("TfL transit failed for %s → %s: %s", origin_str, dest_str, e)
             failures.append(f"tfl_transit: {e}")

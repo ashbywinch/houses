@@ -60,6 +60,21 @@ const mockData: Record<string, PropertySummary> = {
     },
     freshness: { property_added_at: '2026-07-13T10:00:00+00:00' },
   },
+  'prop-d': {
+    rid: 'prop-d',
+    best_address: { succeeded: true, value: '40 School Ln', error: null, provenance: { label: 'test' } },
+    best_location: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 'test' } },
+    rightmove_price: { succeeded: true, value: {amount: 250000, currency: "GBP"}, error: null, provenance: { label: 'test' } },
+    rightmove_bedrooms: { succeeded: true, value: '3', error: null, provenance: { label: 'test' } },
+    total_monthly_cost: { succeeded: true, value: {amount: 1800, currency: "GBP"}, error: null, provenance: { label: 'test' } },
+    walkability: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
+    commutes: { 'Simon/Office': { commute: { succeeded: true, value: { duration: { value: 45, unit: 'minute' } }, error: null, provenance: { label: 'test' } } } },
+    schools: {
+      primary: { school: { succeeded: true, value: { name: 'Empty Ofsted School', ofsted: '', distance_km: 2, url: '' }, error: null, provenance: { label: 'test' } } },
+      secondary: { school: { succeeded: true, value: { name: 'Good Secondary', ofsted: 'Good', distance_km: 3, url: '' }, error: null, provenance: { label: 'test' } } },
+    },
+    freshness: { property_added_at: '2026-07-12T10:00:00+00:00' },
+  },
 }
 
 function initStore() {
@@ -81,6 +96,25 @@ describe('PropertyList tab switching', () => {
     // displayedRids is internal to the component, but we can test
     // that the store has 3 RIDs
     expect(store.rids).toHaveLength(3)
+  })
+
+  it('renders properties with empty ofsted rating without error', () => {
+    const store = initStore()
+    store.rids = ['prop-a', 'prop-d']
+    const wrapper = mount(PropertyList)
+    expect(wrapper.text()).toContain('10 Cheap St')
+    expect(wrapper.text()).toContain('40 School Ln')
+    // prop-d has a primary school with empty ofsted — should render without throwing
+    expect(() => wrapper.vm.$forceUpdate()).not.toThrow()
+  })
+
+  it('renders property with null ofsted value gracefully', () => {
+    const store = initStore()
+    const summaryWithNullOfsted = JSON.parse(JSON.stringify(mockData['prop-d']))
+    summaryWithNullOfsted.schools.primary.school.value.ofsted = null
+    store.summaries['prop-d'] = summaryWithNullOfsted
+    store.rids = ['prop-d']
+    expect(() => mount(PropertyList)).not.toThrow()
   })
 
   it('favourites tab shows only favourited properties', () => {
@@ -225,7 +259,7 @@ describe('PropertyList map tab markers', () => {
 
     // all three mock properties have best_location set — loadAll fetches all 3
     const pins = wrapper.findAll('.map-pin')
-    expect(pins.length).toBe(3)
+    expect(pins.length).toBe(4)
   })
 
   it('renders no pins when no properties have location data', async () => {

@@ -100,15 +100,20 @@ def init_db(db_path: str | None = None) -> None:
     """)
 
 def save_node_result(node_id: str, result_dict: dict[str, Any],
-                     dep_timestamps: dict[str, str] | None = None) -> int:
+                     dep_timestamps: dict[str, str] | None = None,
+                     created_at: str | None = None) -> int:
     """Persist a node's to_json() output to the node_results table.
 
     Each call appends a new row. The most recent row is the current value.
+    *created_at* should be the same value used by the caller's ``_db_created_at``
+    so that the in-memory timestamp matches the DB column (avoids false staleness).
+    When omitted, a fresh timestamp is generated (callers that don't care about
+    round-trip consistency).
     """
     if not _table_exists("node_results"):
         init_db()
     conn = _get_db()
-    now = datetime.now(UTC).isoformat()
+    now = created_at or datetime.now(UTC).isoformat()
     cur = conn.execute(
         "INSERT INTO node_results (node_id, result_json, dep_timestamps, created_at)"
         " VALUES (?, ?, ?, ?)",

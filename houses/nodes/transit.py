@@ -131,6 +131,10 @@ class TransitNode(DerivedNode[Commute]):
         self._max_walk = max_walk
         self._best_address = best_address
 
+    def _is_transient_error(self, exc: Exception) -> bool:
+        from houses.helpers import is_transient_error as _ite
+        return _ite(exc)
+
     async def compute(
         self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest], best_address: Attempt[str] = None
     ) -> Attempt[Commute]:

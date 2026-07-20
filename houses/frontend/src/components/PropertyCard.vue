@@ -108,6 +108,18 @@ function commuteMode(commute: unknown): string | undefined {
   return (val?.mode as string) || undefined
 }
 
+function schoolWalkMin(labelPart: string): number | null {
+  if (!props.data.commutes) return null
+  for (const [key, v] of Object.entries(props.data.commutes)) {
+    if (!key.includes(labelPart)) continue
+    const val = (v.commute?.value as Record<string, unknown> | undefined)
+    if (!val?.is_child) continue
+    const dur = (val.duration as Record<string, unknown> | undefined)?.value
+    return typeof dur === 'number' ? Math.round(dur) : null
+  }
+  return null
+}
+
 function commuteLabel(c: unknown, key: string): string {
   const val = (c as Record<string, unknown> | undefined)?.value as Record<string, unknown> | undefined
   if (val?.label) return val.label as string
@@ -175,11 +187,13 @@ async function toggleViewed() {
             <a v-if="data.schools.primary.school.value!.url" :href="data.schools.primary.school.value!.url" target="_blank" class="school__name">{{ data.schools.primary.school.value!.name }}</a>
             <span v-else class="school__name">{{ data.schools.primary.school.value!.name }}</span>
             <span class="pill pill--xs" :class="ofstedClass(data.schools.primary.school.value!.ofsted)">{{ simpleOfsted(data.schools.primary.school.value!.ofsted) }}</span>
+            <span v-if="schoolWalkMin('Primary') !== null" class="pill pill--xs pill--good">{{ schoolWalkMin('Primary') }}m walk</span>
           </div>
           <div v-if="data.schools?.secondary?.school?.succeeded" class="school-line">
             <a v-if="data.schools.secondary.school.value!.url" :href="data.schools.secondary.school.value!.url" target="_blank" class="school__name">{{ data.schools.secondary.school.value!.name }}</a>
             <span v-else class="school__name">{{ data.schools.secondary.school.value!.name }}</span>
             <span class="pill pill--xs" :class="ofstedClass(data.schools.secondary.school.value!.ofsted)">{{ simpleOfsted(data.schools.secondary.school.value!.ofsted) }}</span>
+            <span v-if="schoolWalkMin('Secondary') !== null" class="pill pill--xs pill--good">{{ schoolWalkMin('Secondary') }}m walk</span>
           </div>
         </div>
         <div class="epc-col">
@@ -188,8 +202,6 @@ async function toggleViewed() {
           </div>
         </div>
       </div>
-
-      <!-- Row 5: Triage action bar -->
       <div class="card__row card__row--section card__triage">
         <button class="triage-btn" :class="{ 'triage-btn--active': triage?.favourite }" @click="toggleFavourite" aria-label="Toggle favourite">
           <svg width="20" height="20" viewBox="0 0 24 24" :fill="triage?.favourite ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">

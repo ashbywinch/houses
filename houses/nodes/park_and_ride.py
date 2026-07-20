@@ -107,9 +107,10 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         car_park = parking.find_car_park(station)
         if car_park is None or car_park.daily_cost is None:
             return transit
-
-        parking_cost = float(car_park.daily_cost.amount)
-        existing_cost = float(commute.daily_cost.amount)
+        parking_cost = car_park.daily_cost
+        existing_cost = commute.daily_cost
+        if existing_cost is None:
+            existing_cost = Money("0", "GBP")
         new_cost = existing_cost + parking_cost
 
         # Replace the walk leg with a drive leg (actual drive time)
@@ -133,7 +134,7 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
                 for leg in new_first_cg.legs
             )
             if has_transit:
-                new_first_cg = replace(new_first_cg, cost=Money(str(existing_cost), "GBP"))
+                new_first_cg = replace(new_first_cg, cost=existing_cost)
 
         new_details = (new_first_cg, new_parking_group)
         # Recalculate duration from replaced legs
@@ -143,7 +144,7 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         )
         new_commute = replace(
             commute,
-            daily_cost=Money(str(new_cost), "GBP"),
+            daily_cost=new_cost,
             details=new_details,
             duration=new_duration,
         )

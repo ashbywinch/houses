@@ -116,6 +116,8 @@ describe('PropertyCard commute filtering', () => {
     })
     const wrapper = mountCard({ rid: '123', data: summary })
     expect(wrapper.text()).toContain('Test Primary')
+    // School commute time should appear alongside the school name
+    expect(wrapper.text()).toContain('20m')
   })
 })
 
@@ -178,4 +180,36 @@ describe('PropertyCard error handling', () => {
     const wrapper = mountCard({ rid: '123', data: makeSummary() })
     expect(wrapper.find('.card__commutes').exists()).toBe(true)
   })
+
+  it('handles empty ofsted string without throwing', () => {
+    const summary = makeSummary({
+      schools: {
+        primary: { school: { succeeded: true, value: { name: 'Test Primary', ofsted: '', distance_km: 1, url: '' }, error: null, provenance: { label: 'test' } } },
+        secondary: { school: { succeeded: false, value: null, error: null, provenance: { label: 'test' } } },
+      },
+    })
+    expect(() => mountCard({ rid: '123', data: summary })).not.toThrow()
+  })
+
+  it('handles null ofsted value without throwing', () => {
+    const summary = makeSummary({
+      schools: {
+        primary: { school: { succeeded: true, value: { name: 'Test Primary', ofsted: null as unknown as string, distance_km: 1, url: '' }, error: null, provenance: { label: 'test' } } },
+        secondary: { school: { succeeded: false, value: null, error: null, provenance: { label: 'test' } } },
+      },
+    })
+    expect(() => mountCard({ rid: '123', data: summary })).not.toThrow()
+  })
+
+  it('handles missing ofsted property without throwing', () => {
+    const summary = makeSummary({
+      schools: {
+        primary: { school: { succeeded: true, value: { name: 'Test Primary', distance_km: 1, url: '' } as unknown as { name: string; ofsted: string; distance_km: number; url: string }, error: null, provenance: { label: 'test' } } },
+        secondary: { school: { succeeded: false, value: null, error: null, provenance: { label: 'test' } } },
+      },
+    })
+    expect(() => mountCard({ rid: '123', data: summary })).not.toThrow()
+  })
+
 })
+
