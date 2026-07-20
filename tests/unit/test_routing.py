@@ -48,6 +48,35 @@ class TestWalkCommuteFailsFast:
             f"Got: {str(exc.value)}"
         )
 
+    @pytest.mark.asyncio
+    async def test_transit_route_daily_cost_is_never_none(self):
+        """TransitRoute._process_data() must return daily_cost as Money,
+        never None, even when the TfL response has no fare data.
+        Used to crash _replace_walk_with_bus with
+        'decimal.Decimal + NoneType'."""
+        from money import Money
+
+        from houses.transit_route import TransitRoute
+
+        route = TransitRoute("51.3,-0.58", "EC3A 7LP", "Aldgate")
+
+        # Empty TfL response — no journeys, no fare data.
+        # raw_cost will be None → daily_cost_gbp would be None
+        # without the guard in _process_data.
+        attempt = await route._process_data({"journeys": []})
+
+        # The guard catches this: daily_cost_gbp = Money("0", "GBP")
+        if attempt.succeeded:
+            val = attempt.value_or_none()
+            assert isinstance(val.daily_cost, Money), (
+                f"daily_cost must be Money, got {type(val.daily_cost).__name__}. "
+                f"The guard in _process_data should set it to Money('0', 'GBP') "
+                f"when raw_cost is None."
+            )
+        else:
+            # No journeys → impossible is also fine
+            pass
+
 
 
 @pytest.mark.asyncio

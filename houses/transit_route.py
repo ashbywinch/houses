@@ -341,11 +341,14 @@ class TransitRoute:
         self._fare_lookup = fare_lookup
 
     async def plan(self) -> Attempt[Commute]:
-        """Fetch TfL route, pick best journey, enrich with costs.
+        """Fetch TfL route, enrich with costs, and return a Commute."""
+        data = await self._fetch_data()
+        if data is not None and self._park_and_ride:
+            data = await _apply_park_and_ride_to_journeys(data, self._origin, settings.max_walk_to_station_minutes)
+        return await self._process_data(data)
 
-        Returns ``Attempt.succeeded(Commute(...))`` on success,
-        ``Attempt.impossible("tfl", ...)`` on failure.
-        """
+    async def _fetch_data(self) -> dict | None:
+        """Call TfL API and return the raw JSON response, or None on failure."""
         modes = ["tube", "overground", "dlr", "tram", "national-rail", "walking"]
         if self._allow_bus:
             modes.append("bus")
@@ -359,55 +362,52 @@ class TransitRoute:
             **_next_weekday_date_params(),
             **_tfl_auth_params(),
         }
-        # Cache key must NOT include API keys — TfL responses are identical
-        # regardless of which key is used.
         cache_params = {k: v for k, v in params.items() if k != "app_key"}
 
-        duration_minutes: int | None = None
-        daily_cost_gbp: Money | None = None
-        route_summary = ""
-        parking_cost_gbp: float | None = None
-        bus_cost_gbp: float | None = None
-        cost_groups: list[CostGroup] = []
-        data: dict | None = None
-
-        # Check cache first
         cached = get_cached("GET", url, cache_params)
         if cached is not None:
-            # Cache hit — if the cached response is a disambiguation, handle it
-            # the same way as a live 300 (triggers geocode fallback).
             if "Disambiguation" in str(cached.get("$type", "")):
                 data = await self._geocode_fallback(params)
                 if data is None:
                     logger.warning("TfL disambiguation from cache, fallback failed for %s", self._label)
             else:
                 data = cached
-        else:
-            try:
-                async with cached_async_client(timeout=20.0) as client:
-                    resp = await client.get(url, params=params)
-                    resp.raise_for_status()
-                    data = resp.json()
-                    set_cached("GET", url, cache_params, None, data)
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 300:
-                    with contextlib.suppress(Exception):
-                        set_cached("GET", url, cache_params, None, e.response.json())
-                    data = await self._geocode_fallback(params)
-                elif e.response.status_code == 429 or (500 <= e.response.status_code < 600):
-                    raise  # transient — let DAG retry handle it
-                elif e.response.status_code != 404:
-                    logger.error("TfL API HTTP error for %s (url=%s): %s", self._label, url, e)
-            except httpx.RequestError:
-                raise  # transient — let DAG retry handle it
-            except (KeyError, IndexError, TypeError) as e:
-                logger.error("TfL API unexpected response for %s: %s", self._label, e)
+            return data
 
-        if data is not None and self._park_and_ride:
-            data = await _apply_park_and_ride_to_journeys(data, self._origin, settings.max_walk_to_station_minutes)
+        try:
+            async with cached_async_client(timeout=20.0) as client:
+                resp = await client.get(url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                set_cached("GET", url, cache_params, None, data)
+                return data
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 300:
+                with contextlib.suppress(Exception):
+                    set_cached("GET", url, cache_params, None, e.response.json())
+                return await self._geocode_fallback(params)
+            elif e.response.status_code == 429 or (500 <= e.response.status_code < 600):
+                raise  # transient — let DAG retry handle it
+            elif e.response.status_code != 404:
+                logger.error("TfL API HTTP error for %s (url=%s): %s", self._label, url, e)
+        except httpx.RequestError:
+            raise  # transient — let DAG retry handle it
+        except (KeyError, IndexError, TypeError) as e:
+            logger.error("TfL API unexpected response for %s: %s", self._label, e)
+        return None
+
+    async def _process_data(self, data: dict | None) -> Attempt[Commute]:
+        """Turn raw TfL API data into a Commute.  Pure logic — no HTTP.
+
+        Extracted from plan() so tests can pass controlled JSON directly
+        without real API calls or monkeypatching.
+        """
+        duration_minutes: int | None = None
+        daily_cost_gbp: Money | None = None
+        cost_groups: list[CostGroup] = []
 
         if data is not None:
-            dur, raw_cost, route_summary = _pick_best_journey(data)
+            dur, raw_cost, _ = _pick_best_journey(data)
             duration_minutes = dur
             daily_cost_gbp = Money(str(raw_cost), "GBP") if raw_cost is not None else None
             cost_groups = self._build_cost_groups(data)
@@ -424,6 +424,10 @@ class TransitRoute:
             parking_cost_gbp, new_cost, parking_groups = await self._add_parking_cost(data, raw_cost)
             daily_cost_gbp = Money(str(new_cost), "GBP") if new_cost is not None else None
             cost_groups.extend(parking_groups)
+
+        # Ensure daily_cost is never None — downstream code expects Money
+        if daily_cost_gbp is None:
+            daily_cost_gbp = Money("0", "GBP")
 
         result = Commute(
             person=Person(name="", has_car=False),

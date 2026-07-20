@@ -489,10 +489,10 @@ async def _find_bus_alternative(origin: str, dest: str, has_car: bool = False) -
     if not routes:
         return None
     leg = routes[0].get("legs", [{}])[0]
+    steps = leg.get("steps", [])
     duration_sec = int(routes[0].get("duration", "0s").rstrip("s"))
     duration_min = round(duration_sec / 60)
-    steps = leg.get("steps", [])
-    total_bus_cost = 0.0
+    total_bus_cost = Money("0", "GBP")
     for s in steps:
         if s.get("travelMode") != "TRANSIT":
             continue
@@ -509,8 +509,8 @@ async def _find_bus_alternative(origin: str, dest: str, has_car: bool = False) -
         arr_point = {"lat": arr_coords.get("latitude"), "lon": arr_coords.get("longitude")} if arr_coords else None
         leg_cost = _bus_fare_for(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
         if leg_cost is not None:
-            total_bus_cost += leg_cost.amount if isinstance(leg_cost, Money) else leg_cost
-    daily_cost_gbp = Money(str(round(total_bus_cost, 2)), "GBP") if total_bus_cost > 0 else None
+            total_bus_cost += leg_cost
+    daily_cost_gbp = total_bus_cost if total_bus_cost > Money("0", "GBP") else None
     return Commute(
         person=Person(name="", has_car=has_car),
         label="Lorena — Aldgate / City of London (Bus)",
