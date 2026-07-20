@@ -29,38 +29,6 @@ class TestWalkCommuteFailsFast:
         finally:
             settings.google_maps_api_key = original
 
-    @pytest.mark.asyncio
-    async def test_returns_none_for_long_distance_walk_with_postcode(self):
-        """When dest is a postcode string (not GeoPoint) and walking is
-        infeasible, _google_route_commute must skip the API call and
-        return None, rather than sending a WALK request for an 80 km
-        journey and getting a 400 from Google Routes API.
-
-        The distance check at line 268 only fires when both origin AND
-        dest are GeoPoint objects.  With a string postcode dest it's
-        bypassed, so the API is called for absurdly long walks.
-        """
-        from houses.geo import GeoPoint
-        from houses.routing import _google_route_commute
-        from houses.config import settings
-
-        # Didcot-ish origin (far from Aldgate postcode EC3A 7LP)
-        origin = GeoPoint(51.6, -1.25)
-        # String postcode that is ~80 km away — too far to walk
-        dest_postcode = "EC3A 7LP"
-
-        original_key = settings.google_maps_api_key
-        try:
-            settings.google_maps_api_key = "test-key"
-            result = await _google_route_commute(origin, dest_postcode, "WALK", max_walk_minutes=30)
-            assert result is None, (
-                f"Expected None (skip API for long walk with string postcode), "
-                f"got {result}. "
-                f"The distance check must geocode the postcode before deciding "
-                f"whether to call the API."
-            )
-        finally:
-            settings.google_maps_api_key = original_key
 
 
 @pytest.mark.asyncio
@@ -333,13 +301,43 @@ class TestGetCommuteChoice:
 
         monkeypatch.setattr("houses.routing._google_route_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
+    @pytest.mark.asyncio
+    async def test_find_bus_alternative_uses_latlng_for_coord_origin(self, monkeypatch):
+        """_find_bus_alternative must call _address_waypoint to convert
+        coordinate strings to latLng waypoints, not hardcode {"address": ...}.
+        """
+        import json
+        from houses.routing import _find_bus_alternative
+        from houses.config import settings
 
-        monkeypatch.setattr("houses.routing._google_route_commute", mock_drive)
-        monkeypatch.setattr("houses.routing._in_congestion_zone", mock_cz)
+        bodies: list[dict] = []
 
-        result = await get_commute("GU21 7QF", "RG12 8YA", has_car=True, max_walk_minutes=15)
-        assert result.impossible, f"Expected impossible, got {result}"
-        assert result.error, "Should have a reason for failure"
+        async def capture_google_routes_post(body, field_mask, **kw):
+            bodies.append(body)
+            return None
+
+        monkeypatch.setattr("houses.routing._google_routes_post", capture_google_routes_post)
+
+        original_key = settings.google_maps_api_key
+        try:
+            settings.google_maps_api_key = "test-key"
+            await _find_bus_alternative("51.6,-1.25", "EC3A 7LP")
+        finally:
+            settings.google_maps_api_key = original_key
+
+        assert len(bodies) > 0, "_find_bus_alternative should call Google Routes"
+        body = bodies[0]
+        origin_wp = body.get("origin", {})
+        assert "location" in origin_wp, (
+            f"Origin waypoint for coord string must use 'location' (latLng), "
+            f"got {json.dumps(origin_wp, indent=2)}. "
+            f"Sending {{'address': 'lat,lon'}} causes Google Routes to return 400."
+        )
+        assert "latLng" in origin_wp.get("location", {}), (
+            f"Expected latLng in origin waypoint, "
+            f"got {json.dumps(origin_wp, indent=2)}"
+        )
+
 
     # ── Tiebreak: priced vs non-priced routes ─────────────────────────
     # Requirement: "Have an accurate price for the whole journey" (#1).

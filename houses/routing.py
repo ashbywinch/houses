@@ -460,8 +460,8 @@ async def _replace_walk_with_bus(
 async def _find_bus_alternative(origin: str, dest: str, has_car: bool = False) -> Commute | None:
     """Find a bus alternative via Google Routes API (for areas outside TfL coverage)."""
     body = {
-        "origin": {"address": origin},
-        "destination": {"address": dest},
+        "origin": _address_waypoint(origin),
+        "destination": _address_waypoint(dest),
         "travelMode": "TRANSIT",
         "transitPreferences": {"routingPreference": "less_walking"},
         "computeAlternativeRoutes": False,
