@@ -76,6 +76,24 @@ class UserInputNode(Node[T], Generic[T]):
 
     def __init__(self, node_id: str, value_type: type[T]) -> None:
         super().__init__(node_id, value_type)
+        # Validate that property node IDs have a numeric RID prefix.
+        # Non-numeric RIDs like "exp/" or "big_0/" are test data that
+        # must not enter the production DB.
+        import dag.persistence as _per
+        if not _per.testing and "/" in node_id:
+            rid = node_id.split("/")[0]
+            if not rid.isdigit():
+                raise ValueError(
+                    f"Blocked node creation: RID {rid!r} (from node_id {node_id!r}) "
+                    f"contains non-digit characters. Property RIDs must be numeric.\n"
+                    f"\n"
+                    f"This means the node was requested with a test/scaffold RID. "
+                    f"No data was written to the database.\n"
+                    f"\n"
+                    f"Do NOT attempt to work around this by changing the RID — the "
+                    f"code path that created this node is using test data and should "
+                    f"be run via pytest with standard isolation fixtures.\n"
+                )
         self._value: T | None = None
         self._source_label: str = ""
         loaded = self._load_attempt_from_db()
