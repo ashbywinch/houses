@@ -1,5 +1,5 @@
 # Makefile for houses — Browser-to-Spreadsheet Ingestion Engine
-.PHONY: help setup run frontend-dev frontend-build dev test test-all test-integration test-e2e e2e lint format clean reset-db
+.PHONY: help setup run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e lint format clean reset-db
 
 # Variables
 PYTHON := .venv/bin/python
@@ -30,7 +30,7 @@ help:
 	@echo "  ${GREEN}make coverage${NC}           Run tests with coverage report"
 	@echo "  ${GREEN}make clean${NC}              Clean up generated files"
 
-setup: omp-config-install
+setup:
 	@$(UV) --version >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
 	@$(UV) sync --all-extras
 	@echo "${GREEN}✓ Setup complete${NC}"
@@ -99,6 +99,6 @@ clean:
 	@find . -type f -name "*.pyc" -delete
 
 reset-db:  # Reset DAG database but PRESERVE API cache
-	@rm -f data/dag.db
-	@echo "data/dag.db removed (API cache in data/cache/ left intact)"
+	@rm -f data/houses.db
+	@echo "data/houses.db removed (API cache in data/api_cache/ left intact)"
 	@echo "${GREEN}✓ Cleaned${NC}"
