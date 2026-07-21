@@ -90,21 +90,7 @@ def build_commute_pipeline(prop) -> None:
                 has_car=p_info.has_car,
                 max_walk=p_info.bus_walk_penalty_minutes,
             )
-
-            petrol_cost = PetrolCostAugmentNode(
-                f"{prop.rid}/{key}/petrol_cost",
-                commute_node=park_and_ride,
-                financial_source=prop._svc.financial_source,
-            )
-
-            # Separate PetrolCostAugmentNode for the raw drive path so
-            # drive-only commutes (where transit is unavailable) always
-            # have fuel cost.
-            drive_fuel = PetrolCostAugmentNode(
-                f"{prop.rid}/{key}/drive_fuel",
-                commute_node=drive_node,
-                financial_source=prop._svc.financial_source,
-            )
+ 
  
 
             walk_check = WalkLegCheckNode(
@@ -178,15 +164,20 @@ def build_commute_pipeline(prop) -> None:
                 f"{prop.rid}/{key}/commute",
                 origin=prop.best_location,
                 poi=poi_src,
-                drive_result=drive_fuel,
                 walk_result=walk_node,
-                transit_result=petrol_cost,
+                transit_result=park_and_ride,
+                drive_result=drive_node,
                 bus_result=bus_if,
                 rail_fare_result=rail_fare_result,
                 is_child=is_child,
                 max_walk=p_info.bus_walk_penalty_minutes,
             )
-            prop.commute_selectors[key] = selector
+            final_fuel = PetrolCostAugmentNode(
+                f"{prop.rid}/{key}/final_fuel",
+                commute_node=selector,
+                financial_source=prop._svc.financial_source,
+            )
+            prop.commute_selectors[key] = final_fuel
 
     prop.commute_breakdown = CommuteBreakdownNode(
         f"{prop.rid}/commute_breakdown",

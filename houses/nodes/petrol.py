@@ -97,3 +97,19 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
             details=tuple(new_details),
         )
         return Attempt.succeeded(new_commute)
+
+    async def to_json(self) -> dict:
+        result = await super().to_json()
+        attempt = await self.attempt()
+        if attempt.succeeded:
+            val = attempt.value_or_none()
+            if val is not None:
+                result["is_child"] = val.is_child
+        return result
+
+    async def to_json_value(self) -> dict:
+        result = await super().to_json_value()
+        val = self._attempt.value_or_none() if self._attempt.succeeded else None
+        if val is not None:
+            result["is_child"] = val.is_child
+        return result
