@@ -310,6 +310,104 @@ class TestParkAndRideAugmentNode:
             _sp.reset(token)
 
     @pytest.mark.asyncio
+    async def test_preserves_transit_cost_group_when_walk_is_separate(self):
+        """Realistic _build_cost_groups shape: walk in CG0, transit in CG1.
+        ParkAndRideAugmentNode must preserve CG1 so duration sums all legs."""
+        from money import Money
+        from pint import Quantity
+
+        from dag.derived_node import flush_processor
+        from houses.car_park import CarPark, CarParkRegistry
+        from houses.commute import CostGroup, JourneyLeg, LegMode
+        from houses.geo import GeoPoint
+        from houses.nodes.park_and_ride import ParkAndRideAugmentNode
+        from houses.services_provider import _request_services as _sp
+        from houses.stations import StationRegistry
+        from tests.helpers import make_services
+
+        class _FakeDriveTime:
+            async def estimate(self, origin, station):
+                return 12
+
+        class _FakeStation:
+            name = "Woking Rail Station"
+            crs = "WOK"
+
+        class _FakeStationRegistry(StationRegistry):
+            def find(self, name):
+                return _FakeStation() if "Woking" in name else None
+
+        class _FakeCarParkRegistry(CarParkRegistry):
+            def find_car_park(self, station):
+                return CarPark(name="Woking Park", daily_cost=Money("12.80", "GBP"))
+
+        svc = make_services(drive_time_service=_FakeDriveTime())
+        token = _sp.set(svc)
+        try:
+            transit = UserInputNode[Commute]("pr_mcg", Commute)
+            loc = UserInputNode[GeoPoint]("loc_mcg", GeoPoint)
+            # Production _build_cost_groups shape: walk before transit in its own CG
+            walk_cg = CostGroup(
+                legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=39, end_station="Woking Rail Station"),),
+                cost=None, operator="",
+            )
+            transit_cg = CostGroup(
+                legs=(
+                    JourneyLeg(mode=LegMode.TRAIN, duration_minutes=26),
+                    JourneyLeg(mode=LegMode.TUBE, duration_minutes=8),
+                    JourneyLeg(mode=LegMode.TUBE, duration_minutes=3),
+                    JourneyLeg(mode=LegMode.WALK, duration_minutes=7),
+                ),
+                cost=Money("12.50", "GBP"), operator="TfL",
+            )
+            commute = Commute(
+                person=Person(name="", has_car=True, is_child=False),
+                label="Office",
+                destination=PlaceOfInterest("Office", "SW1V 2QQ"),
+                duration=Quantity(94, "minute"),
+                daily_cost=Money("0", "GBP"),
+                mode="transit",
+                details=(walk_cg, transit_cg),
+            )
+            transit.push(commute, "TfL")
+            loc.push(GeoPoint(51.5, -0.1), "user")
+            pc_node = UserInputNode[str]("pc_mcg", str)
+            pc_node.push("GU21 7QF", "test")
+
+            node = ParkAndRideAugmentNode(
+                "pr_mcg",
+                transit_node=transit,
+                best_location=loc,
+                postcode_node=pc_node,
+                has_car=True,
+                max_walk=20,
+                station_registry=_FakeStationRegistry(),
+                car_park_registry=_FakeCarParkRegistry(),
+            )
+            await flush_processor()
+
+            a = await node.attempt()
+            assert a.succeeded, f"Expected succeeded, got {a.error}"
+            val = a.value_or_none()
+            assert val is not None
+
+            # Must have 3 cost groups: drive (replaced walk), park, original transit
+            assert len(val.details) == 3, f"Expected 3 CGs, got {len(val.details)}"
+            assert val.details[0].legs[0].mode.name == "DRIVE"
+            assert val.details[1].legs[0].mode.name == "PARK"
+            assert val.details[2].legs[0].mode.name == "TRAIN"
+
+            # Duration must sum ALL legs, not just the drive leg
+            total_legs = sum(
+                leg.duration_minutes for cg in val.details for leg in cg.legs
+            )
+            assert int(val.duration.magnitude) == total_legs, (
+                f"duration {int(val.duration.magnitude)} != sum of legs {total_legs}"
+            )
+        finally:
+            _sp.reset(token)
+
+    @pytest.mark.asyncio
     async def test_skips_short_walk(self):
         """10min walk, max_walk=20 — walk stays as walk, no parking."""
         from dag.derived_node import flush_processor
