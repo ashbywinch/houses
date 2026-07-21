@@ -398,54 +398,69 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         if not origin.succeeded or not poi.succeeded:
             return self._impossible({"origin": origin, "poi": poi})
 
-        # 1. Walk — best option when it works
-        if walk is not None and walk.succeeded and walk.value_or_none() is not None:
-            w = walk.value_or_none()
-            if w.duration.magnitude <= self._max_walk:
-                return Attempt.succeeded(replace(w, is_child=self.is_child))
+        candidates: list[Attempt[Commute]] = []
 
-        # 2. Transit vs bus
-        selected = None
+        # 1. Walk (Google Routes) — add if within max_walk
+        if walk is not None and walk.succeeded and walk.value_or_none() is not None:
+            if walk.value_or_none().duration.magnitude <= self._max_walk:
+                candidates.append(walk)
+
+        # 2. Transit vs bus — pick the better of the two
+        best_transit: Attempt[Commute] | None = None
         if transit.succeeded and transit.value_or_none() is not None:
             if bus_result.succeeded and bus_result.value_or_none() is not None:
-                transit_dur = transit.value_or_none().duration.magnitude
-                bus_dur = bus_result.value_or_none().duration.magnitude
-                selected = bus_result if bus_dur < transit_dur - 5 else transit
+                td = transit.value_or_none().duration.magnitude
+                bd = bus_result.value_or_none().duration.magnitude
+                best_transit = bus_result if bd < td - 5 else transit
             else:
-                selected = transit
+                best_transit = transit
+            candidates.append(best_transit)
+        elif bus_result.succeeded and bus_result.value_or_none() is not None:
+            # Transit failed — bus is a fallback
+            candidates.append(bus_result)
 
-        # 3. Drive — no transit available
-        if selected is None and drive is not None and drive.succeeded and drive.value_or_none() is not None:
-            selected = drive
+        # 3. Drive
+        if drive is not None and drive.succeeded and drive.value_or_none() is not None:
+            candidates.append(drive)
 
-        # 4. Bus fallback
-        if selected is None and bus_result.succeeded and bus_result.value_or_none() is not None:
-            selected = bus_result
+        if not candidates:
+            return self._impossible(
+                {"walk_result": walk, "transit_result": transit, "drive_result": drive, "bus_result": bus_result}
+            )
 
-        if selected is not None:
-            val = selected.value_or_none()
-            if val is not None:
-                val = replace(val, is_child=self.is_child)
-            # Only merge rail_fare cost when transit was selected (not bus/walk/drive)
-            if selected is transit and rail_fare_result.succeeded:
-                rf_val = rail_fare_result.value_or_none()
-                if rf_val and rf_val.daily_cost and rf_val.daily_cost.amount > 0 and val:
-                    new_details = _replace_transit_group(val.details, rf_val.details)
-                    from money import Money
+        # Pick fastest
+        selected = min(candidates, key=lambda a: a.value_or_none().duration.magnitude)
+        selected_src = None
+        if selected is walk:
+            selected_src = "walk"
+        elif best_transit is not None and selected is best_transit:
+            selected_src = "transit"
+        elif selected is drive:
+            selected_src = "drive"
 
-                    total = Money("0", "GBP")
-                    for cg in new_details:
-                        if cg.cost is not None:
-                            total += cg.cost if isinstance(cg.cost, Money) else Money(str(cg.cost), "GBP")
-                    merged = replace(
-                        val,
-                        daily_cost=total,
-                        details=new_details,
-                    )
-                    return Attempt.succeeded(merged)
-            return Attempt.succeeded(val)
+        val = selected.value_or_none()
+        if val is not None:
+            val = replace(val, is_child=self.is_child)
 
-        return self._impossible({"walk_result": walk, "transit_result": transit, "drive_result": drive, "bus_result": bus_result})
+        # Merge rail_fare cost when transit was selected
+        if selected_src == "transit" and rail_fare_result.succeeded:
+            rf_val = rail_fare_result.value_or_none()
+            if rf_val and rf_val.daily_cost and rf_val.daily_cost.amount > 0 and val:
+                new_details = _replace_transit_group(val.details, rf_val.details)
+                from money import Money
+
+                total = Money("0", "GBP")
+                for cg in new_details:
+                    if cg.cost is not None:
+                        total += cg.cost if isinstance(cg.cost, Money) else Money(str(cg.cost), "GBP")
+                merged = replace(
+                    val,
+                    daily_cost=total,
+                    details=new_details,
+                )
+                return Attempt.succeeded(merged)
+
+        return Attempt.succeeded(val)
 
     async def to_json(self) -> dict:
         attempt = await self.attempt()
