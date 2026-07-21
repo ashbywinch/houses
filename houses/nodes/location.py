@@ -32,6 +32,11 @@ class BestAddressNode(DerivedNode[str]):
             (self._user_entered, self._user_entered_ts),
             (self._corrected, self._corrected_ts),
         ):
+            # On restart the in-memory snapshot is lost (not persisted).
+            # Restore it from the dep's current _db_created_at so we can
+            # detect FUTURE changes correctly, without a false positive.
+            if not ts_field:
+                ts_field = src._db_created_at
             ts = src._db_created_at
             if ts and ts != ts_field:
                 return True
@@ -93,10 +98,14 @@ class BestLocationNode(DerivedNode[GeoPoint]):
             (self._precise_location, self._precise_ts_at_compute),
             (self._rightmove_location, self._rightmove_ts_at_compute),
         ):
+            if not ts_field:
+                ts_field = src._db_created_at
             ts = src._db_created_at
             if ts and ts != ts_field:
                 return True
         if self._geocode is not None:
+            if not self._geocode_ts_at_compute:
+                self._geocode_ts_at_compute = self._geocode._db_created_at
             ts = self._geocode._db_created_at
             if ts and ts != self._geocode_ts_at_compute:
                 return True

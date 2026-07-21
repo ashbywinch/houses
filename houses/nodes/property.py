@@ -229,7 +229,8 @@ class PropertyNodes:
                     )
                 else:
                     poi_src = UserInputNode[str](f"{self.rid}/{key}/poi", str)
-                    poi_src.push(postcode, "persons_source")
+                    if poi_src.latest_attempt().pending:
+                        poi_src.push(postcode, "persons_source")
 
                 walk_node = WalkNode(
                     f"{self.rid}/{key}/walk",
@@ -299,7 +300,7 @@ class PropertyNodes:
                 # Wrap bus_augment in IfThenElseNode — only active when walk is too long
                 bus_if = IfThenElseNode(
                     f"{self.rid}/{key}/bus_if",
-                    Commute,
+                    Commute | None,
                     condition_sources=(walk_check,),
                     condition_fn=_bus_condition,
                     then_branch=bus_augment,
@@ -322,7 +323,7 @@ class PropertyNodes:
                     _dummy = commute_input_node(f"{self.rid}/{key}/rail_fare_dummy")
                     rail_fare_result = IfThenElseNode(
                         f"{self.rid}/{key}/rail_fare_noop",
-                        Commute,
+                        Commute | None,
                         condition_sources=(),
                         condition_fn=lambda: False,
                         then_branch=_dummy,
@@ -330,7 +331,7 @@ class PropertyNodes:
                 else:
                     rail_fare_result = IfThenElseNode(
                         f"{self.rid}/{key}/rail_fare_if",
-                        Commute,
+                        Commute | None,
                         condition_sources=(transit_node,),
                         condition_fn=_needs_rail_fare,
                         then_branch=rail_fare_node,
@@ -375,29 +376,29 @@ class PropertyNodes:
 
         result = {
             "rid": self.rid,
-            "best_address": await self.best_address.to_json(),
-            "best_location": await self.best_location.to_json(),
-            "rightmove_price": await self.rightmove_price.to_json(),
-            "rightmove_bedrooms": await self.rightmove_bedrooms.to_json(),
-            "total_monthly_cost": await self.total_monthly_cost.to_json(),
-            "town_name": await self.town_name.to_json(),
-            "commutes": {k: {"commute": await v.to_json()} for k, v in self.commute_selectors.items()},
+            "best_address": await self.best_address.to_json_value(),
+            "best_location": await self.best_location.to_json_value(),
+            "rightmove_price": await self.rightmove_price.to_json_value(),
+            "rightmove_bedrooms": await self.rightmove_bedrooms.to_json_value(),
+            "total_monthly_cost": await self.total_monthly_cost.to_json_value(),
+            "town_name": await self.town_name.to_json_value(),
+            "commutes": {k: {"commute": await v.to_json_value()} for k, v in self.commute_selectors.items()},
             "schools": {
                 "primary": {
-                    "school": await self.primary_school.to_json(),
+                    "school": await self.primary_school.to_json_value(),
                 },
                 "secondary": {
-                    "school": await self.secondary_school.to_json(),
+                    "school": await self.secondary_school.to_json_value(),
                 },
             },
-            "walkability": await self.walkability.to_json(),
-            "epc": await self.epc.to_json(),
+            "walkability": await self.walkability.to_json_value(),
+            "epc": await self.epc.to_json_value(),
             "triage": {
-                "favourite": await self.favourite.to_json(),
-                "dismissed": await self.dismissed.to_json(),
-                "is_viewed": await self.is_viewed.to_json(),
-                "user_notes": await self.user_notes.to_json(),
-                "triage_status": await self.triage_status.to_json(),
+                "favourite": await self.favourite.to_json_value(),
+                "dismissed": await self.dismissed.to_json_value(),
+                "is_viewed": await self.is_viewed.to_json_value(),
+                "user_notes": await self.user_notes.to_json_value(),
+                "triage_status": await self.triage_status.to_json_value(),
             },
         }
         result["freshness"] = {

@@ -96,7 +96,6 @@ class TestSummaryShape:
         ):
             assert "status" in s[key], f"{key} missing status"
             assert "value" in s[key], f"{key} missing value"
-            assert "provenance" in s[key], f"{key} missing provenance"
 
         # triage fields should all be wrapped (including user_notes and triage_status)
         assert "triage" in s

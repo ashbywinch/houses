@@ -481,3 +481,8 @@ class CommuteSelectorNode(DerivedNode[Commute]):
             result["error"] = attempt.error
         result["provenance"] = (await self.build_provenance()).to_dict()
         return result
+
+    async def to_json_value(self) -> dict:
+        result = await super().to_json_value()
+        result["is_child"] = self.is_child
+        return result

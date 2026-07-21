@@ -57,5 +57,7 @@ class IfThenElseNode(DerivedNode[T], Generic[T]):
         # If a branch was activated, the last arg is the branch result.
         if len(args) > len(self._condition_sources):
             return args[-1]
-        # No branch — return succeeded None so callers can check .succeeded.
+        # No branch activated — return succeeded(None).  The node's value_type
+        # must be a nullable type (T | None) so the TypeAdapter round-trips
+        # correctly through persist/reload.
         return Attempt.succeeded(None)

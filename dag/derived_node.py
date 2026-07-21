@@ -49,6 +49,8 @@ class RefreshScheduler:
 
     async def process_pending(self) -> None:
         """Synchronously process all currently scheduled nodes."""
+    def after_refresh(self, node: DerivedNode) -> None:
+        """Called after a node completes refresh (no-op default)."""
 
 
 class AsyncQueueScheduler(RefreshScheduler):
@@ -63,7 +65,7 @@ class AsyncQueueScheduler(RefreshScheduler):
         self._queue: asyncio.PriorityQueue[QueueEvent] = asyncio.PriorityQueue()
         self._scheduled: dict[str, QueueEvent] = {}
         self._wakeup = asyncio.Event()
-        self._after_refresh: Callable[[DerivedNode], object] | None = None
+        self._after_refresh_callback: Callable[[DerivedNode], object] | None = None
         self._respect_time = respect_time
 
     def schedule(self, node: DerivedNode) -> None:
@@ -91,12 +93,18 @@ class AsyncQueueScheduler(RefreshScheduler):
             return
         if node._retry_at is not None and node._retry_at > datetime.now(UTC):
             self.schedule_at(node, node._retry_at)
-        elif node._attempt.pending or node._is_stale():
+        elif node._attempt.pending:
+            self.schedule(node)
+        elif node._is_stale():
             self.schedule(node)
 
     def unregister(self, node: DerivedNode) -> None:
         """Called when a node is disconnected (cleanup)."""
         self._scheduled.pop(node._id, None)
+    def after_refresh(self, node: DerivedNode) -> None:
+        """Called after a node completes refresh — delegates to callback if set."""
+        if self._after_refresh_callback is not None:
+            self._after_refresh_callback(node)
 
     async def process_pending(self) -> None:
         """Process all past-due events (or all events when ``_respect_time`` is False)."""
@@ -132,8 +140,7 @@ class AsyncQueueScheduler(RefreshScheduler):
 
 def set_after_refresh(callback: Callable[[DerivedNode], object]) -> None:
     sched = _get_scheduler()
-    if isinstance(sched, AsyncQueueScheduler):
-        sched._after_refresh = callback
+    sched._after_refresh_callback = callback
 
 
 # Production default — shared across all asyncio tasks.
@@ -210,6 +217,7 @@ class DerivedNode(Node[T], Generic[T]):
         return self._attempt
 
     def _on_dep_changed(self) -> None:
+        self._retry_count = 0
         if not self._is_stale():
             return
         _get_scheduler().schedule(self)
@@ -222,20 +230,29 @@ class DerivedNode(Node[T], Generic[T]):
         for dep in self._get_active_deps():
             if dep._persisted_at is not None and self._computed_at is not None \
                     and dep._persisted_at > self._computed_at:
+                logger.warning("STALE1: %s dep=%s persisted=%s > computed=%s", self._id, dep._id, dep._persisted_at.isoformat(), self._computed_at.isoformat())
                 return True
             if isinstance(dep, DerivedNode) and dep._computed_at is not None \
                     and self._computed_at is not None \
                     and dep._computed_at > self._computed_at:
+                logger.warning("STALE2: %s dep=%s computed=%s > self_computed=%s", self._id, dep._id, dep._computed_at.isoformat(), self._computed_at.isoformat())
                 return True
             if self._loaded_dep_timestamps:
                 stored = self._loaded_dep_timestamps.get(dep._id, "")
-                if stored and dep._db_created_at != stored:
-                    return True
+                if stored:
+                    if not dep._db_created_at:
+                        logger.warning(
+                            "STALE_EMPTY: %s dep=%s has empty _db_created_at",
+                            self._id, dep._id,
+                        )
+                        continue
+                    if dep._db_created_at != stored:
+                        logger.warning("STALE3: %s dep=%s stored=%s actual=%s", self._id, dep._id, stored, dep._db_created_at)
+                        return True
         return False
 
     async def attempt(self) -> Attempt[T]:
         return self._attempt
-
     @property
     def _skip_impossible_dep_check(self) -> bool:
         """Override in subclasses whose compute() handles failed deps gracefully.
@@ -299,13 +316,15 @@ class DerivedNode(Node[T], Generic[T]):
                 }
                 self._persist(result_dict, dep_timestamps)
                 self.changed.emit()
-                if _get_scheduler()._after_refresh is not None:
-                    _get_scheduler()._after_refresh(self)
+                _get_scheduler().after_refresh(self)
                 return
         try:
             result = self.compute(*dep_attempts)
             if iscoroutine(result):
                 result = await result
+                # Yield to event loop so HTTP requests aren't starved during
+                # burst refresh (many nodes queued at startup).
+                await asyncio.sleep(0)
         except Exception as e:
             if self._is_transient_error(e):
                 if not self.schedule_retry(self._retry_delay_from(e)):
@@ -314,6 +333,9 @@ class DerivedNode(Node[T], Generic[T]):
                     result = Attempt.pending()
             else:
                 result = Attempt.impossible(f"{self._id}: {e}")
+        # Yield after compute finishes so the event loop can serve HTTP
+        # requests before we do sync persist work (json.dumps + SQLite).
+        await asyncio.sleep(0)
 
         self._attempt = result
         self._computed_at = datetime.now(UTC)
@@ -343,8 +365,7 @@ class DerivedNode(Node[T], Generic[T]):
             }
         self._persist(result_dict, dep_timestamps)
         self.changed.emit()
-        if _get_scheduler()._after_refresh is not None:
-            _get_scheduler()._after_refresh(self)
+        _get_scheduler().after_refresh(self)
 
     async def _build_provenance_dict(self) -> dict:
         """Build provenance dict for persistence, with a fallback if build_provenance() fails."""
@@ -367,6 +388,15 @@ class DerivedNode(Node[T], Generic[T]):
 
     async def to_json(self) -> dict:
         result = await super().to_json()
+        if self._retry_at is not None:
+            result["retry_at"] = self._retry_at.isoformat()
+            result["retry_count"] = self._retry_count
+        if not self._attempt.pending:
+            result["stale"] = self._is_stale()
+        return result
+
+    async def to_json_value(self) -> dict:
+        result = await super().to_json_value()
         if self._retry_at is not None:
             result["retry_at"] = self._retry_at.isoformat()
             result["retry_count"] = self._retry_count

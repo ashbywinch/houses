@@ -243,8 +243,8 @@ class TestSummaryShape:
             assert key in s, f"Missing key: {key}"
 
     @pytest.mark.asyncio
-    async def test_every_wrapped_value_has_status_value_provenance(self, prop):
-        """Every node-backed field wraps its value in a standard envelope."""
+    async def test_every_wrapped_value_has_status_and_value(self, prop):
+        """Every node-backed field wraps its value in a standard envelope (no provenance in summary)."""
         await flush_processor()
         await flush_processor()
         s = await prop.to_json_summary()
@@ -262,7 +262,6 @@ class TestSummaryShape:
             val = s[key]
             assert "status" in val, f"{key} missing status"
             assert "value" in val, f"{key} missing value"
-            assert "provenance" in val, f"{key} missing provenance"
 
 
 class TestCommuteData:
@@ -286,7 +285,6 @@ class TestCommuteData:
             c = cd["commute"]
             assert "status" in c, f"{key} commute missing status"
             assert "succeeded" in c, f"{key} commute missing succeeded"
-            assert "provenance" in c, f"{key} commute missing provenance"
 
     @pytest.mark.asyncio
     async def test_successful_commute_has_duration_and_cost(self, prop):
@@ -375,7 +373,6 @@ class TestSchoolData:
         for phase in ("primary", "secondary"):
             school_node = s["schools"][phase]["school"]
             assert "status" in school_node, f"{phase} school missing status"
-            assert "provenance" in school_node, f"{phase} school missing provenance"
             assert "succeeded" in school_node, f"{phase} school missing succeeded"
 
 
