@@ -1,12 +1,6 @@
-"""Reusable fake services for tests using the Services DI container.
+"""Reusable fakes and helpers for tests.
 
-Usage::
-
-    from tests.helpers import FakeEPC, FakeCommuteRouter, make_services
-    from houses.services import Services
-
-    services = make_services(epc_service=FakeEPC(band="C"))
-    result = await _run_enrichment(..., services=services)
+Every fake returns minimal data so tests don't hit real APIs.
 """
 
 from __future__ import annotations
@@ -14,12 +8,14 @@ from __future__ import annotations
 from typing import Any
 
 from money import Money
+from pint import Quantity
 
-from houses.attempt import Attempt
-from houses.commute import Commute
+from dag.attempt import Attempt
+from houses.council_tax_info import CouncilTaxInfo
 from houses.geo import GeoPoint
-from houses.property import CouncilTaxInfo
-from houses.schools import School, SchoolGender
+from houses.model.domain import Commute, Person, PlaceOfInterest
+from houses.school import School
+from houses.school_gender import SchoolGender
 from houses.services import Services
 
 # ── Individual Fake Services ──────────────────────────────────────────
@@ -29,39 +25,53 @@ _DEFAULT_POINT = GeoPoint(51.5, -0.1)
 
 
 class FakeGeocoder:
-    """Returns a fixed GeoPoint for any geocode request."""
+    """Returns a fixed GeoPoint for any geocode request, and a fixed
+    town name for reverse-geocode town lookups."""
 
-    def __init__(self, result: GeoPoint | None = _DEFAULT_POINT):
+    def __init__(self, result: GeoPoint | None = _DEFAULT_POINT, reverse_town: str | None = "Test Town"):
         self.result = result
+        self.reverse_town = reverse_town
         self.postcode_calls: list[str] = []
         self.address_calls: list[str] = []
+        self.reverse_calls: list[tuple[float, float]] = []
+
+    @property
+    def call_count(self) -> int:
+        return len(self.address_calls) + len(self.postcode_calls)
 
     async def geocode_postcode(self, postcode: str) -> Attempt[GeoPoint]:
         self.postcode_calls.append(postcode)
-        return Attempt.succeeded(self.result, "fake") if self.result else Attempt.impossible("fake", "no result")
+        return Attempt.succeeded(self.result) if self.result else Attempt.impossible("no result")
 
     async def geocode_address(self, address: str) -> Attempt[GeoPoint]:
         self.address_calls.append(address)
-        return Attempt.succeeded(self.result, "fake") if self.result else Attempt.impossible("fake", "no result")
+        return Attempt.succeeded(self.result) if self.result else Attempt.impossible("no result")
+
+    async def reverse_geocode_town(self, lat: float, lon: float) -> str | None:
+        self.reverse_calls.append((lat, lon))
+        return self.reverse_town
 
 
 _DEFAULT_SIMON = Commute(
-    destination_label="Simon (London)",
-    destination_postcode="SW1V 2QQ",
-    duration_minutes=30,
-    daily_cost_gbp=Money("10.0", "GBP"),
+    person=Person(name="Simon", has_car=False),
+    label="Simon (London)",
+    destination=PlaceOfInterest(label="Simon (London)", postcode="SW1V 2QQ"),
+    duration=Quantity(30, "minute"),
+    daily_cost=Money("10.0", "GBP"),
 )
 _DEFAULT_LORENA = Commute(
-    destination_label="Lorena (London)",
-    destination_postcode="EC3A 7LP",
-    duration_minutes=45,
-    daily_cost_gbp=Money("12.0", "GBP"),
+    person=Person(name="Lorena", has_car=False),
+    label="Lorena (London)",
+    destination=PlaceOfInterest(label="Lorena (London)", postcode="EC3A 7LP"),
+    duration=Quantity(45, "minute"),
+    daily_cost=Money("12.0", "GBP"),
 )
 _DEFAULT_PETROL = Commute(
-    destination_label="Bracknell Office (RG12 8YA)",
-    destination_postcode="RG12 8YA",
-    duration_minutes=90,
-    daily_cost_gbp=Money("12.50", "GBP"),
+    person=Person(name="Simon", has_car=True),
+    label="Bracknell Office (RG12 8YA)",
+    destination=PlaceOfInterest(label="Bracknell Office (RG12 8YA)", postcode="RG12 8YA"),
+    duration=Quantity(90, "minute"),
+    daily_cost=Money("12.50", "GBP"),
 )
 
 
@@ -79,67 +89,66 @@ class FakeCommuteRouter:
         self.petrol = petrol
         self.calls: list[tuple[str, str]] = []
 
-    async def simon_commute(self, postcode: str) -> Attempt[Commute]:
-        self.calls.append(("simon", postcode))
-        return Attempt.succeeded(self.simon, "fake") if self.simon else Attempt.impossible("fake", "no route")
-
-    async def lorena_commute(self, postcode: str) -> Attempt[Commute]:
-        self.calls.append(("lorena", postcode))
-        return Attempt.succeeded(self.lorena, "fake") if self.lorena else Attempt.impossible("fake", "no route")
-
-    async def petrol_cost(self, postcode: str) -> Attempt[Commute]:
-        self.calls.append(("petrol", postcode))
-        return Attempt.succeeded(self.petrol, "fake") if self.petrol else Attempt.impossible("fake", "no route")
+    async def route(
+        self,
+        origin: str | GeoPoint,
+        destination: str | GeoPoint,
+        *,
+        has_car: bool,
+        max_walk_minutes: int,
+    ) -> Attempt[Commute]:
+        self.calls.append(("route", str(origin)))
+        return Attempt.impossible("mocked route")
 
 
 class FakeSchoolLookup:
-    """Returns no school (None) for any lookup."""
+    """School lookup that returns whatever school was passed to constructor.
 
-    def __init__(self):
-        self.find_calls: list[dict] = []
-        self.commute_calls: list[tuple[str, School | None]] = []
+    ``FakeSchoolLookup()`` returns None (no school found).  Override with
+    ``FakeSchoolLookup(school=some_school)`` to return a specific school.
+    """
+
+    def __init__(self, school: School | None = None):
+        self.school = school
+        self.find_calls: list[tuple[str, int, str, tuple]] = []
 
     async def find_nearest(
         self,
         postcode: str,
         child_age: int,
         address: str = "",
-        requirement: SchoolGender = SchoolGender.BOYS,
-    ) -> School | None:
-        self.find_calls.append(dict(postcode=postcode, child_age=child_age, address=address, requirement=requirement))
-        return None
+        acceptable: tuple[SchoolGender, ...] = (SchoolGender.MIXED,),
+    ) -> Attempt[School | None]:
+        self.find_calls.append((postcode, child_age, address, acceptable))
+        return Attempt.succeeded(self.school)
 
     async def school_commute(self, postcode: str, school: School) -> Commute | None:
-        self.commute_calls.append((postcode, school))
-        return None
+        from houses.model.domain import Commute, Person, PlaceOfInterest
+
+        return Commute(
+            person=Person(name="George", has_car=False, is_child=True),
+            label=school.name,
+            destination=PlaceOfInterest(label=school.name, postcode=school.postcode),
+            duration=Quantity(20, "minute"),
+            daily_cost=Money("0", "GBP"),
+        )
 
 
 class FakeWalkability:
-    """Returns empty walkability data."""
-
-    def __init__(self, walk_to_town_minutes: int | None = None, amenities: str = ""):
-        self._walk_to_town_minutes = walk_to_town_minutes
-        self._amenities = amenities
+    def __init__(self, walk_to_town_minutes: int = 10, amenities: str = ""):
+        self.walk_to_town_minutes = walk_to_town_minutes
+        self.amenities = amenities
 
     async def enrich(self, lat: float, lng: float, address: str) -> dict[str, Any]:
-        return {"walk_to_town_minutes": self._walk_to_town_minutes, "amenities": self._amenities}
+        return {"walk_to_town_minutes": self.walk_to_town_minutes, "amenities": self.amenities}
 
 
 class FakeTownDesc:
-    """Returns a canned town description."""
-
-    def __init__(self, description: str = "A pleasant town."):
-        self._description = description
-        self.calls: list[tuple[str, str]] = []
-
     async def describe(self, town_name: str, postcode: str) -> str:
-        self.calls.append((town_name, postcode))
-        return self._description
+        return "A nice town."
 
 
 class FakeEPC:
-    """Returns a canned EPC band. Records calls for assertion."""
-
     def __init__(self, band: str = "C"):
         self.band = band
         self.calls: list[tuple[str, str]] = []
@@ -150,24 +159,14 @@ class FakeEPC:
 
 
 class FakeCouncilTax:
-    """Returns a canned council tax result."""
-
-    def __init__(self, band: str = "D", cost: float | None = 1800.0):
-        if band:
-            self._result: Attempt[CouncilTaxInfo] = Attempt.succeeded(
-                CouncilTaxInfo(band=band, yearly_cost=cost),
-                "fake",
-            )
-        else:
-            self._result = Attempt.impossible("fake", "no result")
+    def __init__(self, result: CouncilTaxInfo | None = None):
+        self.result = result or CouncilTaxInfo(band="D", yearly_cost=2000)
 
     async def lookup(self, postcode: str, address: str = "") -> Attempt[CouncilTaxInfo]:
-        return self._result
+        return Attempt.succeeded(self.result)
 
 
 class FakeRailFare:
-    """Passes simon/lorena through unchanged (no rail fare enrichment)."""
-
     async def enrich(
         self,
         enabled: set[str] | None,
@@ -176,10 +175,26 @@ class FakeRailFare:
         simon: Commute | None,
         lorena: Commute | None,
     ) -> tuple[Commute | None, Commute | None]:
-        return simon, lorena
+        return None, None
 
 
-# ── Convenience factory ────────────────────────────────────────────────
+# ── Composite helper ──────────────────────────────────────────────────
+
+
+_DEFAULT_SCHOOL = School(
+    urn="123",
+    name="Test School",
+    phase="primary",
+    gender=SchoolGender.MIXED,
+    type_of_establishment="community school",
+    postcode="SW1V 2QQ",
+    website="https://example.com",
+    ofsted_rating="Good",
+    inspection_year="2022",
+    coords=GeoPoint(lat=51.5, lon=-0.13),
+    statutory_low_age=None,
+    statutory_high_age=None,
+)
 
 
 def make_services(**overrides: Any) -> Services:
@@ -195,7 +210,7 @@ def make_services(**overrides: Any) -> Services:
     base: dict[str, Any] = dict(
         geocoder=FakeGeocoder(),
         commute_router=FakeCommuteRouter(),
-        school_lookup=FakeSchoolLookup(),
+        school_lookup=FakeSchoolLookup(school=_DEFAULT_SCHOOL),
         walkability_service=FakeWalkability(walk_to_town_minutes=10, amenities="Shops, cafe"),
         town_desc_service=FakeTownDesc(),
         epc_service=FakeEPC(),

@@ -79,3 +79,12 @@ data/bods_stops.csv
 .sisyphus/
 .code-review-graph/
 .ropeproject/
+data/houses.db*
+# DAG database (recreatable)
+data/dag.db
+data/dag.db-shm
+data/dag.db-wal
+tools/captures/
+
+# Logs directory (PID files, dev server logs)
+.logs/

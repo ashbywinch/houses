@@ -28,7 +28,7 @@ from pathlib import Path
 
 from money import Money
 
-from houses.attempt import Attempt
+from dag.attempt import Attempt
 from houses.stations import Station
 
 logger = logging.getLogger(__name__)
@@ -297,7 +297,7 @@ class CarParkRegistry:
         """
         result = await self._apcoa_lookup(station)
         if result is None:
-            return Attempt.impossible("apcoa", f"No APCOA rate found for {station.name}")
+            return Attempt.impossible(f"No APCOA rate found for {station.name}")
 
         car_park.daily_cost = Money(str(result["price"]), "GBP")
         if result.get("address"):
@@ -306,7 +306,7 @@ class CarParkRegistry:
             car_park.name = result["name"]
 
         self._persist_results(station, car_park)
-        return Attempt.succeeded(car_park, "apcoa")
+        return Attempt.succeeded(car_park)
 
     async def add_nearest_car_park_for(self, station: Station) -> Attempt[CarPark]:
         """Find the nearest APCOA car park for a station not in the CSV.
@@ -317,7 +317,7 @@ class CarParkRegistry:
         """
         result = await self._apcoa_lookup(station)
         if result is None:
-            return Attempt.impossible("apcoa", f"No APCOA car park found near {station.name}")
+            return Attempt.impossible(f"No APCOA car park found near {station.name}")
 
         car_park = CarPark(
             name=result.get("name") or f"{station.name} Station Car Park",
@@ -326,7 +326,7 @@ class CarParkRegistry:
         )
 
         self._persist_results(station, car_park)
-        return Attempt.succeeded(car_park, "apcoa")
+        return Attempt.succeeded(car_park)
 
     async def _apcoa_lookup(self, station: Station) -> dict | None:
         """Scrape APCOA for a car park near *station*.

@@ -1,96 +1,88 @@
-"""Tests for card_data — sheet-row to card-model transformation.
+"""Tests for card data — API response shape for the frontend.
 
-Tests ``_build_card`` (pure function, no I/O) with synthetic sheet data,
-and ``get_all_cards`` with mocked sheet I/O boundary.
+The old card_data module (``_build_card`` / ``CardData`` dataclass) has been
+replaced by the DAG-based ``PropertyNode.to_json_summary()``.  Card display
+is now driven by the frontend consuming the API response JSON.
+
+These tests verify that the API response shape matches what the frontend
+``PropertyCard.vue`` and ``PropertyDetail.vue`` expect, plus the pure
+helper functions that survived the migration.
 """
 
 from __future__ import annotations
 
-from unittest import mock
+import pytest
+from money import Money
+from pint import Quantity
 
-from houses.sheets.formulas import VIEW_HEADERS
-from houses.sheets.row import Row
-from houses.web.card_data import _build_card, commute_colour, get_all_cards, ofsted_colour, walk_colour
+from dag.attempt import Attempt
+from dag.derived_node import flush_processor
+from houses.geo import GeoPoint
+from houses.model.domain import Commute, Person, PlaceOfInterest
+from houses.nodes.commute import commute_colour, format_duration
+from houses.nodes.property import PropertyNodes
+from houses.property_registry import _registry, register_property
+from houses.web.api_router import _score_from_summary
+from tests.helpers import make_services
 
-# ── Test data helpers ────────────────────────────────────────────────────
-
-
-def _data(overrides: dict[str, str] | None = None) -> dict[str, str]:
-    """Build a Data tab row with defaults that produce a well-rounded card."""
-    row = {h: "" for h in Row.HEADERS}
-    row.update(
-        {
-            "Rightmove ID": "12345",
-            "Rightmove URL": "https://www.rightmove.co.uk/properties/12345",
-            "Address": "48 Acacia Avenue, Southall, UB2",
-            "Postcode": "UB2 5AD",
-            "Bedrooms": "3",
-            "Price (£)": "450000",
-            "Simon London (min)": "32",
-            "Simon London Cost (£)": "4.50",
-            "Lorena London (min)": "45",
-            "Lorena London Cost (£)": "2.80",
-            "Bracknell Time (min)": "22",
-            "Bracknell Cost (£)": "6.00",
-            "Primary School": "St Mary's Primary",
-            "Primary Walk (min)": "4",
-            "Primary Ofsted": "Outstanding",
-            "Primary Inspection Year": "2023",
-            "Primary School Link": "https://get-information-schools.service.gov.uk/Establishments/Establishment/Details/100",
-            "Secondary School": "The Academy",
-            "Secondary Walk (min)": "12",
-            "Secondary Ofsted": "Good",
-            "Secondary Inspection Year": "2022",
-            "Secondary School Link": "https://get-information-schools.service.gov.uk/Establishments/Establishment/Details/200",
-            "Walk to Town (min)": "10",
-            "Best Latitude": "51.5",
-            "Best Longitude": "-0.4",
-            "Map URL": "https://www.google.com/maps?q=51.5,-0.4",
-        }
-    )
-    if overrides:
-        row.update(overrides)
-    return row
+# ── Fixtures ────────────────────────────────────────────────────────────
 
 
-def _view(overrides: dict[str, str] | None = None) -> dict[str, str]:
-    """Build a View tab row with defaults."""
-    row = {h: "" for h in VIEW_HEADERS}
-    row.update(
-        {
-            "Rightmove ID": "12345",
-            "Total Monthly Housing Cost (£)": "2850.00",
-            "Status": "Maybe",
-        }
-    )
-    if overrides:
-        row.update(overrides)
-    return row
+@pytest.fixture(autouse=True)
+def _mock(monkeypatch):
+    """Set fake services with a commute router that returns canned data."""
+    from houses.services_provider import _request_services as _sp
+
+    class _CannedRouter:
+        async def route(self, origin, destination, *, has_car, max_walk_minutes):
+            return Attempt.succeeded(
+                Commute(
+                    person=Person(name="Test", has_car=has_car),
+                    label="Test Commute",
+                    destination=PlaceOfInterest(
+                        label="Dest",
+                        postcode=str(destination),
+                    ),
+                    duration=Quantity(30, "minute"),
+                    daily_cost=Money("5.0", "GBP"),
+                    mode="transit",
+                ),
+            )
+
+    svc = make_services(commute_router=_CannedRouter())
+    token = _sp.set(svc)
+    yield
+    _sp.reset(token)
 
 
-# ── Column header validation ─────────────────────────────────────────────
+@pytest.fixture(autouse=True)
+def _clear():
+    _registry.clear()
+    yield
+    _registry.clear()
 
 
-class TestColumnHeaders:
-    """Test data column sets must stay in sync with production constants."""
+@pytest.fixture
+def prop():
+    """A PropertyNode seeded with basic data, registered."""
+    rid = "test_card"
+    p = PropertyNodes(rid)
+    p.rightmove_address.push("48 Acacia Avenue, Southall, UB2 5AD", "Rightmove")
+    p.rightmove_url.push("https://www.rightmove.co.uk/properties/12345", "Browser")
+    p.rightmove_bedrooms.push("3", "Rightmove")
+    p.rightmove_price.push(Money("450000", "GBP"), "Rightmove")
+    p.rightmove_location.push(GeoPoint(51.5, -0.4), "Rightmove map")
+    p.postcode.push("UB2 5AD", "Rightmove")
+    register_property(rid, p)
+    return p
 
-    def test_data_defaults_cover_all_columns(self):
-        row = {h: "" for h in Row.HEADERS}
-        row.update({"Rightmove ID": "x"})
-        card = _build_card(row, {"Rightmove ID": "x"})
-        assert card.rid == "x"
 
-    def test_view_defaults_cover_all_columns(self):
-        row = {h: "" for h in VIEW_HEADERS}
-        row.update({"Rightmove ID": "x", "Status": "Maybe"})
-        card = _build_card({"Rightmove ID": "x"}, row)
-        assert card.status == "Maybe"
-
-
-# ── Colour helpers ───────────────────────────────────────────────────────
+# ── Colour helpers ──────────────────────────────────────────────────────
 
 
 class TestCommuteColour:
+    """commute_colour() survived the migration — still used in scoring."""
+
     def test_simon_good(self):
         assert commute_colour(30, bracknell=False) == "good"
 
@@ -121,221 +113,416 @@ class TestCommuteColour:
         assert commute_colour(None, bracknell=False) == "muted"
 
 
+class TestFormatDuration:
+    """format_duration() replaced the old ``_dur`` helper.
+
+    Frontend still formats commute durations in ``PropertyCard.vue`` via
+    ``commuteDuration()``, but the API response includes raw minutes.
+    This helper is used internally in the DAG pipeline.
+    """
+
+    def test_none_returns_empty(self):
+        assert format_duration(None) == ""
+
+    def test_under_one_hour(self):
+        assert format_duration(32) == "32m"
+
+    def test_exact_one_hour(self):
+        assert format_duration(60) == "1h"
+
+    def test_one_hour_with_minutes(self):
+        assert format_duration(90) == "1h30"
+
+    def test_two_hours_exact(self):
+        assert format_duration(120) == "2h"
+
+    def test_two_hours_with_minutes(self):
+        assert format_duration(145) == "2h25"
+
+
 class TestOfstedColour:
+    """_ofsted_score() from the scoring routine replicates the old ofsted_colour() mapping.
+
+    The colour helper itself lives in the frontend;
+    the backend scoring uses the same thresholds.
+    """
+
+    @staticmethod
+    def _summary_with_ofsted(ofsted: str) -> dict:
+        return {
+            "commutes": {},
+            "schools": {
+                "primary": {"school": {"status": "succeeded", "value": {"ofsted": ofsted, "walk_minutes": None}}},
+                "secondary": {"school": {"status": "impossible", "value": None}},
+            },
+            "walkability": {"value": None},
+        }
+
     def test_outstanding_is_good(self):
-        assert ofsted_colour("Outstanding") == "good"
+        """Outstanding → score 2 (was colour 'good')."""
+        assert _score_from_summary(self._summary_with_ofsted("Outstanding")) == 2
 
     def test_good_is_warn(self):
-        assert ofsted_colour("Good") == "warn"
+        """Good → score 1 (was colour 'warn')."""
+        assert _score_from_summary(self._summary_with_ofsted("Good")) == 1
 
     def test_requires_improvement_is_bad(self):
-        assert ofsted_colour("Requires Improvement") == "bad"
+        """Requires Improvement → score -1 (was colour 'bad')."""
+        assert _score_from_summary(self._summary_with_ofsted("Requires Improvement")) == -1
 
     def test_inadequate_is_bad(self):
-        assert ofsted_colour("Inadequate") == "bad"
+        """Inadequate → score -1 (was colour 'bad')."""
+        assert _score_from_summary(self._summary_with_ofsted("Inadequate")) == -1
 
     def test_empty_returns_muted(self):
-        assert ofsted_colour("") == "muted"
+        """Empty → score 0 (was colour 'muted')."""
+        assert _score_from_summary(self._summary_with_ofsted("")) == 0
 
 
 class TestWalkColour:
+    """_walk_score() from the scoring routine replicates the old walk_colour() mapping.
+
+    Colour is now a frontend concern; the backend scoring still uses the
+    same thresholds (<15 green, 15-30 warn, >30 bad).
+    """
+
+    @staticmethod
+    def _summary_with_walk(minutes: int | None) -> dict:
+        return {
+            "commutes": {},
+            "schools": {
+                "primary": {"school": {"status": "impossible", "value": None}},
+                "secondary": {"school": {"status": "impossible", "value": None}},
+            },
+            "walkability": {"value": {"walk_to_town_minutes": minutes}},
+        }
+
     def test_good_under_15(self):
-        assert walk_colour(10) == "good"
+        """walk < 15 → score 2 (was colour 'good')."""
+        assert _score_from_summary(self._summary_with_walk(10)) == 2
 
     def test_boundary_good_warn(self):
-        assert walk_colour(14) == "good"
-        assert walk_colour(15) == "warn"
+        """14 → green/2, 15 → warn/1."""
+        assert _score_from_summary(self._summary_with_walk(14)) == 2
+        assert _score_from_summary(self._summary_with_walk(15)) == 1
 
     def test_boundary_warn_bad(self):
-        assert walk_colour(30) == "warn"
-        assert walk_colour(31) == "bad"
+        """30 → warn/1, 31 → bad/-1."""
+        assert _score_from_summary(self._summary_with_walk(30)) == 1
+        assert _score_from_summary(self._summary_with_walk(31)) == -1
 
     def test_none_returns_muted(self):
-        assert walk_colour(None) == "muted"
+        """None → score 0 (was colour 'muted')."""
+        assert _score_from_summary(self._summary_with_walk(None)) == 0
 
 
-# ── Card building ────────────────────────────────────────────────────────
+# ── API response shape ──────────────────────────────────────────────────
 
 
-class TestCardBuild:
-    def test_address_and_price(self):
-        card = _build_card(_data(), _view())
-        assert card.address == "48 Acacia Avenue, Southall, UB2"
-        assert card.price == 450000.0
+class TestSummaryShape:
+    """Verify the top-level keys of to_json_summary()."""
 
-    def test_bedrooms_and_postcode_district(self):
-        card = _build_card(_data(), _view())
-        assert card.bedrooms == 3
-        assert card.postcode_district == "UB2"
+    @pytest.mark.asyncio
+    async def test_has_expected_top_level_keys(self, prop):
+        await flush_processor()
+        await flush_processor()
+        s = await prop.to_json_summary()
 
-    def test_commute_colours(self):
-        card = _build_card(_data(), _view())
-        assert card.simon_colour == "good"  # 32 < 45
-        assert card.lorena_colour == "warn"  # 45 is boundary (warn)
-        assert card.bracknell_colour == "good"  # 22 < 30
+        assert s["rid"] == "test_card"
+        for key in (
+            "best_address",
+            "best_location",
+            "rightmove_price",
+            "rightmove_bedrooms",
+            "total_monthly_cost",
+            "town_name",
+            "commutes",
+            "schools",
+            "walkability",
+        ):
+            assert key in s, f"Missing key: {key}"
 
-    def test_commute_duration_formatting(self):
-        card = _build_card(_data(), _view())
-        assert card.simon_dur == "32m"
-        assert card.lorena_dur == "45m"
-        assert card.bracknell_dur == "22m"
+    @pytest.mark.asyncio
+    async def test_every_wrapped_value_has_status_and_value(self, prop):
+        """Every node-backed field wraps its value in a standard envelope (no provenance in summary)."""
+        await flush_processor()
+        await flush_processor()
+        s = await prop.to_json_summary()
 
-    def test_long_commute_formats_as_hours(self):
-        card = _build_card(_data({"Simon London (min)": "90"}), _view())
-        assert card.simon_dur == "1h30"
-
-    def test_exact_hour_commute(self):
-        card = _build_card(_data({"Simon London (min)": "60"}), _view())
-        assert card.simon_dur == "1h"
-
-    def test_ofsted_colours(self):
-        card = _build_card(_data(), _view())
-        assert card.primary_ofsted_label == "Outstanding"
-        assert card.primary_ofsted_colour == "good"
-        assert card.secondary_ofsted_label == "Good"
-        assert card.secondary_ofsted_colour == "warn"
-
-    def test_walk_to_town(self):
-        card = _build_card(_data(), _view())
-        assert card.walk_to_town_minutes == 10
-        assert card.walk_colour == "good"
-
-    def test_town_name_extracted_from_address(self):
-        card = _build_card(_data(), _view())
-        assert card.town_name == "Southall"
-
-    def test_town_excludes_counties(self):
-        card = _build_card(_data({"Address": "Some Road, Maidenhead, Berkshire, SL6"}), _view())
-        assert card.town_name == "Maidenhead"
-
-    def test_school_name_trimmed_at_comma(self):
-        card = _build_card(
-            _data({"Primary School": "St Paul's Church of England Combined School, Wooburn"}),
-            _view(),
+        wrapped = (
+            "best_address",
+            "best_location",
+            "rightmove_price",
+            "rightmove_bedrooms",
+            "total_monthly_cost",
+            "town_name",
+            "walkability",
         )
-        assert card.primary_name == "St Paul's Church of England Combined School"
-
-    def test_ofsted_first_word_no_punctuation(self):
-        card = _build_card(_data({"Primary Ofsted": "Good, Behaviour Outstanding"}), _view())
-        assert card.primary_ofsted_label == "Good"
-
-    def test_bus_priority_for_secondary(self):
-        card = _build_card(_data({"Secondary Walk (min)": "23", "Secondary Bus (min)": "14"}), _view())
-        assert card.secondary_walk_label == "14m bus"
-
-    def test_fallback_to_walk_when_no_bus(self):
-        card = _build_card(
-            _data({"Secondary Walk (min)": "12", "Secondary Bus (min)": ""}),
-            _view(),
-        )
-        assert card.secondary_walk_label == "12m walk"
-
-    def test_current_home_status(self):
-        card = _build_card(_data(), _view({"Status": "Current"}))
-        assert card.status == "Current"
-
-    def test_unenriched_card(self):
-        data = _data(
-            {
-                "Simon London (min)": "",
-                "Lorena London (min)": "",
-                "Bracknell Time (min)": "",
-            }
-        )
-        card = _build_card(data, _view())
-        assert card.is_enriched is False
-        assert card.simon_minutes is None
-        assert card.simon_colour == "muted"
-
-    def test_direction_urls_present_when_coords_known(self):
-        card = _build_card(_data(), _view())
-        assert card.simon_dir_url.startswith("https://www.google.com/maps/dir/51.5,-0.4/")
-        assert card.walk_dir_url.startswith("https://www.google.com/maps/dir/51.5,-0.4/")
-        assert card.primary_dir_url.startswith("https://www.google.com/maps/dir/51.5,-0.4/")
-
-    def test_direction_urls_empty_when_no_coords(self):
-        card = _build_card(_data({"Best Latitude": "", "Best Longitude": ""}), _view())
-        assert card.simon_dir_url == ""
-        assert card.walk_dir_url == ""
-
-    def test_total_monthly_cost(self):
-        card = _build_card(_data(), _view({"Total Monthly Housing Cost (£)": "2850.00"}))
-        assert card.total_monthly_cost == 2850.0
-
-    def test_score_all_green(self):
-        data = _data(
-            {
-                "Simon London (min)": "30",
-                "Lorena London (min)": "30",
-                "Bracknell Time (min)": "20",
-                "Primary Ofsted": "Outstanding",
-                "Primary Walk (min)": "5",
-                "Secondary Ofsted": "Outstanding",
-                "Secondary Walk (min)": "5",
-                "Walk to Town (min)": "5",
-            }
-        )
-        card = _build_card(data, _view())
-        assert card.score == 16  # 8 × 2
-
-    def test_score_mixed(self):
-        """Score computed: green=2, orange=1, red=-1, muted=0."""
-        data = _data(
-            {
-                "Simon London (min)": "30",  # good (2)
-                "Lorena London (min)": "50",  # warn (1)
-                "Bracknell Time (min)": "20",  # good (2)
-                "Primary Ofsted": "Outstanding",  # good (2)
-                "Primary Walk (min)": "5",  # good (2)
-                "Secondary Ofsted": "Good",  # warn (1)
-                "Secondary Walk (min)": "5",  # good (2)
-                "Walk to Town (min)": "5",  # good (2)
-            }
-        )
-        card = _build_card(data, _view())
-        assert card.score == 14
-
-    def test_score_with_reds(self):
-        """Red commutes and Ofsted subtract a point.
-
-        Other defaults (walk times, secondary Ofsted) are cleared so
-        only the bad values contribute.
-        """
-        data = _data(
-            {
-                "Simon London (min)": "90",  # bad (-1)
-                "Lorena London (min)": "80",  # bad (-1)
-                "Bracknell Time (min)": "70",  # bad (-1)
-                "Primary Ofsted": "Inadequate",  # bad (-1)
-                "Primary Walk (min)": "",
-                "Secondary Ofsted": "",
-                "Secondary Walk (min)": "",
-                "Walk to Town (min)": "",
-            }
-        )
-        card = _build_card(data, _view())
-        assert card.score == -4  # 4 bad × -1
-
-    def test_score_muted_contributes_zero(self):
-        """Missing data (muted) contributes 0, not -1."""
-        card = _build_card(_data(), _view())
-        assert card.score == 14
+        for key in wrapped:
+            val = s[key]
+            assert "status" in val, f"{key} missing status"
+            assert "value" in val, f"{key} missing value"
 
 
-# ── Card sorting (with mocked I/O) ────────────────────────────────────────
+class TestCommuteData:
+    """Commute entries in the summary must match frontend expectations."""
+
+    @pytest.mark.asyncio
+    async def test_commutes_is_dict(self, prop):
+        await flush_processor()
+        await flush_processor()
+        s = await prop.to_json_summary()
+        assert isinstance(s["commutes"], dict)
+
+    @pytest.mark.asyncio
+    async def test_each_commute_has_commute_key(self, prop):
+        await flush_processor()
+        await flush_processor()
+        s = await prop.to_json_summary()
+
+        for key, cd in s["commutes"].items():
+            assert "commute" in cd, f"{key} missing 'commute'"
+            c = cd["commute"]
+            assert "status" in c, f"{key} commute missing status"
+            assert "succeeded" in c, f"{key} commute missing succeeded"
+
+    @pytest.mark.asyncio
+    async def test_successful_commute_has_duration_and_cost(self, prop):
+        await flush_processor()
+        await flush_processor()
+        s = await prop.to_json_summary()
+
+        for key, cd in s["commutes"].items():
+            c = cd["commute"]
+            if not c.get("succeeded"):
+                continue
+            val = c.get("value")
+            assert isinstance(val, dict), f"{key} value should be a dict"
+            assert "duration" in val, f"{key} value missing duration"
+            assert "daily_cost" in val, f"{key} value missing daily_cost"
+            # Duration
+            dur = val.get("duration", {})
+            assert "value" in dur, f"{key} duration missing value"
+            assert dur.get("unit") == "minute", f"{key} duration unit not minute"
+            assert isinstance(dur["value"], int) and dur["value"] > 0
+            # Daily cost
+            dc = val.get("daily_cost", {})
+            assert "amount" in dc, f"{key} daily_cost missing amount"
+            assert "currency" in dc, f"{key} daily_cost missing currency"
+
+    @pytest.mark.asyncio
+    async def test_commute_has_is_child_flag(self, prop):
+        await flush_processor()
+        await flush_processor()
+        s = await prop.to_json_summary()
+
+        for key, cd in s["commutes"].items():
+            c = cd["commute"]
+            assert "is_child" in c, f"{key} commute missing is_child"
+
+    @pytest.mark.asyncio
+    async def test_child_commutes_marked_is_child(self, prop):
+        """School commutes (George/Primary School etc.) carry is_child=True."""
+        await flush_processor()
+        await flush_processor()
+        s = await prop.to_json_summary()
+
+        for key, cd in s["commutes"].items():
+            c = cd["commute"]
+            if "Primary School" in key or "Secondary School" in key:
+                assert c.get("is_child") is True, f"{key} should be child commute"
+
+
+class TestSchoolData:
+    """School entries in the summary match what the frontend renders."""
+
+    @pytest.mark.asyncio
+    async def test_schools_has_primary_and_secondary(self, prop):
+        await flush_processor()
+        await flush_processor()
+        s = await prop.to_json_summary()
+
+        schools = s.get("schools", {})
+        assert "primary" in schools
+        assert "secondary" in schools
+        for phase in ("primary", "secondary"):
+            assert "school" in schools[phase], f"{phase} missing 'school' key"
+
+    @pytest.mark.asyncio
+    async def test_each_school_has_name_ofsted_and_url(self, prop):
+        await flush_processor()
+        await flush_processor()
+        s = await prop.to_json_summary()
+
+        for phase in ("primary", "secondary"):
+            school_node = s["schools"][phase]["school"]
+            val = school_node.get("value")
+            assert isinstance(val, dict), f"{phase} school value should be a dict"
+            assert "name" in val, f"{phase} school value missing name"
+            assert "ofsted" in val, f"{phase} school value missing ofsted"
+            assert "url" in val, f"{phase} school value missing url"
+            assert "walk_minutes" in val, f"{phase} school value missing walk_minutes"
+
+    @pytest.mark.asyncio
+    async def test_school_data_envelope(self, prop):
+        """School nodes themselves have a status/value/provenance envelope."""
+        await flush_processor()
+        await flush_processor()
+        s = await prop.to_json_summary()
+
+        for phase in ("primary", "secondary"):
+            school_node = s["schools"][phase]["school"]
+            assert "status" in school_node, f"{phase} school missing status"
+            assert "succeeded" in school_node, f"{phase} school missing succeeded"
+
+
+# ── Scoring ─────────────────────────────────────────────────────────────
+
+
+class TestScoring:
+    """_score_from_summary() replicates the old card_data scoring formula."""
+
+    @pytest.mark.asyncio
+    async def test_score_is_integer(self, prop):
+        await flush_processor()
+        await flush_processor()
+        s = await prop.to_json_summary()
+        score = _score_from_summary(s)
+        assert score == 15
+
+    def test_all_green_returns_max(self):
+        summary = {
+            "commutes": {
+                "Simon/Pimlico": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 30, "unit": "minute"}}}
+                },
+                "Lorena/Aldgate": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 30, "unit": "minute"}}}
+                },
+                "Simon/Bracknell": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 20, "unit": "minute"}}}
+                },
+            },
+            "schools": {
+                "primary": {"school": {"status": "succeeded", "value": {"ofsted": "Outstanding", "walk_minutes": 5}}},
+                "secondary": {"school": {"status": "succeeded", "value": {"ofsted": "Outstanding", "walk_minutes": 5}}},
+            },
+            "walkability": {"value": {"walk_to_town_minutes": 5}},
+        }
+        score = _score_from_summary(summary)
+        assert score == 16  # 8 metrics × 2
+
+    def test_greens_and_warns_mixed(self):
+        summary = {
+            "commutes": {
+                "Simon/Pimlico": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 30, "unit": "minute"}}}
+                },
+                "Lorena/Aldgate": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 50, "unit": "minute"}}}
+                },
+                "Simon/Bracknell": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 20, "unit": "minute"}}}
+                },
+            },
+            "schools": {
+                "primary": {"school": {"status": "succeeded", "value": {"ofsted": "Outstanding", "walk_minutes": 5}}},
+                "secondary": {"school": {"status": "succeeded", "value": {"ofsted": "Good", "walk_minutes": 5}}},
+            },
+            "walkability": {"value": {"walk_to_town_minutes": 5}},
+        }
+        score = _score_from_summary(summary)
+        assert score == 14  # 2×3 + 1 + 2×3 + 2 + 1 + 2
+
+    def test_bad_values_subtract(self):
+        summary = {
+            "commutes": {
+                "Simon/Pimlico": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 90, "unit": "minute"}}}
+                },
+                "Lorena/Aldgate": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 80, "unit": "minute"}}}
+                },
+                "Simon/Bracknell": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 70, "unit": "minute"}}}
+                },
+            },
+            "schools": {
+                "primary": {"school": {"status": "succeeded", "value": {"ofsted": "Inadequate", "walk_minutes": 50}}},
+                "secondary": {"school": {"status": "succeeded", "value": {"ofsted": "", "walk_minutes": None}}},
+            },
+            "walkability": {"value": {"walk_to_town_minutes": None}},
+        }
+        score = _score_from_summary(summary)
+        assert score == -5  # 3 red commutes (-1 each) + red ofsted (-1) + bad walk (-1)
+
+    def test_muted_contributes_zero(self):
+        summary = {
+            "commutes": {},
+            "schools": {
+                "primary": {"school": {"status": "impossible", "value": None}},
+                "secondary": {"school": {"status": "impossible", "value": None}},
+            },
+            "walkability": {"value": None},
+        }
+        score = _score_from_summary(summary)
+        assert score == 0
+
+    def test_bracknell_thresholds(self):
+        """Bracknell commutes use 30/60 thresholds instead of 45/75."""
+        summary = {
+            "commutes": {
+                "Simon/Bracknell": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 25, "unit": "minute"}}}
+                },
+            },
+            "schools": {
+                "primary": {"school": {"status": "impossible", "value": None}},
+                "secondary": {"school": {"status": "impossible", "value": None}},
+            },
+            "walkability": {"value": None},
+        }
+        assert _score_from_summary(summary) == 2  # green = 2
+        summary["commutes"]["Simon/Bracknell"]["commute"]["value"]["duration"]["value"] = 35
+        assert _score_from_summary(summary) == 1  # warn = 1
+        summary["commutes"]["Simon/Bracknell"]["commute"]["value"]["duration"]["value"] = 65
+        assert _score_from_summary(summary) == -1  # bad = -1
 
 
 class TestCardSorting:
-    def test_cards_sorted_by_score_descending(self):
-        data_best = _data({"Rightmove ID": "best", "Simon London (min)": "20"})
-        data_worst = _data({"Rightmove ID": "worst", "Simon London (min)": "95"})
-        data_rows = [data_worst, data_best]
-        view_rows = [_view({"Rightmove ID": "best"}), _view({"Rightmove ID": "worst"})]
+    """Cards/properties sorted by score descending (matching old get_all_cards())."""
 
-        with mock.patch("houses.web.card_data.get_data_rows", return_value=data_rows), \
-             mock.patch("houses.web.card_data.get_view_rows", return_value=view_rows):
-            cards = get_all_cards()
+    def test_sorted_by_score_descending(self):
+        """Verify the sorting logic used by get_all_properties()."""
+        high = {
+            "commutes": {},
+            "schools": {
+                "primary": {"school": {"status": "impossible", "value": None}},
+                "secondary": {"school": {"status": "impossible", "value": None}},
+            },
+            "walkability": {"value": None},
+        }
+        mid = {
+            "commutes": {},
+            "schools": {
+                "primary": {"school": {"status": "succeeded", "value": {"ofsted": "Outstanding", "walk_minutes": 5}}},
+                "secondary": {"school": {"status": "succeeded", "value": {"ofsted": "Good", "walk_minutes": 5}}},
+            },
+            "walkability": {"value": None},
+        }
+        low = {
+            "commutes": {
+                "Simon/Pimlico": {
+                    "commute": {"status": "succeeded", "value": {"duration": {"value": 90, "unit": "minute"}}}
+                },
+            },
+            "schools": {
+                "primary": {"school": {"status": "impossible", "value": None}},
+                "secondary": {"school": {"status": "impossible", "value": None}},
+            },
+            "walkability": {"value": None},
+        }
 
-        assert len(cards) == 2
-        assert cards[0].rid == "best"
-        assert cards[1].rid == "worst"
+        results = {"low": low, "high": high, "mid": mid}
+        scored = sorted(results.items(), key=lambda kv: _score_from_summary(kv[1]), reverse=True)
+        assert [r[0] for r in scored] == ["mid", "high", "low"]

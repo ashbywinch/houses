@@ -28,7 +28,7 @@ from houses.sheets.named_ranges import (
     ensure_named_ranges,
     named_range_name,
 )
-from houses.sheets.row import CONSTANTS_TAB, DATA_TAB, VIEW_TAB, Row, ensure_headers, write_enriched_row
+from houses.sheets.row import CONSTANTS_TAB, DATA_TAB, VIEW_TAB, Row, ensure_headers
 from houses.sheets.tab import Tab
 from houses.sheets.view import View, sync_view_formulas
 
@@ -42,6 +42,8 @@ _FORMULA_COLUMNS = Row._FORMULA_COLUMNS
 
 col_index = Row.index_of
 col_letter = Row.letter_of
+
+# Backward-compat aliases used by scripts/update_sheet.py
 _build_full_row = Row.to_list
 row_values = Row.from_property
 
@@ -52,20 +54,21 @@ __all__ = [
     "Tab",
     "Row",
     "View",
-    # Tab name constants
+    "_USER_COLUMNS",
+    "col_index",
+    "col_letter",
+    # Backward-compat aliases
+    "row_values",
+    "_build_full_row",
     "DATA_TAB",
     "VIEW_TAB",
     "CONSTANTS_TAB",
     # Column schema
     "COLUMN_HEADERS",
     "_USER_COLUMNS",
-    "_FORMULA_COLUMNS",
     "col_index",
     "col_letter",
-    # Row operations
-    "row_values",
-    "_build_full_row",
-    "write_enriched_row",
+    "ensure_headers",
     "ensure_headers",
     # View tab
     "VIEW_HEADERS",

@@ -5,11 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from houses.commute import Commute, CommuteBreakdown
-from houses.schools import School
+from houses.commute import CommuteBreakdown
+from houses.council_tax_info import CouncilTaxInfo
+from houses.location import resolve_house_location
+from houses.school import School
 
 if TYPE_CHECKING:
     from houses.geo import GeoPoint
+    from houses.model.domain import Commute
 
 
 @dataclass(frozen=False)
@@ -41,8 +44,6 @@ class Property:
 
     async def location(self) -> GeoPoint | None:
         """Return the best spatial coordinate for this property."""
-        from houses.location import resolve_house_location
-
         return await resolve_house_location(
             postcode=self.postcode,
             address=self.address,
@@ -51,15 +52,6 @@ class Property:
             approx_lat=None,
             approx_lng=None,
         )
-
-
-@dataclass(frozen=True)
-class CouncilTaxInfo:
-    """Council tax band, cost, and evidence source."""
-
-    band: str = ""
-    yearly_cost: float | None = None
-    evidence_url: str = ""
 
 
 @dataclass
@@ -111,3 +103,8 @@ class EnrichedProperty:
     approx_longitude: float | None = None
     approx_station_crs: str = ""
     approx_station_name: str = ""
+
+    # Separate geocode values captured BEFORE the rightmove override
+    geocode_latitude: float | None = None
+    geocode_longitude: float | None = None
+    geo_provenance: str = ""

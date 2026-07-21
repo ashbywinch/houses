@@ -15,11 +15,10 @@ from typing import ClassVar
 import gspread
 from money import Money
 
-from houses.commute import Commute, LegMode
-from houses.config import settings
+from houses.commute import LegMode, _render_leg_description
+from houses.model.domain import Commute
 from houses.property import EnrichedProperty
-from houses.schools import School
-from houses.sheets.tab import Tab
+from houses.school import School
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +147,9 @@ class Row:
 
     @classmethod
     def _fmt_duration(cls, t: Commute | None) -> str:
-        return str(t.duration_minutes) if t and t.duration_minutes is not None else ""
+        if t and t.duration is not None:
+            return str(int(t.duration.magnitude))
+        return ""
 
     @classmethod
     def _fmt_cost(cls, val: Money | float | None) -> str:
@@ -169,10 +170,10 @@ class Row:
 
     @classmethod
     def _fmt_walk(cls, commute: Commute | None) -> str:
-        if commute and commute.duration_minutes is not None and commute.cost_groups:
-            legs = commute.cost_groups[0].legs
+        if commute and commute.details:
+            legs = commute.details[0].legs
             if legs and legs[0].mode == LegMode.WALK:
-                return str(commute.duration_minutes)
+                return str(int(commute.duration.magnitude))
         return ""
 
     @classmethod
@@ -183,17 +184,17 @@ class Row:
 
     @classmethod
     def _fmt_bus(cls, commute: Commute | None) -> str:
-        if commute and commute.duration_minutes is not None and commute.cost_groups:
-            legs = commute.cost_groups[0].legs
+        if commute and commute.details:
+            legs = commute.details[0].legs
             if legs and legs[0].mode == LegMode.BUS:
-                return str(commute.duration_minutes)
+                return str(int(commute.duration.magnitude))
         return ""
 
     @classmethod
     def _fmt_bus_route(cls, commute: Commute | None) -> str:
         """Extract bus route description from a commute, or empty string."""
-        if commute and commute.cost_groups:
-            for group in commute.cost_groups:
+        if commute and commute.details:
+            for group in commute.details:
                 for leg in group.legs:
                     if leg.mode == LegMode.BUS:
                         return leg.line_name or "bus"
@@ -203,11 +204,37 @@ class Row:
                         return desc
         return ""
 
+    @classmethod
+    def _build_route_summary(cls, commute: Commute) -> str:
+        """Build a route summary string from a Commute's detail CostGroups."""
+        all_legs = [leg for group in commute.details for leg in group.legs]
+        parts: list[str] = []
+        total = len(all_legs)
+        for idx, leg in enumerate(all_legs):
+            desc = _render_leg_description(leg)
+            if leg.mode == LegMode.WALK and idx == total - 1:
+                parts.append(f"walk {leg.duration_minutes}m")
+            else:
+                parts.append(f"{desc} ({leg.duration_minutes}m)")
+        return " \u2192 ".join(parts)
+
+    @classmethod
+    def _calc_non_rail_cost(cls, commute: Commute) -> float:
+        """Sum of costs from non-TfL cost groups."""
+        total = 0.0
+        for cg in commute.details:
+            if cg.cost is not None and cg.operator != "TfL":
+                if isinstance(cg.cost, Money):
+                    total += float(cg.cost.amount)
+                else:
+                    total += cg.cost
+        return total
+
     # ── Domain-to-sheet mapping ─────────────────────────────────────
 
     @classmethod
     def from_property(cls, property_: EnrichedProperty) -> dict[str, str]:
-        """Build a header→value dict from an enriched property.
+        """Build a header->value dict from an enriched property.
 
         Returns values keyed by header name, including both enriched
         and user-owned columns.
@@ -219,37 +246,37 @@ class Row:
         r["Postcode"] = property_.postcode
         r["Bedrooms"] = str(property_.bedrooms) if property_.bedrooms else ""
         r["Price (£)"] = str(property_.price) if property_.price else ""
+        r["Actual Latitude"] = str(property_.actual_latitude) if property_.actual_latitude is not None else ""
+        r["Actual Longitude"] = str(property_.actual_longitude) if property_.actual_longitude is not None else ""
         r["Rightmove ID"] = property_.rid
         r["Simon London (min)"] = cls._fmt_duration(property_.simon_commute)
         r["Simon London Cost (£)"] = cls._fmt_cost(
-            property_.simon_commute.daily_cost_gbp if property_.simon_commute else None
+            property_.simon_commute.daily_cost if property_.simon_commute else None
         )
-        r["Simon London Route"] = property_.simon_commute.summary() if property_.simon_commute else ""
+        r["Simon London Route"] = cls._build_route_summary(property_.simon_commute) if property_.simon_commute else ""
         r["Simon Parking Cost (£)"] = cls._fmt_cost(
-            property_.simon_commute.non_rail_cost() if property_.simon_commute else None
+            cls._calc_non_rail_cost(property_.simon_commute) if property_.simon_commute else None
         )
         r["Lorena London (min)"] = cls._fmt_duration(property_.lorena_commute)
         r["Lorena London Cost (£)"] = cls._fmt_cost(
-            property_.lorena_commute.daily_cost_gbp if property_.lorena_commute else None
+            property_.lorena_commute.daily_cost if property_.lorena_commute else None
         )
-        r["Lorena London Route"] = property_.lorena_commute.summary() if property_.lorena_commute else ""
-        bt = property_.petrol.duration_minutes if property_.petrol else None
+        r["Lorena London Route"] = cls._build_route_summary(property_.lorena_commute) if property_.lorena_commute else ""
+        bt = int(property_.petrol.duration.magnitude) if property_.petrol else None
         r["Bracknell Time (min)"] = str(bt) if bt is not None else ""
-        r["Bracknell Cost (£)"] = cls._fmt_cost(property_.petrol.daily_cost_gbp if property_.petrol else None)
+        r["Bracknell Cost (£)"] = cls._fmt_cost(property_.petrol.daily_cost if property_.petrol else None)
         r["Primary School"] = property_.primary_school.name if property_.primary_school else ""
         r["Primary Distance (km)"] = cls._fmt_dist(property_.primary_school_distance_km)
         r["Primary Walk (min)"] = cls._fmt_walk(property_.primary_school_commute)
         r["Primary School Link"] = cls._fmt_school_link(property_.primary_school)
-        r["Primary Ofsted"] = property_.primary_school.ofsted_rating if property_.primary_school else ""
-        r["Primary Inspection Year"] = property_.primary_school.inspection_year if property_.primary_school else ""
+        r["Primary Ofsted"] = property_.primary_ofsted
+        r["Primary Inspection Year"] = property_.primary_inspection_year
         r["Secondary School"] = property_.secondary_school.name if property_.secondary_school else ""
         r["Secondary Distance (km)"] = cls._fmt_dist(property_.secondary_school_distance_km)
         r["Secondary Walk (min)"] = cls._fmt_walk(property_.secondary_school_commute)
         r["Secondary School Link"] = cls._fmt_school_link(property_.secondary_school)
-        r["Secondary Ofsted"] = property_.secondary_school.ofsted_rating if property_.secondary_school else ""
-        r["Secondary Inspection Year"] = (
-            property_.secondary_school.inspection_year if property_.secondary_school else ""
-        )
+        r["Secondary Ofsted"] = property_.secondary_ofsted
+        r["Secondary Inspection Year"] = property_.secondary_inspection_year
         r["Area Description"] = property_.town_description
         r["Walk to Town (min)"] = (
             str(property_.walk_to_town_minutes) if property_.walk_to_town_minutes is not None else ""
@@ -280,72 +307,3 @@ def ensure_headers(worksheet: gspread.Worksheet) -> None:
     """Write column headers to a worksheet if it's empty."""
     if worksheet.row_count == 0 or not worksheet.get_all_values():
         worksheet.append_row(Row.HEADERS, value_input_option="USER_ENTEred")
-
-
-async def write_enriched_row(property_: EnrichedProperty, tab: str = DATA_TAB) -> str | None:
-    """Write an enriched property to the sheet, updating existing rows or appending new ones.
-
-    Returns a URL to the written row, or ``None`` if the write was skipped.
-    """
-    if not settings.sheet_id:
-        logger.info("No HOUSES_SHEET_ID configured; skipping sheet write")
-        return None
-
-    from houses.sheets.client import get_client as _get_client
-
-    client = _get_client()
-    if client is None:
-        logger.warning("No service account credentials configured; skipping sheet write")
-        return None
-
-    try:
-        sh = client.open_by_key(settings.sheet_id)
-        worksheet = sh.worksheet(tab)
-
-        ensure_headers(worksheet)
-        enriched = Row.from_property(property_)
-
-        # Find existing row by Rightmove ID (column H). Never append duplicates.
-        existing = worksheet.get_all_values()
-        target_row = None
-        rid = property_.rid
-        sheet_headers = existing[0]
-        try:
-            rid_col = sheet_headers.index("Rightmove ID")
-        except ValueError:
-            rid_col = -1
-        if rid and rid_col >= 0:
-            for i, r in enumerate(existing[1:], 2):
-                if len(r) > rid_col and r[rid_col].strip() == rid:
-                    target_row = i
-                    break
-
-        if target_row:
-            # Look up each enriched value's column by header name. Never use positions.
-            header_to_col = {h: i for i, h in enumerate(sheet_headers)}
-            cells = []
-            for name, val in enriched.items():
-                if val and name in header_to_col:
-                    col_idx = header_to_col[name]
-                    cl = Row.letter_of(col_idx)
-                    cells.append({"range": f"{cl}{target_row}", "values": [[val]]})
-            if cells:
-                Tab(worksheet).batch_update(cells)
-            row_url = f"https://docs.google.com/spreadsheets/d/{settings.sheet_id}/edit#gid={worksheet.id}&range=A{target_row}"
-            logger.info("Updated row %d for Rightmove ID %s", target_row, rid)
-        else:
-            worksheet.append_row(Row.to_list(property_), value_input_option="USER_ENTEred")
-            new_row_num = worksheet.row_count
-            row_url = f"https://docs.google.com/spreadsheets/d/{settings.sheet_id}/edit#gid={worksheet.id}&range=A{new_row_num}"
-            logger.info("Appended row for %s", property_.url)
-
-        return row_url
-    except gspread.SpreadsheetNotFound:
-        logger.error("Sheet with id=%s not found. Share it with the service account email.", settings.sheet_id)
-        return None
-    except gspread.WorksheetNotFound:
-        logger.error("Worksheet '%s' not found in sheet %s", tab, settings.sheet_id)
-        return None
-    except Exception:
-        logger.exception("Failed to write row to Google Sheets")
-        return None

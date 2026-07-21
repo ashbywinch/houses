@@ -68,7 +68,7 @@ def test_match_cert_by_number():
         {"addressLine1": "7 Goaters Road", "registrationDate": "2025-06-01", "currentEnergyEfficiencyBand": "C"},
     ]
     result = _match_cert(certs, "7")
-    assert result.is_succeeded
+    assert result.succeeded
     assert result.value_or("") == "C"
 
 
@@ -82,7 +82,7 @@ def test_match_cert_by_name():
         {a1: "MAY COTTAGE PANGBOURNE HILL", a2: "2023-03-10", a3: "E"},
     ]
     result = _match_cert(certs, "Blue Dawes")
-    assert result.is_succeeded
+    assert result.succeeded
     assert result.value_or("") == "D"
 
 
@@ -93,7 +93,7 @@ def test_match_cert_multiple_certs_same_building_returns_most_recent():
         {"addressLine1": "7 Goaters Road", "registrationDate": "2025-06-01", "currentEnergyEfficiencyBand": "C"},
     ]
     result = _match_cert(certs, "7")
-    assert result.is_succeeded
+    assert result.succeeded
     assert result.value_or("") == "C"
 
 
@@ -103,15 +103,15 @@ def test_match_cert_no_match_returns_impossible():
         {"addressLine1": "9 Goaters Road", "registrationDate": "2024-01-01", "currentEnergyEfficiencyBand": "D"},
     ]
     result = _match_cert(certs, "7")
-    assert result.is_impossible
-    assert result.reason == "no matching certificate for this address"
+    assert result.impossible
+    assert result.error == "no matching certificate for this address"
 
 
 def test_match_cert_empty_certs_returns_impossible():
     """Empty certs list → impossible."""
     result = _match_cert([], "")
-    assert result.is_impossible
-    assert result.reason == "no certificates found"
+    assert result.impossible
+    assert result.error == "no certificates found"
 
 
 def test_match_cert_empty_building_id_returns_most_recent():
@@ -121,7 +121,7 @@ def test_match_cert_empty_building_id_returns_most_recent():
         {"addressLine1": "7 Goaters Road", "registrationDate": "2025-06-01", "currentEnergyEfficiencyBand": "C"},
     ]
     result = _match_cert(certs, "")
-    assert result.is_succeeded
+    assert result.succeeded
     assert result.value_or("") == "C"
 
 
@@ -132,8 +132,8 @@ def test_match_cert_ambiguous_different_addresses_returns_impossible():
         {"addressLine1": "Rose Garden House", "registrationDate": "2025-06-01", "currentEnergyEfficiencyBand": "C"},
     ]
     result = _match_cert(certs, "Rose")
-    assert result.is_impossible
-    assert result.reason == "address matched multiple properties"
+    assert result.impossible
+    assert result.error == "address matched multiple properties"
 
 
 # ── lookup_epc with address tests ──

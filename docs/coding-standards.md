@@ -7,17 +7,44 @@ Read both. If they conflict, this file takes precedence.
 
 ```
 houses/
-├── server.py          # HTTP endpoint, request handling
-├── models.py          # Pydantic data models
-├── enricher.py        # Enrichment coordinators
-├── sheets/            # Google Sheets write (package: Tab, Row, View, formulas)
-├── retry.py           # Async retry with backoff
-├── routing.py         # Transit/drive routing dispatch
-├── stations.py        # Station class + registry
-├── bus_journey.py     # Bus fare zone data
-├── commute.py         # Commute value objects
-├── endpoint_client.py # API client with Retry-After
-└── ...
+├── server.py              # FastAPI app, endpoints, enrichment orchestration
+├── enrichment_runner.py   # Enrichment coordination (commute, schools, etc.)
+├── model/                 # DAG — universal data model
+│   ├── __init__.py        # Core types: NodeKind, NodeDef, NodeResult, PropertyData
+│   ├── registry.py        # node() decorator, NODES dict
+│   ├── rightmove.py       # RightmoveProperty domain: rightmove_* nodes
+│   ├── property.py        # Property domain: best_*, corrected_*, precise_* nodes
+│   ├── geo.py             # GeoPoint helpers (serialize_gp, is_single_property_address)
+│   ├── resolver.py        # Topo sort, staleness, resolve_property
+│   └── persistence.py     # SQLite CRUD (source_values, user_*, derived_values)
+├── web/                   # Presentation
+│   ├── router.py          # HTTP route handlers
+│   ├── card_data.py       # Card view model assembly
+│   └── geo_utils.py       # Postcode-bounds location validation (shared)
+├── sheets/                # Google Sheets I/O (package: Tab, Row, View, formulas)
+├── services.py            # DI protocols + Services container (ports + adapters)
+├── context.py             # ContextVar per-request state
+├── config.py              # pydantic-settings configuration
+├── location.py            # Geocoding (postcodes.io, ORS, Google, Nominatim)
+├── services.py            # DI protocols + Services container (ports + adapters)
+├── endpoint_client.py     # Reusable API client with Retry-After
+├── transit_route.py       # TfL API + park-and-ride
+├── commute.py             # Commute value objects
+├── bus_journey.py         # Bus fare zone data
+├── walkability.py         # Google Maps Places + ORS walking
+├── council_tax.py         # VOA scraper
+├── epc.py                 # EPC lookup
+├── town_desc.py           # LLM town descriptions
+├── schools.py             # School lookup (GIAS CSV)
+├── stations.py            # Station class + registry
+├── routing.py             # Transit/drive routing dispatch
+├── retry.py               # Async retry with backoff
+└── templates/             # Jinja2 HTML templates
+    ├── base.html
+    ├── property_list.html
+    ├── property_detail.html
+    ├── _card.html
+    └── ...
 ```
 
 Each module should have one reason to change.
@@ -30,6 +57,110 @@ for example, `models.py` bundling several small models is fine because
 each is just a handful of fields with no behaviour and they share the
 same reason to change (the data schema). If a class grows non-trivial
 behaviour, extract it to its own module.
+
+## DAG Model Is the Source of Truth
+
+**The DAG (`houses/model/`) is the single authoritative store for all
+resolved property data.** Every piece of information about a property --
+address, location, bedrooms, price, commute times, school ratings, council
+tax, EPC band, walkability -- goes through the DAG.
+
+The DAG is not just an address/location resolver. It is the universal
+data model:
+
+```mermaid
+flowchart LR
+    subgraph Input
+        Enrichment[Enrichment modules]
+        SheetImport[Sheet import]
+        UserEdit[User edits]
+    end
+    subgraph DAG[houses/model/]
+        SV[source_values]
+        UI[user_inputs]
+        DV[derived_values]
+        Resolver[Resolver]
+    end
+    subgraph Output
+        UI_Layer[Web UI]
+        SheetWrite[Sheet write]
+    end
+    Input --> SV
+    Input --> UI
+    SV --> Resolver
+    UI --> Resolver
+    Resolver --> DV
+    DV --> UI_Layer
+    DV --> SheetWrite
+```
+
+### What Belongs in the DAG
+
+Every enrichment module that produces a value for a property must store
+that value as a source_value node in the DAG. This includes:
+
+- **Rightmove scrape**: address, bedrooms, price, map coordinates
+- **Commute**: Simon transit time, Lorena transit time, Bracknell drive time
+- **Schools**: primary and secondary school names, Ofsted ratings, walk times
+- **Council tax**: band, cost
+- **EPC**: rating, potential rating
+- **Walkability**: walk-to-town time, amenities
+- **Geocoding**: lat/lng from any source
+
+Every display or sheet-write operation reads from the DAG's derived
+values. No module re-implements a priority chain or combines raw inputs
+-- the DAG resolver does that once.
+
+### Dependency Direction
+
+```
+Presentation (routes, templates)
+  → Application (enrichment_runner, card_data, import)
+    → Domain Model (DAG nodes, resolver)
+      → Infrastructure (persistence, sheets, external APIs)
+```
+
+Each layer only depends on the layer below it. The DAG (Domain Model)
+has no knowledge of HTTP, sheets, or API clients. The Application layer
+orchestrates: it calls enrichment modules (which write source_values),
+then the DAG resolver (which computes derived values), then output
+modules (which read derived values for display or sheet write).
+
+### What Does NOT Go in the DAG
+
+- **Sheet import logic**: imports call `insert_source_value()` and
+  `resolve_property()` but do not re-implement priority chains or
+  validation. The DAG's node definitions are the single source of truth
+  for those rules.
+- **Card/display assembly**: reads the DAG's resolved values via
+  `load_property_data()` or `resolve_property()`. It never decides
+  which value is "best" -- the DAG already decided.
+- **Enrichment runners**: write source values into the DAG via
+  `insert_source_value()`, then call `resolve_property()` to trigger
+  derived computation. They do not make priority decisions.
+
+### Design for New Nodes
+
+When adding any new property data:
+
+1. **Declare source nodes** in `nodes.py` for each raw input (e.g.
+   `rightmove_bedrooms`, `tfl_simon_duration`).
+2. **Declare derived nodes** for resolved values that combine or elevate
+   inputs (e.g. `best_commute_time`).
+3. **Enrichment module** writes to source_values via
+   `insert_source_value()`.
+4. **Templates and sheet writes** read from derived_values via
+   `load_property_data()` or `resolve_property()`.
+
+The DAG handles staleness, re-computation, and priority. No other code
+needs to know the resolution logic.
+
+### Rule of Thumb
+
+If two places in the codebase need the same business rule (e.g. "user
+correction overrides Rightmove data"), that rule belongs in a DAG node
+definition — NOT in both the import function and the card builder. The
+DAG resolves once; everything else reads the result.
 
 ## Houses-Specific Practices
 

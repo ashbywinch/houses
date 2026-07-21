@@ -1,0 +1,1 @@
+../../../omp-config/rules/session-start.md

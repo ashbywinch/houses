@@ -1,0 +1,1 @@
+../../../omp-config/rules/test-first.md

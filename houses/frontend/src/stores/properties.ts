@@ -1,0 +1,90 @@
+import { defineStore } from 'pinia'
+import { ref } from 'vue'
+import type { PropertyDetail, PropertySummary, TriageEntry } from '../types'
+import { fetchAllSummaries, fetchPropertyDetail, fetchSettings, patchTriage } from '../services/api'
+
+export const usePropertiesStore = defineStore('properties', () => {
+  const rids = ref<string[]>([])
+  const summaries = ref<Record<string, PropertySummary>>({})
+  const details = ref<Record<string, PropertyDetail>>({})
+  const loading = ref(false)
+  const error = ref<string | null>(null)
+  const settings = ref<{ commute_thresholds?: { good: number; warn: number } }>({})
+  const triage = ref<Record<string, TriageEntry>>({})
+
+  async function loadAll() {
+    loading.value = true
+    error.value = null
+    try {
+      const data = await fetchAllSummaries()
+      summaries.value = data
+      rids.value = Object.keys(data)
+      // Populate triage from response — extract values from AttemptValue wrappers
+      for (const rid of rids.value) {
+        const entry = data[rid]
+        const t = entry?.triage
+        if (t) {
+          triage.value[rid] = {
+            favourite: t.favourite?.value ?? false,
+            dismissed: t.dismissed?.value ?? false,
+            is_viewed: t.is_viewed?.value ?? false,
+            user_notes: t.user_notes?.value ?? '',
+            triage_status: t.triage_status?.value ?? '',
+          }
+        }
+      }
+    } catch (e) {
+      error.value = String(e)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function loadSettings() {
+    try {
+      settings.value = await fetchSettings()
+    } catch {
+      // defaults used
+    }
+  }
+  loadSettings()
+
+  async function loadDetail(rid: string, force = false) {
+    if (!force && details.value[rid]) return details.value[rid]
+    loading.value = true
+    error.value = null
+    try {
+      const detail = await fetchPropertyDetail(rid)
+      details.value[rid] = detail
+      return detail
+    } catch (e) {
+      error.value = String(e)
+      return null
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function toggleTriage(rid: string, field: keyof TriageEntry, value: boolean | string) {
+    await patchTriage(rid, { [field]: value })
+    if (!triage.value[rid]) {
+      triage.value[rid] = { favourite: false, dismissed: false, is_viewed: false, user_notes: '', triage_status: '' }
+    }
+    const t = triage.value[rid]
+    if (field === 'favourite') t.favourite = value as boolean
+    else if (field === 'dismissed') t.dismissed = value as boolean
+    else if (field === 'is_viewed') t.is_viewed = value as boolean
+    else if (field === 'user_notes') t.user_notes = value as string
+    else if (field === 'triage_status') t.triage_status = value as string
+  }
+
+  function updateSummary(rid: string, data: PropertySummary) {
+    summaries.value[rid] = data
+  }
+
+  function updateDetail(rid: string, data: PropertyDetail) {
+    details.value[rid] = data
+  }
+
+  return { rids, summaries, details, triage, settings, loading, error, loadAll, loadDetail, updateSummary, updateDetail, toggleTriage }
+})

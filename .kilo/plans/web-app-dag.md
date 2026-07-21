@@ -195,7 +195,7 @@ The agent doesn't know when the user looked at a property. Logs by timestamp are
 
 ## 3. Thin slices
 
-### Slice 1 — Card UI backed by the sheet
+### Slice 1 — Card UI backed by the sheet: DONE
 
 Build a web app that reads from the existing Google Sheet via `houses/sheets/reader.py`.
 

@@ -17,7 +17,6 @@ import asyncio
 import csv
 import logging
 import re
-import sys
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -216,7 +215,8 @@ async def extract_daily_rate(page, url: str) -> float | None:
         await page.evaluate("""
             () => {
                 const btns = [...document.querySelectorAll('button')];
-                const accept = btns.find(b => b.textContent.includes('Accept All') || b.textContent.includes('Agree always'));
+                const accept = btns.find(b => b.textContent.includes('Accept All')
+                    || b.textContent.includes('Agree always'));
                 if (accept) accept.click();
             }
         """)
@@ -259,7 +259,10 @@ async def extract_daily_rate(page, url: str) -> float | None:
                     hasDailyRate: di >= 0,
                     pricingContext: pi >= 0 ? text.substring(pi, pi + 300) : null,
                     dailyContext: di >= 0 ? text.substring(di, di + 100) : null,
-                    buttons: [...document.querySelectorAll('button')].map(b => b.textContent.trim()).filter(t => t.length > 0 && t.length < 50).slice(0, 10)
+                    buttons: [...document.querySelectorAll('button')]
+                        .map(b => b.textContent.trim())
+                        .filter(t => t.length > 0 && t.length < 50)
+                        .slice(0, 10)
                 });
             }""")
             logger.warning("No tariff section found on %s. Debug: %s", url, debug_text)
@@ -360,10 +363,12 @@ async def main():
     # Build the master rate map from existing + new
     rate_map: dict[str, float | None] = dict(existing)
 
-    async with async_playwright() as pw:
-        async with await pw.chromium.launch(headless=True) as browser:
+    async with async_playwright() as pw, await pw.chromium.launch(headless=True) as browser:
             context = await browser.new_context(
-                user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                user_agent=(
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+                    " (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                )
             )
             page = await context.new_page()
 

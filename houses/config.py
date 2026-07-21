@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     simon_station_crs: str = "VIC"
     lorena_station_crs: str = "FST"
 
+    sqlite_path: str = Field(default="data/houses.db", alias="HOUSES_SQLITE_PATH")
+
     working_weeks_per_year: int = 46
     weekly_simon_trips: int = 1
     weekly_lorena_trips: int = 2

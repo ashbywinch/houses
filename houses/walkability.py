@@ -11,7 +11,7 @@ import httpx
 from houses.api_cache import cached_async_client, with_cache
 from houses.config import settings
 from houses.geo import GeoPoint
-from houses.retry import retry_async
+from houses.location import PropertyLocation
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +21,11 @@ ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 GOOGLE_MAPS_PLACES_URL = "https://places.googleapis.com/v1/places:searchNearby"
 
 _POSTCODE_FULL_RE = re.compile(
-    r"^[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}$",
+    r"[A-Z]{1,2}[0-9][A-Z0-9]? ?[0-9][A-Z]{2}$",
     re.IGNORECASE,
 )
 _POSTCODE_OUTCODE_RE = re.compile(
-    r"^[A-Z]{1,2}[0-9][A-Z0-9]?$",
+    r"[A-Z]{1,2}[0-9][A-Z0-9]?$",
     re.IGNORECASE,
 )
 
@@ -82,17 +82,51 @@ KNOWN_COUNTIES = frozenset(
 
 def _extract_town(address: str) -> str:
     parts = [p.strip() for p in address.split(",")]
-    filtered = [p for p in parts if p and not _POSTCODE_FULL_RE.match(p) and not _POSTCODE_OUTCODE_RE.match(p)]
+    # Use search() so postcodes embedded in a segment (e.g. "Surrey. KT9 2HN") are detected.
+    filtered = [p for p in parts if p and not _POSTCODE_FULL_RE.search(p) and not _POSTCODE_OUTCODE_RE.search(p)]
     non_county = [p for p in filtered if p.lower().strip() not in KNOWN_COUNTIES]
-    return non_county[-1] if non_county else (filtered[-1] if filtered else "")
+    candidate = non_county[-1] if non_county else (filtered[-1] if filtered else "")
+    # Strip trailing descriptions like " - Backing the River Wye"
+    if " - " in candidate:
+        candidate = candidate.split(" - ")[0].strip()
+    return candidate
 
 
 async def _extract_town_centre(lat: float, lng: float, town: str) -> GeoPoint | None:
     """Resolve a town name to coordinates, used for walkability enrichment."""
-    from houses.location import PropertyLocation
-
     loc = await PropertyLocation.from_town(town)
     return loc.coordinates.value_or_none()
+
+
+async def _find_town_centre_by_reverse_geocode(lat: float, lng: float) -> GeoPoint | None:
+    """Use ORS Pelias reverse geocode to find the nearest town and its centre."""
+    from houses.api_cache import cached_async_client, get_cached, set_cached
+
+    rev_url = ORS_GEOCODE_URL.replace("/search", "/reverse")
+    params = {"point.lat": lat, "point.lon": lng, "size": 1, "boundary.country": "GBR"}
+
+    cached = get_cached("GET", rev_url, params, None)
+    if cached is not None:
+        data = cached
+    else:
+        try:
+            async with cached_async_client(timeout=10.0) as client:
+                resp = await client.get(rev_url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                set_cached("GET", rev_url, params, None, data)
+        except Exception:
+            return None
+
+    features = data.get("features", [])
+    if not features:
+        return None
+    props = features[0].get("properties", {})
+    town = props.get("locality") or props.get("borough")
+    if not town:
+        return None
+    # Forward-geocode the town name to get its centre
+    return await _extract_town_centre(lat, lng, town)
 
 
 async def _walk_duration(
@@ -107,26 +141,26 @@ async def _walk_duration(
         async with cached_async_client(timeout=15.0) as client:
 
             async def _fetch():
-                resp = await retry_async(
-                    lambda: client.post(
-                        ORS_WALKING_URL,
-                        headers={
-                            "Authorization": settings.ors_api_key,
-                            "Content-Type": "application/json",
-                        },
-                        json=body,
-                    ),
-                    max_retries=2,
-                    base_delay=1.0,
-                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+                resp = await client.post(
+                    ORS_WALKING_URL,
+                    headers={
+                        "Authorization": settings.ors_api_key,
+                        "Content-Type": "application/json",
+                    },
+                    json=body,
                 )
                 resp.raise_for_status()
                 return resp.json()
 
             data = await with_cache("POST", ORS_WALKING_URL, body=body, fetch=_fetch)
         return round(data["routes"][0]["summary"]["duration"] / 60)
-    except (httpx.HTTPStatusError, httpx.RequestError, KeyError, IndexError) as e:
-        logger.warning("ORS walk directions failed: %s", e)
+    except (KeyError, IndexError) as e:
+        logger.warning("ORS walk directions failed for (%.4f, %.4f): %s", lat, lng, e)
+        return None
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 429 or (500 <= e.response.status_code < 600):
+            raise  # transient — let DAG retry handle it
+        logger.warning("ORS walk directions failed for (%.4f, %.4f): %s", lat, lng, e)
         return None
 
 
@@ -154,19 +188,14 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
         async with cached_async_client(timeout=15.0) as client:
 
             async def _fetch_places():
-                resp = await retry_async(
-                    lambda: client.post(
-                        GOOGLE_MAPS_PLACES_URL,
-                        headers={
-                            "X-Goog-Api-Key": settings.google_maps_api_key,
-                            "X-Goog-FieldMask": "places.displayName,places.types,places.location",
-                            "Content-Type": "application/json",
-                        },
-                        json=places_body,
-                    ),
-                    max_retries=2,
-                    base_delay=1.0,
-                    exceptions=(httpx.HTTPStatusError, httpx.RequestError),
+                resp = await client.post(
+                    GOOGLE_MAPS_PLACES_URL,
+                    headers={
+                        "X-Goog-Api-Key": settings.google_maps_api_key,
+                        "X-Goog-FieldMask": "places.displayName,places.types,places.location",
+                        "Content-Type": "application/json",
+                    },
+                    json=places_body,
                 )
                 resp.raise_for_status()
                 return resp.json()
@@ -176,9 +205,14 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
         if result:
             return result
     except httpx.HTTPStatusError as exc:
-        logger.warning("Google Places API failed (%s), falling back to Overpass", exc.response.status_code)
+        status = exc.response.status_code
+        if status == 429 or (500 <= status < 600):
+            raise  # transient — let DAG retry handle it
+        logger.warning("Google Places API failed (%s), falling back to Overpass", status)
         google_failed = True
-    except (httpx.RequestError, KeyError, IndexError) as e:
+    except httpx.RequestError:
+        raise  # transient — let DAG retry handle it
+    except (KeyError, IndexError) as e:
         logger.warning("Google Places API failed (%s), falling back to Overpass", e)
         google_failed = True
 
@@ -279,22 +313,21 @@ async def enrich_walkability(
         town_centre = await _extract_town_centre(lat, lng, town)
         if town_centre:
             walk_to_town_minutes = await _walk_duration(lat, lng, town_centre)
-        else:
-            logger.warning(
-                "Could not geocode town centre for '%s' from address: %s",
-                town,
-                address,
-            )
-    else:
-        logger.warning(
-            "No town extracted from address: %s",
-            address,
-        )
+
+    # If the address-based town failed or gave an implausible result, try
+    # reverse-geocoding the property coordinates to find the actual nearest town.
+    if walk_to_town_minutes is None or walk_to_town_minutes <= 0 or walk_to_town_minutes > 180:
+        rev_centre = await _find_town_centre_by_reverse_geocode(lat, lng)
+        if rev_centre:
+            rev_minutes = await _walk_duration(lat, lng, rev_centre)
+            if rev_minutes is not None and 0 < rev_minutes <= 180:
+                walk_to_town_minutes = rev_minutes
+            # If reverse geocode also failed to produce a valid time, leave
+            # the original walk_to_town_minutes as-is (may be None or invalid).
 
     amenities = await _nearby_amenities(lat, lng)
 
-    # Sanitize walk time: ignore impossible values (ORS can return 0 or huge numbers
-    # when it can't find a proper route or geocoding is wrong)
+    # Sanitize walk time: ignore impossible values
     if walk_to_town_minutes is not None and (walk_to_town_minutes <= 0 or walk_to_town_minutes > 180):
         walk_to_town_minutes = None
 

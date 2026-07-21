@@ -41,6 +41,27 @@ class LegMode(Enum):
     CYCLE = auto()
     PARK = auto()
 
+# Register pydantic schema for TypeAdapter serialization
+from pydantic_core import core_schema  # noqa: E402 — pydantic registration after class def
+
+if not hasattr(LegMode, "__get_pydantic_core_schema__"):
+    def _legmode_schema(_source, _handler):
+        def validate(v):
+            if isinstance(v, LegMode):
+                return v
+            if isinstance(v, str):
+                return LegMode[v.upper()]
+            if isinstance(v, int):
+                return LegMode(v)
+            raise ValueError(f"Cannot convert {type(v)} to LegMode")
+        def serialize(lm):
+            return lm.name.lower()
+        return core_schema.no_info_plain_validator_function(
+            validate,
+            serialization=core_schema.plain_serializer_function_ser_schema(serialize),
+        )
+    LegMode.__get_pydantic_core_schema__ = _legmode_schema
+
 
 class CommuteMode(Enum):
     TRANSIT = auto()
@@ -53,9 +74,10 @@ class JourneyLeg:
 
     mode: LegMode
     duration_minutes: int
-    start_station: str = ""  # departure point name from TfL
-    end_station: str = ""  # arrival point name from TfL
-    line_name: str = ""  # transit route name from TfL (e.g. "Bakerloo", "Great Western Railway")
+    distance_km: float = 0.0
+    start_station: str = ""
+    end_station: str = ""
+    line_name: str = ""
 
 
 @dataclass(frozen=True)
@@ -63,7 +85,12 @@ class CostGroup:
     """A contiguous set of legs priced as a single unit, by one operator.
 
     One TfL tap-in/tap-out covers tube→walk→tube as one CostGroup.
-    A boring CostGroup (walking to/from transit) has no operator and no cost.
+    An NR ticket covering train→tube is another CostGroup.
+
+    ``cost`` is the price of the WHOLE group — a single product from one
+    operator.  NEVER add to an existing CostGroup's cost; create a new
+    CostGroup for each separately-priced product.  The commute's total
+    cost is the SUM of all its CostGroups' costs.
     """
 
     legs: tuple[JourneyLeg, ...]
@@ -75,50 +102,6 @@ class CostGroup:
         return tuple(_render_leg_description(leg) for leg in self.legs)
 
 
-@dataclass(frozen=True)
-class Commute:
-    """A person's journey between home and a destination."""
-
-    destination_label: str
-    destination_postcode: str
-    duration_minutes: int | None = None
-    daily_cost_gbp: Money | None = None
-    mode: str | CommuteMode = "transit"
-    cost_groups: tuple[CostGroup, ...] = ()
-
-    def _leg_description(self, leg: JourneyLeg) -> str:
-        """Build a human-readable leg description from raw fields."""
-        return _render_leg_description(leg)
-
-    def summary(self) -> str:
-        """Render as the sheet's route-summary string."""
-        parts: list[str] = []
-        all_legs = [leg for group in self.cost_groups for leg in group.legs]
-        total = len(all_legs)
-
-        for idx, leg in enumerate(all_legs):
-            desc = self._leg_description(leg)
-            if leg.mode == LegMode.WALK and idx == total - 1:
-                parts.append(f"walk {leg.duration_minutes}m")
-            else:
-                parts.append(f"{desc} ({leg.duration_minutes}m)")
-
-        return " \u2192 ".join(parts)
-
-    def non_rail_cost(self) -> float:
-        """Sum of costs from non-TfL cost groups (bus, parking, etc.).
-
-        Parking costs are stored as ``Money`` objects to avoid float
-        precision artifacts; bus and TfL costs are stored as plain floats.
-        """
-        total = 0.0
-        for cg in self.cost_groups:
-            if cg.cost is not None and cg.operator != "TfL":
-                if isinstance(cg.cost, Money):
-                    total += float(cg.cost.amount)
-                else:
-                    total += cg.cost
-        return total
 
 
 @dataclass(frozen=True)

@@ -320,7 +320,7 @@ class TestCarParkRegistry:
         assert car_park.daily_cost is None  # blank before load
 
         result = await registry.load_costs(car_park, station)
-        assert result.is_succeeded
+        assert result.succeeded
         updated = result.value_or_none()
         assert updated is car_park  # same object, mutated
         assert updated.daily_cost == Money("12.80", "GBP")
@@ -343,8 +343,8 @@ class TestCarParkRegistry:
         car_park = registry.find_car_park(station)
 
         result = await registry.load_costs(car_park, station)
-        assert result.is_impossible
-        assert "No APCOA rate" in result.reason
+        assert result.impossible
+        assert "No APCOA rate" in result.error
 
     @pytest.mark.asyncio
     async def test_add_nearest_car_park_for_unknown_station(self, tmp_path, monkeypatch):
@@ -367,7 +367,7 @@ class TestCarParkRegistry:
         assert registry.find_car_park(station) is None  # not in CSV
 
         result = await registry.add_nearest_car_park_for(station)
-        assert result.is_succeeded
+        assert result.succeeded
         car_park = result.value_or_none()
         assert car_park.name == "Reading Station Car Park"
         assert car_park.daily_cost == Money("15.00", "GBP")
@@ -393,5 +393,74 @@ class TestCarParkRegistry:
 
         station = Station(name="Reading", crs="RDG", location=GeoPoint(51.4, -1.0))
         result = await registry.add_nearest_car_park_for(station)
-        assert result.is_impossible
-        assert "No APCOA car park" in result.reason
+        assert result.impossible
+        assert "No APCOA car park" in result.error
+
+
+# ── extract_daily_rate_from_tariff (pure function, imported from scripts/) ──
+
+
+class TestExtractDailyRateFromTariff:
+    """extract_daily_rate_from_tariff — pure function, no I/O, test fixture files."""
+
+    FIXTURES_DIR = Path("tests/fixtures/parking_tariffs")
+
+    def _load(self, name: str) -> str:
+        return (self.FIXTURES_DIR / name).read_text()
+
+    def test_woking(self):
+        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
+        rate = extract_daily_rate_from_tariff(self._load("woking.txt"))
+        assert rate == 12.80
+
+    def test_fleet(self):
+        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
+        rate = extract_daily_rate_from_tariff(self._load("fleet.txt"))
+        assert rate == 10.90
+
+    def test_bourne_end_peak_rate(self):
+        """Bourne End has 'Daily Rate before 12pm: £4.00' — should pick peak rate."""
+        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
+        rate = extract_daily_rate_from_tariff(self._load("bourne_end.txt"))
+        assert rate == 4.00
+
+    def test_didcot_24h_rate(self):
+        """Didcot uses 'Up to 24 hours £7.20' format."""
+        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
+        rate = extract_daily_rate_from_tariff(self._load("didcot_foxhall.txt"))
+        assert rate == 7.20
+
+    def test_high_wycombe(self):
+        """High Wycombe has 'Daily Rate: £10.40' with a preceding 'Monday - Sunday' line."""
+        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
+        rate = extract_daily_rate_from_tariff(self._load("high_wycombe.txt"))
+        assert rate == 10.40
+
+    def test_twyford_car_park_2(self):
+        """Twyford CP2 has 'Daily Rate: £9.90'."""
+        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
+        rate = extract_daily_rate_from_tariff(self._load("twyford_car_park_2.txt"))
+        assert rate == 9.90
+
+    def test_twyford_car_park_1_permit_only(self):
+        """Twyford CP1 is permit holders only — returns None."""
+        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
+        rate = extract_daily_rate_from_tariff(self._load("twyford_car_park_1.txt"))
+        assert rate is None
+
+    def test_empty_text_returns_none(self):
+        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
+        assert extract_daily_rate_from_tariff("") is None
+
+    def test_no_tariff_section_returns_none(self):
+        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
+        assert extract_daily_rate_from_tariff("Some random text without pricing") is None

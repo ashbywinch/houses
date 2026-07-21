@@ -1,8 +1,11 @@
 """Tests for data models."""
 
-from houses.commute import Commute, CommuteBreakdown
-from houses.property import CouncilTaxInfo, EnrichedProperty, Property
-from houses.schools import School, SchoolGender
+from houses.commute import CommuteBreakdown
+from houses.council_tax_info import CouncilTaxInfo
+from houses.model.domain import Commute, Person, PlaceOfInterest
+from houses.property import EnrichedProperty, Property
+from houses.school import School
+from houses.school_gender import SchoolGender
 
 
 def test_property_payload() -> None:
@@ -46,10 +49,15 @@ def test_enriched_property_defaults() -> None:
 
 
 def test_transit_info() -> None:
+    from money import Money
+    from pint import Quantity
     t = Commute(
-        destination_label="Test",
-        destination_postcode="EC3A 7LP",
-        duration_minutes=30,
+        person=Person(name="Test", has_car=False),
+        label="Test",
+        destination=PlaceOfInterest(label="Test", postcode="SW1V 2QQ"),
+        duration=Quantity(10, "minute"),
+        daily_cost=Money("0", "GBP"),
+        mode="transit",
     )
     assert t.mode == "transit"
 
@@ -65,10 +73,19 @@ def test_school_defaults() -> None:
 
 
 def test_bracknell_commute_defaults() -> None:
-    p = Commute(destination_label="Bracknell", destination_postcode="RG12 8YA")
-    assert p.destination_label == "Bracknell"
-    assert p.daily_cost_gbp is None
-    assert p.duration_minutes is None
+    from money import Money
+    from pint import Quantity
+    p = Commute(
+        person=Person(name="", has_car=True),
+        label="Bracknell",
+        destination=PlaceOfInterest(label="Bracknell", postcode="RG12 8YA"),
+        duration=Quantity(10, "minute"),
+        daily_cost=Money("0", "GBP"),
+        mode="drive",
+    )
+    assert p.label == "Bracknell"
+    assert p.daily_cost == Money("0", "GBP")
+    assert p.duration.magnitude == 10
 
 
 def test_council_tax_info() -> None:

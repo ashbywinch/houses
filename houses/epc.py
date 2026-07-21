@@ -10,8 +10,10 @@ from __future__ import annotations
 import logging
 import re
 
+import httpx
+
+from dag.attempt import Attempt
 from houses.api_cache import cached_async_client, get_cached, set_cached
-from houses.attempt import Attempt
 from houses.config import settings
 
 logger = logging.getLogger(__name__)
@@ -103,8 +105,8 @@ async def lookup_epc(postcode: str, address: str = "") -> str:
     if cached is not None:
         certs = cached.get("data", [])
         result = _match_cert(certs, building_id)
-        if result.is_impossible:
-            logger.debug("EPC: %s for %s", result.reason, postcode)
+        if result.impossible:
+            logger.debug("EPC: %s for %s", result.error, postcode)
         return result.value_or("")
 
     try:
@@ -125,10 +127,12 @@ async def lookup_epc(postcode: str, address: str = "") -> str:
             set_cached("GET", EPC_SEARCH_URL, params, None, data)
             certs = data.get("data", [])
             result = _match_cert(certs, building_id)
-            if result.is_impossible:
-                logger.debug("EPC: %s for %s", result.reason, postcode)
+            if result.impossible:
+                logger.debug("EPC: %s for %s", result.error, postcode)
             return result.value_or("")
 
+    except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
+        raise  # transient — let DAG retry handle it
     except Exception as e:
         logger.warning("EPC lookup failed for %s: %s", postcode, e)
         return ""
@@ -176,22 +180,22 @@ def _match_cert(certs: list[dict], building_id: str) -> Attempt[str]:
     descriptive reason.
     """
     if not certs:
-        return Attempt.impossible("epc", "no certificates found")
+        return Attempt.impossible("no certificates found")
 
     candidates = certs
     if building_id:
         norm_id = _normalise(building_id)
         candidates = [c for c in certs if norm_id in _normalise(c.get("addressLine1", ""))]
         if not candidates:
-            return Attempt.impossible("epc", "no matching certificate for this address")
+            return Attempt.impossible("no matching certificate for this address")
         # Ambiguity check: more than one distinct address matches
         unique_addresses = {c.get("addressLine1", "") for c in candidates}
         if len(unique_addresses) > 1:
-            return Attempt.impossible("epc", "address matched multiple properties")
+            return Attempt.impossible("address matched multiple properties")
 
     candidates.sort(key=lambda c: c.get("registrationDate", ""), reverse=True)
     band = candidates[0].get("currentEnergyEfficiencyBand", "")
     raw = band.strip() if band else ""
     if not raw:
-        return Attempt.impossible("epc", "certificate has no energy band")
-    return Attempt.succeeded(raw, "epc")
+        return Attempt.impossible("certificate has no energy band")
+    return Attempt.succeeded(raw)

@@ -6,5 +6,6 @@
   "skills": {
     "paths": [".kilo/skills"]
   },
-  "mcp": {}
+  "mcp": {},
+  "snapshot": false
 }

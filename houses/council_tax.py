@@ -8,9 +8,11 @@ import re
 from collections import namedtuple
 from pathlib import Path
 
+import httpx
+
+from dag.attempt import Attempt
 from houses.api_cache import cached_sync_client, get_cached, set_cached
-from houses.attempt import Attempt
-from houses.property import CouncilTaxInfo
+from houses.council_tax_info import CouncilTaxInfo
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,10 @@ COUNCIL_TAX_CSV = "data/council_tax_rates.csv"
 
 # In-memory cache: lowercased authority name -> Band D rate (float)
 _cached_rates: dict[str, float] | None = None
+def _reset():
+    """Clear the cached council tax rates for test isolation."""
+    global _cached_rates
+    _cached_rates = None
 
 
 def _load_rates() -> dict[str, float]:
@@ -219,19 +225,21 @@ async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[Counci
         results_raw = [{"address": r.address, "band": r.band, "local_authority": r.local_authority} for r in page.rows]
     except ImportError:
         logger.warning("uk-property-apis not installed; skipping council tax lookup")
-        return Attempt.impossible("voa", "uk-property-apis not installed")
+        return Attempt.impossible("uk-property-apis not installed")
+    except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
+        raise  # transient — let DAG retry handle it
     except Exception as e:
         logger.warning("VOA council tax lookup failed for %s: %s", postcode, e)
-        return Attempt.impossible("voa", f"VOA lookup failed: {e}")
+        return Attempt.impossible(f"VOA lookup failed: {e}")
 
     if not address:
         logger.debug("No address provided — cannot positively identify property")
-        return Attempt.impossible("voa", "no address provided")
+        return Attempt.impossible("no address provided")
 
     active = [r for r in results_raw if r["band"] in BAND_RATIOS or r["band"] == "I"]
     if not active:
         logger.debug("VOA returned no active properties for %s", postcode)
-        return Attempt.impossible("voa", "no active properties in VOA results")
+        return Attempt.impossible("no active properties in VOA results")
 
     building = _extract_building(address)
     building_id = building.get("building_number") or building.get("building_name") or ""
@@ -239,13 +247,13 @@ async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[Counci
 
     if not norm_id:
         logger.debug("Could not extract building identifier from address %r", address)
-        return Attempt.impossible("voa", "could not extract building identifier")
+        return Attempt.impossible("could not extract building identifier")
 
     matches = [r for r in active if norm_id in _normalise(r["address"])]
 
     if not matches:
         logger.debug("Could not match building %r in VOA results for %s", building_id, postcode)
-        return Attempt.impossible("voa", f"no VOA match for building {building_id}")
+        return Attempt.impossible(f"no VOA match for building {building_id}")
 
     # Ambiguity check: more than one distinct address matches
     unique_addresses = {m["address"] for m in matches}
@@ -256,7 +264,7 @@ async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[Counci
             len(unique_addresses),
             postcode,
         )
-        return Attempt.impossible("voa", "address matched multiple properties")
+        return Attempt.impossible("address matched multiple properties")
 
     matched = matches[0]
     yearly_cost = None
@@ -270,5 +278,4 @@ async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[Counci
 
     return Attempt.succeeded(
         CouncilTaxInfo(band=matched["band"], yearly_cost=yearly_cost, evidence_url=evidence_url),
-        "voa",
     )
