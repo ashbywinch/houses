@@ -29,29 +29,31 @@ def _fresh_db():
 
 
 @pytest.fixture(autouse=True)
-def _mock():
+def _mock(monkeypatch):
     from money import Money
     from pint import Quantity
 
     from dag.attempt import Attempt
     from houses.model.domain import Commute, Person, PlaceOfInterest
     from houses.services_provider import _request_services as _sp
-
-    class _SuccessRouter:
-        async def route(self, origin, destination, *, has_car, max_walk_minutes):
-            return Attempt.succeeded(
-                Commute(
-                    person=Person(name="T", has_car=has_car),
-                    label="Test",
-                    destination=PlaceOfInterest(label="D", postcode=str(destination)),
-                    duration=Quantity(30, "minute"),
-                    daily_cost=Money("5.0", "GBP"),
-                    mode="transit",
-                )
-            )
-
-    svc = make_services(commute_router=_SuccessRouter())
+    svc = make_services()
     token = _sp.set(svc)
+
+    canned = Commute(
+        person=Person(name="T", has_car=True),
+        label="Test",
+        destination=PlaceOfInterest(label="D", postcode="SW1V 2QQ"),
+        duration=Quantity(30, "minute"),
+        daily_cost=Money("5.0", "GBP"),
+        mode="transit",
+    )
+
+    async def fake_route(*_, **__):
+        return Attempt.succeeded(canned)
+
+    svc.commute_router.route = fake_route
+    monkeypatch.setattr("houses.routing._google_route_commute", fake_route)
+
     yield
     _sp.reset(token)
 

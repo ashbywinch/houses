@@ -111,9 +111,9 @@ class FakeSchoolLookup:
         child_age: int,
         address: str = "",
         acceptable: tuple[SchoolGender, ...] = (SchoolGender.MIXED,),
-    ) -> School | None:
+    ) -> Attempt[School | None]:
         self.find_calls.append((postcode, child_age, address, acceptable))
-        return self.school
+        return Attempt.succeeded(self.school)
 
     async def school_commute(self, postcode: str, school: School) -> Commute | None:
         from houses.model.domain import Commute, Person, PlaceOfInterest

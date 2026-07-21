@@ -273,19 +273,20 @@ async def _walk_to_station_minutes(
 
 async def _google_route_commute(
     origin: str | GeoPoint, dest: str | GeoPoint, mode: str, max_walk_minutes: int | None = None
-) -> Commute | None:
+) -> Attempt[Commute]:
     """Try walking or driving via Google Routes API.
 
     Skips the API call entirely when the straight-line distance makes
     walking infeasible (exceeds ``max_walk_minutes`` at 5 km/h).
+    Returns the commute on success, or an Attempt.impossible with
+    the reason when the API returns no route or the request fails.
     """
     if mode == "WALK" and max_walk_minutes is not None:
         max_walk_km = max_walk_minutes * 5.0 / 60.0  # 5 km/h walking pace
         if isinstance(origin, GeoPoint) and isinstance(dest, GeoPoint):
             dist_km = origin.distance_km_to(dest)
             if dist_km > max_walk_km:
-                return None
-        # If dest is a postcode string we can't check distance — let the API decide
+                return Attempt.impossible(f"straight-line distance {dist_km:.1f} km exceeds {max_walk_km:.1f} km max walk")
 
     body = {
         "origin": _address_waypoint(origin),
@@ -295,11 +296,12 @@ async def _google_route_commute(
     mask = "routes.duration,routes.distanceMeters,routes.legs"
     data = await _google_routes_post(body, mask, timeout=15.0 if mode == "DRIVE" else 10.0)
     if data is None:
-        return None
+        return Attempt.impossible("Google Routes API returned no data")
 
     routes = data.get("routes", [])
     if not routes:
-        return None
+        return Attempt.impossible("Google Routes returned no routes")
+
     duration_sec = int(routes[0].get("duration", "0s").rstrip("s"))
     duration_min = round(duration_sec / 60)
     distance_meters = routes[0].get("distanceMeters", 0)
@@ -312,7 +314,7 @@ async def _google_route_commute(
         distance_km = distance_meters / 1000
         leg = JourneyLeg(mode=LegMode.DRIVE, duration_minutes=duration_min, distance_km=distance_km)
         daily = Money("0", "GBP")
-    return Commute(
+    return Attempt.succeeded(Commute(
         person=Person(name="", has_car=False),
         label="",
         destination=PlaceOfInterest(label="", postcode=dest_str),
@@ -325,7 +327,9 @@ async def _google_route_commute(
                 cost=daily,
             ),
         ),
-    )
+    ),
+    error=f"google_routes_{mode.lower()}: duration={duration_min}min distance={distance_meters}m")
+
 
 
 def _first_walk_minutes(commute: Commute) -> int:
@@ -342,7 +346,7 @@ def _first_walk_minutes(commute: Commute) -> int:
 # ---------------------------------------------------------------------------
 
 
-async def _tfl_transit_commute(origin_postcode: str, dest_postcode: str, has_car: bool) -> Commute | None:
+async def _tfl_transit_commute(origin_postcode: str, dest_postcode: str, has_car: bool) -> Attempt[Commute]:
     """Transit routing via TfL API.
 
     Tries routes with and without bus mode, picks the best.
@@ -362,12 +366,13 @@ async def _tfl_transit_commute(origin_postcode: str, dest_postcode: str, has_car
     # If no_bus succeeded, return it directly.  If it failed, fall through
     # to try with_bus as a last resort.
     if has_car and not no_bus.impossible:
-        return no_bus.value_or_none()
+        return Attempt.succeeded(no_bus.value_or_none(), error=no_bus.error)
 
     with_bus = await TransitRoute(origin_postcode, dest_postcode, label, park_and_ride=has_car, allow_bus=True).plan()
 
     if no_bus.impossible and with_bus.impossible:
-        return None
+        errors = [e for e in (no_bus.error, with_bus.error) if e]
+        return Attempt.impossible("; ".join(errors) if errors else "no transit route available")
 
     empty = Commute(
         person=Person(name="", has_car=has_car),
@@ -382,7 +387,6 @@ async def _tfl_transit_commute(origin_postcode: str, dest_postcode: str, has_car
 
     # Bus fallback: if the chosen route has a long walk to the first
     # transit leg, try Google Routes transit as an alternative.
-    # The bus only replaces the walking leg — the TfL route stays the same.
     if result is no_bus_val and result.duration.magnitude > 0:
         walk_to_station = _first_walk_minutes(result)
         if walk_to_station >= settings.bus_walk_penalty_minutes:
@@ -394,7 +398,7 @@ async def _tfl_transit_commute(origin_postcode: str, dest_postcode: str, has_car
                 has_car=has_car,
             )
 
-    return result
+    return Attempt.succeeded(result, error=f"tfl_transit: duration={result.duration.magnitude}min mode={result.mode}")
 
 
 _SENTINEL = object()  # sentinel for _bus_alternative default
@@ -576,91 +580,52 @@ async def get_commute(
 ) -> Attempt[Commute]:
     """Route from origin to destination based on the traveler's circumstances.
 
-    Parameters:
-        origin_postcode: Where the traveler starts (postcode string or GeoPoint).
-        dest_postcode: Where the traveler is going.
-        has_car: Whether the traveler has access to a car.
-        max_walk_minutes: Maximum acceptable walking time for the first/last
-            leg. Beyond this, transit or driving is preferred.
+    Tries walking first (cheapest), then transit (London only),
+    then driving (if car available and not congestion zone).
+    Returns the best non-zero-duration result with preference
+    for priced routes (TfL has real cost data).
 
-    Returns an ``Attempt[Commute]``.  When no route is available or a backend
-    fails, the attempt carries the source and reason (e.g. ``"google_routes"``,
-    ``"API rate limited (429)"``).
+    Each mode returns an ``Attempt[Commute]`` — errors from failed
+    modes are carried in the Attempt's ``error`` field, visible
+    in the DAG provenance chain.
     """
-    candidates: list[Commute] = []
-    failures: list[str] = []
-
     dest_str = dest_postcode if isinstance(dest_postcode, str) else f"{dest_postcode.lat},{dest_postcode.lon}"
-
-    # ── 0. Congestion zone — skip driving ──────────────────────────
     dest_in_congestion = _in_congestion_zone(dest_str)
 
-    # ── 1. Walking (cheapest to try) ───────────────────────────────
-    try:
-        walk = await _google_route_commute(origin_postcode, dest_postcode, "WALK", max_walk_minutes)
-    except ValueError as e:
-        failures.append(f"walk: {e}")
-        walk = None
-    if walk is not None and walk.duration.magnitude <= max_walk_minutes:
-        return Attempt.succeeded(walk)
-    if walk is not None:
-        candidates.append(walk)
+    walk_attempt = await _google_route_commute(origin_postcode, dest_postcode, "WALK", max_walk_minutes)
+    if walk_attempt.succeeded and walk_attempt.value_or_none() is not None:
+        c = walk_attempt.value_or_none()
+        if c.duration.magnitude <= max_walk_minutes:
+            return walk_attempt
 
-    # ── 2. Transit ─────────────────────────────────────────────────
-    tfl: Commute | None = None
-    origin_str = origin_postcode if isinstance(origin_postcode, str) else f"{origin_postcode.lat},{origin_postcode.lon}"
+    candidates: list[Attempt[Commute]] = [walk_attempt]
 
     if _is_london_area(dest_str):
+        origin_str = origin_postcode if isinstance(origin_postcode, str) else f"{origin_postcode.lat},{origin_postcode.lon}"
         try:
-            tfl = await _tfl_transit_commute(origin_str, dest_str, has_car)
+            tfl_attempt = await _tfl_transit_commute(origin_str, dest_str, has_car)
         except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException, HttpError):
             raise
         except Exception as e:
-            logger.warning("TfL transit failed for %s → %s: %s", origin_str, dest_str, e)
-            failures.append(f"tfl_transit: {e}")
+            tfl_attempt = Attempt.impossible(f"tfl_transit: {e}")
+        candidates.append(tfl_attempt)
+    else:
+        candidates.append(Attempt.impossible("not in London area"))
 
-    if tfl is not None:
-        candidates.append(tfl)
-
-    # ── 3. Driving ─────────────────────────────────────────────────
     if has_car and not dest_in_congestion:
-        try:
-            drive = await _google_route_commute(origin_postcode, dest_postcode, "DRIVE")
-        except ValueError as e:
-            failures.append(f"drive: {e}")
-            drive = None
-        if drive is not None:
-            candidates.append(drive)
+        drive_attempt = await _google_route_commute(origin_postcode, dest_postcode, "DRIVE")
+        candidates.append(drive_attempt)
 
-    # ── 4. Pick fastest ────────────────────────────────────────────
-    valid = [c for c in candidates if c.duration.magnitude > 0]
-    if valid:
-        # Prefer priced routes over faster non-priced ones.
-        # Priority:
-        #   1. Has real cost data (non-zero daily_cost)
-        #   2. Faster duration
-        # Google Routes may return the fastest transit option but often
-        # lacks bus/rail fare data (cost=0).  TfL has accurate
-        # pricing for London including park-and-ride.  When we have both,
-        # the priced result is more useful — the NR fare fallback
-        # (applied later) can only approximate a rail fare and won't
-        # capture bus or parking costs.
-        def _tiebreak(c: Commute) -> tuple[int, float]:
-            no_cost = 1 if c.daily_cost == Money("0", "GBP") else 0
-            return (no_cost, c.duration.magnitude or 0)
+    valid = [a for a in candidates if a.succeeded and a.value_or_none() is not None
+             and a.value_or_none().duration.magnitude > 0]
+    if not valid:
+        errors = [a.error for a in candidates if a.error]
+        return Attempt.impossible("; ".join(errors) if errors else "no route available")
 
-        return Attempt.succeeded(min(valid, key=_tiebreak))
+    def _tiebreak(c: Commute) -> tuple[int, float]:
+        no_cost = 1 if c.daily_cost == Money("0", "GBP") else 0
+        return (no_cost, c.duration.magnitude or 0)
 
-    reason = "; ".join(failures) if failures else "no route available"
-    return Attempt.impossible(reason)
-
-
-def _with_label(commute: Commute, label: str, postcode: str) -> Commute:
-    """Set destination label on a commute (Commute is frozen, so replace)."""
-    import dataclasses
-
-    return dataclasses.replace(
-        commute,
-        label=label,
-        destination=PlaceOfInterest(label=label, postcode=postcode),
-    )
+    best = min((a.value_or_none() for a in valid), key=_tiebreak)
+    errors = [a.error for a in candidates if not a.succeeded and a.error]
+    return Attempt.succeeded(best, error="; ".join(errors) if errors else "")

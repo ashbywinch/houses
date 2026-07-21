@@ -8,24 +8,25 @@ from pint import Quantity
 
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.model.domain import Commute, Person, PlaceOfInterest
+from dag.attempt import Attempt
 
 # ── Fail-fast when API keys are missing ─────────────────────────────────
 
-
 class TestWalkCommuteFailsFast:
-    """_google_route_commute must raise ValueError when Google API key is missing."""
+    """_google_routes_post must raise ValueError when Google API key is missing."""
 
     def test_raises_without_api_key(self):
+        """_google_routes_post must raise ValueError when Google API key is missing."""
         import asyncio
 
         from houses.config import settings
-        from houses.routing import _google_route_commute
+        from houses.routing import _google_routes_post
 
         original = settings.google_maps_api_key
         try:
             settings.google_maps_api_key = ""
             with pytest.raises(ValueError, match="Google Maps API key not configured"):
-                asyncio.run(_google_route_commute("SW1V 2QQ", "EC3A 7LP", "WALK"))
+                asyncio.run(_google_routes_post({}, "test"))
         finally:
             settings.google_maps_api_key = original
 
@@ -118,7 +119,7 @@ async def test_find_nearest_handles_coordinate_string(monkeypatch):
     result = await find_nearest("51.5,-0.13", child_age=4, acceptable=(SchoolGender.MIXED,))
 
     assert result is not None, "find_nearest should find a school from coordinate input"
-    assert result.name == "Test Primary"
+    assert result.value_or_none().name == "Test Primary"
     assert not geocode_called, "find_nearest should NOT call geocode when given coordinates"
 
 
@@ -187,12 +188,13 @@ _DRIVE_25 = Commute(
 )
 
 # Tiebreak fixture — route with cost, used by test_returns_cost_when_tfl_has_cost
-_SLOWER_HAS_COST = Commute(
+_SLOWER_HAS_COST = Attempt.succeeded(Commute(
     person=Person(name="", has_car=False),
     label="",
     destination=PlaceOfInterest(label="", postcode=""),
     duration=Quantity(25, "minute"),
     daily_cost=Money("5.0", "GBP"),
+)
 )
 
 
@@ -205,13 +207,13 @@ class TestGetCommuteChoice:
         from houses.routing import get_commute
 
         async def mock_walk(*_):
-            return _WALK_20
+            return Attempt.succeeded(_WALK_20)
 
         async def mock_transit(*_, **__):
-            return _TRANSIT_30
+            return Attempt.succeeded(_TRANSIT_30)
 
         async def mock_none(*_, **__):
-            return None
+            return Attempt.impossible("none")
 
         monkeypatch.setattr("houses.routing._google_route_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
@@ -226,13 +228,13 @@ class TestGetCommuteChoice:
         from houses.routing import get_commute
 
         async def mock_walk(*_):
-            return _WALK_60
+            return Attempt.succeeded(_WALK_60)
 
         async def mock_transit(*_, **__):
-            return _TRANSIT_30
+            return Attempt.succeeded(_TRANSIT_30)
 
         async def mock_none(*_, **__):
-            return None
+            return Attempt.impossible("none")
 
         monkeypatch.setattr("houses.routing._google_route_commute", mock_walk)
         monkeypatch.setattr("houses.routing._tfl_transit_commute", mock_transit)
@@ -247,16 +249,16 @@ class TestGetCommuteChoice:
         from houses.routing import get_commute
 
         async def mock_walk(*_):
-            return _WALK_60
+            return Attempt.succeeded(_WALK_60)
 
         async def mock_transit(*_, **__):
-            return None  # no transit available
+            return Attempt.impossible("none")  # no transit available
 
         async def mock_none(*_, **__):
-            return None
+            return Attempt.impossible("none")
 
         async def mock_drive(*_):
-            return _DRIVE_25
+            return Attempt.succeeded(_DRIVE_25)
 
         def mock_cz(_):
             return False
@@ -277,16 +279,16 @@ class TestGetCommuteChoice:
         from houses.routing import get_commute
 
         async def mock_walk(*_):
-            return _WALK_60
+            return Attempt.succeeded(_WALK_60)
 
         async def mock_transit(*_, **__):
-            return _TRANSIT_30
+            return Attempt.succeeded(_TRANSIT_30)
 
         async def mock_none(*_, **__):
-            return None
+            return Attempt.impossible("none")
 
         async def mock_drive(*_):
-            return _DRIVE_25
+            return Attempt.succeeded(_DRIVE_25)
 
         def mock_cz(_):
             return False
@@ -307,14 +309,14 @@ class TestGetCommuteChoice:
         from houses.routing import get_commute
 
         async def mock_transit(*_, **__):
-            return _TRANSIT_30
+            return Attempt.succeeded(_TRANSIT_30)
 
         async def mock_routes(origin, dest, mode, max_walk_minutes=None):
             if mode == "WALK":
-                return None
+                return Attempt.impossible("no walk")
             if mode == "DRIVE":
-                return _DRIVE_25
-            return None
+                return Attempt.succeeded(_DRIVE_25)
+            return Attempt.impossible("none")
 
         def mock_cz(_):
             return True
@@ -333,16 +335,16 @@ class TestGetCommuteChoice:
         from houses.routing import get_commute
 
         async def mock_walk(*_):
-            return None
+            return Attempt.impossible("none")
 
         async def mock_transit(*_, **__):
-            return None
+            return Attempt.impossible("none")
 
         async def mock_none(*_, **__):
-            return None
+            return Attempt.impossible("none")
 
         async def mock_drive(*_):
-            return None
+            return Attempt.impossible("none")
 
         def mock_cz(_):
             return False
@@ -400,7 +402,7 @@ class TestGetCommuteChoice:
         from houses.routing import get_commute
 
         async def mock_walk(*_):
-            return _WALK_60
+            return Attempt.succeeded(_WALK_60)
 
         async def mock_tfl(*_, **__):
             return _SLOWER_HAS_COST  # 25 min, cost=5.0
@@ -422,6 +424,10 @@ class TestTflNoBusWhenHasCar:
 
     @pytest.mark.asyncio
     async def test_skips_with_bus_when_no_bus_succeeds(self, monkeypatch):
+        from houses.routing import _tfl_transit_commute as _real_tfl
+        # Restore real function — conftest mocks it globally
+        import houses.routing as _routing
+        monkeypatch.setattr(_routing, '_tfl_transit_commute', _real_tfl)
         """has_car=True + no_bus succeeds → with_bus is not compared."""
         from dag.attempt import Attempt
 
@@ -454,14 +460,17 @@ class TestTflNoBusWhenHasCar:
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_plan)
 
         result = await _tfl_transit_commute("GU21 2NA", "EC3A 7LP", has_car=True)
-        assert result is not None
-        assert result.duration.magnitude == 90, (
-            f"Expected no_bus (90 min), got {result.duration.magnitude} — with_bus was compared when no_bus succeeded"
+        assert result.succeeded, f"_tfl_transit_commute should succeed, got {result}"
+        assert result.value_or_none().duration.magnitude == 90, (
+            f"Expected no_bus (90 min), got {result.value_or_none().duration.magnitude} — with_bus was compared when no_bus succeeded"
         )
 
     @pytest.mark.asyncio
     async def test_uses_with_bus_when_no_bus_fails(self, monkeypatch):
         """has_car=True + no_bus fails → with_bus is used as last resort."""
+        from houses.routing import _tfl_transit_commute as _real_tfl
+        import houses.routing as _routing
+        monkeypatch.setattr(_routing, '_tfl_transit_commute', _real_tfl)
         from dag.attempt import Attempt
 
         no_bus = Attempt.impossible("no route found")
@@ -487,8 +496,8 @@ class TestTflNoBusWhenHasCar:
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_plan)
 
         result = await _tfl_transit_commute("GU21 2NA", "EC3A 7LP", has_car=True)
-        assert result is not None
-        assert result.duration.magnitude == 70, f"Expected with_bus (70 min), got {result.duration.magnitude}"
+        assert result.succeeded, f"_tfl_transit_commute should succeed, got {result}"
+        assert result.value_or_none().duration.magnitude == 70, f"Expected with_bus (70 min), got {result.value_or_none().duration.magnitude}"
 
 
 # ── Park-and-ride creates parking CostGroup ─────────────────────────

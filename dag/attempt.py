@@ -42,7 +42,7 @@ class _AttemptMeta(type):
 
     def __getattr__(cls, name):
         if name == "succeeded":
-            return lambda value: cls(_Status.SUCCEEDED, value=value)
+            return lambda value, error="": cls(_Status.SUCCEEDED, value=value, error=error)
         if name == "pending":
             return lambda: cls(_Status.PENDING)
         if name == "impossible":
@@ -70,13 +70,14 @@ class Attempt[T](metaclass=_AttemptMeta):
     properties.  For exhaustive handling, use ``.match()``.
     """
 
-    __slots__ = ("_status", "_value", "_error")
+    __slots__ = ("_status", "_value", "_error", "_metadata")
 
     def __init__(self, status: _Status, value: T | None = None,
-                 error: str = "") -> None:
+                 error: str = "", metadata: dict | None = None) -> None:
         object.__setattr__(self, "_status", status)
         object.__setattr__(self, "_value", value)
         object.__setattr__(self, "_error", error)
+        object.__setattr__(self, "_metadata", metadata or {})
 
     # ── Predicates (instance properties via __getattr__) ────────────
 

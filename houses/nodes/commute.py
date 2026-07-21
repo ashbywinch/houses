@@ -329,6 +329,19 @@ class RailFareNode(DerivedNode[Commute]):
 
 
 class CommuteSelectorNode(DerivedNode[Commute]):
+    """Selects the best commute from walk, transit, drive, and bus options.
+
+    Priority:
+    1. Walking, if Google Routes returned a route within max_walk minutes
+    2. Transit (vs bus — picks faster of the two)
+    3. Driving (if available and not congestion zone)
+    4. Bus (fallback when transit has a long first-leg walk)
+
+    ``walk_result`` and ``drive_result`` are optional — omit them when
+    walking/driving is not applicable (the selector treats them as
+    impossible).
+    """
+
     def __init__(
         self,
         node_id: str,
@@ -338,15 +351,39 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         transit_result,
         bus_result,
         rail_fare_result,
+        walk_result=None,
+        drive_result=None,
         is_child: bool = False,
+        max_walk: int = 30,
     ):
         self.origin = origin
         self.poi = poi
+        self.walk_result = walk_result
         self.transit_result = transit_result
+        self.drive_result = drive_result
         self.bus_result = bus_result
         self.rail_fare_result = rail_fare_result
         self.is_child = is_child
-        super().__init__(node_id, Commute, (origin, poi, transit_result, bus_result, rail_fare_result))
+        self._max_walk = max_walk
+        deps = [origin, poi, transit_result, bus_result, rail_fare_result]
+        if walk_result is not None:
+            deps.append(walk_result)
+        if drive_result is not None:
+            deps.append(drive_result)
+        super().__init__(node_id, Commute, tuple(deps))
+
+    @property
+    def _skip_impossible_dep_check(self) -> bool:
+        """CommuteSelectorNode handles failed deps gracefully (e.g., fall back to bus)."""
+        return True
+
+    def _get_active_deps(self) -> tuple[Node, ...]:
+        deps = [self.origin, self.poi, self.transit_result, self.bus_result, self.rail_fare_result]
+        if self.walk_result is not None:
+            deps.append(self.walk_result)
+        if self.drive_result is not None:
+            deps.append(self.drive_result)
+        return tuple(deps)
 
     def compute(
         self,
@@ -355,29 +392,41 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         transit: Attempt[Commute],
         bus_result: Attempt[Commute],
         rail_fare_result: Attempt[Commute | None],
+        walk: Attempt[Commute] | None = None,
+        drive: Attempt[Commute] | None = None,
     ) -> Attempt[Commute]:
         if not origin.succeeded or not poi.succeeded:
             return self._impossible({"origin": origin, "poi": poi})
 
+        # 1. Walk — best option when it works
+        if walk is not None and walk.succeeded and walk.value_or_none() is not None:
+            w = walk.value_or_none()
+            if w.duration.magnitude <= self._max_walk:
+                return Attempt.succeeded(replace(w, is_child=self.is_child))
+
+        # 2. Transit vs bus
         selected = None
-        if transit.succeeded:
+        if transit.succeeded and transit.value_or_none() is not None:
             if bus_result.succeeded and bus_result.value_or_none() is not None:
                 transit_dur = transit.value_or_none().duration.magnitude
                 bus_dur = bus_result.value_or_none().duration.magnitude
                 selected = bus_result if bus_dur < transit_dur - 5 else transit
             else:
                 selected = transit
-        elif bus_result.succeeded and bus_result.value_or_none() is not None:
+
+        # 3. Drive — no transit available
+        if selected is None and drive is not None and drive.succeeded and drive.value_or_none() is not None:
+            selected = drive
+
+        # 4. Bus fallback
+        if selected is None and bus_result.succeeded and bus_result.value_or_none() is not None:
             selected = bus_result
 
         if selected is not None:
             val = selected.value_or_none()
             if val is not None:
-                # Override is_child on the Commute value — the transit node
-                # hardcodes False, but the selector knows the correct value
-                # (e.g. George's school commutes should have is_child=True).
                 val = replace(val, is_child=self.is_child)
-            # Only merge rail_fare cost when transit was selected (not bus)
+            # Only merge rail_fare cost when transit was selected (not bus/walk/drive)
             if selected is transit and rail_fare_result.succeeded:
                 rf_val = rail_fare_result.value_or_none()
                 if rf_val and rf_val.daily_cost and rf_val.daily_cost.amount > 0 and val:
@@ -396,7 +445,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
                     return Attempt.succeeded(merged)
             return Attempt.succeeded(val)
 
-        return self._impossible({"transit_result": transit, "bus_result": bus_result})
+        return self._impossible({"walk_result": walk, "transit_result": transit, "drive_result": drive, "bus_result": bus_result})
 
     async def to_json(self) -> dict:
         attempt = await self.attempt()
@@ -408,14 +457,12 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         result["succeeded"] = attempt.succeeded
         result["pending"] = attempt.pending
         result["impossible"] = attempt.impossible
-        if attempt.succeeded:
-            result["value"] = self._adapter.dump_python(attempt.value_or_none(), mode="json")
+        if attempt.succeeded and attempt.value_or_none() is not None:
+            try:
+                result["value"] = self._adapter.dump_python(attempt.value_or_none(), mode="json")
+            except Exception:
+                result["value"] = None
         if attempt.impossible:
             result["error"] = attempt.error
         result["provenance"] = (await self.build_provenance()).to_dict()
         return result
-
-    @property
-    def _skip_impossible_dep_check(self) -> bool:
-        """Transit/bus/rail dep failures are handled gracefully in compute()."""
-        return True

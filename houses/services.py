@@ -61,7 +61,7 @@ class SchoolLookupService(Protocol):
         child_age: int,
         address: str = "",
         acceptable: tuple[SchoolGender, ...] = (SchoolGender.MIXED,),
-    ) -> School | None: ...
+    ) -> Attempt[School | None]: ...
 
     async def school_commute(self, postcode: str, school: School) -> Commute | None: ...
 
@@ -171,9 +171,13 @@ class _DefaultCommuteRouter:
         has_car: bool,
         max_walk_minutes: int,
     ) -> Attempt[Commute]:
-        from houses.routing import get_commute
+        from houses.routing import _is_london_area, _tfl_transit_commute
 
-        return await get_commute(origin, destination, has_car=has_car, max_walk_minutes=max_walk_minutes)
+        dest_str = destination if isinstance(destination, str) else f"{destination.lat},{destination.lon}"
+        if not _is_london_area(dest_str):
+            return Attempt.impossible("destination outside London area")
+        origin_str = origin if isinstance(origin, str) else f"{origin.lat},{origin.lon}"
+        return await _tfl_transit_commute(origin_str, dest_str, has_car)
 
 
 class _DefaultSchoolLookup:
@@ -183,7 +187,7 @@ class _DefaultSchoolLookup:
         child_age: int,
         address: str = "",
         acceptable: tuple[SchoolGender, ...] = (SchoolGender.MIXED,),
-    ) -> School | None:
+    ) -> Attempt[School | None]:
         return await find_nearest(postcode, child_age=child_age, address=address, acceptable=acceptable)
 
     async def school_commute(self, postcode: str, school: School) -> Commute | None:

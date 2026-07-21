@@ -53,12 +53,14 @@ def _build_full_address(row: dict[str, Any]) -> str:
     street = (row.get("Street") or "").strip()
     locality = (row.get("Locality") or "").strip()
     town = (row.get("Town") or "").strip()
-    county = (row.get("County (name)") or "").strip()
     postcode = (row.get("Postcode") or "").strip()
-    return ", ".join(p for p in (name, street, locality, town, county, postcode) if p)
+    # Exclude county — historic names like "Middlesex" confuse the
+    # ORS-Pelias geocoder and cause it to return the UK centroid.
+    return ", ".join(p for p in (name, street, locality, town, postcode) if p)
 
 
 def _existing_coords(row: dict[str, Any]) -> GeoPoint | None:
+    """Parse original GIAS Latitude/Longitude from a CSV row."""
     lat = (row.get("Latitude") or "").strip()
     lng = (row.get("Longitude") or "").strip()
     if lat and lng:
@@ -69,6 +71,12 @@ def _existing_coords(row: dict[str, Any]) -> GeoPoint | None:
     return None
 
 
+def _clear_coords(row: dict[str, Any]) -> None:
+    """Remove corrected coords from a row (mutates in place)."""
+    row["CorrectedLatitude"] = ""
+    row["CorrectedLongitude"] = ""
+
+
 def _near_london(row: dict[str, Any]) -> bool:
     coords = _existing_coords(row)
     if coords is None:
@@ -77,9 +85,25 @@ def _near_london(row: dict[str, Any]) -> bool:
 
 
 def _already_done(row: dict[str, Any]) -> bool:
+    """True when existing corrected coords are present AND pass the 100km sanity check.
+
+    Invalid coords (e.g. UK centroid from failed ORS-Pelias lookups) are
+    cleared and treated as not-done so the script re-processes them.
+    """
     lat = (row.get("CorrectedLatitude") or "").strip()
     lng = (row.get("CorrectedLongitude") or "").strip()
-    return bool(lat and lng)
+    if not (lat and lng):
+        return False
+    try:
+        corrected = GeoPoint(float(lat), float(lng))
+    except (ValueError, TypeError):
+        _clear_coords(row)
+        return False
+    original = _existing_coords(row)
+    if original is not None and original.distance_km_to(corrected) >= 100:
+        _clear_coords(row)
+        return False
+    return True
 
 
 async def main() -> None:
@@ -98,7 +122,6 @@ async def main() -> None:
         if col not in fieldnames:
             fieldnames.append(col)
 
-    total = len(rows)
     skipped = far_away = done = failed = 0
 
     logger.info("Processing %d schools...", total)
@@ -116,35 +139,41 @@ async def main() -> None:
             logger.warning("Row %d: empty address, skipping", i)
             continue
 
-        try:
-            result = await _geocode_address(address)
-            if result.succeeded:
-                pt = result.value_or_none()
-                if pt is not None:
-                    row["CorrectedLatitude"] = f"{pt.lat:.7f}"
-                    row["CorrectedLongitude"] = f"{pt.lon:.7f}"
-                    done += 1
-            else:
-                failed += 1
-                logger.debug("Row %d (%s): geocode failed", i, address[:60])
-        except Exception as e:
+        result = await _geocode_address(address)
+        if not (result.succeeded and result.value_or_none() is not None):
+            # Full address failed — try school name + postcode only.
+            # Some schools have streets/locality in GIAS that don't
+            # match what geocoding services know.
+            name = (row.get("EstablishmentName") or "").strip()
+            postcode = (row.get("Postcode") or "").strip()
+            fallback = f"{name}, {postcode}" if name and postcode else ""
+            if fallback:
+                logger.debug("Full address failed, retrying with '%s'", fallback)
+                result = await _geocode_address(fallback)
+
+        if result.succeeded and result.value_or_none() is not None:
+            pt = result.value_or_none()
+            row["CorrectedLatitude"] = f"{pt.lat:.7f}"
+            row["CorrectedLongitude"] = f"{pt.lon:.7f}"
+            done += 1
+        else:
             failed += 1
-            logger.debug("Row %d (%s): error: %s", i, address[:60], e)
+            logger.debug("Row %d (%s): geocode failed", i, address[:60])
 
         if _get_geo_state().nominatim_exhausted:
             logger.info("Nominatim exhausted — stopping (done=%d failed=%d)", done, failed)
             break
 
         if (i + 1) % 100 == 0:
+            _atomic_write(rows, fieldnames)
             logger.info("  Progress: %d/%d (done=%d skipped=%d far=%d failed=%d)",
                         i + 1, total, done, skipped, far_away, failed)
 
-        await asyncio.sleep(0.1)
-        if done > 0:
-            _atomic_write(rows, fieldnames)
+        await asyncio.sleep(0.15)
 
-    if done > 0:
-        _atomic_write(rows, fieldnames)
+    # Always flush at the end — row modifications from _already_done
+    # (clearing bad coords) must be persisted even if all geocodes failed.
+    _atomic_write(rows, fieldnames)
 
     logger.info("Complete: done=%d skipped=%d far=%d failed=%d / %d total",
                 done, skipped, far_away, failed, total)

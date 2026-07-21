@@ -12,6 +12,7 @@ from dag.derived_node import flush_processor
 from houses.api_cache import set_cache_dir
 from houses.config import settings
 from tests.helpers import FakeCommuteRouter, FakeSchoolLookup, make_services
+from dag.attempt import Attempt
 from tests.unit.isolation_fixtures import _inject_test_scheduler, _reset_global_state, _sqlite_memory  # noqa: F401, F811
 
 
@@ -27,12 +28,25 @@ def flush_all() -> None:
     loop.run_until_complete(flush_processor())
     loop.run_until_complete(flush_processor())
 
-
 def _make_mock_services():
     return make_services(
         commute_router=FakeCommuteRouter(),
         school_lookup=FakeSchoolLookup(),
     )
+
+
+@pytest.fixture(autouse=True)
+def _mock_google_routes(monkeypatch):
+    """Prevent WalkNode and DriveNode from making real API calls.
+
+    WalkNode and DriveNode call _google_route_commute directly
+    (not through the commute_router service), so we must mock it
+    at the module level for all unit tests.
+    """
+    async def mock_google_routes(*_, **__):
+        return Attempt.impossible("mocked — unit test")
+
+    monkeypatch.setattr("houses.routing._google_route_commute", mock_google_routes)
 
 
 @pytest.fixture(autouse=True)

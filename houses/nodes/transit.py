@@ -114,11 +114,70 @@ class WalkLegCheckNode(DerivedNode[bool]):
         return Attempt.succeeded(walk_time > self._max_walk)
 
 
-class TransitNode(DerivedNode[Commute]):
-    """Computes a transit commute from best_location to a POI postcode.
+class WalkNode(DerivedNode[Commute]):
+    """Walking commute via Google Routes WALK.
 
-    The value type is ``Commute`` (houses.model.domain), serialised via
-    ``TypeAdapter`` through the base ``Node`` persistence layer.
+    Tries Google Routes walking mode. Returns the commute when walking
+    is feasible within max_walk minutes, or impossible otherwise.
+    """
+
+    def __init__(self, node_id: str, *, best_location, poi, max_walk: int):
+        super().__init__(node_id, Commute, (best_location, poi))
+        self.display_name = "Walk"
+        self._max_walk = max_walk
+
+    async def compute(
+        self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]
+    ) -> Attempt[Commute]:
+        from houses.routing import _google_route_commute
+
+        loc = location.value_or_none()
+        poi_val = poi.value_or_none()
+        if loc is None or not poi_val:
+            return Attempt.impossible("missing location or destination")
+        dest = poi_val.postcode if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
+        if not dest:
+            return Attempt.impossible("empty destination")
+        return await _google_route_commute(loc, dest, "WALK", self._max_walk)
+
+
+class DriveNode(DerivedNode[Commute]):
+    """Driving commute via Google Routes DRIVE.
+
+    Tries Google Routes driving mode. Skips when the destination is
+    in the London congestion zone.
+    """
+
+    def __init__(self, node_id: str, *, best_location, poi, has_car: bool):
+        super().__init__(node_id, Commute, (best_location, poi))
+        self.display_name = "Drive"
+        self._has_car = has_car
+
+    async def compute(
+        self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]
+    ) -> Attempt[Commute]:
+        from houses.routing import _google_route_commute, _in_congestion_zone
+
+        if not self._has_car:
+            return Attempt.impossible("no car available")
+        loc = location.value_or_none()
+        poi_val = poi.value_or_none()
+        if loc is None or not poi_val:
+            return Attempt.impossible("missing location or destination")
+        dest = poi_val.postcode if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
+        if not dest:
+            return Attempt.impossible("empty destination")
+        if _in_congestion_zone(dest):
+            return Attempt.impossible("destination in congestion zone")
+        return await _google_route_commute(loc, dest, "DRIVE")
+
+
+class TransitNode(DerivedNode[Commute]):
+    """TfL transit commute from best_location to a POI postcode.
+
+    Calls the TfL API via ``_tfl_transit_commute``. Returns the
+    best transit route, or impossible when no transit is available
+    or the destination is outside London.
     """
 
     def __init__(self, node_id: str, *, best_location, poi, has_car: bool, max_walk: int, best_address=None):
@@ -134,18 +193,21 @@ class TransitNode(DerivedNode[Commute]):
     def _is_transient_error(self, exc: Exception) -> bool:
         from houses.helpers import is_transient_error as _ite
         return _ite(exc)
-
     async def compute(
         self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest], best_address: Attempt[str] = None
     ) -> Attempt[Commute]:
         loc = location.value_or_none()
         poi_val = poi.value_or_none()
-        dest_postcode = poi_val.postcode if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
+        if loc is None or not poi_val:
+            return Attempt.impossible("missing location or destination")
+        dest = poi_val.postcode if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
+        if not dest:
+            return Attempt.impossible("empty destination")
 
         svc = get_services()
         commute = await svc.commute_router.route(
             loc,
-            dest_postcode,
+            dest,
             has_car=self._has_car,
             max_walk_minutes=self._max_walk,
         )
@@ -170,24 +232,3 @@ class TransitNode(DerivedNode[Commute]):
             )
             return Attempt.succeeded(result)
         return self._impossible({"commute": commute})
-
-    async def to_json(self) -> dict:
-        attempt = await self.attempt()
-        result: dict = {
-            "status": attempt.status,
-            "value": None,
-        }
-        result["succeeded"] = attempt.succeeded
-        result["pending"] = attempt.pending
-        result["impossible"] = attempt.impossible
-        if attempt.succeeded:
-            raw = attempt.value_or_none()
-            result["value"] = self._adapter.dump_python(raw)
-            legs = _build_details(raw)
-            result["value"]["walk_time"] = sum(int(leg.duration.magnitude) for leg in legs if leg.mode == "walk")
-            result["value"]["route_description"] = _route_description(legs)
-            result["value"]["is_child"] = False
-        if attempt.impossible:
-            result["error"] = attempt.error
-        result["provenance"] = (await self.build_provenance()).to_dict()
-        return result

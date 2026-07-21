@@ -25,7 +25,7 @@ from houses.nodes.monthly_costs import (
 from houses.nodes.park_and_ride import ParkAndRideAugmentNode
 from houses.nodes.petrol import PetrolCostAugmentNode
 from houses.nodes.schools import PrimarySchoolNode, SchoolLocationNode, SecondarySchoolNode
-from houses.nodes.transit import TransitNode, WalkLegCheckNode
+from houses.nodes.transit import DriveNode, TransitNode, WalkLegCheckNode, WalkNode
 from houses.services_provider import get_services
 
 
@@ -224,6 +224,20 @@ class PropertyNodes:
                     poi_src = UserInputNode[str](f"{self.rid}/{key}/poi", str)
                     poi_src.push(postcode, "persons_source")
 
+                walk_node = WalkNode(
+                    f"{self.rid}/{key}/walk",
+                    best_location=self.best_location,
+                    poi=poi_src,
+                    max_walk=p_info.bus_walk_penalty_minutes,
+                )
+
+                drive_node = DriveNode(
+                    f"{self.rid}/{key}/drive",
+                    best_location=self.best_location,
+                    poi=poi_src,
+                    has_car=p_info.has_car,
+                )
+
                 transit_node = TransitNode(
                     f"{self.rid}/{key}/computed_transit",
                     best_location=self.best_location,
@@ -319,10 +333,13 @@ class PropertyNodes:
                     f"{self.rid}/{key}/commute",
                     origin=self.best_location,
                     poi=poi_src,
+                    walk_result=walk_node,
                     transit_result=petrol_cost,
+                    drive_result=drive_node,
                     bus_result=bus_if,
                     rail_fare_result=rail_fare_result,
                     is_child=is_child,
+                    max_walk=p_info.bus_walk_penalty_minutes,
                 )
                 self.commute_selectors[key] = selector
 

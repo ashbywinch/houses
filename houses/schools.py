@@ -51,25 +51,33 @@ async def find_nearest(
     address: str = "",
     *,
     acceptable: tuple[SchoolGender, ...] = (SchoolGender.MIXED,),
-) -> School | None:
+) -> Attempt[School | None]:
     """Find the nearest school accepting a child of the given age.
 
-    Args:
-        postcode: Property postcode (used to geocode and compute distances).
-        child_age: Age of the child (checked against school's age range).
-        address: Property address (fallback if postcode geocoding fails).
-        acceptable: Tuple of SchoolGender values the family finds acceptable.
+    For each school matching age/gender/fee/name filters:
+    - If the school has reliable (corrected building-level) coords,
+      distance is computed and it is added to the candidate list.
+    - If the school has only a postcode centroid (``_postcode_centroid``),
+      the centroid is used to check proximity: if within the search
+      radius the school is noted as a nearby candidate without reliable
+      coords (``skipped_no_coords``).
+    - If the school has neither (no location data at all), it is
+      silently skipped.
 
-    Returns the nearest ``School`` or ``None`` if no suitable school is found
-    within the configured search radius.
+    Returns ``Attempt.succeeded(school)`` when a nearest school is found,
+    ``Attempt.pending()`` when no school with reliable coords is within
+    range but some nearby schools lack reliable coords (the answer is
+    inconclusive — retry when coordinate data improves), and
+    ``Attempt.succeeded(None)`` when no school matches at all
+    (no candidates at any quality level).
     """
+    from dag.attempt import Attempt as _Attempt
+
     schools = _load_schools()
     if not schools:
-        return None
+        return _Attempt.succeeded(None)
 
     property_coords = None
-    # If the input is a "lat,lon" coordinate string, parse it directly
-    # instead of trying to geocode it (geocoding would fail).
     if "," in postcode:
         try:
             lat_str, lon_str = postcode.split(",", 1)
@@ -82,9 +90,9 @@ async def find_nearest(
     if property_coords is None and address:
         property_coords = (await _geocode_address(address)).value_or_none()
     if property_coords is None:
-        return None
-
+        return _Attempt.succeeded(None)
     candidates: list[tuple[float, School]] = []
+    skipped_no_coords = False
 
     for school in schools:
         if not school.accepts_any(acceptable):
@@ -96,22 +104,23 @@ async def find_nearest(
         if not school.name.strip():
             continue
         sc = school.coords
-        if sc is None:
-            school_postcode = school.postcode
-            if not school_postcode:
-                continue
-            sc = (await geocode(school_postcode)).value_or_none()
-            if sc is None:
-                continue
-        dist = property_coords.distance_km_to(sc)
-        if dist <= settings.school_search_radius_km:
-            candidates.append((dist, school))
-
+        if sc is not None:
+            dist = property_coords.distance_km_to(sc)
+            if dist <= settings.school_search_radius_km:
+                candidates.append((dist, school))
+        elif school._postcode_centroid is not None:
+            # No reliable coords but we have a postcode centroid —
+            # check if this school is roughly nearby.
+            dist = property_coords.distance_km_to(school._postcode_centroid)
+            if dist <= settings.school_search_radius_km:
+                skipped_no_coords = True
     if not candidates:
-        return None
+        if skipped_no_coords:
+            return _Attempt.pending()
+        return _Attempt.succeeded(None)
 
     candidates.sort(key=lambda x: x[0])
-    return candidates[0][1]
+    return _Attempt.succeeded(candidates[0][1])
 
 
 # ---------------------------------------------------------------------------

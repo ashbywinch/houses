@@ -228,6 +228,21 @@ class TestTransitCommute:
 
 
 class TestCommuteSelectorPipeline:
+    @staticmethod
+    def _dummy_commute_node():
+        from houses.model.domain import Person, PlaceOfInterest
+        from pint import Quantity
+        from money import Money
+
+        n = UserInputNode[Commute]("_dummy", Commute)
+        n.push(Commute(
+            person=Person(name="", has_car=False),
+            label="",
+            destination=PlaceOfInterest(label="", postcode=""),
+            duration=Quantity(999, "minute"),
+            daily_cost=Money("0", "GBP"),
+        ), "default")
+        return n
     """CommuteSelectorNode — picks transit, falls back to bus, or raises impossible."""
 
     @pytest.mark.asyncio
@@ -243,7 +258,9 @@ class TestCommuteSelectorPipeline:
             "csel1",
             origin=origin,
             poi=poi,
+            walk_result=self._dummy_commute_node(),
             transit_result=transit,
+            drive_result=self._dummy_commute_node(),
             bus_result=_noop_if("csel1"),
             rail_fare_result=_noop_if("csel1_rf"),
         )
@@ -277,7 +294,9 @@ class TestCommuteSelectorPipeline:
             "csel2",
             origin=origin,
             poi=poi,
+            walk_result=self._dummy_commute_node(),
             transit_result=transit,
+            drive_result=self._dummy_commute_node(),
             bus_result=_noop_if("csel2"),
             rail_fare_result=_noop_if("csel2_rf"),
         )
@@ -307,7 +326,9 @@ class TestCommuteSelectorPipeline:
             "csel3",
             origin=origin,
             poi=poi,
+            walk_result=self._dummy_commute_node(),
             transit_result=transit,
+            drive_result=self._dummy_commute_node(),
             bus_result=_noop_if("csel3"),
             rail_fare_result=_noop_if("csel3_rf"),
         )
@@ -334,7 +355,9 @@ class TestCommuteSelectorPipeline:
             "csel4",
             origin=origin,
             poi=poi,
+            walk_result=self._dummy_commute_node(),
             transit_result=transit,
+            drive_result=self._dummy_commute_node(),
             bus_result=_noop_if("csel4"),
             rail_fare_result=_noop_if("csel4_rf"),
         )
@@ -360,7 +383,9 @@ class TestCommuteSelectorPipeline:
             "csel5",
             origin=origin,
             poi=poi,
+            walk_result=self._dummy_commute_node(),
             transit_result=transit,
+            drive_result=self._dummy_commute_node(),
             bus_result=_noop_if("csel5"),
             rail_fare_result=_noop_if("csel5_rf"),
         )
@@ -397,7 +422,9 @@ class TestCommuteSelectorPipeline:
             "csel6",
             origin=origin,
             poi=poi,
+            walk_result=self._dummy_commute_node(),
             transit_result=transit,
+            drive_result=self._dummy_commute_node(),
             bus_result=_noop_if("csel6"),
             rail_fare_result=_noop_if("csel6_rf"),
         )

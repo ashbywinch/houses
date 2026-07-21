@@ -111,3 +111,13 @@ class TestSettingsApi:
         )
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
+
+    def test_reseed_endpoint_exists(self):
+        """POST /api/admin/reseed must return a JSON response."""
+        from unittest.mock import patch
+
+        with patch("houses.nodes.bootstrap.seed_registry_from_sheet", return_value=0):
+            client = self._setup()
+            resp = client.post("/api/admin/reseed")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok"}

@@ -217,7 +217,8 @@ class TestSchoolNodeAcceptable:
             async def find_nearest(self, postcode, child_age, address="", acceptable=None):
                 nonlocal seen_acceptable
                 seen_acceptable = acceptable
-                return None
+                from dag.attempt import Attempt
+                return Attempt.succeeded(None)
 
         svc = make_services(school_lookup=AssertingService())
         token = _sp.set(svc)
@@ -247,7 +248,8 @@ class TestSchoolNodeAcceptable:
             async def find_nearest(self, postcode, child_age, address="", acceptable=None):
                 nonlocal seen_acceptable
                 seen_acceptable = acceptable
-                return None
+                from dag.attempt import Attempt
+                return Attempt.succeeded(None)
 
         svc = make_services(school_lookup=AssertingService())
         token = _sp.set(svc)
@@ -277,7 +279,8 @@ class TestSchoolNodeAcceptable:
             async def find_nearest(self, postcode, child_age, address="", acceptable=None):
                 nonlocal seen
                 seen = acceptable
-                return None
+                from dag.attempt import Attempt
+                return Attempt.succeeded(None)
 
         svc = make_services(school_lookup=AssertingService())
         token = _sp.set(svc)
@@ -306,7 +309,8 @@ class TestSchoolNodeAcceptable:
             async def find_nearest(self, postcode, child_age, address="", acceptable=None):
                 nonlocal seen
                 seen = acceptable
-                return None
+                from dag.attempt import Attempt
+                return Attempt.succeeded(None)
 
         svc = make_services(school_lookup=AssertingService())
         token = _sp.set(svc)
@@ -482,7 +486,7 @@ class TestSchoolCoords:
         from houses.geo import GeoPoint
         from houses.school import School
 
-        s = School.from_GIAS_row({"Latitude": "51.5", "Longitude": "-0.13"})
+        s = School.from_GIAS_row({"CorrectedLatitude": "51.5", "CorrectedLongitude": "-0.13"})
         assert s.coords == GeoPoint(51.5, -0.13)
 
     def test_missing_lat_returns_none(self):
@@ -508,14 +512,14 @@ class TestSchoolCoords:
         from houses.geo import GeoPoint
         from houses.school import School
 
-        s = School.from_GIAS_row({"Latitude": "0", "Longitude": "0"})
+        s = School.from_GIAS_row({"CorrectedLatitude": "0", "CorrectedLongitude": "0"})
         assert s.coords == GeoPoint(0.0, 0.0)
 
     def test_returns_geopoint(self):
         from houses.geo import GeoPoint
         from houses.school import School
 
-        s = School.from_GIAS_row({"Latitude": "52.2053", "Longitude": "0.1218"})
+        s = School.from_GIAS_row({"CorrectedLatitude": "52.2053", "CorrectedLongitude": "0.1218"})
         assert s.coords == GeoPoint(52.2053, 0.1218)
 
 
@@ -567,7 +571,7 @@ class TestSchoolFromGIASRow:
         from houses.geo import GeoPoint
         from houses.school import School
 
-        s = School.from_GIAS_row({"Latitude": "51.5", "Longitude": "-0.13"})
+        s = School.from_GIAS_row({"CorrectedLatitude": "51.5", "CorrectedLongitude": "-0.13"})
         assert s.coords == GeoPoint(51.5, -0.13)
 
     def test_missing_coords_is_none(self):
@@ -601,6 +605,8 @@ class TestFindNearestFilters:
                 "TypeOfEstablishment (name)": "Independent School",
                 "Latitude": "51.5",
                 "Longitude": "-0.1",
+                "CorrectedLatitude": "51.5",
+                "CorrectedLongitude": "-0.1",
                 "Postcode": "SL6 1AA",
             }
         )
@@ -612,6 +618,8 @@ class TestFindNearestFilters:
                 "TypeOfEstablishment (name)": "Community School",
                 "Latitude": "51.501",
                 "Longitude": "-0.101",
+                "CorrectedLatitude": "51.501",
+                "CorrectedLongitude": "-0.101",
                 "Postcode": "SL6 2BB",
             }
         )
@@ -631,8 +639,8 @@ class TestFindNearestFilters:
         result = await find_nearest(
             "SL6 3CC", child_age=7, acceptable=(SchoolGender.BOYS, SchoolGender.GIRLS, SchoolGender.MIXED)
         )
-        assert result is not None, "Expected a school, got None"
-        assert result.name == "Free School", f"Expected Free School, got {result.name}"
+        assert result.succeeded, "Expected a school, got None"
+        assert result.value_or_none().name == "Free School", f"Expected Free School, got {result.value_or_none().name}"
 
     @pytest.mark.asyncio
     async def test_excludes_empty_name_school(self, monkeypatch):
@@ -648,6 +656,8 @@ class TestFindNearestFilters:
                 "TypeOfEstablishment (name)": "Community School",
                 "Latitude": "51.5",
                 "Longitude": "-0.1",
+                "CorrectedLatitude": "51.5",
+                "CorrectedLongitude": "-0.1",
                 "Postcode": "SL6 1AA",
             }
         )
@@ -659,6 +669,8 @@ class TestFindNearestFilters:
                 "TypeOfEstablishment (name)": "Community School",
                 "Latitude": "51.501",
                 "Longitude": "-0.101",
+                "CorrectedLatitude": "51.501",
+                "CorrectedLongitude": "-0.101",
                 "Postcode": "SL6 2BB",
             }
         )
@@ -678,8 +690,8 @@ class TestFindNearestFilters:
         result = await find_nearest(
             "SL6 3CC", child_age=7, acceptable=(SchoolGender.BOYS, SchoolGender.GIRLS, SchoolGender.MIXED)
         )
-        assert result is not None, "Expected a school, got None"
-        assert result.name == "Has A Name School", f"Expected Has A Name, got {result.name}"
+        assert result.succeeded, "Expected a school, got None"
+        assert result.value_or_none().name == "Has A Name School", f"Expected Has A Name, got {result.value_or_none().name}"
 
     @pytest.mark.asyncio
     async def test_find_nearest_filters_by_acceptable_boys_only(self, monkeypatch):
@@ -696,6 +708,8 @@ class TestFindNearestFilters:
                 "TypeOfEstablishment (name)": "Community School",
                 "Latitude": "51.5",
                 "Longitude": "-0.1",
+                "CorrectedLatitude": "51.5",
+                "CorrectedLongitude": "-0.1",
                 "Postcode": "SL6 1AA",
             }
         )
@@ -707,6 +721,8 @@ class TestFindNearestFilters:
                 "TypeOfEstablishment (name)": "Community School",
                 "Latitude": "51.501",
                 "Longitude": "-0.099",
+                "CorrectedLatitude": "51.501",
+                "CorrectedLongitude": "-0.099",
                 "Postcode": "SL6 2BB",
             }
         )
@@ -723,12 +739,12 @@ class TestFindNearestFilters:
 
         # With acceptable=(BOYS,), should find the boys school (mixed excluded)
         result = await find_nearest("SL6 3CC", child_age=7, acceptable=(SchoolGender.BOYS,))
-        assert result is not None
-        assert result.name == "Boys Grammar"
+        assert result.succeeded
+        assert result.value_or_none().name == "Boys Grammar"
 
         # With acceptable=(GIRLS,), neither school matches (one boys, one mixed)
         result = await find_nearest("SL6 3CC", child_age=7, acceptable=(SchoolGender.GIRLS,))
-        assert result is None
+        assert result.value_or_none() is None
 
     @pytest.mark.asyncio
     async def test_find_nearest_filters_by_acceptable_girls_only(self, monkeypatch):
@@ -745,6 +761,8 @@ class TestFindNearestFilters:
                 "TypeOfEstablishment (name)": "Community School",
                 "Latitude": "51.5",
                 "Longitude": "-0.1",
+                "CorrectedLatitude": "51.5",
+                "CorrectedLongitude": "-0.1",
                 "Postcode": "SL6 1AA",
             }
         )
@@ -760,12 +778,12 @@ class TestFindNearestFilters:
         monkeypatch.setattr("houses.schools._geocode_address", mock_geocode)
 
         result = await find_nearest("SL6 3CC", child_age=7, acceptable=(SchoolGender.GIRLS,))
-        assert result is not None
-        assert result.name == "Girls Academy"
+        assert result.succeeded
+        assert result.value_or_none().name == "Girls Academy"
 
         # With acceptable=(BOYS,), girls school should be excluded
         result = await find_nearest("SL6 3CC", child_age=7, acceptable=(SchoolGender.BOYS,))
-        assert result is None, "Girls school should not match BOYS acceptable"
+        assert result.value_or_none() is None, "Girls school should not match BOYS acceptable"
 
     @pytest.mark.asyncio
     async def test_find_nearest_accepts_all_types(self, monkeypatch):
@@ -782,6 +800,8 @@ class TestFindNearestFilters:
                 "TypeOfEstablishment (name)": "Community School",
                 "Latitude": "51.5",
                 "Longitude": "-0.1",
+                "CorrectedLatitude": "51.5",
+                "CorrectedLongitude": "-0.1",
                 "Postcode": "SL6 1AA",
             }
         )
@@ -799,4 +819,57 @@ class TestFindNearestFilters:
         result = await find_nearest(
             "SL6 3CC", child_age=7, acceptable=(SchoolGender.BOYS, SchoolGender.GIRLS, SchoolGender.MIXED)
         )
-        assert result is not None
+        assert result.succeeded
+        result = await find_nearest("SL6 3CC", child_age=7, acceptable=(SchoolGender.BOYS,))
+        assert result.value_or_none() is None
+
+    @pytest.mark.asyncio
+    async def test_skips_school_without_coords_no_geocode(self, monkeypatch):
+        """find_nearest must skip schools with coords=None without
+        calling geocode (no API calls at query time)."""
+        from dag.attempt import Attempt
+        from houses.school import School
+        from houses.school_gender import SchoolGender
+        from houses.schools import find_nearest
+        from houses.geo import GeoPoint
+
+        geocode_called = False
+
+        async def fake_geocode(*_):
+            nonlocal geocode_called
+            geocode_called = True
+            return Attempt.succeeded(GeoPoint(51.5, -0.13))
+
+        no_coords = School(
+            urn="1", name="No Coords School", phase="Primary",
+            gender=SchoolGender.MIXED,
+            type_of_establishment="Community School",
+            postcode="UB2 4RP", website="",
+            ofsted_rating="Good", inspection_year="2022",
+            coords=None,
+            _postcode_centroid=GeoPoint(51.5, -0.13),
+            statutory_low_age=4, statutory_high_age=11,
+        )
+        has_coords = School(
+            urn="2", name="Has Coords School", phase="Primary",
+            gender=SchoolGender.MIXED,
+            type_of_establishment="Community School",
+            postcode="UB2 4HT", website="",
+            ofsted_rating="Good", inspection_year="2022",
+            coords=GeoPoint(52.0, -0.13),
+            statutory_low_age=4, statutory_high_age=11,
+        )
+
+        monkeypatch.setattr("houses.schools.geocode", fake_geocode)
+        monkeypatch.setattr("houses.schools._load_schools",
+                           lambda: [no_coords, has_coords])
+
+        result = await find_nearest("51.5,-0.13", child_age=7,
+                                    acceptable=(SchoolGender.MIXED,))
+        assert result.pending, (
+            "When a school matching filters lacks coords, must return pending "
+            "(incomplete data, cannot give definitive answer)"
+        )
+        assert not geocode_called, (
+            "find_nearest must NOT geocode school postcodes at query time"
+        )

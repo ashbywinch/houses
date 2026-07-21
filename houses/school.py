@@ -50,6 +50,9 @@ class School:
     statutory_high_age: int | None
     full_address: str = ""
     url: str = ""
+    # Postcode centroid from GIAS — approximate location for distance
+    # gating when corrected (building-level) coords are unavailable.
+    _postcode_centroid: GeoPoint | None = None
     _PHASE_RANGES: ClassVar[dict[str, tuple[int, int]]] = {
         "nursery": (2, 4),
         "primary": (4, 11),
@@ -73,18 +76,38 @@ class School:
 
     @classmethod
     def from_GIAS_row(cls, row: dict) -> School:  # noqa: N802
-        # Prefer corrected coordinates if available
+        """Parse a GIAS CSV row into a School.
+
+        ``coords`` is set to the corrected (building-level) coordinates
+        when available and within 100km of the raw GIAS coordinates.
+        Falls back to ``None`` — postcode centroids from the raw
+        GIAS columns are not reliable enough for nearest-school
+        distance calculations.
+        """
+        original: GeoPoint | None = None
+        lat = row.get(cls._COL_LAT)
+        lng = row.get(cls._COL_LNG)
+        if lat and lng:
+            try:
+                original = GeoPoint(float(lat), float(lng))
+            except (ValueError, TypeError):
+                pass
+
         corr_lat = (row.get(cls._COL_CORR_LAT) or "").strip()
         corr_lng = (row.get(cls._COL_CORR_LNG) or "").strip()
+
+        coords: GeoPoint | None = None
         if corr_lat and corr_lng:
             try:
-                coords = GeoPoint(float(corr_lat), float(corr_lng))
+                corrected = GeoPoint(float(corr_lat), float(corr_lng))
             except (ValueError, TypeError):
-                coords = None
-        else:
-            lat = row.get(cls._COL_LAT)
-            lng = row.get(cls._COL_LNG)
-            coords = GeoPoint(float(lat), float(lng)) if lat and lng else None
+                corrected = None
+            if corrected is not None and original is not None:
+                if original.distance_km_to(corrected) < 100:
+                    coords = corrected
+            elif corrected is not None:
+                coords = corrected
+
         raw_gender = (row.get(cls._COL_GENDER) or "").strip().lower()
         try:
             gender = SchoolGender(raw_gender)
@@ -104,11 +127,8 @@ class School:
             ofsted_rating=(row.get(cls._COL_OFSTED) or "").strip(),
             inspection_year=(row.get(cls._COL_INSPECTION_YEAR) or "").strip(),
             coords=coords,
-            url=(f"https://get-information-schools.service.gov.uk/Establishments/Establishment/Details/{urn}")
-            if urn
-            else "",
+            _postcode_centroid=original,
         )
-
     def accepts_any(self, acceptable: tuple[SchoolGender, ...]) -> bool:
         """Check if this school's gender is in the acceptable set."""
         if self.gender == SchoolGender.UNKNOWN:

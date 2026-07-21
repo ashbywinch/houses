@@ -35,14 +35,12 @@ class TestCommuteSelectorNode:
         bus = commute_input_node("bus")
         walk_check = _succeeded_walk_check(False)
 
-        node = CommuteSelectorNode(
-            "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_noop_if(),
-        )
+        node = CommuteSelectorNode("commute_selector",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -70,14 +68,12 @@ class TestCommuteSelectorNode:
         bus = commute_input_node("bus")
         walk_check = _succeeded_walk_check(False)
 
-        node = CommuteSelectorNode(
-            "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_noop_if(),
-        )
+        node = CommuteSelectorNode("commute_selector",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -102,14 +98,12 @@ class TestCommuteSelectorNode:
         bus = commute_input_node("bus")
         walk_check = _succeeded_walk_check(True)
 
-        node = CommuteSelectorNode(
-            "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_noop_if(),
-        )
+        node = CommuteSelectorNode("commute_selector",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -139,14 +133,12 @@ class TestCommuteSelectorNode:
         bus = commute_input_node("bus")
         walk_check = _succeeded_walk_check(True)
 
-        node = CommuteSelectorNode(
-            "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_noop_if(),
-        )
+        node = CommuteSelectorNode("commute_selector",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -175,14 +167,12 @@ class TestCommuteSelectorNode:
         bus = commute_input_node("bus")
         walk_check = _succeeded_walk_check(False)
 
-        node = CommuteSelectorNode(
-            "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_noop_if(),
-        )
+        node = CommuteSelectorNode("commute_selector",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -203,14 +193,12 @@ class TestCommuteSelectorNode:
         bus = commute_input_node("bus")
         walk_check = _succeeded_walk_check(False)
 
-        node = CommuteSelectorNode(
-            "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_noop_if(),
-        )
+        node = CommuteSelectorNode("commute_selector",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
 
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
         poi.push(office_poi, "config")
@@ -230,14 +218,12 @@ class TestCommuteSelectorNode:
         bus = commute_input_node("bus")
         walk_check = _succeeded_walk_check(False)
 
-        node = CommuteSelectorNode(
-            "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_noop_if(),
-        )
+        node = CommuteSelectorNode("commute_selector",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -264,14 +250,12 @@ class TestCommuteSelectorNode:
         bus = commute_input_node("bus")
         walk_check = _succeeded_walk_check(False)
 
-        node = CommuteSelectorNode(
-            "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_noop_if(),
-        )
+        node = CommuteSelectorNode("commute_selector",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -302,15 +286,13 @@ class TestCommuteSelectorNode:
         bus = commute_input_node("bus")
         walk_check = _succeeded_walk_check(False)
 
-        node = CommuteSelectorNode(
-            "commute_selector_child",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_noop_if(),
-            is_child=True,
-        )
+        node = CommuteSelectorNode("commute_selector_child",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_noop_if(),
+        is_child=True, walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("School", "SW1V 2QQ"), "config")
@@ -347,14 +329,12 @@ class TestCommuteSelectorNode:
         bus = commute_input_node("bus")
         walk_check = _succeeded_walk_check(True)
 
-        node = CommuteSelectorNode(
-            "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_noop_if(),
-        )
+        node = CommuteSelectorNode("commute_selector",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -383,14 +363,12 @@ class TestCommuteSelectorNode:
         bus = commute_input_node("bus")
         walk_check = _succeeded_walk_check(True)
 
-        node = CommuteSelectorNode(
-            "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_noop_if(),
-        )
+        node = CommuteSelectorNode("commute_selector",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -432,14 +410,12 @@ class TestCommuteSelectorNode:
         bus = commute_input_node("bus")
         walk_check = _succeeded_walk_check(True)
 
-        node = CommuteSelectorNode(
-            "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_noop_if(),
-        )
+        node = CommuteSelectorNode("commute_selector",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -465,14 +441,12 @@ class TestCommuteSelectorNode:
         bus = commute_input_node("bus")
         walk_check = _succeeded_walk_check(False)  # bus not active
 
-        node = CommuteSelectorNode(
-            "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_noop_if(),
-        )
+        node = CommuteSelectorNode("commute_selector",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -505,14 +479,12 @@ class TestDynamicDeps:
 
         rail_fare = commute_input_node("rail_fare")  # never pushed → pending
 
-        node = CommuteSelectorNode(
-            "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_rail_fare_if(transit, rail_fare),
-        )
+        node = CommuteSelectorNode("commute_selector",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_rail_fare_if(transit, rail_fare), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -539,14 +511,12 @@ class TestDynamicDeps:
 
         rail_fare = commute_input_node("rail_fare")
 
-        node = CommuteSelectorNode(
-            "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_rail_fare_if(transit, rail_fare),
-        )
+        node = CommuteSelectorNode("commute_selector",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_rail_fare_if(transit, rail_fare), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
         # cost_gbp = 0 so rail_fare IS an active dep (but still pending)
@@ -574,14 +544,12 @@ class TestDynamicDeps:
         bus = commute_input_node("bus")
         walk_check = _succeeded_walk_check(True)  # walk too long → bus IS active
 
-        node = CommuteSelectorNode(
-            "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_noop_if(),
-        )
+        node = CommuteSelectorNode("commute_selector",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -605,14 +573,12 @@ class TestDynamicDeps:
         bus = commute_input_node("bus")
         walk_check = _succeeded_walk_check(False)  # walk fine → bus NOT active
 
-        node = CommuteSelectorNode(
-            "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_noop_if(),
-        )
+        node = CommuteSelectorNode("commute_selector",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -652,14 +618,12 @@ class TestDynamicDeps:
 
         walk_check = _ImpossibleWalkCheck()
 
-        node = CommuteSelectorNode(
-            "rf_walk_impossible",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_rail_fare_if(transit, rail_fare),
-        )
+        node = CommuteSelectorNode("rf_walk_impossible",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_rail_fare_if(transit, rail_fare), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -692,14 +656,12 @@ class TestDynamicDeps:
         rail_fare = commute_input_node("rail_fare_ul")
         walk_check = _succeeded_walk_check(False)  # bus not active
 
-        node = CommuteSelectorNode(
-            "rf_unpriced",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            bus_result=_bus_if(walk_check, bus),
-            rail_fare_result=_rail_fare_if(transit, rail_fare),
-        )
+        node = CommuteSelectorNode("rf_unpriced",
+        origin=origin,
+        poi=poi,
+        transit_result=transit,
+        bus_result=_bus_if(walk_check, bus),
+        rail_fare_result=_rail_fare_if(transit, rail_fare), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
 
@@ -859,6 +821,21 @@ def _rail_fare_if(transit_node: Node, rail_fare_node: Node) -> IfThenElseNode:
     )
 
 
+class _ImpossibleCommuteNode(DerivedNode[Commute]):
+    """A node that always returns Attempt.impossible for Commute."""
+
+    def __init__(self, node_id: str = "_impossible"):
+        super().__init__(node_id, Commute, ())
+
+    def compute(self):
+        return Attempt.impossible("not available")
+
+
+def _impossible_commute(name: str = "walk") -> DerivedNode[Commute]:
+    """Return a DerivedNode that always returns Attempt.impossible for Commute."""
+    return _ImpossibleCommuteNode(f"_impl_{name}")
+
+
 @pytest.mark.asyncio
 async def test_commute_selector_init_with_persisted_result():
     """Constructing a CommuteSelectorNode that loads a persisted result
@@ -889,14 +866,12 @@ async def test_commute_selector_init_with_persisted_result():
     bus = UserInputNode[dict]("bus_crash", dict)
     walk_check = _succeeded_walk_check(False)
 
-    node = CommuteSelectorNode(
-        node_id,
-        origin=origin,
-        poi=poi,
-        transit_result=transit,
-        bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_noop_if("crash"),
-    )
+    node = CommuteSelectorNode(node_id,
+    origin=origin,
+    poi=poi,
+    transit_result=transit,
+    bus_result=_bus_if(walk_check, bus),
+    rail_fare_result=_noop_if("crash"), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
     node.disconnect()
 
 
@@ -1115,14 +1090,12 @@ async def test_commute_selector_impossible_without_bus():
     bus = UserInputNode[dict]("bus_nb", dict)
     # Don't push bus — it'll be pending, but not added to active deps
 
-    node = CommuteSelectorNode(
-        "commute_nb",
-        origin=origin,
-        poi=poi,
-        transit_result=transit,
-        bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_noop_if("nb"),
-    )
+    node = CommuteSelectorNode("commute_nb",
+    origin=origin,
+    poi=poi,
+    transit_result=transit,
+    bus_result=_bus_if(walk_check, bus),
+    rail_fare_result=_noop_if("nb"), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
 
     origin.push(GeoPoint(51.5, -0.1), "user")
     poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")

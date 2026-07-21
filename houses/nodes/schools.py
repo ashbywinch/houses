@@ -16,12 +16,17 @@ class PrimarySchoolNode(DerivedNode[dict]):
 
     async def compute(self, location: Attempt[GeoPoint], address: Attempt[str]) -> Attempt[dict]:
         loc = location.value_or_none()
+        if loc is None:
+            return self._impossible({"location": location})
         svc = get_services()
-        school = await svc.school_lookup.find_nearest(
+        attempt = await svc.school_lookup.find_nearest(
             f"{loc.lat},{loc.lon}",
             child_age=4,
             acceptable=tuple(SchoolGender(v) for v in self._acceptable),
         )
+        if attempt.pending:
+            return Attempt.pending()
+        school = attempt.value_or_none()
         if school is None:
             return Attempt.impossible("no primary school found")
         result = {
@@ -44,12 +49,17 @@ class SecondarySchoolNode(DerivedNode[dict]):
 
     async def compute(self, location: Attempt[GeoPoint], address: Attempt[str]) -> Attempt[dict]:
         loc = location.value_or_none()
+        if loc is None:
+            return self._impossible({"location": location})
         svc = get_services()
-        school = await svc.school_lookup.find_nearest(
+        attempt = await svc.school_lookup.find_nearest(
             f"{loc.lat},{loc.lon}",
             child_age=12,
             acceptable=tuple(SchoolGender(v) for v in self._acceptable),
         )
+        if attempt.pending:
+            return Attempt.pending()
+        school = attempt.value_or_none()
         if school is None:
             return Attempt.impossible("no secondary school found")
         result = {

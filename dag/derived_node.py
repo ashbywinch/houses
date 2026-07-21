@@ -351,8 +351,13 @@ class DerivedNode(Node[T], Generic[T]):
         sources: dict[str, Provenance] = {}
         for dep in self._get_active_deps():
             sources[dep._id] = await dep.build_provenance()
-        description = self._attempt.error if self._attempt.impossible else ""
-        return Provenance(label=self.display_name, description=description, sources=sources)
+        description = self._attempt.error
+        return Provenance(
+            label=self.display_name,
+            description=description,
+            value=self._attempt.value,
+            sources=sources,
+        )
 
     async def to_json(self) -> dict:
         result = await super().to_json()
