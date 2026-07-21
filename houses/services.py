@@ -19,7 +19,7 @@ from houses.council_tax import lookup_council_tax
 from houses.council_tax_info import CouncilTaxInfo
 from houses.epc import lookup_epc
 from houses.geo import GeoPoint
-from houses.location import _geocode_address, geocode
+from houses.location import _geocode_address, find_nearest_town_name, geocode
 from houses.model.domain import Commute, Person
 from houses.nodes.settings import make_default_financials, make_default_persons, make_default_thresholds
 from houses.school import School
@@ -32,11 +32,14 @@ from houses.walkability import enrich_walkability
 
 
 class GeocodingService(Protocol):
-    """Resolve a postcode or address to geographic coordinates."""
+    """Resolve a postcode or address to geographic coordinates,
+    and reverse-geocode coordinates to the nearest town name."""
 
     async def geocode_postcode(self, postcode: str) -> Attempt[GeoPoint]: ...
 
     async def geocode_address(self, address: str) -> Attempt[GeoPoint]: ...
+
+    async def reverse_geocode_town(self, lat: float, lon: float) -> str | None: ...
 
 
 class CommuteRoutingService(Protocol):
@@ -160,6 +163,9 @@ class _DefaultGeocoder:
 
     async def geocode_address(self, address: str) -> Attempt[GeoPoint]:
         return await _geocode_address(address)
+
+    async def reverse_geocode_town(self, lat: float, lon: float) -> str | None:
+        return await find_nearest_town_name(lat, lon)
 
 
 class _DefaultCommuteRouter:

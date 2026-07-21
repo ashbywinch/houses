@@ -382,6 +382,39 @@ async def _geocode_postcode(postcode: str) -> Attempt[GeoPoint]:
             return Attempt.impossible("unexpected error")
 
 
+
+async def find_nearest_town_name(lat: float, lon: float) -> str | None:
+    """Reverse-geocode coordinates to the nearest UK town name via ORS Pelias.
+
+    Returns the locality or borough name, or ``None`` if the API
+    returns no result or an error.  Does NOT fall back to county.
+    """
+    rev_url = ORS_GEOCODE_URL.replace("/search", "/reverse")
+    params = {"point.lat": lat, "point.lon": lon, "size": 1, "boundary.country": "GBR"}
+    headers = {}
+    if settings.ors_api_key:
+        headers["Authorization"] = settings.ors_api_key
+
+    cached = get_cached("GET", rev_url, params, None)
+    if cached is not None:
+        data = cached
+    else:
+        try:
+            async with cached_async_client(timeout=10.0) as client:
+                resp = await client.get(rev_url, params=params, headers=headers or None)
+                resp.raise_for_status()
+                data = resp.json()
+                set_cached("GET", rev_url, params, None, data)
+        except Exception:
+            return None
+
+    features = data.get("features", [])
+    if not features:
+        return None
+    props = features[0].get("properties", {})
+    town = props.get("locality") or props.get("borough")
+    return town
+
 # ── Postcode helpers ────────────────────────────────────────────────────
 
 

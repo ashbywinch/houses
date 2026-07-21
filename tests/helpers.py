@@ -25,12 +25,15 @@ _DEFAULT_POINT = GeoPoint(51.5, -0.1)
 
 
 class FakeGeocoder:
-    """Returns a fixed GeoPoint for any geocode request."""
+    """Returns a fixed GeoPoint for any geocode request, and a fixed
+    town name for reverse-geocode town lookups."""
 
-    def __init__(self, result: GeoPoint | None = _DEFAULT_POINT):
+    def __init__(self, result: GeoPoint | None = _DEFAULT_POINT, reverse_town: str | None = "Test Town"):
         self.result = result
+        self.reverse_town = reverse_town
         self.postcode_calls: list[str] = []
         self.address_calls: list[str] = []
+        self.reverse_calls: list[tuple[float, float]] = []
 
     @property
     def call_count(self) -> int:
@@ -43,6 +46,10 @@ class FakeGeocoder:
     async def geocode_address(self, address: str) -> Attempt[GeoPoint]:
         self.address_calls.append(address)
         return Attempt.succeeded(self.result) if self.result else Attempt.impossible("no result")
+
+    async def reverse_geocode_town(self, lat: float, lon: float) -> str | None:
+        self.reverse_calls.append((lat, lon))
+        return self.reverse_town
 
 
 _DEFAULT_SIMON = Commute(

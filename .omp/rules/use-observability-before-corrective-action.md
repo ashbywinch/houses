@@ -1,0 +1,1 @@
+../../../omp-config/rules/use-observability-before-corrective-action.md

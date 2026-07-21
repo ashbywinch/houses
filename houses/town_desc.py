@@ -16,10 +16,6 @@ API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
 async def generate_town_description(town_name: str, postcode: str) -> str:
-    if not settings.llm_api_key:
-        logger.warning("llm_api_key not set — skipping town description")
-        return ""
-
     key = town_name.strip().lower()
     if key in _town_cache:
         return _town_cache[key]

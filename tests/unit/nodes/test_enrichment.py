@@ -90,15 +90,115 @@ class TestWalkabilityNode:
         assert not a.succeeded
 
 
-class TestTownDescNode:
+class TestNearestTownNode:
     @pytest.mark.asyncio
     async def test_impossible_without_location(self):
-        from houses.nodes.area import TownDescNode
+        from houses.nodes.area import NearestTownNode
 
-        loc = UserInputNode[dict]("loc_td", dict)
-        node = TownDescNode("td", best_location=loc)
+        loc = UserInputNode[dict]("loc_nt", dict)
+        node = NearestTownNode("nt", best_location=loc)
         a = await node.attempt()
         assert not a.succeeded
+
+    @pytest.mark.asyncio
+    async def test_returns_town_name(self):
+        from houses.nodes.area import NearestTownNode
+        from houses.geo import GeoPoint
+        from dag.derived_node import flush_processor
+
+        loc = UserInputNode[GeoPoint]("loc_nt2", GeoPoint)
+        node = NearestTownNode("nt2", best_location=loc)
+        loc.push(GeoPoint(lat=51.5, lon=-0.1), "test")
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded, f"nearest_town failed: {a.error}"
+        assert a.value == "Test Town"
+
+
+class TestTownDescNode:
+    @pytest.mark.asyncio
+    async def test_impossible_without_deps(self):
+        from houses.nodes.area import TownDescNode
+
+        loc = UserInputNode[dict]("loc_td2", dict)
+        nearest = UserInputNode[str]("nearest_td2", str)
+        addr_town = UserInputNode[str]("addr_td2", str)
+        pc = UserInputNode[str]("pc_td2", str)
+        node = TownDescNode("td2", best_location=loc, nearest_town=nearest, town_name=addr_town, postcode_node=pc)
+        a = await node.attempt()
+        assert not a.succeeded
+
+    @pytest.mark.asyncio
+    async def test_prefers_address_town_over_nearest(self):
+        from houses.nodes.area import TownDescNode
+        from houses.geo import GeoPoint
+        from houses.services_provider import _request_services as _sp
+        from tests.helpers import make_services
+        from dag.derived_node import flush_processor
+
+        seen_town = None
+        seen_pc = None
+
+        class _RecordingTownDesc:
+            async def describe(self, town_name: str, postcode: str) -> str:
+                nonlocal seen_town, seen_pc
+                seen_town = town_name
+                seen_pc = postcode
+                return "A leafy town."
+
+        token = _sp.set(make_services(town_desc_service=_RecordingTownDesc()))
+        try:
+            loc = UserInputNode[GeoPoint]("loc_td3", GeoPoint)
+            nearest = UserInputNode[str]("nearest_td3", str)
+            addr_town = UserInputNode[str]("addr_td3", str)
+            pc = UserInputNode[str]("pc_td3", str)
+            node = TownDescNode("td3", best_location=loc, nearest_town=nearest, town_name=addr_town, postcode_node=pc)
+            loc.push(GeoPoint(lat=51.5, lon=-0.1), "test")
+            nearest.push("London", "test")
+            addr_town.push("Southall", "test")
+            pc.push("UB2 4GN", "test")
+            await flush_processor()
+            a = await node.attempt()
+            assert a.succeeded, f"town_desc failed: {a.error}"
+            # Must prefer address-extracted "Southall" over reverse-geocoded "London"
+            assert seen_town == "Southall", f"Expected address town, got {seen_town}"
+            assert seen_pc == "UB2 4GN"
+        finally:
+            _sp.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_nearest_when_address_has_no_town(self):
+        from houses.nodes.area import TownDescNode
+        from houses.geo import GeoPoint
+        from houses.services_provider import _request_services as _sp
+        from tests.helpers import make_services
+        from dag.derived_node import flush_processor
+
+        seen_town = None
+
+        class _RecordingTownDesc:
+            async def describe(self, town_name: str, postcode: str) -> str:
+                nonlocal seen_town
+                seen_town = town_name
+                return "A leafy town."
+
+        token = _sp.set(make_services(town_desc_service=_RecordingTownDesc()))
+        try:
+            loc = UserInputNode[GeoPoint]("loc_td4", GeoPoint)
+            nearest = UserInputNode[str]("nearest_td4", str)
+            addr_town = UserInputNode[str]("addr_td4", str)
+            pc = UserInputNode[str]("pc_td4", str)
+            node = TownDescNode("td4", best_location=loc, nearest_town=nearest, town_name=addr_town, postcode_node=pc)
+            loc.push(GeoPoint(lat=51.5, lon=-0.1), "test")
+            nearest.push("Pangbourne", "test")
+            addr_town.push("", "test")  # empty string = no town found in address
+            pc.push("RG8 7AS", "test")
+            await flush_processor()
+            a = await node.attempt()
+            assert a.succeeded, f"town_desc failed: {a.error}"
+            assert seen_town == "Pangbourne", f"Expected nearest town fallback, got {seen_town}"
+        finally:
+            _sp.reset(token)
 
 
 class TestGeocodeNode:

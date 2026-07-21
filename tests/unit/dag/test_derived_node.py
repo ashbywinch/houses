@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from dag.attempt import Attempt
+from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode, flush_processor
 from dag.persistence import latest_node_result
 from dag.user_input_node import UserInputNode
@@ -108,6 +108,42 @@ class TestDerivedNode:
         a = await doubler.attempt()
         assert a.impossible is True
 
+
+    @pytest.mark.asyncio
+    async def test_impossible_dep_preserves_provenance(self):
+        """The impossible-dep short-circuit must preserve provenance, not hardcode empty."""
+        class _FailingNode(DerivedNode[int]):
+            def __init__(self):
+                super().__init__("fail_prov_src", int, ())
+                self._attempt = Attempt.impossible("always fails")
+
+            def compute(self):
+                return self._attempt
+
+        class _NodeWithProvenance(DerivedNode[int]):
+            def __init__(self, node_id: str, deps):
+                super().__init__(node_id, int, deps)
+
+            def compute(self, *args):
+                return Attempt.succeeded(42)
+
+            async def build_provenance(self):
+                return Provenance(label="my_custom_label")
+
+        src = _FailingNode()
+        await flush_processor()
+
+        node = _NodeWithProvenance("prov_persist_test", deps=(src,))
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.impossible is True
+
+        # The persisted record must have real provenance, not hardcoded empty
+        stored = latest_node_result("prov_persist_test")
+        assert stored is not None
+        prov = stored.get("provenance", {})
+        assert prov.get("label") == "my_custom_label", f"Expected custom provenance label in persisted data, got {prov}"
     @pytest.mark.asyncio
     async def test_to_json(self):
         src = UserInputNode[int]("src", int)

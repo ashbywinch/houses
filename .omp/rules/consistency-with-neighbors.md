@@ -1,0 +1,1 @@
+../../../omp-config/rules/consistency-with-neighbors.md

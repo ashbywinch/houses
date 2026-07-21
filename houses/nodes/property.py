@@ -9,7 +9,7 @@ from dag.signals import Signal, Slot
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute
-from houses.nodes.area import TownDescNode, TownNode, WalkabilityNode
+from houses.nodes.area import NearestTownNode, TownDescNode, TownNode, WalkabilityNode
 from houses.nodes.bus import BodsFareNode, BusLegAugmentNode, BusRouteNode
 from houses.nodes.commute import CommuteSelectorNode, _bus_condition, _needs_rail_fare, commute_input_node
 from houses.nodes.epc_node import CouncilTaxNode, EpcNode
@@ -104,13 +104,20 @@ class PropertyNodes:
             best_location=self.best_location,
             best_address=self.best_address,
         )
-        self.town_desc = TownDescNode(
-            f"{rid}/town_desc",
+        self.nearest_town = NearestTownNode(
+            f"{rid}/nearest_town",
             best_location=self.best_location,
         )
         self.town_name = TownNode(
             f"{rid}/town_name",
             best_address=self.best_address,
+        )
+        self.town_desc = TownDescNode(
+            f"{rid}/town_desc_v3",
+            best_location=self.best_location,
+            nearest_town=self.nearest_town,
+            town_name=self.town_name,
+            postcode_node=self.postcode,
         )
 
         # ── School Nodes ───────────────────────────────────────────────

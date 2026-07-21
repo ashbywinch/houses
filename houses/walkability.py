@@ -122,7 +122,7 @@ async def _find_town_centre_by_reverse_geocode(lat: float, lng: float) -> GeoPoi
     if not features:
         return None
     props = features[0].get("properties", {})
-    town = props.get("locality") or props.get("borough") or props.get("county")
+    town = props.get("locality") or props.get("borough")
     if not town:
         return None
     # Forward-geocode the town name to get its centre

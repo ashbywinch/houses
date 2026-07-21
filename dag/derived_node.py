@@ -295,7 +295,7 @@ class DerivedNode(Node[T], Generic[T]):
                 result_dict = {
                     "status": "impossible", "value": None,
                     "error": f"dep failed: {errors}",
-                    "provenance": {"label": ""},
+                    "provenance": await self._build_provenance_dict(),
                 }
                 self._persist(result_dict, dep_timestamps)
                 self.changed.emit()
@@ -307,8 +307,6 @@ class DerivedNode(Node[T], Generic[T]):
             if iscoroutine(result):
                 result = await result
         except Exception as e:
-            # Check if this is a transient error that should be retried.
-            # Subclasses can override _is_transient_error for custom logic.
             if self._is_transient_error(e):
                 if not self.schedule_retry(self._retry_delay_from(e)):
                     result = Attempt.impossible(f"{self._id}: retry exhausted ({e})")
@@ -328,7 +326,7 @@ class DerivedNode(Node[T], Generic[T]):
             except Exception as e:
                 result_dict = {
                     "status": "pending", "value": None, "error": str(e),
-                    "provenance": {"label": ""},
+                    "provenance": await self._build_provenance_dict(),
                 }
             self._persist(result_dict, dep_timestamps)
             return
@@ -341,12 +339,20 @@ class DerivedNode(Node[T], Generic[T]):
         except Exception as e:
             result_dict = {
                 "status": "impossible", "value": None, "error": str(e),
-                "provenance": {"label": ""},
+                "provenance": await self._build_provenance_dict(),
             }
         self._persist(result_dict, dep_timestamps)
         self.changed.emit()
         if _get_scheduler()._after_refresh is not None:
             _get_scheduler()._after_refresh(self)
+
+    async def _build_provenance_dict(self) -> dict:
+        """Build provenance dict for persistence, with a fallback if build_provenance() fails."""
+        try:
+            prov = await self.build_provenance()
+            return prov.to_dict()
+        except Exception:
+            return {"label": ""}
     async def build_provenance(self) -> Provenance:
         sources: dict[str, Provenance] = {}
         for dep in self._get_active_deps():

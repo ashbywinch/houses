@@ -290,3 +290,48 @@ the global DB connection with an in-memory SQLite before every test.
 Because settings sources are not module-level, they read from the
 in-memory DB by default — no stale cached data, no real DB access
 during test collection.
+
+### Node versioning
+
+When you change a `DerivedNode.compute()` in a way that makes old persisted
+results semantically invalid (different inputs, new dependencies, changed
+algorithm), bump the node_id:
+
+```python
+# Before
+self.town_desc = TownDescNode(f"{rid}/town_desc", ...)
+
+# After — old persisted results under "town_desc" are ignored
+self.town_desc = TownDescNode(f"{rid}/town_desc_v2", ...)
+```
+
+The new node_id has no persisted data, so:
+1. The node starts as `Attempt.pending()` during the next reload
+2. The scheduler processes it: compute runs with current deps
+3. Result is persisted under the new node_id
+4. Old results under the old node_id are orphaned harmlessly
+
+That's all that's needed — no DB surgery, no manual clearing, no reseeding.
+The server auto-reloads when .py files change; the fresh node_id causes fresh
+computation.
+
+**When NOT to bump**: cosmetic refactors, adding logging, changing error
+messages, or any change that produces the same output for the same inputs.
+
+### Tracing failures through provenance
+
+Every node's `to_json()` output includes a `provenance` dict with a `label`
+identifying which computation produced the value. When a node fails:
+
+1. Read the failed node's `node_results` entry — the `error` field says
+   "dep failed: X failed" or gives the compute error directly
+2. If it's a dep failure, read the dep's `node_results` entry for its
+   provenance label and error
+3. Repeat until you reach the root cause (a source node or an API error)
+
+The provenance chain survives dep failures since April 2026 — the
+impossible-dep short-circuit no longer strips provenance to `{"label": ""}`.
+
+This is the primary debugging tool for DAG failures. Do not delete DB rows,
+clear caches, or restart the server to investigate — that destroys the
+evidence. Read the provenance chain instead.

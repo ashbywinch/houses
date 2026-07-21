@@ -27,14 +27,49 @@ class WalkabilityNode(DerivedNode[dict]):
         return Provenance(label="walkability")
 
 
-class TownDescNode(DerivedNode[dict]):
-    def __init__(self, node_id: str, *, best_location):
-        super().__init__(node_id, dict, (best_location,))
+class NearestTownNode(DerivedNode[str]):
+    """Reverse-geocode the property's location to find the nearest town name."""
 
-    async def compute(self, location: Attempt[GeoPoint]) -> Attempt[dict]:
+    def __init__(self, node_id: str, *, best_location):
+        deps: tuple[Node, ...] = (best_location,)
+        super().__init__(node_id, str, deps)
+
+    async def compute(self, location: Attempt[GeoPoint]) -> Attempt[str]:
         loc = location.value_or_none()
+        if loc is None:
+            return Attempt.impossible("no location")
         svc = get_services()
-        desc = await svc.town_desc_service.describe("", f"{loc.lat},{loc.lon}")
+        town = await svc.geocoder.reverse_geocode_town(loc.lat, loc.lon)
+        if town:
+            return Attempt.succeeded(town)
+        return Attempt.impossible("could not determine nearest town")
+
+    def _is_transient_error(self, exc: Exception) -> bool:
+        from houses.helpers import is_transient_error as _ite
+        return _ite(exc)
+
+    async def build_provenance(self):
+        return Provenance(label="reverse_geocode")
+
+
+class TownDescNode(DerivedNode[dict]):
+    def __init__(self, node_id: str, *, best_location, nearest_town, town_name, postcode_node):
+        deps: tuple[Node, ...] = (best_location, nearest_town, town_name, postcode_node)
+        super().__init__(node_id, dict, deps)
+
+    @property
+    def _skip_impossible_dep_check(self) -> bool:
+        return True
+
+    async def compute(self, location: Attempt[GeoPoint], nearest_town: Attempt[str], town_name: Attempt[str], postcode: Attempt[str]) -> Attempt[dict]:
+        # Prefer the address-extracted town name (more specific), fall back to
+        # reverse-geocoded town when the address has no recognizable town.
+        town = town_name.value_or_none() or nearest_town.value_or_none()
+        pc = postcode.value_or_none() or ""
+        if not town:
+            return Attempt.impossible("no town name available from address or reverse geocode")
+        svc = get_services()
+        desc = await svc.town_desc_service.describe(town, pc)
         return Attempt.succeeded({"description": desc})
 
     def _is_transient_error(self, exc: Exception) -> bool:
