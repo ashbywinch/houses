@@ -74,7 +74,7 @@ class SecondarySchoolNode(DerivedNode[dict]):
         return Attempt.succeeded(result)
 
     async def build_provenance(self):
-        return Provenance(label="GIAS CSV")
+        return Provenance(label="GIAS CSV", url="https://get-information-schools.service.gov.uk/")
 
 
 class SchoolLocationNode(DerivedNode[str]):

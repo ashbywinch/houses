@@ -24,7 +24,7 @@ class WalkabilityNode(DerivedNode[dict]):
         return _ite(exc)
 
     async def build_provenance(self):
-        return Provenance(label="walkability")
+        return Provenance(label="walkability", url="https://maps.googleapis.com/")
 
 
 class NearestTownNode(DerivedNode[str]):
@@ -61,7 +61,13 @@ class TownDescNode(DerivedNode[dict]):
     def _skip_impossible_dep_check(self) -> bool:
         return True
 
-    async def compute(self, location: Attempt[GeoPoint], nearest_town: Attempt[str], town_name: Attempt[str], postcode: Attempt[str]) -> Attempt[dict]:
+    async def compute(
+        self,
+        location: Attempt[GeoPoint],
+        nearest_town: Attempt[str],
+        town_name: Attempt[str],
+        postcode: Attempt[str],
+    ) -> Attempt[dict]:
         # Prefer the address-extracted town name (more specific), fall back to
         # reverse-geocoded town when the address has no recognizable town.
         town = town_name.value_or_none() or nearest_town.value_or_none()

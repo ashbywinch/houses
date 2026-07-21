@@ -55,28 +55,6 @@ try:
 
         Quantity.__get_pydantic_core_schema__ = _quantity_schema
 
-    from houses.commute import LegMode
-
-    if not hasattr(LegMode, "__get_pydantic_core_schema__"):
-        def _legmode_schema(_source, _handler):
-            def validate(v):
-                if isinstance(v, LegMode):
-                    return v
-                if isinstance(v, str):
-                    return LegMode[v.upper()]
-                if isinstance(v, int):
-                    return LegMode(v)
-                raise ValueError(f"Cannot convert {type(v)} to LegMode")
-
-            def serialize(lm):
-                return lm.name.lower()
-
-            return core_schema.no_info_plain_validator_function(
-                validate,
-                serialization=core_schema.plain_serializer_function_ser_schema(serialize),
-            )
-
-        LegMode.__get_pydantic_core_schema__ = _legmode_schema
 except ImportError:
     pass
 

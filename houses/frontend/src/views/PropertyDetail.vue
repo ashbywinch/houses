@@ -6,6 +6,7 @@ import { patchTriage } from '../services/api'
 import { ofstedClass } from '../utils/format'
 import { commuteColour } from '../utils/commute'
 import Header from '../components/Header.vue'
+import ProvenanceTree from '../components/ProvenanceTree.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -271,7 +272,7 @@ function epcClass(band: string): string {
         <div v-if="walkability" class="detail-field">
           <span class="detail-field__label">Walk Score</span>
           <span class="detail-field__value">
-            {{ (walkability as Record<string, unknown>).walk_to_town_minutes ?? '?' }} min to town
+            {{ (walkability as Record<string, unknown>).walk_to_town_minutes ?? '?' }} min to {{ detail?.town_name?.value ?? 'town' }}
           </span>
         </div>
 
@@ -317,7 +318,8 @@ function epcClass(band: string): string {
               </div>
             </div>
             <div class="commute-provenance">
-              {{ c.provenance?.label ?? 'unknown' }}
+              <ProvenanceTree v-if="c.provenance" :provenance="c.provenance" />
+              <span v-else>unknown</span>
             </div>
           </div>
         </div>

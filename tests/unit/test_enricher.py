@@ -230,9 +230,10 @@ class TestTransitCommute:
 class TestCommuteSelectorPipeline:
     @staticmethod
     def _dummy_commute_node():
-        from houses.model.domain import Person, PlaceOfInterest
-        from pint import Quantity
         from money import Money
+        from pint import Quantity
+
+        from houses.model.domain import Person, PlaceOfInterest
 
         n = UserInputNode[Commute]("_dummy", Commute)
         n.push(Commute(

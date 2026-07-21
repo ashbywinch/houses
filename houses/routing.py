@@ -286,7 +286,10 @@ async def _google_route_commute(
         if isinstance(origin, GeoPoint) and isinstance(dest, GeoPoint):
             dist_km = origin.distance_km_to(dest)
             if dist_km > max_walk_km:
-                return Attempt.impossible(f"straight-line distance {dist_km:.1f} km exceeds {max_walk_km:.1f} km max walk")
+                return Attempt.impossible(
+                    f"straight-line distance {dist_km:.1f} km exceeds "
+                    f"{max_walk_km:.1f} km max walk"
+                )
 
     body = {
         "origin": _address_waypoint(origin),
@@ -601,7 +604,10 @@ async def get_commute(
     candidates: list[Attempt[Commute]] = [walk_attempt]
 
     if _is_london_area(dest_str):
-        origin_str = origin_postcode if isinstance(origin_postcode, str) else f"{origin_postcode.lat},{origin_postcode.lon}"
+        origin_str = (
+            origin_postcode if isinstance(origin_postcode, str)
+            else f"{origin_postcode.lat},{origin_postcode.lon}"
+        )
         try:
             tfl_attempt = await _tfl_transit_commute(origin_str, dest_str, has_car)
         except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException, HttpError):

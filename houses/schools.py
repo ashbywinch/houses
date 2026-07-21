@@ -14,6 +14,7 @@ import logging
 from pathlib import Path
 
 import houses.routing as _routing
+from dag.attempt import Attempt
 from houses.config import settings
 from houses.geo import GeoPoint
 from houses.location import _geocode_address, geocode

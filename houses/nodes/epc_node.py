@@ -25,7 +25,7 @@ class EpcNode(DerivedNode[dict]):
         return _ite(exc)
 
     async def build_provenance(self):
-        return Provenance(label="EPC API")
+        return Provenance(label="EPC API", url="https://www.epcregister.com/")
 
 
 class CouncilTaxNode(DerivedNode[dict]):
@@ -53,4 +53,4 @@ class CouncilTaxNode(DerivedNode[dict]):
         return _ite(exc)
 
     async def build_provenance(self):
-        return Provenance(label="Council Tax")
+        return Provenance(label="Council Tax", url="https://www.gov.uk/council-tax-bands")

@@ -33,11 +33,10 @@ class Signal:
     def emit(self) -> None:
         for handler in list(self._handlers):
             handler()
-        # Sweep handlers whose Slot's weakref has died
+        # Sweep dead Slot handlers
         self._handlers = [
             h for h in self._handlers
-            if not isinstance(h, Slot) or h._ref() is not None
-            or h._callback is not None
+            if not isinstance(h, Slot) or not h.is_dead()
         ]
 
     def _disconnect(self, handler: Callable) -> None:
@@ -49,11 +48,19 @@ class Slot:
     """Wraps a bound method with a weak reference for auto-cleanup."""
 
     def __init__(self, callback: Callable) -> None:
+        self._callback: Callable | None = None
         try:
             self._ref = weakref.WeakMethod(callback)
         except TypeError:
             self._ref = None
             self._callback = callback
+
+    def is_dead(self) -> bool:
+        """Return True when the underlying handler is no longer reachable."""
+        if self._ref is not None:
+            return self._ref() is None
+        # Non-method callables: Slot holds a strong ref, so never dead
+        return False
 
     def __call__(self) -> None:
         if self._ref is not None:

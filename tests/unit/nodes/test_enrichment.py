@@ -102,9 +102,9 @@ class TestNearestTownNode:
 
     @pytest.mark.asyncio
     async def test_returns_town_name(self):
-        from houses.nodes.area import NearestTownNode
-        from houses.geo import GeoPoint
         from dag.derived_node import flush_processor
+        from houses.geo import GeoPoint
+        from houses.nodes.area import NearestTownNode
 
         loc = UserInputNode[GeoPoint]("loc_nt2", GeoPoint)
         node = NearestTownNode("nt2", best_location=loc)
@@ -130,11 +130,11 @@ class TestTownDescNode:
 
     @pytest.mark.asyncio
     async def test_prefers_address_town_over_nearest(self):
-        from houses.nodes.area import TownDescNode
+        from dag.derived_node import flush_processor
         from houses.geo import GeoPoint
+        from houses.nodes.area import TownDescNode
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
-        from dag.derived_node import flush_processor
 
         seen_town = None
         seen_pc = None
@@ -168,11 +168,11 @@ class TestTownDescNode:
 
     @pytest.mark.asyncio
     async def test_falls_back_to_nearest_when_address_has_no_town(self):
-        from houses.nodes.area import TownDescNode
+        from dag.derived_node import flush_processor
         from houses.geo import GeoPoint
+        from houses.nodes.area import TownDescNode
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
-        from dag.derived_node import flush_processor
 
         seen_town = None
 

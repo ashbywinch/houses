@@ -43,8 +43,8 @@ class TestGeoPointSerialisation:
         assert d["lat"] == 51.5
         assert d["lon"] == -0.1
 
-    def test_none_serialises_to_empty(self):
-        assert _serialize_value(None) == ""
+    def test_none_serialises_to_none(self):
+        assert _serialize_value(None) is None
 
     def test_empty_string_deserialises_to_empty_string(self):
         assert _deserialize_value("") == ""

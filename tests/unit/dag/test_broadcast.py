@@ -42,8 +42,7 @@ async def test_after_refresh_does_not_broadcast():
 
         # The _after_refresh callback after processing should do nothing
         sched = _get_async_queue_scheduler()
-        if sched._after_refresh is not None:
-            sched._after_refresh(node)
+        sched.after_refresh(node)
 
         assert not mock_push_node.called, (
             "_push_node_update should NOT be called during cascade. "

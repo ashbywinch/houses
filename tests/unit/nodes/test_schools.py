@@ -691,7 +691,9 @@ class TestFindNearestFilters:
             "SL6 3CC", child_age=7, acceptable=(SchoolGender.BOYS, SchoolGender.GIRLS, SchoolGender.MIXED)
         )
         assert result.succeeded, "Expected a school, got None"
-        assert result.value_or_none().name == "Has A Name School", f"Expected Has A Name, got {result.value_or_none().name}"
+        assert result.value_or_none().name == "Has A Name School", (
+            f"Expected Has A Name, got {result.value_or_none().name}"
+        )
 
     @pytest.mark.asyncio
     async def test_find_nearest_filters_by_acceptable_boys_only(self, monkeypatch):
@@ -828,10 +830,10 @@ class TestFindNearestFilters:
         """find_nearest must skip schools with coords=None without
         calling geocode (no API calls at query time)."""
         from dag.attempt import Attempt
+        from houses.geo import GeoPoint
         from houses.school import School
         from houses.school_gender import SchoolGender
         from houses.schools import find_nearest
-        from houses.geo import GeoPoint
 
         geocode_called = False
 

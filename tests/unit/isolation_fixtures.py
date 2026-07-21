@@ -40,11 +40,11 @@ def _sqlite_memory():
     per.testing = False
     per._get_db = saved
 
-from houses.services import _reset_settings_cache
-from houses.property_registry import _reset as _reset_property_registry
-from houses.web.broadcaster import _reset as _reset_broadcaster
-from houses.town_desc import _reset as _reset_town_desc
-from houses.council_tax import _reset as _reset_council_tax
+from houses.council_tax import _reset as _reset_council_tax  # noqa: E402
+from houses.property_registry import _reset as _reset_property_registry  # noqa: E402
+from houses.services import _reset_settings_cache  # noqa: E402
+from houses.town_desc import _reset as _reset_town_desc  # noqa: E402
+from houses.web.broadcaster import _reset as _reset_broadcaster  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

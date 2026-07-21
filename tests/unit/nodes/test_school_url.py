@@ -41,8 +41,6 @@ async def test_school_location_node_returns_geopoint():
 
     async def fake_find(*a, **kw):
         from dag.attempt import Attempt
-        from houses.school import School
-        from houses.school_gender import SchoolGender
         return Attempt.succeeded(School(
             urn="103578",
             name="Pimlico Primary",

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dag.signals import Signal
+from dag.signals import Signal, Slot
 
 
 class TestSignal:
@@ -58,33 +58,71 @@ class TestSignal:
 
 
 class TestSlot:
-    def test_slot_receives_signal(self):
-        sig = Signal()
-        received = []
-
-        class Receiver:
-            def __init__(self):
-                self._slot = sig.connect(lambda: received.append("called"))
-
-        Receiver()
-        sig.emit()
-        assert received == ["called"]
-
-    def test_slot_disconnects_when_owner_dies(self):
-        import weakref
+    def test_slot_wrapping_bound_method_detects_dead_owner(self):
+        """Slot wrapping a bound method: drop owner, is_dead() returns True."""
         sig = Signal()
 
         class Owner:
-            def __init__(self):
-                self.ref = weakref.ref(self)
-                self.slot = self._handler
-
-            def _handler(self):
+            def handler(self):
                 pass
 
         owner = Owner()
-        sig.connect(owner.slot)
-        owner = None  # delete reference
-        # Signal still has the connection because the Slot holds a ref
-        assert len(sig._handlers) > 0
+        slot = Slot(owner.handler)
+        sig.connect(slot)
 
+        # Owner alive — slot not dead
+        assert not slot.is_dead()
+
+        del owner
+        import gc
+        gc.collect()
+        # Owner gone — weakref dies
+        assert slot.is_dead()
+
+    def test_emit_removes_dead_slot(self):
+        """emit() sweeps dead Slots from handlers list."""
+        sig = Signal()
+
+        class Owner:
+            def handler(self):
+                pass
+
+        owner = Owner()
+        slot = Slot(owner.handler)
+        sig.connect(slot)
+        assert len(sig._handlers) == 1
+
+        del owner
+        import gc
+        gc.collect()
+
+        # Dead Slot was removed
+        assert len(sig._handlers) == 0
+
+    def test_slot_non_method_callable_never_dead(self):
+        """Non-method callable: Slot holds strong ref, is_dead() returns False."""
+        sig = Signal()
+        received = []
+
+        def handler():
+            received.append("called")
+
+        slot = Slot(handler)
+        sig.connect(slot)
+        sig.emit()
+        assert received == ["called"]
+        assert not slot.is_dead()
+        # Even after dropping ref, Slot keeps callable alive
+        del handler
+        assert not slot.is_dead()
+
+    def test_slot_wrapping_lambda_via_fallback(self):
+        """Lambda (not a method) hits TypeError in WeakMethod, uses _callback path."""
+        sig = Signal()
+        received = []
+
+        slot = Slot(lambda: received.append("called"))
+        sig.connect(slot)
+        sig.emit()
+        assert received == ["called"]
+        assert not slot.is_dead()

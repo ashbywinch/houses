@@ -67,17 +67,16 @@ async def lifespan(_app: FastAPI):
     # leaking API keys in the server log
     logging.getLogger("httpx").setLevel(logging.WARNING)
     init_dag_db()
-    from houses.services import _reset_settings_cache
-    from houses.property_registry import _reset as _reset_property_registry
-    from houses.web.broadcaster import _reset as _reset_broadcaster
-    from houses.town_desc import _reset as _reset_town_desc
     from houses.council_tax import _reset as _reset_council_tax
+    from houses.property_registry import _reset as _reset_property_registry
+    from houses.services import _reset_settings_cache
+    from houses.town_desc import _reset as _reset_town_desc
+    from houses.web.broadcaster import _reset as _reset_broadcaster
     _reset_settings_cache()
     _reset_property_registry()
     _reset_broadcaster()
     _reset_town_desc()
     _reset_council_tax()
-    from houses.nodes.bootstrap import seed_registry_from_sheet
 
     seed_registry_from_sheet()
     # Start the background stale-node processor and the WebSocket broadcaster.

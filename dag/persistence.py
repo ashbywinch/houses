@@ -8,6 +8,7 @@ from __future__ import annotations
 import importlib
 import json
 import sqlite3
+import threading
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -15,10 +16,10 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
-from houses.config import settings
 
 DB_PATH: Path | None = None
 testing: bool = False
+_connection_cache = threading.local()
 
 
 class DagJSONEncoder(json.JSONEncoder):
@@ -29,11 +30,13 @@ class DagJSONEncoder(json.JSONEncoder):
             return o.name.lower()
         return super().default(o)
 
-
 def _get_db() -> sqlite3.Connection:
     global DB_PATH
     if DB_PATH is None:
-        DB_PATH = Path(settings.sqlite_path)
+        DB_PATH = Path("data/houses.db")
+
+    if hasattr(_connection_cache, "conn"):
+        return _connection_cache.conn
 
     if testing:
         raise RuntimeError(
@@ -46,12 +49,20 @@ def _get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    _connection_cache.conn = conn
     return conn
 
 
-def _serialize_value(val: Any) -> str:
+def close_db() -> None:
+    """Close the cached database connection and clear it."""
+    if hasattr(_connection_cache, "conn"):
+        _connection_cache.conn.close()
+        _connection_cache.conn = None
+
+
+def _serialize_value(val: Any) -> str | None:
     if val is None:
-        return ""
+        return None
     if isinstance(val, bool):
         return json.dumps(val)
     if isinstance(val, str):
@@ -71,7 +82,7 @@ def _serialize_value(val: Any) -> str:
         return str(val)
 
 
-def _deserialize_value(raw: str) -> Any:
+def _deserialize_value(raw: str | None) -> Any:
     if raw is None:  # was: if not raw — empty string "" should not be treated as None
         return None
     try:

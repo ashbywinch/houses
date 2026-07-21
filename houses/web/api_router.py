@@ -254,7 +254,7 @@ async def put_persons(body: list = Body()):  # noqa: B008
     try:
         get_services().persons_source.push(validated, "user")
     except (ValueError, TypeError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     return {"status": "ok"}
 
 @api_router.patch("/settings/financial")

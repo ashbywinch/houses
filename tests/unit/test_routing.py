@@ -6,9 +6,9 @@ import pytest
 from money import Money
 from pint import Quantity
 
+from dag.attempt import Attempt
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.model.domain import Commute, Person, PlaceOfInterest
-from dag.attempt import Attempt
 
 # ── Fail-fast when API keys are missing ─────────────────────────────────
 
@@ -35,6 +35,7 @@ class TestWalkCommuteFailsFast:
         message so the reason for a 400 (e.g. "LatLng cannot be specified
         as an Address Waypoint") appears in the traceback."""
         import httpx
+
         from houses.routing import _raise_with_body
 
         resp = httpx.Response(
@@ -332,7 +333,6 @@ class TestGetCommuteChoice:
     @pytest.mark.asyncio
     async def test_returns_impossible_when_no_route(self, monkeypatch):
         """When all backends return None, get_commute returns Attempt.impossible."""
-        from houses.routing import get_commute
 
         async def mock_walk(*_):
             return Attempt.impossible("none")
@@ -357,8 +357,9 @@ class TestGetCommuteChoice:
         coordinate strings to latLng waypoints, not hardcode {"address": ...}.
         """
         import json
-        from houses.routing import _find_bus_alternative
+
         from houses.config import settings
+        from houses.routing import _find_bus_alternative
 
         bodies: list[dict] = []
 
@@ -424,12 +425,13 @@ class TestTflNoBusWhenHasCar:
 
     @pytest.mark.asyncio
     async def test_skips_with_bus_when_no_bus_succeeds(self, monkeypatch):
-        from houses.routing import _tfl_transit_commute as _real_tfl
         # Restore real function — conftest mocks it globally
         import houses.routing as _routing
+        from dag.attempt import Attempt
+        from houses.routing import _tfl_transit_commute as _real_tfl
+
         monkeypatch.setattr(_routing, '_tfl_transit_commute', _real_tfl)
         """has_car=True + no_bus succeeds → with_bus is not compared."""
-        from dag.attempt import Attempt
 
         no_bus = Commute(
             person=Person(name="", has_car=True),
@@ -455,23 +457,24 @@ class TestTflNoBusWhenHasCar:
                 return Attempt.succeeded(no_bus)
             return Attempt.succeeded(with_bus)
 
-        from houses.routing import _tfl_transit_commute
 
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_plan)
 
-        result = await _tfl_transit_commute("GU21 2NA", "EC3A 7LP", has_car=True)
+        result = await _real_tfl("GU21 2NA", "EC3A 7LP", has_car=True)
         assert result.succeeded, f"_tfl_transit_commute should succeed, got {result}"
         assert result.value_or_none().duration.magnitude == 90, (
-            f"Expected no_bus (90 min), got {result.value_or_none().duration.magnitude} — with_bus was compared when no_bus succeeded"
+            f"Expected no_bus (90 min), got {result.value_or_none().duration.magnitude}"
+            " — with_bus was compared when no_bus succeeded"
         )
 
     @pytest.mark.asyncio
     async def test_uses_with_bus_when_no_bus_fails(self, monkeypatch):
         """has_car=True + no_bus fails → with_bus is used as last resort."""
-        from houses.routing import _tfl_transit_commute as _real_tfl
         import houses.routing as _routing
-        monkeypatch.setattr(_routing, '_tfl_transit_commute', _real_tfl)
         from dag.attempt import Attempt
+        from houses.routing import _tfl_transit_commute as _real_tfl
+
+        monkeypatch.setattr(_routing, '_tfl_transit_commute', _real_tfl)
 
         no_bus = Attempt.impossible("no route found")
         with_bus = Commute(
@@ -491,13 +494,13 @@ class TestTflNoBusWhenHasCar:
                 return no_bus
             return Attempt.succeeded(with_bus)
 
-        from houses.routing import _tfl_transit_commute
 
         monkeypatch.setattr("houses.transit_route.TransitRoute.plan", mock_plan)
 
-        result = await _tfl_transit_commute("GU21 2NA", "EC3A 7LP", has_car=True)
-        assert result.succeeded, f"_tfl_transit_commute should succeed, got {result}"
-        assert result.value_or_none().duration.magnitude == 70, f"Expected with_bus (70 min), got {result.value_or_none().duration.magnitude}"
+        result = await _real_tfl("GU21 2NA", "EC3A 7LP", has_car=True)
+        assert result.value_or_none().duration.magnitude == 70, (
+            f"Expected with_bus (70 min), got {result.value_or_none().duration.magnitude}"
+        )
 
 
 # ── Park-and-ride creates parking CostGroup ─────────────────────────

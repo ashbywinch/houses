@@ -8,12 +8,16 @@ from pathlib import Path
 
 import pytest
 
+from dag.attempt import Attempt
 from dag.derived_node import flush_processor
 from houses.api_cache import set_cache_dir
 from houses.config import settings
 from tests.helpers import FakeCommuteRouter, FakeSchoolLookup, make_services
-from dag.attempt import Attempt
-from tests.unit.isolation_fixtures import _inject_test_scheduler, _reset_global_state, _sqlite_memory  # noqa: F401, F811
+from tests.unit.isolation_fixtures import (  # noqa: F401, F811
+    _inject_test_scheduler,
+    _reset_global_state,
+    _sqlite_memory,
+)
 
 
 def flush_all() -> None:

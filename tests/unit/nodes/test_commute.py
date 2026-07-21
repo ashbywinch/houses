@@ -40,7 +40,10 @@ class TestCommuteSelectorNode:
         poi=poi,
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        rail_fare_result=_noop_if(),
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -73,7 +76,10 @@ class TestCommuteSelectorNode:
         poi=poi,
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        rail_fare_result=_noop_if(),
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -103,7 +109,10 @@ class TestCommuteSelectorNode:
         poi=poi,
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        rail_fare_result=_noop_if(),
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -138,7 +147,10 @@ class TestCommuteSelectorNode:
         poi=poi,
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        rail_fare_result=_noop_if(),
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -172,7 +184,10 @@ class TestCommuteSelectorNode:
         poi=poi,
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        rail_fare_result=_noop_if(),
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -198,7 +213,10 @@ class TestCommuteSelectorNode:
         poi=poi,
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        rail_fare_result=_noop_if(),
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
 
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
         poi.push(office_poi, "config")
@@ -223,7 +241,10 @@ class TestCommuteSelectorNode:
         poi=poi,
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        rail_fare_result=_noop_if(),
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -255,7 +276,10 @@ class TestCommuteSelectorNode:
         poi=poi,
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        rail_fare_result=_noop_if(),
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -292,7 +316,10 @@ class TestCommuteSelectorNode:
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
         rail_fare_result=_noop_if(),
-        is_child=True, walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        is_child=True,
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("School", "SW1V 2QQ"), "config")
@@ -334,7 +361,10 @@ class TestCommuteSelectorNode:
         poi=poi,
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        rail_fare_result=_noop_if(),
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -368,7 +398,10 @@ class TestCommuteSelectorNode:
         poi=poi,
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        rail_fare_result=_noop_if(),
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -415,7 +448,10 @@ class TestCommuteSelectorNode:
         poi=poi,
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        rail_fare_result=_noop_if(),
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -446,7 +482,10 @@ class TestCommuteSelectorNode:
         poi=poi,
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        rail_fare_result=_noop_if(),
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -484,7 +523,10 @@ class TestDynamicDeps:
         poi=poi,
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_rail_fare_if(transit, rail_fare), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        rail_fare_result=_rail_fare_if(transit, rail_fare),
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -516,7 +558,10 @@ class TestDynamicDeps:
         poi=poi,
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_rail_fare_if(transit, rail_fare), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        rail_fare_result=_rail_fare_if(transit, rail_fare),
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
         # cost_gbp = 0 so rail_fare IS an active dep (but still pending)
@@ -549,7 +594,10 @@ class TestDynamicDeps:
         poi=poi,
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        rail_fare_result=_noop_if(),
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -578,7 +626,10 @@ class TestDynamicDeps:
         poi=poi,
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_noop_if(), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        rail_fare_result=_noop_if(),
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -623,7 +674,10 @@ class TestDynamicDeps:
         poi=poi,
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_rail_fare_if(transit, rail_fare), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        rail_fare_result=_rail_fare_if(transit, rail_fare),
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -661,7 +715,10 @@ class TestDynamicDeps:
         poi=poi,
         transit_result=transit,
         bus_result=_bus_if(walk_check, bus),
-        rail_fare_result=_rail_fare_if(transit, rail_fare), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+        rail_fare_result=_rail_fare_if(transit, rail_fare),
+        walk_result=_impossible_commute("walk"),
+        drive_result=_impossible_commute("drive"),
+        max_walk=30)
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
 
@@ -871,7 +928,10 @@ async def test_commute_selector_init_with_persisted_result():
     poi=poi,
     transit_result=transit,
     bus_result=_bus_if(walk_check, bus),
-    rail_fare_result=_noop_if("crash"), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+    rail_fare_result=_noop_if("crash"),
+    walk_result=_impossible_commute("walk"),
+    drive_result=_impossible_commute("drive"),
+    max_walk=30)
     node.disconnect()
 
 
@@ -1004,8 +1064,8 @@ class TestRailFareNode:
 
         from houses.commute import LegMode
         from houses.nodes.commute import RailFareNode
-        from houses.services_provider import get_services
         from houses.rail_fares import RailFareRegistry
+        from houses.services_provider import get_services
         from houses.stations import StationRegistry
 
         # Set up registry with stations and fare
@@ -1095,7 +1155,10 @@ async def test_commute_selector_impossible_without_bus():
     poi=poi,
     transit_result=transit,
     bus_result=_bus_if(walk_check, bus),
-    rail_fare_result=_noop_if("nb"), walk_result=_impossible_commute("walk"), drive_result=_impossible_commute("drive"), max_walk=30)
+    rail_fare_result=_noop_if("nb"),
+    walk_result=_impossible_commute("walk"),
+    drive_result=_impossible_commute("drive"),
+    max_walk=30)
 
     origin.push(GeoPoint(51.5, -0.1), "user")
     poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")

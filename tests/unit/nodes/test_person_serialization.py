@@ -5,8 +5,8 @@ import pytest
 
 def test_int_deposit_equity_raises():
     """UserInputNode.push rejects Person with deposit_equity=177000 (int)."""
-    from houses.model.domain import Person
     from dag.user_input_node import UserInputNode
+    from houses.model.domain import Person
 
     node = UserInputNode[list[Person]]("test", list[Person])  # type: ignore[valid-type]
     p = Person(name="Simon", has_car=True, deposit_equity=177000)
@@ -16,8 +16,8 @@ def test_int_deposit_equity_raises():
 
 def test_float_deposit_equity_raises():
     """deposit_equity=177000.0 is also rejected."""
-    from houses.model.domain import Person
     from dag.user_input_node import UserInputNode
+    from houses.model.domain import Person
 
     node = UserInputNode[list[Person]]("test_f", list[Person])  # type: ignore[valid-type]
     p = Person(name="Simon", has_car=True, deposit_equity=177000.0)
@@ -32,8 +32,9 @@ def test_dict_deposit_equity_succeeds():
     Person, so it reaches push() as a proper Money object.
     """
     from money import Money
-    from houses.model.domain import Person
+
     from dag.user_input_node import UserInputNode
+    from houses.model.domain import Person
 
     node = UserInputNode[list[Person]]("test_d", list[Person])  # type: ignore[valid-type]
     p = Person(name="Simon", has_car=True, deposit_equity=Money("200000", "GBP"))
@@ -43,8 +44,8 @@ def test_dict_deposit_equity_succeeds():
 
 def test_none_deposit_equity_succeeds():
     """deposit_equity=None must work."""
-    from houses.model.domain import Person
     from dag.user_input_node import UserInputNode
+    from houses.model.domain import Person
 
     node = UserInputNode[list[Person]]("test_n", list[Person])  # type: ignore[valid-type]
     p = Person(name="George", has_car=False, deposit_equity=None)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -88,10 +89,8 @@ class School:
         lat = row.get(cls._COL_LAT)
         lng = row.get(cls._COL_LNG)
         if lat and lng:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 original = GeoPoint(float(lat), float(lng))
-            except (ValueError, TypeError):
-                pass
 
         corr_lat = (row.get(cls._COL_CORR_LAT) or "").strip()
         corr_lng = (row.get(cls._COL_CORR_LNG) or "").strip()

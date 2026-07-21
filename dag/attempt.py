@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import TypeVar
+from typing import Any, TypeVar
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -193,6 +193,7 @@ class Provenance:
     label: str = ""
     description: str = ""
     value: Any = None
+    url: str = ""
     sources: dict[str, Provenance] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -200,6 +201,8 @@ class Provenance:
         result: dict = {"label": self.label}
         if self.description:
             result["description"] = self.description
+        if self.url:
+            result["url"] = self.url
         if self.value is not None:
             # Omit the value if it's not JSON-serializable or too large
             try:
@@ -215,12 +218,13 @@ class Provenance:
         return result
 
     @classmethod
-    def from_label(cls, label: str) -> Provenance:
+    def from_label(cls, label: str, url: str = "") -> Provenance:
         """Create a simple leaf Provenance with just a label."""
-        return cls(label=label)
+        return cls(label=label, url=url)
 
     @classmethod
     def composite(cls, label: str,
-                  sources: dict[str, Provenance]) -> Provenance:
+                  sources: dict[str, Provenance],
+                  url: str = "") -> Provenance:
         """Create a Provenance with dependency sub-sources."""
-        return cls(label=label, sources=sources)
+        return cls(label=label, sources=sources, url=url)

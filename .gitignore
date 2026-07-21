@@ -85,3 +85,6 @@ data/dag.db
 data/dag.db-shm
 data/dag.db-wal
 tools/captures/
+
+# Logs directory (PID files, dev server logs)
+.logs/

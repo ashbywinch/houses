@@ -37,9 +37,8 @@ class TestSerialisation:
         s = _serialize_value(3.14)
         assert _deserialize_value(s) == 3.14
 
-    def test_none_serialises_to_empty(self):
-        s = _serialize_value(None)
-        assert s == ""
+    def test_none_serialises_to_none(self):
+        assert _serialize_value(None) is None
 
     def test_complex_type_serialisation(self):
         @dataclass

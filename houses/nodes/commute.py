@@ -10,6 +10,7 @@ from money import Money
 
 from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
+from dag.node import Node
 from dag.user_input_node import UserInputNode
 from houses.commute import CostGroup, LegMode
 from houses.geo import GeoPoint
@@ -401,9 +402,13 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         candidates: list[Attempt[Commute]] = []
 
         # 1. Walk (Google Routes) — add if within max_walk
-        if walk is not None and walk.succeeded and walk.value_or_none() is not None:
-            if walk.value_or_none().duration.magnitude <= self._max_walk:
-                candidates.append(walk)
+        if (
+            walk is not None
+            and walk.succeeded
+            and walk.value_or_none() is not None
+            and walk.value_or_none().duration.magnitude <= self._max_walk
+        ):
+            candidates.append(walk)
 
         # 2. Transit vs bus — pick the better of the two
         best_transit: Attempt[Commute] | None = None

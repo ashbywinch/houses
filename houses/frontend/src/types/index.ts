@@ -8,6 +8,7 @@ export interface AttemptValue<T> {
 export interface Provenance {
   label: string
   description?: string
+  url?: string
   sources?: Record<string, Provenance>
 }
 
@@ -113,6 +114,7 @@ export interface PropertyDetail {
   rightmove_price: AttemptValue<MoneyValue>
   rightmove_bedrooms: AttemptValue<string>
   postcode: AttemptValue<string>
+  town_name?: AttemptValue<string>
   location: {
     best_location: AttemptValue<GeoPoint>
     geocode: AttemptValue<GeoPoint>
