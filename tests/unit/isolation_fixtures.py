@@ -31,11 +31,13 @@ def _sqlite_memory():
     to the real ``data/houses.db``.
     """
     saved = per._get_db
+    per.testing = True
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
     per._get_db = lambda: conn
     per.init_db()
     yield
+    per.testing = False
     per._get_db = saved
 
 from houses.services import _reset_settings_cache

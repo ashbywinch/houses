@@ -18,6 +18,7 @@ from pydantic import TypeAdapter
 from houses.config import settings
 
 DB_PATH: Path | None = None
+testing: bool = False
 
 
 class DagJSONEncoder(json.JSONEncoder):
@@ -29,11 +30,18 @@ class DagJSONEncoder(json.JSONEncoder):
         return super().default(o)
 
 
-
 def _get_db() -> sqlite3.Connection:
     global DB_PATH
     if DB_PATH is None:
         DB_PATH = Path(settings.sqlite_path)
+
+    if testing:
+        raise RuntimeError(
+            f"Refusing to open production DB at {DB_PATH} — test fixture "
+            "should have replaced _get_db with an in-memory connection. "
+            "Did a direct import bypass the replacement?"
+        )
+
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
