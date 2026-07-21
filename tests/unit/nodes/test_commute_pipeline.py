@@ -299,10 +299,13 @@ class TestFullCommutePipeline:
         )
         get_services().rail_fare_registry = registry
         svc = get_services()
-        svc.financial_source.push({
-            "petrol_mpg": 45,
-            "petrol_cost_per_litre": 1.45,
-        }, "test")
+        svc.financial_source.push(
+            {
+                "petrol_mpg": 45,
+                "petrol_cost_per_litre": 1.45,
+            },
+            "test",
+        )
         poi_src = UserInputNode[str]("poi_mh", str)
         poi_src.push("RG12 8YA", "persons_source")
         loc = UserInputNode[GeoPoint]("loc_mh", GeoPoint)
@@ -395,6 +398,7 @@ class TestFullCommutePipeline:
 
         # Inspect provenance of each node in the chain
         import json
+
         for label, node in [
             ("park_and_ride", park_and_ride),
             ("petrol_cost", petrol_cost),
@@ -404,7 +408,7 @@ class TestFullCommutePipeline:
             j = await node.to_json()
             print(f"\n=== {label} ===")
             print(f"  status={j.get('status')}")
-            if j.get('value'):
+            if j.get("value"):
                 print(f"  daily_cost={j['value'].get('daily_cost')}")
                 print(f"  mode={j['value'].get('mode')}")
             print(f"  provenance={json.dumps(j.get('provenance', {}), indent=2, default=str)[:500]}")
@@ -418,3 +422,104 @@ class TestFullCommutePipeline:
         # NR fare: (£12.60 + £2.80 TfL tube) × 2 = £30.80
         # Total: £10.00 + £1.46 + £30.80 = £42.26
         assert float(val.daily_cost.amount) == 42.26, f"expected £42.26, got £{val.daily_cost.amount}"
+
+    @pytest.mark.asyncio
+    async def test_drive_only_gets_fuel_cost(self):
+        """A drive-only commute (no transit) gets fuel cost from final_fuel."""
+        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
+        from houses.nodes.park_and_ride import ParkAndRideAugmentNode
+        from houses.nodes.petrol import PetrolCostAugmentNode
+        from houses.nodes.transit import TransitNode
+        from houses.services_provider import get_services
+
+        svc = get_services()
+        svc.financial_source.push(
+            {
+                "petrol_mpg": 45,
+                "petrol_cost_per_litre": 1.45,
+            },
+            "test",
+        )
+        loc = UserInputNode[GeoPoint]("loc_dr", GeoPoint)
+        loc.push(GeoPoint(51.518, -0.722), "test")
+        poi_src = UserInputNode[str]("poi_dr", str)
+        poi_src.push("RG12 8YA", "persons_source")
+        pc_src = UserInputNode[str]("pc_dr", str)
+        pc_src.push("RG12 8YA", "test")
+
+        # Canned drive route — Bracknell is non-London so get_commute()
+        # returns this drive option.
+        drive = Commute(
+            person=Person(name="Simon", has_car=True),
+            label="Office",
+            destination=PlaceOfInterest("Office", "RG12 8YA"),
+            duration=Quantity(40, "minute"),
+            daily_cost=Money("0", "GBP"),
+            mode="drive",
+            details=(
+                CostGroup(
+                    legs=(JourneyLeg(mode=LegMode.DRIVE, duration_minutes=40, distance_km=32.0),),
+                    cost=None,
+                ),
+            ),
+        )
+        svc.commute_router.routes["RG12 8YA"] = drive
+
+        transit_node = TransitNode(
+            "test/dr/computed_transit",
+            best_location=loc,
+            poi=poi_src,
+            has_car=True,
+            max_walk=30,
+        )
+        park_and_ride = ParkAndRideAugmentNode(
+            "test/dr/park_and_ride",
+            transit_node=transit_node,
+            best_location=loc,
+            postcode_node=pc_src,
+            has_car=True,
+            max_walk=30,
+        )
+        bus_dummy = commute_input_node("test/dr/bus_dummy")
+        rf_dummy = commute_input_node("test/dr/rf_dummy")
+        from dag.if_then_else import IfThenElseNode
+        def _noop(): return False
+        bus_if = IfThenElseNode(
+            "test/dr/bus_if", Commute | None,
+            condition_sources=(), condition_fn=_noop, then_branch=bus_dummy,
+        )
+        rf_if = IfThenElseNode(
+            "test/dr/rf_if", Commute | None,
+            condition_sources=(), condition_fn=_noop, then_branch=rf_dummy,
+        )
+        selector = CommuteSelectorNode(
+            "test/dr/commute",
+            origin=loc,
+            poi=poi_src,
+            transit_result=park_and_ride,
+            bus_result=bus_if,
+            rail_fare_result=rf_if,
+            is_child=False,
+        )
+        final_fuel = PetrolCostAugmentNode(
+            "test/dr/final_fuel",
+            commute_node=selector,
+            financial_source=svc.financial_source,
+        )
+
+        await flush_processor()
+        await flush_processor()
+
+        a = await final_fuel.attempt()
+        assert a.succeeded, f"got {a.status}: {a.error}"
+        val = a.value_or_none()
+        assert val is not None
+        assert val.mode == "drive"
+        assert float(val.daily_cost.amount) > 0, (
+            f"Drive-only commute should have fuel cost > 0, got £{val.daily_cost.amount}"
+        )
+        # Validate is_child flag in serialization
+        j = await final_fuel.to_json()
+        assert j.get("is_child") is not None
+        jv = await final_fuel.to_json_value()
+        assert jv.get("is_child") is not None
