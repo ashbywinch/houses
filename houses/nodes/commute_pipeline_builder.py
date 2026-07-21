@@ -96,6 +96,15 @@ def build_commute_pipeline(prop) -> None:
                 commute_node=park_and_ride,
                 financial_source=prop._svc.financial_source,
             )
+
+            # Separate PetrolCostAugmentNode for the raw drive path so
+            # drive-only commutes (where transit is unavailable) always
+            # have fuel cost.
+            drive_fuel = PetrolCostAugmentNode(
+                f"{prop.rid}/{key}/drive_fuel",
+                commute_node=drive_node,
+                financial_source=prop._svc.financial_source,
+            )
  
 
             walk_check = WalkLegCheckNode(
@@ -169,9 +178,9 @@ def build_commute_pipeline(prop) -> None:
                 f"{prop.rid}/{key}/commute",
                 origin=prop.best_location,
                 poi=poi_src,
+                drive_result=drive_fuel,
                 walk_result=walk_node,
                 transit_result=petrol_cost,
-                drive_result=drive_node,
                 bus_result=bus_if,
                 rail_fare_result=rail_fare_result,
                 is_child=is_child,
