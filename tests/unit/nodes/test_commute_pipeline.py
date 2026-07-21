@@ -483,14 +483,23 @@ class TestFullCommutePipeline:
         bus_dummy = commute_input_node("test/dr/bus_dummy")
         rf_dummy = commute_input_node("test/dr/rf_dummy")
         from dag.if_then_else import IfThenElseNode
-        def _noop(): return False
+
+        def _noop():
+            return False
+
         bus_if = IfThenElseNode(
-            "test/dr/bus_if", Commute | None,
-            condition_sources=(), condition_fn=_noop, then_branch=bus_dummy,
+            "test/dr/bus_if",
+            Commute | None,
+            condition_sources=(),
+            condition_fn=_noop,
+            then_branch=bus_dummy,
         )
         rf_if = IfThenElseNode(
-            "test/dr/rf_if", Commute | None,
-            condition_sources=(), condition_fn=_noop, then_branch=rf_dummy,
+            "test/dr/rf_if",
+            Commute | None,
+            condition_sources=(),
+            condition_fn=_noop,
+            then_branch=rf_dummy,
         )
         selector = CommuteSelectorNode(
             "test/dr/commute",

@@ -496,8 +496,9 @@ class TflClient:
         """Parse TfL response legs into CostGroup objects.
 
         Walking legs before/after transit and between transit lines
-        are boring (no cost). Transit legs are grouped by operator
-        (typically one TfL CostGroup covers all transit legs).
+        are boring (no cost).  Transit legs are grouped by the fare
+        structure in the API response — if ``fare.fares`` provides
+        separate costs per mode, each mode gets its own CostGroup.
         """
         journeys = data.get("journeys", [])
         if not journeys:
@@ -507,8 +508,15 @@ class TflClient:
         if not tfl_legs:
             return []
 
+        fare = best.get("fare", {})
+        fare_fares: list[dict] = fare.get("fares", []) if fare else []
+        modes_with_fares: set[str] = {f.get("mode") for f in fare_fares if f.get("cost")}
+        if fare and fare.get("totalCost") is not None:
+            round(fare["totalCost"] / 100.0 * 2, 2)
+
         groups: list[CostGroup] = []
         current_legs: list[JourneyLeg] = []
+        current_mode: str | None = None
         in_transit = False
 
         parsed = TflClient._parse_tfl_legs(tfl_legs)
@@ -517,20 +525,33 @@ class TflClient:
             if mode_name == "walking":
                 if in_transit:
                     current_legs.append(jl)
-                else:
-                    groups.append(CostGroup(legs=(jl,)))
-            else:
-                if not in_transit and current_legs:
-                    groups.append(CostGroup(legs=tuple(current_legs)))
-                    current_legs = []
-                in_transit = True
-                current_legs.append(jl)
+                    continue
+                groups.append(CostGroup(legs=(jl,)))
+                continue
+
+            # Transit leg — check if we need a new CostGroup
+            if current_mode is not None and current_mode != mode_name and (modes_with_fares or in_transit):
+                groups.append(
+                    CostGroup(
+                        legs=tuple(current_legs),
+                        operator="TfL",
+                    )
+                )
+                current_legs = []
+
+            if not in_transit and current_legs:
+                groups.append(CostGroup(legs=tuple(current_legs)))
+                current_legs = []
+            in_transit = True
+            current_mode = mode_name
+            current_legs.append(jl)
 
         if current_legs:
-            fare = best.get("fare", {})
-            cost = None
-            if fare and fare.get("totalCost") is not None:
-                cost = round(fare["totalCost"] / 100.0 * 2, 2)
-            groups.append(CostGroup(legs=tuple(current_legs), operator="TfL", cost=cost))
+            groups.append(
+                CostGroup(
+                    legs=tuple(current_legs),
+                    operator="TfL",
+                )
+            )
 
         return groups

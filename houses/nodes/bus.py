@@ -28,11 +28,31 @@ class BusLegAugmentNode(DerivedNode[Commute]):
 
     def compute(self, transit: Attempt, walk_check: Attempt, route: Attempt, fare: Attempt) -> Attempt[Commute]:
         if transit.succeeded:
-            # Pass through the Commute object directly — IfThenElseNode expects Commute type
             val = transit.value_or_none()
-            if isinstance(val, Commute):
-                return Attempt.succeeded(val)
-            return transit
+            if not isinstance(val, Commute):
+                return transit
+            # Apply BODS fare to bus CostGroups
+            fr = fare.value_or_none() if fare.succeeded else {}
+            new_details = list(val.details or ())
+            changed = False
+            from dataclasses import replace
+
+            from money import Money
+
+            for i, cg in enumerate(new_details):
+                bus_legs = [leg for leg in cg.legs if leg.mode.name == "BUS"]
+                if not bus_legs:
+                    continue
+                stop_name = bus_legs[0].start_station
+                stop_data = (fr or {}).get(stop_name, {})
+                bus_fare = stop_data.get("single_fare") if isinstance(stop_data, dict) else None
+                if bus_fare is not None:
+                    new_details[i] = replace(cg, cost=Money(str(bus_fare), "GBP"))
+                    changed = True
+            if changed:
+                new_commute = replace(val, details=tuple(new_details))
+                return Attempt.succeeded(new_commute)
+            return Attempt.succeeded(val)
         if not walk_check.succeeded or not route.succeeded:
             return self._impossible({"walk_leg_check_node": walk_check, "bus_route_node": route})
         return Attempt.impossible("no transit or bus route")

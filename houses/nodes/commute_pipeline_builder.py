@@ -90,8 +90,6 @@ def build_commute_pipeline(prop) -> None:
                 has_car=p_info.has_car,
                 max_walk=p_info.bus_walk_penalty_minutes,
             )
- 
- 
 
             walk_check = WalkLegCheckNode(
                 f"{prop.rid}/{key}/walk_check",

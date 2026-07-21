@@ -80,6 +80,7 @@ class UserInputNode(Node[T], Generic[T]):
         # Non-numeric RIDs like "exp/" or "big_0/" are test data that
         # must not enter the production DB.
         import dag.persistence as _per
+
         if not _per.testing and "/" in node_id:
             rid = node_id.split("/")[0]
             if not rid.isdigit():

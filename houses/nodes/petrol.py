@@ -51,6 +51,16 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         drive_legs = [leg for cg in val.details for leg in cg.legs if leg.mode == LegMode.DRIVE]
         if not drive_legs:
             return commute
+        import logging
+
+        logging.getLogger().setLevel(logging.DEBUG)
+        logger = logging.getLogger(__name__)
+        logger.debug(
+            "PETROL_DEBUG: %d drive legs, total_min=%d, distances=%s",
+            len(drive_legs),
+            sum(leg.duration_minutes for leg in drive_legs),
+            [leg.distance_km for leg in drive_legs],
+        )
 
         # Get settings from financial source (user-editable)
         fin = financial.value_or_none() if (financial and financial.succeeded) else {}
