@@ -95,6 +95,7 @@ class TestSlot:
         del owner
         import gc
         gc.collect()
+        sig.emit()  # should not crash
 
         # Dead Slot was removed
         assert len(sig._handlers) == 0
