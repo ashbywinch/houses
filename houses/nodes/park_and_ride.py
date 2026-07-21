@@ -136,7 +136,7 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
             if has_transit:
                 new_first_cg = replace(new_first_cg, cost=existing_cost)
 
-        new_details = (new_first_cg, new_parking_group)
+        new_details = (new_first_cg, new_parking_group) + commute.details[1:]
         # Recalculate duration from replaced legs
         new_duration = Quantity(
             sum(leg.duration_minutes for cg in new_details for leg in cg.legs),
