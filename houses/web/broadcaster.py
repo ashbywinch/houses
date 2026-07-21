@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 _broadcast_queue: asyncio.Queue[str] = asyncio.Queue()
 _websocket_clients: set[WebSocket] = set()
+
+
 def _reset():
     """Reset broadcast queue and websocket clients for test isolation."""
     global _broadcast_queue
@@ -55,6 +57,7 @@ async def _push_node_update(node) -> None:
             dead.append(ws)
     for ws in dead:
         _websocket_clients.discard(ws)
+
 
 def push_rid(rid: str) -> None:
     """Push a property RID to the broadcast queue (add/delete events only)."""

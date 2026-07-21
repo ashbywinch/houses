@@ -46,11 +46,12 @@ async def check():
             if isinstance(val, dict):
                 print(f"    duration={val.get('duration')}")
 
-    for name in ['rightmove_address', 'best_address', 'best_location', 'postcode']:
+    for name in ["rightmove_address", "best_address", "best_location", "postcode"]:
         node = getattr(prop, name, None)
         if node:
             a = await node.attempt()
             print(f"  {name:25s} status={a.status:12s}")
+
 
 asyncio.run(check())
 

@@ -69,7 +69,7 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
             # Estimate distance: 48 km/h average speed, round trip
             round_trip_km = (total_drive_min / 60.0) * 48.0 * 2
 
-        # Fuel calculation using pint for proper Imperial gallon → litre conversion
+        # Fuel calculation using pint for proper Imperial gallon -> litre conversion
         # 1 imperial gallon = 4.54609 litres; US gallon is 3.78541 litres
         fuel_volume = (Quantity(round_trip_km, "km") / Quantity(mpg, "mile / imperial_gallon")).to("liter")
         fuel_cost_amount = round(float(fuel_volume.magnitude) * cost_per_litre, 2)
@@ -82,6 +82,7 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
 
         # Attribute fuel cost to the drive CostGroup(s)
         from dataclasses import replace as _replace_cg
+
         new_details = list(val.details)
         for i, cg in enumerate(new_details):
             has_drive = any(leg.mode == LegMode.DRIVE for leg in cg.legs)

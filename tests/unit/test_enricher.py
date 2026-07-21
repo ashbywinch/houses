@@ -14,12 +14,14 @@ from money import Money
 from pint import Quantity
 
 from dag.attempt import Attempt
-from dag.derived_node import DerivedNode, flush_processor
+from dag.derived_node import DerivedNode
 from dag.if_then_else import IfThenElseNode
+from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
-from houses.transit_route import _apply_park_and_ride_to_journeys, _format_route_summary
+from houses.tfl_client import TflClient
+from houses.transit_route import _apply_park_and_ride_to_journeys
 
 # ======================================================================
 # DAG-based commute computation (replaces old houses.enricher tests)
@@ -236,14 +238,18 @@ class TestCommuteSelectorPipeline:
         from houses.model.domain import Person, PlaceOfInterest
 
         n = UserInputNode[Commute]("_dummy", Commute)
-        n.push(Commute(
-            person=Person(name="", has_car=False),
-            label="",
-            destination=PlaceOfInterest(label="", postcode=""),
-            duration=Quantity(999, "minute"),
-            daily_cost=Money("0", "GBP"),
-        ), "default")
+        n.push(
+            Commute(
+                person=Person(name="", has_car=False),
+                label="",
+                destination=PlaceOfInterest(label="", postcode=""),
+                duration=Quantity(999, "minute"),
+                daily_cost=Money("0", "GBP"),
+            ),
+            "default",
+        )
         return n
+
     """CommuteSelectorNode — picks transit, falls back to bus, or raises impossible."""
 
     @pytest.mark.asyncio
@@ -456,7 +462,7 @@ class TestCommuteBreakdown:
     @pytest.mark.asyncio
     async def test_yearly_formula_with_all_costs(self):
         """46wk x (15 + 10 + 2x24) = 46 x 73 = 3358"""
-        from houses.nodes.monthly_costs import CommuteBreakdownNode
+        from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 
         so = UserInputNode[Commute]("cbd_so1", Commute)
         sb = UserInputNode[Commute]("cbd_sb1", Commute)
@@ -511,7 +517,7 @@ class TestCommuteBreakdown:
     @pytest.mark.asyncio
     async def test_missing_cost_means_partial_total(self):
         """When some costs are present, total includes only those."""
-        from houses.nodes.monthly_costs import CommuteBreakdownNode
+        from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 
         so = UserInputNode[Commute]("cbd_so2", Commute)
         sb = UserInputNode[Commute]("cbd_sb2", Commute)
@@ -575,7 +581,7 @@ class TestCommuteBreakdown:
     @pytest.mark.asyncio
     async def test_returns_defaults_when_no_commutes(self):
         """All commute selectors empty → yearly_total is 0.0."""
-        from houses.nodes.monthly_costs import CommuteBreakdownNode
+        from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 
         persons = UserInputNode[list]("cbd_ps2", list)
 
@@ -596,7 +602,7 @@ class TestCommuteBreakdown:
     @pytest.mark.asyncio
     async def test_missing_commute_does_not_crash(self):
         """When some commute selectors are impossible, node still succeeds."""
-        from houses.nodes.monthly_costs import CommuteBreakdownNode
+        from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 
         so = UserInputNode[Commute]("cbd_so3", Commute)
         sb = UserInputNode[Commute]("cbd_sb3", Commute)
@@ -758,7 +764,7 @@ class TestParkAndRide:
         data = copy.deepcopy(self.LONG_WALK_DATA)
         result = await _apply_park_and_ride_to_journeys(data, "SL6 3YZ", max_walk_minutes=20, _drive_fn=self._drive_10)
         best = min(result["journeys"], key=lambda j: j.get("duration", 9999))
-        summary = _format_route_summary(best)
+        summary = TflClient._format_route_summary(best)
         assert "Drive to Maidenhead (10m)" in summary
         assert "Train to Paddington (20m)" in summary
         assert "walk 7m" in summary

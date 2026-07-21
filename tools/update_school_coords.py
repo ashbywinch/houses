@@ -122,6 +122,7 @@ async def main() -> None:
         if col not in fieldnames:
             fieldnames.append(col)
 
+    total = len(rows)
     skipped = far_away = done = failed = 0
 
     logger.info("Processing %d schools...", total)
@@ -166,8 +167,9 @@ async def main() -> None:
 
         if (i + 1) % 100 == 0:
             _atomic_write(rows, fieldnames)
-            logger.info("  Progress: %d/%d (done=%d skipped=%d far=%d failed=%d)",
-                        i + 1, total, done, skipped, far_away, failed)
+            logger.info(
+                "  Progress: %d/%d (done=%d skipped=%d far=%d failed=%d)", i + 1, total, done, skipped, far_away, failed
+            )
 
         await asyncio.sleep(0.15)
 
@@ -175,8 +177,7 @@ async def main() -> None:
     # (clearing bad coords) must be persisted even if all geocodes failed.
     _atomic_write(rows, fieldnames)
 
-    logger.info("Complete: done=%d skipped=%d far=%d failed=%d / %d total",
-                done, skipped, far_away, failed, total)
+    logger.info("Complete: done=%d skipped=%d far=%d failed=%d / %d total", done, skipped, far_away, failed, total)
 
 
 if __name__ == "__main__":

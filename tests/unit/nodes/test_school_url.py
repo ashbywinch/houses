@@ -41,25 +41,28 @@ async def test_school_location_node_returns_geopoint():
 
     async def fake_find(*a, **kw):
         from dag.attempt import Attempt
-        return Attempt.succeeded(School(
-            urn="103578",
-            name="Pimlico Primary",
-            phase="Primary",
-            gender=SchoolGender.MIXED,
-            type_of_establishment="Community School",
-            postcode="SW1V 2QQ",
-            website="",
-            ofsted_rating="Outstanding",
-            inspection_year="2023",
-            coords=GeoPoint(51.488, -0.138),
-            statutory_low_age=None,
-            statutory_high_age=None,
-        ))
+
+        return Attempt.succeeded(
+            School(
+                urn="103578",
+                name="Pimlico Primary",
+                phase="Primary",
+                gender=SchoolGender.MIXED,
+                type_of_establishment="Community School",
+                postcode="SW1V 2QQ",
+                website="",
+                ofsted_rating="Outstanding",
+                inspection_year="2023",
+                coords=GeoPoint(51.488, -0.138),
+                statutory_low_age=None,
+                statutory_high_age=None,
+            )
+        )
 
     svc = make_services(school_lookup=type("FS", (), {"find_nearest": fake_find})())
     token = _sp.set(svc)
     try:
-        from dag.derived_node import flush_processor
+        from dag.scheduler import flush_processor
 
         await flush_processor()
         await flush_processor()
@@ -92,24 +95,28 @@ async def test_school_node_output_has_url():
 
     async def fake_find2(*a, **kw):
         from dag.attempt import Attempt
-        return Attempt.succeeded(School(
-            urn="123456",
-            name="Test School",
-            phase="primary",
-            gender=SchoolGender.BOYS,
-            type_of_establishment="community school",
-            postcode="SW1V 2QQ",
-            website="",
-            ofsted_rating="Good",
-            inspection_year="2022",
-            coords=GeoPoint(51.5, -0.37),
-            statutory_low_age=None,
-            statutory_high_age=None,
-        ))
+
+        return Attempt.succeeded(
+            School(
+                urn="123456",
+                name="Test School",
+                phase="primary",
+                gender=SchoolGender.BOYS,
+                type_of_establishment="community school",
+                postcode="SW1V 2QQ",
+                website="",
+                ofsted_rating="Good",
+                inspection_year="2022",
+                coords=GeoPoint(51.5, -0.37),
+                statutory_low_age=None,
+                statutory_high_age=None,
+            )
+        )
+
     svc = make_services(school_lookup=type("FS", (), {"find_nearest": fake_find2})())
     token = _sp.set(svc)
     try:
-        from dag.derived_node import flush_processor
+        from dag.scheduler import flush_processor
 
         await flush_processor()
         await flush_processor()

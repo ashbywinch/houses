@@ -21,6 +21,7 @@ class WalkabilityNode(DerivedNode[dict]):
 
     def _is_transient_error(self, exc: Exception) -> bool:
         from houses.helpers import is_transient_error as _ite
+
         return _ite(exc)
 
     async def build_provenance(self):
@@ -46,6 +47,7 @@ class NearestTownNode(DerivedNode[str]):
 
     def _is_transient_error(self, exc: Exception) -> bool:
         from houses.helpers import is_transient_error as _ite
+
         return _ite(exc)
 
     async def build_provenance(self):
@@ -80,6 +82,7 @@ class TownDescNode(DerivedNode[dict]):
 
     def _is_transient_error(self, exc: Exception) -> bool:
         from houses.helpers import is_transient_error as _ite
+
         return _ite(exc)
 
     async def build_provenance(self):

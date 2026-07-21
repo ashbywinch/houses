@@ -17,7 +17,7 @@ from pint import Quantity
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, PlaceOfInterest
 from houses.stations import Station, StationRegistry
-from houses.transit_route import FALLBACK_TUBE_SINGLE_GBP, get_tube_leg_fare
+from houses.tfl_client import TflClient
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,6 @@ class RailFareRegistry:
         """Look up a station by CRS code."""
         return self._station_registry.find_by_crs(crs)
 
-
     def find_station(self, name: str) -> Station | None:
         """Look up a station by name (suffix- and case-insensitive).
 
@@ -85,6 +84,7 @@ class RailFareRegistry:
         like " Rail Station", " Station", etc.
         """
         return self._station_registry.find(name)
+
     def fare_between(self, origin: Station, destination: Station) -> Money | None:
         """Return the single fare between two stations.
 
@@ -95,7 +95,6 @@ class RailFareRegistry:
         if not self._fares_by_pair:
             return None
         return self._fares_by_pair.get(frozenset({origin.crs, destination.crs}))
-
 
 
 async def enrich_single_rail_fare(
@@ -124,14 +123,14 @@ async def enrich_single_rail_fare(
     from houses.rail_fare_registry import get_rail_fare_registry
 
     registry = _registry or get_rail_fare_registry()
-    tube_fare_fn = _tube_fare_fn or get_tube_leg_fare
+    tube_fare_fn = _tube_fare_fn or TflClient.get_tube_leg_fare
 
     fare = registry.fare_between(origin_station, dest_station)
     if fare is None:
         return None
 
     tube_fare = await tube_fare_fn(dest_station, destination_postcode)
-    tube_single = tube_fare or Money(FALLBACK_TUBE_SINGLE_GBP, "GBP")
+    tube_single = tube_fare or Money(TflClient.FALLBACK_TUBE_SINGLE_GBP, "GBP")
     rail_cost = (fare + tube_single) * 2
 
     total = rail_cost + parking_cost if parking_cost is not None else rail_cost

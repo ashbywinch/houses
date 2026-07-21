@@ -30,9 +30,7 @@ def migrate_node_results(db_path: str | Path) -> int:
     conn.row_factory = sqlite3.Row
     migrated = 0
 
-    rows = conn.execute(
-        "SELECT id, node_id, result_json FROM node_results"
-    ).fetchall()
+    rows = conn.execute("SELECT id, node_id, result_json FROM node_results").fetchall()
 
     for row in rows:
         node_id: str = row["node_id"]

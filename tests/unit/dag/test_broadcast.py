@@ -4,6 +4,7 @@ User-visible contract: during initial DAG processing, the server must NOT
 send WebSocket messages for every node refresh.  Broadcasts are only for
 property-level events (add/delete) triggered via ``push_rid``.
 """
+
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -11,7 +12,8 @@ from unittest.mock import patch
 import pytest
 
 from dag.attempt import Attempt
-from dag.derived_node import AsyncQueueScheduler, DerivedNode, flush_processor, set_scheduler
+from dag.derived_node import DerivedNode
+from dag.scheduler import AsyncQueueScheduler, flush_processor, set_scheduler
 from dag.user_input_node import UserInputNode
 
 
@@ -39,7 +41,6 @@ async def test_after_refresh_does_not_broadcast():
     import houses.web.broadcaster as bcast
 
     with patch.object(bcast, "_push_node_update") as mock_push_node:
-
         # The _after_refresh callback after processing should do nothing
         sched = _get_async_queue_scheduler()
         sched.after_refresh(node)
@@ -51,8 +52,9 @@ async def test_after_refresh_does_not_broadcast():
 
 
 def _get_async_queue_scheduler():
-    from dag.derived_node import AsyncQueueScheduler as _AsyncQS
-    from dag.derived_node import _get_scheduler
+    from dag.scheduler import AsyncQueueScheduler as _AsyncQS
+    from dag.scheduler import _get_scheduler
+
     s = _get_scheduler()
     assert isinstance(s, _AsyncQS)
     return s

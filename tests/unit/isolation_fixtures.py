@@ -13,7 +13,7 @@ import sqlite3
 import pytest
 
 import dag.persistence as per
-from dag.derived_node import AsyncQueueScheduler, set_scheduler
+from dag.scheduler import AsyncQueueScheduler, set_scheduler
 
 
 @pytest.fixture(autouse=True)
@@ -39,6 +39,7 @@ def _sqlite_memory():
     yield
     per.testing = False
     per._get_db = saved
+
 
 from houses.council_tax import _reset as _reset_council_tax  # noqa: E402
 from houses.property_registry import _reset as _reset_property_registry  # noqa: E402

@@ -16,6 +16,7 @@ def _fresh_db():
     import sqlite3
 
     import dag.persistence as per
+
     saved = per._get_db
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -23,12 +24,19 @@ def _fresh_db():
     per.init_db()
     yield
     per._get_db = saved
+
+
 def _clear():
     _registry.clear()
+
+
 def _mock():
     from houses.services_provider import _request_services as _sp
+
     token = _sp.set(make_services())
     _sp.reset(token)
+
+
 @pytest.mark.asyncio
 async def test_detail_includes_stamp_duty():
     """Property detail must include stamp_duty in affordability."""
@@ -39,7 +47,8 @@ async def test_detail_includes_stamp_duty():
     prop.rightmove_bedrooms.push("3", "Rightmove")
     prop.rightmove_price.push(Money("795000", "GBP"), "Rightmove")
     prop.rightmove_location.push(GeoPoint(51.5, -0.1), "Rightmove map")
-    from dag.derived_node import flush_processor
+    from dag.scheduler import flush_processor
+
     await flush_processor()
     register_property(rid, prop)
     detail = await prop.to_json_detail()

@@ -63,7 +63,7 @@ class TestCouncilTaxNode:
             addr.push("1 High Street, Egham, TW20 9JP", "test")
             pc.push("TW20 9JP", "test")
 
-            from dag.derived_node import flush_processor
+            from dag.scheduler import flush_processor
 
             await flush_processor()
 
@@ -102,7 +102,7 @@ class TestNearestTownNode:
 
     @pytest.mark.asyncio
     async def test_returns_town_name(self):
-        from dag.derived_node import flush_processor
+        from dag.scheduler import flush_processor
         from houses.geo import GeoPoint
         from houses.nodes.area import NearestTownNode
 
@@ -130,7 +130,7 @@ class TestTownDescNode:
 
     @pytest.mark.asyncio
     async def test_prefers_address_town_over_nearest(self):
-        from dag.derived_node import flush_processor
+        from dag.scheduler import flush_processor
         from houses.geo import GeoPoint
         from houses.nodes.area import TownDescNode
         from houses.services_provider import _request_services as _sp
@@ -168,7 +168,7 @@ class TestTownDescNode:
 
     @pytest.mark.asyncio
     async def test_falls_back_to_nearest_when_address_has_no_town(self):
-        from dag.derived_node import flush_processor
+        from dag.scheduler import flush_processor
         from houses.geo import GeoPoint
         from houses.nodes.area import TownDescNode
         from houses.services_provider import _request_services as _sp
@@ -275,7 +275,7 @@ class TestParkAndRideAugmentNode:
         """35min walk, max_walk=20 — walk replaced with drive, parking added."""
         from money import Money
 
-        from dag.derived_node import flush_processor
+        from dag.scheduler import flush_processor
         from houses.geo import GeoPoint
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
@@ -300,10 +300,14 @@ class TestParkAndRideAugmentNode:
             assert a.succeeded, f"Expected succeeded, got {a.error}"
             val = a.value_or_none()
             assert val is not None
+            # First CG: drive leg (replaced walk)
             assert val.details[0].legs[0].mode.name == "DRIVE"
             assert val.details[0].legs[0].duration_minutes == 10
-            assert len(val.details) == 2
+            # Second CG: parking
             assert val.details[1].legs[0].mode.name == "PARK"
+            # Third CG: remaining transit legs (train from original first CG)
+            assert val.details[2].legs[0].mode.name == "TRAIN"
+            # daily_cost = original cost (£12.50) + parking (£9.00) = £21.50
             expected_cost = Money("21.50", "GBP")
             assert float(val.daily_cost.amount) == float(expected_cost.amount)
         finally:
@@ -316,7 +320,7 @@ class TestParkAndRideAugmentNode:
         from money import Money
         from pint import Quantity
 
-        from dag.derived_node import flush_processor
+        from dag.scheduler import flush_processor
         from houses.car_park import CarPark, CarParkRegistry
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.geo import GeoPoint
@@ -349,7 +353,8 @@ class TestParkAndRideAugmentNode:
             # Production _build_cost_groups shape: walk before transit in its own CG
             walk_cg = CostGroup(
                 legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=39, end_station="Woking Rail Station"),),
-                cost=None, operator="",
+                cost=None,
+                operator="",
             )
             transit_cg = CostGroup(
                 legs=(
@@ -358,7 +363,8 @@ class TestParkAndRideAugmentNode:
                     JourneyLeg(mode=LegMode.TUBE, duration_minutes=3),
                     JourneyLeg(mode=LegMode.WALK, duration_minutes=7),
                 ),
-                cost=Money("12.50", "GBP"), operator="TfL",
+                cost=Money("12.50", "GBP"),
+                operator="TfL",
             )
             commute = Commute(
                 person=Person(name="", has_car=True, is_child=False),
@@ -398,9 +404,7 @@ class TestParkAndRideAugmentNode:
             assert val.details[2].legs[0].mode.name == "TRAIN"
 
             # Duration must sum ALL legs, not just the drive leg
-            total_legs = sum(
-                leg.duration_minutes for cg in val.details for leg in cg.legs
-            )
+            total_legs = sum(leg.duration_minutes for cg in val.details for leg in cg.legs)
             assert int(val.duration.magnitude) == total_legs, (
                 f"duration {int(val.duration.magnitude)} != sum of legs {total_legs}"
             )
@@ -410,7 +414,7 @@ class TestParkAndRideAugmentNode:
     @pytest.mark.asyncio
     async def test_skips_short_walk(self):
         """10min walk, max_walk=20 — walk stays as walk, no parking."""
-        from dag.derived_node import flush_processor
+        from dag.scheduler import flush_processor
         from houses.geo import GeoPoint
 
         transit = UserInputNode[Commute]("pr_sw", Commute)
@@ -437,7 +441,7 @@ class TestParkAndRideAugmentNode:
         from money import Money
         from pint import Quantity
 
-        from dag.derived_node import flush_processor
+        from dag.scheduler import flush_processor
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.geo import GeoPoint
 
@@ -471,7 +475,7 @@ class TestParkAndRideAugmentNode:
     @pytest.mark.asyncio
     async def test_skips_when_drive_lookup_fails(self):
         """Drive lookup fails (returns None) — walk stays as walk."""
-        from dag.derived_node import flush_processor
+        from dag.scheduler import flush_processor
         from houses.geo import GeoPoint
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
@@ -504,7 +508,7 @@ class TestParkAndRideAugmentNode:
     @pytest.mark.asyncio
     async def test_format_includes_drive_in_route_after_park_and_ride(self):
         """Provenance description mentions parking after park-and-ride."""
-        from dag.derived_node import flush_processor
+        from dag.scheduler import flush_processor
         from houses.geo import GeoPoint
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
@@ -531,6 +535,8 @@ class TestParkAndRideAugmentNode:
             assert "parking" in prov.description.lower()
         finally:
             _sp.reset(token)
+
+
 class TestTransitCostAttribution:
     """Park-and-ride should attribute costs to transit legs, not just parking."""
 
@@ -574,8 +580,12 @@ class TestTransitCostAttribution:
             transit.push(c, "test")
 
             node = ParkAndRideAugmentNode(
-                "t_cta_pr", transit_node=transit, best_location=loc, postcode_node=pc,
-                has_car=True, max_walk=20,
+                "t_cta_pr",
+                transit_node=transit,
+                best_location=loc,
+                postcode_node=pc,
+                has_car=True,
+                max_walk=20,
             )
 
             # Call refresh directly — no global queue dependency
@@ -588,10 +598,7 @@ class TestTransitCostAttribution:
             assert result.daily_cost is not None
             assert float(result.daily_cost.amount) == 21.50, f"Expected 21.50, got {result.daily_cost}"
 
-            train_groups = [
-                cg for cg in result.details
-                if any(leg.mode == LegMode.TRAIN for leg in cg.legs)
-            ]
+            train_groups = [cg for cg in result.details if any(leg.mode == LegMode.TRAIN for leg in cg.legs)]
             assert len(train_groups) > 0
 
             train_group = train_groups[0]
@@ -648,8 +655,12 @@ class TestTransitCostAttribution:
             transit.push(c, "test")
 
             node = ParkAndRideAugmentNode(
-                "t_cta_zero_pr", transit_node=transit, best_location=loc, postcode_node=pc,
-                has_car=True, max_walk=20,
+                "t_cta_zero_pr",
+                transit_node=transit,
+                best_location=loc,
+                postcode_node=pc,
+                has_car=True,
+                max_walk=20,
             )
 
             await node.refresh()
@@ -660,10 +671,7 @@ class TestTransitCostAttribution:
             # daily_cost = 0 (existing) + parking
             assert float(result.daily_cost.amount) > 0, f"Expected >0, got {result.daily_cost}"
 
-            train_groups = [
-                cg for cg in result.details
-                if any(leg.mode == LegMode.TRAIN for leg in cg.legs)
-            ]
+            train_groups = [cg for cg in result.details if any(leg.mode == LegMode.TRAIN for leg in cg.legs)]
             assert len(train_groups) > 0
 
             train_group = train_groups[0]

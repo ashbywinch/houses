@@ -8,9 +8,12 @@ from houses.config import settings
 logger = logging.getLogger(__name__)
 
 _town_cache: dict[str, str] = {}
+
+
 def _reset():
     """Clear the town description cache for test isolation."""
     _town_cache.clear()
+
 
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 

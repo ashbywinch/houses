@@ -4,6 +4,7 @@ User-visible contract: when the server restarts, all previously computed
 commutes must appear as ``succeeded`` (not ``pending``) because they are
 loaded from the persisted DAG node result cache.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -11,7 +12,8 @@ from money import Money
 from pint import Quantity
 
 from dag.attempt import Attempt
-from dag.derived_node import DerivedNode, flush_processor
+from dag.derived_node import DerivedNode
+from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.model.domain import Commute, Person, PlaceOfInterest
 

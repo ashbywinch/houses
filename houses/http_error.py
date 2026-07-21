@@ -64,3 +64,8 @@ def _status_phrase(code: int) -> str:
         502: "Bad Gateway",
         503: "Service Unavailable",
     }.get(code, "")
+
+
+def is_transient_http_error(http_code: int) -> bool:
+    """Return True if the HTTP code indicates a transient failure worth retrying."""
+    return http_code in (429, 502, 503, 504)

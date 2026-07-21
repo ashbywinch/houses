@@ -10,13 +10,15 @@ This test reproduces that failure mode:
 2. Create a fresh node with the same ID
 3. The node MUST load without crashing and report the value correctly
 """
+
 from __future__ import annotations
 
 import pytest
 
 from dag.attempt import Attempt
-from dag.derived_node import DerivedNode, flush_processor
+from dag.derived_node import DerivedNode
 from dag.persistence import save_node_result
+from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 
 
@@ -55,6 +57,4 @@ async def test_money_node_loads_old_float_value():
 
     # The value should have been loaded — either as the original float
     # (if loading is tolerant) or as a migrated Money.
-    assert a.succeeded or a.pending, (
-        f"Node should load without crashing. Got {a.status}: {a.error}"
-    )
+    assert a.succeeded or a.pending, f"Node should load without crashing. Got {a.status}: {a.error}"

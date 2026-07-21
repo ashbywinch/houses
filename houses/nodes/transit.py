@@ -13,9 +13,13 @@ from dag.node import Node
 from houses.commute import LegMode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
+from houses.routing import CommuteRouter
 from houses.services_provider import get_services
 
 logger = logging.getLogger(__name__)
+# Module-level router for Google Routes and congestion zone lookups.
+_router = CommuteRouter()
+# Module-level router for Google Routes and congestion zone lookups.
 
 
 @dataclass(frozen=True)
@@ -126,11 +130,7 @@ class WalkNode(DerivedNode[Commute]):
         self.display_name = "Walk"
         self._max_walk = max_walk
 
-    async def compute(
-        self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]
-    ) -> Attempt[Commute]:
-        from houses.routing import _google_route_commute
-
+    async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
         loc = location.value_or_none()
         poi_val = poi.value_or_none()
         if loc is None or not poi_val:
@@ -138,7 +138,7 @@ class WalkNode(DerivedNode[Commute]):
         dest = poi_val.postcode if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
             return Attempt.impossible("empty destination")
-        return await _google_route_commute(loc, dest, "WALK", self._max_walk)
+        return await _router._google_route_commute(loc, dest, "WALK", self._max_walk)
 
 
 class DriveNode(DerivedNode[Commute]):
@@ -153,11 +153,7 @@ class DriveNode(DerivedNode[Commute]):
         self.display_name = "Drive"
         self._has_car = has_car
 
-    async def compute(
-        self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]
-    ) -> Attempt[Commute]:
-        from houses.routing import _google_route_commute, _in_congestion_zone
-
+    async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
         if not self._has_car:
             return Attempt.impossible("no car available")
         loc = location.value_or_none()
@@ -167,9 +163,9 @@ class DriveNode(DerivedNode[Commute]):
         dest = poi_val.postcode if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
             return Attempt.impossible("empty destination")
-        if _in_congestion_zone(dest):
+        if CommuteRouter._in_congestion_zone(dest):
             return Attempt.impossible("destination in congestion zone")
-        return await _google_route_commute(loc, dest, "DRIVE")
+        return await _router._google_route_commute(loc, dest, "DRIVE")
 
 
 class TransitNode(DerivedNode[Commute]):
@@ -192,7 +188,9 @@ class TransitNode(DerivedNode[Commute]):
 
     def _is_transient_error(self, exc: Exception) -> bool:
         from houses.helpers import is_transient_error as _ite
+
         return _ite(exc)
+
     async def compute(
         self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest], best_address: Attempt[str] = None
     ) -> Attempt[Commute]:

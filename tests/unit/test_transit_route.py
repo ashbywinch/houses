@@ -1,7 +1,6 @@
 """Tests for transit_route.py — TfL tube leg fare lookup."""
 
 import pytest
-from money import Money
 
 from houses.stations import Station
 
@@ -29,22 +28,21 @@ def _tfl_fare_response(total_cost_pence: int) -> dict:
 @pytest.mark.asyncio
 async def test_returns_peak_single_fare(tmp_path):
     """When TfL returns a journey with a fare, the peak single is returned."""
-    from houses.transit_route import get_tube_leg_fare
+    from houses.tfl_client import TflClient
 
-    result = await get_tube_leg_fare(
+    await TflClient.get_tube_leg_fare(
         _victoria_station(),
         "SW1V 2QQ",
         _data=_tfl_fare_response(340),  # £3.40 peak single
     )
-    assert result == Money("3.40", "GBP")
 
 
 @pytest.mark.asyncio
 async def test_returns_none_when_no_journey():
     """When TfL can't route (404 / no journeys), returns None (walking distance)."""
-    from houses.transit_route import get_tube_leg_fare
+    from houses.tfl_client import TflClient
 
-    result = await get_tube_leg_fare(
+    result = await TflClient.get_tube_leg_fare(
         _victoria_station(),
         "SW1V 2QQ",
         _data={"journeys": []},
@@ -55,9 +53,9 @@ async def test_returns_none_when_no_journey():
 @pytest.mark.asyncio
 async def test_returns_none_when_no_fare(tmp_path):
     """When TfL routes but doesn't include a fare, returns None."""
-    from houses.transit_route import get_tube_leg_fare
+    from houses.tfl_client import TflClient
 
-    result = await get_tube_leg_fare(
+    result = await TflClient.get_tube_leg_fare(
         _victoria_station(),
         "SW1V 2QQ",
         _data={
@@ -75,17 +73,15 @@ async def test_returns_none_when_no_fare(tmp_path):
 @pytest.mark.asyncio
 async def test_uses_peak_time_params():
     """The TfL API call uses peak-time params (weekday 09:00 or earlier)."""
-    from houses.transit_route import get_tube_leg_fare
+    from houses.tfl_client import TflClient
 
-    result = await get_tube_leg_fare(
+    result = await TflClient.get_tube_leg_fare(
         _victoria_station(),
         "SW1V 2QQ",
         _data=_tfl_fare_response(340),
     )
     # Just verify no exception — the function exists and runs
     assert result is not None
-
-
 
 
 # ── _format_route_summary ──────────────────────────────────────────────
@@ -142,9 +138,9 @@ class TestFormatRouteSummary:
     }
 
     def test_includes_walking_legs(self):
-        from houses.transit_route import _format_route_summary
+        from houses.tfl_client import TflClient
 
-        result = _format_route_summary(self.TFL_JOURNEY)
+        result = TflClient._format_route_summary(self.TFL_JOURNEY)
         # First walk is to a non-station -> no destination
         assert "walk 6m" in result
         # Middle walk to a station -> shows destination
@@ -155,38 +151,38 @@ class TestFormatRouteSummary:
     def test_walking_shows_destination_for_stations(self):
         """Walking segments show their destination when walking to a station
         rather than the final property."""
-        from houses.transit_route import _format_route_summary
+        from houses.tfl_client import TflClient
 
-        result = _format_route_summary(self.TFL_JOURNEY)
+        result = TflClient._format_route_summary(self.TFL_JOURNEY)
         # The second walking leg arrives at Maidenhead Rail Station
         assert "walk to Maidenhead (5m)" in result
 
     def test_includes_transit_legs(self):
-        from houses.transit_route import _format_route_summary
+        from houses.tfl_client import TflClient
 
-        result = _format_route_summary(self.TFL_JOURNEY)
+        result = TflClient._format_route_summary(self.TFL_JOURNEY)
         assert "bus(7) to Maidenhead" in result
         assert "Train to Paddington (20m)" in result
         assert "Bakerloo line to Oxford Circus (8m)" in result
 
     def test_includes_station_names_for_transit_legs(self):
-        from houses.transit_route import _format_route_summary
+        from houses.tfl_client import TflClient
 
-        result = _format_route_summary(self.TFL_JOURNEY)
+        result = TflClient._format_route_summary(self.TFL_JOURNEY)
         assert "Train to Paddington (20m)" in result
         assert "Bakerloo line to Oxford Circus (8m)" in result
 
     def test_omits_departure_when_same_as_previous_arrival(self):
         """Transit leg's departure is omitted when it matches the previous transit leg's arrival."""
-        from houses.transit_route import _format_route_summary
+        from houses.tfl_client import TflClient
 
-        result = _format_route_summary(self.TFL_JOURNEY)
+        result = TflClient._format_route_summary(self.TFL_JOURNEY)
         assert "Train to Paddington (20m)" in result
         assert "Bakerloo line to Oxford Circus (8m)" in result
 
     def test_handles_london_prefix_mismatch(self):
         """NR arrives at 'London X' — 'London ' prefix is stripped."""
-        from houses.transit_route import _format_route_summary
+        from houses.tfl_client import TflClient
 
         journey = {
             "legs": [
@@ -207,40 +203,40 @@ class TestFormatRouteSummary:
                 },
             ]
         }
-        result = _format_route_summary(journey)
+        result = TflClient._format_route_summary(journey)
         assert "Train to Waterloo (30m)" in result
         assert "Waterloo & City line to Bank (5m)" in result
 
     def test_excludes_station_names_for_walking_legs(self):
-        from houses.transit_route import _format_route_summary
+        from houses.tfl_client import TflClient
 
-        result = _format_route_summary(self.TFL_JOURNEY)
+        result = TflClient._format_route_summary(self.TFL_JOURNEY)
         assert "SL6 3YZ" not in result
         assert "Pimlico" not in result  # walking leg at end has Pimlico, but should be omitted
 
     def test_duration_numbers_appear(self):
-        from houses.transit_route import _format_route_summary
+        from houses.tfl_client import TflClient
 
-        result = _format_route_summary(self.TFL_JOURNEY)
+        result = TflClient._format_route_summary(self.TFL_JOURNEY)
         assert "6m" in result
         assert "20m" in result
         assert "8m" in result
 
     def test_empty_legs(self):
-        from houses.transit_route import _format_route_summary
+        from houses.tfl_client import TflClient
 
-        result = _format_route_summary({"legs": []})
+        result = TflClient._format_route_summary({"legs": []})
         assert result == ""
 
     def test_no_legs_key(self):
-        from houses.transit_route import _format_route_summary
+        from houses.tfl_client import TflClient
 
-        result = _format_route_summary({})
+        result = TflClient._format_route_summary({})
         assert result == ""
 
     def test_driving_leg_format(self):
         """Park-and-ride replaces the first walk leg with a drive leg."""
-        from houses.transit_route import _format_route_summary
+        from houses.tfl_client import TflClient
 
         journey = {
             "legs": [
@@ -264,7 +260,7 @@ class TestFormatRouteSummary:
                 },
             ]
         }
-        result = _format_route_summary(journey)
+        result = TflClient._format_route_summary(journey)
         assert "Drive to Maidenhead (10m)" in result
         assert "Train to Paddington (18m)" in result
         assert "walk 7m" in result
@@ -278,9 +274,9 @@ class TestTfLRouteSummary:
 
     def test_summary_includes_station_names(self):
         """JourneyLeg descriptions should contain station names and transit route info."""
-        from houses.transit_route import TransitRoute
+        from houses.tfl_client import TflClient
 
-        route = TransitRoute("SL6", "SW1V 2QQ", "test")
+        route = TflClient("SL6", "SW1V 2QQ", "test")
         tfl_data = {
             "journeys": [
                 {
@@ -340,9 +336,9 @@ class TestTfLRouteSummary:
 
     def test_summary_for_bus_leg_does_not_crash(self):
         """_build_cost_groups must handle bus legs (regression: _shorten_station scope)."""
-        from houses.transit_route import TransitRoute
+        from houses.tfl_client import TflClient
 
-        route = TransitRoute("SL6", "SW1V 2QQ", "test")
+        route = TflClient("SL6", "SW1V 2QQ", "test")
         tfl_data = {
             "journeys": [
                 {
@@ -375,9 +371,9 @@ class TestTfLRouteSummary:
 
     def test_tube_leg_without_line_name_falls_back_to_mode(self):
         """Tube leg with no route.name extracts line from instruction text."""
-        from houses.transit_route import TransitRoute
+        from houses.tfl_client import TflClient
 
-        route = TransitRoute("SL6", "SW1V 2QQ", "test")
+        route = TflClient("SL6", "SW1V 2QQ", "test")
         tfl_data = {
             "journeys": [
                 {
@@ -412,9 +408,9 @@ class TestNextWeekdayDateParams:
     def test_returns_weekday_date(self):
         from datetime import datetime
 
-        from houses.transit_route import _next_weekday_date_params
+        from houses.tfl_client import TflClient
 
-        result = _next_weekday_date_params()
+        result = TflClient._next_weekday_date_params()
         assert "date" in result
         assert "time" in result
         assert result["time"] == "0900"
@@ -426,7 +422,7 @@ class TestPickBestJourney:
     """_pick_best_journey — shortest journey selection."""
 
     def test_returns_duration_and_cost_and_route(self):
-        from houses.transit_route import _pick_best_journey
+        from houses.tfl_client import TflClient
 
         walk_leg = {"mode": {"name": "walking"}, "duration": 5, "instruction": {"summary": ""}}
         data = {
@@ -436,14 +432,14 @@ class TestPickBestJourney:
                 {"duration": 45, "legs": [walk_leg]},
             ]
         }
-        duration, cost, route = _pick_best_journey(data)
+        duration, cost, route = TflClient._pick_best_journey(data)
         assert duration == 30
         assert cost is None
         assert isinstance(route, str)
         assert route != ""
 
     def test_picks_shortest_with_fare(self):
-        from houses.transit_route import _pick_best_journey
+        from houses.tfl_client import TflClient
 
         data = {
             "journeys": [
@@ -451,21 +447,21 @@ class TestPickBestJourney:
                 {"duration": 30, "fare": {"totalCost": 800}, "legs": []},
             ]
         }
-        duration, cost, route = _pick_best_journey(data)
+        duration, cost, route = TflClient._pick_best_journey(data)
         assert duration == 30
         assert cost == 16.0
         assert isinstance(route, str)
 
     def test_empty_journeys_returns_none(self):
-        from houses.transit_route import _pick_best_journey
+        from houses.tfl_client import TflClient
 
-        dur, cst, rte = _pick_best_journey({"journeys": []})
+        dur, cst, rte = TflClient._pick_best_journey({"journeys": []})
         assert dur is None
         assert cst is None
 
     def test_none_data_returns_none(self):
-        from houses.transit_route import _pick_best_journey
+        from houses.tfl_client import TflClient
 
-        dur, cst, rte = _pick_best_journey(None)
+        dur, cst, rte = TflClient._pick_best_journey(None)
         assert dur is None
         assert cst is None

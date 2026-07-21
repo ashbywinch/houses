@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from dag.derived_node import flush_processor
+from dag.scheduler import flush_processor
 from houses.nodes.bootstrap import bootstrap_from_row
 from houses.nodes.property import PropertyNodes
 from houses.property_registry import register_property
@@ -36,6 +36,7 @@ def _mock(monkeypatch):
     from dag.attempt import Attempt
     from houses.model.domain import Commute, Person, PlaceOfInterest
     from houses.services_provider import _request_services as _sp
+
     svc = make_services()
     token = _sp.set(svc)
 
@@ -52,7 +53,7 @@ def _mock(monkeypatch):
         return Attempt.succeeded(canned)
 
     svc.commute_router.route = fake_route
-    monkeypatch.setattr("houses.routing._google_route_commute", fake_route)
+    monkeypatch.setattr("houses.routing.CommuteRouter._google_route_commute", fake_route)
 
     yield
     _sp.reset(token)

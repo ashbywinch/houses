@@ -25,10 +25,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-ODS_URL = (
-    "https://assets.publishing.service.gov.uk/media/"
-    "69e8ab2d9ca985145673b826/Band_D_2026-27.ods"
-)
+ODS_URL = "https://assets.publishing.service.gov.uk/media/69e8ab2d9ca985145673b826/Band_D_2026-27.ods"
 OUTPUT_PATH = Path("data/council_tax_rates.csv")
 
 # Billing authority classes that set council tax for individual properties

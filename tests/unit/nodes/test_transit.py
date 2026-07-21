@@ -4,7 +4,7 @@ import pytest
 from money import Money
 from pint import Quantity
 
-from dag.derived_node import flush_processor
+from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
@@ -78,7 +78,6 @@ class TestTransitNodeJson:
         assert j["impossible"] is False
         assert j["status"] == "pending"
 
-
     @pytest.mark.asyncio
     async def test_provenance_includes_input_values(self):
         """When a transit commute fails, the provenance should include the
@@ -110,13 +109,11 @@ class TestTransitNodeJson:
         # Check the POI source includes its value (the postcode)
         poi_source = sources.get("poi_ti", {})
         assert "value" in poi_source, (
-            f"POI provenance should include 'value' with the postcode. "
-            f"Got keys: {list(poi_source.keys())}"
+            f"POI provenance should include 'value' with the postcode. Got keys: {list(poi_source.keys())}"
         )
 
         # Check the location source includes its value (the GeoPoint)
         loc_source = sources.get("loc_ti", {})
         assert "value" in loc_source, (
-            f"Location provenance should include 'value' with the GeoPoint. "
-            f"Got keys: {list(loc_source.keys())}"
+            f"Location provenance should include 'value' with the GeoPoint. Got keys: {list(loc_source.keys())}"
         )

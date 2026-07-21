@@ -128,6 +128,7 @@ class School:
             coords=coords,
             _postcode_centroid=original,
         )
+
     def accepts_any(self, acceptable: tuple[SchoolGender, ...]) -> bool:
         """Check if this school's gender is in the acceptable set."""
         if self.gender == SchoolGender.UNKNOWN:

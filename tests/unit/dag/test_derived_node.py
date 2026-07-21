@@ -3,8 +3,9 @@ from __future__ import annotations
 import pytest
 
 from dag.attempt import Attempt, Provenance
-from dag.derived_node import DerivedNode, flush_processor
+from dag.derived_node import DerivedNode
 from dag.persistence import latest_node_result
+from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 
 
@@ -91,6 +92,7 @@ class TestDerivedNode:
     @pytest.mark.asyncio
     async def test_impossible_when_dep_fails(self):
         """When a dep returns Attempt.impossible, the derived node should also be impossible."""
+
         # A node that returns impossible
         class _FailingNode(DerivedNode[int]):
             def __init__(self):
@@ -108,10 +110,10 @@ class TestDerivedNode:
         a = await doubler.attempt()
         assert a.impossible is True
 
-
     @pytest.mark.asyncio
     async def test_impossible_dep_preserves_provenance(self):
         """The impossible-dep short-circuit must preserve provenance, not hardcode empty."""
+
         class _FailingNode(DerivedNode[int]):
             def __init__(self):
                 super().__init__("fail_prov_src", int, ())
@@ -144,6 +146,7 @@ class TestDerivedNode:
         assert stored is not None
         prov = stored.get("provenance", {})
         assert prov.get("label") == "my_custom_label", f"Expected custom provenance label in persisted data, got {prov}"
+
     @pytest.mark.asyncio
     async def test_to_json(self):
         src = UserInputNode[int]("src", int)

@@ -16,8 +16,8 @@ from money import Money
 from pint import Quantity
 
 from dag.attempt import Attempt
-from dag.derived_node import flush_processor
 from dag.if_then_else import IfThenElseNode
+from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.car_park import CarPark
 from houses.commute import CostGroup, JourneyLeg, LegMode
@@ -192,11 +192,11 @@ class TestFullCommutePipeline:
 
         from houses.nodes.commute import (
             CommuteSelectorNode,
-            RailFareNode,
             _bus_condition,
             _needs_rail_fare,
             commute_input_node,
         )
+        from houses.nodes.rail_fare_node import RailFareNode
         from houses.nodes.transit import TransitNode, WalkLegCheckNode
         from houses.services_provider import get_services
 
@@ -260,7 +260,7 @@ class TestFullCommutePipeline:
 
         get_services().commute_router.routes["SW1V 2QQ"] = _pimlico_commute()
 
-        with patch("houses.transit_route.get_tube_leg_fare", return_value=None):
+        with patch("houses.tfl_client.TflClient.get_tube_leg_fare", return_value=None):
             await flush_processor()
             await flush_processor()
 
@@ -279,13 +279,13 @@ class TestFullCommutePipeline:
 
         from houses.nodes.commute import (
             CommuteSelectorNode,
-            RailFareNode,
             _bus_condition,
             _needs_rail_fare,
             commute_input_node,
         )
         from houses.nodes.park_and_ride import ParkAndRideAugmentNode
         from houses.nodes.petrol import PetrolCostAugmentNode
+        from houses.nodes.rail_fare_node import RailFareNode
         from houses.nodes.transit import TransitNode, WalkLegCheckNode
         from houses.services_provider import get_services
 
@@ -298,9 +298,11 @@ class TestFullCommutePipeline:
             fares={frozenset({"MAI", "LON"}): Money("12.60", "GBP")},
         )
         get_services().rail_fare_registry = registry
-        # Set fuel cost so PetrolCostAugmentNode passes through
         svc = get_services()
-        svc.financial_source.push({"fuel_cost_per_mile": 0.15}, "test")
+        svc.financial_source.push({
+            "petrol_mpg": 45,
+            "petrol_cost_per_litre": 1.45,
+        }, "test")
         poi_src = UserInputNode[str]("poi_mh", str)
         poi_src.push("RG12 8YA", "persons_source")
         loc = UserInputNode[GeoPoint]("loc_mh", GeoPoint)
@@ -324,10 +326,12 @@ class TestFullCommutePipeline:
             postcode_node=postcode,
             has_car=True,
             max_walk=10,
-            station_registry=_FakeStationRegistry([
-                Station("Maidenhead Rail Station", "MAI", GeoPoint(51.518, -0.722)),
-                Station("London Paddington", "PAD", GeoPoint(51.515, -0.176)),
-            ]),
+            station_registry=_FakeStationRegistry(
+                [
+                    Station("Maidenhead Rail Station", "MAI", GeoPoint(51.518, -0.722)),
+                    Station("London Paddington", "PAD", GeoPoint(51.515, -0.176)),
+                ]
+            ),
             car_park_registry=_FakeCarParkRegistry(
                 CarPark(name="Test Car Park", daily_cost=Money("10.00", "GBP")),
             ),
@@ -385,15 +389,32 @@ class TestFullCommutePipeline:
 
         svc.commute_router.routes["RG12 8YA"] = _maidenhead_commute()
 
-        with patch("houses.transit_route.get_tube_leg_fare", return_value=None):
+        with patch("houses.tfl_client.TflClient.get_tube_leg_fare", return_value=None):
             await flush_processor()
             await flush_processor()
 
+        # Inspect provenance of each node in the chain
+        import json
+        for label, node in [
+            ("park_and_ride", park_and_ride),
+            ("petrol_cost", petrol_cost),
+            ("rail_fare", rail_fare_node),
+            ("rail_fare_if", rail_fare_if),
+        ]:
+            j = await node.to_json()
+            print(f"\n=== {label} ===")
+            print(f"  status={j.get('status')}")
+            if j.get('value'):
+                print(f"  daily_cost={j['value'].get('daily_cost')}")
+                print(f"  mode={j['value'].get('mode')}")
+            print(f"  provenance={json.dumps(j.get('provenance', {}), indent=2, default=str)[:500]}")
         a = await selector.attempt()
         assert a.succeeded, f"got {a.status}: {a.error}"
         val = a.value_or_none()
         assert val is not None
         # Park-and-ride adds £10.00 parking (from fake CarParkRegistry)
+        # Park-and-ride drive leg: 10 min @ 48 km/h × 2 (return) = 16 km
+        # Fuel: 16 km / (45 mpg × 1.609 km/mile) × £1.45/l = £1.46
         # NR fare: (£12.60 + £2.80 TfL tube) × 2 = £30.80
-        # Total: £10.00 + £30.80 = £40.80
-        assert float(val.daily_cost.amount) == 40.80, f"expected £40.80, got £{val.daily_cost.amount}"
+        # Total: £10.00 + £1.46 + £30.80 = £42.26
+        assert float(val.daily_cost.amount) == 42.26, f"expected £42.26, got £{val.daily_cost.amount}"

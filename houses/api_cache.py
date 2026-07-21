@@ -145,8 +145,13 @@ class CachingTransport(httpx.AsyncBaseTransport):
             if response.is_success:
                 set_cached(request.method, url_path, params, body, data)
             else:
-                set_cached(request.method, url_path, params, body,
-                           {"_cached_status": response.status_code, "_cached_body": data})
+                set_cached(
+                    request.method,
+                    url_path,
+                    params,
+                    body,
+                    {"_cached_status": response.status_code, "_cached_body": data},
+                )
         except Exception:
             pass
         return response

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from dag.derived_node import flush_processor
+from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 

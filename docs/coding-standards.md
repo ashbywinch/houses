@@ -9,25 +9,17 @@ Read both. If they conflict, this file takes precedence.
 houses/
 ├── server.py              # FastAPI app, endpoints, enrichment orchestration
 ├── enrichment_runner.py   # Enrichment coordination (commute, schools, etc.)
-├── model/                 # DAG — universal data model
-│   ├── __init__.py        # Core types: NodeKind, NodeDef, NodeResult, PropertyData
-│   ├── registry.py        # node() decorator, NODES dict
-│   ├── rightmove.py       # RightmoveProperty domain: rightmove_* nodes
-│   ├── property.py        # Property domain: best_*, corrected_*, precise_* nodes
-│   ├── geo.py             # GeoPoint helpers (serialize_gp, is_single_property_address)
-│   ├── resolver.py        # Topo sort, staleness, resolve_property
-│   └── persistence.py     # SQLite CRUD (source_values, user_*, derived_values)
+├── dag/                   # DAG library (DerivedNode, UserInputNode, Attempt, signals)
+├── nodes/                 # DAG node definitions
 ├── web/                   # Presentation
-│   ├── router.py          # HTTP route handlers
+│   ├── api_router.py      # API route handlers
 │   ├── card_data.py       # Card view model assembly
-│   └── geo_utils.py       # Postcode-bounds location validation (shared)
+│   └── broadcaster.py     # WebSocket push
 ├── sheets/                # Google Sheets I/O (package: Tab, Row, View, formulas)
 ├── services.py            # DI protocols + Services container (ports + adapters)
 ├── context.py             # ContextVar per-request state
 ├── config.py              # pydantic-settings configuration
 ├── location.py            # Geocoding (postcodes.io, ORS, Google, Nominatim)
-├── services.py            # DI protocols + Services container (ports + adapters)
-├── endpoint_client.py     # Reusable API client with Retry-After
 ├── transit_route.py       # TfL API + park-and-ride
 ├── commute.py             # Commute value objects
 ├── bus_journey.py         # Bus fare zone data

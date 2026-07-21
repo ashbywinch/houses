@@ -1,4 +1,5 @@
 """Enforce layer boundaries — dag/ must not import houses/, etc."""
+
 from archunitpython.layers import project_layers
 
 

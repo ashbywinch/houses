@@ -15,7 +15,7 @@ import houses.services_provider as _sp
 from dag.persistence import init_db as init_dag_db
 from houses.config import settings
 from houses.location import extract_postcode, is_outcode
-from houses.nodes.bootstrap import seed_registry_from_sheet
+from houses.nodes.bootstrap import load_property_nodes_from_db, load_property_nodes_from_rows
 from houses.nodes.cutover import push_enriched_property
 from houses.nodes.property import PropertyNodes
 from houses.property import Property
@@ -34,11 +34,13 @@ from houses.web.json_utils import asdict_serializable
 
 logger = logging.getLogger(__name__)
 
+
 def _on_node_refreshed(node):
     """Broadcast per-node update after a genuine value change."""
     import asyncio
 
     from houses.web.broadcaster import _push_node_update
+
     asyncio.create_task(_push_node_update(node))
 
 
@@ -67,23 +69,29 @@ async def lifespan(_app: FastAPI):
     # leaking API keys in the server log
     logging.getLogger("httpx").setLevel(logging.WARNING)
     init_dag_db()
-    from houses.council_tax import _reset as _reset_council_tax
     from houses.property_registry import _reset as _reset_property_registry
     from houses.services import _reset_settings_cache
     from houses.town_desc import _reset as _reset_town_desc
     from houses.web.broadcaster import _reset as _reset_broadcaster
+
     _reset_settings_cache()
     _reset_property_registry()
     _reset_broadcaster()
     _reset_town_desc()
-    _reset_council_tax()
+    from dag.persistence import property_rids
+    from houses.sheets.reader import get_properties_data
 
-    seed_registry_from_sheet()
+    if property_rids():
+        load_property_nodes_from_db()
+    else:
+        # Cold start: seed from the Google Sheet
+        rows = get_properties_data()
+        load_property_nodes_from_rows(rows)
     # Start the background stale-node processor and the WebSocket broadcaster.
     # The processor eagerly recomputes nodes whose dependencies have changed;
     # the broadcaster pushes fresh property summaries to connected clients.
-    from dag.derived_node import set_after_refresh
-    from dag.derived_node import start_processor as _start_processor
+    from dag.scheduler import set_after_refresh
+    from dag.scheduler import start_processor as _start_processor
     from houses.web.broadcaster import _broadcaster as _start_broadcaster
 
     set_after_refresh(_on_node_refreshed)

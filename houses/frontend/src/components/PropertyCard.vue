@@ -3,7 +3,8 @@ import { computed } from 'vue'
 import type { PropertySummary } from '../types'
 import { usePropertiesStore } from '../stores/properties'
 import CommutePill from './CommutePill.vue'
-import { simpleOfsted, ofstedClass } from '../utils/format'
+import { simpleOfsted, ofstedClass, epcClass } from '../formatters/format'
+import { schoolWalkMin } from '../formatters/school'
 
 const store = usePropertiesStore()
 const props = defineProps<{
@@ -43,16 +44,10 @@ const borderClass = computed(() => {
   return 'card__border--active'
 })
 
-// EPC band color class
-function epcClass(band: string | undefined): string {
-  if (!band) return 'epc--muted'
-  const b = band.toUpperCase()
-  if (b === 'A') return 'epc--a'
-  if (b === 'B' || b === 'C') return 'epc--bc'
-  if (b === 'D') return 'epc--d'
-  if (b === 'E') return 'epc--e'
-  if (b === 'F' || b === 'G') return 'epc--fg'
-  return 'epc--muted'
+// EPC badge color class — uses group from format.ts with 'epc--' prefix
+function epcBadgeClass(band: string | undefined): string {
+    const g = epcClass(band)
+    return g ? `epc--${g}` : 'epc--muted'
 }
 
 // Freshness badge — how many days ago the property was added
@@ -108,7 +103,7 @@ function commuteMode(commute: unknown): string | undefined {
   return (val?.mode as string) || undefined
 }
 
-function schoolWalkMin(labelPart: string): number | null {
+function getSchoolWalkMinutes(labelPart: string): number | null {
   if (!props.data.commutes) return null
   for (const [key, v] of Object.entries(props.data.commutes)) {
     if (!key.includes(labelPart)) continue
@@ -187,17 +182,17 @@ async function toggleViewed() {
             <a v-if="data.schools.primary.school.value!.url" :href="data.schools.primary.school.value!.url" target="_blank" class="school__name">{{ data.schools.primary.school.value!.name }}</a>
             <span v-else class="school__name">{{ data.schools.primary.school.value!.name }}</span>
             <span class="pill pill--xs" :class="ofstedClass(data.schools.primary.school.value!.ofsted)">{{ simpleOfsted(data.schools.primary.school.value!.ofsted) }}</span>
-            <span v-if="schoolWalkMin('Primary') !== null" class="pill pill--xs pill--good">{{ schoolWalkMin('Primary') }}m walk</span>
+            <span v-if="getSchoolWalkMinutes('Primary') !== null" class="pill pill--xs pill--good">{{ schoolWalkMin(getSchoolWalkMinutes('Primary')) }}</span>
           </div>
           <div v-if="data.schools?.secondary?.school?.succeeded" class="school-line">
             <a v-if="data.schools.secondary.school.value!.url" :href="data.schools.secondary.school.value!.url" target="_blank" class="school__name">{{ data.schools.secondary.school.value!.name }}</a>
             <span v-else class="school__name">{{ data.schools.secondary.school.value!.name }}</span>
             <span class="pill pill--xs" :class="ofstedClass(data.schools.secondary.school.value!.ofsted)">{{ simpleOfsted(data.schools.secondary.school.value!.ofsted) }}</span>
-            <span v-if="schoolWalkMin('Secondary') !== null" class="pill pill--xs pill--good">{{ schoolWalkMin('Secondary') }}m walk</span>
+            <span v-if="getSchoolWalkMinutes('Secondary') !== null" class="pill pill--xs pill--good">{{ schoolWalkMin(getSchoolWalkMinutes('Secondary')) }}</span>
           </div>
         </div>
         <div class="epc-col">
-          <div v-if="data.epc?.succeeded && data.epc.value?.band" class="epc-badge" :class="epcClass(data.epc.value.band)">
+          <div v-if="data.epc?.succeeded && data.epc.value?.band" class="epc-badge" :class="epcBadgeClass(data.epc.value.band)">
             {{ data.epc.value.band }}
           </div>
         </div>

@@ -75,6 +75,7 @@ class TestSlot:
 
         del owner
         import gc
+
         gc.collect()
         # Owner gone — weakref dies
         assert slot.is_dead()
@@ -94,6 +95,7 @@ class TestSlot:
 
         del owner
         import gc
+
         gc.collect()
         sig.emit()  # should not crash
 

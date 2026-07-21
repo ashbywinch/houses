@@ -51,6 +51,7 @@ def test_enriched_property_defaults() -> None:
 def test_transit_info() -> None:
     from money import Money
     from pint import Quantity
+
     t = Commute(
         person=Person(name="Test", has_car=False),
         label="Test",
@@ -75,6 +76,7 @@ def test_school_defaults() -> None:
 def test_bracknell_commute_defaults() -> None:
     from money import Money
     from pint import Quantity
+
     p = Commute(
         person=Person(name="", has_car=True),
         label="Bracknell",

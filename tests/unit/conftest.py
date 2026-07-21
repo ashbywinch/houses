@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from dag.attempt import Attempt
-from dag.derived_node import flush_processor
+from dag.scheduler import flush_processor
 from houses.api_cache import set_cache_dir
 from houses.config import settings
 from tests.helpers import FakeCommuteRouter, FakeSchoolLookup, make_services
@@ -32,6 +32,7 @@ def flush_all() -> None:
     loop.run_until_complete(flush_processor())
     loop.run_until_complete(flush_processor())
 
+
 def _make_mock_services():
     return make_services(
         commute_router=FakeCommuteRouter(),
@@ -47,10 +48,11 @@ def _mock_google_routes(monkeypatch):
     (not through the commute_router service), so we must mock it
     at the module level for all unit tests.
     """
+
     async def mock_google_routes(*_, **__):
         return Attempt.impossible("mocked — unit test")
 
-    monkeypatch.setattr("houses.routing._google_route_commute", mock_google_routes)
+    monkeypatch.setattr("houses.routing.CommuteRouter._google_route_commute", mock_google_routes)
 
 
 @pytest.fixture(autouse=True)
@@ -93,6 +95,7 @@ def _isolate_settings_sources():
 def _mock_services(_sqlite_memory, _reset_global_state, _isolate_settings_sources):  # noqa: F811
     """Set mock services AFTER in-memory DB and empty settings cache."""
     from houses.services_provider import _request_services as _sp
+
     token = _sp.set(_make_mock_services())
     yield
     _sp.reset(token)

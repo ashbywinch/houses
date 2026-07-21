@@ -22,6 +22,7 @@ class EpcNode(DerivedNode[dict]):
 
     def _is_transient_error(self, exc: Exception) -> bool:
         from houses.helpers import is_transient_error as _ite
+
         return _ite(exc)
 
     async def build_provenance(self):
@@ -50,6 +51,7 @@ class CouncilTaxNode(DerivedNode[dict]):
 
     def _is_transient_error(self, exc: Exception) -> bool:
         from houses.helpers import is_transient_error as _ite
+
         return _ite(exc)
 
     async def build_provenance(self):

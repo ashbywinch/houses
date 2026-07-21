@@ -4,28 +4,18 @@ from typing import Any
 
 from money import Money
 
-from dag.if_then_else import IfThenElseNode
 from dag.signals import Signal, Slot
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
-from houses.model.domain import Commute
 from houses.nodes.area import NearestTownNode, TownDescNode, TownNode, WalkabilityNode
-from houses.nodes.bus import BodsFareNode, BusLegAugmentNode, BusRouteNode
-from houses.nodes.commute import CommuteSelectorNode, _bus_condition, _needs_rail_fare, commute_input_node
 from houses.nodes.epc_node import CouncilTaxNode, EpcNode
 from houses.nodes.geocode import GeocodeNode
 from houses.nodes.location import BestAddressNode, BestLocationNode
-from houses.nodes.monthly_costs import (
-    CommuteBreakdownNode,
-    MonthlyMortgagePaymentNode,
-    StampDutyNode,
-    TotalMonthlyHousingCostNode,
-    YearlySinkingFundNode,
-)
-from houses.nodes.park_and_ride import ParkAndRideAugmentNode
-from houses.nodes.petrol import PetrolCostAugmentNode
-from houses.nodes.schools import PrimarySchoolNode, SchoolLocationNode, SecondarySchoolNode
-from houses.nodes.transit import DriveNode, TransitNode, WalkLegCheckNode, WalkNode
+from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNode
+from houses.nodes.schools import PrimarySchoolNode, SecondarySchoolNode
+from houses.nodes.stamp_duty_node import StampDutyNode
+from houses.nodes.total_monthly_housing_cost_node import TotalMonthlyHousingCostNode
+from houses.nodes.yearly_sinking_fund_node import YearlySinkingFundNode
 from houses.services_provider import get_services
 
 
@@ -37,6 +27,23 @@ class PropertyNodes:
     """
 
     def __init__(self, rid: str) -> None:
+        # Validate RID — must be numeric (unless running in test mode with
+        # an in-memory DB where non-numeric RIDs are acceptable).
+        import dag.persistence as _dag_per
+
+        if not _dag_per.testing and not rid.isdigit():
+            raise ValueError(
+                f"Invalid RID {rid!r} — property RIDs must be numeric (digits 0-9).\n"
+                f"\n"
+                f"This RID contains non-digit characters, which means it is test data\n"
+                f"that was written to the production database by misbehaving agents.\n"
+                f"Do NOT attempt to fix the RID and retry — the underlying\n"
+                f"node_results data is test data that must be removed.\n"
+                f"\n"
+                f"To recover:\n"
+                f"  1. sqlite3 data/houses.db \"DELETE FROM node_results WHERE node_id LIKE '{rid}/%'\"\n"
+                f"  2. Restart the server.\n"
+            )
         self.rid = rid
         self.changed = Signal()
         self._svc = get_services()
@@ -200,162 +207,9 @@ class PropertyNodes:
             node.changed.connect(slot)
 
     def _build_commute_pipeline(self) -> None:
-        self._transit_nodes = []
-        self._bus_augment_nodes = []
-        self.commute_selectors = {}
+        from houses.nodes.commute_pipeline_builder import build_commute_pipeline
 
-        for p_info in self._svc.persons_source._value or []:
-            p_name = p_info.name
-            pois = p_info.places_of_interest
-            for poi in pois:
-                label = poi.label
-                postcode = poi.postcode
-                key = f"{p_name}/{label}"
-
-                is_child = p_info.is_child
-                if is_child:
-                    school_node = (
-                        self.primary_school
-                        if "Primary" in label
-                        else self.secondary_school
-                        if "Secondary" in label
-                        else None
-                    )
-                    if school_node is None:
-                        continue
-                    poi_src = SchoolLocationNode(
-                        f"{self.rid}/{key}/poi",
-                        school_node=school_node,
-                    )
-                else:
-                    poi_src = UserInputNode[str](f"{self.rid}/{key}/poi", str)
-                    if poi_src.latest_attempt().pending:
-                        poi_src.push(postcode, "persons_source")
-
-                walk_node = WalkNode(
-                    f"{self.rid}/{key}/walk",
-                    best_location=self.best_location,
-                    poi=poi_src,
-                    max_walk=p_info.bus_walk_penalty_minutes,
-                )
-
-                drive_node = DriveNode(
-                    f"{self.rid}/{key}/drive",
-                    best_location=self.best_location,
-                    poi=poi_src,
-                    has_car=p_info.has_car,
-                )
-
-                transit_node = TransitNode(
-                    f"{self.rid}/{key}/computed_transit",
-                    best_location=self.best_location,
-                    poi=poi_src,
-                    has_car=p_info.has_car,
-                    max_walk=p_info.bus_walk_penalty_minutes,
-                )
-                self._transit_nodes.append(transit_node)
-
-                park_and_ride = ParkAndRideAugmentNode(
-                    f"{self.rid}/{key}/park_and_ride",
-                    transit_node=transit_node,
-                    best_location=self.best_location,
-                    postcode_node=self.postcode,
-                    has_car=p_info.has_car,
-                    max_walk=p_info.bus_walk_penalty_minutes,
-                )
-
-                petrol_cost = PetrolCostAugmentNode(
-                    f"{self.rid}/{key}/petrol_cost",
-                    commute_node=park_and_ride,
-                    financial_source=self._svc.financial_source,
-                )
-
-                walk_check = WalkLegCheckNode(
-                    f"{self.rid}/{key}/walk_check",
-                    transit_node=transit_node,
-                    max_walk=p_info.bus_walk_penalty_minutes,
-                )
-
-                bus_route = BusRouteNode(
-                    f"{self.rid}/{key}/bus_route",
-                    best_location=self.best_location,
-                    walk_leg_check_node=walk_check,
-                    transit_node=transit_node,
-                )
-
-                bods_fare = BodsFareNode(
-                    f"{self.rid}/{key}/bods_fare",
-                    bus_route_node=bus_route,
-                )
-
-                bus_augment = BusLegAugmentNode(
-                    f"{self.rid}/{key}/bus_augment",
-                    transit_node=transit_node,
-                    walk_leg_check_node=walk_check,
-                    bus_route_node=bus_route,
-                    bods_fare_node=bods_fare,
-                )
-                self._bus_augment_nodes.append(bus_augment)
-
-                # Wrap bus_augment in IfThenElseNode — only active when walk is too long
-                bus_if = IfThenElseNode(
-                    f"{self.rid}/{key}/bus_if",
-                    Commute | None,
-                    condition_sources=(walk_check,),
-                    condition_fn=_bus_condition,
-                    then_branch=bus_augment,
-                )
-
-                # Create a RailFareNode for non-child commutes to apply NR fares
-                rail_fare_node = None
-                if not is_child:
-                    from houses.nodes.commute import RailFareNode
-
-                    rail_fare_node = RailFareNode(
-                        f"{self.rid}/{key}/rail_fare",
-                        transit_result=transit_node,
-                        best_location=self.best_location,
-                    )
-
-                # Wrap rail_fare in IfThenElseNode — only active when NR fare is needed
-                if is_child:
-                    # Children don't get NR fares — dummy IfThenElse that always returns None
-                    _dummy = commute_input_node(f"{self.rid}/{key}/rail_fare_dummy")
-                    rail_fare_result = IfThenElseNode(
-                        f"{self.rid}/{key}/rail_fare_noop",
-                        Commute | None,
-                        condition_sources=(),
-                        condition_fn=lambda: False,
-                        then_branch=_dummy,
-                    )
-                else:
-                    rail_fare_result = IfThenElseNode(
-                        f"{self.rid}/{key}/rail_fare_if",
-                        Commute | None,
-                        condition_sources=(transit_node,),
-                        condition_fn=_needs_rail_fare,
-                        then_branch=rail_fare_node,
-                    )
-
-                selector = CommuteSelectorNode(
-                    f"{self.rid}/{key}/commute",
-                    origin=self.best_location,
-                    poi=poi_src,
-                    walk_result=walk_node,
-                    transit_result=petrol_cost,
-                    drive_result=drive_node,
-                    bus_result=bus_if,
-                    rail_fare_result=rail_fare_result,
-                    is_child=is_child,
-                    max_walk=p_info.bus_walk_penalty_minutes,
-                )
-                self.commute_selectors[key] = selector
-
-        self.commute_breakdown = CommuteBreakdownNode(
-            f"{self.rid}/commute_breakdown",
-            commute_selectors=self.commute_selectors,
-            persons_source=self._svc.persons_source,
-        )
+        build_commute_pipeline(self)
 
     def _on_node_changed(self) -> None:
         self.changed.emit()

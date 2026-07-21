@@ -311,6 +311,7 @@ async def find_station_rate(page, station_name: str) -> float | None:
         lat, lng = None, None
         if csv_path.is_file():
             import csv
+
             with csv_path.open(newline="") as f:
                 for row in csv.DictReader(f):
                     if row.get("stationName", "").strip().lower() == station_name.strip().lower():
@@ -364,38 +365,37 @@ async def main():
     rate_map: dict[str, float | None] = dict(existing)
 
     async with async_playwright() as pw, await pw.chromium.launch(headless=True) as browser:
-            context = await browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
-                    " (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                )
+        context = await browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             )
-            page = await context.new_page()
+        )
+        page = await context.new_page()
 
-            processed = 0
-            for s in stations:
-                crs = s["crs"]
-                name = s["stationName"]
+        processed = 0
+        for s in stations:
+            crs = s["crs"]
+            name = s["stationName"]
 
-                if not args.force and crs in rate_map and rate_map[crs] is not None:
-                    logger.info("Skipping %s (%s) — already have £%.2f", name, crs, rate_map[crs])
-                    continue
+            if not args.force and crs in rate_map and rate_map[crs] is not None:
+                logger.info("Skipping %s (%s) — already have £%.2f", name, crs, rate_map[crs])
+                continue
 
-                logger.info("Processing %s (%s)...", name, crs)
-                if processed > 0:
-                    await asyncio.sleep(REQUEST_DELAY_SECONDS)
-                try:
-                    rate = await find_station_rate(page, name)
-                    rate_map[crs] = rate
-                    if rate is None:
-                        logger.info("  → %s: no rate found", name)
-                except Exception as e:
-                    logger.warning("Failed to process %s (%s): %s", name, crs, e)
-                    rate_map[crs] = None
+            logger.info("Processing %s (%s)...", name, crs)
+            if processed > 0:
+                await asyncio.sleep(REQUEST_DELAY_SECONDS)
+            try:
+                rate = await find_station_rate(page, name)
+                rate_map[crs] = rate
+                if rate is None:
+                    logger.info("  → %s: no rate found", name)
+            except Exception as e:
+                logger.warning("Failed to process %s (%s): %s", name, crs, e)
+                rate_map[crs] = None
 
-                processed += 1
-                if processed % 5 == 0:
-                    write_rates(all_stations, rate_map)
+            processed += 1
+            if processed % 5 == 0:
+                write_rates(all_stations, rate_map)
 
     write_rates(all_stations, rate_map)
     found = sum(1 for v in rate_map.values() if v is not None)

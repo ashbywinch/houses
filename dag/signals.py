@@ -34,10 +34,7 @@ class Signal:
         for handler in list(self._handlers):
             handler()
         # Sweep dead Slot handlers
-        self._handlers = [
-            h for h in self._handlers
-            if not isinstance(h, Slot) or not h.is_dead()
-        ]
+        self._handlers = [h for h in self._handlers if not isinstance(h, Slot) or not h.is_dead()]
 
     def _disconnect(self, handler: Callable) -> None:
         if handler in self._handlers:

@@ -11,7 +11,7 @@ from money import Money
 from pint import Quantity
 
 from dag.attempt import Attempt
-from dag.derived_node import flush_processor
+from dag.scheduler import flush_processor
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.nodes.property import PropertyNodes

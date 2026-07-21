@@ -32,6 +32,7 @@ def _get_adapter(t: type) -> TypeAdapter:
 
 class Node(ABC, Generic[T]):
     """Base class for all DAG nodes."""
+
     def __init__(self, node_id: str, value_type: type[T], source_url: str = "") -> None:
         self._id = node_id
         self._value_type = value_type
@@ -91,9 +92,7 @@ class Node(ABC, Generic[T]):
     def latest_attempt(self) -> Attempt:
         """Synchronous access to the last known attempt.
         Override in subclasses that cache the attempt object."""
-        raise RuntimeError(
-            f"{type(self).__name__} does not support sync attempt access"
-        )
+        raise RuntimeError(f"{type(self).__name__} does not support sync attempt access")
 
     @abstractmethod
     async def attempt(self) -> Attempt[T]:
@@ -111,7 +110,7 @@ class Node(ABC, Generic[T]):
         attempt = await self.attempt()
         result: dict = {
             "status": attempt.status,
-            "value": self._adapter.dump_python(attempt.value, mode='json') if attempt.succeeded else None,
+            "value": self._adapter.dump_python(attempt.value, mode="json") if attempt.succeeded else None,
         }
         result["succeeded"] = attempt.succeeded
         result["pending"] = attempt.pending
@@ -133,7 +132,7 @@ class Node(ABC, Generic[T]):
         attempt = await self.attempt()
         result: dict = {
             "status": attempt.status,
-            "value": self._adapter.dump_python(attempt.value, mode='json') if attempt.succeeded else None,
+            "value": self._adapter.dump_python(attempt.value, mode="json") if attempt.succeeded else None,
         }
         result["succeeded"] = attempt.succeeded
         result["pending"] = attempt.pending
@@ -144,8 +143,7 @@ class Node(ABC, Generic[T]):
             result["source_url"] = self._source_url
         return result
 
-    def _persist(self, result_dict: dict,
-                 dep_timestamps: dict[str, str] | None = None) -> None:
+    def _persist(self, result_dict: dict, dep_timestamps: dict[str, str] | None = None) -> None:
         from dag.persistence import save_node_result
 
         now_str = datetime.now(UTC).isoformat()
@@ -155,8 +153,8 @@ class Node(ABC, Generic[T]):
         self._db_created_at = now_str
         if dep_timestamps is not None:
             self._loaded_dep_timestamps = dep_timestamps
-    def _impossible(self, dep_attempts: dict[str, Attempt[T]],
-                    extra: str = "") -> Attempt[T]:
+
+    def _impossible(self, dep_attempts: dict[str, Attempt[T]], extra: str = "") -> Attempt[T]:
         parts = [self._id]
         if extra:
             parts.append(extra)

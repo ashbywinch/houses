@@ -65,18 +65,6 @@ short string shown as a badge on the detail page.
 The resolver checks staleness: if any dependency has a newer row than when
 this derived node was last computed, it recomputes.
 
-## Node Registry
-
-All nodes are declared in `houses/nodes/` using classes that inherit from
-
-```python
-@node(id="my_value", kind=NodeKind.derived, deps=["dep_a", "dep_b"])
-def my_value(dep_a: str | None, dep_b: str | None):
-    ...
-    return result, "my_provenance"
-```
-
-Node IDs must be unique. Dependencies are referenced by their node ID.
 
 ## Adding a New Node
 

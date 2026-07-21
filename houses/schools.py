@@ -13,17 +13,18 @@ import csv
 import logging
 from pathlib import Path
 
-import houses.routing as _routing
 from dag.attempt import Attempt
 from houses.config import settings
 from houses.geo import GeoPoint
 from houses.location import _geocode_address, geocode
 from houses.model.domain import Commute
+from houses.routing import CommuteRouter
 from houses.school import School
 from houses.school_gender import SchoolGender
 
 logger = logging.getLogger(__name__)
-
+# Module-level CommuteRouter instance for school commute lookups.
+_router = CommuteRouter()
 
 # ---------------------------------------------------------------------------
 # Data loading
@@ -134,9 +135,8 @@ async def compute_school_commute(property_postcode: str, school: School) -> Comm
 
     Delegates to ``get_commute(has_car=False, max_walk_minutes=20)``.
     Returns ``None`` silently — the caller's sheet formatting handles
-    missing commutes.
     """
-    result = await _routing.get_commute(property_postcode, school.postcode, has_car=False, max_walk_minutes=20)
+    result = await _router.get_commute(property_postcode, school.postcode, has_car=False, max_walk_minutes=20)
     if result.impossible:
         logger.debug("School commute for %s → %s: %s", property_postcode, school.postcode, result.error)
     return result.value_or_none()
