@@ -121,17 +121,6 @@ class DerivedNode(Node[T], Generic[T]):
     async def attempt(self) -> Attempt[T]:
         return self._attempt
 
-    @property
-    def _skip_impossible_dep_check(self) -> bool:
-        """Override in subclasses whose compute() handles failed deps gracefully.
-
-        When True, the generic impossible-dep short-circuit in refresh() is
-        skipped, allowing compute() to receive impossible dep attempts and
-        handle them (e.g., IfThenElseNode falls back to else branch,
-        CommuteSelectorNode falls back to bus when transit fails).
-        """
-        return False
-
     def _is_transient_error(self, exc: Exception) -> bool:
         """Override in subclasses to identify retryable errors.
 
@@ -177,24 +166,6 @@ class DerivedNode(Node[T], Generic[T]):
         dep_attempts = [await dep.attempt() for dep in active_deps]
         if any(a.pending for a in dep_attempts):
             return
-        if not self._skip_impossible_dep_check:
-            impossible_deps = [a for a in dep_attempts if a.impossible]
-            if impossible_deps:
-                errors = "; ".join(a.error or "unknown" for a in impossible_deps)
-                self._attempt = Attempt.impossible(f"dep failed: {errors}")
-                self._computed_at = datetime.now(UTC)
-                self._retry_at = None  # dep is permanently gone, cancel retry
-                dep_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
-                result_dict = {
-                    "status": "impossible",
-                    "value": None,
-                    "error": f"dep failed: {errors}",
-                    "provenance": await self._build_provenance_dict(),
-                }
-                self._persist(result_dict, dep_timestamps)
-                self.changed.emit()
-                _get_scheduler().after_refresh(self)
-                return
         try:
             result = self.compute(*dep_attempts)
             if iscoroutine(result):
@@ -209,8 +180,13 @@ class DerivedNode(Node[T], Generic[T]):
                 else:
                     result = Attempt.pending()
             else:
-                import traceback
-                result = Attempt.impossible(f"{self._id}: {e}\n{traceback.format_exc()}")
+                impossible_deps = [a for a in dep_attempts if a.impossible]
+                if impossible_deps:
+                    errors = "; ".join(a.error or "unknown" for a in impossible_deps)
+                    result = Attempt.impossible(f"{self._id}: dep failed ({errors})")
+                else:
+                    import traceback
+                    result = Attempt.impossible(f"{self._id}: {e}\n{traceback.format_exc()}")
         # requests before we do sync persist work (json.dumps + SQLite).
         await asyncio.sleep(0)
 

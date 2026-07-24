@@ -142,10 +142,6 @@ class CommuteSelectorNode(DerivedNode[Commute]):
             deps.append(drive_result)
         super().__init__(node_id, Commute, tuple(deps))
 
-    @property
-    def _skip_impossible_dep_check(self) -> bool:
-        """CommuteSelectorNode handles failed deps gracefully (e.g., fall back to bus)."""
-        return True
 
     def _get_active_deps(self) -> tuple[Node, ...]:
         deps = [self.origin, self.poi, self.transit_result]

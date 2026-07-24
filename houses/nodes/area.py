@@ -59,9 +59,6 @@ class TownDescNode(DerivedNode[dict]):
         deps: tuple[Node, ...] = (best_location, nearest_town, town_name, postcode_node)
         super().__init__(node_id, dict, deps)
 
-    @property
-    def _skip_impossible_dep_check(self) -> bool:
-        return True
 
     async def compute(
         self,

@@ -112,10 +112,16 @@ class TestScrapeWithSamplePage:
                 cache_file.unlink()
 
     def test_scrape_offline_returns_none_for_uncached(self):
-        """scrape() returns None for an uncached RID when offline mode is on.
-        The conftest sets offline mode by default; this tests the fail-fast path."""
-        result = asyncio.run(scrape("https://www.rightmove.co.uk/properties/00000000"))
-        assert result is None, f"Expected None, got {result}"
+        """scrape() returns None for an uncached RID when offline mode is on."""
+        from houses.config import settings
+
+        saved = settings.rightmove_scraper_offline
+        settings.rightmove_scraper_offline = True
+        try:
+            result = asyncio.run(scrape("https://www.rightmove.co.uk/properties/00000000"))
+            assert result is None, f"Expected None, got {result}"
+        finally:
+            settings.rightmove_scraper_offline = saved
 
     @pytest.mark.asyncio
     async def test_unknown_url_rid_returns_none(self):
