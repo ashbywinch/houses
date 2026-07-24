@@ -100,7 +100,7 @@ class CostGroup:
 
     legs: tuple[JourneyLeg, ...]
     operator: str = ""
-    cost: Money | float | None = None  # None = free (walking).  Parking CostGroups use Money.
+    cost: Money | None = None  # None = free (walking).  Only Money — never float.
 
     def leg_descriptions(self) -> tuple[str, ...]:
         """Return operator-appropriate descriptions for each leg."""

@@ -16,8 +16,6 @@ from pint import Quantity
 
 from dag.attempt import Attempt
 from houses.api_cache import cached_async_client, get_cached, set_cached
-from houses.bus_fare_reader import get_bus_fare_reader
-from houses.bus_journey import cheapest_round_trip
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.geo import GeoPoint
@@ -111,16 +109,9 @@ class CommuteRouter:
     )
     _OUTCODE_RE = re.compile(r"^[A-Z]{1,2}[0-9][A-Z0-9]?")
 
-    _SENTINEL = object()  # sentinel for _bus_alternative default
-
-    def __init__(self, bus_fare_reader=None) -> None:
-        """Initialise the router.
-
-        ``bus_fare_reader`` — optional override for the bus fare lookup
-        (used in tests).  When ``None``, the global ``get_bus_fare_reader()``
-        is used.
-        """
-        self._bus_fare_reader = bus_fare_reader
+    def __init__(self) -> None:
+        """Initialise the router."""
+        pass
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -229,29 +220,6 @@ class CommuteRouter:
             except (ValueError, TypeError):
                 pass
         return {"address": loc}
-
-    def _bus_fare_for(
-        self,
-        dep_name: str,
-        arr_name: str,
-        dep_point: dict[str, float] | None = None,
-        arr_point: dict[str, float] | None = None,
-    ) -> Money | None:
-        """Look up daily round-trip bus cost between two stops.
-
-        Delegates to ``BusJourneyRegistry`` which handles direct name match,
-        fuzzy token match, and coordinate-based match (100m radius via spatial
-        index).  No expanding-radius search — the point of taking the bus is
-        to avoid long walks.
-
-        Returns the cost as Money, or ``None`` if no fare is found.
-        """
-        fares_r = self._bus_fare_reader if self._bus_fare_reader is not None else get_bus_fare_reader()
-        fares = fares_r.fares_for_stops(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
-        cheapest = cheapest_round_trip(fares, fares_r.national_max_single)
-        if cheapest is not None:
-            return Money(str(round(cheapest.amount, 2)), "GBP")
-        return None
 
     # ------------------------------------------------------------------
     # Walking — Google Routes walking mode
@@ -388,7 +356,6 @@ class CommuteRouter:
             dest_postcode,
             label,
             park_and_ride=has_car,
-            fare_lookup=self._bus_fare_for,
         ).plan()
 
         # When the traveler has a car, park-and-ride is preferred over bus.
@@ -413,165 +380,9 @@ class CommuteRouter:
         no_bus_val = no_bus.value_or(empty)
         with_bus_val = with_bus.value_or(empty)
         result = self._pick_best_route(no_bus_val, with_bus_val)
-
-        # Bus fallback: if the chosen route has a long walk to the first
-        # transit leg, try Google Routes transit as an alternative.
-        if result is no_bus_val and result.duration.magnitude > 0:
-            walk_to_station = self._first_walk_minutes(result)
-            if walk_to_station >= settings.bus_walk_penalty_minutes:
-                result = await self._replace_walk_with_bus(
-                    tfl_commute=result,
-                    origin_postcode=origin_postcode,
-                    dest_postcode=dest_postcode,
-                    walk_to_station_minutes=walk_to_station,
-                    has_car=has_car,
-                    person_label=person_label,
-                )
-
         return Attempt.succeeded(
             result,
             error=f"tfl_transit: duration={result.duration.magnitude}min mode={result.mode}",
-        )
-
-    async def _replace_walk_with_bus(
-        self,
-        tfl_commute: Commute,
-        origin_postcode: str,
-        dest_postcode: str,
-        walk_to_station_minutes: int,
-        has_car: bool = False,
-        person_label: str = "",
-        _bus_alternative: Commute | None | object = _SENTINEL,
-    ) -> Commute:
-        """Replace the walking leg of a TfL commute with a bus, if viable.
-
-        The bus only replaces the walk *to the first transit stop* — the rest
-        of the TfL route (train/tube legs) stays the same. This means the
-        total cost is *TfL cost + bus cost*, and the total time is
-        *TfL duration − walk + bus_time*.
-
-        Returns the original commute unchanged when:
-        * ``walk_to_station_minutes < bus_walk_penalty_minutes`` (walk is acceptable)
-        * no bus alternative is available
-        * the bus has no cost
-        * the time savings don't justify the bus detour
-
-        ``_bus_alternative`` — optional pre-resolved bus route (for test injection).
-        When omitted, the function calls ``_find_bus_alternative()``.
-        """
-        penalty = settings.bus_walk_penalty_minutes
-        if walk_to_station_minutes < penalty:
-            return tfl_commute
-
-        if _bus_alternative is CommuteRouter._SENTINEL:
-            bus = await self._find_bus_alternative(
-                origin_postcode, dest_postcode, has_car=has_car, person_label=person_label
-            )
-        else:
-            bus = _bus_alternative
-        if bus is None:
-            return tfl_commute
-
-        # Inline non_rail_cost: sum non-rail costs from commute details
-        bus_costs: list[float] = []
-        for cg in bus.details:
-            if cg.cost is not None:
-                if isinstance(cg.cost, Money):
-                    bus_costs.append(float(cg.cost.amount))
-                else:
-                    bus_costs.append(float(cg.cost))
-        bus_cost = sum(bus_costs) if bus_costs else None
-
-        if bus_cost is None or bus_cost <= 0:
-            return tfl_commute
-
-        bus_time = min(15, walk_to_station_minutes - penalty)
-        savings = walk_to_station_minutes - bus_time
-        if savings < penalty:
-            return tfl_commute
-
-        new_duration = int(tfl_commute.duration.magnitude - walk_to_station_minutes + bus_time)
-        new_daily_cost = tfl_commute.daily_cost + Money(str(bus_cost), "GBP")
-
-        return Commute(
-            person=tfl_commute.person,
-            label=tfl_commute.label,
-            destination=tfl_commute.destination,
-            duration=Quantity(new_duration, "minute"),
-            daily_cost=new_daily_cost,
-            mode=tfl_commute.mode,
-            details=tfl_commute.details
-            + (
-                CostGroup(
-                    legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=bus_time),),
-                    cost=bus_cost,
-                ),
-            ),
-        )
-
-    async def _find_bus_alternative(
-        self,
-        origin: str,
-        dest: str,
-        has_car: bool = False,
-        person_label: str = "",
-    ) -> Commute | None:
-        """Find a bus alternative via Google Routes API (for areas outside TfL coverage)."""
-        body = {
-            "origin": self._address_waypoint(origin),
-            "destination": self._address_waypoint(dest),
-            "travelMode": "TRANSIT",
-            "transitPreferences": {"routingPreference": "less_walking"},
-            "computeAlternativeRoutes": False,
-        }
-        data = await self._google_routes_post(body, "routes.duration,routes.legs", timeout=15.0)
-        if data is None:
-            return None
-        routes = data.get("routes", [])
-        if not routes:
-            return None
-        leg = routes[0].get("legs", [{}])[0]
-        steps = leg.get("steps", [])
-        duration_sec = int(routes[0].get("duration", "0s").rstrip("s"))
-        duration_min = round(duration_sec / 60)
-        total_bus_cost = Money("0", "GBP")
-        for s in steps:
-            if s.get("travelMode") != "TRANSIT":
-                continue
-            td = s.get("transitDetails", {})
-            if td.get("transitLine", {}).get("vehicle", {}).get("type") != "BUS":
-                continue
-            dep_stop = td.get("stopDetails", {}).get("departureStop", {})
-            arr_stop = td.get("stopDetails", {}).get("arrivalStop", {})
-            dep_name = dep_stop.get("name", "")
-            arr_name = arr_stop.get("name", "")
-            dep_coords = dep_stop.get("location", {}).get("latLng", {})
-            arr_coords = arr_stop.get("location", {}).get("latLng", {})
-            dep_point = {"lat": dep_coords.get("latitude"), "lon": dep_coords.get("longitude")} if dep_coords else None
-            arr_point = {"lat": arr_coords.get("latitude"), "lon": arr_coords.get("longitude")} if arr_coords else None
-            leg_cost = self._bus_fare_for(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
-            if leg_cost is not None:
-                total_bus_cost += leg_cost
-        daily_cost_gbp = total_bus_cost if total_bus_cost > Money("0", "GBP") else None
-        bus_label = f"{person_label} — {dest} (Bus)" if person_label else f"{dest} (Bus)"
-        return Commute(
-            person=Person(name="", has_car=has_car),
-            label=bus_label,
-            destination=PlaceOfInterest(
-                label=bus_label,
-                postcode=dest,
-            ),
-            duration=Quantity(duration_min, "minute"),
-            daily_cost=daily_cost_gbp if daily_cost_gbp is not None else Money("0", "GBP"),
-            mode="transit",
-            details=(
-                CostGroup(
-                    legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=duration_min or 0),),
-                    cost=daily_cost_gbp,
-                ),
-            )
-            if daily_cost_gbp is not None
-            else (),
         )
 
     @staticmethod

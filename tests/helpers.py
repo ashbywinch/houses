@@ -11,6 +11,7 @@ from money import Money
 from pint import Quantity
 
 from dag.attempt import Attempt
+from dag.derived_node import DerivedNode
 from houses.council_tax_info import CouncilTaxInfo
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
@@ -19,6 +20,36 @@ from houses.school_gender import SchoolGender
 from houses.services import Services
 
 # ── Individual Fake Services ──────────────────────────────────────────
+
+
+class FixedCommuteNode(DerivedNode[Commute]):
+    """A DerivedNode that holds a canned Commute value for tests.
+
+    Matches the production architecture: Commutes always come from
+    DerivedNodes, never from UserInputNodes.  Call ``set(commute)``
+    to update the value and notify downstream nodes.
+    """
+
+    def __init__(self, node_id: str):
+        super().__init__(node_id, Commute, ())
+        self._commute: Commute | None = None
+
+    def compute(self) -> Attempt[Commute]:
+        if self._commute is not None:
+            return Attempt.succeeded(self._commute)
+        return Attempt.pending()
+
+    def set(self, commute: Commute) -> None:
+        self._commute = commute
+        self._attempt = Attempt.pending()
+        from dag.scheduler import _get_scheduler
+
+        _get_scheduler().schedule(self)
+        self.changed.emit()
+
+    def push(self, value: Commute, source_label: str = "") -> None:
+        """API-compatible alias for set(). Accepts a source_label for compatibility."""
+        self.set(value)
 
 
 _DEFAULT_POINT = GeoPoint(51.5, -0.1)

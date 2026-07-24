@@ -12,12 +12,18 @@ from dag.attempt import Attempt
 from dag.scheduler import flush_processor
 from houses.api_cache import set_cache_dir
 from houses.config import settings
+from houses.nodes.bus import BusRouteNode
 from tests.helpers import FakeCommuteRouter, FakeSchoolLookup, make_services
 from tests.unit.isolation_fixtures import (  # noqa: F401, F811
     _inject_test_scheduler,
     _reset_global_state,
     _sqlite_memory,
 )
+
+# Prevent BusRouteNode from making real Google Routes API calls in unit tests.
+# bus.py sets _default_google_routes_post = _router._google_routes_post at
+# import time; this override must run after that import but before any test.
+BusRouteNode._default_google_routes_post = None
 
 
 def flush_all() -> None:
@@ -56,20 +62,12 @@ def _mock_google_routes(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _offline_scraper():
-    saved = settings.rightmove_scraper_offline
-    settings.rightmove_scraper_offline = True
-    yield
-    settings.rightmove_scraper_offline = saved
-
-
-@pytest.fixture(autouse=True)
 def _isolate_api_cache():
     with tempfile.TemporaryDirectory() as tmp:
         set_cache_dir(tmp)
         yield
         files = list(Path(tmp).iterdir())
-        assert not files, f"Unit test created {len(files)} cache file(s). Cache files: {[f.name for f in files]}"
+        assert not files, f"Unit test created {len(files)} cache file(s): {[f.name for f in files]}"
 
 
 @pytest.fixture(autouse=True)

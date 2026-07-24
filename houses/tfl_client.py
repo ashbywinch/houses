@@ -61,14 +61,12 @@ class TflClient:
         label: str,
         park_and_ride: bool = False,
         allow_bus: bool = False,
-        fare_lookup: callable | None = None,
     ):
         self._origin = origin_postcode
         self._destination = destination_postcode
         self._label = label
         self._park_and_ride = park_and_ride
         self._allow_bus = allow_bus
-        self._fare_lookup = fare_lookup
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -325,37 +323,32 @@ class TflClient:
         return None
 
     async def _process_data(self, data: dict | None) -> Attempt[Commute]:
-        """Turn raw TfL API data into a Commute.  Pure logic \u2014 no HTTP.
+        """Turn raw TfL API data into a Commute.  Pure logic — no HTTP.
 
-        Extracted from plan() so tests can pass controlled JSON directly
-        without real API calls or monkeypatching.
+        Every cost lives on a CostGroup in the result's details. The total
+        daily_cost is derived by summing all CostGroup costs.
         """
         duration_minutes: int | None = None
-        daily_cost_gbp: Money | None = None
         cost_groups: list[CostGroup] = []
 
         if data is not None:
             dur, raw_cost, _ = TflClient._pick_best_journey(data)
             duration_minutes = dur
-            daily_cost_gbp = Money(str(raw_cost), "GBP") if raw_cost is not None else None
             cost_groups = self._build_cost_groups(data)
 
-        # Bus fare
-        if self._allow_bus and duration_minutes is not None and data is not None:
-            raw_cost = float(daily_cost_gbp.amount) if daily_cost_gbp is not None else None
-            bus_cost_gbp = self._add_bus_fare(data, raw_cost)
-            daily_cost_gbp = Money(str(bus_cost_gbp), "GBP") if bus_cost_gbp is not None else None
-
-        # Parking cost
+        # Parking cost — adds a CostGroup with the parking fee
         if self._park_and_ride and duration_minutes is not None and data is not None:
-            raw_cost = float(daily_cost_gbp.amount) if daily_cost_gbp is not None else None
-            parking_cost_gbp, new_cost, parking_groups = await self._add_parking_cost(data, raw_cost)
-            daily_cost_gbp = Money(str(new_cost), "GBP") if new_cost is not None else None
+            _, _, parking_groups = await self._add_parking_cost(data, None)
             cost_groups.extend(parking_groups)
 
-        # Ensure daily_cost is never None \u2014 downstream code expects Money
-        if daily_cost_gbp is None:
-            daily_cost_gbp = Money("0", "GBP")
+        # Derive total from CostGroup costs
+        total = Money("0", "GBP")
+        for cg in cost_groups:
+            if cg.cost is not None:
+                if not isinstance(cg.cost, Money):
+                    raise TypeError(f"CostGroup.cost must be Money or None, got {type(cg.cost).__name__}: {cg.cost}")
+                total += cg.cost
+        daily_cost_gbp = total
 
         result = Commute(
             person=Person(name="", has_car=False),
@@ -389,49 +382,6 @@ class TflClient:
                     return d2
             except Exception:
                 logger.warning("TfL geocode fallback failed for %s", self._label)
-        return None
-
-    # ── Cost helpers ─────────────────────────────────────────────────
-
-    def _add_bus_fare(self, data: dict, current_cost: float | None) -> float | None:
-        """Look up bus leg costs when TfL didn't price them."""
-        journeys = data.get("journeys", [])
-        if not journeys:
-            return None
-        best = min(journeys, key=lambda j: j.get("duration", 9999))
-        bus_legs = [leg for leg in best.get("legs", []) if leg.get("mode", {}).get("name") == "bus"]
-        if not bus_legs:
-            return None
-
-        fare = best.get("fare", {})
-        tfl_total_pence = fare.get("totalCost") if fare else None
-
-        if tfl_total_pence and tfl_total_pence > 0:
-            return round(tfl_total_pence / 100 * 2, 2)
-
-        tfl_non_bus_fare = 0
-        fare_fares = fare.get("fares", []) if fare else []
-        for f in fare_fares:
-            if f.get("mode") != "bus" and f.get("cost"):
-                tfl_non_bus_fare += f["cost"]
-
-        total_bus_cost = 0.0
-        for bus_leg in bus_legs:
-            dep = bus_leg.get("departurePoint", {}).get("commonName", "")
-            arr = bus_leg.get("arrivalPoint", {}).get("commonName", "")
-            dep_raw = bus_leg.get("departurePoint", {})
-            arr_raw = bus_leg.get("arrivalPoint", {})
-            dep_point = {"lat": dep_raw["lat"], "lon": dep_raw["lon"]} if dep_raw.get("lat") else None
-            arr_point = {"lat": arr_raw["lat"], "lon": arr_raw["lon"]} if arr_raw.get("lat") else None
-            leg_cost = (
-                self._fare_lookup(dep, arr, dep_point=dep_point, arr_point=arr_point) if self._fare_lookup else None
-            )
-            if leg_cost is not None:
-                total_bus_cost += leg_cost
-
-        if total_bus_cost > 0:
-            return round(tfl_non_bus_fare / 100 * 2 + total_bus_cost, 2)
-        return current_cost
 
     async def _add_parking_cost(
         self,

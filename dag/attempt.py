@@ -78,6 +78,12 @@ class Attempt[T](metaclass=_AttemptMeta):
     __slots__ = ("_status", "_value", "_error", "_metadata")
 
     def __init__(self, status: _Status, value: T | None = None, error: str = "", metadata: dict | None = None) -> None:
+        if status is _Status.SUCCEEDED and isinstance(value, Attempt):
+            raise TypeError(
+                f"Cannot create Attempt.succeeded() with an Attempt as value. "
+                f"Attempt values must be domain objects, not Attempts. "
+                f"Attempt inside Attempt: {type(value).__name__} -> {type(value._value).__name__ if value._value is not None else 'None'}"
+            )
         object.__setattr__(self, "_status", status)
         object.__setattr__(self, "_value", value)
         object.__setattr__(self, "_error", error)

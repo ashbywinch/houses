@@ -4,17 +4,12 @@ from dag.if_then_else import IfThenElseNode
 from dag.user_input_node import UserInputNode
 from houses.model.domain import Commute
 from houses.nodes.bus import BodsFareNode, BusLegAugmentNode, BusRouteNode
-from houses.nodes.commute import (
-    CommuteSelectorNode,
-    _bus_condition,
-    _needs_rail_fare,
-    commute_input_node,
-)
+from houses.nodes.commute import CommuteSelectorNode, _needs_rail_fare
 from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 from houses.nodes.park_and_ride import ParkAndRideAugmentNode
 from houses.nodes.petrol import PetrolCostAugmentNode
 from houses.nodes.schools import SchoolLocationNode
-from houses.nodes.transit import DriveNode, TransitNode, WalkLegCheckNode, WalkNode
+from houses.nodes.transit import DriveNode, TransitNode, WalkNode
 
 
 def build_commute_pipeline(prop) -> None:
@@ -27,6 +22,7 @@ def build_commute_pipeline(prop) -> None:
     Sets the following attributes on *prop* in place:
         _transit_nodes, _bus_augment_nodes, commute_selectors, commute_breakdown
     """
+
     prop._transit_nodes = []
     prop._bus_augment_nodes = []
     prop.commute_selectors = {}
@@ -91,40 +87,23 @@ def build_commute_pipeline(prop) -> None:
                 max_walk=p_info.bus_walk_penalty_minutes,
             )
 
-            walk_check = WalkLegCheckNode(
-                f"{prop.rid}/{key}/walk_check",
-                transit_node=transit_node,
-                max_walk=p_info.bus_walk_penalty_minutes,
-            )
-
-            bus_route = BusRouteNode(
+            bus_route_node = BusRouteNode(
                 f"{prop.rid}/{key}/bus_route",
                 best_location=prop.best_location,
-                walk_leg_check_node=walk_check,
-                transit_node=transit_node,
+                poi=poi_src,
             )
 
-            bods_fare = BodsFareNode(
+            bods_fare_node = BodsFareNode(
                 f"{prop.rid}/{key}/bods_fare",
-                bus_route_node=bus_route,
+                bus_route_node=bus_route_node,
             )
 
             bus_augment = BusLegAugmentNode(
                 f"{prop.rid}/{key}/bus_augment",
-                transit_node=transit_node,
-                walk_leg_check_node=walk_check,
-                bus_route_node=bus_route,
-                bods_fare_node=bods_fare,
-            )
-            prop._bus_augment_nodes.append(bus_augment)
-
-            # Wrap bus_augment in IfThenElseNode — only active when walk is too long
-            bus_if = IfThenElseNode(
-                f"{prop.rid}/{key}/bus_if",
-                Commute | None,
-                condition_sources=(walk_check,),
-                condition_fn=_bus_condition,
-                then_branch=bus_augment,
+                transit_input=park_and_ride,
+                bus_route_node=bus_route_node,
+                bods_fare_node=bods_fare_node,
+                max_walk=p_info.bus_walk_penalty_minutes,
             )
 
             # Create a RailFareNode for non-child commutes to apply NR fares
@@ -141,7 +120,7 @@ def build_commute_pipeline(prop) -> None:
             # Wrap rail_fare in IfThenElseNode — only active when NR fare is needed
             if is_child:
                 # Children don't get NR fares — dummy IfThenElse that always returns None
-                _dummy = commute_input_node(f"{prop.rid}/{key}/rail_fare_dummy")
+                _dummy = UserInputNode[str](f"{prop.rid}/{key}/rail_fare_dummy", str)
                 rail_fare_result = IfThenElseNode(
                     f"{prop.rid}/{key}/rail_fare_noop",
                     Commute | None,
@@ -163,9 +142,8 @@ def build_commute_pipeline(prop) -> None:
                 origin=prop.best_location,
                 poi=poi_src,
                 walk_result=walk_node,
-                transit_result=park_and_ride,
+                transit_result=bus_augment,
                 drive_result=drive_node,
-                bus_result=bus_if,
                 rail_fare_result=rail_fare_result,
                 is_child=is_child,
                 max_walk=p_info.bus_walk_penalty_minutes,

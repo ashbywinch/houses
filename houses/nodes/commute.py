@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import UTC, datetime
 
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.node import Node
-from dag.user_input_node import UserInputNode
 from houses.commute import CostGroup, LegMode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute
@@ -67,44 +65,13 @@ def commute_colour(minutes: int | None, bracknell: bool = False) -> str:
     return "good" if minutes < 45 else "warn" if minutes <= 75 else "bad"
 
 
-def commute_input_node(node_id: str) -> UserInputNode[Commute]:
-    return _CommuteInputNode(node_id)
-
-
-class _CommuteInputNode(UserInputNode[dict]):
-    """A UserInputNode that holds a raw Commute (not serialised to dict).
-
-    Values are not persisted to the DB — they are ephemeral results
-    pushed from the commute pipeline during enrichment.
-    """
-
-    def __init__(self, node_id: str) -> None:
-        super().__init__(node_id, dict)
-
-    def push(self, value: Commute, source_label: str = "") -> None:
-        self._value = value
-        self._source_label = source_label
-        self._persisted_at = datetime.now(UTC)
-        self._db_created_at = datetime.now(UTC).isoformat()
-        self.changed.emit()
-
-    async def attempt(self) -> Attempt[Commute]:
-        if self._value is not None:
-            return Attempt.succeeded(self._value)
-        return Attempt.pending()
-
-    async def build_provenance(self):
-        return Provenance.from_label(self._source_label)
-
-
 class CommuteSelectorNode(DerivedNode[Commute]):
-    """Selects the best commute from walk, transit, drive, and bus options.
+    """Selects the best commute from walk, transit, and drive options.
 
     Priority:
     1. Walking, if Google Routes returned a route within max_walk minutes
-    2. Transit (vs bus — picks faster of the two)
+    2. Transit
     3. Driving (if available and not congestion zone)
-    4. Bus (fallback when transit has a long first-leg walk)
 
     ``walk_result`` and ``drive_result`` are optional — omit them when
     walking/driving is not applicable (the selector treats them as
@@ -118,7 +85,6 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         origin,
         poi,
         transit_result,
-        bus_result,
         rail_fare_result,
         walk_result=None,
         drive_result=None,
@@ -130,11 +96,10 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         self.walk_result = walk_result
         self.transit_result = transit_result
         self.drive_result = drive_result
-        self.bus_result = bus_result
         self.rail_fare_result = rail_fare_result
         self.is_child = is_child
         self._max_walk = max_walk
-        deps = [origin, poi, transit_result, bus_result, rail_fare_result]
+        deps = [origin, poi, transit_result, rail_fare_result]
         if walk_result is not None:
             deps.append(walk_result)
         if drive_result is not None:
@@ -182,7 +147,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         return tuple(result)
 
     def _get_active_deps(self) -> tuple[Node, ...]:
-        deps = [self.origin, self.poi, self.transit_result, self.bus_result, self.rail_fare_result]
+        deps = [self.origin, self.poi, self.transit_result, self.rail_fare_result]
         if self.walk_result is not None:
             deps.append(self.walk_result)
         if self.drive_result is not None:
@@ -194,7 +159,6 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         origin: Attempt[GeoPoint],
         poi: Attempt[str],
         transit: Attempt[Commute],
-        bus_result: Attempt[Commute],
         rail_fare_result: Attempt[Commute | None],
         walk: Attempt[Commute] | None = None,
         drive: Attempt[Commute] | None = None,
@@ -202,7 +166,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         if not origin.succeeded or not poi.succeeded:
             return self._impossible({"origin": origin, "poi": poi})
 
-        candidates: list[Attempt[Commute]] = []
+        candidates = []
 
         # 1. Walk (Google Routes) — add if within max_walk
         if (
@@ -213,28 +177,18 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         ):
             candidates.append(walk)
 
-        # 2. Transit vs bus — pick the better of the two
+        # 2. Transit — add if succeeded
         best_transit: Attempt[Commute] | None = None
         if transit.succeeded and transit.value_or_none() is not None:
-            if bus_result.succeeded and bus_result.value_or_none() is not None:
-                td = transit.value_or_none().duration.magnitude
-                bd = bus_result.value_or_none().duration.magnitude
-                best_transit = bus_result if bd < td - 5 else transit
-            else:
-                best_transit = transit
+            best_transit = transit
             candidates.append(best_transit)
-        elif bus_result.succeeded and bus_result.value_or_none() is not None:
-            # Transit failed — bus is a fallback
-            candidates.append(bus_result)
 
         # 3. Drive
         if drive is not None and drive.succeeded and drive.value_or_none() is not None:
             candidates.append(drive)
 
         if not candidates:
-            return self._impossible(
-                {"walk_result": walk, "transit_result": transit, "drive_result": drive, "bus_result": bus_result}
-            )
+            return self._impossible({"walk_result": walk, "transit_result": transit, "drive_result": drive})
 
         # Pick fastest
         selected = min(candidates, key=lambda a: a.value_or_none().duration.magnitude)

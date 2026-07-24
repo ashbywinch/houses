@@ -27,22 +27,16 @@ class PropertyNodes:
     """
 
     def __init__(self, rid: str) -> None:
-        # Validate RID — must be numeric (unless running in test mode with
-        # an in-memory DB where non-numeric RIDs are acceptable).
+        # Validate RID — must be numeric and at least 6 digits
+        # (Rightmove property IDs are 6-10 digits; shorter values like
+        # "999" are test data written outside pytest isolation).
         import dag.persistence as _dag_per
 
-        if not _dag_per.testing and not rid.isdigit():
+        if not _dag_per.testing and (not rid.isdigit() or len(rid) < 6):
             raise ValueError(
-                f"Invalid RID {rid!r} — property RIDs must be numeric (digits 0-9).\n"
-                f"\n"
-                f"This RID contains non-digit characters, which means it is test data\n"
-                f"that was written to the production database by misbehaving agents.\n"
-                f"Do NOT attempt to fix the RID and retry — the underlying\n"
-                f"node_results data is test data that must be removed.\n"
-                f"\n"
-                f"To recover:\n"
-                f"  1. sqlite3 data/houses.db \"DELETE FROM node_results WHERE node_id LIKE '{rid}/%'\"\n"
-                f"  2. Restart the server.\n"
+                f"Invalid RID {rid!r}: property RIDs must be all digits and at "
+                f"least 6 characters long (Rightmove IDs are 6-10 digits). "
+                f"This appears to be test data."
             )
         self.rid = rid
         self.changed = Signal()

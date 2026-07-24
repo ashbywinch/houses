@@ -189,3 +189,92 @@ To re-extract bus fare data or troubleshoot problems with it, see bus fare pipel
 
 See `docs/bus-fares.md` for full details on the extraction process, flags,
 and how to update the sheet with new fares.
+
+## Fixing Bugs That Produced Wrong Persisted Data
+
+When a code fix changes what a DAG node computes, existing `node_results`
+rows in `data/houses.db` still hold the buggy output. The DAG won't
+auto-detect staleness from a code change — it only recomputes when a
+dependency's timestamp changes.
+
+### Step 1 — Find the affected `node_results`
+
+Use `sqlite3` to inspect which node IDs need clearing. The affected nodes
+are the one whose `compute()` method was fixed, plus everything downstream
+in its dependency chain. Node IDs follow the pattern
+`{rid}/{person}/{label}/{node_type}` (e.g.
+`88639800/Lorena/Aldgate/computed_transit`).
+
+Check which properties have rows for the affected node type:
+
+```sql
+SELECT DISTINCT SUBSTR(node_id, 1, INSTR(node_id, '/') - 1) AS rid
+FROM node_results
+WHERE node_id LIKE '%/Lorena/Aldgate/computed_transit';
+```
+
+### Step 2 — Delete only the root node, restart, let the cascade propagate
+
+You only need to delete the `node_results` rows for the **fixed node**
+(the one whose `compute()` was wrong). After a server restart, that node
+becomes pending (no DB row), recomputes with the fix, and its `changed`
+signal fires. Each downstream node detects the newer dependency timestamp
+via `_is_stale()` and schedules itself in turn.
+
+Find the affected RIDs:
+
+```sql
+SELECT DISTINCT SUBSTR(node_id, 1, INSTR(node_id, '/') - 1) AS rid
+FROM node_results
+WHERE node_id LIKE '%/Lorena/Aldgate/computed_transit';
+```
+
+Then delete just the root rows. For each affected RID and node type:
+
+```sql
+DELETE FROM node_results
+WHERE node_id = '{rid}/Lorena/Aldgate/computed_transit';
+```
+
+Bulk delete for all affected properties at once:
+
+```sql
+DELETE FROM node_results
+WHERE node_id IN (
+    SELECT node_id FROM node_results
+    WHERE node_id LIKE '%/Lorena/Aldgate/computed_transit'
+);
+```
+
+Do NOT delete downstream nodes (`commute`, `final_fuel`,
+`commute_breakdown`, etc.) — they will recompute when their dep finishes.
+Do NOT delete leaf inputs (`walk`, `drive`, `poi`, `person_name`) — they
+are not affected by the fix and don't need recompute.
+
+### Step 3 — Trigger a server reload
+
+The nodes load their state from `node_results` during server startup
+(bootstrap). If you deleted rows while the server was running, the
+in-memory node objects still hold the old results. Trigger a uvicorn
+reload so every node re-loads from the cleaned DB:
+
+```bash
+touch houses/server.py   # any watched .py file triggers --reload
+```
+
+Wait for the reload to finish (check the logs: "Application startup
+complete"). On reload, deleted nodes become `pending` and the background
+processor recomputes them with the fixed code. The cascade propagates
+through the entire dependency chain automatically.
+
+### Verification
+
+Hit the property detail endpoint and check the affected field is no longer
+`pending` and shows the corrected value:
+
+```bash
+curl -s http://localhost:8080/api/properties/{rid}/detail | python3 -m json.tool
+```
+
+Poll if the compute takes time — the background processor may be working
+through other properties first.

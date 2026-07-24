@@ -24,6 +24,7 @@ from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.stations import Station
+from tests.helpers import FixedCommuteNode
 
 # ── Commute fixtures ---------------------------------------------------------
 
@@ -194,7 +195,6 @@ class TestFullCommutePipeline:
             CommuteSelectorNode,
             _bus_condition,
             _needs_rail_fare,
-            commute_input_node,
         )
         from houses.nodes.rail_fare_node import RailFareNode
         from houses.nodes.transit import TransitNode, WalkLegCheckNode
@@ -228,7 +228,7 @@ class TestFullCommutePipeline:
             transit_node=transit_node,
             max_walk=30,
         )
-        bus_dummy = commute_input_node("test/poi/bus_dummy")
+        bus_dummy = FixedCommuteNode("test/poi/bus_dummy")
         bus_if = IfThenElseNode(
             "test/poi/bus_if",
             Commute,
@@ -253,7 +253,6 @@ class TestFullCommutePipeline:
             origin=loc,
             poi=poi_src,
             transit_result=transit_node,
-            bus_result=bus_if,
             rail_fare_result=rail_fare_if,
             is_child=False,
         )
@@ -281,7 +280,6 @@ class TestFullCommutePipeline:
             CommuteSelectorNode,
             _bus_condition,
             _needs_rail_fare,
-            commute_input_node,
         )
         from houses.nodes.park_and_ride import ParkAndRideAugmentNode
         from houses.nodes.petrol import PetrolCostAugmentNode
@@ -349,7 +347,7 @@ class TestFullCommutePipeline:
             transit_node=transit_node,
             max_walk=10,
         )
-        bus_input = commute_input_node("test/dad/bus")
+        bus_input = FixedCommuteNode("test/dad/bus")
         # Bus is slower than transit so transit wins
         bus_commute = Commute(
             person=_person("Simon", has_car=True),
@@ -360,7 +358,7 @@ class TestFullCommutePipeline:
             mode="bus",
             details=(),
         )
-        bus_input.push(bus_commute, "Bus")
+        bus_input.push(bus_commute)
         bus_if = IfThenElseNode(
             "test/dad/bus_if",
             Commute,
@@ -385,7 +383,6 @@ class TestFullCommutePipeline:
             origin=loc,
             poi=poi_src,
             transit_result=petrol_cost,
-            bus_result=bus_if,
             rail_fare_result=rail_fare_if,
             is_child=False,
         )
@@ -426,7 +423,7 @@ class TestFullCommutePipeline:
     @pytest.mark.asyncio
     async def test_drive_only_gets_fuel_cost(self):
         """A drive-only commute (no transit) gets fuel cost from final_fuel."""
-        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
+        from houses.nodes.commute import CommuteSelectorNode
         from houses.nodes.park_and_ride import ParkAndRideAugmentNode
         from houses.nodes.petrol import PetrolCostAugmentNode
         from houses.nodes.transit import TransitNode
@@ -480,8 +477,8 @@ class TestFullCommutePipeline:
             has_car=True,
             max_walk=30,
         )
-        bus_dummy = commute_input_node("test/dr/bus_dummy")
-        rf_dummy = commute_input_node("test/dr/rf_dummy")
+        bus_dummy = FixedCommuteNode("test/dr/bus_dummy")
+        rf_dummy = FixedCommuteNode("test/dr/rf_dummy")
         from dag.if_then_else import IfThenElseNode
 
         def _noop():
@@ -506,7 +503,6 @@ class TestFullCommutePipeline:
             origin=loc,
             poi=poi_src,
             transit_result=park_and_ride,
-            bus_result=bus_if,
             rail_fare_result=rf_if,
             is_child=False,
         )

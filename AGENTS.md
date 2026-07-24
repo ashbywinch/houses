@@ -62,8 +62,8 @@ make stop                       # Stop dev server + frontend
   - **Inspect the DB directly**: ``sqlite3 data/houses.db "SELECT * FROM node_results LIMIT 5;"``
   - **Check a property's DAG state**: query ``node_results`` for a specific RID
   - **Re-run a specific computation**: call the relevant API endpoint, don't nuke the DB
+  - **Fix a bug that produced wrong persisted data**: see [docs/development.md](docs/development.md) → *Fixing Bugs That Produced Wrong Persisted Data*
   - **Write a test that reproduces the bug** — if the test passes against a fresh DB
-    but fails against real data, the bug is in how you seeded, not in the DB itself
 
   ### CONSTRAINTS:
   - **Do NOT** run ``rm``, ``unlink``, ``truncate``, ``DROP TABLE``, or any

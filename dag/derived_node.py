@@ -30,6 +30,13 @@ class DerivedNode(Node[T], Generic[T]):
         loaded = self._load_attempt_from_db()
         if loaded is not None:
             self._attempt = loaded
+        for i, dep in enumerate(deps):
+            if dep is None:
+                raise ValueError(
+                    f"{self._id}: dependency at index {i} is None — "
+                    f"DAG nodes must not have None dependencies. "
+                    f"Check the caller's deps list."
+                )
         for dep in deps:
             slot = Slot(self._on_dep_changed)
             self._slots.append(slot)
@@ -161,6 +168,12 @@ class DerivedNode(Node[T], Generic[T]):
         if not self._is_stale():
             return
         active_deps = self._get_active_deps()
+        for i, dep in enumerate(active_deps):
+            if dep is None:
+                raise ValueError(
+                    f"{self._id}._get_active_deps() returned None at index {i}. "
+                    f"Active deps: {[d._id if d else None for d in active_deps]}"
+                )
         dep_attempts = [await dep.attempt() for dep in active_deps]
         if any(a.pending for a in dep_attempts):
             return
@@ -196,8 +209,8 @@ class DerivedNode(Node[T], Generic[T]):
                 else:
                     result = Attempt.pending()
             else:
-                result = Attempt.impossible(f"{self._id}: {e}")
-        # Yield after compute finishes so the event loop can serve HTTP
+                import traceback
+                result = Attempt.impossible(f"{self._id}: {e}\n{traceback.format_exc()}")
         # requests before we do sync persist work (json.dumps + SQLite).
         await asyncio.sleep(0)
 
@@ -246,8 +259,14 @@ class DerivedNode(Node[T], Generic[T]):
     async def build_provenance(self) -> Provenance:
         sources: dict[str, Provenance] = {}
         for dep in self._get_active_deps():
-            sources[dep._id] = await dep.build_provenance()
-        description = self._attempt.error
+            try:
+                sources[dep._id] = await dep.build_provenance()
+            except Exception as e:
+                sources[dep._id] = Provenance(
+                    label=getattr(dep, "display_name", dep._id),
+                    description=f"build_provenance failed: {e}",
+                )
+        description = self._attempt.error if self._attempt.impossible else None
         return Provenance(
             label=self.display_name,
             description=description,

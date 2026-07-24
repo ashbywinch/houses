@@ -15,17 +15,47 @@ class TestBusRouteNode:
         from houses.nodes.bus import BusRouteNode
 
         loc = UserInputNode[GeoPoint]("loc_br", GeoPoint)
-        walk = UserInputNode[bool]("walk_br", bool)
-        transit = UserInputNode[dict]("transit_br", dict)
+        dest = UserInputNode[str]("dest_br", str)
+
+        async def fake_google_routes(body, field_mask, **kw):
+            return {
+                "routes": [
+                    {
+                        "duration": "600s",
+                        "legs": [
+                            {
+                                "steps": [
+                                    {
+                                        "travelMode": "TRANSIT",
+                                        "transitDetails": {
+                                            "transitLine": {"vehicle": {"type": "BUS"}},
+                                            "stopDetails": {
+                                                "departureStop": {
+                                                    "name": "Stop A",
+                                                    "location": {"latLng": {"latitude": 51.5, "longitude": -0.1}},
+                                                },
+                                                "arrivalStop": {
+                                                    "name": "Stop B",
+                                                    "location": {"latLng": {"latitude": 51.51, "longitude": -0.11}},
+                                                },
+                                            },
+                                        },
+                                    },
+                                ]
+                            }
+                        ],
+                    }
+                ],
+            }
+
         node = BusRouteNode(
             "br",
             best_location=loc,
-            walk_leg_check_node=walk,
-            transit_node=transit,
+            poi=dest,
+            _google_routes_post=fake_google_routes,
         )
         loc.push(GeoPoint(51.5, -0.1), "test")
-        walk.push(False, "test")
-        transit.push({}, "test")
+        dest.push("EC3A 7LP", "test")
         await flush_processor()
         await flush_processor()
         a = await node.attempt()
@@ -46,27 +76,60 @@ class TestBodsFareNode:
         a = await node.attempt()
         assert a.succeeded
 
+    @pytest.mark.asyncio
+    async def test_looks_up_fares_for_stops(self):
+        """BodsFareNode returns stop fares for bus stops in the route."""
+        from houses.nodes.bus import BodsFareNode
+
+        route = UserInputNode[dict]("route_bf2", dict)
+        node = BodsFareNode("bf2", bus_route_node=route)
+
+        route.push(
+            {
+                "bus_stops": [
+                    {
+                        "departure_name": "Stop A",
+                        "arrival_name": "Stop B",
+                        "departure_lat": 51.5,
+                        "departure_lon": -0.1,
+                        "arrival_lat": 51.51,
+                        "arrival_lon": -0.11,
+                    },
+                ],
+                "duration_minutes": 15,
+            },
+            "test",
+        )
+        await flush_processor()
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded
+        val = a.value_or_none()
+        assert val is not None
+        assert "stop_fares" in val
+
 
 class TestBusLegAugmentNode:
     @pytest.mark.asyncio
-    async def test_succeeds_when_walk_ok(self):
+    async def test_walk_short_no_replacement(self):
+        """When walk is shorter than max_walk, commute is returned unchanged."""
         from money import Money
         from pint import Quantity
 
+        from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.model.domain import Commute, Person, PlaceOfInterest
         from houses.nodes.bus import BusLegAugmentNode
 
-        transit = UserInputNode[Commute]("t_bl", Commute)
-        walk = UserInputNode[bool]("w_bl", bool)
-        route = UserInputNode[dict]("r_bl", dict)
-        fare = UserInputNode[dict]("f_bl", dict)
+        transit = UserInputNode[Commute]("t_bl_short", Commute)
+        route = UserInputNode[dict]("r_bl_short", dict)
+        fare = UserInputNode[dict]("f_bl_short", dict)
 
         node = BusLegAugmentNode(
-            "bla",
-            transit_node=transit,
-            walk_leg_check_node=walk,
+            "bla_short",
+            transit_input=transit,
             bus_route_node=route,
             bods_fare_node=fare,
+            max_walk=30,
         )
         commute = Commute(
             person=Person(name="", has_car=False),
@@ -75,9 +138,9 @@ class TestBusLegAugmentNode:
             duration=Quantity(30, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="transit",
+            details=(CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=5),)),),
         )
         transit.push(commute, "test")
-        walk.push(False, "test")
         route.push({}, "test")
         fare.push({}, "test")
         await flush_processor()
@@ -87,8 +150,8 @@ class TestBusLegAugmentNode:
         assert a.value_or_none() == commute
 
     @pytest.mark.asyncio
-    async def test_separates_bus_leg_into_own_cost_group(self):
-        """Bus leg gets BODS fare when bus and tube are in separate CGs."""
+    async def test_no_bus_route_no_replacement(self):
+        """When no bus route data, the commute is returned unchanged."""
         from money import Money
         from pint import Quantity
 
@@ -96,47 +159,96 @@ class TestBusLegAugmentNode:
         from houses.model.domain import Commute, Person, PlaceOfInterest
         from houses.nodes.bus import BusLegAugmentNode
 
-        transit = UserInputNode[Commute]("t_bl_sep", Commute)
-        walk = UserInputNode[bool]("w_bl_sep", bool)
-        route = UserInputNode[dict]("r_bl_sep", dict)
-        fare = UserInputNode[dict]("f_bl_sep", dict)
+        transit = UserInputNode[Commute]("t_bl_nobus", Commute)
+        route = UserInputNode[dict]("r_bl_nobus", dict)
+        fare = UserInputNode[dict]("f_bl_nobus", dict)
 
         node = BusLegAugmentNode(
-            "bla_sep",
-            transit_node=transit,
-            walk_leg_check_node=walk,
+            "bla_nobus",
+            transit_input=transit,
             bus_route_node=route,
             bods_fare_node=fare,
+            max_walk=30,
         )
-        # Separate CGs for bus and tube (_build_cost_groups now outputs this)
         commute = Commute(
             person=Person(name="", has_car=False),
             label="Test",
             destination=PlaceOfInterest(label="", postcode=""),
-            duration=Quantity(40, "minute"),
-            daily_cost=Money("0", "GBP"),
+            duration=Quantity(90, "minute"),
+            daily_cost=Money("12.50", "GBP"),
             mode="transit",
             details=(
-                CostGroup(
-                    legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=5),),
-                    cost=None,
-                ),
-                CostGroup(
-                    legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=15, start_station="Stop A"),),
-                    operator="TfL",
-                    cost=Money("13.10", "GBP"),
-                ),
-                CostGroup(
-                    legs=(JourneyLeg(mode=LegMode.TUBE, duration_minutes=10),),
-                    operator="TfL",
-                    cost=None,
-                ),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=46),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration_minutes=42),)),
             ),
         )
         transit.push(commute, "test")
-        walk.push(True, "test")
-        route.push({"bus_stops": [{"name": "Stop A", "lat": 51.5, "lon": -0.1}]}, "test")
-        fare.push({"Stop A": {"single_fare": 1.75}}, "test")
+        # Empty route data — no bus stops
+        route.push({"bus_stops": []}, "test")
+        fare.push({}, "test")
+        await flush_processor()
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded
+        assert a.value_or_none() == commute
+
+    @pytest.mark.asyncio
+    async def test_replaces_long_walk_with_bus(self):
+        """When walk is too long and bus route available, walk is replaced."""
+        from money import Money
+        from pint import Quantity
+
+        from houses.commute import CostGroup, JourneyLeg, LegMode
+        from houses.model.domain import Commute, Person, PlaceOfInterest
+        from houses.nodes.bus import BusLegAugmentNode
+
+        transit = UserInputNode[Commute]("t_bl_repl", Commute)
+        route = UserInputNode[dict]("r_bl_repl", dict)
+        fare = UserInputNode[dict]("f_bl_repl", dict)
+
+        node = BusLegAugmentNode(
+            "bla_repl",
+            transit_input=transit,
+            bus_route_node=route,
+            bods_fare_node=fare,
+            max_walk=30,
+        )
+        commute = Commute(
+            person=Person(name="", has_car=False),
+            label="L",
+            destination=PlaceOfInterest(label="L", postcode="EC3A 7LP"),
+            duration=Quantity(90, "minute"),
+            daily_cost=Money("12.50", "GBP"),
+            mode="transit",
+            details=(
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=46),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration_minutes=42),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TUBE, duration_minutes=4),)),
+            ),
+        )
+        transit.push(commute, "test")
+        route.push(
+            {
+                "bus_stops": [
+                    {
+                        "departure_name": "Stop A",
+                        "arrival_name": "Stop B",
+                        "departure_lat": None,
+                        "departure_lon": None,
+                        "arrival_lat": None,
+                        "arrival_lon": None,
+                    },
+                ],
+                "duration_minutes": 15,
+            },
+            "test",
+        )
+        fare.push(
+            {
+                "stop_fares": {"Stop A": {"amount": 1.90, "currency": "GBP"}},
+            },
+            "test",
+        )
         await flush_processor()
         await flush_processor()
 
@@ -145,15 +257,143 @@ class TestBusLegAugmentNode:
         val = a.value_or_none()
         assert val is not None
 
-        # The bus CostGroup should have the BODS fare applied
-        bus_cgs = [cg for cg in (val.details or ()) if any(leg.mode == LegMode.BUS for leg in cg.legs)]
-        assert len(bus_cgs) == 1, f"Expected 1 bus CostGroup, got {len(bus_cgs)}"
-        bus_cg = bus_cgs[0]
-        assert bus_cg.cost is not None, "Bus CostGroup should have a fare"
-        assert float(bus_cg.cost.amount) == 1.75, f"Bus CostGroup should have BODS fare £1.75, got £{bus_cg.cost}"
+        # Walk leg should be replaced with BUS
+        first_leg = val.details[0].legs[0]
+        assert first_leg.mode == LegMode.BUS, f"Expected first leg BUS, got {first_leg.mode}"
+        assert first_leg.duration_minutes == 15
 
-        # The tube CostGroup should be unchanged (still no TfL fare)
-        tube_cgs = [cg for cg in (val.details or ()) if any(leg.mode == LegMode.TUBE for leg in cg.legs)]
-        assert len(tube_cgs) == 1, f"Expected 1 tube CostGroup, got {len(tube_cgs)}"
-        tube_cg = tube_cgs[0]
-        assert tube_cg.cost is None, "Tube CostGroup should not have cost attributed yet"
+        # Bus CostGroup should carry the fare (BodsFareNode returns round-trip amount)
+        assert val.details[0].cost is not None
+        assert float(val.details[0].cost.amount) == 1.90
+        # Duration: 90 - 46 + 15 = 59
+        assert val.duration.magnitude == 59
+
+        # Cost: original 12.50 + bus 1.90 = 14.40
+        assert float(val.daily_cost.amount) == 14.40
+
+    @pytest.mark.asyncio
+    async def test_no_walk_leg_remains_after_replacement(self):
+        """No WALK leg should remain after bus replaces the walk."""
+        from money import Money
+        from pint import Quantity
+
+        from houses.commute import CostGroup, JourneyLeg, LegMode
+        from houses.model.domain import Commute, Person, PlaceOfInterest
+        from houses.nodes.bus import BusLegAugmentNode
+
+        transit = UserInputNode[Commute]("t_bl_nw", Commute)
+        route = UserInputNode[dict]("r_bl_nw", dict)
+        fare = UserInputNode[dict]("f_bl_nw", dict)
+
+        node = BusLegAugmentNode(
+            "bla_nw",
+            transit_input=transit,
+            bus_route_node=route,
+            bods_fare_node=fare,
+            max_walk=30,
+        )
+        commute = Commute(
+            person=Person(name="", has_car=False),
+            label="L",
+            destination=PlaceOfInterest(label="L", postcode="EC3A 7LP"),
+            duration=Quantity(90, "minute"),
+            daily_cost=Money("12.50", "GBP"),
+            mode="transit",
+            details=(
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=46),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration_minutes=42),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TUBE, duration_minutes=4),)),
+            ),
+        )
+        transit.push(commute, "test")
+        route.push(
+            {
+                "bus_stops": [
+                    {
+                        "departure_name": "Stop A",
+                        "arrival_name": "Stop B",
+                        "departure_lat": None,
+                        "departure_lon": None,
+                        "arrival_lat": None,
+                        "arrival_lon": None,
+                    },
+                ],
+                "duration_minutes": 15,
+            },
+            "test",
+        )
+        fare.push(
+            {
+                "stop_fares": {"Stop A": {"amount": 1.90, "currency": "GBP"}},
+            },
+            "test",
+        )
+        await flush_processor()
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded
+        val = a.value_or_none()
+        assert val is not None
+
+        # No WALK leg should remain
+        for cg in val.details:
+            for leg in cg.legs:
+                assert leg.mode != LegMode.WALK, f"WALK leg should have been replaced but found {leg}"
+
+    @pytest.mark.asyncio
+    async def test_walk_under_threshold_no_replacement(self):
+        """When walk is under max_walk, no replacement happens even with bus."""
+        from money import Money
+        from pint import Quantity
+
+        from houses.commute import CostGroup, JourneyLeg, LegMode
+        from houses.model.domain import Commute, Person, PlaceOfInterest
+        from houses.nodes.bus import BusLegAugmentNode
+
+        transit = UserInputNode[Commute]("t_bl_under", Commute)
+        route = UserInputNode[dict]("r_bl_under", dict)
+        fare = UserInputNode[dict]("f_bl_under", dict)
+
+        node = BusLegAugmentNode(
+            "bla_under",
+            transit_input=transit,
+            bus_route_node=route,
+            bods_fare_node=fare,
+            max_walk=30,
+        )
+        commute = Commute(
+            person=Person(name="", has_car=False),
+            label="L",
+            destination=PlaceOfInterest(label="L", postcode="EC3A 7LP"),
+            duration=Quantity(90, "minute"),
+            daily_cost=Money("12.50", "GBP"),
+            mode="transit",
+            details=(
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=9),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration_minutes=42),)),
+            ),
+        )
+        transit.push(commute, "test")
+        route.push(
+            {
+                "bus_stops": [
+                    {
+                        "departure_name": "Stop A",
+                        "arrival_name": "Stop B",
+                        "departure_lat": None,
+                        "departure_lon": None,
+                        "arrival_lat": None,
+                        "arrival_lon": None,
+                    },
+                ],
+                "duration_minutes": 15,
+            },
+            "test",
+        )
+        fare.push({}, "test")
+        await flush_processor()
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded
+        assert a.value_or_none() == commute
