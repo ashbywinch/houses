@@ -194,11 +194,10 @@ class TestFullCommutePipeline:
         from houses.nodes.commute import (
             CommuteSelectorNode,
             MergeRailFareNode,
-            _bus_condition,
             _needs_rail_fare,
         )
         from houses.nodes.rail_fare_node import RailFareNode
-        from houses.nodes.transit import TransitNode, WalkLegCheckNode
+        from houses.nodes.transit import TransitNode
         from houses.services_provider import get_services
 
         # Inject a fake registry with known stations and fare
@@ -223,19 +222,6 @@ class TestFullCommutePipeline:
             poi=poi_src,
             has_car=False,
             max_walk=30,
-        )
-        walk_check = WalkLegCheckNode(
-            "test/poi/walk_check",
-            transit_node=transit_node,
-            max_walk=30,
-        )
-        bus_dummy = FixedCommuteNode("test/poi/bus_dummy")
-        bus_if = IfThenElseNode(
-            "test/poi/bus_if",
-            Commute,
-            condition_sources=(walk_check,),
-            condition_fn=_bus_condition,
-            then_branch=bus_dummy,
         )
         rail_fare_node = RailFareNode(
             "test/poi/rail_fare",
@@ -285,13 +271,12 @@ class TestFullCommutePipeline:
         from houses.nodes.commute import (
             CommuteSelectorNode,
             MergeRailFareNode,
-            _bus_condition,
             _needs_rail_fare,
         )
         from houses.nodes.park_and_ride import ParkAndRideAugmentNode
         from houses.nodes.petrol import PetrolCostAugmentNode
         from houses.nodes.rail_fare_node import RailFareNode
-        from houses.nodes.transit import TransitNode, WalkLegCheckNode
+        from houses.nodes.transit import TransitNode
         from houses.services_provider import get_services
 
         # Fake registry with Maidenhead, Paddington, London Terminals
@@ -349,30 +334,7 @@ class TestFullCommutePipeline:
             commute_node=park_and_ride,
             financial_source=svc.financial_source,
         )
-        walk_check = WalkLegCheckNode(
-            "test/dad/walk_check",
-            transit_node=transit_node,
-            max_walk=10,
-        )
-        bus_input = FixedCommuteNode("test/dad/bus")
         # Bus is slower than transit so transit wins
-        bus_commute = Commute(
-            person=_person("Simon", has_car=True),
-            label="Office",
-            destination=PlaceOfInterest("Office", "SW1V 2QQ"),
-            duration=Quantity(90, "minute"),
-            daily_cost=Money("5.00", "GBP"),
-            mode="bus",
-            details=(),
-        )
-        bus_input.push(bus_commute)
-        bus_if = IfThenElseNode(
-            "test/dad/bus_if",
-            Commute,
-            condition_sources=(walk_check,),
-            condition_fn=_bus_condition,
-            then_branch=bus_input,
-        )
         rail_fare_node = RailFareNode(
             "test/dad/rail_fare",
             transit_result=transit_node,
@@ -489,20 +451,12 @@ class TestFullCommutePipeline:
             has_car=True,
             max_walk=30,
         )
-        bus_dummy = FixedCommuteNode("test/dr/bus_dummy")
         rf_dummy = FixedCommuteNode("test/dr/rf_dummy")
         from dag.if_then_else import IfThenElseNode
 
         def _noop():
             return False
 
-        bus_if = IfThenElseNode(
-            "test/dr/bus_if",
-            Commute | None,
-            condition_sources=(),
-            condition_fn=_noop,
-            then_branch=bus_dummy,
-        )
         rf_if = IfThenElseNode(
             "test/dr/rf_if",
             Commute | None,

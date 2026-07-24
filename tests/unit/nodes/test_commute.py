@@ -346,8 +346,9 @@ class TestMergeRailFareNode:
     async def test_combines_existing_cost_with_rail_fare(self):
         """When transit has some cost (e.g. parking) and unpriced transit legs,
         the rail_fare cost is added to the existing cost."""
-        from houses.nodes.commute import MergeRailFareNode
         from pint import Quantity
+
+        from houses.nodes.commute import MergeRailFareNode
 
         commute_src = FixedCommuteNode("merge_c4")
         rail_fare_src = FixedCommuteNode("merge_rf4")
@@ -412,7 +413,13 @@ class TestMergeRailFareNode:
             duration=Quantity(20, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="walk",
-            details=(CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=20),), operator="", cost=Money("0", "GBP")),),
+            details=(
+                CostGroup(
+                    legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=20),),
+                    operator="",
+                    cost=Money("0", "GBP"),
+                ),
+            ),
         )
         commute_src.push(walk_commute)
         rail_fare_src.push(_make_commute(duration_min=30, cost_gbp=41.0))
