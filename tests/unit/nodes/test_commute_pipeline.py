@@ -193,6 +193,7 @@ class TestFullCommutePipeline:
 
         from houses.nodes.commute import (
             CommuteSelectorNode,
+            MergeRailFareNode,
             _bus_condition,
             _needs_rail_fare,
         )
@@ -253,8 +254,13 @@ class TestFullCommutePipeline:
             origin=loc,
             poi=poi_src,
             transit_result=transit_node,
-            rail_fare_result=rail_fare_if,
             is_child=False,
+        )
+
+        merge_node = MergeRailFareNode(
+            "test/poi/merge",
+            commute_result=selector,
+            rail_fare_result=rail_fare_if,
         )
 
         get_services().commute_router.routes["SW1V 2QQ"] = _pimlico_commute()
@@ -263,7 +269,7 @@ class TestFullCommutePipeline:
             await flush_processor()
             await flush_processor()
 
-        a = await selector.attempt()
+        a = await merge_node.attempt()
         assert a.succeeded, f"got {a.status}: {a.error}"
         val = a.value_or_none()
         assert val is not None
@@ -278,6 +284,7 @@ class TestFullCommutePipeline:
 
         from houses.nodes.commute import (
             CommuteSelectorNode,
+            MergeRailFareNode,
             _bus_condition,
             _needs_rail_fare,
         )
@@ -383,8 +390,13 @@ class TestFullCommutePipeline:
             origin=loc,
             poi=poi_src,
             transit_result=petrol_cost,
-            rail_fare_result=rail_fare_if,
             is_child=False,
+        )
+
+        merge_node = MergeRailFareNode(
+            "test/dad/merge",
+            commute_result=selector,
+            rail_fare_result=rail_fare_if,
         )
 
         svc.commute_router.routes["RG12 8YA"] = _maidenhead_commute()
@@ -409,7 +421,7 @@ class TestFullCommutePipeline:
                 print(f"  daily_cost={j['value'].get('daily_cost')}")
                 print(f"  mode={j['value'].get('mode')}")
             print(f"  provenance={json.dumps(j.get('provenance', {}), indent=2, default=str)[:500]}")
-        a = await selector.attempt()
+        a = await merge_node.attempt()
         assert a.succeeded, f"got {a.status}: {a.error}"
         val = a.value_or_none()
         assert val is not None
@@ -423,7 +435,7 @@ class TestFullCommutePipeline:
     @pytest.mark.asyncio
     async def test_drive_only_gets_fuel_cost(self):
         """A drive-only commute (no transit) gets fuel cost from final_fuel."""
-        from houses.nodes.commute import CommuteSelectorNode
+        from houses.nodes.commute import CommuteSelectorNode, MergeRailFareNode
         from houses.nodes.park_and_ride import ParkAndRideAugmentNode
         from houses.nodes.petrol import PetrolCostAugmentNode
         from houses.nodes.transit import TransitNode
@@ -503,12 +515,16 @@ class TestFullCommutePipeline:
             origin=loc,
             poi=poi_src,
             transit_result=park_and_ride,
-            rail_fare_result=rf_if,
             is_child=False,
+        )
+        merge_node = MergeRailFareNode(
+            "test/dr/merge",
+            commute_result=selector,
+            rail_fare_result=rf_if,
         )
         final_fuel = PetrolCostAugmentNode(
             "test/dr/final_fuel",
-            commute_node=selector,
+            commute_node=merge_node,
             financial_source=svc.financial_source,
         )
 

@@ -42,7 +42,6 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            rail_fare_result=_noop_if(),
             walk_result=_impossible_commute("walk"),
             drive_result=_impossible_commute("drive"),
             max_walk=30,
@@ -78,7 +77,6 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            rail_fare_result=_noop_if(),
             walk_result=_impossible_commute("walk"),
             drive_result=_impossible_commute("drive"),
             max_walk=30,
@@ -107,7 +105,6 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            rail_fare_result=_noop_if(),
             walk_result=_impossible_commute("walk"),
             drive_result=_impossible_commute("drive"),
             max_walk=30,
@@ -137,7 +134,6 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            rail_fare_result=_noop_if(),
             walk_result=_impossible_commute("walk"),
             drive_result=_impossible_commute("drive"),
             max_walk=30,
@@ -166,7 +162,6 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            rail_fare_result=_noop_if(),
             walk_result=_impossible_commute("walk"),
             drive_result=_impossible_commute("drive"),
             max_walk=30,
@@ -202,7 +197,6 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            rail_fare_result=_noop_if(),
             walk_result=_impossible_commute("walk"),
             drive_result=_impossible_commute("drive"),
             max_walk=30,
@@ -242,7 +236,6 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            rail_fare_result=_noop_if(),
             is_child=True,
             walk_result=_impossible_commute("walk"),
             drive_result=_impossible_commute("drive"),
@@ -272,172 +265,98 @@ class TestCommuteSelectorNode:
         )
 
 
-class TestDynamicDeps:
-    """Dynamic dependency tests for CommuteSelectorNode."""
+class TestMergeRailFareNode:
+    """MergeRailFareNode — applies NR fare to transit CostGroup."""
 
     @pytest.mark.asyncio
-    async def test_cost_gt_zero_rail_fare_pending_computes(self):
-        """Cost > 0 means rail_fare is not an active dep, so node computes
-        even when rail_fare is pending."""
-        from houses.nodes.commute import CommuteSelectorNode
+    async def test_passes_through_when_no_rail_fare(self):
+        """When rail_fare is pending, MergeRailFareNode blocks."""
+        from houses.nodes.commute import MergeRailFareNode
 
-        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
-        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
-        transit = FixedCommuteNode("transit")
-        FixedCommuteNode("bus")
-        _succeeded_walk_check(False)
+        commute_src = FixedCommuteNode("merge_c")
+        rail_fare_src = FixedCommuteNode("merge_rf")  # never pushed → pending
 
-        rail_fare = FixedCommuteNode("rail_fare")  # never pushed → pending
-
-        node = CommuteSelectorNode(
-            "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            rail_fare_result=_rail_fare_if(transit, rail_fare),
-            walk_result=_impossible_commute("walk"),
-            drive_result=_impossible_commute("drive"),
-            max_walk=30,
+        node = MergeRailFareNode(
+            "merge_test",
+            commute_result=commute_src,
+            rail_fare_result=rail_fare_src,
         )
 
-        origin.push(GeoPoint(51.5, -0.1), "user")
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
-        # cost_gbp > 0 so rail_fare is NOT an active dep
-        transit.push(_make_commute(duration_min=32, cost_gbp=4.50), "TfL")
+        commute_src.push(_make_commute(duration_min=32, cost_gbp=4.50))
 
         await flush_processor()
 
         a = await node.attempt()
-        assert a.succeeded, "Should compute without rail_fare when cost > 0"
-        assert a.value_or_none() is not None
+        assert a.pending, "Should block when rail_fare is pending"
 
     @pytest.mark.asyncio
-    async def test_cost_zero_rail_fare_pending_blocks(self):
-        """Cost = 0 means rail_fare IS an active dep, so the node blocks
-        until rail_fare resolves."""
-        from houses.nodes.commute import CommuteSelectorNode
+    async def test_passes_through_when_rail_fare_has_no_cost(self):
+        """When rail_fare has no cost (None), the commute passes through unchanged."""
+        from houses.nodes.commute import MergeRailFareNode
 
-        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
-        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
-        transit = FixedCommuteNode("transit")
-        FixedCommuteNode("bus")
-        _succeeded_walk_check(False)
+        commute_src = FixedCommuteNode("merge_c2")
+        rail_fare_src = FixedCommuteNode("merge_rf2")
 
-        rail_fare = FixedCommuteNode("rail_fare")
-
-        node = CommuteSelectorNode(
-            "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            rail_fare_result=_rail_fare_if(transit, rail_fare),
-            walk_result=_impossible_commute("walk"),
-            drive_result=_impossible_commute("drive"),
-            max_walk=30,
-        )
-        origin.push(GeoPoint(51.5, -0.1), "user")
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
-        # cost_gbp = 0 so rail_fare IS an active dep (but still pending)
-        transit.push(_make_commute(duration_min=32, cost_gbp=0), "TfL")
-
-        await flush_processor()
-
-        a = await node.attempt()
-        assert a.pending, "Should block when rail_fare is an active dep and pending"
-
-        # Now resolve rail_fare
-        rail_fare.push(_make_commute(duration_min=30, cost_gbp=5.00), "NR")
-        await flush_processor()
-
-        a = await node.attempt()
-        assert a.succeeded, "Should resolve once rail_fare completes"
-
-    @pytest.mark.asyncio
-    async def test_rail_fare_applied_when_walk_check_impossible(self):
-        """When walk_check is impossible (not False), bus is not active.
-        RailFareNode's attempt lands in the `bus` parameter positionally,
-        leaving `rail_fare=None` in compute(), so the NR fare is lost.
-        This test verifies the fix — rail_fare's cost must be applied."""
-        from houses.nodes.commute import CommuteSelectorNode
-
-        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
-        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
-        transit = FixedCommuteNode("transit2")
-        FixedCommuteNode("bus2")
-        rail_fare = FixedCommuteNode("rail_fare2")
-
-        # Walk check that is impossible (succeeded=False) — same as Lorena/Aldgate
-        from dag.derived_node import DerivedNode
-
-        class _ImpossibleWalkCheck(DerivedNode[bool]):
-            def __init__(self):
-                super().__init__("wci", bool, ())
-                self._attempt = Attempt.impossible("no transit data")
-
-            def compute(self):
-                return self._attempt
-
-        _ImpossibleWalkCheck()
-
-        node = CommuteSelectorNode(
-            "rf_walk_impossible",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            rail_fare_result=_rail_fare_if(transit, rail_fare),
-            walk_result=_impossible_commute("walk"),
-            drive_result=_impossible_commute("drive"),
-            max_walk=30,
+        node = MergeRailFareNode(
+            "merge_test2",
+            commute_result=commute_src,
+            rail_fare_result=rail_fare_src,
         )
 
-        origin.push(GeoPoint(51.5, -0.1), "user")
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
-
-        # Transit has £0 cost (TfL doesn't price NR)
-        transit.push(_make_commute(duration_min=32, cost_gbp=0), "TfL")
-        # Rail fare computed successfully with cost
-        rail_fare.push(_make_commute(duration_min=30, cost_gbp=41.0), "NR")
+        commute_src.push(_make_commute(duration_min=32, cost_gbp=0))
+        rail_fare_src.push(_make_commute(duration_min=30, cost_gbp=0))
 
         await flush_processor()
 
         a = await node.attempt()
-        assert a.succeeded, "Should compute when rail_fare resolved"
+        assert a.succeeded, "Should succeed with zero-cost rail_fare"
         val = a.value_or_none()
         assert val is not None
-        # The commute should have the rail_fare cost (£41), not the transit cost (£0)
-        assert float(val.daily_cost.amount) == 41.0, f"Expected rail_fare cost £41.0, got £{val.daily_cost.amount}"
+        # Cost should remain 0 (rail_fare has no cost to add)
+        assert float(val.daily_cost.amount) == 0
 
     @pytest.mark.asyncio
-    async def test_rail_fare_applied_when_transit_has_unpriced_legs(self):
-        """When transit has cost > 0 (e.g. from park_and_ride parking) but
-        the transit legs (train/tube) have no cost attributed, the
-        CommuteSelectorNode must still apply the rail_fare."""
-        from houses.nodes.commute import CommuteSelectorNode
+    async def test_applies_rail_fare_to_transit_commute(self):
+        """Rail_fare cost replaces the transit CostGroup cost when provided."""
+        from houses.nodes.commute import MergeRailFareNode
 
-        origin = UserInputNode[GeoPoint]("origin_ul", GeoPoint)
-        poi = UserInputNode[PlaceOfInterest]("poi_ul", PlaceOfInterest)
-        transit = FixedCommuteNode("transit_ul")
-        FixedCommuteNode("bus_ul")
-        rail_fare = FixedCommuteNode("rail_fare_ul")
-        _succeeded_walk_check(False)  # bus not active
+        commute_src = FixedCommuteNode("merge_c3")
+        rail_fare_src = FixedCommuteNode("merge_rf3")
 
-        node = CommuteSelectorNode(
-            "rf_unpriced",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            rail_fare_result=_rail_fare_if(transit, rail_fare),
-            walk_result=_impossible_commute("walk"),
-            drive_result=_impossible_commute("drive"),
-            max_walk=30,
+        node = MergeRailFareNode(
+            "merge_test3",
+            commute_result=commute_src,
+            rail_fare_result=rail_fare_src,
         )
-        origin.push(GeoPoint(51.5, -0.1), "user")
-        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
 
-        # Transit has cost > 0 (parking) but the train leg CostGroup has cost=None
+        # Transit commute with £0 cost and train leg
+        commute_src.push(_make_commute(duration_min=32, cost_gbp=0))
+        # Rail fare with £41 cost
+        rail_fare_src.push(_make_commute(duration_min=30, cost_gbp=41.0))
+
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded, "Should apply rail_fare cost"
+        val = a.value_or_none()
+        assert val is not None
+        assert float(val.daily_cost.amount) == 41.0, f"Expected £41.0, got £{val.daily_cost.amount}"
+
+    @pytest.mark.asyncio
+    async def test_combines_existing_cost_with_rail_fare(self):
+        """When transit has some cost (e.g. parking) and unpriced transit legs,
+        the rail_fare cost is added to the existing cost."""
+        from houses.nodes.commute import MergeRailFareNode
         from pint import Quantity
 
-        from houses.commute import CostGroup, LegMode
+        commute_src = FixedCommuteNode("merge_c4")
+        rail_fare_src = FixedCommuteNode("merge_rf4")
+
+        node = MergeRailFareNode(
+            "merge_test4",
+            commute_result=commute_src,
+            rail_fare_result=rail_fare_src,
+        )
 
         office = PlaceOfInterest("Office", "SW1V 2QQ")
         person = Person("Simon", True, places_of_interest=(office,))
@@ -455,18 +374,57 @@ class TestDynamicDeps:
                 CostGroup(legs=(park_leg,), operator="Ascot Car Park", cost=Money("10.90", "GBP")),
             ),
         )
-        transit.push(transit_commute)
-        # Rail fare computed successfully with cost
-        rail_fare.push(_make_commute(duration_min=30, cost_gbp=41.0), "NR")
+        commute_src.push(transit_commute)
+        rail_fare_src.push(_make_commute(duration_min=30, cost_gbp=41.0))
 
         await flush_processor()
 
         a = await node.attempt()
-        assert a.succeeded, "Should compute when rail_fare resolved"
+        assert a.succeeded, "Should apply rail_fare cost"
         val = a.value_or_none()
         assert val is not None
-        # The commute should include both parking (10.90) and rail_fare (41.0) costs
-        assert float(val.daily_cost.amount) == 51.90, f"Expected merged cost £51.90, got £{val.daily_cost.amount}"
+        # Should include both parking (£10.90) and rail_fare (£41.00)
+        assert float(val.daily_cost.amount) == 51.90, f"Expected £51.90, got £{val.daily_cost.amount}"
+
+    @pytest.mark.asyncio
+    async def test_passes_through_when_commute_has_no_transit_legs(self):
+        """When the selected commute is walk or drive (no transit legs),
+        MergeRailFareNode passes through without merging."""
+        from houses.nodes.commute import MergeRailFareNode
+
+        commute_src = FixedCommuteNode("merge_c5")
+        rail_fare_src = FixedCommuteNode("merge_rf5")
+
+        node = MergeRailFareNode(
+            "merge_test5",
+            commute_result=commute_src,
+            rail_fare_result=rail_fare_src,
+        )
+
+        # Walk commute (no transit legs), £0 cost
+        walk_commute = _make_commute(duration_min=20, cost_gbp=0)
+        # Replace train leg with walk leg
+        from pint import Quantity
+        walk_commute = Commute(
+            person=walk_commute.person,
+            label=walk_commute.label,
+            destination=walk_commute.destination,
+            duration=Quantity(20, "minute"),
+            daily_cost=Money("0", "GBP"),
+            mode="walk",
+            details=(CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=20),), operator="", cost=Money("0", "GBP")),),
+        )
+        commute_src.push(walk_commute)
+        rail_fare_src.push(_make_commute(duration_min=30, cost_gbp=41.0))
+
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded
+        val = a.value_or_none()
+        assert val is not None
+        # Walk cost should remain £0 (no transit legs to replace)
+        assert float(val.daily_cost.amount) == 0, f"Expected £0, got £{val.daily_cost.amount}"
 
 
 class TestWalkLegCheckNode:
@@ -640,7 +598,6 @@ async def test_commute_selector_init_with_persisted_result():
         origin=origin,
         poi=poi,
         transit_result=transit,
-        rail_fare_result=_noop_if("crash"),
         walk_result=_impossible_commute("walk"),
         drive_result=_impossible_commute("drive"),
         max_walk=30,
@@ -868,7 +825,6 @@ async def test_commute_selector_impossible_without_bus():
         origin=origin,
         poi=poi,
         transit_result=transit,
-        rail_fare_result=_noop_if("nb"),
         walk_result=_impossible_commute("walk"),
         drive_result=_impossible_commute("drive"),
         max_walk=30,
@@ -905,7 +861,6 @@ async def test_walk_selected_when_fastest():
         origin=origin,
         poi=poi,
         transit_result=transit,
-        rail_fare_result=_rail_fare_if(transit, rail_fare),
         walk_result=walk,
         drive_result=_impossible_commute("drive"),
         max_walk=30,

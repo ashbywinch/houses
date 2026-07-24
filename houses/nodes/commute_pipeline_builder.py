@@ -4,7 +4,7 @@ from dag.if_then_else import IfThenElseNode
 from dag.user_input_node import UserInputNode
 from houses.model.domain import Commute
 from houses.nodes.bus import BodsFareNode, BusLegAugmentNode, BusRouteNode
-from houses.nodes.commute import CommuteSelectorNode, _needs_rail_fare
+from houses.nodes.commute import CommuteSelectorNode, MergeRailFareNode, _needs_rail_fare
 from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 from houses.nodes.park_and_ride import ParkAndRideAugmentNode
 from houses.nodes.petrol import PetrolCostAugmentNode
@@ -136,7 +136,6 @@ def build_commute_pipeline(prop) -> None:
                     condition_fn=_needs_rail_fare,
                     then_branch=rail_fare_node,
                 )
-
             selector = CommuteSelectorNode(
                 f"{prop.rid}/{key}/commute",
                 origin=prop.best_location,
@@ -144,13 +143,19 @@ def build_commute_pipeline(prop) -> None:
                 walk_result=walk_node,
                 transit_result=bus_augment,
                 drive_result=drive_node,
-                rail_fare_result=rail_fare_result,
                 is_child=is_child,
                 max_walk=p_info.bus_walk_penalty_minutes,
             )
+
+            merge_node = MergeRailFareNode(
+                f"{prop.rid}/{key}/merge",
+                commute_result=selector,
+                rail_fare_result=rail_fare_result,
+            )
+
             final_fuel = PetrolCostAugmentNode(
                 f"{prop.rid}/{key}/final_fuel",
-                commute_node=selector,
+                commute_node=merge_node,
                 financial_source=prop._svc.financial_source,
             )
             prop.commute_selectors[key] = final_fuel

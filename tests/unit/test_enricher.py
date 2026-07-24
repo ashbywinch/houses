@@ -269,7 +269,6 @@ class TestCommuteSelectorPipeline:
             walk_result=self._dummy_commute_node(),
             transit_result=transit,
             drive_result=self._dummy_commute_node(),
-            rail_fare_result=_noop_if("csel1_rf"),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
@@ -303,7 +302,6 @@ class TestCommuteSelectorPipeline:
             walk_result=self._dummy_commute_node(),
             transit_result=transit,
             drive_result=self._dummy_commute_node(),
-            rail_fare_result=_noop_if("csel2_rf"),
         )
         origin.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -327,7 +325,6 @@ class TestCommuteSelectorPipeline:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            rail_fare_result=_noop_if("csel3_rf"),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
@@ -357,7 +354,6 @@ class TestCommuteSelectorPipeline:
             walk_result=self._dummy_commute_node(),
             transit_result=transit,
             drive_result=self._dummy_commute_node(),
-            rail_fare_result=_noop_if("csel4_rf"),
         )
 
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -386,7 +382,6 @@ class TestCommuteSelectorPipeline:
             walk_result=self._dummy_commute_node(),
             transit_result=transit,
             drive_result=self._dummy_commute_node(),
-            rail_fare_result=_noop_if("csel5_rf"),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
@@ -424,7 +419,6 @@ class TestCommuteSelectorPipeline:
             walk_result=self._dummy_commute_node(),
             transit_result=transit,
             drive_result=self._dummy_commute_node(),
-            rail_fare_result=_noop_if("csel6_rf"),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
