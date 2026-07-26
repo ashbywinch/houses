@@ -36,6 +36,7 @@ def _session_dir() -> Path:
     session.mkdir(parents=True, exist_ok=True)
     return session
 
+
 _browser = None
 _playwright = None
 
@@ -111,7 +112,9 @@ async def capture_page(url: str, output_dir: str, label: str):
 async def main():
     parser = ArgumentParser(description="Capture Vue frontend DOM")
     parser.add_argument(
-        "--output", "-o", default=None,
+        "--output",
+        "-o",
+        default=None,
         help="Output directory (default: tools/captures/<session-timestamp>)",
     )
     parser.add_argument("--list-only", action="store_true")

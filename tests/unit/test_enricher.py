@@ -14,12 +14,14 @@ from money import Money
 from pint import Quantity
 
 from dag.attempt import Attempt
-from dag.derived_node import DerivedNode, flush_processor
-from dag.if_then_else import IfThenElseNode
+from dag.derived_node import DerivedNode
+from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
-from houses.transit_route import _apply_park_and_ride_to_journeys, _format_route_summary
+from houses.tfl_client import TflClient
+from houses.transit_route import _apply_park_and_ride_to_journeys
+from tests.helpers import FixedCommuteNode
 
 # ======================================================================
 # DAG-based commute computation (replaces old houses.enricher tests)
@@ -53,7 +55,7 @@ def _serialize_commute(duration_min: int, cost_gbp: float, label: str = "Office"
     return CommuteObj(
         person=Person(name="", has_car=False),
         label=label,
-        destination=PlaceOfInterest(label=label, postcode=""),
+        destination=PlaceOfInterest(label=label, address=""),
         duration=Quantity(duration_min, "minute"),
         daily_cost=Money(str(cost_gbp), "GBP"),
         mode=mode,
@@ -64,57 +66,82 @@ def _serialize_commute(duration_min: int, cost_gbp: float, label: str = "Office"
 
 
 class TestTransitCommute:
-    """TransitNode — produces a serialised commute dict from the router."""
+    """TransitNode — produces a serialised commute dict from TflTransitNode deps."""
+
+    @pytest.fixture
+    def _tfl_deps(self):
+        from houses.nodes.transit import TflTransitNode
+
+        return lambda loc, poi, has_car=False, prefix="t": (
+            TflTransitNode(f"{prefix}_nb", best_location=loc, poi=poi, has_car=has_car, allow_bus=False),
+            TflTransitNode(f"{prefix}_wb", best_location=loc, poi=poi, has_car=has_car, allow_bus=True),
+        )
 
     @pytest.mark.asyncio
     async def test_pending_without_location(self):
         """No location → node stays pending."""
-        from houses.nodes.transit import TransitNode
+        from houses.nodes.transit import TflTransitNode, TransitNode
 
         loc = UserInputNode[GeoPoint]("tr_loc1", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi1", PlaceOfInterest)
 
-        node = TransitNode("tr1", best_location=loc, poi=poi, has_car=False, max_walk=30)
+        no_bus = TflTransitNode("tr1_nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
+        with_bus = TflTransitNode("tr1_wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
+        node = TransitNode(
+            "tr1", best_location=loc, poi=poi, has_car=False, max_walk=30, no_bus_node=no_bus, with_bus_node=with_bus
+        )
         a = await node.attempt()
-        assert a.pending
+        assert a.pending, "Should be pending when location isn't set"
 
     @pytest.mark.asyncio
     async def test_pending_without_poi(self):
         """No POI → node stays pending even with location set."""
-        from houses.nodes.transit import TransitNode
+        from houses.nodes.transit import TflTransitNode, TransitNode
 
         loc = UserInputNode[GeoPoint]("tr_loc2", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi2", PlaceOfInterest)
 
         loc.push(GeoPoint(51.5, -0.1), "test")
         await flush_processor()
-
-        node = TransitNode("tr2", best_location=loc, poi=poi, has_car=False, max_walk=30)
+        no_bus = TflTransitNode("tr2_nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
+        with_bus = TflTransitNode("tr2_wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
+        node = TransitNode(
+            "tr2", best_location=loc, poi=poi, has_car=False, max_walk=30, no_bus_node=no_bus, with_bus_node=with_bus
+        )
         a = await node.attempt()
-        assert a.pending
+        assert a.pending, "Should be pending when POI isn't set"
 
     @pytest.mark.asyncio
     async def test_returns_commute_from_router(self, monkeypatch):
-        """With all deps, TransitNode calls commute_router.route() and serialises the result."""
-        from houses.nodes.transit import TransitNode
-        from houses.services_provider import get_services
+        """With all deps, TransitNode picks best from TflTransitNode deps."""
+        from houses.nodes.transit import TflTransitNode, TransitNode
+        from houses.tfl_client import TflClient
 
         loc = UserInputNode[GeoPoint]("tr_loc3", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi3", PlaceOfInterest)
 
         loc.push(GeoPoint(51.5, -0.1), "test")
         office = PlaceOfInterest("Office", "SW1V 2QQ")
-        poi.push(office, "config")
+        poi.push(office)
 
         commute = _make_commute(duration_min=45, cost_gbp="12.50")
 
-        async def mock_route(origin, destination, *, has_car, max_walk_minutes):
+        async def mock_plan(self):
             return Attempt.succeeded(commute)
 
-        svc = get_services()
-        monkeypatch.setattr(svc.commute_router, "route", mock_route)
+        monkeypatch.setattr(TflClient, "plan", mock_plan)
 
-        node = TransitNode("tr3/Simon/Office/computed_transit", best_location=loc, poi=poi, has_car=False, max_walk=30)
+        no_bus = TflTransitNode("tr3_nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
+        with_bus = TflTransitNode("tr3_wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
+        node = TransitNode(
+            "tr3/Simon/Office/computed_transit",
+            best_location=loc,
+            poi=poi,
+            has_car=False,
+            max_walk=30,
+            no_bus_node=no_bus,
+            with_bus_node=with_bus,
+        )
         await flush_processor()
         await flush_processor()
 
@@ -127,8 +154,8 @@ class TestTransitCommute:
     @pytest.mark.asyncio
     async def test_impossible_when_router_fails(self, monkeypatch):
         """Router returning impossible → TransitNode is impossible."""
-        from houses.nodes.transit import TransitNode
-        from houses.services_provider import get_services
+        from houses.nodes.transit import TflTransitNode, TransitNode
+        from houses.tfl_client import TflClient
 
         loc = UserInputNode[GeoPoint]("tr_loc4", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi4", PlaceOfInterest)
@@ -136,13 +163,22 @@ class TestTransitCommute:
         loc.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
 
-        async def mock_route_fail(origin, destination, *, has_car, max_walk_minutes):
+        async def mock_fail(self):
             return Attempt.impossible("API down")
 
-        svc = get_services()
-        monkeypatch.setattr(svc.commute_router, "route", mock_route_fail)
+        monkeypatch.setattr(TflClient, "plan", mock_fail)
 
-        node = TransitNode("tr4/Simon/Office/computed_transit", best_location=loc, poi=poi, has_car=False, max_walk=30)
+        no_bus = TflTransitNode("tr4_nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
+        with_bus = TflTransitNode("tr4_wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
+        node = TransitNode(
+            "tr4/Simon/Office/computed_transit",
+            best_location=loc,
+            poi=poi,
+            has_car=False,
+            max_walk=30,
+            no_bus_node=no_bus,
+            with_bus_node=with_bus,
+        )
         await flush_processor()
         await flush_processor()
 
@@ -152,12 +188,16 @@ class TestTransitCommute:
     @pytest.mark.asyncio
     async def test_to_json_has_boolean_fields(self):
         """TransitNode.to_json() must include succeeded/pending/impossible booleans."""
-        from houses.nodes.transit import TransitNode
+        from houses.nodes.transit import TflTransitNode, TransitNode
 
         loc = UserInputNode[GeoPoint]("tr_loc5", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi5", PlaceOfInterest)
 
-        node = TransitNode("tr5", best_location=loc, poi=poi, has_car=False, max_walk=30)
+        no_bus = TflTransitNode("tr5_nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
+        with_bus = TflTransitNode("tr5_wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
+        node = TransitNode(
+            "tr5", best_location=loc, poi=poi, has_car=False, max_walk=30, no_bus_node=no_bus, with_bus_node=with_bus
+        )
         j = await node.to_json()
         assert "succeeded" in j
         assert "pending" in j
@@ -169,8 +209,8 @@ class TestTransitCommute:
     @pytest.mark.asyncio
     async def test_uses_has_car_and_max_walk_params(self, monkeypatch):
         """Uses has_car and max_walk from constructor params for the commute request."""
-        from houses.nodes.transit import TransitNode
-        from houses.services_provider import get_services
+        from houses.nodes.transit import TflTransitNode, TransitNode
+        from houses.tfl_client import TflClient
 
         loc = UserInputNode[GeoPoint]("tr_loc6", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi6", PlaceOfInterest)
@@ -180,28 +220,36 @@ class TestTransitCommute:
 
         captured = {}
 
-        async def capture_route(origin, destination, *, has_car, max_walk_minutes):
-            captured["has_car"] = has_car
-            captured["max_walk"] = max_walk_minutes
+        async def capture_plan(self):
+            captured["park_and_ride"] = self._park_and_ride
+            captured["allow_bus"] = self._allow_bus
             return Attempt.succeeded(_make_commute())
 
-        svc = get_services()
-        monkeypatch.setattr(svc.commute_router, "route", capture_route)
+        monkeypatch.setattr(TflClient, "plan", capture_plan)
 
-        node = TransitNode("rid/Simon/Office/computed_transit", best_location=loc, poi=poi, has_car=True, max_walk=15)
+        no_bus = TflTransitNode("tr6_nb", best_location=loc, poi=poi, has_car=True, allow_bus=False)
+        with_bus = TflTransitNode("tr6_wb", best_location=loc, poi=poi, has_car=True, allow_bus=True)
+        node = TransitNode(
+            "rid/Simon/Office/computed_transit",
+            best_location=loc,
+            poi=poi,
+            has_car=True,
+            max_walk=15,
+            no_bus_node=no_bus,
+            with_bus_node=with_bus,
+        )
         await flush_processor()
         await flush_processor()
 
         a = await node.attempt()
         assert a.succeeded
-        assert captured.get("has_car") is True
-        assert captured.get("max_walk") == 15
+        assert captured.get("park_and_ride") is True
 
     @pytest.mark.asyncio
     async def test_transit_is_not_child(self, monkeypatch):
         """Transit result is_child is always False (child handling done upstream)."""
-        from houses.nodes.transit import TransitNode
-        from houses.services_provider import get_services
+        from houses.nodes.transit import TflTransitNode, TransitNode
+        from houses.tfl_client import TflClient
 
         loc = UserInputNode[GeoPoint]("tr_loc7", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("tr_poi7", PlaceOfInterest)
@@ -209,22 +257,28 @@ class TestTransitCommute:
         loc.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("School", "SL6 1AA"), "config")
 
-        async def mock_route(origin, destination, *, has_car, max_walk_minutes):
+        async def mock_plan(self):
             return Attempt.succeeded(_make_commute(duration_min=20, cost_gbp="0"))
 
-        svc = get_services()
-        monkeypatch.setattr(svc.commute_router, "route", mock_route)
+        monkeypatch.setattr(TflClient, "plan", mock_plan)
 
-        node = TransitNode("rid/George/School/computed_transit", best_location=loc, poi=poi, has_car=False, max_walk=30)
+        no_bus = TflTransitNode("tr7_nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
+        with_bus = TflTransitNode("tr7_wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
+        node = TransitNode(
+            "rid/George/School/computed_transit",
+            best_location=loc,
+            poi=poi,
+            has_car=False,
+            max_walk=30,
+            no_bus_node=no_bus,
+            with_bus_node=with_bus,
+        )
         await flush_processor()
         await flush_processor()
 
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none().person.is_child is False
-
-
-# ── CommuteSelectorNode ──────────────────────────────────────────────
 
 
 class TestCommuteSelectorPipeline:
@@ -236,25 +290,29 @@ class TestCommuteSelectorPipeline:
         from houses.model.domain import Person, PlaceOfInterest
 
         n = UserInputNode[Commute]("_dummy", Commute)
-        n.push(Commute(
-            person=Person(name="", has_car=False),
-            label="",
-            destination=PlaceOfInterest(label="", postcode=""),
-            duration=Quantity(999, "minute"),
-            daily_cost=Money("0", "GBP"),
-        ), "default")
+        n.push(
+            Commute(
+                person=Person(name="", has_car=False),
+                label="",
+                destination=PlaceOfInterest(label="", address=""),
+                duration=Quantity(999, "minute"),
+                daily_cost=Money("0", "GBP"),
+            ),
+            "default",
+        )
         return n
+
     """CommuteSelectorNode — picks transit, falls back to bus, or raises impossible."""
 
     @pytest.mark.asyncio
     async def test_transit_takes_priority(self):
         """When transit succeeds it is returned directly (Commute object)."""
-        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
+        from houses.nodes.commute import CommuteSelectorNode
 
         origin = UserInputNode[GeoPoint]("csel_o1", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("csel_p1", PlaceOfInterest)
-        transit = commute_input_node("csel_t1")
-        bus = commute_input_node("csel_b1")
+        transit = FixedCommuteNode("csel_t1")
+        bus = FixedCommuteNode("csel_b1")
         node = CommuteSelectorNode(
             "csel1",
             origin=origin,
@@ -262,8 +320,6 @@ class TestCommuteSelectorPipeline:
             walk_result=self._dummy_commute_node(),
             transit_result=transit,
             drive_result=self._dummy_commute_node(),
-            bus_result=_noop_if("csel1"),
-            rail_fare_result=_noop_if("csel1_rf"),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
@@ -272,8 +328,8 @@ class TestCommuteSelectorPipeline:
         transit_commute = _make_commute(duration_min=30, cost_gbp="10.0")
         bus_commute = _make_commute(duration_min=55, cost_gbp="5.0")
 
-        transit.push(transit_commute, "TfL")
-        bus.push(bus_commute, "Bus")
+        transit.push(transit_commute)
+        bus.push(bus_commute)
 
         await flush_processor()
 
@@ -282,14 +338,13 @@ class TestCommuteSelectorPipeline:
         assert a.value_or_none().daily_cost == Money("10.0", "GBP")
 
     @pytest.mark.asyncio
-    async def test_fallback_to_bus(self):
-        """When transit fails but bus succeeds, bus is returned."""
-        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
+    async def test_pending_when_transit_unset(self):
+        """When transit is pending, selector is pending."""
+        from houses.nodes.commute import CommuteSelectorNode
 
         origin = UserInputNode[GeoPoint]("csel_o2", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("csel_p2", PlaceOfInterest)
-        transit = commute_input_node("csel_t2")
-        bus = commute_input_node("csel_b2")
+        transit = FixedCommuteNode("csel_t2")
 
         node = CommuteSelectorNode(
             "csel2",
@@ -298,59 +353,50 @@ class TestCommuteSelectorPipeline:
             walk_result=self._dummy_commute_node(),
             transit_result=transit,
             drive_result=self._dummy_commute_node(),
-            bus_result=_noop_if("csel2"),
-            rail_fare_result=_noop_if("csel2_rf"),
         )
-
         origin.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
 
-        bus_commute = _make_commute(duration_min=55, cost_gbp="5.0")
-        bus.push(bus_commute, "Bus")
-
         await flush_processor()
 
-        # transit is pending → selector is pending (waits for transit)
         a = await node.attempt()
-        assert a.pending
+        assert a.pending, "Should be pending when transit hasn't been set"
 
     @pytest.mark.asyncio
     async def test_impossible_when_both_fail(self):
-        """When both transit and bus fail, selector is impossible."""
-        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
+        """When all routes fail, selector is impossible."""
+        from houses.nodes.commute import CommuteSelectorNode
 
         origin = UserInputNode[GeoPoint]("csel_o3", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("csel_p3", PlaceOfInterest)
-        transit = commute_input_node("csel_t3")
+        transit = FixedCommuteNode("csel_t3")
 
         node = CommuteSelectorNode(
             "csel3",
             origin=origin,
             poi=poi,
-            walk_result=self._dummy_commute_node(),
             transit_result=transit,
-            drive_result=self._dummy_commute_node(),
-            bus_result=_noop_if("csel3"),
-            rail_fare_result=_noop_if("csel3_rf"),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
+        transit._commute = None
+        transit._attempt = Attempt.impossible("no route")
+        transit.changed.emit()
 
         await flush_processor()
 
         a = await node.attempt()
-        assert a.pending
+        assert a.impossible, f"Should be impossible when all routes fail, got {a.status}: {a.error}"
 
     @pytest.mark.asyncio
     async def test_impossible_when_origin_missing(self):
         """No origin → selector is impossible."""
-        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
+        from houses.nodes.commute import CommuteSelectorNode
 
         origin = UserInputNode[GeoPoint]("csel_o4", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("csel_p4", PlaceOfInterest)
-        transit = commute_input_node("csel_t4")
-        transit = commute_input_node("csel_t4")
+        transit = FixedCommuteNode("csel_t4")
 
         node = CommuteSelectorNode(
             "csel4",
@@ -359,26 +405,26 @@ class TestCommuteSelectorPipeline:
             walk_result=self._dummy_commute_node(),
             transit_result=transit,
             drive_result=self._dummy_commute_node(),
-            bus_result=_noop_if("csel4"),
-            rail_fare_result=_noop_if("csel4_rf"),
         )
 
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
+        transit.push(_make_commute(duration_min=35, cost_gbp="8.50"))
 
         await flush_processor()
 
         a = await node.attempt()
-        assert a.pending
+
+        assert a.pending, "Should be pending when origin is missing (waiting for data)"
 
     @pytest.mark.asyncio
     async def test_to_json_includes_value_and_booleans(self):
         """CommuteSelectorNode.to_json() includes status/value/is_child/provenance."""
-        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
+        from houses.nodes.commute import CommuteSelectorNode
 
         origin = UserInputNode[GeoPoint]("csel_o5", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("csel_p5", PlaceOfInterest)
-        transit = commute_input_node("csel_t5")
-        bus = commute_input_node("csel_b5")
+        transit = FixedCommuteNode("csel_t5")
+        bus = FixedCommuteNode("csel_b5")
 
         node = CommuteSelectorNode(
             "csel5",
@@ -387,8 +433,6 @@ class TestCommuteSelectorPipeline:
             walk_result=self._dummy_commute_node(),
             transit_result=transit,
             drive_result=self._dummy_commute_node(),
-            bus_result=_noop_if("csel5"),
-            rail_fare_result=_noop_if("csel5_rf"),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
@@ -412,12 +456,12 @@ class TestCommuteSelectorPipeline:
     @pytest.mark.asyncio
     async def test_selector_with_commute_values(self):
         """CommuteSelectorNode passes through a Commute object."""
-        from houses.nodes.commute import CommuteSelectorNode, commute_input_node
+        from houses.nodes.commute import CommuteSelectorNode
 
         origin = UserInputNode[GeoPoint]("csel_o6", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("csel_p6", PlaceOfInterest)
-        transit = commute_input_node("csel_t6")
-        bus = commute_input_node("csel_b6")
+        transit = FixedCommuteNode("csel_t6")
+        bus = FixedCommuteNode("csel_b6")
 
         node = CommuteSelectorNode(
             "csel6",
@@ -426,8 +470,6 @@ class TestCommuteSelectorPipeline:
             walk_result=self._dummy_commute_node(),
             transit_result=transit,
             drive_result=self._dummy_commute_node(),
-            bus_result=_noop_if("csel6"),
-            rail_fare_result=_noop_if("csel6_rf"),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
@@ -435,7 +477,7 @@ class TestCommuteSelectorPipeline:
 
         transit_commute = _make_commute(duration_min=35, cost_gbp="8.50")
         bus.push(_make_commute(duration_min=55, cost_gbp="2.00"), "Bus")
-        transit.push(transit_commute, "TfL")
+        transit.push(transit_commute)
 
         await flush_processor()
 
@@ -456,7 +498,7 @@ class TestCommuteBreakdown:
     @pytest.mark.asyncio
     async def test_yearly_formula_with_all_costs(self):
         """46wk x (15 + 10 + 2x24) = 46 x 73 = 3358"""
-        from houses.nodes.monthly_costs import CommuteBreakdownNode
+        from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 
         so = UserInputNode[Commute]("cbd_so1", Commute)
         sb = UserInputNode[Commute]("cbd_sb1", Commute)
@@ -511,7 +553,7 @@ class TestCommuteBreakdown:
     @pytest.mark.asyncio
     async def test_missing_cost_means_partial_total(self):
         """When some costs are present, total includes only those."""
-        from houses.nodes.monthly_costs import CommuteBreakdownNode
+        from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 
         so = UserInputNode[Commute]("cbd_so2", Commute)
         sb = UserInputNode[Commute]("cbd_sb2", Commute)
@@ -575,7 +617,7 @@ class TestCommuteBreakdown:
     @pytest.mark.asyncio
     async def test_returns_defaults_when_no_commutes(self):
         """All commute selectors empty → yearly_total is 0.0."""
-        from houses.nodes.monthly_costs import CommuteBreakdownNode
+        from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 
         persons = UserInputNode[list]("cbd_ps2", list)
 
@@ -596,7 +638,7 @@ class TestCommuteBreakdown:
     @pytest.mark.asyncio
     async def test_missing_commute_does_not_crash(self):
         """When some commute selectors are impossible, node still succeeds."""
-        from houses.nodes.monthly_costs import CommuteBreakdownNode
+        from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 
         so = UserInputNode[Commute]("cbd_so3", Commute)
         sb = UserInputNode[Commute]("cbd_sb3", Commute)
@@ -758,7 +800,7 @@ class TestParkAndRide:
         data = copy.deepcopy(self.LONG_WALK_DATA)
         result = await _apply_park_and_ride_to_journeys(data, "SL6 3YZ", max_walk_minutes=20, _drive_fn=self._drive_10)
         best = min(result["journeys"], key=lambda j: j.get("duration", 9999))
-        summary = _format_route_summary(best)
+        summary = TflClient._format_route_summary(best)
         assert "Drive to Maidenhead (10m)" in summary
         assert "Train to Paddington (20m)" in summary
         assert "walk 7m" in summary
@@ -774,17 +816,3 @@ def _succeeded_walk_check(val: bool = False) -> DerivedNode:
     w = WalkLegCheckNode("_wc", transit_node=t, max_walk=30)
     w._attempt = Attempt.succeeded(val)
     return w
-
-
-def _noop_if(name: str = "noop") -> IfThenElseNode:
-    """IfThenElseNode that always returns None (no branch activated)."""
-    cond = UserInputNode[bool](f"_{name}_cond", bool)
-    dummy = UserInputNode[str](f"_{name}_dummy", str)
-    cond.push(False, "setup")
-    return IfThenElseNode(
-        f"_{name}",
-        Commute,
-        condition_sources=(cond,),
-        condition_fn=lambda a: False,
-        then_branch=dummy,
-    )

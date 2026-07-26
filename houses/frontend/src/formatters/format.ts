@@ -13,3 +13,15 @@ export function ofstedClass(rating: string): string {
         default:             return 'pill--muted'
     }
 }
+
+/** EPC band → CSS class group (e.g. 'a', 'bc', 'd', 'e', 'fg', or '') */
+export function epcClass(band: string | undefined): string {
+    if (!band) return ''
+    const b = band.toUpperCase()
+    if (b === 'A') return 'a'
+    if (b === 'B' || b === 'C') return 'bc'
+    if (b === 'D') return 'd'
+    if (b === 'E') return 'e'
+    if (b === 'F' || b === 'G') return 'fg'
+    return ''
+}

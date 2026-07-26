@@ -11,6 +11,7 @@ from money import Money
 from pint import Quantity
 
 from dag.attempt import Attempt
+from dag.derived_node import DerivedNode
 from houses.council_tax_info import CouncilTaxInfo
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
@@ -19,6 +20,36 @@ from houses.school_gender import SchoolGender
 from houses.services import Services
 
 # ── Individual Fake Services ──────────────────────────────────────────
+
+
+class FixedCommuteNode(DerivedNode[Commute]):
+    """A DerivedNode that holds a canned Commute value for tests.
+
+    Matches the production architecture: Commutes always come from
+    DerivedNodes, never from UserInputNodes.  Call ``set(commute)``
+    to update the value and notify downstream nodes.
+    """
+
+    def __init__(self, node_id: str):
+        super().__init__(node_id, Commute, ())
+        self._commute: Commute | None = None
+
+    def compute(self) -> Attempt[Commute]:
+        if self._commute is not None:
+            return Attempt.succeeded(self._commute)
+        return Attempt.pending()
+
+    def set(self, commute: Commute) -> None:
+        self._commute = commute
+        self._attempt = Attempt.pending()
+        from dag.scheduler import _get_scheduler
+
+        _get_scheduler().schedule(self)
+        self.changed.emit()
+
+    def push(self, value: Commute, source_label: str = "") -> None:
+        """API-compatible alias for set(). Accepts a source_label for compatibility."""
+        self.set(value)
 
 
 _DEFAULT_POINT = GeoPoint(51.5, -0.1)
@@ -55,21 +86,21 @@ class FakeGeocoder:
 _DEFAULT_SIMON = Commute(
     person=Person(name="Simon", has_car=False),
     label="Simon (London)",
-    destination=PlaceOfInterest(label="Simon (London)", postcode="SW1V 2QQ"),
+    destination=PlaceOfInterest(label="Simon (London)", address="SW1V 2QQ"),
     duration=Quantity(30, "minute"),
     daily_cost=Money("10.0", "GBP"),
 )
 _DEFAULT_LORENA = Commute(
     person=Person(name="Lorena", has_car=False),
     label="Lorena (London)",
-    destination=PlaceOfInterest(label="Lorena (London)", postcode="EC3A 7LP"),
+    destination=PlaceOfInterest(label="Lorena (London)", address="EC3A 7LP"),
     duration=Quantity(45, "minute"),
     daily_cost=Money("12.0", "GBP"),
 )
 _DEFAULT_PETROL = Commute(
     person=Person(name="Simon", has_car=True),
     label="Bracknell Office (RG12 8YA)",
-    destination=PlaceOfInterest(label="Bracknell Office (RG12 8YA)", postcode="RG12 8YA"),
+    destination=PlaceOfInterest(label="Bracknell Office (RG12 8YA)", address="RG12 8YA"),
     duration=Quantity(90, "minute"),
     daily_cost=Money("12.50", "GBP"),
 )
@@ -128,7 +159,7 @@ class FakeSchoolLookup:
         return Commute(
             person=Person(name="George", has_car=False, is_child=True),
             label=school.name,
-            destination=PlaceOfInterest(label=school.name, postcode=school.postcode),
+            destination=PlaceOfInterest(label=school.name, address=school.postcode),
             duration=Quantity(20, "minute"),
             daily_cost=Money("0", "GBP"),
         )

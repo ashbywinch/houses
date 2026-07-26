@@ -41,10 +41,12 @@ class LegMode(Enum):
     CYCLE = auto()
     PARK = auto()
 
+
 # Register pydantic schema for TypeAdapter serialization
 from pydantic_core import core_schema  # noqa: E402 — pydantic registration after class def
 
 if not hasattr(LegMode, "__get_pydantic_core_schema__"):
+
     def _legmode_schema(_source, _handler):
         def validate(v):
             if isinstance(v, LegMode):
@@ -54,12 +56,15 @@ if not hasattr(LegMode, "__get_pydantic_core_schema__"):
             if isinstance(v, int):
                 return LegMode(v)
             raise ValueError(f"Cannot convert {type(v)} to LegMode")
+
         def serialize(lm):
             return lm.name.lower()
+
         return core_schema.no_info_plain_validator_function(
             validate,
             serialization=core_schema.plain_serializer_function_ser_schema(serialize),
         )
+
     LegMode.__get_pydantic_core_schema__ = _legmode_schema
 
 
@@ -95,13 +100,11 @@ class CostGroup:
 
     legs: tuple[JourneyLeg, ...]
     operator: str = ""
-    cost: Money | float | None = None  # None = free (walking).  Parking CostGroups use Money.
+    cost: Money | None = None  # None = free (walking).  Only Money — never float.
 
     def leg_descriptions(self) -> tuple[str, ...]:
         """Return operator-appropriate descriptions for each leg."""
         return tuple(_render_leg_description(leg) for leg in self.legs)
-
-
 
 
 @dataclass(frozen=True)

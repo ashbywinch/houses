@@ -19,10 +19,20 @@ dependencies = [
     "setuptools>=82.0.1",
     "pint>=0.25.3",
     "python-multipart>=0.0.20",
-    "archunit>=0.0.0",
-    "import-linter>=2.13",
-    "archunitpython>=1.5.0",
+    "uk-postcodes-parsing>=2.1.0",
+    "httpx2>=2.9.1",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "archunitpython>=1.5.0",
+    "import-linter>=2.13",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.25.0",
+    "ruff>=0.11.0",
+    "coverage>=7.0.0",
+    "httpx>=0.28.0",
+]  # Architecture testing (ArchUnit-style rules for Python imports)
 
 [project.scripts]
 houses = "houses.__main__:main"
@@ -62,16 +72,3 @@ asyncio_mode = "auto"
 [tool.uv.sources]
 uk-property-apis = { git = "https://github.com/kubilay-yavuz/uk-property-intel.git", subdirectory = "packages/apis" }
 
-[dependency-groups]
-dev = [
-    "httpx2>=2.3.0",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.25.0",
-    "ruff>=0.11.0",
-    "coverage>=7.0.0",
-    "httpx>=0.28.0",
-]

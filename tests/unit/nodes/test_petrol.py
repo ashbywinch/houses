@@ -7,7 +7,7 @@ from money import Money
 from pint import Quantity
 
 import dag.user_input_node  # noqa: F401 — register Money/Quantity pydantic schemas
-from dag.derived_node import flush_processor
+from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.model.domain import Commute, Person, PlaceOfInterest
@@ -106,9 +106,7 @@ class TestPetrolCostAugmentNode:
         assert drive_cg.cost is not None, "Drive CostGroup should have cost attributed"
         # Original cost was 5.00, fuel added 3.64 → total 8.64
         if isinstance(drive_cg.cost, Money):
-            assert float(drive_cg.cost.amount) == 9.37, (
-                f"Expected drive CostGroup cost £9.37, got {drive_cg.cost}"
-            )
+            assert float(drive_cg.cost.amount) == 9.37, f"Expected drive CostGroup cost £9.37, got {drive_cg.cost}"
 
     @pytest.mark.asyncio
     async def test_skips_non_drive_commute(self):

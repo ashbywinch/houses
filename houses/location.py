@@ -26,10 +26,9 @@ class _GeoState:
     nominatim_last_call: float = 0.0
 
 
-
-
 def _get_geo_state() -> _GeoState:
     from houses.services_provider import get_services
+
     svc = get_services()
     if svc.geo_state is None:
         svc.geo_state = _GeoState()
@@ -57,6 +56,7 @@ _TOWN_SUFFIXES = re.compile(
 
 def _geo_cache() -> dict:
     from houses.services_provider import get_services
+
     svc = get_services()
     if svc.geo_cache is None:
         svc.geo_cache = {}
@@ -382,7 +382,6 @@ async def _geocode_postcode(postcode: str) -> Attempt[GeoPoint]:
             return Attempt.impossible("unexpected error")
 
 
-
 async def find_nearest_town_name(lat: float, lon: float) -> str | None:
     """Reverse-geocode coordinates to the nearest UK town name via ORS Pelias.
 
@@ -414,6 +413,7 @@ async def find_nearest_town_name(lat: float, lon: float) -> str | None:
     props = features[0].get("properties", {})
     town = props.get("locality") or props.get("borough")
     return town
+
 
 # ── Postcode helpers ────────────────────────────────────────────────────
 

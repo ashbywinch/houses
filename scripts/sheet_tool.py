@@ -50,9 +50,7 @@ VIEW_TAB = "Properties View"
 
 
 def _get_sheet() -> tuple[gspread.Spreadsheet, gspread.Worksheet]:
-    creds = Credentials.from_service_account_info(
-        json.loads(settings.service_account_json), scopes=SCOPES
-    )
+    creds = Credentials.from_service_account_info(json.loads(settings.service_account_json), scopes=SCOPES)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
     ws = sh.worksheet(DATA_TAB)
@@ -73,9 +71,7 @@ def cmd_layout():
 
 
 def cmd_move(header: str, after: str | None, tab: str | None = None):
-    creds = Credentials.from_service_account_info(
-        json.loads(settings.service_account_json), scopes=SCOPES
-    )
+    creds = Credentials.from_service_account_info(json.loads(settings.service_account_json), scopes=SCOPES)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
     ws = sh.worksheet(tab or DATA_TAB)
@@ -105,22 +101,26 @@ def cmd_move(header: str, after: str | None, tab: str | None = None):
         dst_idx = len(headers)
 
     body = {
-        "requests": [{
-            "moveDimension": {
-                "source": {"sheetId": sheet_id, "dimension": "COLUMNS",
-                           "startIndex": src_idx, "endIndex": src_idx + 1},
-                "destinationIndex": dst_idx,
+        "requests": [
+            {
+                "moveDimension": {
+                    "source": {
+                        "sheetId": sheet_id,
+                        "dimension": "COLUMNS",
+                        "startIndex": src_idx,
+                        "endIndex": src_idx + 1,
+                    },
+                    "destinationIndex": dst_idx,
+                }
             }
-        }]
+        ]
     }
     sh.batch_update(body)
     print(f"Moved '{header}' to position {dst_idx}")
 
 
 def cmd_add(header: str, after: str | None = None, tab: str | None = None):
-    creds = Credentials.from_service_account_info(
-        json.loads(settings.service_account_json), scopes=SCOPES
-    )
+    creds = Credentials.from_service_account_info(json.loads(settings.service_account_json), scopes=SCOPES)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
     ws = sh.worksheet(tab or DATA_TAB)
@@ -140,12 +140,18 @@ def cmd_add(header: str, after: str | None = None, tab: str | None = None):
         dst_idx = len(headers)
 
     body = {
-        "requests": [{
-            "insertDimension": {
-                "range": {"sheetId": sheet_id, "dimension": "COLUMNS",
-                          "startIndex": dst_idx, "endIndex": dst_idx + 1},
+        "requests": [
+            {
+                "insertDimension": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "COLUMNS",
+                        "startIndex": dst_idx,
+                        "endIndex": dst_idx + 1,
+                    },
+                }
             }
-        }]
+        ]
     }
     sh.batch_update(body)
     cl = col_letter(dst_idx)
@@ -171,9 +177,7 @@ def cmd_delete(header: str, tab: str | None = None):
 
     Safe against index drift because it finds the column by header text first.
     """
-    creds = Credentials.from_service_account_info(
-        json.loads(settings.service_account_json), scopes=SCOPES
-    )
+    creds = Credentials.from_service_account_info(json.loads(settings.service_account_json), scopes=SCOPES)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
 
@@ -196,10 +200,7 @@ def cmd_delete(header: str, tab: str | None = None):
 
     if len(found_in) > 1:
         tabs = "', '".join(found_in.keys())
-        print(
-            f"Column '{header}' exists in both '{tabs}'. "
-            f"Specify --tab to disambiguate."
-        )
+        print(f"Column '{header}' exists in both '{tabs}'. Specify --tab to disambiguate.")
         sys.exit(1)
 
     target_tab = next(iter(found_in))
@@ -208,16 +209,18 @@ def cmd_delete(header: str, tab: str | None = None):
     sheet_id = ws._properties["sheetId"]
 
     body = {
-        "requests": [{
-            "deleteDimension": {
-                "range": {
-                    "sheetId": sheet_id,
-                    "dimension": "COLUMNS",
-                    "startIndex": col_idx,
-                    "endIndex": col_idx + 1,
+        "requests": [
+            {
+                "deleteDimension": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "COLUMNS",
+                        "startIndex": col_idx,
+                        "endIndex": col_idx + 1,
+                    }
                 }
             }
-        }]
+        ]
     }
     sh.batch_update(body)
     print(f"Deleted column '{header}' (col {col_idx}) from '{target_tab}'")
@@ -285,18 +288,18 @@ def cmd_diff(rid: str, tab: str, other: str | None):
 
 def cmd_delete_tab(tab: str):
     """Delete a worksheet tab, cleaning up its named ranges first to avoid orphans."""
-    creds = Credentials.from_service_account_info(
-        json.loads(settings.service_account_json), scopes=SCOPES
-    )
+    creds = Credentials.from_service_account_info(json.loads(settings.service_account_json), scopes=SCOPES)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
     ws = sh.worksheet(tab)
     sid = ws._properties["sheetId"]
 
     named_ranges = sh.list_named_ranges() or []
-    cleanup = [{"deleteNamedRange": {"namedRangeId": r["namedRangeId"]}}
-               for r in named_ranges
-               if r.get("range", {}).get("sheetId") == sid]
+    cleanup = [
+        {"deleteNamedRange": {"namedRangeId": r["namedRangeId"]}}
+        for r in named_ranges
+        if r.get("range", {}).get("sheetId") == sid
+    ]
     if cleanup:
         sh.batch_update({"requests": cleanup})
         print(f"Cleaned up {len(cleanup)} named ranges on '{tab}'")
@@ -306,12 +309,11 @@ def cmd_delete_tab(tab: str):
 
 
 def cmd_refresh_formulas():
-    creds = Credentials.from_service_account_info(
-        json.loads(settings.service_account_json), scopes=SCOPES
-    )
+    creds = Credentials.from_service_account_info(json.loads(settings.service_account_json), scopes=SCOPES)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
     from houses.sheets import sync_data_formulas, sync_view_formulas
+
     sync_view_formulas(sh)
     sync_data_formulas(sh)
     print("View and Data formulas refreshed via named ranges")
@@ -368,9 +370,7 @@ def cmd_migrate_view(dry_run: bool = False, undo: bool = False):
       2. Insert 2 cols at index 5
       3. Write the original 29 headers
     """
-    creds = Credentials.from_service_account_info(
-        json.loads(settings.service_account_json), scopes=SCOPES
-    )
+    creds = Credentials.from_service_account_info(json.loads(settings.service_account_json), scopes=SCOPES)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
 
@@ -403,9 +403,7 @@ def cmd_migrate_view(dry_run: bool = False, undo: bool = False):
 
         # Step 1: Delete the 7 inserted columns (indices 23-29)
         req_delete = {
-            "deleteDimension": {
-                "range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": 23, "endIndex": 30}
-            }
+            "deleteDimension": {"range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": 23, "endIndex": 30}}
         }
         sh.batch_update({"requests": [req_delete]})
         print("  Deleted 7 columns (affordability block + Ashby Works)")
@@ -440,9 +438,7 @@ def cmd_migrate_view(dry_run: bool = False, undo: bool = False):
 
     # Step 1: Delete cols F-G (indices 5-6)
     req_delete = {
-        "deleteDimension": {
-            "range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": 5, "endIndex": 7}
-        }
+        "deleteDimension": {"range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": 5, "endIndex": 7}}
     }
     sh.batch_update({"requests": [req_delete]})
     print("  Deleted columns F-G (Yearly Commute Total, Yearly Council Tax)")
@@ -512,9 +508,7 @@ def cmd_migrate_data_formulas(dry_run: bool = False):
     command adds the missing Data tab headers and removes any excess columns
     beyond index 44 that accumulated from prior resize operations.
     """
-    creds = Credentials.from_service_account_info(
-        json.loads(settings.service_account_json), scopes=SCOPES
-    )
+    creds = Credentials.from_service_account_info(json.loads(settings.service_account_json), scopes=SCOPES)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
     ws_data = sh.worksheet(DATA_TAB)
@@ -554,22 +548,27 @@ def cmd_migrate_data_formulas(dry_run: bool = False):
 
     # Step 2: Delete excess columns (beyond expected count)
     if num_cols > expected:
-        sh.batch_update({
-            "requests": [{
-                "deleteDimension": {
-                    "range": {
-                        "sheetId": sid_data,
-                        "dimension": "COLUMNS",
-                        "startIndex": expected,
-                        "endIndex": num_cols,
+        sh.batch_update(
+            {
+                "requests": [
+                    {
+                        "deleteDimension": {
+                            "range": {
+                                "sheetId": sid_data,
+                                "dimension": "COLUMNS",
+                                "startIndex": expected,
+                                "endIndex": num_cols,
+                            }
+                        }
                     }
-                }
-            }]
-        })
+                ]
+            }
+        )
         print(f"  Deleted {num_cols - expected} excess columns")
 
     # Step 3: Refresh formulas
     from houses.sheets import ensure_named_ranges, sync_data_formulas, sync_view_formulas
+
     ensure_named_ranges(sh)
     print("  Named ranges refreshed")
     sync_data_formulas(sh)

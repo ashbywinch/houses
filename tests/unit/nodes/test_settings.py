@@ -7,6 +7,7 @@ If this test fails, the persons config has been accidentally changed or
 stale test data has leaked into the database, causing properties to miss
 commutes for Lorena, George, or Simon's other destinations (Bracknell, Dad).
 """
+
 from unittest.mock import patch
 
 import pytest
@@ -47,9 +48,7 @@ def test_lorena_has_aldgate_commute():
     lorena = next(p for p in persons if p.name == "Lorena")
     labels = [poi.label for poi in lorena.places_of_interest]
     assert "Aldgate" in labels, "Lorena missing Aldgate commute"
-    assert len(lorena.places_of_interest) == 1, (
-        f"Lorena should have 1 POI, got {len(lorena.places_of_interest)}"
-    )
+    assert len(lorena.places_of_interest) == 1, f"Lorena should have 1 POI, got {len(lorena.places_of_interest)}"
 
 
 def test_george_is_child_with_school_pois():

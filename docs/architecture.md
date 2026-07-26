@@ -205,8 +205,6 @@ schools, EPC, council tax) should have source + derived node
 declarations. This ensures consistent staleness tracking, re-computation,
 and priority across the entire property data model.
 
-### Current Violations
-
 ## Key Files
 
 | File | Responsibility |

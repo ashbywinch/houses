@@ -261,7 +261,9 @@ class Row:
         r["Lorena London Cost (£)"] = cls._fmt_cost(
             property_.lorena_commute.daily_cost if property_.lorena_commute else None
         )
-        r["Lorena London Route"] = cls._build_route_summary(property_.lorena_commute) if property_.lorena_commute else ""
+        r["Lorena London Route"] = (
+            cls._build_route_summary(property_.lorena_commute) if property_.lorena_commute else ""
+        )
         bt = int(property_.petrol.duration.magnitude) if property_.petrol else None
         r["Bracknell Time (min)"] = str(bt) if bt is not None else ""
         r["Bracknell Cost (£)"] = cls._fmt_cost(property_.petrol.daily_cost if property_.petrol else None)

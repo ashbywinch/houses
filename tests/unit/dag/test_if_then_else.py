@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 
 from dag.attempt import Attempt
-from dag.derived_node import AsyncQueueScheduler, flush_processor, set_scheduler
 from dag.if_then_else import IfThenElseNode
+from dag.scheduler import AsyncQueueScheduler, flush_processor, set_scheduler
 from dag.user_input_node import UserInputNode
 
 

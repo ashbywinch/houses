@@ -6,14 +6,14 @@ graceful degradation behaviour.
 | Module | Doc | Entry Point |
 |--------|-----|-------------|
 | Commute | [commute.md](commute.md) | `compute_simon_commute()`, `compute_lorena_commute()` |
-| Petrol Cost | [petrol-cost.md](petrol-cost.md) | `compute_petrol_cost()` |
-| Rail Fare Fallback | [rail-fares.md](rail-fares.md) | `nearest_station()`, `fare_between()` |
-| Schools | [schools.md](schools.md) | `compute_school_commute()` |
-| Walkability | [walkability.md](walkability.md) | `enrich_walkability()` |
-| Town Description | [town-description.md](town-description.md) | `generate_town_description()` |
-| Council Tax | [council-tax.md](council-tax.md) | `lookup_council_tax()` |
-| EPC Rating | [epc.md](epc.md) | `lookup_epc()` |
-| Commute Breakdown | [commute-breakdown.md](commute-breakdown.md) | `compute_commute_breakdown()` |
+| Petrol Cost | (doc removed — implementation in `houses/nodes/petrol.py`) | `compute_petrol_cost()` |
+| Rail Fare Fallback | (doc removed — implementation in `houses/nodes/rail_fare_node.py`) | `nearest_station()`, `fare_between()` |
+| Schools | (doc removed — implementation in `houses/nodes/schools.py`) | `compute_school_commute()` |
+| Walkability | (doc removed — implementation in `houses/walkability.py`) | `enrich_walkability()` |
+| Town Description | (doc removed — implementation in `houses/town_desc.py`) | `generate_town_description()` |
+| Council Tax | (doc removed — implementation in `houses/council_tax.py`) | `lookup_council_tax()` |
+| EPC Rating | (doc removed — implementation in `houses/nodes/epc_node.py`) | `lookup_epc()` |
+| Commute Breakdown | (doc removed — implementation in `houses/nodes/commute_breakdown_node.py`) | `compute_commute_breakdown()` |
 
 ## Adding a New Module
 

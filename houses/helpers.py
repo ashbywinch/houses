@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import httpx
 
-from houses.http_error import HttpError
+from dag.http_error import HttpError
 
 
 def is_transient_error(exc: Exception) -> bool:

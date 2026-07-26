@@ -10,7 +10,6 @@ from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 from houses.nodes.property import PropertyNodes
 from houses.property_registry import register_property
-from houses.sheets.reader import get_properties_data
 
 logger = logging.getLogger(__name__)
 
@@ -157,18 +156,26 @@ def bootstrap_from_row(row: dict[str, Any], sources: dict[str, UserInputNode]) -
     return pushed
 
 
-def seed_registry_from_sheet() -> int:
+def load_property_nodes_from_db() -> int:
+    """Create PropertyNodes for every RID found in the DB.
+    Called on normal startup. No sheet dependency.
+    Nodes load their persisted values from the database automatically.
+    """
     from dag.persistence import property_rids
 
-    db_rids = property_rids()
-    if db_rids:
-        for rid in db_rids:
-            prop = PropertyNodes(rid)
-            register_property(rid, prop)
-        logger.info("Rebuilt registry for %d properties from DB", len(db_rids))
-        return len(db_rids)
+    count = 0
+    for rid in property_rids():
+        prop = PropertyNodes(rid)
+        register_property(rid, prop)
+        count += 1
+    logger.info("Loaded %d properties from DB", count)
+    return count
 
-    rows = get_properties_data()
+
+def load_property_nodes_from_rows(rows: list[dict[str, Any]]) -> int:
+    """Create PropertyNodes from sheet rows and push source values.
+    Called on cold start (empty DB) or explicit reseed.
+    """
     count = 0
     for row in rows:
         raw_rid = (row.get("Rightmove ID") or "").strip()

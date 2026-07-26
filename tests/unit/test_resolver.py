@@ -9,8 +9,9 @@ from __future__ import annotations
 import pytest
 
 from dag.attempt import Attempt
-from dag.derived_node import DerivedNode, flush_processor
+from dag.derived_node import DerivedNode
 from dag.persistence import latest_node_result
+from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 
 # ── Helper subclasses ────────────────────────────────────────────────────────

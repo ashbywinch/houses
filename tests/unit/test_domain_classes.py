@@ -24,7 +24,7 @@ from houses.school_gender import SchoolGender
 
 class TestPerson:
     def test_construction_with_all_fields(self):
-        poi = PlaceOfInterest(label="Office", postcode="EC3A 7LP")
+        poi = PlaceOfInterest(label="Office", address="EC3A 7LP")
         person = Person(
             name="Simon",
             has_car=True,
@@ -46,15 +46,15 @@ class TestPerson:
 
 class TestPlaceOfInterest:
     def test_construction(self):
-        poi = PlaceOfInterest(label="Office", postcode="EC3A 7LP")
+        poi = PlaceOfInterest(label="Office", address="EC3A 7LP")
         assert poi.label == "Office"
-        assert poi.postcode == "EC3A 7LP"
+        assert poi.address == "EC3A 7LP"
 
 
 class TestCommute:
     def test_construction(self):
         person = Person(name="Simon", has_car=True)
-        destination = PlaceOfInterest(label="Office", postcode="EC3A 7LP")
+        destination = PlaceOfInterest(label="Office", address="EC3A 7LP")
         leg = JourneyLeg(
             mode=LegMode.TUBE,
             duration_minutes=15,
@@ -79,7 +79,7 @@ class TestCommute:
 
     def test_empty_details(self):
         person = Person(name="Simon", has_car=True)
-        dest = PlaceOfInterest(label="Office", postcode="EC3A 7LP")
+        dest = PlaceOfInterest(label="Office", address="EC3A 7LP")
         commute = Commute(
             person=person,
             label="Office",

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { simpleOfsted, ofstedClass } from './format'
+import { simpleOfsted, ofstedClass } from '../formatters/format'
 
 describe('simpleOfsted', () => {
   it('handles normal ratings', () => {

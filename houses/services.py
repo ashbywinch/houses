@@ -22,6 +22,7 @@ from houses.geo import GeoPoint
 from houses.location import _geocode_address, find_nearest_town_name, geocode
 from houses.model.domain import Commute, Person
 from houses.nodes.settings import make_default_financials, make_default_persons, make_default_thresholds
+from houses.routing import CommuteRouter
 from houses.school import School
 from houses.school_gender import SchoolGender
 from houses.schools import compute_school_commute, find_nearest
@@ -119,13 +120,13 @@ class _DefaultDriveTimeService:
         return await _get_drive_minutes(origin_postcode, station_name)
 
 
-
-
 # Settings sources are cached by node_id so that the same UserInputNode
 # instance is returned on every Services() construction.  This means
 # a PATCH to /api/settings/financial updates the canonical node that
 # all PropertyNodes reference, without needing a server restart.
 _SETTINGS_SOURCE_CACHE: dict[str, UserInputNode] = {}
+
+
 def _reset_settings_cache():
     """Clear the settings source cache for test isolation."""
     _SETTINGS_SOURCE_CACHE.clear()
@@ -138,7 +139,7 @@ def _make_settings_source(node_id: str, value_type: type, default_factory):
     persisted = latest_node_result(node_id)
     if persisted and persisted.get("status") == "succeeded":
         source_label = persisted.get("source_label", "db")
-        if source_label == "tests":
+        if source_label in ("tests", "test"):
             raise RuntimeError(
                 f"Stale test data (source_label='tests') found in production DB "
                 f"for settings node '{node_id}'. "
@@ -169,6 +170,11 @@ class _DefaultGeocoder:
 
 
 class _DefaultCommuteRouter:
+    """Thin wrapper around CommuteRouter."""
+
+    def __init__(self):
+        self._router = CommuteRouter()
+
     async def route(
         self,
         origin: str | GeoPoint,
@@ -177,13 +183,12 @@ class _DefaultCommuteRouter:
         has_car: bool,
         max_walk_minutes: int,
     ) -> Attempt[Commute]:
-        from houses.routing import _is_london_area, _tfl_transit_commute
-
-        dest_str = destination if isinstance(destination, str) else f"{destination.lat},{destination.lon}"
-        if not _is_london_area(dest_str):
-            return Attempt.impossible("destination outside London area")
-        origin_str = origin if isinstance(origin, str) else f"{origin.lat},{origin.lon}"
-        return await _tfl_transit_commute(origin_str, dest_str, has_car)
+        return await self._router.get_commute(
+            origin,
+            destination,
+            has_car=has_car,
+            max_walk_minutes=max_walk_minutes,
+        )
 
 
 class _DefaultSchoolLookup:
@@ -231,7 +236,6 @@ class _DefaultRailFare:
     ) -> tuple[Commute | None, Commute | None]:
         # NR fare enrichment is now handled by RailFareNode in the DAG pipeline
         return simon, lorena
-
 
 
 # ── DI Container ──────────────────────────────────────────────────────

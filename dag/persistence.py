@@ -3,10 +3,12 @@
 Stores versioned source values and resolved derived values in SQLite.
 Serialises complex types via TypeAdapter with ``_type``/``_module`` markers.
 """
+
 from __future__ import annotations
 
 import importlib
 import json
+import logging
 import sqlite3
 import threading
 from datetime import UTC, datetime
@@ -15,6 +17,8 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import TypeAdapter
+
+logger = logging.getLogger(__name__)
 
 
 DB_PATH: Path | None = None
@@ -29,6 +33,7 @@ class DagJSONEncoder(json.JSONEncoder):
         if isinstance(o, Enum):
             return o.name.lower()
         return super().default(o)
+
 
 def _get_db() -> sqlite3.Connection:
     global DB_PATH
@@ -79,7 +84,8 @@ def _serialize_value(val: Any) -> str | None:
             d["_module"] = type(val).__module__
         return json.dumps(d)
     except Exception:
-        return str(val)
+        logger.exception("Failed to serialize %s", type(val).__name__)
+        raise
 
 
 def _deserialize_value(raw: str | None) -> Any:
@@ -96,10 +102,9 @@ def _deserialize_value(raw: str | None) -> Any:
             fields = {k: v for k, v in d.items() if not k.startswith("_")}
             return cls(**fields)
         except Exception:
-            return d
+            logger.exception("Failed to deserialize %s", d.get("_type", "unknown"))
+            raise
     return d
-
-
 
 
 def init_db(db_path: str | None = None) -> None:
@@ -118,9 +123,13 @@ def init_db(db_path: str | None = None) -> None:
         CREATE INDEX IF NOT EXISTS idx_nr_node ON node_results(node_id, created_at DESC);
     """)
 
-def save_node_result(node_id: str, result_dict: dict[str, Any],
-                     dep_timestamps: dict[str, str] | None = None,
-                     created_at: str | None = None) -> int:
+
+def save_node_result(
+    node_id: str,
+    result_dict: dict[str, Any],
+    dep_timestamps: dict[str, str] | None = None,
+    created_at: str | None = None,
+) -> int:
     """Persist a node's to_json() output to the node_results table.
 
     Each call appends a new row. The most recent row is the current value.
@@ -134,12 +143,13 @@ def save_node_result(node_id: str, result_dict: dict[str, Any],
     conn = _get_db()
     now = created_at or datetime.now(UTC).isoformat()
     cur = conn.execute(
-        "INSERT INTO node_results (node_id, result_json, dep_timestamps, created_at)"
-        " VALUES (?, ?, ?, ?)",
-        (node_id,
-         json.dumps(result_dict, cls=DagJSONEncoder),
-         json.dumps(dep_timestamps, cls=DagJSONEncoder) if dep_timestamps else None,
-         now),
+        "INSERT INTO node_results (node_id, result_json, dep_timestamps, created_at) VALUES (?, ?, ?, ?)",
+        (
+            node_id,
+            json.dumps(result_dict, cls=DagJSONEncoder),
+            json.dumps(dep_timestamps, cls=DagJSONEncoder) if dep_timestamps else None,
+            now,
+        ),
     )
     conn.commit()
     return cur.lastrowid
@@ -187,13 +197,14 @@ def property_created_at(rid: str) -> str | None:
         (f"{rid}/%",),
     ).fetchone()
     return row[0] if row and row[0] else None
+
+
 def property_rids() -> list[str]:
     """Return distinct property RIDs from the node_results table."""
     if not _table_exists("node_results"):
         return []
     conn = _get_db()
     rows = conn.execute(
-        "SELECT DISTINCT SUBSTR(node_id, 1, INSTR(node_id, '/') - 1) AS rid"
-        " FROM node_results WHERE node_id LIKE '%/%'"
+        "SELECT DISTINCT SUBSTR(node_id, 1, INSTR(node_id, '/') - 1) AS rid FROM node_results WHERE node_id LIKE '%/%'"
     ).fetchall()
     return sorted(set(r[0] for r in rows if r[0]))

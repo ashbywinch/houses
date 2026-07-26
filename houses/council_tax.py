@@ -31,6 +31,8 @@ COUNCIL_TAX_CSV = "data/council_tax_rates.csv"
 
 # In-memory cache: lowercased authority name -> Band D rate (float)
 _cached_rates: dict[str, float] | None = None
+
+
 def _reset():
     """Clear the cached council tax rates for test isolation."""
     global _cached_rates

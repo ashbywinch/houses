@@ -5,6 +5,7 @@ display its cost in the frontend.  If daily_cost silently becomes a float,
 ``to_json()`` crashes with ``'float' object has no attribute 'amount'``
 and the node is persisted as ``impossible`` — the frontend shows ``?``.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -12,7 +13,8 @@ from money import Money
 from pint import Quantity
 
 from dag.attempt import Attempt
-from dag.derived_node import AsyncQueueScheduler, DerivedNode, flush_processor, set_scheduler
+from dag.derived_node import DerivedNode
+from dag.scheduler import AsyncQueueScheduler, flush_processor, set_scheduler
 from dag.user_input_node import UserInputNode
 from houses.model.domain import Commute, Person, PlaceOfInterest
 
@@ -30,7 +32,7 @@ class _FloatCostNode(DerivedNode[Commute]):
             Commute(
                 person=Person(name="Test", has_car=False),
                 label="Office",
-                destination=PlaceOfInterest(label="Office", postcode="SW1V 2QQ"),
+                destination=PlaceOfInterest(label="Office", address="SW1V 2QQ"),
                 duration=DURATION,
                 daily_cost=7.2,  # raw float — this MUST raise
                 mode="transit",
@@ -65,7 +67,7 @@ class _ProperNode(DerivedNode[Commute]):
             Commute(
                 person=Person(name="Test", has_car=False),
                 label="Office",
-                destination=PlaceOfInterest(label="Office", postcode="SW1V 2QQ"),
+                destination=PlaceOfInterest(label="Office", address="SW1V 2QQ"),
                 duration=DURATION,
                 daily_cost=Money("7.20", "GBP"),
                 mode="transit",

@@ -3,8 +3,9 @@ from __future__ import annotations
 import pytest
 
 from dag.attempt import Attempt, Provenance
-from dag.derived_node import DerivedNode, flush_processor
+from dag.derived_node import DerivedNode
 from dag.persistence import latest_node_result
+from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 
 
@@ -91,6 +92,7 @@ class TestDerivedNode:
     @pytest.mark.asyncio
     async def test_impossible_when_dep_fails(self):
         """When a dep returns Attempt.impossible, the derived node should also be impossible."""
+
         # A node that returns impossible
         class _FailingNode(DerivedNode[int]):
             def __init__(self):
@@ -108,42 +110,83 @@ class TestDerivedNode:
         a = await doubler.attempt()
         assert a.impossible is True
 
-
     @pytest.mark.asyncio
-    async def test_impossible_dep_preserves_provenance(self):
-        """The impossible-dep short-circuit must preserve provenance, not hardcode empty."""
+    async def test_graceful_dep_failure_does_not_cascade(self):
+        """When compute() handles an impossible dep (e.g. via value_or),
+        the framework must not short-circuit — compute() decides the outcome."""
+
         class _FailingNode(DerivedNode[int]):
             def __init__(self):
-                super().__init__("fail_prov_src", int, ())
+                super().__init__("fail_graceful_src", int, ())
                 self._attempt = Attempt.impossible("always fails")
 
             def compute(self):
                 return self._attempt
 
-        class _NodeWithProvenance(DerivedNode[int]):
+        class _GracefulNode(DerivedNode[int]):
             def __init__(self, node_id: str, deps):
                 super().__init__(node_id, int, deps)
 
             def compute(self, *args):
-                return Attempt.succeeded(42)
+                val = args[0].value_or(0)
+                return Attempt.succeeded(val + 42)
 
             async def build_provenance(self):
-                return Provenance(label="my_custom_label")
+                return Provenance(label="graceful")
 
         src = _FailingNode()
         await flush_processor()
 
-        node = _NodeWithProvenance("prov_persist_test", deps=(src,))
+        node = _GracefulNode("graceful_test", deps=(src,))
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded is True
+        assert a.value == 42
+
+        stored = latest_node_result("graceful_test")
+        assert stored is not None
+        prov = stored.get("provenance", {})
+        assert prov.get("label") == "graceful"
+
+    @pytest.mark.asyncio
+    async def test_impossible_dep_crash_preserves_provenance(self):
+        """When compute() crashes from using None from an impossible dep,
+        the framework catches it and preserves provenance in the error record."""
+
+        class _FailingNode(DerivedNode[int]):
+            def __init__(self):
+                super().__init__("fail_crash_src", int, ())
+                self._attempt = Attempt.impossible("always fails")
+
+            def compute(self):
+                return self._attempt
+
+        class _CrashNode(DerivedNode[int]):
+            def __init__(self, node_id: str, deps):
+                super().__init__(node_id, int, deps)
+
+            def compute(self, *args):
+                return Attempt.succeeded(args[0].value + 1)
+
+            async def build_provenance(self):
+                return Provenance(label="crash_test")
+
+        src = _FailingNode()
+        await flush_processor()
+
+        node = _CrashNode("crash_test", deps=(src,))
         await flush_processor()
 
         a = await node.attempt()
         assert a.impossible is True
+        assert "dep failed" in a.error
 
-        # The persisted record must have real provenance, not hardcoded empty
-        stored = latest_node_result("prov_persist_test")
+        stored = latest_node_result("crash_test")
         assert stored is not None
         prov = stored.get("provenance", {})
-        assert prov.get("label") == "my_custom_label", f"Expected custom provenance label in persisted data, got {prov}"
+        assert prov.get("label") == "crash_test"
+
     @pytest.mark.asyncio
     async def test_to_json(self):
         src = UserInputNode[int]("src", int)

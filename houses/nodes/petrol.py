@@ -51,6 +51,15 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         drive_legs = [leg for cg in val.details for leg in cg.legs if leg.mode == LegMode.DRIVE]
         if not drive_legs:
             return commute
+        import logging
+
+        logger = logging.getLogger(__name__)
+        logger.debug(
+            "PETROL_DEBUG: %d drive legs, total_min=%d, distances=%s",
+            len(drive_legs),
+            sum(leg.duration_minutes for leg in drive_legs),
+            [leg.distance_km for leg in drive_legs],
+        )
 
         # Get settings from financial source (user-editable)
         fin = financial.value_or_none() if (financial and financial.succeeded) else {}
@@ -69,7 +78,7 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
             # Estimate distance: 48 km/h average speed, round trip
             round_trip_km = (total_drive_min / 60.0) * 48.0 * 2
 
-        # Fuel calculation using pint for proper Imperial gallon → litre conversion
+        # Fuel calculation using pint for proper Imperial gallon -> litre conversion
         # 1 imperial gallon = 4.54609 litres; US gallon is 3.78541 litres
         fuel_volume = (Quantity(round_trip_km, "km") / Quantity(mpg, "mile / imperial_gallon")).to("liter")
         fuel_cost_amount = round(float(fuel_volume.magnitude) * cost_per_litre, 2)
@@ -81,13 +90,13 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         new_daily_cost = val.daily_cost + fuel_cost
 
         # Attribute fuel cost to the drive CostGroup(s)
-        from dataclasses import replace as _replace_cg
         new_details = list(val.details)
+
         for i, cg in enumerate(new_details):
             has_drive = any(leg.mode == LegMode.DRIVE for leg in cg.legs)
             if has_drive:
                 new_cg_cost = cg.cost + fuel_cost if isinstance(cg.cost, Money) else fuel_cost
-                new_details[i] = _replace_cg(cg, cost=new_cg_cost)
+                new_details[i] = replace(cg, cost=new_cg_cost)
                 break
 
         new_commute = replace(
@@ -96,3 +105,19 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
             details=tuple(new_details),
         )
         return Attempt.succeeded(new_commute)
+
+    async def to_json(self) -> dict:
+        result = await super().to_json()
+        attempt = await self.attempt()
+        if attempt.succeeded:
+            val = attempt.value_or_none()
+            if val is not None:
+                result["is_child"] = val.is_child
+        return result
+
+    async def to_json_value(self) -> dict:
+        result = await super().to_json_value()
+        val = self._attempt.value_or_none() if self._attempt.succeeded else None
+        if val is not None:
+            result["is_child"] = val.is_child
+        return result

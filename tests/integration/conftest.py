@@ -1,6 +1,5 @@
 """Integration test configuration — isolated temp cache, no sheet writes, offline scraper."""
 
-
 import tempfile
 from collections.abc import Callable
 from unittest.mock import patch
@@ -32,7 +31,6 @@ def mock_httpx():
         def add_rule(self, matcher: Callable[[str], bool], responder: Callable) -> None:
             """Register a custom matcher/responder that takes priority."""
             self._rules.insert(0, (matcher, responder))
-
 
         def handler(self, request):
             url = str(request.url)
@@ -133,7 +131,9 @@ def _isolate_api_cache():
 def _reset_geo_cache():
     """Give each integration test its own geocode cache."""
     from houses.services_provider import get_services
+
     get_services().geo_cache = {}
+
 
 @pytest.fixture(autouse=True)
 def _mock_http_requests():
@@ -147,6 +147,7 @@ def _mock_http_requests():
     counter, async_patch, sync_patch = mock_httpx()
     with async_patch, sync_patch:
         yield counter
+
 
 @pytest.fixture(autouse=True)
 def _use_sqlite_memory(_sqlite_memory):  # noqa: F811

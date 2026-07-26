@@ -90,17 +90,13 @@ class TestSettingsApi:
             "/api/settings/persons",
             json=[{"name": "Simon", "has_car": True}],
         )
-        assert resp.status_code == 200, (
-            f"Expected 200, got {resp.status_code}: {resp.text[:200]}"
-        )
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text[:200]}"
 
     def test_put_persons_rejects_empty_list(self):
         """PUT /settings/persons with empty list must return 400."""
         client = self._setup()
         resp = client.put("/api/settings/persons", json=[])
-        assert resp.status_code == 400, (
-            f"Expected 400 for empty list, got {resp.status_code}"
-        )
+        assert resp.status_code == 400, f"Expected 400 for empty list, got {resp.status_code}"
 
     def test_patch_financial_with_dict(self):
         """PATCH /settings/financial must accept a dict body."""
@@ -116,7 +112,7 @@ class TestSettingsApi:
         """POST /api/admin/reseed must return a JSON response."""
         from unittest.mock import patch
 
-        with patch("houses.nodes.bootstrap.seed_registry_from_sheet", return_value=0):
+        with patch("houses.sheets.reader.get_properties_data", return_value=[]):
             client = self._setup()
             resp = client.post("/api/admin/reseed")
         assert resp.status_code == 200

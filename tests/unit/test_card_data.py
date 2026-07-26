@@ -16,7 +16,7 @@ from money import Money
 from pint import Quantity
 
 from dag.attempt import Attempt
-from dag.derived_node import flush_processor
+from dag.scheduler import flush_processor
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.nodes.commute import commute_colour, format_duration
@@ -32,6 +32,7 @@ from tests.helpers import make_services
 def _mock(monkeypatch):
     """Set fake services with a commute router that returns canned data."""
     from houses.services_provider import _request_services as _sp
+    from houses.tfl_client import TflClient
 
     class _CannedRouter:
         async def route(self, origin, destination, *, has_car, max_walk_minutes):
@@ -39,15 +40,26 @@ def _mock(monkeypatch):
                 Commute(
                     person=Person(name="Test", has_car=has_car),
                     label="Test Commute",
-                    destination=PlaceOfInterest(
-                        label="Dest",
-                        postcode=str(destination),
-                    ),
+                    destination=PlaceOfInterest(label="Dest", address=str(destination)),
                     duration=Quantity(30, "minute"),
                     daily_cost=Money("5.0", "GBP"),
                     mode="transit",
                 ),
             )
+
+    canned = Commute(
+        person=Person(name="Test", has_car=False),
+        label="Test",
+        destination=PlaceOfInterest(label="Dest", address="SW1V 2QQ"),
+        duration=Quantity(30, "minute"),
+        daily_cost=Money("5.0", "GBP"),
+        mode="transit",
+    )
+
+    async def mock_plan(self):
+        return Attempt.succeeded(canned)
+
+    monkeypatch.setattr(TflClient, "plan", mock_plan)
 
     svc = make_services(commute_router=_CannedRouter())
     token = _sp.set(svc)

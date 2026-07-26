@@ -47,7 +47,7 @@ class TestSchoolNodes:
         svc = make_services(school_lookup=AssertingService())
         token = _sp.set(svc)
         try:
-            from dag.derived_node import flush_processor
+            from dag.scheduler import flush_processor
 
             await flush_processor()
             await flush_processor()
@@ -79,7 +79,7 @@ class TestSchoolNodes:
         svc = make_services(school_lookup=AssertingService())
         token = _sp.set(svc)
         try:
-            from dag.derived_node import flush_processor
+            from dag.scheduler import flush_processor
 
             await flush_processor()
             await flush_processor()
@@ -118,7 +118,7 @@ class TestCouncilTaxNode:
         svc = make_services(council_tax_service=CapturingService())
         token = _sp.set(svc)
         try:
-            from dag.derived_node import flush_processor
+            from dag.scheduler import flush_processor
 
             await flush_processor()
             await flush_processor()
@@ -136,7 +136,7 @@ class TestCouncilTaxNode:
         pc = UserInputNode[str]("pc", str)
         node = CouncilTaxNode("ct2", best_address=addr, postcode_node=pc)
         addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
-        from dag.derived_node import flush_processor
+        from dag.scheduler import flush_processor
 
         await flush_processor()
         await flush_processor()
@@ -184,7 +184,7 @@ class TestTownNode:
         addr = UserInputNode[str]("addr", str)
         node = TownNode("tn", best_address=addr)
         addr.push("48 Acacia Avenue, Southall, UB2 5AD", "test")
-        from dag.derived_node import flush_processor
+        from dag.scheduler import flush_processor
 
         await flush_processor()
         await flush_processor()

@@ -51,13 +51,13 @@ class TestSerialisation:
         assert d["x"] == 1
         assert d["y"] == 2
 
-    def test_complex_type_deserialises(self):
-        """Complex types serialised with _type/_module markers
-        reconstruct as dicts (no automatic class reconstruction)."""
+    def test_complex_type_deserialises_fails_fast(self):
+        """Complex types with unresolvable _type/_module raise instead of silent fallback."""
+        import pytest
+
         s = '{"x": 3, "y": 4, "_type": "Point", "_module": "__main__"}'
-        result = _deserialize_value(s)
-        assert result["x"] == 3
-        assert result["y"] == 4
+        with pytest.raises(AttributeError):
+            _deserialize_value(s)
 
     def test_empty_string_roundtrips(self):
         """Empty string should round-trip as empty string, not None."""
@@ -97,6 +97,7 @@ class TestNodeResults:
         loaded = latest_node_result(f"{RID}/n4")
         assert loaded["_persisted_at"] is not None
 
+
 class TestPropertyCreatedAt:
     def test_returns_none_for_unknown_property(self):
         assert property_created_at("nonexistent") is None
@@ -112,6 +113,7 @@ class TestPropertyCreatedAt:
     def test_uses_earliest_result(self):
         save_node_result("prop456/rightmove_url", {"status": "succeeded", "value": "url1"})
         import time
+
         time.sleep(0.01)  # ensure different timestamp
         save_node_result("prop456/rightmove_url", {"status": "succeeded", "value": "url2"})
         ts = property_created_at("prop456")

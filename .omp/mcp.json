@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+  "mcpServers": {
+    "code-review-graph": {
+      "command": "code-review-graph",
+      "args": [
+        "serve",
+        "--repo",
+        "/home/ashby/Documents/code/houses",
+        "--auto-watch"
+      ],
+      "env": {
+        "CRG_REPO_ROOT": "/home/ashby/Documents/code/houses"
+      }
+    }
+  }
+}

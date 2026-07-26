@@ -7,7 +7,7 @@ import pytest
 if TYPE_CHECKING:
     from houses.school import School
 
-from dag.derived_node import flush_processor
+from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 
@@ -218,6 +218,7 @@ class TestSchoolNodeAcceptable:
                 nonlocal seen_acceptable
                 seen_acceptable = acceptable
                 from dag.attempt import Attempt
+
                 return Attempt.succeeded(None)
 
         svc = make_services(school_lookup=AssertingService())
@@ -249,6 +250,7 @@ class TestSchoolNodeAcceptable:
                 nonlocal seen_acceptable
                 seen_acceptable = acceptable
                 from dag.attempt import Attempt
+
                 return Attempt.succeeded(None)
 
         svc = make_services(school_lookup=AssertingService())
@@ -280,6 +282,7 @@ class TestSchoolNodeAcceptable:
                 nonlocal seen
                 seen = acceptable
                 from dag.attempt import Attempt
+
                 return Attempt.succeeded(None)
 
         svc = make_services(school_lookup=AssertingService())
@@ -310,6 +313,7 @@ class TestSchoolNodeAcceptable:
                 nonlocal seen
                 seen = acceptable
                 from dag.attempt import Attempt
+
                 return Attempt.succeeded(None)
 
         svc = make_services(school_lookup=AssertingService())
@@ -843,35 +847,41 @@ class TestFindNearestFilters:
             return Attempt.succeeded(GeoPoint(51.5, -0.13))
 
         no_coords = School(
-            urn="1", name="No Coords School", phase="Primary",
+            urn="1",
+            name="No Coords School",
+            phase="Primary",
             gender=SchoolGender.MIXED,
             type_of_establishment="Community School",
-            postcode="UB2 4RP", website="",
-            ofsted_rating="Good", inspection_year="2022",
+            postcode="UB2 4RP",
+            website="",
+            ofsted_rating="Good",
+            inspection_year="2022",
             coords=None,
             _postcode_centroid=GeoPoint(51.5, -0.13),
-            statutory_low_age=4, statutory_high_age=11,
+            statutory_low_age=4,
+            statutory_high_age=11,
         )
         has_coords = School(
-            urn="2", name="Has Coords School", phase="Primary",
+            urn="2",
+            name="Has Coords School",
+            phase="Primary",
             gender=SchoolGender.MIXED,
             type_of_establishment="Community School",
-            postcode="UB2 4HT", website="",
-            ofsted_rating="Good", inspection_year="2022",
+            postcode="UB2 4HT",
+            website="",
+            ofsted_rating="Good",
+            inspection_year="2022",
             coords=GeoPoint(52.0, -0.13),
-            statutory_low_age=4, statutory_high_age=11,
+            statutory_low_age=4,
+            statutory_high_age=11,
         )
 
         monkeypatch.setattr("houses.schools.geocode", fake_geocode)
-        monkeypatch.setattr("houses.schools._load_schools",
-                           lambda: [no_coords, has_coords])
+        monkeypatch.setattr("houses.schools._load_schools", lambda: [no_coords, has_coords])
 
-        result = await find_nearest("51.5,-0.13", child_age=7,
-                                    acceptable=(SchoolGender.MIXED,))
+        result = await find_nearest("51.5,-0.13", child_age=7, acceptable=(SchoolGender.MIXED,))
         assert result.pending, (
             "When a school matching filters lacks coords, must return pending "
             "(incomplete data, cannot give definitive answer)"
         )
-        assert not geocode_called, (
-            "find_nearest must NOT geocode school postcodes at query time"
-        )
+        assert not geocode_called, "find_nearest must NOT geocode school postcodes at query time"

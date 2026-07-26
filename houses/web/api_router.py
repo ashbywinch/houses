@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, Body, HTTPException, WebSocket
 
 from houses.geo import GeoPoint
-from houses.nodes.bootstrap import seed_registry_from_sheet
+from houses.nodes.bootstrap import load_property_nodes_from_rows
 from houses.property_registry import get_property as get_registry_property
 from houses.property_registry import list_properties as list_registry_properties
 from houses.services_provider import get_services
@@ -185,9 +185,11 @@ async def patch_triage(rid: str, body: dict):
     return {"status": "ok"}
 
 
-@api_router.post("/seed")
 async def seed_properties():
-    count = seed_registry_from_sheet()
+    from houses.sheets.reader import get_properties_data
+
+    rows = get_properties_data()
+    count = load_property_nodes_from_rows(rows)
     return {"seeded": count, "total": len(list_registry_properties())}
 
 
@@ -257,6 +259,7 @@ async def put_persons(body: list = Body()):  # noqa: B008
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"status": "ok"}
 
+
 @api_router.patch("/settings/financial")
 async def patch_financial(body: dict):
     get_services().financial_source.push(body, "user")
@@ -271,16 +274,18 @@ async def reseed_from_sheet():
     from code changes should not re-read the sheet.  Call this endpoint
     explicitly after seeding the sheet with new properties.
     """
-    from houses.nodes.bootstrap import seed_registry_from_sheet
+    from houses.sheets.reader import get_properties_data
 
-    seed_registry_from_sheet()
+    rows = get_properties_data()
+    load_property_nodes_from_rows(rows)
     return {"status": "ok"}
+
 
 @api_router.get("/debug/scheduler")
 async def debug_scheduler():
     """Dump the entire scheduler queue — for debugging stalled background processing."""
-    from dag.derived_node import AsyncQueueScheduler as _AsyncQueueScheduler
-    from dag.derived_node import _get_scheduler
+    from dag.scheduler import AsyncQueueScheduler as _AsyncQueueScheduler
+    from dag.scheduler import _get_scheduler
 
     sched = _get_scheduler()
     if not isinstance(sched, _AsyncQueueScheduler):
@@ -290,10 +295,12 @@ async def debug_scheduler():
     while not sched._queue.empty():
         try:
             ev = sched._queue.get_nowait()
-            queue_snapshot.append({
-                "node_id": ev.node_id,
-                "scheduled_at": ev.scheduled_at,
-            })
+            queue_snapshot.append(
+                {
+                    "node_id": ev.node_id,
+                    "scheduled_at": ev.scheduled_at,
+                }
+            )
             sched._queue.put_nowait(ev)
         except Exception:
             break
@@ -304,6 +311,7 @@ async def debug_scheduler():
         "wakeup_set": sched._wakeup.is_set(),
         "queue": queue_snapshot[:500],
     }
+
 
 @api_router.get("/debug/memory")
 async def debug_memory():

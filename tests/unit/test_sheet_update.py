@@ -27,7 +27,7 @@ def _make_enriched(url: str, simon_cost: float | None = 10.0) -> EnrichedPropert
         simon_commute=Commute(
             person=Person(name="Simon", has_car=False),
             label="S",
-            destination=PlaceOfInterest(label="S", postcode="SW1V 2QQ"),
+            destination=PlaceOfInterest(label="S", address="SW1V 2QQ"),
             duration=Quantity(45, "minute"),
             daily_cost=simon_money,
             mode="transit",
@@ -35,7 +35,7 @@ def _make_enriched(url: str, simon_cost: float | None = 10.0) -> EnrichedPropert
         lorena_commute=Commute(
             person=Person(name="Lorena", has_car=False),
             label="L",
-            destination=PlaceOfInterest(label="L", postcode="EC3A 7LP"),
+            destination=PlaceOfInterest(label="L", address="EC3A 7LP"),
             duration=Quantity(50, "minute"),
             daily_cost=lorena_money,
             mode="transit",
@@ -43,7 +43,7 @@ def _make_enriched(url: str, simon_cost: float | None = 10.0) -> EnrichedPropert
         petrol=Commute(
             person=Person(name="", has_car=True),
             label="Bracknell",
-            destination=PlaceOfInterest(label="Bracknell", postcode="RG12 8YA"),
+            destination=PlaceOfInterest(label="Bracknell", address="RG12 8YA"),
             duration=Quantity(0, "minute"),
             daily_cost=Money("8.50", "GBP"),
             mode="drive",

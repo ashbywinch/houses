@@ -1,7 +1,10 @@
 """Serve the production build — mount built frontend and run."""
-import uvicorn
+
 from pathlib import Path
+
+import uvicorn
 from fastapi.staticfiles import StaticFiles
+
 from houses.config import settings
 from houses.server import app
 

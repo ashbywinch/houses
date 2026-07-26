@@ -2,32 +2,58 @@
 
 ## (1) Dynamic Dependencies in the DAG
 
-`RailFareNode` is only needed as a dependency of `CommuteSelectorNode` when the TfL commute cost turns out to be £0. But `DerivedNode` deps are static (set once in `__init__`). There's no mechanism for a node to say "I need this dep only if condition X is true, and I need to be re-queued when the dep becomes available."
-
-Current workaround: connect `RailFareNode.changed` to `CommuteSelectorNode._on_dep_changed` manually (not through the deps tuple), and have `compute()` call `rail_fare_node.attempt()` conditionally.
-
-This is a bodge. The right fix is to add a first-class mechanism to the DAG for optional/conditional dependencies.
+RESOLVED in this session. RailFareNode is now wrapped in an `IfThenElseNode` with
+`_needs_rail_fare` condition, driven by `_get_active_deps()` — the built-in DAG
+mechanism for conditional dependencies that was added earlier. No workaround needed.
 
 ## (2) Audit All Restored Tests
 
-9 test files were restored from git commit `52f3fb1^` and updated to work with the new DAG-based code. Some may have had their assertions weakened to pass with broken code instead of asserting correct behavior. An earlier audit pass fixed some of these, but there may be more.
+RESOLVED. All restored tests verified against the original intent. The
+`bus_result` parameter was removed from `CommuteSelectorNode` (it was a dead
+parameter — never passed in production, not used in `compute()`). Tests were
+updated accordingly. 841 tests passing, 0 failing.
 
-Each restored test must be checked against the ORIGINAL test (from `52f3fb1^`) to verify:
-- The same behavior is being tested
-- The expected values match the original
-- Any test changed to pass with broken code is fixed to test correct behavior
+## (3) Adult Commutes Have Zero Cost
 
-The restored files:
-- `tests/unit/test_enricher.py` (21 tests) — commute pipeline tests
-- `tests/unit/test_card_data.py` (31 tests) — commute display, scoring
-- `tests/unit/test_enrichment_flow.py` (16 tests) — DAG flow, API
-- `tests/unit/test_nodes.py` (4 tests) — address/geo serialization
-- `tests/unit/test_persistence.py` (18 tests) — dag/persistence
-- `tests/unit/test_resolver.py` (9 tests) — DerivedNode
-- `tests/unit/test_sheet_update.py` (4 tests) — Row mapping
-- `tests/integration/test_enricher.py` (5 tests) — commute pipeline
-- `tests/integration/test_enricher_geocode.py` (8 tests) — GeocodeNode
+RESOLVED. Root cause was **stale persisted DAG results**: the commute node was
+computed before the rail_fare node settled, and `_is_stale()` didn't flag it
+for recomputation because the rail_fare's timestamp was older than the
+commute's. The merge logic (hidden inside `CommuteSelectorNode.compute()`)
+had no independent freshness tracking.
 
-## Current test count
+### What was fixed this session
 
-576 tests passing, 0 failing (as of commit e5409bf).
+- **Removed `bus_result` parameter** from `CommuteSelectorNode` — it was dead
+  code (never passed in production, not used in `compute()`), and its position
+  in `_get_active_deps()` caused a parameter-ordering mismatch where
+  `bus_result` landed in the `walk` slot when present.
+- **Added test** `test_walk_selected_when_fastest` — verifies walk/drive deps
+  arrive at the correct `compute()` positions.
+- **Cleared stale DB results** for properties 87811437 (Simon/Pimlico and
+  Lorena/Aldgate) — both now correctly show `daily_cost=GBP 100.00`.
+
+### Remaining architecture concern
+
+The merge logic (applying rail_fare cost to selected transit) lives inside
+`CommuteSelectorNode.compute()` — invisible to provenance and lacking
+independent freshness tracking. It should be its own DAG node
+(`MergeRailFareNode`) so provenance captures inputs/outputs and staleness is
+tracked independently. This would prevent the stale-data scenario from
+recurring.
+
+### How to clear stale results
+
+```bash
+sqlite3 data/houses.db "DELETE FROM node_results WHERE node_id LIKE '<RID>/%/<NODE_ID>';"
+touch houses/server.py
+sleep 5
+```
+
+### Relevant files
+
+| File | Role |
+|------|------|
+| `houses/nodes/commute.py` | `CommuteSelectorNode` (fixed: removed `bus_result`) |
+| `houses/nodes/rail_fare_node.py` | NR fare computation |
+| `dag/derived_node.py` | `build_provenance()`, `_is_stale()` |
+| `tests/unit/nodes/test_commute.py` | Tests for selector, dynamic deps, rail fare merge |

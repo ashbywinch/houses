@@ -3,14 +3,14 @@ from __future__ import annotations
 import pytest
 from money import Money
 
-from dag.derived_node import flush_processor
+from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 
 
 class TestMonthlyMortgagePaymentNode:
     @pytest.mark.asyncio
     async def test_zero_when_no_price(self):
-        from houses.nodes.monthly_costs import MonthlyMortgagePaymentNode
+        from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNode
 
         price = UserInputNode[Money]("price_mm", Money)
         fin = UserInputNode[dict]("fin_mm", dict)
@@ -34,7 +34,7 @@ class TestMonthlyMortgagePaymentNode:
 
     @pytest.mark.asyncio
     async def test_computes_with_valid_data(self):
-        from houses.nodes.monthly_costs import MonthlyMortgagePaymentNode
+        from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNode
 
         price = UserInputNode[Money]("price_mm2", Money)
         fin = UserInputNode[dict]("fin_mm2", dict)
@@ -66,7 +66,7 @@ class TestMonthlyMortgagePaymentNode:
 class TestYearlySinkingFundNode:
     @pytest.mark.asyncio
     async def test_zero_when_no_price(self):
-        from houses.nodes.monthly_costs import YearlySinkingFundNode
+        from houses.nodes.yearly_sinking_fund_node import YearlySinkingFundNode
 
         price = UserInputNode[Money]("price_ys", Money)
         fin = UserInputNode[dict]("fin_ys", dict)
@@ -84,7 +84,7 @@ class TestYearlySinkingFundNode:
 
     @pytest.mark.asyncio
     async def test_computes_with_price(self):
-        from houses.nodes.monthly_costs import YearlySinkingFundNode
+        from houses.nodes.yearly_sinking_fund_node import YearlySinkingFundNode
 
         price = UserInputNode[Money]("price_ys2", Money)
         fin = UserInputNode[dict]("fin_ys2", dict)
@@ -104,7 +104,7 @@ class TestYearlySinkingFundNode:
 class TestCommuteBreakdownNode:
     @pytest.mark.asyncio
     async def test_returns_defaults_when_no_commutes(self):
-        from houses.nodes.monthly_costs import CommuteBreakdownNode
+        from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 
         persons = UserInputNode[list]("persons_cb", list)
         selectors = {}
@@ -123,7 +123,7 @@ class TestCommuteBreakdownNode:
 class TestTotalMonthlyHousingCostNode:
     @pytest.mark.asyncio
     async def test_returns_zero_when_no_data(self):
-        from houses.nodes.monthly_costs import TotalMonthlyHousingCostNode
+        from houses.nodes.total_monthly_housing_cost_node import TotalMonthlyHousingCostNode
 
         mg = UserInputNode[Money]("mg", Money)
         sf = UserInputNode[Money]("sf", Money)
@@ -153,7 +153,7 @@ class TestTotalMonthlyHousingCostNode:
         """Each cost component contributes to the total.
         Replaces the old spreadsheet formula test that checked
         named range references in VIEW_FORMULA_COLS."""
-        from houses.nodes.monthly_costs import TotalMonthlyHousingCostNode
+        from houses.nodes.total_monthly_housing_cost_node import TotalMonthlyHousingCostNode
 
         mg = UserInputNode[Money]("mg2", Money)
         sf = UserInputNode[Money]("sf2", Money)

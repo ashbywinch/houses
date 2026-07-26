@@ -34,15 +34,6 @@ wheels = [
 ]
 
 [[package]]
-name = "archunit"
-version = "0.0.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/5b/ba/d14e2e9874e14764eecebb1702e701defe522a2e6017c9d016f7cb72a2f1/archunit-0.0.0.tar.gz", hash = "sha256:975f9090288214ab5888757237690700a57dc9c56dd80948e3c8585d9af4badf", size = 1255, upload-time = "2023-05-08T12:34:13.551Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ab/9b/68706b0d1c40688b3d8e1a7090ce6df700790d7c9f222f25a78e073b5c8c/archunit-0.0.0-py3-none-any.whl", hash = "sha256:8b986ecd7f57bec571dc7e46e7cbee94f3166b9320fbb01a07e66c9d05bcfca7", size = 1680, upload-time = "2023-05-08T12:34:11.902Z" },
-]
-
-[[package]]
 name = "archunitpython"
 version = "1.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -572,13 +563,11 @@ name = "houses"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "archunit" },
-    { name = "archunitpython" },
     { name = "fastapi" },
     { name = "google-auth" },
     { name = "gspread" },
     { name = "httpx" },
-    { name = "import-linter" },
+    { name = "httpx2" },
     { name = "money" },
     { name = "pint" },
     { name = "playwright" },
@@ -587,35 +576,33 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "python-multipart" },
     { name = "setuptools" },
+    { name = "uk-postcodes-parsing" },
     { name = "uk-property-apis" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.optional-dependencies]
 dev = [
+    { name = "archunitpython" },
     { name = "coverage" },
     { name = "httpx" },
+    { name = "import-linter" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
 ]
 
-[package.dev-dependencies]
-dev = [
-    { name = "httpx2" },
-]
-
 [package.metadata]
 requires-dist = [
-    { name = "archunit", specifier = ">=0.0.0" },
-    { name = "archunitpython", specifier = ">=1.5.0" },
+    { name = "archunitpython", marker = "extra == 'dev'", specifier = ">=1.5.0" },
     { name = "coverage", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "google-auth", specifier = ">=2.38.0" },
     { name = "gspread", specifier = ">=6.2.0" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.0" },
-    { name = "import-linter", specifier = ">=2.13" },
+    { name = "httpx2", specifier = ">=2.9.1" },
+    { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.13" },
     { name = "money", specifier = ">=1.3.0" },
     { name = "pint", specifier = ">=0.25.3" },
     { name = "playwright", specifier = ">=1.50.0" },
@@ -627,13 +614,11 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.11.0" },
     { name = "setuptools", specifier = ">=82.0.1" },
+    { name = "uk-postcodes-parsing", specifier = ">=2.1.0" },
     { name = "uk-property-apis", git = "https://github.com/kubilay-yavuz/uk-property-intel.git?subdirectory=packages%2Fapis" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
 ]
 provides-extras = ["dev"]
-
-[package.metadata.requires-dev]
-dev = [{ name = "httpx2", specifier = ">=2.3.0" }]
 
 [[package]]
 name = "httpcore"
@@ -650,15 +635,15 @@ wheels = [
 
 [[package]]
 name = "httpcore2"
-version = "2.3.0"
+version = "2.9.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "h11" },
     { name = "truststore" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e6/34/18f1c596e677962f040284246f393b10a1f8ce440b3a7e69c637d0f1c7ad/httpcore2-2.3.0.tar.gz", hash = "sha256:07327e251560960eea8e969d92d4c6a325feb13cca39e25340731336c3baf924", size = 64300, upload-time = "2026-06-01T13:15:02.998Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/39/a8/20ed1ed79cbc2ecdf5301c0968ab7c85547212e2a7bd126ddd2d986e206e/httpcore2-2.9.1.tar.gz", hash = "sha256:4d8acbf8b306f48c9d6046591fd5ba4037d1b1b1000d140fc2c3eab1e9a0c0e2", size = 67089, upload-time = "2026-07-24T09:21:03.867Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c2/dd/3357218c69360d1cecc196c230c9a1d5c9afd5dba362056e23e60a5e64e5/httpcore2-2.3.0-py3-none-any.whl", hash = "sha256:477e9e334f74e5240dcac002e890580f36a57d40ff0fb14cc9655731d23b8415", size = 80024, upload-time = "2026-06-01T13:15:00.001Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/fb/46c52b781975c335a2bcf1072c7bbc007cbdc8d674217f5ee1daba2c848b/httpcore2-2.9.1-py3-none-any.whl", hash = "sha256:6182472379e855fe4221246a2bb7ecede403bc61c6798062ae1787d051ccde26", size = 82809, upload-time = "2026-07-24T09:21:01.178Z" },
 ]
 
 [[package]]
@@ -714,17 +699,18 @@ wheels = [
 
 [[package]]
 name = "httpx2"
-version = "2.3.0"
+version = "2.9.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
     { name = "httpcore2" },
     { name = "idna" },
     { name = "truststore" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9f/9a/cca0b9145f13d8ae34b885ae28d403a1469a433abc78e0f94f4ce94e650b/httpx2-2.3.0.tar.gz", hash = "sha256:227e7c41d95a76d4077a52640564132777215fc3394e07b66a3116c33d668fa9", size = 81115, upload-time = "2026-06-01T13:15:04.324Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/21/14/38128fbafd7e0ed41d874df6c9a653d47c2d111cfe59e2b4ac95161b4abd/httpx2-2.9.1.tar.gz", hash = "sha256:1932a768737e3666291582833da748cc4e563c337cf96706fccc04fa6e58764a", size = 95458, upload-time = "2026-07-24T09:21:04.972Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/87/ce/ae2911859847f9ba1d6b23027e53481cbeb50b93234f355a968d300ca2cb/httpx2-2.3.0-py3-none-any.whl", hash = "sha256:6f393663bdf6dbe7fe90118e3eb5b2bd024a675cae0390ac08cec9198812d8b7", size = 74538, upload-time = "2026-06-01T13:15:01.566Z" },
+    { url = "https://files.pythonhosted.org/packages/13/b8/cfd91c4ab9134d386d48f0b6ac662ff3d4be6efdee59ee1c67ebc3c0487c/httpx2-2.9.1-py3-none-any.whl", hash = "sha256:1820fe14a9ab1107bfeff39259987429450b070ec0ff38cc87eb0d8c97fdc71a", size = 91191, upload-time = "2026-07-24T09:21:02.6Z" },
 ]
 
 [[package]]
@@ -1274,6 +1260,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/55/e3/70399cb7dd41c10ac53367ae42139cf4b1ca5f36bb3dc6c9d33acdb43655/typing_inspection-0.4.2.tar.gz", hash = "sha256:ba561c48a67c5958007083d386c3295464928b01faa735ab8547c5692e87f464", size = 75949, upload-time = "2025-10-01T02:14:41.687Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/dc/9b/47798a6c91d8bdb567fe2698fe81e0c6b7cb7ef4d13da4114b41d239f65d/typing_inspection-0.4.2-py3-none-any.whl", hash = "sha256:4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7", size = 14611, upload-time = "2025-10-01T02:14:40.154Z" },
+]
+
+[[package]]
+name = "uk-postcodes-parsing"
+version = "2.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8d/25/ee7a585e46f02c744f941e9016244314029c726e648a423855cde23da38a/uk_postcodes_parsing-2.1.0.tar.gz", hash = "sha256:7af6a9ef9f0caeb3e04a0b42e234ce8bfdec40ff91c92b53166e0e077be19376", size = 4052925, upload-time = "2025-08-15T21:05:05.467Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d7/db/ac4456ca1a34d447cf4f4c73ec98a10449fb3939b52316010bcc28d4f683/uk_postcodes_parsing-2.1.0-py3-none-any.whl", hash = "sha256:e60ceee06a7fbb85d37a7ffce35895fbea7ef558477b2512940af0596312baa6", size = 4935274, upload-time = "2025-08-15T21:05:03.858Z" },
 ]
 
 [[package]]

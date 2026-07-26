@@ -74,7 +74,6 @@ def _best_inspection_year(row: dict) -> str:
     return ""
 
 
-
 def _grade_score(grade: str) -> int:
     return {"Outstanding": 4, "Good": 3, "Requires Improvement": 2, "Inadequate": 1}.get(grade, 0)
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { usePropertiesStore } from '../stores/properties'
-import { commuteColour } from '../utils/commute'
+import { commuteColour } from '../formatters/commute'
 
 const store = usePropertiesStore()
 const props = defineProps<{
@@ -28,7 +28,7 @@ const colour = computed(() => {
 const displayText = computed(() => {
   const durStr = formatDuration(props.duration)
   const modeStr = props.mode ? ` ${props.mode}` : ''
-  const costStr = props.cost ? ` · £${props.cost.toFixed(2)}` : ''
+  const costStr = props.cost != null ? ` · £${props.cost.toFixed(2)}` : ''
   if (props.label) return `${props.label} ${durStr}${modeStr}${costStr}`
   return `${durStr}${modeStr}${costStr}`
 })

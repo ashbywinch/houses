@@ -29,9 +29,7 @@ def _get_conn():
 
 def list_properties():
     conn = _get_conn()
-    rows = conn.execute(
-        "SELECT DISTINCT property_id FROM source_values ORDER BY property_id"
-    ).fetchall()
+    rows = conn.execute("SELECT DISTINCT property_id FROM source_values ORDER BY property_id").fetchall()
     print(f"Properties ({len(rows)}):")
     for r in rows:
         rid = r["property_id"]
@@ -49,8 +47,7 @@ def inspect_rid(rid: str):
 
     # Persisted node results
     rows = conn.execute(
-        "SELECT node_id, result_json FROM node_results "
-        "WHERE node_id LIKE ? ORDER BY node_id",
+        "SELECT node_id, result_json FROM node_results WHERE node_id LIKE ? ORDER BY node_id",
         (f"{rid}/%",),
     ).fetchall()
 

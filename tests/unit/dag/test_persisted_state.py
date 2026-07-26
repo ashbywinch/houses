@@ -5,12 +5,14 @@ impossible, pending+retry) must report that status immediately on re-creation
 without waiting for the scheduler to re-process it.  If nodes stay pending
 on restart, the frontend shows ``?`` instead of commute data.
 """
+
 from __future__ import annotations
 
 import pytest
 
 from dag.attempt import Attempt
-from dag.derived_node import AsyncQueueScheduler, DerivedNode, flush_processor, set_scheduler
+from dag.derived_node import DerivedNode
+from dag.scheduler import AsyncQueueScheduler, flush_processor, set_scheduler
 from dag.user_input_node import UserInputNode
 
 

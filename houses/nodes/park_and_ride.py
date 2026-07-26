@@ -113,35 +113,38 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
             existing_cost = Money("0", "GBP")
         new_cost = existing_cost + parking_cost
 
-        # Replace the walk leg with a drive leg (actual drive time)
+        # Replace the walk leg with a drive leg (actual drive time).
+        # The drive leg goes in its OWN CostGroup so that fuel cost and
+        # rail fare can be attributed independently.
         first_cg = commute.details[0]
         first_leg = first_cg.legs[0]
-        new_first_leg = replace(first_leg, mode=LegMode.DRIVE, duration_minutes=drive_minutes)
-        new_first_cg = replace(first_cg, legs=(new_first_leg,) + first_cg.legs[1:])
-        # Build the parking CostGroup
+        new_drive_leg = replace(first_leg, mode=LegMode.DRIVE, duration_minutes=drive_minutes)
+        new_drive_group = CostGroup(
+            legs=(new_drive_leg,),
+            cost=None,
+        )
+        # Remaining transit legs (train/tube) stay in their own CostGroup
+        # with the original operator and cost.
+        transit_legs = first_cg.legs[1:]
         new_parking_group = CostGroup(
             legs=(JourneyLeg(mode=LegMode.PARK, duration_minutes=0),),
             operator=car_park.name,
             cost=car_park.daily_cost,
         )
-
-        # Attribute the original transit fare to new_first_cg (drive + transit legs)
-        # if it has no cost yet.  Always attribute (even if 0) so the frontend
-        # shows the cost leg and CommuteSelectorNode can apply the NR fare.
-        if new_first_cg.cost is None:
-            has_transit = any(
-                leg.mode in (LegMode.TRAIN, LegMode.TUBE, LegMode.BUS)
-                for leg in new_first_cg.legs
-            )
-            if has_transit:
-                new_first_cg = replace(new_first_cg, cost=existing_cost)
-
-        new_details = (new_first_cg, new_parking_group) + commute.details[1:]
+        # If the first CostGroup had transit legs after the walk, keep them in
+        # their own group; otherwise there's only the drive group + parking.
+        if transit_legs:
+            new_transit_group = replace(first_cg, legs=transit_legs)
+            # Attribute the original transit fare if no cost yet
+            if new_transit_group.cost is None:
+                has_transit = any(leg.mode in (LegMode.TRAIN, LegMode.TUBE, LegMode.BUS) for leg in transit_legs)
+                if has_transit:
+                    new_transit_group = replace(new_transit_group, cost=existing_cost)
+            new_details = (new_drive_group, new_parking_group, new_transit_group) + commute.details[1:]
+        else:
+            new_details = (new_drive_group, new_parking_group) + commute.details[1:]
         # Recalculate duration from replaced legs
-        new_duration = Quantity(
-            sum(leg.duration_minutes for cg in new_details for leg in cg.legs),
-            "minute"
-        )
+        new_duration = Quantity(sum(leg.duration_minutes for cg in new_details for leg in cg.legs), "minute")
         new_commute = replace(
             commute,
             daily_cost=new_cost,

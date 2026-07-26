@@ -5,20 +5,17 @@ from pathlib import Path
 import pytest
 from money import Money
 
-from houses.car_park import (
-    CarPark,
-    CarParkRegistry,
-    _apcoa_location_urls,
-    _make_slug,
-    _parse_apcoa_location_page,
-    _parse_apcoa_prebook_listing,
-)
+from houses.apcoa_scraper import ApcoaScraper
+from houses.car_park import CarPark, CarParkRegistry
 from houses.geo import GeoPoint
 from houses.stations import Station
 
 
 class TestParseApcoaLocationPage:
     """_parse_apcoa_location_page with real APCOA page fixture."""
+
+    def setup_method(self) -> None:
+        self.scraper = ApcoaScraper()
 
     def _load_fixture(self, name: str) -> tuple[str, str]:
         path = Path("tests/fixtures/apcoa_pages") / f"{name}.txt"
@@ -34,8 +31,7 @@ class TestParseApcoaLocationPage:
     def test_parse_bourne_end(self):
         """Real APCOA page for Bourne End yields name, address, and price."""
         page_text, title = self._load_fixture("bourne_end")
-        result = _parse_apcoa_location_page(page_text, title)
-
+        result = self.scraper._parse_apcoa_location_page(page_text, title)
         assert result is not None
         assert "Bourne End Station" in result["name"]
         assert result["address"] is not None
@@ -44,7 +40,7 @@ class TestParseApcoaLocationPage:
 
     def test_parse_name_from_title(self):
         """Name is extracted from the page title before ' - APCOA'."""
-        result = _parse_apcoa_location_page(
+        result = self.scraper._parse_apcoa_location_page(
             "Parking tariff\n\nDaily Rate: £12.80",
             "Woking Station Car Park - APCOA",
         )
@@ -53,7 +49,7 @@ class TestParseApcoaLocationPage:
 
     def test_parse_no_tariff_returns_none(self):
         """Page without 'Parking tariff' section returns None."""
-        result = _parse_apcoa_location_page(
+        result = self.scraper._parse_apcoa_location_page(
             "Some random page text without pricing",
             "Random Page",
         )
@@ -61,7 +57,7 @@ class TestParseApcoaLocationPage:
 
     def test_parse_no_price_returns_none(self):
         """Tariff section without extractable price returns None."""
-        result = _parse_apcoa_location_page(
+        result = self.scraper._parse_apcoa_location_page(
             "Parking tariff\n\nPermit Holders Only",
             "Test - APCOA",
         )
@@ -69,17 +65,20 @@ class TestParseApcoaLocationPage:
 
     def test_parse_empty_page_returns_none(self):
         """Completely empty page text returns None."""
-        result = _parse_apcoa_location_page("", "Empty Page")
+        result = self.scraper._parse_apcoa_location_page("", "Empty Page")
         assert result is None
 
 
 class TestParseApcoaPrebookListing:
     """_parse_apcoa_prebook_listing with realistic page text."""
 
+    def setup_method(self) -> None:
+        self.scraper = ApcoaScraper()
+
     def test_parse_listing_with_name_address_price(self):
         """Typical prebook listing with name, address, and From £X.XX."""
         text = "APCOA Maidenhead\nStation Approach, Maidenhead\nFrom £9.00 per day\nMore details"
-        result = _parse_apcoa_prebook_listing(text)
+        result = self.scraper._parse_apcoa_prebook_listing(text)
         assert result is not None
         assert result["name"] == "APCOA Maidenhead"
         assert result["address"] == "Station Approach, Maidenhead"
@@ -87,11 +86,11 @@ class TestParseApcoaPrebookListing:
 
     def test_parse_listing_no_price_returns_none(self):
         text = "APCOA Maidenhead\nStation Approach, Maidenhead\nNo price info"
-        result = _parse_apcoa_prebook_listing(text)
+        result = self.scraper._parse_apcoa_prebook_listing(text)
         assert result is None
 
     def test_parse_listing_empty_returns_none(self):
-        result = _parse_apcoa_prebook_listing("")
+        result = self.scraper._parse_apcoa_prebook_listing("")
         assert result is None
 
 
@@ -99,31 +98,34 @@ class TestMakeSlug:
     """_make_slug URL slug generation."""
 
     def test_basic_name(self):
-        assert _make_slug("Woking") == "woking"
+        assert ApcoaScraper._make_slug("Woking") == "woking"
 
     def test_with_apostrophe(self):
-        assert _make_slug("Stoke D'Abernon") == "stoke-dabernon"
+        assert ApcoaScraper._make_slug("Stoke D'Abernon") == "stoke-dabernon"
 
     def test_with_ampersand(self):
-        assert _make_slug("Cobham & Stoke") == "cobham-and-stoke"
+        assert ApcoaScraper._make_slug("Cobham & Stoke") == "cobham-and-stoke"
 
     def test_multi_word_name(self):
-        assert _make_slug("Bourne End") == "bourne-end"
+        assert ApcoaScraper._make_slug("Bourne End") == "bourne-end"
 
     def test_parkway(self):
-        assert _make_slug("Didcot Parkway") == "didcot-parkway"
+        assert ApcoaScraper._make_slug("Didcot Parkway") == "didcot-parkway"
 
 
 class TestApcoaLocationUrls:
     """_apcoa_location_urls URL generation."""
 
+    def setup_method(self) -> None:
+        self.scraper = ApcoaScraper()
+
     def test_single_city_slug(self):
-        urls = _apcoa_location_urls("Woking")
+        urls = self.scraper.apcoa_location_urls("Woking")
         assert len(urls) == 2
         assert all("woking" in u for u in urls)
 
     def test_two_city_slugs(self):
-        urls = _apcoa_location_urls("Bourne End")
+        urls = self.scraper.apcoa_location_urls("Bourne End")
         assert len(urls) == 4
         assert any("bourne-end" in u for u in urls)
         assert any("bourne" in u and "bourne-end" not in u for u in urls)

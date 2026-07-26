@@ -33,28 +33,33 @@ class _AttemptMeta(type):
     alongside ``instance.succeeded`` boolean properties.
 
     Python cannot have a ``@classmethod`` and a ``@property`` with
-    the same name on one class.  This metaclass intercepts class-level
-    attribute access via ``__getattr__`` so that ``succeeded``,
-    ``pending``, and ``impossible`` act as constructors when called
-    on the class, while the instance-level ``__getattr__`` on
-    ``Attempt`` makes them boolean properties.
+    the same name on one class.  This metaclass provides class-level
+    properties for ``succeeded``, ``pending``, and ``impossible``.
     """
 
-    def __getattr__(cls, name):
-        if name == "succeeded":
-            return lambda value, error="": cls(_Status.SUCCEEDED, value=value, error=error)
-        if name == "pending":
-            return lambda: cls(_Status.PENDING)
-        if name == "impossible":
-            return lambda error="": cls(_Status.IMPOSSIBLE, error=error)
-        raise AttributeError(f"{cls.__name__!r} has no attribute {name!r}")
+    @property
+    def succeeded(cls):
+        return lambda value, error="": cls(_Status.SUCCEEDED, value=value, error=error)
 
-    def __setattr__(cls, name, value):
-        if name in ("succeeded", "pending", "impossible"):
-            raise AttributeError(
-                f"Cannot set {name!r} — reserved by Attempt constructor/property"
-            )
-        super().__setattr__(name, value)
+    @succeeded.setter
+    def succeeded(cls, value):
+        raise AttributeError("Cannot set 'succeeded' — reserved by Attempt constructor/property")
+
+    @property
+    def pending(cls):
+        return lambda: cls(_Status.PENDING)
+
+    @pending.setter
+    def pending(cls, value):
+        raise AttributeError("Cannot set 'pending' — reserved by Attempt constructor/property")
+
+    @property
+    def impossible(cls):
+        return lambda error="": cls(_Status.IMPOSSIBLE, error=error)
+
+    @impossible.setter
+    def impossible(cls, value):
+        raise AttributeError("Cannot set 'impossible' — reserved by Attempt constructor/property")
 
 
 class Attempt[T](metaclass=_AttemptMeta):
@@ -72,30 +77,40 @@ class Attempt[T](metaclass=_AttemptMeta):
 
     __slots__ = ("_status", "_value", "_error", "_metadata")
 
-    def __init__(self, status: _Status, value: T | None = None,
-                 error: str = "", metadata: dict | None = None) -> None:
+    def __init__(self, status: _Status, value: T | None = None, error: str = "", metadata: dict | None = None) -> None:
+        if status is _Status.SUCCEEDED and isinstance(value, Attempt):
+            raise TypeError(
+                f"Cannot create Attempt.succeeded() with an Attempt as value. "
+                f"Attempt values must be domain objects, not Attempts. "
+                f"Attempt inside Attempt: {type(value).__name__}"
+                f" -> {type(value._value).__name__ if value._value is not None else 'None'}"
+            )
         object.__setattr__(self, "_status", status)
         object.__setattr__(self, "_value", value)
         object.__setattr__(self, "_error", error)
         object.__setattr__(self, "_metadata", metadata or {})
 
-    # ── Predicates (instance properties via __getattr__) ────────────
+    # ── Predicates (instance properties) ─────────────────────────
 
-    def __getattr__(self, name: str):
-        if name == "succeeded":
-            return self._status is _Status.SUCCEEDED
-        if name == "pending":
-            return self._status is _Status.PENDING
-        if name == "impossible":
-            return self._status is _Status.IMPOSSIBLE
-        raise AttributeError(f"{type(self).__name__!r} has no attribute {name!r}")
+    @property
+    def succeeded(self) -> bool:
+        """True when this Attempt holds a succeeded value."""
+        return self._status is _Status.SUCCEEDED
+
+    @property
+    def pending(self) -> bool:
+        """True when this Attempt is not yet computed."""
+        return self._status is _Status.PENDING
+
+    @property
+    def impossible(self) -> bool:
+        """True when this Attempt holds a failure/error."""
+        return self._status is _Status.IMPOSSIBLE
 
     @property
     def status(self) -> str:
         """Serialisable status string: ``"succeeded"`` / ``"pending"`` / ``"impossible"``."""
-        return ("succeeded" if self.succeeded
-                else "pending" if self.pending
-                else "impossible")
+        return "succeeded" if self.succeeded else "pending" if self.pending else "impossible"
 
     # ── Value access ──────────────────────────────────────────────────
 
@@ -133,6 +148,7 @@ class Attempt[T](metaclass=_AttemptMeta):
         if self.succeeded:
             return Attempt.succeeded(fn(self._value))  # type: ignore[arg-type]
         return self  # type: ignore[return-value]
+
     def bind(self, fn: Callable[[T], Attempt[U]]) -> Attempt[U]:
         """Chain a fallible transform; ``fn`` returns ``Attempt[U]``."""
         if self.succeeded:
@@ -167,9 +183,7 @@ class Attempt[T](metaclass=_AttemptMeta):
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Attempt):
             return NotImplemented
-        return (self._status is other._status
-                and self._value == other._value
-                and self._error == other._error)
+        return self._status is other._status and self._value == other._value and self._error == other._error
 
     def __ne__(self, other: object) -> bool:
         result = self.__eq__(other)
@@ -207,14 +221,13 @@ class Provenance:
             # Omit the value if it's not JSON-serializable or too large
             try:
                 import json as _json
+
                 _json.dumps(self.value)
                 result["value"] = self.value
             except (TypeError, ValueError, OverflowError):
                 result["value"] = str(self.value)
         if self.sources:
-            result["sources"] = {
-                k: v.to_dict() for k, v in self.sources.items()
-            }
+            result["sources"] = {k: v.to_dict() for k, v in self.sources.items()}
         return result
 
     @classmethod
@@ -223,8 +236,6 @@ class Provenance:
         return cls(label=label, url=url)
 
     @classmethod
-    def composite(cls, label: str,
-                  sources: dict[str, Provenance],
-                  url: str = "") -> Provenance:
+    def composite(cls, label: str, sources: dict[str, Provenance], url: str = "") -> Provenance:
         """Create a Provenance with dependency sub-sources."""
         return cls(label=label, sources=sources, url=url)
