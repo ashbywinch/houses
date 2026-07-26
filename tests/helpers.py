@@ -86,21 +86,21 @@ class FakeGeocoder:
 _DEFAULT_SIMON = Commute(
     person=Person(name="Simon", has_car=False),
     label="Simon (London)",
-    destination=PlaceOfInterest(label="Simon (London)", postcode="SW1V 2QQ"),
+    destination=PlaceOfInterest(label="Simon (London)", address="SW1V 2QQ"),
     duration=Quantity(30, "minute"),
     daily_cost=Money("10.0", "GBP"),
 )
 _DEFAULT_LORENA = Commute(
     person=Person(name="Lorena", has_car=False),
     label="Lorena (London)",
-    destination=PlaceOfInterest(label="Lorena (London)", postcode="EC3A 7LP"),
+    destination=PlaceOfInterest(label="Lorena (London)", address="EC3A 7LP"),
     duration=Quantity(45, "minute"),
     daily_cost=Money("12.0", "GBP"),
 )
 _DEFAULT_PETROL = Commute(
     person=Person(name="Simon", has_car=True),
     label="Bracknell Office (RG12 8YA)",
-    destination=PlaceOfInterest(label="Bracknell Office (RG12 8YA)", postcode="RG12 8YA"),
+    destination=PlaceOfInterest(label="Bracknell Office (RG12 8YA)", address="RG12 8YA"),
     duration=Quantity(90, "minute"),
     daily_cost=Money("12.50", "GBP"),
 )
@@ -159,7 +159,7 @@ class FakeSchoolLookup:
         return Commute(
             person=Person(name="George", has_car=False, is_child=True),
             label=school.name,
-            destination=PlaceOfInterest(label=school.name, postcode=school.postcode),
+            destination=PlaceOfInterest(label=school.name, address=school.postcode),
             duration=Quantity(20, "minute"),
             daily_cost=Money("0", "GBP"),
         )

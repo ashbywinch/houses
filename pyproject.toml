@@ -19,6 +19,8 @@ dependencies = [
     "setuptools>=82.0.1",
     "pint>=0.25.3",
     "python-multipart>=0.0.20",
+    "uk-postcodes-parsing>=2.1.0",
+    "httpx2>=2.9.1",
 ]
 
 [project.optional-dependencies]

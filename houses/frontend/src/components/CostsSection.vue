@@ -27,7 +27,7 @@ function epcStepClass(band: string): string {
       </div>
       <div class="costs-row">
         <span class="costs-label">Sinking Fund</span>
-        <span class="costs-value">£{{ affordability?.monthly_sinking_fund?.value ?? '?' }}</span>
+        <span class="costs-value">£{{ affordability?.monthly_sinking_fund?.value?.amount ?? '?' }}</span>
       </div>
       <div class="costs-row">
         <span class="costs-label">Commute Cost</span>

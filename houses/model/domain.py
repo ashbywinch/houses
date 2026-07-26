@@ -29,7 +29,7 @@ class PlaceOfInterest:
     """A named place a person needs to commute to."""
 
     label: str
-    postcode: str
+    address: str = ""
     trips_per_week: int = 1
     weeks_per_year: int = 46
 

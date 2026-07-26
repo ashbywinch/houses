@@ -158,7 +158,7 @@ class TestCongestionZone:
 _WALK_60 = Commute(
     person=Person(name="", has_car=False),
     label="",
-    destination=PlaceOfInterest(label="", postcode=""),
+    destination=PlaceOfInterest(label="", address=""),
     duration=Quantity(60, "minute"),
     daily_cost=Money("0.0", "GBP"),
     mode="walk",
@@ -166,7 +166,7 @@ _WALK_60 = Commute(
 _WALK_20 = Commute(
     person=Person(name="", has_car=False),
     label="",
-    destination=PlaceOfInterest(label="", postcode=""),
+    destination=PlaceOfInterest(label="", address=""),
     duration=Quantity(20, "minute"),
     daily_cost=Money("0.0", "GBP"),
     mode="walk",
@@ -174,7 +174,7 @@ _WALK_20 = Commute(
 _TRANSIT_30 = Commute(
     person=Person(name="", has_car=False),
     label="",
-    destination=PlaceOfInterest(label="", postcode=""),
+    destination=PlaceOfInterest(label="", address=""),
     duration=Quantity(30, "minute"),
     daily_cost=Money("8.0", "GBP"),
     mode="transit",
@@ -182,7 +182,7 @@ _TRANSIT_30 = Commute(
 _DRIVE_25 = Commute(
     person=Person(name="", has_car=False),
     label="",
-    destination=PlaceOfInterest(label="", postcode=""),
+    destination=PlaceOfInterest(label="", address=""),
     duration=Quantity(25, "minute"),
     daily_cost=Money("5.0", "GBP"),
     mode="drive",
@@ -193,11 +193,16 @@ _SLOWER_HAS_COST = Attempt.succeeded(
     Commute(
         person=Person(name="", has_car=False),
         label="",
-        destination=PlaceOfInterest(label="", postcode=""),
+        destination=PlaceOfInterest(label="", address=""),
         duration=Quantity(25, "minute"),
         daily_cost=Money("5.0", "GBP"),
     )
 )
+
+
+_PIMLICO = "1 Drummond Gate, Pimlico, London SW1V 2QQ"
+_BRACKNELL = "Waite House, Doncastle Road, Bracknell, Berkshire RG12 8YA"
+_ALDGATE = "Eastgate House, 40 Dukes Place, Aldgate, London EC3A 7LP"
 
 
 class TestGetCommuteChoice:
@@ -206,6 +211,7 @@ class TestGetCommuteChoice:
     @pytest.mark.asyncio
     async def test_walking_wins_when_fastest(self, monkeypatch):
         """Walking within max_walk_minutes should be returned immediately."""
+
         from houses.routing import CommuteRouter
 
         async def mock_walk(*_):
@@ -220,13 +226,12 @@ class TestGetCommuteChoice:
         monkeypatch.setattr("houses.routing.CommuteRouter._google_route_commute", mock_walk)
         monkeypatch.setattr("houses.routing.CommuteRouter._tfl_transit_commute", mock_transit)
         router = CommuteRouter()
-        result = await router.get_commute("GU21 7QF", "SW1V 2QQ", has_car=False, max_walk_minutes=30)
+        result = await router.get_commute("GU21 7QF", _PIMLICO, has_car=False, max_walk_minutes=30)
         assert result.succeeded, f"Expected succeeded, got {result}"
         assert result.value_or_none().duration.magnitude == 20
 
     @pytest.mark.asyncio
     async def test_walking_skipped_when_too_slow(self, monkeypatch):
-        """Walking longer than max_walk_minutes should fall through to transit."""
         from houses.routing import CommuteRouter
 
         async def mock_walk(*_):
@@ -240,16 +245,14 @@ class TestGetCommuteChoice:
 
         monkeypatch.setattr("houses.routing.CommuteRouter._google_route_commute", mock_walk)
         monkeypatch.setattr("houses.routing.CommuteRouter._tfl_transit_commute", mock_transit)
-
         router = CommuteRouter()
-        result = await router.get_commute("GU21 7QF", "SW1V 2QQ", has_car=False, max_walk_minutes=30)
+        result = await router.get_commute("GU21 7QF", _PIMLICO, has_car=False, max_walk_minutes=30)
         assert result.succeeded, f"Expected succeeded, got {result}"
         assert result.value_or_none().duration.magnitude == 30  # transit, not walking
 
     @pytest.mark.asyncio
     async def test_driving_considered_when_has_car(self, monkeypatch):
         """With has_car=True and no congestion zone, driving should be an option."""
-        from houses.routing import CommuteRouter
 
         async def mock_walk(*_):
             return Attempt.succeeded(_WALK_60)
@@ -272,15 +275,16 @@ class TestGetCommuteChoice:
         monkeypatch.setattr("houses.routing.CommuteRouter._google_route_commute", mock_drive)
         monkeypatch.setattr("houses.routing.CommuteRouter._in_congestion_zone", mock_cz)
 
+        from houses.routing import CommuteRouter
+
         router = CommuteRouter()
-        result = await router.get_commute("GU21 7QF", "RG12 8YA", has_car=True, max_walk_minutes=15)
+        result = await router.get_commute("GU21 7QF", _BRACKNELL, has_car=True, max_walk_minutes=15)
         assert result.succeeded, f"Expected succeeded, got {result}"
         assert result.value_or_none().duration.magnitude == 25  # driving
 
     @pytest.mark.asyncio
     async def test_prefers_faster_of_transit_and_drive(self, monkeypatch):
         """With both transit and driving available, picks the faster one."""
-        from houses.routing import CommuteRouter
 
         async def mock_walk(*_):
             return Attempt.succeeded(_WALK_60)
@@ -303,8 +307,10 @@ class TestGetCommuteChoice:
         monkeypatch.setattr("houses.routing.CommuteRouter._google_route_commute", mock_drive)
         monkeypatch.setattr("houses.routing.CommuteRouter._in_congestion_zone", mock_cz)
 
+        from houses.routing import CommuteRouter
+
         router = CommuteRouter()
-        result = await router.get_commute("GU21 7QF", "RG12 8YA", has_car=True, max_walk_minutes=15)
+        result = await router.get_commute("GU21 7QF", _BRACKNELL, has_car=True, max_walk_minutes=15)
         assert result.succeeded, f"Expected succeeded, got {result}"
         assert result.value_or_none().duration.magnitude == 25  # driving is faster than transit
 
@@ -329,9 +335,8 @@ class TestGetCommuteChoice:
         monkeypatch.setattr("houses.routing.CommuteRouter._google_route_commute", mock_routes)
         monkeypatch.setattr("houses.routing.CommuteRouter._tfl_transit_commute", mock_transit)
         monkeypatch.setattr("houses.routing.CommuteRouter._in_congestion_zone", mock_cz)
-
         router = CommuteRouter()
-        result = await router.get_commute("GU21 7QF", "SW1V 2QQ", has_car=True, max_walk_minutes=15)
+        result = await router.get_commute("GU21 7QF", _PIMLICO, has_car=True, max_walk_minutes=15)
         assert result.succeeded, f"Expected succeeded, got {result}"
         assert result.value_or_none().duration.magnitude == 30  # transit, not driving
 
@@ -367,7 +372,6 @@ class TestGetCommuteChoice:
     @pytest.mark.asyncio
     async def test_returns_cost_when_tfl_has_cost(self, monkeypatch):
         """TfL returns a route with cost → it's selected."""
-        from houses.routing import CommuteRouter
 
         async def mock_walk(*_):
             return Attempt.succeeded(_WALK_60)
@@ -378,8 +382,10 @@ class TestGetCommuteChoice:
         monkeypatch.setattr("houses.routing.CommuteRouter._google_route_commute", mock_walk)
         monkeypatch.setattr("houses.routing.CommuteRouter._tfl_transit_commute", mock_tfl)
 
+        from houses.routing import CommuteRouter
+
         router = CommuteRouter()
-        result = await router.get_commute("GU21 7QF", "EC3A 7LP", has_car=False, max_walk_minutes=30)
+        result = await router.get_commute("GU21 7QF", _ALDGATE, has_car=False, max_walk_minutes=30)
         assert result.succeeded, f"Expected succeeded, got {result}"
         best = result.value_or_none()
         assert best.daily_cost == Money("5.0", "GBP"), "Should return the route with a real cost"
@@ -400,14 +406,14 @@ class TestTflNoBusWhenHasCar:
         no_bus = Commute(
             person=Person(name="", has_car=True),
             label="",
-            destination=PlaceOfInterest(label="", postcode="SW1V 2QQ"),
+            destination=PlaceOfInterest(label="", address="SW1V 2QQ"),
             duration=Quantity(90, "minute"),
             daily_cost=Money("20.0", "GBP"),
         )
         with_bus = Commute(
             person=Person(name="", has_car=True),
             label="",
-            destination=PlaceOfInterest(label="", postcode="SW1V 2QQ"),
+            destination=PlaceOfInterest(label="", address="SW1V 2QQ"),
             duration=Quantity(70, "minute"),
             daily_cost=Money("15.0", "GBP"),
         )
@@ -441,7 +447,7 @@ class TestTflNoBusWhenHasCar:
         with_bus = Commute(
             person=Person(name="", has_car=True),
             label="",
-            destination=PlaceOfInterest(label="", postcode="SW1V 2QQ"),
+            destination=PlaceOfInterest(label="", address="SW1V 2QQ"),
             duration=Quantity(70, "minute"),
             daily_cost=Money("15.0", "GBP"),
         )
@@ -537,7 +543,7 @@ class TestSchoolCommute:
             commute = Commute(
                 person=Person(name="", has_car=False),
                 label="",
-                destination=PlaceOfInterest(label="", postcode=dest),
+                destination=PlaceOfInterest(label="", address=dest),
                 duration=Quantity(10, "minute"),
                 daily_cost=Money("0.0", "GBP"),
             )

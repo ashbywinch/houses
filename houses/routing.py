@@ -8,18 +8,19 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 
 import httpx
+import uk_postcodes_parsing as _ukp
 from money import Money
 from pint import Quantity
+from uk_postcodes_parsing.postcode_utils import to_outcode as _to_outcode
 
 from dag.attempt import Attempt
+from dag.http_error import HttpError
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.geo import GeoPoint
-from houses.http_error import HttpError
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.tfl_client import TflClient
 
@@ -107,11 +108,14 @@ class CommuteRouter:
             # destinations anyway, but driving remains a valid option.
         }
     )
-    _OUTCODE_RE = re.compile(r"^[A-Z]{1,2}[0-9][A-Z0-9]?")
 
     def __init__(self) -> None:
         """Initialise the router."""
         pass
+
+    @property
+    def google_routes_post(self):
+        return self._google_routes_post
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -164,30 +168,32 @@ class CommuteRouter:
             self._raise_with_body(resp)
             data = resp.json()
             set_cached("POST", self.GOOGLE_ROUTES_URL, None, key, data)
-            return data
 
     @staticmethod
-    def _outcode_from_postcode(postcode: str) -> str | None:
-        m = CommuteRouter._OUTCODE_RE.match(postcode.strip().upper())
-        return m.group(0) if m else None
+    def _extract_outcode(text: str) -> str | None:
+        """Extract the UK postcode outcode from a postcode or address string.
+
+        Uses ``uk-postcodes-parsing`` to reliably find postcodes embedded
+        in full addresses (e.g. ``"1 Drummond Gate, London SW1V 2QQ"``).
+        Returns ``None`` for coordinate strings (``"51.5,-0.1"``).
+        """
+        postcodes = _ukp.parse_from_corpus(text.strip().upper(), attempt_fix=False)
+        if not postcodes:
+            return None
+        return _to_outcode(postcodes[0].postcode)
 
     @staticmethod
-    def _in_congestion_zone(postcode: str) -> bool:
-        oc = CommuteRouter._outcode_from_postcode(postcode)
+    def _in_congestion_zone(dest: str | GeoPoint) -> bool:
+        if isinstance(dest, GeoPoint):
+            return 51.5 < dest.lat < 51.52 and -0.15 < dest.lon < 0.01
+        oc = CommuteRouter._extract_outcode(dest)
         if oc:
             return oc in CommuteRouter._CONGESTION_OUTCODES
-        # Check coordinate strings ("lat,lon") — central London congestion zone box
-        if "," in postcode:
-            try:
-                lat, lon = postcode.split(",")
-                return 51.5 < float(lat) < 51.52 and -0.15 < float(lon) < 0.01
-            except (ValueError, TypeError):
-                pass
         return False
 
     @staticmethod
-    def _is_london_area(postcode: str) -> bool:
-        """Rough check: is this postcode in the TfL service area?
+    def _is_london_area(dest: str | GeoPoint) -> bool:
+        """Rough check: is this destination in the TfL service area?
 
         This is an OPTIMISATION, not a correctness gate.  A false positive
         (trying TfL for an out-of-area destination) is harmless — the API
@@ -195,16 +201,11 @@ class CommuteRouter:
         negative means we skip TfL for a London destination, still getting
         a valid driving result.
         """
-        oc = CommuteRouter._outcode_from_postcode(postcode)
+        if isinstance(dest, GeoPoint):
+            return 51.3 < dest.lat < 51.7 and -0.5 < dest.lon < 0.3  # approx Greater London
+        oc = CommuteRouter._extract_outcode(dest)
         if oc:
             return oc.startswith(("E", "EC", "N", "NW", "SE", "SW", "W", "WC"))
-        # Check coordinate strings ("lat,lon") — London bounding box
-        if "," in postcode:
-            try:
-                lat, lon = postcode.split(",")
-                return 51.3 < float(lat) < 51.7 and -0.5 < float(lon) < 0.3  # approx Greater London
-            except (ValueError, TypeError):
-                pass
         return False
 
     @staticmethod
@@ -224,38 +225,6 @@ class CommuteRouter:
     # ------------------------------------------------------------------
     # Walking — Google Routes walking mode
     # ------------------------------------------------------------------
-
-    async def _walk_to_station_minutes(
-        self,
-        origin_postcode: str,
-        lat: float,
-        lng: float,
-        *,
-        origin_latlng: tuple[float, float] | None = None,
-    ) -> int | None:
-        """Walking duration (minutes) from a postcode or coordinate to a lat/lng point.
-
-        Uses Google Routes walking mode.  When ``origin_latlng`` is provided, it is
-        used as the origin (a precise coordinate) instead of ``origin_postcode``
-        which relies on geocoding the address string.  Returns ``None`` if the
-        API call fails or returns no route.
-        """
-        if origin_latlng is not None:
-            origin = {"location": {"latLng": {"latitude": origin_latlng[0], "longitude": origin_latlng[1]}}}
-        else:
-            origin = {"address": origin_postcode}
-        body = {
-            "origin": origin,
-            "destination": {"location": {"latLng": {"latitude": lat, "longitude": lng}}},
-            "travelMode": "WALK",
-        }
-        data = await self._google_routes_post(body, "routes.duration,routes.distanceMeters")
-        if data is None:
-            return None
-        routes = data.get("routes", [])
-        if not routes:
-            return None
-        return round(int(routes[0].get("duration", "0s").rstrip("s")) / 60)
 
     async def _google_route_commute(
         self,
@@ -310,7 +279,7 @@ class CommuteRouter:
             Commute(
                 person=Person(name="", has_car=False),
                 label="",
-                destination=PlaceOfInterest(label="", postcode=dest_str),
+                destination=PlaceOfInterest(label="", address=dest_str),
                 duration=Quantity(duration_min, "minute"),
                 daily_cost=daily or Money("0", "GBP"),
                 mode="walk" if mode == "WALK" else "drive",
@@ -324,15 +293,6 @@ class CommuteRouter:
             error=f"google_routes_{mode.lower()}: duration={duration_min}min distance={distance_meters}m",
         )
 
-    @staticmethod
-    def _first_walk_minutes(commute: Commute) -> int:
-        """Return the duration (minutes) of the first walk leg in a commute, or 0."""
-        for cg in commute.details:
-            for leg in cg.legs:
-                if leg.mode == LegMode.WALK:
-                    return leg.duration_minutes
-        return 0
-
     # ------------------------------------------------------------------
     # Transit — TfL via TflClient (London area)
     # ------------------------------------------------------------------
@@ -342,7 +302,6 @@ class CommuteRouter:
         origin_postcode: str,
         dest_postcode: str,
         has_car: bool,
-        person_label: str = "",
     ) -> Attempt[Commute]:
         """Transit routing via TfL API.
 
@@ -373,7 +332,7 @@ class CommuteRouter:
         empty = Commute(
             person=Person(name="", has_car=has_car),
             label=label,
-            destination=PlaceOfInterest(label=label, postcode=dest_postcode),
+            destination=PlaceOfInterest(label=label, address=dest_postcode),
             duration=Quantity(0, "minute"),
             daily_cost=Money("0", "GBP"),
         )
@@ -411,7 +370,6 @@ class CommuteRouter:
         dest: str | GeoPoint,
         *,
         has_car: bool,
-        person_label: str = "",
         max_walk_minutes: int | None = None,
     ) -> Attempt[Commute]:
         """Route from origin to destination based on the traveler's circumstances.
@@ -425,8 +383,9 @@ class CommuteRouter:
         modes are carried in the Attempt's ``error`` field, visible
         in the DAG provenance chain.
         """
+
         dest_str = dest if isinstance(dest, str) else f"{dest.lat},{dest.lon}"
-        dest_in_congestion = self._in_congestion_zone(dest_str)
+        dest_in_congestion = self._in_congestion_zone(dest)
 
         walk_attempt = await self._google_route_commute(origin, dest, "WALK", max_walk_minutes)
         if max_walk_minutes is not None and walk_attempt.succeeded and walk_attempt.value_or_none() is not None:
@@ -436,10 +395,10 @@ class CommuteRouter:
 
         candidates: list[Attempt[Commute]] = [walk_attempt]
 
-        if self._is_london_area(dest_str):
+        if self._is_london_area(dest):
             origin_str = origin if isinstance(origin, str) else f"{origin.lat},{origin.lon}"
             try:
-                tfl_attempt = await self._tfl_transit_commute(origin_str, dest_str, has_car, person_label=person_label)
+                tfl_attempt = await self._tfl_transit_commute(origin_str, dest_str, has_car)
             except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException, HttpError):
                 raise
             except Exception as e:

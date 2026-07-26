@@ -11,8 +11,8 @@ class Settings(BaseSettings):
 
     sheet_id: str = "1CUWQfy5KnyKko2L-H7whQbOVYL_Uzr_5JSHO6HpH_2s"
 
-    simon_postcode: str = "SW1V 2QQ"
-    lorena_postcode: str = "EC3A 7LP"
+    simon_destination: str = "1 Drummond Gate, Pimlico, London SW1V 2QQ"
+    lorena_destination: str = "Eastgate House, 40 Dukes Place, Aldgate, London EC3A 7LP"
     bracknell_postcode: str = "RG12 8YA"
 
     tfl_api_key: str = Field(default="", alias="TFL_API_KEY")

@@ -19,11 +19,6 @@ class WalkabilityNode(DerivedNode[dict]):
         result = await svc.walkability_service.enrich(loc.lat, loc.lon, address.value_or_none() or "")
         return Attempt.succeeded(result)
 
-    def _is_transient_error(self, exc: Exception) -> bool:
-        from houses.helpers import is_transient_error as _ite
-
-        return _ite(exc)
-
     async def build_provenance(self):
         return Provenance(label="walkability", url="https://maps.googleapis.com/")
 
@@ -45,11 +40,6 @@ class NearestTownNode(DerivedNode[str]):
             return Attempt.succeeded(town)
         return Attempt.impossible("could not determine nearest town")
 
-    def _is_transient_error(self, exc: Exception) -> bool:
-        from houses.helpers import is_transient_error as _ite
-
-        return _ite(exc)
-
     async def build_provenance(self):
         return Provenance(label="reverse_geocode")
 
@@ -58,7 +48,6 @@ class TownDescNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, best_location, nearest_town, town_name, postcode_node):
         deps: tuple[Node, ...] = (best_location, nearest_town, town_name, postcode_node)
         super().__init__(node_id, dict, deps)
-
 
     async def compute(
         self,
@@ -76,11 +65,6 @@ class TownDescNode(DerivedNode[dict]):
         svc = get_services()
         desc = await svc.town_desc_service.describe(town, pc)
         return Attempt.succeeded({"description": desc})
-
-    def _is_transient_error(self, exc: Exception) -> bool:
-        from houses.helpers import is_transient_error as _ite
-
-        return _ite(exc)
 
     async def build_provenance(self):
         return Provenance(label="LLM")

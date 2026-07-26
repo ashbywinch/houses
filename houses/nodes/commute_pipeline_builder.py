@@ -9,7 +9,10 @@ from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 from houses.nodes.park_and_ride import ParkAndRideAugmentNode
 from houses.nodes.petrol import PetrolCostAugmentNode
 from houses.nodes.schools import SchoolLocationNode
-from houses.nodes.transit import DriveNode, TransitNode, WalkNode
+from houses.nodes.transit import DriveNode, TflTransitNode, TransitNode, WalkNode
+from houses.routing import CommuteRouter
+
+_router = CommuteRouter()
 
 
 def build_commute_pipeline(prop) -> None:
@@ -32,7 +35,7 @@ def build_commute_pipeline(prop) -> None:
         pois = p_info.places_of_interest
         for poi in pois:
             label = poi.label
-            postcode = poi.postcode
+            postcode = poi.address
             key = f"{p_name}/{label}"
 
             is_child = p_info.is_child
@@ -68,13 +71,28 @@ def build_commute_pipeline(prop) -> None:
                 poi=poi_src,
                 has_car=p_info.has_car,
             )
-
+            no_bus_node = TflTransitNode(
+                f"{prop.rid}/{key}/tfl_no_bus",
+                best_location=prop.best_location,
+                poi=poi_src,
+                has_car=p_info.has_car,
+                allow_bus=False,
+            )
+            with_bus_node = TflTransitNode(
+                f"{prop.rid}/{key}/tfl_with_bus",
+                best_location=prop.best_location,
+                poi=poi_src,
+                has_car=p_info.has_car,
+                allow_bus=True,
+            )
             transit_node = TransitNode(
                 f"{prop.rid}/{key}/computed_transit",
                 best_location=prop.best_location,
                 poi=poi_src,
                 has_car=p_info.has_car,
                 max_walk=p_info.bus_walk_penalty_minutes,
+                no_bus_node=no_bus_node,
+                with_bus_node=with_bus_node,
             )
             prop._transit_nodes.append(transit_node)
 
@@ -91,6 +109,7 @@ def build_commute_pipeline(prop) -> None:
                 f"{prop.rid}/{key}/bus_route",
                 best_location=prop.best_location,
                 poi=poi_src,
+                _google_routes_post=_router.google_routes_post,
             )
 
             bods_fare_node = BodsFareNode(

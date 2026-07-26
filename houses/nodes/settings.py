@@ -27,11 +27,21 @@ def make_default_persons() -> list[Person]:
             bus_walk_penalty_minutes=20,
             deposit_equity=Money("177000", "GBP"),
             places_of_interest=(
-                PlaceOfInterest(label="Pimlico", postcode=settings.simon_postcode, trips_per_week=1, weeks_per_year=46),
                 PlaceOfInterest(
-                    label="Bracknell", postcode=settings.bracknell_postcode, trips_per_week=1, weeks_per_year=46
+                    label="Pimlico", address=settings.simon_destination, trips_per_week=1, weeks_per_year=46
                 ),
-                PlaceOfInterest(label="Dad", postcode="OX7 5GZ", trips_per_week=0, weeks_per_year=46),
+                PlaceOfInterest(
+                    label="Bracknell",
+                    address="Waite House, Doncastle Road, Bracknell, Berkshire RG12 8YA",
+                    trips_per_week=1,
+                    weeks_per_year=46,
+                ),
+                PlaceOfInterest(
+                    label="Dad",
+                    address="Flat 37, Watson Place, Trinity Road, Chipping Norton OX7 5GZ",
+                    trips_per_week=0,
+                    weeks_per_year=46,
+                ),
             ),
         ),
         Person(
@@ -41,7 +51,7 @@ def make_default_persons() -> list[Person]:
             deposit_equity=Money("0", "GBP"),
             places_of_interest=(
                 PlaceOfInterest(
-                    label="Aldgate", postcode=settings.lorena_postcode, trips_per_week=2, weeks_per_year=46
+                    label="Aldgate", address=settings.lorena_destination, trips_per_week=2, weeks_per_year=46
                 ),
             ),
         ),
@@ -51,8 +61,8 @@ def make_default_persons() -> list[Person]:
             is_child=True,
             acceptable_schools=("mixed", "boys", "girls"),
             places_of_interest=(
-                PlaceOfInterest(label="Primary School", postcode="", trips_per_week=5, weeks_per_year=39),
-                PlaceOfInterest(label="Secondary School", postcode="", trips_per_week=5, weeks_per_year=39),
+                PlaceOfInterest(label="Primary School", address="", trips_per_week=5, weeks_per_year=39),
+                PlaceOfInterest(label="Secondary School", address="", trips_per_week=5, weeks_per_year=39),
             ),
         ),
     ]

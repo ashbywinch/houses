@@ -1,4 +1,4 @@
-import { ref, onUnmounted } from 'vue'
+import { ref, onUnmounted, getCurrentInstance } from 'vue'
 import { usePropertiesStore } from '../stores/properties'
 
 const MAX_RETRIES = 10
@@ -59,7 +59,7 @@ export function useWebSocket(factory?: (url: string) => WebSocket) {
     if (timer) clearTimeout(timer)
   }
 
-  onUnmounted(disconnect)
+  if (getCurrentInstance()) onUnmounted(disconnect)
 
   return { connected, connect, disconnect }
 }

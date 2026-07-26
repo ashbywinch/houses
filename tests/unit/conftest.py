@@ -48,17 +48,22 @@ def _make_mock_services():
 
 @pytest.fixture(autouse=True)
 def _mock_google_routes(monkeypatch):
-    """Prevent WalkNode and DriveNode from making real API calls.
+    """Prevent WalkNode, DriveNode, BusRouteNode, and TflTransitNode from making real API calls.
 
-    WalkNode and DriveNode call _google_route_commute directly
-    (not through the commute_router service), so we must mock it
-    at the module level for all unit tests.
+    WalkNode/DriveNode call through ``CommuteRouter._google_route_commute``.
+    BusRouteNode receives ``_google_routes_post`` via the property.
+    TflTransitNode calls ``TflClient.plan()`` directly.
     """
 
     async def mock_google_routes(*_, **__):
         return Attempt.impossible("mocked — unit test")
 
+    async def mock_tfl_plan(self):
+        return Attempt.impossible("mocked — unit test")
+
     monkeypatch.setattr("houses.routing.CommuteRouter._google_route_commute", mock_google_routes)
+    monkeypatch.setattr("houses.routing.CommuteRouter.google_routes_post", None)
+    monkeypatch.setattr("houses.tfl_client.TflClient.plan", mock_tfl_plan)
 
 
 @pytest.fixture(autouse=True)

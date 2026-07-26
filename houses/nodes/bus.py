@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 
 from money import Money
@@ -14,16 +15,13 @@ from houses.bus_journey import cheapest_round_trip
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.config import settings
 from houses.model.domain import Commute
-from houses.nodes.transit import _router
 from houses.routing import CommuteRouter
 
 
 class BusRouteNode(DerivedNode[dict]):
     """Find a bus alternative via Google Routes TRANSIT."""
 
-    # Class-level default for DI — set by pipeline builder in production,
-    # overridden by test conftest for unit tests.
-    _default_google_routes_post = _router._google_routes_post
+    _default_google_routes_post: Callable | None = None
 
     def __init__(self, node_id: str, *, best_location, poi, _google_routes_post=None):
         self._google_routes_post = _google_routes_post or self._default_google_routes_post
@@ -82,7 +80,7 @@ class BusRouteNode(DerivedNode[dict]):
         if not bus_stops:
             return Attempt.impossible("No bus legs found in route")
 
-        duration_sec = int(routes[0].get("duration", "0s").rstrip("s"))
+        duration_sec = int(routes[0].get("duration", "0s").removesuffix("s"))
         return Attempt.succeeded(
             {
                 "bus_stops": bus_stops,

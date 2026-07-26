@@ -53,7 +53,6 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
             return commute
         import logging
 
-        logging.getLogger().setLevel(logging.DEBUG)
         logger = logging.getLogger(__name__)
         logger.debug(
             "PETROL_DEBUG: %d drive legs, total_min=%d, distances=%s",
@@ -91,14 +90,13 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         new_daily_cost = val.daily_cost + fuel_cost
 
         # Attribute fuel cost to the drive CostGroup(s)
-        from dataclasses import replace as _replace_cg
-
         new_details = list(val.details)
+
         for i, cg in enumerate(new_details):
             has_drive = any(leg.mode == LegMode.DRIVE for leg in cg.legs)
             if has_drive:
                 new_cg_cost = cg.cost + fuel_cost if isinstance(cg.cost, Money) else fuel_cost
-                new_details[i] = _replace_cg(cg, cost=new_cg_cost)
+                new_details[i] = replace(cg, cost=new_cg_cost)
                 break
 
         new_commute = replace(

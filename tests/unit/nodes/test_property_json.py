@@ -16,34 +16,43 @@ from houses.geo import GeoPoint
 @pytest.fixture(autouse=True)
 def _fake_services(monkeypatch):
     """Set fake singleton services so no real API calls are made."""
-    from houses.services_provider import _request_services as _sp
-    from tests.helpers import make_services
-
-    token = _sp.set(make_services())
-
     from money import Money
     from pint import Quantity
 
     from dag.attempt import Attempt
     from houses.model.domain import Commute, Person, PlaceOfInterest
+    from houses.services_provider import _request_services as _sp
+    from houses.tfl_client import TflClient
+    from tests.helpers import make_services
 
-    async def fake_route(origin, destination, *, has_car, max_walk_minutes):
+    class _FakeRouter:
+        async def route(self, origin, destination, *, has_car, max_walk_minutes):
+            return Attempt.succeeded(
+                Commute(
+                    person=Person(name="Simon", has_car=False),
+                    label="Office",
+                    destination=PlaceOfInterest(
+                        label="Office", address=destination if isinstance(destination, str) else str(destination)
+                    ),
+                    duration=Quantity(32, "minute"),
+                    daily_cost=Money("4.50", "GBP"),
+                ),
+            )
+
+    async def mock_plan(self):
         return Attempt.succeeded(
             Commute(
                 person=Person(name="Simon", has_car=False),
                 label="Office",
-                destination=PlaceOfInterest(
-                    label="Office", postcode=destination if isinstance(destination, str) else str(destination)
-                ),  # noqa: E501
+                destination=PlaceOfInterest(label="Office", address="SW1V 2QQ"),
                 duration=Quantity(32, "minute"),
                 daily_cost=Money("4.50", "GBP"),
             ),
         )
 
-    svc = _sp.get()
-    if svc and hasattr(svc, "commute_router"):
-        svc.commute_router.route = fake_route
+    monkeypatch.setattr(TflClient, "plan", mock_plan)
 
+    token = _sp.set(make_services(commute_router=_FakeRouter()))
     yield
     _sp.reset(token)
 

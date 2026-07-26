@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from abc import abstractmethod
+import traceback
 from datetime import UTC, datetime, timedelta
 from inspect import iscoroutine
 from typing import Generic, TypeVar
@@ -10,6 +11,7 @@ from typing import Generic, TypeVar
 from dag.attempt import Attempt, Provenance
 from dag.node import Node
 from dag.scheduler import _get_scheduler
+from dag.http_error import HttpError
 from dag.signals import Connection, Slot
 
 logger = logging.getLogger(__name__)
@@ -122,12 +124,16 @@ class DerivedNode(Node[T], Generic[T]):
         return self._attempt
 
     def _is_transient_error(self, exc: Exception) -> bool:
-        """Override in subclasses to identify retryable errors.
-
-        When True, ``refresh()`` calls ``schedule_retry()`` and returns
-        ``Attempt.pending()`` instead of ``Attempt.impossible()``.
-        The default returns False (no retry for any error).
-        """
+        """Identify retryable transient errors (TimeoutError, HttpError rate-limit/server-error, status-aware)."""
+        if isinstance(exc, asyncio.TimeoutError):
+            return True
+        if isinstance(exc, HttpError):
+            return exc.is_rate_limit() or exc.is_server_error()
+        if hasattr(exc, 'status'):
+            try:
+                return int(exc.status) in (429, 502, 503, 504)
+            except (ValueError, TypeError):
+                pass
         return False
 
     def schedule_retry(self, delay: timedelta) -> bool:
@@ -153,6 +159,14 @@ class DerivedNode(Node[T], Generic[T]):
             self._retry_count += 1
         return timedelta(seconds=min(delay_sec, 300))
 
+    async def _error_result_dict(self, status: str, exc: Exception) -> dict:
+        return {
+            "status": status,
+            "value": None,
+            "error": f"{exc}\n{traceback.format_exc()}",
+            "provenance": await self._build_provenance_dict(),
+        }
+
     async def refresh(self) -> None:
         if not self._is_stale():
             return
@@ -174,19 +188,19 @@ class DerivedNode(Node[T], Generic[T]):
                 # burst refresh (many nodes queued at startup).
                 await asyncio.sleep(0)
         except Exception as e:
+            _tb_str = traceback.format_exc()
             if self._is_transient_error(e):
                 if not self.schedule_retry(self._retry_delay_from(e)):
-                    result = Attempt.impossible(f"{self._id}: retry exhausted ({e})")
+                    result = Attempt.impossible(f"{self._id}: retry exhausted ({e})\n{_tb_str}")
                 else:
                     result = Attempt.pending()
             else:
                 impossible_deps = [a for a in dep_attempts if a.impossible]
                 if impossible_deps:
                     errors = "; ".join(a.error or "unknown" for a in impossible_deps)
-                    result = Attempt.impossible(f"{self._id}: dep failed ({errors})")
+                    result = Attempt.impossible(f"{self._id}: dep failed ({errors})\n{_tb_str}")
                 else:
-                    import traceback
-                    result = Attempt.impossible(f"{self._id}: {e}\n{traceback.format_exc()}")
+                    result = Attempt.impossible(f"{self._id}: {e}\n{_tb_str}")
         # requests before we do sync persist work (json.dumps + SQLite).
         await asyncio.sleep(0)
 
@@ -199,12 +213,7 @@ class DerivedNode(Node[T], Generic[T]):
             try:
                 result_dict = await self.to_json()
             except Exception as e:
-                result_dict = {
-                    "status": "pending",
-                    "value": None,
-                    "error": str(e),
-                    "provenance": await self._build_provenance_dict(),
-                }
+                result_dict = await self._error_result_dict("pending", e)
             self._persist(result_dict, dep_timestamps)
             return
 
@@ -214,12 +223,7 @@ class DerivedNode(Node[T], Generic[T]):
         try:
             result_dict = await self.to_json()
         except Exception as e:
-            result_dict = {
-                "status": "impossible",
-                "value": None,
-                "error": str(e),
-                "provenance": await self._build_provenance_dict(),
-            }
+            result_dict = await self._error_result_dict("impossible", e)
         self._persist(result_dict, dep_timestamps)
         self.changed.emit()
         _get_scheduler().after_refresh(self)
@@ -240,7 +244,7 @@ class DerivedNode(Node[T], Generic[T]):
             except Exception as e:
                 sources[dep._id] = Provenance(
                     label=getattr(dep, "display_name", dep._id),
-                    description=f"build_provenance failed: {e}",
+                    description=f"build_provenance failed: {e}\n{traceback.format_exc()}",
                 )
         description = self._attempt.error if self._attempt.impossible else None
         return Provenance(

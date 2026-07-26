@@ -1,6 +1,7 @@
 """Tests for transit_route.py — TfL tube leg fare lookup."""
 
 import pytest
+from money import Money
 
 from houses.stations import Station
 
@@ -30,11 +31,12 @@ async def test_returns_peak_single_fare(tmp_path):
     """When TfL returns a journey with a fare, the peak single is returned."""
     from houses.tfl_client import TflClient
 
-    await TflClient.get_tube_leg_fare(
+    result = await TflClient.get_tube_leg_fare(
         _victoria_station(),
         "SW1V 2QQ",
         _data=_tfl_fare_response(340),  # £3.40 peak single
     )
+    assert result == Money("3.40", "GBP")
 
 
 @pytest.mark.asyncio

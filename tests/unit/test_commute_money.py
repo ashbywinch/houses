@@ -13,7 +13,7 @@ def test_daily_cost_money_type():
     c = Commute(
         person=Person(name="", has_car=False),
         label="",
-        destination=PlaceOfInterest(label="", postcode=""),
+        destination=PlaceOfInterest(label="", address=""),
         duration=Quantity(0, "minute"),
         daily_cost=Money("15.0", "GBP"),
         mode="transit",
@@ -28,7 +28,7 @@ def test_cost_groups_tfl_cost_sum():
     commute = Commute(
         person=Person(name="Simon", has_car=False),
         label="Office",
-        destination=PlaceOfInterest(label="Office", postcode="SW1A 1AA"),
+        destination=PlaceOfInterest(label="Office", address="SW1A 1AA"),
         duration=Quantity(45, "minute"),
         daily_cost=Money("15.00", "GBP"),
         mode="transit",

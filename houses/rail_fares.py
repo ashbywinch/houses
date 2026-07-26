@@ -140,7 +140,7 @@ async def enrich_single_rail_fare(
         label=commute.label,
         destination=PlaceOfInterest(
             label=commute.destination.label,
-            postcode=commute.destination.postcode,
+            address=commute.destination.address,
         ),
         duration=Quantity(int(commute.duration.magnitude), "minute") if commute.duration else Quantity(0, "minute"),
         daily_cost=total,

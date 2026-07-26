@@ -85,3 +85,6 @@ data/houses.db*
 
 # Logs directory (PID files, dev server logs)
 .logs/
+
+# DOM capture tool output (timestamped HTML + PNG screenshots)
+tools/captures/

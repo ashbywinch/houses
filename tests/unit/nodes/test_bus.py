@@ -6,6 +6,7 @@ import pytest
 
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
+from houses.bus_journey import BusJourneyRegistry
 from houses.geo import GeoPoint
 
 
@@ -62,6 +63,32 @@ class TestBusRouteNode:
         assert a.succeeded
 
 
+class _StubFareReader(BusJourneyRegistry):
+    """A BusJourneyRegistry that returns known fares without loading real data."""
+
+    def __init__(self):
+        self._loaded = True
+        self._data = {}
+        self._meta = {}
+
+    def _load(self):
+        pass
+
+    def fares_for_stops(self, dep_stop_name, arr_stop_name, dep_point=None, arr_point=None):
+        from money import Money
+
+        from houses.bus_journey import FareProduct, FareProductType
+
+        return {
+            FareProductType.SINGLE: FareProduct(
+                type=FareProductType.SINGLE,
+                price=Money("2.00", "GBP"),
+                operator="TestBus",
+                zone_pair="Z1:Z1",
+            ),
+        }
+
+
 class TestBodsFareNode:
     @pytest.mark.asyncio
     async def test_succeeds_with_empty_route(self):
@@ -80,33 +107,42 @@ class TestBodsFareNode:
     async def test_looks_up_fares_for_stops(self):
         """BodsFareNode returns stop fares for bus stops in the route."""
         from houses.nodes.bus import BodsFareNode
+        from houses.services_provider import _request_services
+        from tests.helpers import make_services
 
-        route = UserInputNode[dict]("route_bf2", dict)
-        node = BodsFareNode("bf2", bus_route_node=route)
+        svc = make_services(bus_fare_registry=_StubFareReader())
+        token = _request_services.set(svc)
+        try:
+            route = UserInputNode[dict]("route_bf2", dict)
+            node = BodsFareNode("bf2", bus_route_node=route)
 
-        route.push(
-            {
-                "bus_stops": [
-                    {
-                        "departure_name": "Stop A",
-                        "arrival_name": "Stop B",
-                        "departure_lat": 51.5,
-                        "departure_lon": -0.1,
-                        "arrival_lat": 51.51,
-                        "arrival_lon": -0.11,
-                    },
-                ],
-                "duration_minutes": 15,
-            },
-            "test",
-        )
-        await flush_processor()
-        await flush_processor()
-        a = await node.attempt()
-        assert a.succeeded
-        val = a.value_or_none()
-        assert val is not None
-        assert "stop_fares" in val
+            route.push(
+                {
+                    "bus_stops": [
+                        {
+                            "departure_name": "Stop A",
+                            "arrival_name": "Stop B",
+                            "departure_lat": 51.5,
+                            "departure_lon": -0.1,
+                            "arrival_lat": 51.51,
+                            "arrival_lon": -0.11,
+                        },
+                    ],
+                    "duration_minutes": 15,
+                },
+                "test",
+            )
+            await flush_processor()
+            await flush_processor()
+            a = await node.attempt()
+            assert a.succeeded, f"Expected succeeded, got {a.status}: {a.error}"
+            val = a.value_or_none()
+            assert val is not None
+            assert val["stop_fares"] == {
+                "Stop A": {"amount": 4.0, "currency": "GBP"},
+            }
+        finally:
+            _request_services.reset(token)
 
 
 class TestBusLegAugmentNode:
@@ -134,7 +170,7 @@ class TestBusLegAugmentNode:
         commute = Commute(
             person=Person(name="", has_car=False),
             label="Test",
-            destination=PlaceOfInterest(label="", postcode=""),
+            destination=PlaceOfInterest(label="", address=""),
             duration=Quantity(30, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="transit",
@@ -173,7 +209,7 @@ class TestBusLegAugmentNode:
         commute = Commute(
             person=Person(name="", has_car=False),
             label="Test",
-            destination=PlaceOfInterest(label="", postcode=""),
+            destination=PlaceOfInterest(label="", address=""),
             duration=Quantity(90, "minute"),
             daily_cost=Money("12.50", "GBP"),
             mode="transit",
@@ -216,7 +252,7 @@ class TestBusLegAugmentNode:
         commute = Commute(
             person=Person(name="", has_car=False),
             label="L",
-            destination=PlaceOfInterest(label="L", postcode="EC3A 7LP"),
+            destination=PlaceOfInterest(label="L", address="EC3A 7LP"),
             duration=Quantity(90, "minute"),
             daily_cost=Money("12.50", "GBP"),
             mode="transit",
@@ -295,7 +331,7 @@ class TestBusLegAugmentNode:
         commute = Commute(
             person=Person(name="", has_car=False),
             label="L",
-            destination=PlaceOfInterest(label="L", postcode="EC3A 7LP"),
+            destination=PlaceOfInterest(label="L", address="EC3A 7LP"),
             duration=Quantity(90, "minute"),
             daily_cost=Money("12.50", "GBP"),
             mode="transit",
@@ -365,7 +401,7 @@ class TestBusLegAugmentNode:
         commute = Commute(
             person=Person(name="", has_car=False),
             label="L",
-            destination=PlaceOfInterest(label="L", postcode="EC3A 7LP"),
+            destination=PlaceOfInterest(label="L", address="EC3A 7LP"),
             duration=Quantity(90, "minute"),
             daily_cost=Money("12.50", "GBP"),
             mode="transit",

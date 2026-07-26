@@ -55,7 +55,7 @@ def test_transit_info() -> None:
     t = Commute(
         person=Person(name="Test", has_car=False),
         label="Test",
-        destination=PlaceOfInterest(label="Test", postcode="SW1V 2QQ"),
+        destination=PlaceOfInterest(label="Test", address="SW1V 2QQ"),
         duration=Quantity(10, "minute"),
         daily_cost=Money("0", "GBP"),
         mode="transit",
@@ -80,7 +80,7 @@ def test_bracknell_commute_defaults() -> None:
     p = Commute(
         person=Person(name="", has_car=True),
         label="Bracknell",
-        destination=PlaceOfInterest(label="Bracknell", postcode="RG12 8YA"),
+        destination=PlaceOfInterest(label="Bracknell", address="RG12 8YA"),
         duration=Quantity(10, "minute"),
         daily_cost=Money("0", "GBP"),
         mode="drive",

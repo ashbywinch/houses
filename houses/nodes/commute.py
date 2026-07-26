@@ -26,11 +26,6 @@ def _has_unpriced_transit(commute: Commute | None) -> bool:
     return any(cg.cost is None and any(leg.mode in _transit_modes for leg in cg.legs) for cg in commute.details or ())
 
 
-def _bus_condition(walk_check: Attempt) -> bool:
-    """True when walk check succeeded and walk is too long (needs bus)."""
-    return walk_check.succeeded and bool(walk_check.value)
-
-
 def _needs_rail_fare(transit: Attempt) -> bool:
     """True when transit has no cost assigned yet and needs an NR fare."""
     if not transit.succeeded:
@@ -65,6 +60,7 @@ def commute_colour(minutes: int | None, bracknell: bool = False) -> str:
     if bracknell:
         return "good" if minutes < 30 else "warn" if minutes <= 60 else "bad"
     return "good" if minutes < 45 else "warn" if minutes <= 75 else "bad"
+
 
 def _replace_transit_group(
     selected_details: tuple[CostGroup, ...],
@@ -141,7 +137,6 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         if drive_result is not None:
             deps.append(drive_result)
         super().__init__(node_id, Commute, tuple(deps))
-
 
     def _get_active_deps(self) -> tuple[Node, ...]:
         deps = [self.origin, self.poi, self.transit_result]
@@ -257,10 +252,7 @@ class MergeRailFareNode(DerivedNode[Commute]):
 
         # Check if the selected commute has transit legs
         _transit_modes = {LegMode.TRAIN, LegMode.TUBE, LegMode.DLR, LegMode.OVERGROUND}
-        if not any(
-            any(leg.mode in _transit_modes for leg in cg.legs)
-            for cg in val.details
-        ):
+        if not any(any(leg.mode in _transit_modes for leg in cg.legs) for cg in val.details):
             return Attempt.succeeded(val)
 
         # Apply the NR fare to the transit CostGroup

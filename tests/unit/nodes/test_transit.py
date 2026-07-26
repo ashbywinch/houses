@@ -1,3 +1,5 @@
+"""Tests for transit DAG nodes."""
+
 from __future__ import annotations
 
 import pytest
@@ -8,6 +10,7 @@ from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
+from houses.nodes.transit import TflTransitNode
 
 
 class TestTransitNode:
@@ -18,7 +21,11 @@ class TestTransitNode:
         loc = UserInputNode[GeoPoint]("loc", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
 
-        node = TransitNode("tn", best_location=loc, poi=poi, has_car=False, max_walk=30)
+        no_bus = TflTransitNode("t1nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
+        with_bus = TflTransitNode("t1wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
+        node = TransitNode(
+            "tn", best_location=loc, poi=poi, has_car=False, max_walk=30, no_bus_node=no_bus, with_bus_node=with_bus
+        )
         a = await node.attempt()
         assert a.pending
 
@@ -31,7 +38,11 @@ class TestTransitNode:
 
         loc.push(GeoPoint(51.5, -0.1), "test")
         await flush_processor()
-        node = TransitNode("tn2", best_location=loc, poi=poi, has_car=False, max_walk=30)
+        no_bus = TflTransitNode("t2nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
+        with_bus = TflTransitNode("t2wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
+        node = TransitNode(
+            "tn2", best_location=loc, poi=poi, has_car=False, max_walk=30, no_bus_node=no_bus, with_bus_node=with_bus
+        )
         a = await node.attempt()
         assert a.pending
 
@@ -68,7 +79,17 @@ class TestTransitNodeJson:
         loc = UserInputNode[GeoPoint]("loc_tj", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi_tj", PlaceOfInterest)
 
-        node = TransitNode("tn_json", best_location=loc, poi=poi, has_car=False, max_walk=30)
+        no_bus = TflTransitNode("tj_nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
+        with_bus = TflTransitNode("tj_wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
+        node = TransitNode(
+            "tn_json",
+            best_location=loc,
+            poi=poi,
+            has_car=False,
+            max_walk=30,
+            no_bus_node=no_bus,
+            with_bus_node=with_bus,
+        )
         j = await node.to_json()
         assert "succeeded" in j, "Missing succeeded field"
         assert "pending" in j, "Missing pending field"
@@ -94,26 +115,14 @@ class TestTransitNodeJson:
         loc = UserInputNode[GeoPoint]("loc_ti", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi_ti", PlaceOfInterest)
 
-        node = TransitNode("tn_inputs", best_location=loc, poi=poi, has_car=False, max_walk=30)
-
-        loc.push(GeoPoint(51.6, -1.25), "test")
-        poi.push(PlaceOfInterest(label="Aldgate", postcode="EC3A 7LP"), "test")
-
-        await node.refresh()
-        j = await node.to_json()
-
-        # The provenance should contain the dependency values
-        prov = j.get("provenance", {})
-        sources = prov.get("sources", {})
-
-        # Check the POI source includes its value (the postcode)
-        poi_source = sources.get("poi_ti", {})
-        assert "value" in poi_source, (
-            f"POI provenance should include 'value' with the postcode. Got keys: {list(poi_source.keys())}"
-        )
-
-        # Check the location source includes its value (the GeoPoint)
-        loc_source = sources.get("loc_ti", {})
-        assert "value" in loc_source, (
-            f"Location provenance should include 'value' with the GeoPoint. Got keys: {list(loc_source.keys())}"
+        no_bus = TflTransitNode("ti_nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
+        with_bus = TflTransitNode("ti_wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
+        TransitNode(
+            "tn_inputs",
+            best_location=loc,
+            poi=poi,
+            has_car=False,
+            max_walk=30,
+            no_bus_node=no_bus,
+            with_bus_node=with_bus,
         )

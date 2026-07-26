@@ -197,7 +197,7 @@ class TestFullCommutePipeline:
             _needs_rail_fare,
         )
         from houses.nodes.rail_fare_node import RailFareNode
-        from houses.nodes.transit import TransitNode
+        from houses.nodes.transit import TflTransitNode, TransitNode
         from houses.services_provider import get_services
 
         # Inject a fake registry with known stations and fare
@@ -215,13 +215,36 @@ class TestFullCommutePipeline:
         poi_src = UserInputNode[str]("poi", str)
         poi_src.push("SW1V 2QQ", "persons_source")
 
-        # Pipeline
+        from unittest.mock import patch as _patch
+
+        from dag.attempt import Attempt
+        from houses.tfl_client import TflClient
+
+        _plan_patch = _patch.object(TflClient, "plan", autospec=True)
+        mock_plan = _plan_patch.start()
+        mock_plan.return_value = Attempt.succeeded(_pimlico_commute())
+        no_bus = TflTransitNode(
+            "test/poi/tfl_no_bus",
+            best_location=loc,
+            poi=poi_src,
+            has_car=False,
+            allow_bus=False,
+        )
+        with_bus = TflTransitNode(
+            "test/poi/tfl_with_bus",
+            best_location=loc,
+            poi=poi_src,
+            has_car=False,
+            allow_bus=True,
+        )
         transit_node = TransitNode(
             "test/poi/computed_transit",
             best_location=loc,
             poi=poi_src,
             has_car=False,
             max_walk=30,
+            no_bus_node=no_bus,
+            with_bus_node=with_bus,
         )
         rail_fare_node = RailFareNode(
             "test/poi/rail_fare",
@@ -275,8 +298,7 @@ class TestFullCommutePipeline:
         )
         from houses.nodes.park_and_ride import ParkAndRideAugmentNode
         from houses.nodes.petrol import PetrolCostAugmentNode
-        from houses.nodes.rail_fare_node import RailFareNode
-        from houses.nodes.transit import TransitNode
+        from houses.nodes.transit import TflTransitNode, TransitNode
         from houses.services_provider import get_services
 
         # Fake registry with Maidenhead, Paddington, London Terminals
@@ -303,14 +325,25 @@ class TestFullCommutePipeline:
         postcode = UserInputNode[str]("pc_mh", str)
         postcode.push("RG12 8YA", "test")
 
+        from unittest.mock import patch as _patch
+
+        from houses.tfl_client import TflClient
+
+        _plan_patch = _patch.object(TflClient, "plan", autospec=True)
+        mock_plan = _plan_patch.start()
+        mock_plan.return_value = Attempt.succeeded(_maidenhead_commute())
+
         # max_walk=10 so 15-min walk triggers park-and-ride AND bus activation.
-        # Push a slow bus so transit still gets selected.
+        no_bus = TflTransitNode("t_dad_nb", best_location=loc, poi=poi_src, has_car=True, allow_bus=False)
+        with_bus = TflTransitNode("t_dad_wb", best_location=loc, poi=poi_src, has_car=True, allow_bus=True)
         transit_node = TransitNode(
             "test/dad/computed_transit",
             best_location=loc,
             poi=poi_src,
             has_car=True,
             max_walk=10,
+            no_bus_node=no_bus,
+            with_bus_node=with_bus,
         )
         park_and_ride = ParkAndRideAugmentNode(
             "test/dad/park_and_ride",
@@ -335,6 +368,8 @@ class TestFullCommutePipeline:
             financial_source=svc.financial_source,
         )
         # Bus is slower than transit so transit wins
+        from houses.nodes.rail_fare_node import RailFareNode
+
         rail_fare_node = RailFareNode(
             "test/dad/rail_fare",
             transit_result=transit_node,
@@ -397,20 +432,18 @@ class TestFullCommutePipeline:
     @pytest.mark.asyncio
     async def test_drive_only_gets_fuel_cost(self):
         """A drive-only commute (no transit) gets fuel cost from final_fuel."""
+        from unittest.mock import patch as _patch
+
+        from dag.attempt import Attempt
+        from dag.if_then_else import IfThenElseNode
         from houses.nodes.commute import CommuteSelectorNode, MergeRailFareNode
         from houses.nodes.park_and_ride import ParkAndRideAugmentNode
         from houses.nodes.petrol import PetrolCostAugmentNode
-        from houses.nodes.transit import TransitNode
+        from houses.nodes.transit import TflTransitNode, TransitNode
         from houses.services_provider import get_services
+        from houses.tfl_client import TflClient
 
         svc = get_services()
-        svc.financial_source.push(
-            {
-                "petrol_mpg": 45,
-                "petrol_cost_per_litre": 1.45,
-            },
-            "test",
-        )
         loc = UserInputNode[GeoPoint]("loc_dr", GeoPoint)
         loc.push(GeoPoint(51.518, -0.722), "test")
         poi_src = UserInputNode[str]("poi_dr", str)
@@ -418,8 +451,11 @@ class TestFullCommutePipeline:
         pc_src = UserInputNode[str]("pc_dr", str)
         pc_src.push("RG12 8YA", "test")
 
-        # Canned drive route — Bracknell is non-London so get_commute()
-        # returns this drive option.
+        svc.financial_source.push(
+            {"petrol_mpg": 45, "petrol_cost_per_litre": 1.45},
+            "test",
+        )
+
         drive = Commute(
             person=Person(name="Simon", has_car=True),
             label="Office",
@@ -434,14 +470,20 @@ class TestFullCommutePipeline:
                 ),
             ),
         )
-        svc.commute_router.routes["RG12 8YA"] = drive
+        _plan_patch = _patch.object(TflClient, "plan", autospec=True)
+        mock_plan = _plan_patch.start()
+        mock_plan.return_value = Attempt.succeeded(drive)
 
+        no_bus = TflTransitNode("t_dr_nb2", best_location=loc, poi=poi_src, has_car=True, allow_bus=False)
+        with_bus = TflTransitNode("t_dr_wb2", best_location=loc, poi=poi_src, has_car=True, allow_bus=True)
         transit_node = TransitNode(
             "test/dr/computed_transit",
             best_location=loc,
             poi=poi_src,
             has_car=True,
             max_walk=30,
+            no_bus_node=no_bus,
+            with_bus_node=with_bus,
         )
         park_and_ride = ParkAndRideAugmentNode(
             "test/dr/park_and_ride",
@@ -452,16 +494,11 @@ class TestFullCommutePipeline:
             max_walk=30,
         )
         rf_dummy = FixedCommuteNode("test/dr/rf_dummy")
-        from dag.if_then_else import IfThenElseNode
-
-        def _noop():
-            return False
-
         rf_if = IfThenElseNode(
             "test/dr/rf_if",
             Commute | None,
             condition_sources=(),
-            condition_fn=_noop,
+            condition_fn=lambda: False,
             then_branch=rf_dummy,
         )
         selector = CommuteSelectorNode(
@@ -493,7 +530,6 @@ class TestFullCommutePipeline:
         assert float(val.daily_cost.amount) > 0, (
             f"Drive-only commute should have fuel cost > 0, got £{val.daily_cost.amount}"
         )
-        # Validate is_child flag in serialization
         j = await final_fuel.to_json()
         assert j.get("is_child") is not None
         jv = await final_fuel.to_json_value()

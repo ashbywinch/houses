@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import re
 from datetime import datetime, timedelta
 
-import httpx
 from money import Money
 from pint import Quantity
 
 from dag.attempt import Attempt
+from dag.http_error import HttpError
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.car_park import CarParkRegistry
 from houses.commute import CostGroup, JourneyLeg, LegMode
@@ -95,35 +94,15 @@ class TflClient:
         """
         if _data is not None:
             return TflClient._parse_tube_fare(_data)
-
         url = f"{TflClient.TFL_JOURNEY_URL}/{from_station.name}/to/{to_postcode}"
         params = TflClient._next_weekday_date_params()
         params["nationalSearch"] = "false"
         params.update(TflClient._tfl_auth_params())
 
-        cached = get_cached("GET", url, params)
-        if cached is not None:
-            return TflClient._parse_tube_fare(cached)
-
-        try:
-            async with cached_async_client(timeout=10.0) as client:
-                resp = await client.get(url, params=params)
-                if resp.status_code == 404:
-                    logger.debug("TfL cannot route %s \u2192 %s (walking distance)", from_station.crs, to_postcode)
-                    return None
-                resp.raise_for_status()
-                data = resp.json()
-                set_cached("GET", url, params, None, data)
-                return TflClient._parse_tube_fare(data)
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
-                logger.debug("TfL cannot route %s \u2192 %s (walking distance)", from_station.crs, to_postcode)
-                return None
-            logger.warning("TfL tube leg fare failed for %s \u2192 %s: %s", from_station.crs, to_postcode, e)
+        data = await TflClient._cached_api_call(url, params)
+        if data is None:
             return None
-        except Exception as e:
-            logger.debug("TfL tube leg fare failed for %s \u2192 %s: %s", from_station.crs, to_postcode, e)
-            return None
+        return TflClient._parse_tube_fare(data)
 
     @staticmethod
     def _parse_tube_fare(data: dict) -> Money | None:
@@ -273,6 +252,28 @@ class TflClient:
 
     # ── Internal fetch / process ─────────────────────────────────────
 
+    @staticmethod
+    async def _cached_api_call(url: str, params: dict) -> dict | None:
+        """Make a cached TfL API call. Strips auth from cache keys.
+        Transient errors (429, 5xx, httpx.RequestError) are re-raised for DAG retry.
+        For all other statuses (including 300 disambiguation), the response body
+        is cached under the original URL and returned.
+        Unexpected response format errors (KeyError, IndexError, TypeError) are
+        NOT caught — they propagate so the operator knows the API format changed."""
+        cache_params = {k: v for k, v in params.items() if k != "app_key"}
+        cached = get_cached("GET", url, cache_params)
+        if cached is not None:
+            return cached
+        async with cached_async_client(timeout=20.0) as client:
+            resp = await client.get(url, params=params)
+            data = resp.json()
+            # Cache response body regardless of HTTP status (including 300).
+            # The response IS from this URL, so the cache key is correct.
+            set_cached("GET", url, cache_params, None, data)
+            if resp.status_code == 429 or (500 <= resp.status_code < 600):
+                raise HttpError(resp.status_code, body=str(data))
+            return data
+
     async def _fetch_data(self) -> dict | None:
         """Call TfL API and return the raw JSON response, or None on failure."""
         modes = ["tube", "overground", "dlr", "tram", "national-rail", "walking"]
@@ -288,39 +289,11 @@ class TflClient:
             **TflClient._next_weekday_date_params(),
             **TflClient._tfl_auth_params(),
         }
-        cache_params = {k: v for k, v in params.items() if k != "app_key"}
 
-        cached = get_cached("GET", url, cache_params)
-        if cached is not None:
-            if "Disambiguation" in str(cached.get("$type", "")):
-                data = await self._geocode_fallback(params)
-                if data is None:
-                    logger.warning("TfL disambiguation from cache, fallback failed for %s", self._label)
-            else:
-                data = cached
-            return data
-
-        try:
-            async with cached_async_client(timeout=20.0) as client:
-                resp = await client.get(url, params=params)
-                resp.raise_for_status()
-                data = resp.json()
-                set_cached("GET", url, cache_params, None, data)
-                return data
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 300:
-                with contextlib.suppress(Exception):
-                    set_cached("GET", url, cache_params, None, e.response.json())
-                return await self._geocode_fallback(params)
-            elif e.response.status_code == 429 or (500 <= e.response.status_code < 600):
-                raise  # transient \u2014 let DAG retry handle it
-            elif e.response.status_code != 404:
-                logger.error("TfL API HTTP error for %s (url=%s): %s", self._label, url, e)
-        except httpx.RequestError:
-            raise  # transient \u2014 let DAG retry handle it
-        except (KeyError, IndexError, TypeError) as e:
-            logger.error("TfL API unexpected response for %s: %s", self._label, e)
-        return None
+        data = await TflClient._cached_api_call(url, params)
+        if data is not None and "Disambiguation" in str(data.get("$type", "")):
+            data = await self._geocode_fallback(params)
+        return data
 
     async def _process_data(self, data: dict | None) -> Attempt[Commute]:
         """Turn raw TfL API data into a Commute.  Pure logic — no HTTP.
@@ -353,7 +326,7 @@ class TflClient:
         result = Commute(
             person=Person(name="", has_car=False),
             label=self._label,
-            destination=PlaceOfInterest(label=self._label, postcode=self._destination),
+            destination=PlaceOfInterest(label=self._label, address=self._destination),
             duration=Quantity(duration_minutes, "minute") if duration_minutes is not None else None,
             daily_cost=daily_cost_gbp,
             mode="transit",
@@ -372,16 +345,10 @@ class TflClient:
             coords = (await geocode(pc)).value_or_none()
         if coords:
             url2 = f"{TflClient.TFL_JOURNEY_URL}/{coords.lat},{coords.lon}/to/{self._destination}"
-            try:
-                async with cached_async_client(timeout=20.0) as c2:
-                    r2 = await c2.get(url2, params=params)
-                    r2.raise_for_status()
-                    d2 = r2.json()
-                    cache_params2 = {k: v for k, v in params.items() if k != "app_key"}
-                    set_cached("GET", url2, cache_params2, None, d2)
-                    return d2
-            except Exception:
-                logger.warning("TfL geocode fallback failed for %s", self._label)
+            d2 = await TflClient._cached_api_call(url2, params)
+            if d2 is not None:
+                return d2
+        return None
 
     async def _add_parking_cost(
         self,

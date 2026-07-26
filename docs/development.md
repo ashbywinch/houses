@@ -221,13 +221,6 @@ becomes pending (no DB row), recomputes with the fix, and its `changed`
 signal fires. Each downstream node detects the newer dependency timestamp
 via `_is_stale()` and schedules itself in turn.
 
-Find the affected RIDs:
-
-```sql
-SELECT DISTINCT SUBSTR(node_id, 1, INSTR(node_id, '/') - 1) AS rid
-FROM node_results
-WHERE node_id LIKE '%/Lorena/Aldgate/computed_transit';
-```
 
 Then delete just the root rows. For each affected RID and node type:
 

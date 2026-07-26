@@ -37,13 +37,10 @@ def _mock(monkeypatch):
     from houses.model.domain import Commute, Person, PlaceOfInterest
     from houses.services_provider import _request_services as _sp
 
-    svc = make_services()
-    token = _sp.set(svc)
-
     canned = Commute(
         person=Person(name="T", has_car=True),
         label="Test",
-        destination=PlaceOfInterest(label="D", postcode="SW1V 2QQ"),
+        destination=PlaceOfInterest(label="D", address="SW1V 2QQ"),
         duration=Quantity(30, "minute"),
         daily_cost=Money("5.0", "GBP"),
         mode="transit",
@@ -52,9 +49,16 @@ def _mock(monkeypatch):
     async def fake_route(*_, **__):
         return Attempt.succeeded(canned)
 
-    svc.commute_router.route = fake_route
+    from houses.tfl_client import TflClient
+
+    async def mock_plan(self):
+        return Attempt.succeeded(canned)
+
+    monkeypatch.setattr(TflClient, "plan", mock_plan)
     monkeypatch.setattr("houses.routing.CommuteRouter._google_route_commute", fake_route)
 
+    svc = make_services()
+    token = _sp.set(svc)
     yield
     _sp.reset(token)
 

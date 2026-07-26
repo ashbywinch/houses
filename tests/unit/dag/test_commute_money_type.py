@@ -32,7 +32,7 @@ class _FloatCostNode(DerivedNode[Commute]):
             Commute(
                 person=Person(name="Test", has_car=False),
                 label="Office",
-                destination=PlaceOfInterest(label="Office", postcode="SW1V 2QQ"),
+                destination=PlaceOfInterest(label="Office", address="SW1V 2QQ"),
                 duration=DURATION,
                 daily_cost=7.2,  # raw float — this MUST raise
                 mode="transit",
@@ -67,7 +67,7 @@ class _ProperNode(DerivedNode[Commute]):
             Commute(
                 person=Person(name="Test", has_car=False),
                 label="Office",
-                destination=PlaceOfInterest(label="Office", postcode="SW1V 2QQ"),
+                destination=PlaceOfInterest(label="Office", address="SW1V 2QQ"),
                 duration=DURATION,
                 daily_cost=Money("7.20", "GBP"),
                 mode="transit",

@@ -406,6 +406,7 @@ class TestMergeRailFareNode:
         walk_commute = _make_commute(duration_min=20, cost_gbp=0)
         # Replace train leg with walk leg
         from pint import Quantity
+
         walk_commute = Commute(
             person=walk_commute.person,
             label=walk_commute.label,
@@ -515,30 +516,18 @@ def _make_commute(duration_min=32, cost_gbp=4.50):
     )
 
 
+def _bus_condition(walk_check):
+    return walk_check.succeeded and bool(walk_check.value)
+
+
 def _bus_if(walk_check: DerivedNode, bus_node: Node) -> IfThenElseNode:
     """Wrap a bus node in IfThenElseNode activated when walk check is True."""
-    from houses.nodes.commute import _bus_condition
-
     return IfThenElseNode(
         f"_bus_if_{id(bus_node)}",
         Commute,
         condition_sources=(walk_check,),
         condition_fn=_bus_condition,
         then_branch=bus_node,
-    )
-
-
-def _noop_if(name: str = "noop") -> IfThenElseNode:
-    """IfThenElseNode that always returns None (no branch activated)."""
-    cond = UserInputNode[bool](f"_{name}_cond", bool)
-    dummy = UserInputNode[str](f"_{name}_dummy", str)
-    cond.push(False)
-    return IfThenElseNode(
-        f"_{name}",
-        Commute,
-        condition_sources=(cond,),
-        condition_fn=lambda a: False,
-        then_branch=dummy,
     )
 
 
@@ -846,6 +835,7 @@ async def test_commute_selector_impossible_without_bus():
 
     a = await node.attempt()
     assert a.pending, f"Expected pending, got {a.status}: {a.error}"
+
 
 @pytest.mark.asyncio
 async def test_walk_selected_when_fastest():

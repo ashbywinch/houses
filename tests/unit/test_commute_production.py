@@ -44,6 +44,7 @@ def _clear():
 @pytest.fixture(autouse=True)
 def _mock():
     from houses.services_provider import _request_services as _sp
+    from houses.tfl_client import TflClient
 
     class _SuccessRouter:
         async def route(self, origin, destination, *, has_car, max_walk_minutes):
@@ -51,12 +52,28 @@ def _mock():
                 Commute(
                     person=Person(name="Test", has_car=has_car),
                     label="Test Commute",
-                    destination=PlaceOfInterest(label="Dest", postcode=str(destination)),
+                    destination=PlaceOfInterest(label="Dest", address=str(destination)),
                     duration=Quantity(30, "minute"),
                     daily_cost=Money("5.0", "GBP"),
                     mode="transit",
                 )
             )
+
+    from money import Money
+
+    canned = Commute(
+        person=Person(name="Test", has_car=False),
+        label="Test",
+        destination=PlaceOfInterest(label="Dest", address="SW1V 2QQ"),
+        duration=Quantity(30, "minute"),
+        daily_cost=Money("5.0", "GBP"),
+        mode="transit",
+    )
+
+    async def mock_plan(self):
+        return Attempt.succeeded(canned)
+
+    TflClient.plan = mock_plan
 
     svc = make_services(commute_router=_SuccessRouter())
     token = _sp.set(svc)

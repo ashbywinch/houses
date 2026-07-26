@@ -14,12 +14,10 @@ from houses.commute import LegMode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.routing import CommuteRouter
-from houses.services_provider import get_services
 
 logger = logging.getLogger(__name__)
 # Module-level router for Google Routes and congestion zone lookups.
 _router = CommuteRouter()
-# Module-level router for Google Routes and congestion zone lookups.
 
 
 @dataclass(frozen=True)
@@ -135,7 +133,7 @@ class WalkNode(DerivedNode[Commute]):
         poi_val = poi.value_or_none()
         if loc is None or not poi_val:
             return Attempt.impossible("missing location or destination")
-        dest = poi_val.postcode if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
+        dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
             return Attempt.impossible("empty destination")
         return await _router._google_route_commute(loc, dest, "WALK", self._max_walk)
@@ -160,7 +158,7 @@ class DriveNode(DerivedNode[Commute]):
         poi_val = poi.value_or_none()
         if loc is None or not poi_val:
             return Attempt.impossible("missing location or destination")
-        dest = poi_val.postcode if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
+        dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
             return Attempt.impossible("empty destination")
         if CommuteRouter._in_congestion_zone(dest):
@@ -168,16 +166,63 @@ class DriveNode(DerivedNode[Commute]):
         return await _router._google_route_commute(loc, dest, "DRIVE")
 
 
-class TransitNode(DerivedNode[Commute]):
-    """TfL transit commute from best_location to a POI postcode.
+class TflTransitNode(DerivedNode[Commute]):
+    """Call TfL API for a single transit mode (with or without bus).
 
-    Calls the TfL API via ``_tfl_transit_commute``. Returns the
-    best transit route, or impossible when no transit is available
-    or the destination is outside London.
+    One instance per ``allow_bus`` flag.  ``TransitNode`` depends on two
+    of these and picks the best result.
     """
 
-    def __init__(self, node_id: str, *, best_location, poi, has_car: bool, max_walk: int, best_address=None):
-        deps: tuple[Node, ...] = (best_location, poi)
+    def __init__(self, node_id: str, *, best_location: Node, poi: Node, has_car: bool, allow_bus: bool = False):
+        super().__init__(node_id, Commute, (best_location, poi))
+        self._has_car = has_car
+        self._allow_bus = allow_bus
+        self.display_name = "TfL"
+
+    async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
+        loc = location.value_or_none()
+        poi_val = poi.value_or_none()
+        if loc is None or not poi_val:
+            return Attempt.impossible("missing location or destination")
+        dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
+        if not dest:
+            return Attempt.impossible("empty destination")
+
+        origin_str = loc if isinstance(loc, str) else f"{loc.lat},{loc.lon}"
+        dest_str = dest if isinstance(dest, str) else f"{dest.lat},{dest.lon}"
+
+        from houses.tfl_client import TflClient
+
+        return await TflClient(
+            origin_str,
+            dest_str,
+            poi_val.label if isinstance(poi_val, PlaceOfInterest) else "",
+            park_and_ride=self._has_car,
+            allow_bus=self._allow_bus,
+        ).plan()
+
+
+class TransitNode(DerivedNode[Commute]):
+    """Select the best TfL transit route from two TflTransitNode results.
+
+    Tries TfL with and without bus mode, returns the better result.
+    Falls back through driving/walking via the CommuteSelectorNode
+    when both TfL options are impossible.
+    """
+
+    def __init__(
+        self,
+        node_id: str,
+        *,
+        best_location,
+        poi,
+        has_car: bool,
+        max_walk: int,
+        best_address=None,
+        no_bus_node: TflTransitNode,
+        with_bus_node: TflTransitNode,
+    ):
+        deps: tuple[Node, ...] = (best_location, poi, no_bus_node, with_bus_node)
         if best_address is not None:
             deps = deps + (best_address,)
         super().__init__(node_id, Commute, deps)
@@ -186,47 +231,54 @@ class TransitNode(DerivedNode[Commute]):
         self._max_walk = max_walk
         self._best_address = best_address
 
-    def _is_transient_error(self, exc: Exception) -> bool:
-        from houses.helpers import is_transient_error as _ite
-
-        return _ite(exc)
-
     async def compute(
-        self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest], best_address: Attempt[str] = None
+        self,
+        location: Attempt[GeoPoint],
+        poi: Attempt[PlaceOfInterest],
+        no_bus: Attempt[Commute],
+        with_bus: Attempt[Commute],
+        best_address: Attempt[str] = None,
     ) -> Attempt[Commute]:
-        loc = location.value_or_none()
-        poi_val = poi.value_or_none()
-        if loc is None or not poi_val:
-            return Attempt.impossible("missing location or destination")
-        dest = poi_val.postcode if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
-        if not dest:
-            return Attempt.impossible("empty destination")
+        from houses.routing import CommuteRouter
 
-        svc = get_services()
-        commute = await svc.commute_router.route(
-            loc,
-            dest,
-            has_car=self._has_car,
-            max_walk_minutes=self._max_walk,
-        )
-        if commute.succeeded:
-            val = commute.value_or_none()
-            parts = self._id.split("/")
-            label = parts[2] if len(parts) >= 3 else (val.destination.label or "")
-            raw_mode = val.mode if hasattr(val, "mode") else "transit"
-            mode = raw_mode.name.lower() if isinstance(raw_mode, Enum) else str(raw_mode)
-            if val.details and all(leg.mode.name.lower() == "walk" for cg in val.details for leg in cg.legs):
-                mode = "walk"
-            daily_cost = val.daily_cost or Money("0", "GBP")
-
-            result = Commute(
+        if self._has_car and not no_bus.impossible:
+            best_val = no_bus.value_or_none()
+        elif with_bus.impossible and no_bus.impossible:
+            errors = [e for e in (no_bus.error, with_bus.error) if e]
+            return Attempt.impossible("; ".join(errors) if errors else "no transit route available")
+        else:
+            no_val = no_bus.value_or_none()
+            with_val = with_bus.value_or_none()
+            if no_val is None and with_val is None:
+                return Attempt.impossible("no transit route available")
+            empty = Commute(
                 person=Person(name="", has_car=self._has_car),
-                label=label,
-                destination=PlaceOfInterest(label=label, postcode=val.destination.postcode),
-                duration=val.duration,
-                daily_cost=daily_cost,
-                mode=mode,
-                details=val.details,
+                label="",
+                destination=PlaceOfInterest(label="", address=""),
+                duration=Quantity(0, "minute"),
+                daily_cost=Money("0", "GBP"),
             )
-            return Attempt.succeeded(result)
-        return self._impossible({"commute": commute})
+            best_val = CommuteRouter._pick_best_route(no_val or empty, with_val or empty)
+
+        val = best_val
+        if val is None:
+            return Attempt.impossible("transit returned empty result")
+
+        parts = self._id.split("/")
+        label = parts[2] if len(parts) >= 3 else (val.destination.label or "")
+        raw_mode = val.mode if hasattr(val, "mode") else "transit"
+        mode = raw_mode.name.lower() if isinstance(raw_mode, Enum) else str(raw_mode)
+        if val.details and all(leg.mode.name.lower() == "walk" for cg in val.details for leg in cg.legs):
+            mode = "walk"
+        daily_cost = val.daily_cost or Money("0", "GBP")
+
+        result = Commute(
+            person=Person(name="", has_car=self._has_car),
+            label=label,
+            destination=PlaceOfInterest(label=label, address=val.destination.address),
+            duration=val.duration,
+            daily_cost=daily_cost,
+            mode=mode,
+            details=val.details,
+        )
+        return Attempt.succeeded(result)
