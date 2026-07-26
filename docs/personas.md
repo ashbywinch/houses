@@ -46,7 +46,44 @@ All four are suspicious of automated calculations. They want to see how each fig
 
 The group currently discusses properties via WhatsApp. Ashby flags a property, others share their thoughts, they debate pros and cons, eventually reaching a conclusion. The tool should support this discussion, not replace it.
 
----
+### Per-property discussion
+
+Property-specific conversations (annexe feasibility, cost estimates, pros and cons) get lost in WhatsApp because messages about different properties are mixed together. Each property needs its own discussion space that's easy to find later.
+
+### Three distinct property states
+
+Properties fall into three categories with different meanings:
+- **Saved:** actively like it, shortlisted
+- **Dismissed:** hard no, ruled out
+- **Marked as seen:** physically visited — useful for finding the property again to look at pictures, not a decision status
+
+These are distinct needs, not interchangeable. A property can be dismissed without being seen, or seen without being dismissed.<｜end▁of▁thinking｜>
+
+
+
+### Filters must match the workflow
+
+The current filters (Maybe, Undecided) don't match how they triage. The user needs to filter by the states that actually mean something: Saved, Dismissed, Seen, and unprocessed.
+
+### Sort needs depend on the task
+
+When scanning new properties, most-recently-added order is fine. When reviewing survivors, the user needs to sort by overall quality — properties with good commutes, good walkability, and good affordability should rise to the top.
+
+### Freshness helps identify new leads
+
+Knowing when a property was added helps the user spot ones they haven't considered yet.
+
+### Energy efficiency is part of cost
+
+EPC rating affects the running cost of the property, which feeds directly into the affordability decision.
+
+### Calculation transparency is essential for trust
+
+Ashby needs to verify that every computed number is correct. The current provenance display is confusing and doesn't serve this need. This is a trust requirement — if the numbers can't be trusted, the tool isn't useful. The user would click provenance details frequently if they worked properly.
+
+### Property finding after visiting
+
+After physically visiting a property, the user needs to find it again easily to review pictures and details. The "Seen" state serves this lookup need, not a triage purpose.<｜end▁of▁thinking｜>
 
 ## User Journeys
 
