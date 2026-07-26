@@ -12,21 +12,22 @@ Four people buying a house together in/near London. Budget is fixed monthly. Req
 
 **Role:** Primary user, filterer, money person, disabled
 **Needs an annexe:** Wants properties with existing annexe or space that can be converted (garage, outbuilding, separate floor with external access)
-**Financial focus:** Cares most about the money side — is it within budget?
-**Attitude toward the software:** Suspicious of automated calculations. Wants to see exactly how each figure was computed, not just a number.
+**Financial focus:** Cares most about the money side — is it within budget? Wants to verify every calculation.
+**Also cares about:** Everyone's commute situation and school quality — all criteria matter to all decision-makers.
+**Attitude toward the software:** Suspicious of automated calculations. Needs to see exactly how each figure was computed. Current provenance display is confusing and undermines trust.
 **Usage pattern:** Initial screener — scrolls new properties, forms quick opinions, rules out unsuitable ones, adds comments, digs into finances on survivors.
 
 ### Simon
 
 **Role:** Brother, commuter, co-decider
-**Cares about:** His own commute time and cost.
-**Usage pattern:** Reviews properties Ashby surfaces. Checks commute. Gives thumbs up/down. Participates in WhatsApp discussion about pros/cons.
+**Cares about:** Everyone's commute situation — no point in a property where anyone's commute doesn't work. Also participates in group discussion about pros and cons.
+**Usage pattern:** Reviews properties Ashby surfaces. Checks commute for everyone, not just himself. Gives thumbs up/down.
 
 ### Lorena
 
 **Role:** Sister-in-law, neighborhood person, co-decider
-**Cares about:** Walkability, area feel, amenities, what it's like to live there. Also cares about her own commute and the child's school.
-**Usage pattern:** Reviews survivors. Checks area feel and schools. Participates in WhatsApp discussion.
+**Cares about:** Everyone's commute situation. Also walkability, area feel, amenities, what it's like to live there, and the child's school.
+**Usage pattern:** Reviews survivors. Checks commute, area feel, and schools. Participates in group discussion.
 
 ### Child (school-aged)
 
@@ -34,14 +35,13 @@ Four people buying a house together in/near London. Budget is fixed monthly. Req
 **Cared about by:** Everyone
 **Needs:** Good school within reasonable distance.
 
----
-
 ## Shared Concerns
 
 ### Trust in calculations
 
-All four are suspicious of automated calculations. They want to see how each figure was arrived at — the formula, the inputs, the source, the timestamp. This applies to: monthly cost breakdown, commute times, school distances, walk times, EPC data.
+All four are suspicious of automated calculations. They need to see how each figure was arrived at — the formula, the inputs, the source, the timestamp. This applies particularly to monthly cost breakdown, commute times, school distances, walk times, EPC data.
 
+**This is not decorative.** Ashby would click provenance details frequently if they worked. The current provenance display is confusing and doesn't serve this need. Getting this right is essential for the tool to be trusted.
 ### Group discussion
 
 The group currently discusses properties via WhatsApp. Ashby flags a property, others share their thoughts, they debate pros and cons, eventually reaching a conclusion. The tool should support this discussion, not replace it.
@@ -76,10 +76,6 @@ Knowing when a property was added helps the user spot ones they haven't consider
 ### Energy efficiency is part of cost
 
 EPC rating affects the running cost of the property, which feeds directly into the affordability decision.
-
-### Calculation transparency is essential for trust
-
-Ashby needs to verify that every computed number is correct. The current provenance display is confusing and doesn't serve this need. This is a trust requirement — if the numbers can't be trusted, the tool isn't useful. The user would click provenance details frequently if they worked properly.
 
 ### Property finding after visiting
 
