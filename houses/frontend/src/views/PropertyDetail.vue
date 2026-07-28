@@ -407,6 +407,24 @@ async function saveNotes() {
 
 .detail-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-3); flex-wrap: wrap; }
 
+.notes-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text);
+  resize: vertical;
+  font-family: inherit;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.notes-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
 /* Tab bar */
 .tab-bar {
   position: fixed;
@@ -435,23 +453,7 @@ async function saveNotes() {
 }
 .tab-bar__tab--active { color: var(--blue); }
 
-.notes-textarea {
-  width: 100%;
-  padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--card-bg);
-  color: var(--text);
-  resize: vertical;
-  font-family: inherit;
-  font-size: 13px;
-  box-sizing: border-box;
-}
-.notes-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 6px;
-}
+
 .tab-bar__tab--active svg { stroke: var(--blue); }
 .tab-bar__label { font-size: 10px; font-weight: var(--fw-semibold); }
 
