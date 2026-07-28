@@ -30,7 +30,7 @@ help:
 	@echo "  ${GREEN}make coverage${NC}           Run tests with coverage report"
 	@echo "  ${GREEN}make clean${NC}              Clean up generated files"
 
-setup:
+setup: frontend-setup
 	@$(UV) --version >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
 	@$(UV) sync --all-extras
 	@echo "${GREEN}✓ Setup complete${NC}"
@@ -40,7 +40,7 @@ omp-config-install:
 
 LAN_IP := $(shell hostname -I | awk '{print $$1}')
 
-run: setup frontend-setup
+run: setup
 	@if [ -z "$(LAN_IP)" ]; then echo "${RED}Could not detect LAN IP${NC}"; exit 1; fi
 	@echo "${YELLOW}Backend: http://$(LAN_IP):8080  Frontend: http://$(LAN_IP).sslip.io:5173${NC}"
 	@mkdir -p .logs; \
@@ -73,7 +73,7 @@ frontend-build: frontend-setup
 	@cd $(FRONTEND) && $(NPM) run build
 	@echo "${GREEN}✓ Frontend build complete${NC}"
 
-test: setup lint frontend-setup
+test: setup lint
 	$(PYTEST) tests/unit/ -q --tb=short
 	$(PYTEST) tests/integration/ -q --tb=short
 	cd houses/frontend && npm test
