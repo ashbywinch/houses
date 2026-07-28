@@ -1,0 +1,15 @@
+[config]
+model = "opencode/deepseek-v4-flash"
+base_url = "https://opencode.ai/zen/go/v1"
+repo_context_files = [
+    "docs/coding-standards.md",
+    "docs/testing-standards.md",
+    "docs/writing-documentation.md",
+]
+repo_context_from_default_branch = true
+
+[pr_reviewer]
+require_tests_review = true
+require_security_review = true
+require_estimate_effort_to_review = true
+num_max_findings = 5
