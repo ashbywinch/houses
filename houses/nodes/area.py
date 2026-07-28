@@ -101,7 +101,7 @@ class TownNode(DerivedNode[str]):
 
     @property
     def provenance_source_type(self) -> SourceType:
-        return SourceType.GEOCODE
+        return SourceType.CALC
 
     async def build_provenance(self):
-        return Provenance(label="address", source_type=SourceType.GEOCODE, freshness=self._attempt.created_at)
+        return Provenance(label="address", source_type=SourceType.CALC, freshness=self._attempt.created_at)

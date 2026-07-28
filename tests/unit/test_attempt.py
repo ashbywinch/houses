@@ -86,6 +86,21 @@ class TestProvenanceToDict:
         d = prov.to_dict()
         assert d["value"] == 42
 
+    def test_falsy_value_0_serialized(self):
+        prov = Provenance(label="test", value=0)
+        d = prov.to_dict()
+        assert d["value"] == 0
+
+    def test_falsy_value_false_serialized(self):
+        prov = Provenance(label="test", value=False)
+        d = prov.to_dict()
+        assert d["value"] is False
+
+    def test_falsy_value_empty_string_serialized(self):
+        prov = Provenance(label="test", value="")
+        d = prov.to_dict()
+        assert d["value"] == ""
+
     def test_sources_nested(self):
         child = Provenance(label="child")
         parent = Provenance(label="parent", sources={"a": child})
@@ -96,6 +111,7 @@ class TestProvenanceToDict:
         prov = Provenance(label="test", value=object())
         d = prov.to_dict()
         assert isinstance(d["value"], str)
+        assert "object" in d["value"]  # verify meaningful string, not empty
 
 
 class TestAttemptCreatedAt:

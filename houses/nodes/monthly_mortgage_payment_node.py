@@ -60,7 +60,7 @@ class MonthlyMortgagePaymentNode(DerivedNode[Money]):
         if p == 0:
             return Attempt.succeeded(Money("0", "GBP"))
 
-        # Total equity from all non-child persons
+        # Total deposit equity from all persons
         sd_val = (
             float(stamp_duty.value_or_none().amount) if stamp_duty.succeeded and stamp_duty.value_or_none() else 0.0
         )

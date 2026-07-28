@@ -11,7 +11,6 @@ export interface AuthUser {
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<AuthUser | null>(null)
-  const authAvailable = ref(false)
   const loading = ref(true)
 
   // Superuser mode — when active, a header bar shows with an impersonation dropdown
@@ -34,13 +33,11 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const r = await fetch('/api/auth/me')
       if (!r.ok) {
-        user.value = null
-        authAvailable.value = false
+        console.error('Auth check failed:', r.status)
         loading.value = false
-        return
+        return  // keep current user state on transient errors
       }
       const data = await r.json()
-      authAvailable.value = data.auth_available ?? false
       if (data.authenticated) {
         user.value = data
         // Exit superuser mode if user is no longer a superuser
@@ -51,9 +48,9 @@ export const useAuthStore = defineStore('auth', () => {
       } else {
         user.value = null
       }
-    } catch {
-      user.value = null
-      authAvailable.value = false
+    } catch (e) {
+      console.error('Auth check exception:', e)
+      // keep current user state on transient errors
     } finally {
       loading.value = false
     }
@@ -82,7 +79,6 @@ export const useAuthStore = defineStore('auth', () => {
         console.error('Auth login error:', data.detail)
         return { ok: false, error: 'Sign in is unavailable. Please try again later.' }
       }
-      if (data.status === 'unconfigured') return { ok: false }
       if (data.auth_url) {
         window.location.href = data.auth_url
         return { ok: true }
@@ -101,7 +97,6 @@ export const useAuthStore = defineStore('auth', () => {
       console.error('Logout request failed — clearing local state anyway')
     } finally {
       user.value = null
-      authAvailable.value = false
       superuserMode.value = false
       impersonating.value = null
     }
@@ -109,7 +104,6 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     user,
-    authAvailable,
     loading,
     superuserMode,
     impersonating,

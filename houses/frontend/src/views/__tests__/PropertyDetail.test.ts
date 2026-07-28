@@ -5,6 +5,7 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import { usePropertiesStore } from '../../stores/properties'
 import PropertyDetail from '../PropertyDetail.vue'
 import type { PropertyDetail as PropertyDetailType } from '../../types'
+import * as api from '../../services/api'
 
 // Mock the API module so fetch-based calls don't fail in test environment
 vi.mock('../../services/api', () => ({
@@ -193,8 +194,6 @@ describe('PropertyDetail town description', () => {
     expect(text).not.toContain('"description"')
   })
 })
-
-import * as api from '../../services/api'
 
 describe('PropertyDetail notes', () => {
   it('renders notes section with textarea and save button', async () => {

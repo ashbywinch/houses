@@ -36,7 +36,6 @@ async function signIn() {
       <h1 class="login-card__title">Houses</h1>
       <p class="login-card__desc">Sign in to continue</p>
       <button
-        v-if="auth.authAvailable"
         class="login-card__btn"
         :disabled="auth.loading"
         @click="signIn"
@@ -44,9 +43,6 @@ async function signIn() {
         {{ auth.loading ? 'Loading…' : 'Sign in with Google' }}
       </button>
       <p v-if="loginError" class="login-card__error">{{ loginError }}</p>
-      <p v-else-if="!auth.authAvailable" class="login-card__error">
-        Authentication is not configured.
-      </p>
     </div>
   </main>
 </template>

@@ -22,11 +22,7 @@ router.beforeEach(async (to) => {
     await auth.checkAuth()
   }
   if (!auth.user) {
-    if (auth.authAvailable) {
-      return '/login'
-    }
-    // Auth not configured — allow access in debug mode
-    return true
+    return '/login'
   }
   return true
 })

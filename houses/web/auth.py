@@ -1,10 +1,7 @@
 """Google OAuth endpoints for the Houses application.
 
-Two modes:
-- Auth mode (GOOGLE_CLIENT_ID set): user signs in with Google, comment
-  person is derived server-side from email-to-Person mapping.
-- Debug mode (GOOGLE_CLIENT_ID empty): returns ``auth_available: false``
-  from the /me endpoint. The frontend falls back to the old dropdown.
+Users sign in with Google. Comment person is derived server-side from
+email-to-Person mapping (casefolded for case-insensitive matching).
 
 Session storage uses signed cookies (itsdangerous.URLSafeTimedSerializer).
 The cookie payload contains ``{email, name, picture, is_superuser, impersonating}``.
@@ -31,9 +28,18 @@ logger = logging.getLogger(__name__)
 
 auth_router = APIRouter(prefix="/api/auth")
 
-# In-memory OAuth state store — maps state_token to dict with code_verifier.
-# Ephemeral — lost on server restart, user retries the OAuth flow.
+# In-memory OAuth state store — maps state_token to dict with code_verifier
+# and created_at timestamp. Ephemeral — lost on server restart.
 _oauth_states: dict[str, dict] = {}
+_STATE_MAX_AGE = timedelta(minutes=10)
+
+
+def _sweep_stale_states() -> None:
+    """Remove OAuth state entries older than _STATE_MAX_AGE."""
+    cutoff = datetime.now(UTC).timestamp() - _STATE_MAX_AGE.total_seconds()
+    stale = [k for k, v in _oauth_states.items() if v.get("created_at", 0) < cutoff]
+    for k in stale:
+        _oauth_states.pop(k, None)
 
 
 def _get_serializer() -> URLSafeTimedSerializer:
@@ -75,16 +81,30 @@ def _make_session_cookie(
 
 
 def _lookup_person_by_email(email: str, persons_attempt_value: Any) -> str | None:
-    """Scan persons list for a matching email, return the person name or None."""
+    """Scan persons list for a matching email (casefolded), return the person name or None."""
     if not persons_attempt_value:
         return None
+    folded = email.casefold()
     for p in persons_attempt_value:
         if isinstance(p, dict):
-            if p.get("email") == email:
+            pe = p.get("email")
+            if pe is not None and pe.casefold() == folded:
                 return p.get("name")
-        elif hasattr(p, "email") and p.email == email:
+        elif hasattr(p, "email") and p.email is not None and p.email.casefold() == folded:
             return getattr(p, "name", None)
     return None
+
+
+def _is_secure(request: Request) -> bool:
+    """Return True if the request arrived over HTTPS.
+
+    Checks ``X-Forwarded-Proto`` for deployments behind a TLS-terminating
+    proxy, falling back to ``request.url.scheme`` for direct connections.
+    """
+    forwarded = request.headers.get("x-forwarded-proto", "")
+    if forwarded == "https":
+        return True
+    return request.url.scheme == "https"
 
 
 def _set_session_cookie(response, cookie_value: str, secure: bool) -> None:
@@ -115,14 +135,11 @@ def _clear_session_cookie(response, secure: bool) -> None:
 
 @auth_router.get("/login")
 async def login():
-    """Initiate Google OAuth flow or indicate auth is unconfigured.
+    """Initiate Google OAuth flow.
 
-    Returns JSON with either ``auth_url`` (redirect browser to Google) or
-    ``status: "unconfigured"``.
+    Returns JSON with ``auth_url`` (redirect browser to Google).
     """
-    if not settings.google_client_id:
-        return {"status": "unconfigured"}
-
+    _sweep_stale_states()
     state = secrets.token_urlsafe(32)
 
     try:
@@ -152,7 +169,10 @@ async def login():
             state=state,
         )
         # Persist the code_verifier so the callback can use it (PKCE)
-        _oauth_states[state] = {"code_verifier": getattr(flow, "code_verifier", None) or ""}
+        _oauth_states[state] = {
+            "code_verifier": getattr(flow, "code_verifier", None) or "",
+            "created_at": datetime.now(UTC).timestamp(),
+        }
         return {"auth_url": authorization_url}
     except ImportError:
         return {"status": "error", "detail": "google-auth libraries not installed"}
@@ -219,6 +239,7 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
             return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=email_not_verified")
 
         email = id_info.get("email", "")
+        folded_email = email.casefold()
         name = id_info.get("name", email.split("@")[0] if email else "Unknown")
         picture = id_info.get("picture", "")
 
@@ -232,21 +253,21 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
             if persons_attempt.succeeded:
                 for p in persons_attempt.value_or_none() or []:
                     if isinstance(p, dict):
-                        if p.get("email") == email and p.get("is_superuser"):
+                        pe = p.get("email")
+                        if pe is not None and pe.casefold() == folded_email and p.get("is_superuser"):
                             is_superuser = True
                             break
-                    elif hasattr(p, "email") and p.email == email and hasattr(p, "is_superuser") and p.is_superuser:
+                    elif hasattr(p, "email") and p.email is not None and p.email.casefold() == folded_email and hasattr(p, "is_superuser") and p.is_superuser:
                         is_superuser = True
                         break
         except Exception:
             pass  # Non-critical — user can still sign in, just not as superuser
 
-        # Create signed session cookie
-        cookie_value = _make_session_cookie(email, name, picture, is_superuser)
+        # Create signed session cookie with casefolded email
+        cookie_value = _make_session_cookie(folded_email, name, picture, is_superuser)
 
-        is_secure = request.url.scheme == "https"
         response = RedirectResponse(url=f"{settings.frontend_url}/")
-        _set_session_cookie(response, cookie_value, is_secure)
+        _set_session_cookie(response, cookie_value, _is_secure(request))
         return response
 
     except Exception as e:
@@ -258,15 +279,12 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
 async def me(request: Request):
     """Return current authentication state.
 
-    Always includes ``auth_available`` (true when Google OAuth is configured).
-    When authenticated, also includes email, name, picture, person,
+    When authenticated, includes email, name, picture, person,
     is_superuser, and impersonating (if a superuser is impersonating someone).
     """
-    auth_available = bool(settings.google_client_id)
-
     session = get_session_user(request)
     if not session:
-        return {"authenticated": False, "auth_available": auth_available}
+        return {"authenticated": False}
 
     # Look up associated Person by email
     person_name = None
@@ -282,7 +300,6 @@ async def me(request: Request):
 
     return {
         "authenticated": True,
-        "auth_available": auth_available,
         "email": session["email"],
         "name": session["name"],
         "picture": session.get("picture", ""),
@@ -295,9 +312,8 @@ async def me(request: Request):
 @auth_router.post("/logout")
 async def logout(request: Request):
     """Clear session cookie."""
-    is_secure = request.url.scheme == "https"
     response = JSONResponse(content={"status": "ok"})
-    _clear_session_cookie(response, is_secure)
+    _clear_session_cookie(response, _is_secure(request))
     return response
 
 
@@ -331,7 +347,28 @@ async def impersonate(request: Request, body: dict):
         impersonating=person,
     )
 
-    is_secure = request.url.scheme == "https"
     response = JSONResponse(content={"status": "ok", "impersonating": person})
-    _set_session_cookie(response, new_cookie, is_secure)
+    _set_session_cookie(response, new_cookie, _is_secure(request))
     return response
+
+
+@auth_router.get("/persons")
+async def list_persons():
+    """Return the list of persons with non-empty email addresses.
+
+    Used by the frontend superuser impersonation dropdown.
+    """
+    from houses.services_provider import get_services
+
+    svc = get_services()
+    persons_attempt = svc.persons_source.latest_attempt()
+    result: list[dict[str, str]] = []
+    if persons_attempt.succeeded:
+        for p in persons_attempt.value_or_none() or []:
+            if isinstance(p, dict):
+                email = p.get("email", "")
+                if email:
+                    result.append({"name": p.get("name", ""), "email": email})
+            elif hasattr(p, "email") and p.email:
+                result.append({"name": getattr(p, "name", ""), "email": p.email})
+    return {"persons": result}

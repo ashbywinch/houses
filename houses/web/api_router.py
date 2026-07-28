@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Body, HTTPException, Request, WebSocket
+from pydantic import BaseModel, Field, field_validator
 
 from houses.geo import GeoPoint
 from houses.property_registry import get_property as get_registry_property
@@ -200,8 +201,22 @@ async def get_property_comments(rid: str):
     return get_comments(rid)
 
 
+class CommentBody(BaseModel):
+    """Validated request body for posting a comment."""
+    text: str = Field(min_length=1)
+    person: str | None = None
+
+    @field_validator("text")
+    @classmethod
+    def not_blank(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("text must not be whitespace-only")
+        return stripped
+
+
 @api_router.post("/properties/{rid}/comments")
-async def add_property_comment(rid: str, body: dict, request: Request):
+async def add_property_comment(rid: str, body: CommentBody, request: Request):
     """Add a comment for a property.
 
     Person is determined from the authenticated session, with optional
@@ -215,10 +230,6 @@ async def add_property_comment(rid: str, body: dict, request: Request):
     if prop is None:
         raise HTTPException(status_code=404, detail="Property not found")
 
-    text = body.get("text", "")
-    if not text:
-        raise HTTPException(status_code=400, detail="text is required")
-
     session_user = get_session_user(request)
     if not session_user:
         raise HTTPException(status_code=401, detail="Authentication required")
@@ -231,15 +242,17 @@ async def add_property_comment(rid: str, body: dict, request: Request):
             raise HTTPException(status_code=403, detail="Only superusers can impersonate")
         person = impersonate
     else:
+        folded_email = session_user.get("email", "").casefold()
         persons_attempt = svc.persons_source.latest_attempt()
         person = ""
         if persons_attempt.succeeded:
             for p in persons_attempt.value_or_none() or []:
                 if isinstance(p, dict):
-                    if p.get("email") == session_user.get("email"):
+                    pe = p.get("email")
+                    if pe is not None and pe.casefold() == folded_email:
                         person = p.get("name", "")
                         break
-                elif hasattr(p, "email") and p.email == session_user.get("email"):
+                elif hasattr(p, "email") and p.email is not None and p.email.casefold() == folded_email:
                     person = getattr(p, "name", "")
                     break
         if not person:
@@ -248,7 +261,7 @@ async def add_property_comment(rid: str, body: dict, request: Request):
                 detail="Your account is not linked to a person in settings",
             )
 
-    return add_comment(rid, person, text)
+    return add_comment(rid, person, body.text)
 
 
 @api_router.get("/settings")

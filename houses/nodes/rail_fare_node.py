@@ -13,10 +13,6 @@ from houses.stations import Station
 
 
 class RailFareNode(DerivedNode[Commute]):
-    @property
-    def provenance_source_type(self) -> SourceType:
-        return SourceType.API
-
     """Computes National Rail fare for a commute when TfL has no price.
 
     Extracts the destination London terminal from the TfL route legs
@@ -25,6 +21,10 @@ class RailFareNode(DerivedNode[Commute]):
     to find stations — the NR fare system uses terminal zones (PAD, VIC,
     WAT, …) as destinations, and the route already tells us which one.
     """
+
+    @property
+    def provenance_source_type(self) -> SourceType:
+        return SourceType.API
 
     def __init__(self, node_id: str, *, transit_result, best_location):
         self.transit_result = transit_result

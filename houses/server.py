@@ -71,15 +71,24 @@ async def lifespan(_app: FastAPI):
     # httpx logs full URLs including query params — suppress to avoid
     # leaking API keys in the server log
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    if not settings.google_client_id and not settings.auth_disabled:
+    if not settings.google_client_id:
         logger.error(
-            "GOOGLE_CLIENT_ID is not set and AUTH_DISABLED is False. "
-            "Set GOOGLE_CLIENT_ID in environment or set HOUSES_AUTH_DISABLED=true "
-            "to run without authentication."
+            "GOOGLE_CLIENT_ID is not set. Set HOUSES_GOOGLE_CLIENT_ID in .env "
+            "to configure Google OAuth authentication."
         )
         raise RuntimeError("Authentication not configured")
-    if settings.auth_disabled:
-        logger.warning("AUTH_DISABLED=True — API endpoints are publicly accessible")
+    if not settings.google_client_secret:
+        logger.error(
+            "GOOGLE_CLIENT_ID is set but GOOGLE_CLIENT_SECRET is missing. "
+            "Set HOUSES_GOOGLE_CLIENT_SECRET in .env."
+        )
+        raise RuntimeError("Google Client Secret not configured")
+    if not settings.session_secret:
+        logger.error(
+            "GOOGLE_CLIENT_ID is set but HOUSES_SESSION_SECRET is empty. "
+            "Set a non-empty HOUSES_SESSION_SECRET in .env."
+        )
+        raise RuntimeError("Session secret not configured")
 
     init_dag_db()
     init_app_db()
@@ -117,6 +126,8 @@ async def lifespan(_app: FastAPI):
     _proc_task.cancel()
     _bc_task.cancel()
     logger.info("Houses server shutting down")
+    from houses.database import close_db as close_app_db
+    close_app_db()
     await stop_chrome()
 
 
@@ -162,12 +173,7 @@ async def _request_context(request, call_next):
 
 
 async def _require_auth(request, call_next):
-    """Require authentication on /api/* routes (except /api/auth/*).
-
-    When ``AUTH_DISABLED`` is set, all requests pass through.
-    """
-    if settings.auth_disabled:
-        return await call_next(request)
+    """Require authentication on /api/* routes (except /api/auth/*)."""
     path = request.url.path
     if path.startswith("/api/") and not path.startswith("/api/auth/"):
         from houses.web.auth import get_session_user

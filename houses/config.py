@@ -27,7 +27,6 @@ class Settings(BaseSettings):
     epc_bearer_token: str = Field(default="", alias="EPC_BEARER_TOKEN")
     google_client_id: str = Field(default="", alias="GOOGLE_CLIENT_ID")
     google_client_secret: str = Field(default="", alias="GOOGLE_CLIENT_SECRET")
-    auth_disabled: bool = Field(default=False, alias="HOUSES_AUTH_DISABLED")
     session_secret: str = Field(default="", alias="HOUSES_SESSION_SECRET")
 
     rightmove_chrome_port: int = 9222

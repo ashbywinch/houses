@@ -61,7 +61,7 @@ def migrate_old_comments(rid: str, old_comments: dict[str, Any]) -> list[dict[st
     duplicate rows under concurrent access.
     """
     conn = get_connection()
-    conn.execute("BEGIN")
+    conn.execute("BEGIN IMMEDIATE")
     try:
         # Check whether old comments have already been migrated for this RID
         already = conn.execute(

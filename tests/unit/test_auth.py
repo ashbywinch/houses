@@ -60,16 +60,6 @@ def _patch_registry():
 
 
 class TestLogin:
-    def test_unconfigured(self):
-        original = settings.google_client_id
-        settings.google_client_id = ""
-        try:
-            resp = client.get("/api/auth/login")
-            assert resp.status_code == 200
-            assert resp.json() == {"status": "unconfigured"}
-        finally:
-            settings.google_client_id = original
-
     def test_configured_returns_auth_url(self):
         original = settings.google_client_id
         settings.google_client_id = "test-client-id"
@@ -112,17 +102,7 @@ class TestMe:
         try:
             resp = client.get("/api/auth/me")
             assert resp.status_code == 200
-            assert resp.json() == {"authenticated": False, "auth_available": True}
-        finally:
-            settings.google_client_id = original
-
-    def test_not_authenticated_auth_unavailable(self):
-        original = settings.google_client_id
-        settings.google_client_id = ""
-        try:
-            resp = client.get("/api/auth/me")
-            assert resp.status_code == 200
-            assert resp.json() == {"authenticated": False, "auth_available": False}
+            assert resp.json() == {"authenticated": False}
         finally:
             settings.google_client_id = original
 
@@ -390,7 +370,8 @@ class TestCommentAuth:
             _sp.reset(auth_token)
         assert resp.status_code == 401
 
-    def test_post_400_empty_text(self):
+    def test_post_422_empty_text(self):
+        """Empty text fails Pydantic validation with 422."""
         auth_token = _enable_auth()
         session_cookie = _inject_session()
         try:
@@ -401,8 +382,7 @@ class TestCommentAuth:
             )
         finally:
             _sp.reset(auth_token)
-        assert resp.status_code == 400
-        assert "text is required" in resp.json()["detail"]
+        assert resp.status_code == 422  # Pydantic validation error
 
     def test_post_403_non_superuser_impersonates(self):
         auth_token = _enable_auth()
@@ -433,6 +413,40 @@ class TestCommentAuth:
             _sp.reset(auth_token)
         assert resp.status_code == 400
         assert "not linked" in resp.json()["detail"]
+
+    def test_post_200_normal_user(self):
+        """Non-superuser with linked email can post a comment."""
+        svc = make_services(
+            auth_enabled=True,
+            persons_source=MagicMock(
+                latest_attempt=MagicMock(
+                    return_value=MagicMock(
+                        succeeded=True,
+                        value_or_none=MagicMock(
+                            return_value=[
+                                {"name": "Simon", "email": "simon@example.com"},
+                            ]
+                        ),
+                    )
+                )
+            ),
+        )
+        svc_token = _sp.set(svc)
+
+        session_cookie = _inject_session(email="simon@example.com", is_superuser=False)
+        try:
+            resp = client.post(
+                "/api/properties/test-rid/comments",
+                json={"text": "A normal comment"},
+                cookies={"session": session_cookie},
+            )
+        finally:
+            _sp.reset(svc_token)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["person"] == "Simon"
+        assert data["text"] == "A normal comment"
 
     def test_post_200_superuser_impersonates(self):
         """Superuser with impersonation header succeeds with resolved person."""

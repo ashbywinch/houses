@@ -55,16 +55,12 @@ def get_old_comments(dag: sqlite3.Connection, rid: str) -> dict:
     return result
 
 
-def count_comments_in_db(db_path: Path, rid: str) -> int:
+def count_comments_in_db(conn: sqlite3.Connection, rid: str) -> int:
     """Check how many comments exist for a property in the comments table."""
-    conn = sqlite3.connect(str(db_path))
-    try:
-        return conn.execute(
-            "SELECT COUNT(*) FROM comments WHERE rid = ?",
-            (rid,),
-        ).fetchone()[0]
-    finally:
-        conn.close()
+    return conn.execute(
+        "SELECT COUNT(*) FROM comments WHERE rid = ?",
+        (rid,),
+    ).fetchone()[0]
 
 
 def main() -> None:
@@ -96,7 +92,7 @@ def main() -> None:
 
     for rid in rids:
         # Check how many comments already in DB for this rid
-        existing = count_comments_in_db(db_path, rid)
+        existing = count_comments_in_db(app_conn, rid)
         if existing > 0:
             # Already has comments — migration might already have run
             # Still call migrate_old_comments — it's idempotent and

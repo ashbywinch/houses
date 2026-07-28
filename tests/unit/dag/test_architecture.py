@@ -13,9 +13,13 @@ def _format_violations(violations: list) -> str:
 
 def test_dag_does_not_import_houses():
     la = project_layers()
+    # NOTE: All layer patterns use a ``./`` prefix.  ``fnmatch.translate``
+    # converts ``*`` to ``.*`` which matches ``/``, so a bare ``dag/*.py``
+    # would also match ``tests/unit/dag/anything.py``.  The ``./`` anchors
+    # the match to the project root — do not remove it.
     la = la.layer("dag").defined_by("./dag/*.py")
     la = la.layer("dag_tests").defined_by("./tests/unit/dag/*.py")
-    la = la.layer("houses").defined_by("houses/**/*.py")
+    la = la.layer("houses").defined_by("./houses/**/*.py")
     la = la.where_layer("dag").may_only_depend_on_layers()
     la = la.where_layer("dag_tests").may_only_depend_on_layers("dag", "houses")
     violations = la.check()
@@ -30,8 +34,8 @@ def test_web_does_not_import_sheets():
     access from HTTP handlers bypasses caching and the DAG lifecycle.
     """
     la = project_layers()
-    la = la.layer("web").defined_by("houses/web/*.py")
-    la = la.layer("sheets").defined_by("houses/sheets/*.py")
+    la = la.layer("web").defined_by("./houses/web/*.py")
+    la = la.layer("sheets").defined_by("./houses/sheets/*.py")  # noqa: E501 — see note above for ./ prefix rationale
     la = la.where_layer("web").may_not_depend_on_layers("sheets")
     violations = la.check()
     assert len(violations) == 0, _format_violations(violations)

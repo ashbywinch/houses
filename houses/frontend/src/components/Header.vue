@@ -1,9 +1,31 @@
 <script setup lang="ts">
+import { onMounted, ref } from 'vue'
 import { useAuthStore } from '../stores/auth'
 
 defineProps<{ title: string }>()
 
 const auth = useAuthStore()
+
+interface PersonEntry {
+  name: string
+  email: string
+}
+
+const persons = ref<PersonEntry[]>([])
+
+async function fetchPersons() {
+  try {
+    const r = await fetch('/api/auth/persons')
+    if (r.ok) {
+      const data = await r.json()
+      persons.value = data.persons ?? []
+    }
+  } catch {
+    // Non-critical — dropdown falls back to empty
+  }
+}
+
+onMounted(fetchPersons)
 </script>
 
 <template>
@@ -30,7 +52,7 @@ const auth = useAuthStore()
           </button>
           <button class="header__auth-btn" @click="auth.logout()">Logout</button>
         </template>
-        <template v-else-if="auth.authAvailable">
+        <template v-else>
           <button class="header__auth-btn" @click="auth.login()">Login</button>
         </template>
       </div>
@@ -44,8 +66,7 @@ const auth = useAuthStore()
         @change="(e) => auth.setImpersonating((e.target as HTMLSelectElement).value)"
       >
         <option value="" disabled>Select a person…</option>
-        <!-- Persons injected by parent or fetched from settings -->
-        <option v-for="p in ['Ashby', 'Simon', 'Lorena', 'George']" :key="p" :value="p">{{ p }}</option>
+        <option v-for="p in persons" :key="p.name" :value="p.name">{{ p.name }}</option>
       </select>
       <button class="su-bar__exit" @click="auth.toggleSuperuser()">Exit</button>
     </div>

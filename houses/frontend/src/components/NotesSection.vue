@@ -1,19 +1,15 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { fetchComments, postComment, type CommentEntry } from '../services/api'
-import { useAuthStore } from '../stores/auth'
 
 const props = defineProps<{
   rid: string
 }>()
 
-const auth = useAuthStore()
 const comments = ref<CommentEntry[]>([])
 const newComment = ref('')
-const selectedPerson = ref('Ashby')
 const submitting = ref(false)
-
-const persons = ['Ashby', 'Simon', 'Lorena', 'George']
+const commentError = ref<string | null>(null)
 
 function relativeTime(iso: string): string {
   const d = new Date(iso)
@@ -41,15 +37,13 @@ async function submitComment() {
   const text = newComment.value.trim()
   if (!text || submitting.value) return
   submitting.value = true
+  commentError.value = null
   try {
-    // In debug mode, send person from selector; in auth mode, server resolves it
-    const entry = auth.authAvailable
-      ? await postComment({ rid: props.rid, text })
-      : await postComment({ rid: props.rid, text, person: selectedPerson.value })
+    const entry = await postComment({ rid: props.rid, text })
     comments.value.push(entry)
     newComment.value = ''
   } catch {
-    // silently fail
+    commentError.value = 'Failed to save comment. Please try again.'
   } finally {
     submitting.value = false
   }
@@ -87,13 +81,6 @@ onMounted(loadComments)
         rows="2"
       ></textarea>
       <div class="note-input__actions">
-        <select
-          v-if="!auth.authAvailable"
-          v-model="selectedPerson"
-          class="note-input__select"
-        >
-          <option v-for="p in persons" :key="p" :value="p">{{ p }}</option>
-        </select>
         <button
           class="note-input__btn"
           :disabled="!newComment.trim() || submitting"
@@ -102,15 +89,33 @@ onMounted(loadComments)
           {{ submitting ? 'Saving…' : 'Save' }}
         </button>
       </div>
+      <p v-if="commentError" class="note-input__error">{{ commentError }}</p>
     </div>
   </section>
 </template>
 
 <style scoped>
+.detail-section {
+  background: var(--card-bg, #fff);
+  border-radius: var(--r-card, 12px);
+  padding: var(--sp-16, 16px);
+}
+
+.detail-section__title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--slate-500, #64748b);
+  margin-bottom: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--slate-200, #e2e8f0);
+}
+
 .notes-empty {
   padding: 24px 16px;
   text-align: center;
-  color: #888;
+  color: var(--slate-400, #94a3b8);
   font-style: italic;
 }
 
@@ -121,7 +126,7 @@ onMounted(loadComments)
 }
 
 .note-card {
-  background: var(--card-bg);
+  background: var(--slate-50, #f8fafc);
   border-radius: 8px;
   padding: 10px 14px;
 }
@@ -159,7 +164,7 @@ onMounted(loadComments)
 
 .note-card__time {
   font-size: 11px;
-  color: #888;
+  color: var(--slate-400, #94a3b8);
 }
 
 .note-card__body {
@@ -177,8 +182,8 @@ onMounted(loadComments)
   width: 100%;
   padding: 8px 10px;
   border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--card-bg);
+  border: 1px solid var(--slate-200, #e2e8f0);
+  background: var(--card-bg, #fff);
   color: var(--text);
   resize: vertical;
   font-family: inherit;
@@ -203,17 +208,14 @@ onMounted(loadComments)
   cursor: pointer;
 }
 
-.note-input__select {
-  padding: 6px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--card-bg);
-  color: var(--text);
-  font-size: 13px;
-}
-
 .note-input__btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.note-input__error {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--red, #dc2626);
 }
 </style>

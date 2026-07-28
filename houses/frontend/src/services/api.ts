@@ -1,5 +1,6 @@
 import type { PropertyDetail, PropertySummary } from '../types'
 import { useAuthStore } from '../stores/auth'
+import router from '../router'
 
 const BASE = '/api'
 
@@ -9,7 +10,7 @@ function isAuthUrl(url: string): boolean {
 
 function checkFor401(r: Response): Response {
   if (r.status === 401 && !isAuthUrl(r.url)) {
-    window.location.href = '/login'
+    router.push('/login')
     throw new Error('Session expired')
   }
   return r
