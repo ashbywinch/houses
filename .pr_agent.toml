@@ -11,7 +11,6 @@ repo_context_files = [
     "docs/testing-standards.md",
     "docs/writing-documentation.md",
 ]
-repo_context_from_default_branch = false
 
 [pr_reviewer]
 require_tests_review = true
