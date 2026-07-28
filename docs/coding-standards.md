@@ -474,20 +474,6 @@ with a ``MockTransport``. New tests should prefer ``Services`` or
 3. Pass ``services=make_services(...)`` to ``_run_enrichment``.
 4. Remove the test from ``_mock_http_requests`` dependency.
 
-### No Monkeypatching
-
-**Never use ``monkeypatch``, ``unittest.mock.patch``, or ``MockTransport``
-in new tests.** The three mocking layers above (``_kwarg``, ``Services``,
-``ContextVar``) cover every testing scenario without patching module-level
-or global state.
-
-Monkeypatching makes tests brittle — changes to import paths or module
-internals silently break patched tests. The DI-based approaches are
-explicit at the call site and survive refactoring.
-
-If you need to patch something that isn't reachable through DI, that's a
-signal the code needs refactoring, not that it needs another patch.
-
 ### Detailed Test Standards
 
 See ``docs/testing-standards.md`` for the full reference: test file naming,
