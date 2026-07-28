@@ -257,7 +257,13 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
                         if pe is not None and pe.casefold() == folded_email and p.get("is_superuser"):
                             is_superuser = True
                             break
-                    elif hasattr(p, "email") and p.email is not None and p.email.casefold() == folded_email and hasattr(p, "is_superuser") and p.is_superuser:
+                    elif (
+                        hasattr(p, "email")
+                        and p.email is not None
+                        and p.email.casefold() == folded_email
+                        and hasattr(p, "is_superuser")
+                        and p.is_superuser
+                    ):
                         is_superuser = True
                         break
         except Exception:

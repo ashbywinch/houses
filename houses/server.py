@@ -13,7 +13,9 @@ from fastapi.staticfiles import StaticFiles
 
 import houses.services_provider as _sp
 from dag.persistence import init_db as init_dag_db
+from houses.admin_router import admin_router
 from houses.config import settings
+from houses.database import init_db as init_app_db
 from houses.location import extract_postcode, is_outcode
 from houses.nodes.bootstrap import load_property_nodes_from_db, load_property_nodes_from_rows
 from houses.nodes.cutover import push_enriched_property
@@ -29,8 +31,6 @@ from houses.sheets import (
     sync_view_formulas,
 )
 from houses.sheets.reader import get_properties_data, resolve_tab
-from houses.database import init_db as init_app_db
-from houses.admin_router import admin_router
 from houses.web.api_router import api_router
 from houses.web.auth import auth_router
 from houses.web.json_utils import asdict_serializable

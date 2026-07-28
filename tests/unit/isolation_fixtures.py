@@ -12,8 +12,8 @@ import sqlite3
 
 import pytest
 
-import houses.database as db
 import dag.persistence as per
+import houses.database as db
 from dag.scheduler import AsyncQueueScheduler, set_scheduler
 
 
