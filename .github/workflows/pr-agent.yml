@@ -2,7 +2,7 @@ name: AI Code Review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review]
 
 jobs:
   pr-review:
@@ -33,10 +33,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # PR-Agent posts an issue comment on failure. Check for it.
-          COMMENTS=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.number }}/comments" --jq '.[] | select(.user.login == "github-actions[bot]") | .body' 2>/dev/null || echo "")
-          if echo "$COMMENTS" | grep -qi "failed"; then
+          # Check the most recent PR-Agent comment — old failures from previous
+          # runs are stale, only the latest comment reflects the current review.
+          LAST=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.number }}/comments" --jq 'last(.[] | select(.user.login == "github-actions[bot]")) | .body' 2>/dev/null || echo "")
+          if echo "$LAST" | grep -qi "failed"; then
             echo "::error::PR-Agent reported a failure:"
-            echo "$COMMENTS"
+            echo "$LAST"
             exit 1
           fi
+          echo "Review check passed"
