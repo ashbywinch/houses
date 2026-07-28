@@ -6,7 +6,7 @@ from typing import Any, Generic, TypeVar
 
 from pydantic_core import core_schema
 
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt, Provenance, SourceType
 from dag.node import Node
 
 # Register pydantic schemas for third-party types (Money, Quantity) so
@@ -159,7 +159,7 @@ class UserInputNode(Node[T], Generic[T]):
         return Attempt.pending()
 
     async def build_provenance(self) -> Provenance:
-        return Provenance(label=self._source_label, value=self._value)
+        return Provenance(label=self._source_label, value=self._value, source_type=SourceType.USER)
 
     async def to_json_value(self) -> dict[str, Any]:
         """Return a JSON-safe dict without provenance."""

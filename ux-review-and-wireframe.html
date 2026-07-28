@@ -1,0 +1,2325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>House Hunt — UX Review &amp; Wireframe</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   DESIGN SYSTEM TOKENS
+   ═══════════════════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+::root {
+  /* ── Palette ── */
+  --slate-900: #0f172a;
+  --slate-800: #1e293b;
+  --slate-700: #334155;
+  --slate-600: #475569;
+  --slate-500: #64748b;
+  --slate-400: #94a3b8;
+  --slate-300: #cbd5e1;
+  --slate-200: #e2e8f0;
+  --slate-100: #f1f5f9;
+  --slate-50:  #f8fafc;
+
+  --white: #ffffff;
+
+  /* ── Semantic colours ── */
+  --green:      #16a34a;
+  --green-bg:   #f0fdf4;
+  --green-text: #166534;
+
+  --orange:      #ea580c;
+  --orange-bg:   #fff7ed;
+  --orange-text: #9a3412;
+
+  --red:        #dc2626;
+  --red-bg:     #fef2f2;
+  --red-text:   #991b1b;
+
+  --blue:       #2563eb;
+  --blue-bg:    #eff6ff;
+  --blue-text:  #1e40af;
+
+  --amber:      #d97706;
+  --amber-bg:   #fffbeb;
+  --amber-text: #92400e;
+
+  --muted:      #94a3b8;
+  --muted-bg:   #f1f5f9;
+
+  /* ── Neutral ── */
+  --text:          var(--slate-900);
+  --text-secondary: var(--slate-500);
+  --text-muted:    var(--slate-400);
+  --border:        var(--slate-200);
+  --divider:       var(--slate-100);
+  --card-bg:       var(--white);
+  --page-bg:       var(--slate-50);
+  --header-bg:     var(--slate-800);
+  --header-text:   var(--white);
+
+  /* ── Typography ── */
+  --font:     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", SFMono-Regular, ui-monospace, Menlo, monospace;
+
+  --fs-xs:   0.6875rem;
+  --fs-sm:   0.75rem;
+  --fs-base: 0.875rem;
+  --fs-md:   0.9375rem;
+  --fs-lg:   1.125rem;
+  --fs-xl:   1.25rem;
+  --fs-2xl:  1.5rem;
+
+  --lh-tight: 1.25;
+  --lh:       1.5;
+  --lh-loose: 1.6;
+
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* ── Spacing (8px grid) ── */
+  --sp-1:  4px;
+  --sp-2:  8px;
+  --sp-3:  12px;
+  --sp-4:  16px;
+  --sp-5:  20px;
+  --sp-6:  24px;
+  --sp-8:  32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+
+  /* ── Radii ── */
+  --r-sm:   6px;
+  --r:      10px;
+  --r-lg:   14px;
+  --r-full: 9999px;
+
+  /* ── Shadows ── */
+  --sh-sm:   0 1px 2px rgba(15,23,42,0.04);
+  --sh:      0 1px 3px rgba(15,23,42,0.06), 0 1px 2px rgba(15,23,42,0.04);
+  --sh-md:   0 4px 6px rgba(15,23,42,0.06), 0 2px 4px rgba(15,23,42,0.04);
+  --sh-lg:   0 10px 15px rgba(15,23,42,0.06), 0 4px 6px rgba(15,23,42,0.04);
+
+  /* ── Transitions ── */
+  --tr: 180ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── Layout ── */
+  --header-h:  52px;
+  --tabbar-h:  56px;
+  --max-w:     1200px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   BASE
+   ═══════════════════════════════════════════════════════════════ */
+html { font-size: 16px; }
+body {
+  font-family: var(--font);
+  font-size: var(--fs-base);
+  line-height: var(--lh);
+  color: var(--text);
+  background: var(--page-bg);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; cursor: pointer; border: none; background: none; }
+a { color: inherit; text-decoration: none; }
+[hidden] { display: none !important; }
+
+::focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   HEADER
+   ═══════════════════════════════════════════════════════════════ */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--header-bg);
+  color: var(--header-text);
+}
+.header__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--header-h);
+  padding: 0 var(--sp-4);
+  max-width: var(--max-w);
+  margin: 0 auto;
+  gap: var(--sp-3);
+}
+.header__start, .header__end {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 80px;
+}
+.header__end { justify-content: flex-end; }
+.header__title {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.01em;
+  flex: 1;
+  text-align: center;
+}
+.header__back {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: rgba(255,255,255,0.75);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-sm);
+  transition: all var(--tr);
+  min-height: 36px;
+}
+.header__back:hover { color: #fff; background: rgba(255,255,255,0.1); }
+
+.btn-icon {
+  width: 36px; height: 36px;
+  border-radius: var(--r-sm);
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.7);
+  transition: all var(--tr);
+}
+.btn-icon:hover { color: #fff; background: rgba(255,255,255,0.12); }
+.btn-icon--active { color: var(--amber) !important; }
+
+/* ═══════════════════════════════════════════════════════════════
+   VIEW TABS (page switcher)
+   ═══════════════════════════════════════════════════════════════ */
+.view-tabs {
+  display: flex;
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: var(--header-h);
+  z-index: 90;
+}
+.view-tab {
+  flex: 1;
+  text-align: center;
+  padding: var(--sp-3);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+  position: relative;
+  transition: color var(--tr);
+  min-height: 44px;
+}
+.view-tab::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 50%;
+  transform: translateX(-50%);
+  width: 0; height: 2px;
+  background: var(--blue);
+  border-radius: 1px;
+  transition: width var(--tr);
+}
+.view-tab:hover { color: var(--text); }
+.view-tab--active { color: var(--blue); font-weight: var(--fw-semibold); }
+.view-tab--active::after { width: 60%; }
+
+/* ═══════════════════════════════════════════════════════════════
+   PILLS & BADGES
+   ═══════════════════════════════════════════════════════════════ */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 2px 8px;
+  border-radius: var(--r-full);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.pill--green  { background: var(--green-bg); color: var(--green-text); }
+.pill--orange { background: var(--orange-bg); color: var(--orange-text); }
+.pill--red    { background: var(--red-bg); color: var(--red-text); }
+.pill--blue   { background: var(--blue-bg); color: var(--blue-text); }
+.pill--amber  { background: var(--amber-bg); color: var(--amber-text); }
+.pill--muted  { background: var(--muted-bg); color: var(--slate-500); }
+.pill--sm  { font-size: 10px; padding: 1px 6px; }
+.pill--xs  { font-size: 9px; padding: 1px 4px; letter-spacing: 0.02em; }
+
+.new-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--r-full);
+  background: var(--blue);
+  color: #fff;
+  font-size: 9px;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.6;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   FILTER BAR
+   ═══════════════════════════════════════════════════════════════ */
+.filter-bar {
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4) var(--sp-2);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.filter-bar::-webkit-scrollbar { display: none; }
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--r-full);
+  background: var(--white);
+  border: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  transition: all var(--tr);
+  min-height: 32px;
+  cursor: pointer;
+}
+.filter-chip:hover { border-color: var(--slate-300); background: var(--slate-50); }
+.filter-chip--active {
+  background: var(--blue-bg);
+  border-color: var(--blue);
+  color: var(--blue-text);
+}
+.filter-chip__count {
+  background: var(--slate-200);
+  color: var(--slate-600);
+  font-size: 10px;
+  font-weight: var(--fw-bold);
+  min-width: 18px;
+  height: 18px;
+  border-radius: var(--r-full);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+}
+.filter-chip--active .filter-chip__count {
+  background: rgba(37,99,235,0.15);
+  color: var(--blue-text);
+}
+
+.sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--r-full);
+  background: var(--white);
+  border: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--tr);
+  min-height: 32px;
+  margin-left: auto;
+}
+.sort-btn:hover { border-color: var(--slate-300); }
+
+.results-meta {
+  padding: 0 var(--sp-4) var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.results-meta strong { color: var(--text-secondary); font-weight: var(--fw-semibold); }
+
+/* ═══════════════════════════════════════════════════════════════
+   PROPERTY CARD — REDESIGNED
+   ═══════════════════════════════════════════════════════════════ */
+.page {
+  max-width: var(--max-w);
+  margin: 0 auto;
+  padding: 0 0 calc(var(--tabbar-h) + var(--sp-4));
+}
+.card-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-3) var(--sp-3);
+}
+
+.card {
+  background: var(--card-bg);
+  border-radius: var(--r);
+  box-shadow: var(--sh);
+  overflow: hidden;
+  transition: box-shadow var(--tr), transform var(--tr);
+  position: relative;
+  cursor: pointer;
+  border-left: 4px solid transparent;
+}
+.card:hover { box-shadow: var(--sh-md); transform: translateY(-1px); }
+.card:focus-visible { box-shadow: 0 0 0 2px var(--blue), var(--sh-md); transform: translateY(-1px); }
+
+/* Status-driven left accent */
+.card--new       { border-left-color: var(--blue); }
+.card--saved     { border-left-color: var(--green); }
+.card--dismissed { border-left-color: var(--slate-300); opacity: 0.55; }
+.card--seen      { border-left-color: var(--amber); }
+
+.card__body {
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* ── Card: Rule-out strip ── */
+.card__verdicts {
+  display: flex;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-1);
+}
+.verdict {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.02em;
+  padding: 2px 6px;
+  border-radius: var(--r-sm);
+  line-height: 1.4;
+}
+.verdict--pass  { background: var(--green-bg); color: var(--green-text); }
+.verdict--warn  { background: var(--orange-bg); color: var(--orange-text); }
+.verdict--fail  { background: var(--red-bg); color: var(--red-text); }
+.verdict--unknown { background: var(--muted-bg); color: var(--slate-500); }
+.verdict__icon { font-size: 11px; line-height: 1; }
+
+/* ── Card: Primary row ── */
+.card__primary {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+.card__address {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+  color: var(--blue-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.card__price-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+  gap: 2px;
+}
+.card__price {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+  letter-spacing: -0.01em;
+}
+.card__monthly {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+.card__monthly--ok    { color: var(--green-text); }
+.card__monthly--tight { color: var(--orange-text); }
+.card__monthly--over  { color: var(--red-text); }
+
+.card__specs {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+.card__specs-sep {
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background: var(--slate-300);
+  flex-shrink: 0;
+}
+.card__specs-highlight { color: var(--text); font-weight: var(--fw-semibold); }
+
+/* ── Card: Commute row ── */
+.card__section {
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--divider);
+}
+.card__section-label {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: var(--sp-1);
+}
+
+.card__commutes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.commute-unit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-xs);
+}
+.commute-unit__name {
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+  min-width: 0;
+}
+.commute-unit__time {
+  font-weight: var(--fw-semibold);
+  padding: 1px 6px;
+  border-radius: var(--r-full);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.commute-unit__time--ok    { background: var(--green-bg); color: var(--green-text); }
+.commute-unit__time--warn  { background: var(--orange-bg); color: var(--orange-text); }
+.commute-unit__time--bad   { background: var(--red-bg); color: var(--red-text); }
+
+/* ── Card: School row ── */
+.card__schools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.school-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 3px 8px;
+  background: var(--slate-50);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+.school-chip__ofsted {
+  font-weight: var(--fw-bold);
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 3px;
+  line-height: 1.6;
+}
+.school-chip__ofsted--outstanding { background: var(--green); color: #fff; }
+.school-chip__ofsted--good        { background: var(--green-bg); color: var(--green-text); }
+.school-chip__ofsted--requires    { background: var(--orange-bg); color: var(--orange-text); }
+.school-chip__ofsted--inadequate  { background: var(--red-bg); color: var(--red-text); }
+.school-chip__ofsted--unknown     { background: var(--muted-bg); color: var(--slate-400); }
+.school-chip__walk {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* ── Card: Finance row ── */
+.card__finance {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+.card__finance-sep { color: var(--slate-300); }
+
+/* ── Card: Actions (mobile) ── */
+.card__actions {
+  display: flex;
+  gap: var(--sp-2);
+  padding-top: var(--sp-2);
+}
+.card__action-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  transition: all var(--tr);
+  min-height: 36px;
+}
+.card__action-btn--save   { background: var(--green-bg); color: var(--green-text); border: 1px solid var(--green); }
+.card__action-btn--save:hover   { background: var(--green); color: #fff; }
+.card__action-btn--dismiss { background: var(--red-bg); color: var(--red-text); border: 1px solid var(--red); }
+.card__action-btn--dismiss:hover { background: var(--red); color: #fff; }
+.card__action-btn--seen   { background: var(--muted-bg); color: var(--slate-600); border: 1px solid var(--border); }
+.card__action-btn--seen:hover   { background: var(--slate-200); }
+
+/* ═══════════════════════════════════════════════════════════════
+   PROPERTY DETAIL
+   ═══════════════════════════════════════════════════════════════ */
+.page-detail {
+  max-width: var(--max-w);
+  margin: 0 auto;
+  padding-bottom: calc(var(--tabbar-h) + var(--sp-4));
+}
+
+/* Summary bar (sticky) */
+.summary-bar {
+  position: sticky;
+  top: var(--header-h);
+  z-index: 85;
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  padding: var(--sp-3) var(--sp-4);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.summary-bar__info { flex: 1; min-width: 0; }
+.summary-bar__address {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+}
+.summary-bar__address-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+.summary-bar__right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--sp-1);
+  flex-shrink: 0;
+}
+.summary-bar__price {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.01em;
+}
+.summary-bar__monthly {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+/* Section nav (sticky) */
+.section-nav-wrap {
+  position: sticky;
+  top: calc(var(--header-h) + 68px);
+  z-index: 84;
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  padding: 0 var(--sp-3);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.section-nav-wrap::-webkit-scrollbar { display: none; }
+.section-nav {
+  display: flex;
+  gap: var(--sp-1);
+  padding: var(--sp-2) 0;
+}
+.section-nav__tab {
+  flex-shrink: 0;
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--r-full);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+  background: transparent;
+  transition: all var(--tr);
+  min-height: 32px;
+  white-space: nowrap;
+}
+.section-nav__tab:hover { background: var(--slate-50); color: var(--text); }
+.section-nav__tab--active {
+  background: var(--slate-800);
+  color: #fff;
+  font-weight: var(--fw-semibold);
+}
+
+/* Detail content */
+.detail-content {
+  padding: var(--sp-4) var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.detail-card {
+  background: var(--white);
+  border-radius: var(--r);
+  box-shadow: var(--sh-sm);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.detail-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--tr);
+  min-height: 48px;
+}
+.detail-card__header:hover { background: var(--slate-50); }
+.detail-card__header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1;
+  min-width: 0;
+}
+.detail-card__icon {
+  width: 32px; height: 32px;
+  border-radius: var(--r-sm);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  color: #fff;
+}
+.detail-card__icon--summary  { background: var(--blue); }
+.detail-card__icon--commute { background: var(--orange); }
+.detail-card__icon--schools { background: var(--green); }
+.detail-card__icon--costs   { background: var(--slate-700); }
+.detail-card__icon--notes   { background: var(--amber); }
+
+.detail-card__title {
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+}
+.detail-card__subtitle {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.detail-card__header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.detail-card__toggle {
+  color: var(--text-muted);
+  transition: transform var(--tr);
+}
+.detail-card__toggle--open { transform: rotate(180deg); }
+
+.detail-card__body {
+  padding: 0 var(--sp-4) var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+/* Detail rows */
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--divider);
+  font-size: var(--fs-sm);
+}
+.detail-row:last-child { border-bottom: none; }
+.detail-row__label { color: var(--text-secondary); }
+.detail-row__value { font-weight: var(--fw-semibold); text-align: right; }
+
+/* Map embed */
+.map-embed {
+  width: 100%;
+  height: 180px;
+  background: var(--slate-100);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+.map-embed__placeholder {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* Action buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-5);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+  transition: all var(--tr);
+  min-height: 44px;
+  white-space: nowrap;
+}
+.btn--primary { background: var(--blue); color: #fff; }
+.btn--primary:hover { background: #1d4ed8; box-shadow: var(--sh-md); }
+.btn--outline { border: 1px solid var(--border); color: var(--text); background: var(--white); }
+.btn--outline:hover { border-color: var(--slate-300); background: var(--slate-50); }
+.btn--green { background: var(--green); color: #fff; }
+.btn--green:hover { background: #15803d; }
+.btn--red-outline { border: 1px solid var(--red); color: var(--red-text); background: var(--red-bg); }
+.btn--red-outline:hover { background: var(--red); color: #fff; }
+
+/* Commute detail */
+.commute-person {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.commute-person + .commute-person { margin-top: var(--sp-2); }
+.commute-person__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-3);
+  background: var(--slate-50);
+  cursor: pointer;
+}
+.commute-person__name {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+.commute-person__legs {
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.commute-leg {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+.commute-leg__mode {
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.commute-leg__desc { flex: 1; }
+.commute-leg__time { font-weight: var(--fw-semibold); color: var(--text); flex-shrink: 0; }
+.commute-person__meta {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--slate-50);
+  border-top: 1px solid var(--divider);
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* School list */
+.school-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+.school-item + .school-item { margin-top: var(--sp-2); }
+.school-item__info { flex: 1; min-width: 0; }
+.school-item__name {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+}
+.school-item__meta {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.school-item__right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--sp-1);
+  flex-shrink: 0;
+}
+
+/* Cost table */
+.cost-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+.cost-table td {
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--divider);
+}
+.cost-table td:last-child {
+  text-align: right;
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.cost-table__total td {
+  border-bottom: none;
+  border-top: 2px solid var(--slate-300);
+  padding-top: var(--sp-3);
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-base);
+}
+.cost-table__sub td {
+  padding-left: var(--sp-4);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  font-weight: var(--fw-normal);
+}
+
+/* Provenance inline */
+.provenance {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--text-muted);
+  cursor: help;
+}
+.provenance__dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--slate-300);
+}
+.provenance:hover .provenance__dot { background: var(--blue); }
+
+/* Notes section */
+.notes-field { display: flex; flex-direction: column; gap: var(--sp-1); }
+.notes-field__label {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.notes-field__input,
+.notes-field__textarea {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  background: var(--white);
+  transition: border-color var(--tr);
+}
+.notes-field__input:focus,
+.notes-field__textarea:focus {
+  border-color: var(--blue);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+}
+.notes-field__textarea { min-height: 80px; resize: vertical; }
+
+/* Status selector */
+.status-selector {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.status-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  border: 2px solid var(--border);
+  transition: all var(--tr);
+  min-height: 40px;
+}
+.status-btn--new       { border-color: var(--slate-300); color: var(--text-secondary); }
+.status-btn--new:hover { border-color: var(--blue); background: var(--blue-bg); }
+.status-btn--saved     { border-color: var(--green); background: var(--green-bg); color: var(--green-text); }
+.status-btn--dismissed { border-color: var(--red); background: var(--red-bg); color: var(--red-text); }
+.status-btn--seen      { border-color: var(--amber); background: var(--amber-bg); color: var(--amber-text); }
+.status-btn--active    { box-shadow: 0 0 0 2px currentColor; }
+
+/* Discussion thread */
+.discussion {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.discussion-entry {
+  display: flex;
+  gap: var(--sp-2);
+}
+.discussion-avatar {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--slate-200);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: var(--fw-bold);
+  color: var(--slate-600);
+  flex-shrink: 0;
+}
+.discussion-body { flex: 1; min-width: 0; }
+.discussion-name {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--text);
+}
+.discussion-time {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: var(--sp-2);
+}
+.discussion-text {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  line-height: var(--lh-loose);
+  margin-top: 2px;
+}
+.discussion-input {
+  display: flex;
+  gap: var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--divider);
+}
+.discussion-input input {
+  flex: 1;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+.discussion-input input:focus {
+  border-color: var(--blue);
+  outline: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   BOTTOM TAB BAR
+   ═══════════════════════════════════════════════════════════════ */
+.tab-bar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: var(--tabbar-h);
+  background: var(--white);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: stretch;
+  justify-content: space-around;
+  z-index: 80;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+.tab-bar__tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  flex: 1;
+  color: var(--text-muted);
+  transition: color var(--tr);
+  min-height: 44px;
+  padding: var(--sp-1) var(--sp-2);
+}
+.tab-bar__tab:hover { color: var(--text-secondary); }
+.tab-bar__tab--active { color: var(--blue); }
+.tab-bar__label {
+  font-size: 10px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.01em;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PAGE MANAGEMENT
+   ═══════════════════════════════════════════════════════════════ */
+.page-view { display: none; }
+.page-view--active { display: block; }
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════════════════════════ */
+@media (min-width: 768px) {
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--sp-3);
+  }
+}
+@media (min-width: 1024px) {
+  .card-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* On mobile, hide action buttons inside cards — use swipe or detail page */
+@media (min-width: 768px) {
+  .card__actions { display: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   UX REVIEW SECTION (non-wireframe)
+   ═══════════════════════════════════════════════════════════════ */
+.review-section {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: var(--sp-8) var(--sp-4);
+}
+.review-section h1 {
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-bold);
+  margin-bottom: var(--sp-6);
+  color: var(--slate-900);
+  letter-spacing: -0.02em;
+}
+.review-section h2 {
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+  margin: var(--sp-8) 0 var(--sp-4);
+  color: var(--slate-800);
+  letter-spacing: -0.01em;
+  padding-bottom: var(--sp-2);
+  border-bottom: 2px solid var(--border);
+}
+.review-section h3 {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  margin: var(--sp-6) 0 var(--sp-3);
+  color: var(--slate-700);
+}
+.review-section p {
+  font-size: var(--fs-base);
+  line-height: var(--lh-loose);
+  color: var(--text-secondary);
+  margin-bottom: var(--sp-3);
+}
+.review-section ul {
+  padding-left: var(--sp-5);
+  margin-bottom: var(--sp-3);
+}
+.review-section li {
+  font-size: var(--fs-base);
+  line-height: var(--lh-loose);
+  color: var(--text-secondary);
+  margin-bottom: var(--sp-2);
+}
+.review-section li strong { color: var(--text); }
+.review-section code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  background: var(--slate-100);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.finding {
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-sm);
+  margin-bottom: var(--sp-3);
+  border-left: 4px solid;
+}
+.finding--critical { background: var(--red-bg); border-color: var(--red); }
+.finding--major    { background: var(--orange-bg); border-color: var(--orange); }
+.finding--minor    { background: var(--blue-bg); border-color: var(--blue); }
+.finding--positive { background: var(--green-bg); border-color: var(--green); }
+.finding__label {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: var(--sp-1);
+}
+.finding--critical .finding__label { color: var(--red-text); }
+.finding--major    .finding__label { color: var(--orange-text); }
+.finding--minor    .finding__label { color: var(--blue-text); }
+.finding--positive .finding__label { color: var(--green-text); }
+.finding__text {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-loose);
+  color: var(--text);
+}
+
+/* Wireframe divider */
+.wireframe-divider {
+  border: none;
+  border-top: 3px double var(--slate-300);
+  margin: var(--sp-10) 0;
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     UX REVIEW
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="review-section">
+  <h1>UX/UI Review &amp; Wireframe</h1>
+  <p>Analysis of the house-hunting tool's property list and detail pages, grounded in the four personas (Ashby, Simon, Lorena, George) and their two primary workflows: <strong>triage</strong> (scan fast, rule out) and <strong>evaluation</strong> (dig into survivors, discuss as a group).</p>
+
+  <!-- ───────────── UX FINDINGS ───────────── -->
+  <h2>UX Findings</h2>
+
+  <div class="finding finding--critical">
+    <div class="finding__label">Critical — No at-a-glance rule-out signal</div>
+    <div class="finding__text">The three rule-out criteria (affordability, commutes, schools) are scattered across each card in separate sections. To decide if a property is a hard no, the user must read the financial line, scan every commute pill, then check school dots — three separate visual searches per card. During triage of 30+ new properties, this is the primary friction point.</div>
+  </div>
+
+  <div class="finding finding--critical">
+    <div class="finding__label">Critical — Affordability indicator missing</div>
+    <div class="finding__text">The card shows monthly cost (e.g. ~£2,850/mo) but gives no signal about whether that's within, stretching, or over budget. The persona doc says budget is <em>fixed monthly</em> — the user needs a quick ✓/✗ on "can we afford this?" not a number they must mentally compare to a remembered threshold.</div>
+  </div>
+
+  <div class="finding finding--critical">
+    <div class="finding__label">Critical — Bottom nav bar obstructs content on mobile</div>
+    <div class="finding__text">The fixed bottom tab bar (Properties / Favourites / Map) sits at z-index 80 and covers the commute section and action buttons on the detail page. On the 375px screenshot, "George/Secondary School" is partially hidden behind the nav. This blocks the very information users need to make decisions.</div>
+  </div>
+
+  <div class="finding finding--major">
+    <div class="finding__label">Major — Filters don't match workflow</div>
+    <div class="finding__text">Current filters are "Maybe", "Undecided", "Favourites" — but the personas describe three distinct states: Saved (actively like), Dismissed (hard no), Seen (physically visited). "Undecided" isn't a useful filter; the user wants to see what's <em>new and unprocessed</em>. The filter bar needs: New, Saved, Dismissed, Seen.</div>
+  </div>
+
+  <div class="finding finding--major">
+    <div class="finding__label">Major — Commute pills show destinations, not people</div>
+    <div class="finding__text">Cards show "Simon/Pimlico", "Simon/Bracknell", "Simon/Dad", "Lorena/Aldgate" — but the user thinks in terms of <em>per-person</em> commute quality, not per-destination. Simon has multiple destinations because he visits different places, but what matters is: "What's Simon's worst commute from this property?" The current display requires mental aggregation.</div>
+  </div>
+
+  <div class="finding finding--major">
+    <div class="finding__label">Major — Floating-point artifact destroys trust</div>
+    <div class="finding__text">The costs section shows "Total Monthly £3616.1466666666665". For a tool where <em>all four users are suspicious of automated calculations</em>, displaying a raw float is catastrophic. It signals "this wasn't designed for you to trust it." All monetary values must be properly rounded to 2 decimal places or whole pounds.</div>
+  </div>
+
+  <div class="finding finding--major">
+    <div class="finding__label">Major — Provenance display is confusing</div>
+    <div class="finding__text">Ashby "would click provenance details frequently if they worked" but finds the current display confusing. The existing info icons next to data points aren't clearly interactive and don't explain <em>what</em> data source, <em>when</em> it was fetched, or <em>how</em> the calculation was done. Provenance needs to be inline, scannable, and expandable on click.</div>
+  </div>
+
+  <div class="finding finding--major">
+    <div class="finding__label">Major — Group discussion is a flat textarea</div>
+    <div class="finding__text">The current "Notes" section is a single textarea per person. But the personas describe WhatsApp-style per-property discussion: "Simon: Booked viewing Sat 10am", "Lorena: Need to check parking". This needs to be threaded, per-person comments with timestamps — not a single text box.</div>
+  </div>
+
+  <div class="finding finding--minor">
+    <div class="finding__label">Minor — No "new property" indicator</div>
+    <div class="finding__text">Freshness helps identify new leads (from personas). When Ashby opens the tool, they need to immediately see which properties they haven't triaged yet. Currently there's no visual distinction between properties seen yesterday and ones just added.</div>
+  </div>
+
+  <div class="finding finding--minor">
+    <div class="finding__label">Minor — School dots lack legibility</div>
+    <div class="finding__text">The dual-dot system (Ofsted dot + walk dot) beside school names is compact but opaque. The dots aren't labelled, so a new user must learn the convention. On the detail page, school info is presented as plain text rows — no visual hierarchy between "Outstanding" and "Good". The Ofsted rating is the primary school quality signal and should be more prominent.</div>
+  </div>
+
+  <div class="finding finding--minor">
+    <div class="finding__label">Minor — Missing data shown as raw placeholders</div>
+    <div class="finding__text">Council Tax shows "? - £?/yr", Sinking Fund shows "£?". These raw placeholders erode confidence. Missing data should show a clear "Not yet researched" state with an action to fill it in, not broken formatting.</div>
+  </div>
+
+  <div class="finding finding--positive">
+    <div class="finding__label">Positive — Core data model is sound</div>
+    <div class="finding__text">The underlying information architecture is right: per-person commutes, school Ofsted + walk distance, monthly cost breakdown, per-person commute cost, provenance tracking. The wireframe preserves all of this — the issue is presentation, not data.</div>
+  </div>
+
+  <div class="finding finding--positive">
+    <div class="finding__label">Positive — Detail page tab structure works</div>
+    <div class="finding__text">The Summary / Commute / Schools / Costs / Notes tab navigation on the detail page is a good information architecture. Users can jump to their priority section. The wireframe keeps this structure but improves the content within each section.</div>
+  </div>
+
+  <!-- ───────────── UI FINDINGS ───────────── -->
+  <h2>UI Findings</h2>
+
+  <div class="finding finding--major">
+    <div class="finding__label">Card density overwhelms scanning</div>
+    <div class="finding__text">Each list card contains 5–6 distinct sections (address+price, specs, commutes, schools, finance, actions) separated by dividers. At 1280px with a 3-column grid, the cards are dense but readable. At 375px in single column, the vertical length per card is extreme — scrolling through 30 properties means scrolling past hundreds of sections. The redesign condenses the card to focus on the three rule-out signals.</div>
+  </div>
+
+  <div class="finding finding--major">
+    <div class="finding__label">Status actions are hidden behind dropdown</div>
+    <div class="finding__text">Setting a property's status requires scrolling to the Notes section, finding the Status dropdown, and selecting from a menu. For triage — where the user is rapidly saving or dismissing — this is too many steps. The redesign puts Save/Dismiss actions directly on each card (mobile) or as quick-action buttons.</div>
+  </div>
+
+  <div class="finding finding--minor">
+    <div class="finding__label">EPC badge is buried</div>
+    <div class="finding__text">Energy efficiency directly affects running costs and affordability, but the EPC badge appears as a small pill in the Summary section header. It should be part of the cost/finance signal on the list card.</div>
+  </div>
+
+  <div class="finding finding--minor">
+    <div class="finding__label">Map is too small to be useful</div>
+    <div class="finding__text">The map embed on the detail page is approximately 300x150px — too small to actually understand the property's location relative to stations, schools, or amenities. Either make it full-width expandable or replace with a static location summary.</div>
+  </div>
+
+  <!-- ───────────── WHAT CHANGED AND WHY ───────────── -->
+  <h2>What Changed and Why</h2>
+
+  <h3>Property List Cards</h3>
+  <ul>
+    <li><strong>Added verdict strip</strong> (Affordability ✓/✗, Commutes ✓/✗, Schools ✓/✗) at the top of each card — addresses the primary triage need. Users can scan 30 cards and immediately identify rule-outs without reading every section.</li>
+    <li><strong>Monthly cost now color-coded against budget</strong> — green (within budget), orange (stretching), red (over). Replaces the neutral " ~£X/mo" with a decision-ready signal.</li>
+    <li><strong>Commutes condensed to per-person</strong> — shows one pill per person with their worst commute time, not every destination. Detail page shows full breakdown.</li>
+    <li><strong>School quality shown as Ofsted label</strong> — replaces dual-dot system with explicit rating text ("Outstanding", "Good") that doesn't require learning a legend.</li>
+    <li><strong>Added "New" badge</strong> for recently discovered properties — addresses freshness need.</li>
+    <li><strong>Added Save/Dismiss/Seen buttons on mobile cards</strong> — reduces triage friction from 3 taps (scroll, open dropdown, select) to 1 tap.</li>
+    <li><strong>Filters changed to New / Saved / Dismissed / Seen / All</strong> — matches the actual three-state model from the personas.</li>
+    <li><strong>Added count badges on filter chips</strong> — "Saved (3)" tells you at a glance how many you've shortlisted.</li>
+  </ul>
+
+  <h3>Property Detail Page</h3>
+  <ul>
+    <li><strong>Sticky summary bar</strong> keeps address and price visible while scrolling through sections.</li>
+    <li><strong>Costs section: all values properly formatted</strong> — whole pounds or 2 decimal places, no floating-point artifacts. Sub-items (per-person commute cost) shown as indented rows.</li>
+    <li><strong>Provenance shown as inline labels</strong> — "Source: TfL API · 26 Jun 2026" appears beneath each data section, not as confusing icons. Expandable on click for full calculation details.</li>
+    <li><strong>Commute section: per-person expandable cards</strong> — header shows person name + total time, expand to see route legs (walk → train → walk), cost, and provenance.</li>
+    <li><strong>Schools section: prominent Ofsted badges</strong> — rating shown as colored badge (not just text), with distance and walk time. Inspection date shown for trust.</li>
+    <li><strong>Discussion replaces flat textarea</strong> — threaded per-person comments with avatars and timestamps. Each person's input is visually distinct and attributable.</li>
+    <li><strong>Status management moved to prominent button group</strong> — not hidden in a dropdown. Clear visual states for New / Saved / Dismissed / Seen.</li>
+    <li><strong>Bottom nav bar given proper padding</strong> — content area accounts for the fixed nav height so nothing is obscured.</li>
+  </ul>
+
+  <h3>What Was Removed</h3>
+  <ul>
+    <li><strong>Dual-dot school system</strong> — replaced with explicit Ofsted text badges. The dots required learning a convention; text is immediately legible.</li>
+    <li><strong>"Maybe" / "Undecided" filters</strong> — these states don't match the workflow. Replaced with states that map to actual decisions.</li>
+    <li><strong>Confusing provenance icons</strong> — replaced with inline text provenance that reads naturally.</li>
+    <li><strong>Status dropdown on detail page</strong> — replaced with prominent button group that shows all options at once.</li>
+  </ul>
+</div>
+
+<hr class="wireframe-divider">
+
+<!-- ═══════════════════════════════════════════════════════════════
+     WIREFRAME: PROPERTY LIST
+     ═══════════════════════════════════════════════════════════════ -->
+
+<!-- HEADER -->
+<header class="header">
+  <div class="header__inner">
+    <div class="header__start"></div>
+    <div class="header__title">Properties</div>
+    <div class="header__end">
+      <button class="btn-icon" title="Map view">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- VIEW TABS -->
+<div class="view-tabs">
+  <div class="view-tab view-tab--active" onclick="switchPage('list')">Property List</div>
+  <div class="view-tab" onclick="switchPage('detail')">Property Detail</div>
+</div>
+
+<!-- ═══ PAGE: PROPERTY LIST ═══ -->
+<div class="page-view page-view--active" id="page-list">
+  <main class="page" role="main">
+
+    <!-- Filter bar -->
+    <div class="filter-bar">
+      <button class="filter-chip filter-chip--active">
+        New <span class="filter-chip__count">12</span>
+      </button>
+      <button class="filter-chip">
+        Saved <span class="filter-chip__count">3</span>
+      </button>
+      <button class="filter-chip">
+        Dismissed <span class="filter-chip__count">8</span>
+      </button>
+      <button class="filter-chip">
+        Seen <span class="filter-chip__count">2</span>
+      </button>
+      <button class="filter-chip">All</button>
+      <button class="sort-btn">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="20" y2="6"></line><line x1="8" y1="12" x2="20" y2="12"></line><line x1="12" y1="18" x2="20" y2="18"></line></svg>
+        Newest
+      </button>
+    </div>
+
+    <!-- Results meta -->
+    <div class="results-meta">
+      <strong>12 new properties</strong> · 3 rule out by affordability · 5 rule out by commute
+    </div>
+
+    <!-- Card grid -->
+    <div class="card-grid">
+
+      <!-- ─── Card 1: New, passes all ─── -->
+      <article class="card card--new" tabindex="0" onclick="switchPage('detail')">
+        <div class="card__body">
+          <!-- Rule-out verdicts -->
+          <div class="card__verdicts">
+            <span class="verdict verdict--pass"><span class="verdict__icon">✓</span> Affordable</span>
+            <span class="verdict verdict--pass"><span class="verdict__icon">✓</span> Commutes</span>
+            <span class="verdict verdict--pass"><span class="verdict__icon">✓</span> Schools</span>
+            <span class="new-badge">New</span>
+          </div>
+
+          <div class="card__primary">
+            <a class="card__address" href="#">48 Acacia Avenue, Maidenhead, SL6 2NE</a>
+            <div class="card__price-col">
+              <span class="card__price">£795,000</span>
+              <span class="card__monthly card__monthly--ok">£2,850/mo</span>
+            </div>
+          </div>
+          <div class="card__specs">
+            <span class="card__specs-highlight">5 bed</span>
+            <span class="card__specs-sep"></span>
+            <span>2 bath</span>
+            <span class="card__specs-sep"></span>
+            <span>SL6</span>
+            <span class="card__specs-sep"></span>
+            <span class="pill pill--green pill--xs">EPC B</span>
+          </div>
+
+          <div class="card__section">
+            <div class="card__section-label">Commutes</div>
+            <div class="card__commutes">
+              <span class="commute-unit">
+                <span class="commute-unit__name">Simon</span>
+                <span class="commute-unit__time commute-unit__time--ok">32 min</span>
+              </span>
+              <span class="commute-unit">
+                <span class="commute-unit__name">Lorena</span>
+                <span class="commute-unit__time commute-unit__time--warn">48 min</span>
+              </span>
+              <span class="commute-unit">
+                <span class="commute-unit__name">George</span>
+                <span class="commute-unit__time commute-unit__time--ok">14 min</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="card__section">
+            <div class="card__section-label">Schools</div>
+            <div class="card__schools">
+              <span class="school-chip">
+                <span class="school-chip__ofsted school-chip__ofsted--outstanding">Outstanding</span>
+                <span>St Mary's Primary</span>
+                <span class="school-chip__walk">· 8 min</span>
+              </span>
+              <span class="school-chip">
+                <span class="school-chip__ofsted school-chip__ofsted--good">Good</span>
+                <span>The Academy</span>
+                <span class="school-chip__walk">· 12 min</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="card__section">
+            <div class="card__finance">
+              <span style="color:var(--green-text)">£2,850/mo</span>
+              <span class="card__finance-sep">·</span>
+              <span>+£800 vs now</span>
+              <span class="card__finance-sep">·</span>
+              <span style="color:var(--text-muted);font-size:var(--fs-xs)">Stamp duty £21,250</span>
+            </div>
+          </div>
+
+          <!-- Mobile actions -->
+          <div class="card__actions">
+            <button class="card__action-btn card__action-btn--save" onclick="event.stopPropagation()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"></path></svg>
+              Save
+            </button>
+            <button class="card__action-btn card__action-btn--dismiss" onclick="event.stopPropagation()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              Dismiss
+            </button>
+            <button class="card__action-btn card__action-btn--seen" onclick="event.stopPropagation()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              Seen
+            </button>
+          </div>
+        </div>
+      </article>
+
+      <!-- ─── Card 2: New, fails commute ─── -->
+      <article class="card card--new" tabindex="0">
+        <div class="card__body">
+          <div class="card__verdicts">
+            <span class="verdict verdict--pass"><span class="verdict__icon">✓</span> Affordable</span>
+            <span class="verdict verdict--fail"><span class="verdict__icon">✗</span> Commutes</span>
+            <span class="verdict verdict--pass"><span class="verdict__icon">✓</span> Schools</span>
+            <span class="new-badge">New</span>
+          </div>
+
+          <div class="card__primary">
+            <a class="card__address" href="#">Shoppenhangers Road, Maidenhead, SL6 2QL</a>
+            <div class="card__price-col">
+              <span class="card__price">£625,000</span>
+              <span class="card__monthly card__monthly--ok">£2,100/mo</span>
+            </div>
+          </div>
+          <div class="card__specs">
+            <span class="card__specs-highlight">4 bed</span>
+            <span class="card__specs-sep"></span>
+            <span>2 bath</span>
+            <span class="card__specs-sep"></span>
+            <span>SL6</span>
+            <span class="card__specs-sep"></span>
+            <span class="pill pill--green pill--xs">EPC A</span>
+          </div>
+
+          <div class="card__section">
+            <div class="card__section-label">Commutes</div>
+            <div class="card__commutes">
+              <span class="commute-unit">
+                <span class="commute-unit__name">Simon</span>
+                <span class="commute-unit__time commute-unit__time--ok">28 min</span>
+              </span>
+              <span class="commute-unit">
+                <span class="commute-unit__name">Lorena</span>
+                <span class="commute-unit__time commute-unit__time--bad">82 min</span>
+              </span>
+              <span class="commute-unit">
+                <span class="commute-unit__name">George</span>
+                <span class="commute-unit__time commute-unit__time--ok">18 min</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="card__section">
+            <div class="card__section-label">Schools</div>
+            <div class="card__schools">
+              <span class="school-chip">
+                <span class="school-chip__ofsted school-chip__ofsted--outstanding">Outstanding</span>
+                <span>St Mary's Primary</span>
+                <span class="school-chip__walk">· 10 min</span>
+              </span>
+              <span class="school-chip">
+                <span class="school-chip__ofsted school-chip__ofsted--good">Good</span>
+                <span>Maidenhead High</span>
+                <span class="school-chip__walk">· 18 min</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="card__section">
+            <div class="card__finance">
+              <span style="color:var(--green-text)">£2,100/mo</span>
+              <span class="card__finance-sep">·</span>
+              <span>+£50 vs now</span>
+              <span class="card__finance-sep">·</span>
+              <span style="color:var(--text-muted);font-size:var(--fs-xs)">Stamp duty £16,250</span>
+            </div>
+          </div>
+
+          <div class="card__actions">
+            <button class="card__action-btn card__action-btn--save" onclick="event.stopPropagation()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"></path></svg>
+              Save
+            </button>
+            <button class="card__action-btn card__action-btn--dismiss" onclick="event.stopPropagation()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              Dismiss
+            </button>
+            <button class="card__action-btn card__action-btn--seen" onclick="event.stopPropagation()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              Seen
+            </button>
+          </div>
+        </div>
+      </article>
+
+      <!-- ─── Card 3: Saved ─── -->
+      <article class="card card--saved" tabindex="0" onclick="switchPage('detail')">
+        <div class="card__body">
+          <div class="card__verdicts">
+            <span class="verdict verdict--pass"><span class="verdict__icon">✓</span> Affordable</span>
+            <span class="verdict verdict--pass"><span class="verdict__icon">✓</span> Commutes</span>
+            <span class="verdict verdict--warn"><span class="verdict__icon">~</span> Schools</span>
+          </div>
+
+          <div class="card__primary">
+            <a class="card__address" href="#">Pembroke Avenue, Hersham, KT12 4NT</a>
+            <div class="card__price-col">
+              <span class="card__price">£600,000</span>
+              <span class="card__monthly card__monthly--ok">£2,050/mo</span>
+            </div>
+          </div>
+          <div class="card__specs">
+            <span class="card__specs-highlight">4 bed</span>
+            <span class="card__specs-sep"></span>
+            <span>1 bath</span>
+            <span class="card__specs-sep"></span>
+            <span>KT12</span>
+            <span class="card__specs-sep"></span>
+            <span class="pill pill--orange pill--xs">EPC D</span>
+          </div>
+
+          <div class="card__section">
+            <div class="card__section-label">Commutes</div>
+            <div class="card__commutes">
+              <span class="commute-unit">
+                <span class="commute-unit__name">Simon</span>
+                <span class="commute-unit__time commute-unit__time--ok">18 min</span>
+              </span>
+              <span class="commute-unit">
+                <span class="commute-unit__name">Lorena</span>
+                <span class="commute-unit__time commute-unit__time--bad">62 min</span>
+              </span>
+              <span class="commute-unit">
+                <span class="commute-unit__name">George</span>
+                <span class="commute-unit__time commute-unit__time--ok">12 min</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="card__section">
+            <div class="card__section-label">Schools</div>
+            <div class="card__schools">
+              <span class="school-chip">
+                <span class="school-chip__ofsted school-chip__ofsted--outstanding">Outstanding</span>
+                <span>St George's Primary</span>
+                <span class="school-chip__walk">· 5 min</span>
+              </span>
+              <span class="school-chip">
+                <span class="school-chip__ofsted school-chip__ofsted--requires">Requires</span>
+                <span>Esher High</span>
+                <span class="school-chip__walk">· 22 min</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="card__section">
+            <div class="card__finance">
+              <span style="color:var(--green-text)">£2,050/mo</span>
+              <span class="card__finance-sep">·</span>
+              <span style="color:var(--green-text)">−£1,050 vs now</span>
+              <span class="card__finance-sep">·</span>
+              <span style="color:var(--text-muted);font-size:var(--fs-xs)">Stamp duty £15,000</span>
+            </div>
+          </div>
+
+          <div class="card__actions">
+            <button class="card__action-btn card__action-btn--save" onclick="event.stopPropagation()" style="background:var(--green);color:#fff;border-color:var(--green)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2.5"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"></path></svg>
+              Saved
+            </button>
+            <button class="card__action-btn card__action-btn--dismiss" onclick="event.stopPropagation()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              Dismiss
+            </button>
+            <button class="card__action-btn card__action-btn--seen" onclick="event.stopPropagation()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              Seen
+            </button>
+          </div>
+        </div>
+      </article>
+
+      <!-- ─── Card 4: New, fails affordability ─── -->
+      <article class="card card--new" tabindex="0">
+        <div class="card__body">
+          <div class="card__verdicts">
+            <span class="verdict verdict--fail"><span class="verdict__icon">✗</span> Affordable</span>
+            <span class="verdict verdict--pass"><span class="verdict__icon">✓</span> Commutes</span>
+            <span class="verdict verdict--pass"><span class="verdict__icon">✓</span> Schools</span>
+            <span class="new-badge">New</span>
+          </div>
+
+          <div class="card__primary">
+            <a class="card__address" href="#">Thurlby Way, Maidenhead, SL6 3YZ</a>
+            <div class="card__price-col">
+              <span class="card__price">£650,000</span>
+              <span class="card__monthly card__monthly--over">£3,616/mo</span>
+            </div>
+          </div>
+          <div class="card__specs">
+            <span class="card__specs-highlight">4 bed</span>
+            <span class="card__specs-sep"></span>
+            <span>2 bath</span>
+            <span class="card__specs-sep"></span>
+            <span>SL6</span>
+          </div>
+
+          <div class="card__section">
+            <div class="card__section-label">Commutes</div>
+            <div class="card__commutes">
+              <span class="commute-unit">
+                <span class="commute-unit__name">Simon</span>
+                <span class="commute-unit__time commute-unit__time--ok">54 min</span>
+              </span>
+              <span class="commute-unit">
+                <span class="commute-unit__name">Lorena</span>
+                <span class="commute-unit__time commute-unit__time--bad">96 min</span>
+              </span>
+              <span class="commute-unit">
+                <span class="commute-unit__name">George</span>
+                <span class="commute-unit__time commute-unit__time--ok">14 min</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="card__section">
+            <div class="card__section-label">Schools</div>
+            <div class="card__schools">
+              <span class="school-chip">
+                <span class="school-chip__ofsted school-chip__ofsted--good">Good</span>
+                <span>Larchfield Primary</span>
+                <span class="school-chip__walk">· 18 min</span>
+              </span>
+              <span class="school-chip">
+                <span class="school-chip__ofsted school-chip__ofsted--good">Good</span>
+                <span>Desborough College</span>
+                <span class="school-chip__walk">· 14 min</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="card__section">
+            <div class="card__finance">
+              <span style="color:var(--red-text)">£3,616/mo</span>
+              <span class="card__finance-sep">·</span>
+              <span style="color:var(--red-text)">+£1,616 vs now</span>
+              <span class="card__finance-sep">·</span>
+              <span style="color:var(--text-muted);font-size:var(--fs-xs)">Stamp duty £20,000</span>
+            </div>
+          </div>
+
+          <div class="card__actions">
+            <button class="card__action-btn card__action-btn--save" onclick="event.stopPropagation()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"></path></svg>
+              Save
+            </button>
+            <button class="card__action-btn card__action-btn--dismiss" onclick="event.stopPropagation()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              Dismiss
+            </button>
+            <button class="card__action-btn card__action-btn--seen" onclick="event.stopPropagation()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              Seen
+            </button>
+          </div>
+        </div>
+      </article>
+
+      <!-- ─── Card 5: Dismissed ─── -->
+      <article class="card card--dismissed" tabindex="0">
+        <div class="card__body">
+          <div class="card__verdicts">
+            <span class="verdict verdict--fail"><span class="verdict__icon">✗</span> Schools</span>
+          </div>
+
+          <div class="card__primary">
+            <a class="card__address" href="#">15 Victoria Road, London, E8 3DF</a>
+            <div class="card__price-col">
+              <span class="card__price">£325,000</span>
+              <span class="card__monthly card__monthly--ok">£1,400/mo</span>
+            </div>
+          </div>
+          <div class="card__specs">
+            <span class="card__specs-highlight">2 bed</span>
+            <span class="card__specs-sep"></span>
+            <span>1 bath</span>
+            <span class="card__specs-sep"></span>
+            <span>E8</span>
+          </div>
+
+          <div class="card__section">
+            <div class="card__section-label">Commutes</div>
+            <div class="card__commutes">
+              <span class="commute-unit">
+                <span class="commute-unit__name">Simon</span>
+                <span class="commute-unit__time commute-unit__time--ok">32 min</span>
+              </span>
+              <span class="commute-unit">
+                <span class="commute-unit__name">Lorena</span>
+                <span class="commute-unit__time commute-unit__time--warn">55 min</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="card__section">
+            <div class="card__finance">
+              <span>£325,000</span>
+              <span class="card__finance-sep">·</span>
+              <span class="pill pill--muted pill--xs">No school data</span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ─── Card 6: Seen ─── -->
+      <article class="card card--seen" tabindex="0" onclick="switchPage('detail')">
+        <div class="card__body">
+          <div class="card__verdicts">
+            <span class="verdict verdict--pass"><span class="verdict__icon">✓</span> Affordable</span>
+            <span class="verdict verdict--pass"><span class="verdict__icon">✓</span> Commutes</span>
+            <span class="verdict verdict--pass"><span class="verdict__icon">✓</span> Schools</span>
+          </div>
+
+          <div class="card__primary">
+            <a class="card__address" href="#">Flat 12, Bridgewater House, Walton Bridge Road, Sunbury, TW16 6EN</a>
+            <div class="card__price-col">
+              <span class="card__price">£350,000</span>
+              <span class="card__monthly card__monthly--ok">£1,650/mo</span>
+            </div>
+          </div>
+          <div class="card__specs">
+            <span class="card__specs-highlight">3 bed</span>
+            <span class="card__specs-sep"></span>
+            <span>2 bath</span>
+            <span class="card__specs-sep"></span>
+            <span>TW16</span>
+            <span class="card__specs-sep"></span>
+            <span class="pill pill--green pill--xs">EPC B</span>
+          </div>
+
+          <div class="card__section">
+            <div class="card__section-label">Commutes</div>
+            <div class="card__commutes">
+              <span class="commute-unit">
+                <span class="commute-unit__name">Simon</span>
+                <span class="commute-unit__time commute-unit__time--ok">42 min</span>
+              </span>
+              <span class="commute-unit">
+                <span class="commute-unit__name">Lorena</span>
+                <span class="commute-unit__time commute-unit__time--warn">52 min</span>
+              </span>
+              <span class="commute-unit">
+                <span class="commute-unit__name">George</span>
+                <span class="commute-unit__time commute-unit__time--ok">10 min</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="card__section">
+            <div class="card__section-label">Schools</div>
+            <div class="card__schools">
+              <span class="school-chip">
+                <span class="school-chip__ofsted school-chip__ofsted--outstanding">Outstanding</span>
+                <span>Walton Oak Primary</span>
+                <span class="school-chip__walk">· 6 min</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="card__section">
+            <div class="card__finance">
+              <span style="color:var(--green-text)">£1,650/mo</span>
+              <span class="card__finance-sep">·</span>
+              <span style="color:var(--green-text)">−£350 vs now</span>
+              <span class="card__finance-sep">·</span>
+              <span style="color:var(--text-muted);font-size:var(--fs-xs)">Viewed 22 Jul</span>
+            </div>
+          </div>
+
+          <div class="card__actions">
+            <button class="card__action-btn card__action-btn--save" onclick="event.stopPropagation()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"></path></svg>
+              Save
+            </button>
+            <button class="card__action-btn card__action-btn--dismiss" onclick="event.stopPropagation()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              Dismiss
+            </button>
+            <button class="card__action-btn card__action-btn--seen" onclick="event.stopPropagation()" style="background:var(--amber-bg);color:var(--amber-text);border-color:var(--amber)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+              Seen ✓
+            </button>
+          </div>
+        </div>
+      </article>
+
+    </div>
+  </main>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     WIREFRAME: PROPERTY DETAIL
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="page-view" id="page-detail">
+  <main class="page-detail" role="main">
+
+    <!-- Summary bar (sticky) -->
+    <div class="summary-bar">
+      <div class="summary-bar__info">
+        <div class="summary-bar__address">48 Acacia Avenue</div>
+        <div class="summary-bar__address-sub">Maidenhead, SL6 2NE · 5 bed · 2 bath</div>
+      </div>
+      <div class="summary-bar__right">
+        <span class="summary-bar__price">£795,000</span>
+        <span class="summary-bar__monthly card__monthly--ok">£2,850/mo</span>
+      </div>
+    </div>
+
+    <!-- Section nav (sticky) -->
+    <div class="section-nav-wrap">
+      <nav class="section-nav" aria-label="Section navigation">
+        <button class="section-nav__tab section-nav__tab--active">Summary</button>
+        <button class="section-nav__tab">Commute</button>
+        <button class="section-nav__tab">Schools</button>
+        <button class="section-nav__tab">Costs</button>
+        <button class="section-nav__tab">Discussion</button>
+      </nav>
+    </div>
+
+    <!-- Detail content -->
+    <div class="detail-content">
+
+      <!-- ═══ Summary ═══ -->
+      <section class="detail-card" id="section-summary">
+        <div class="detail-card__header">
+          <div class="detail-card__header-left">
+            <div class="detail-card__icon detail-card__icon--summary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+            </div>
+            <div>
+              <div class="detail-card__title">Summary</div>
+              <div class="detail-card__subtitle">Location &amp; overview</div>
+            </div>
+          </div>
+          <div class="detail-card__header-right">
+            <span class="pill pill--green pill--sm">EPC B</span>
+            <span class="pill pill--green pill--sm">✓ Within budget</span>
+          </div>
+        </div>
+        <div class="detail-card__body">
+          <!-- Map placeholder -->
+          <div class="map-embed">
+            <span class="map-embed__placeholder">Map · Maidenhead, SL6 2NE</span>
+          </div>
+
+          <div class="detail-row">
+            <span class="detail-row__label">Price</span>
+            <span class="detail-row__value">£795,000</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-row__label">Monthly cost</span>
+            <span class="detail-row__value" style="color:var(--green-text)">£2,850/mo</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-row__label">EPC Rating</span>
+            <span class="detail-row__value"><span class="pill pill--green pill--sm">B · Good</span></span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-row__label">Council Tax</span>
+            <span class="detail-row__value">Band F · £2,400/yr</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-row__label">Walk to town</span>
+            <span class="detail-row__value"><span class="pill pill--green pill--sm">12 min</span></span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-row__label">Stamp Duty</span>
+            <span class="detail-row__value">£21,250</span>
+          </div>
+
+          <!-- Provenance -->
+          <div class="provenance">
+            <span class="provenance__dot"></span>
+            EPC from EPC Register · Fetched 20 Jul 2026 · Council Tax from RBWM website
+          </div>
+
+          <div style="display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-top:var(--sp-2)">
+            <a href="#" class="btn btn--primary" style="flex:1;justify-content:center">View on Rightmove</a>
+            <a href="#" class="btn btn--outline" style="flex:1;justify-content:center">Get Directions</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Commute ═══ -->
+      <section class="detail-card" id="section-commute">
+        <div class="detail-card__header">
+          <div class="detail-card__header-left">
+            <div class="detail-card__icon detail-card__icon--commute">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+            </div>
+            <div>
+              <div class="detail-card__title">Commute</div>
+              <div class="detail-card__subtitle">3 people · 5 routes</div>
+            </div>
+          </div>
+          <div class="detail-card__header-right">
+            <span class="pill pill--green pill--sm">All OK</span>
+          </div>
+        </div>
+        <div class="detail-card__body">
+
+          <!-- Simon -->
+          <div class="commute-person">
+            <div class="commute-person__header">
+              <span class="commute-person__name">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                Simon → Pimlico
+              </span>
+              <span class="pill pill--green">54 min · £48.27/wk</span>
+            </div>
+            <div class="commute-person__legs">
+              <div class="commute-leg">
+                <span class="commute-leg__mode">🚶</span>
+                <span class="commute-leg__desc">Walk to Maidenhead station</span>
+                <span class="commute-leg__time">8 min</span>
+              </div>
+              <div class="commute-leg">
+                <span class="commute-leg__mode">🚂</span>
+                <span class="commute-leg__desc">GWR → Paddington</span>
+                <span class="commute-leg__time">28 min</span>
+              </div>
+              <div class="commute-leg">
+                <span class="commute-leg__mode">🚇</span>
+                <span class="commute-leg__desc">Bakerloo → Victoria → Pimlico</span>
+                <span class="commute-leg__time">12 min</span>
+              </div>
+              <div class="commute-leg">
+                <span class="commute-leg__mode">🚶</span>
+                <span class="commute-leg__desc">Walk to office</span>
+                <span class="commute-leg__time">6 min</span>
+              </div>
+            </div>
+            <div class="commute-person__meta">
+              <span>£48.27/week</span>
+              <span>Source: TfL API + GWR fares</span>
+              <span>Updated 26 Jul 2026</span>
+            </div>
+          </div>
+
+          <!-- Simon alt route -->
+          <div class="commute-person">
+            <div class="commute-person__header">
+              <span class="commute-person__name">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                Simon → Bracknell
+              </span>
+              <span class="pill pill--green">16 min · £3.77/trip</span>
+            </div>
+            <div class="commute-person__legs">
+              <div class="commute-leg">
+                <span class="commute-leg__mode">🚗</span>
+                <span class="commute-leg__desc">A404(M) → M4 → A329(M)</span>
+                <span class="commute-leg__time">16 min</span>
+              </div>
+            </div>
+            <div class="commute-person__meta">
+              <span>£3.77/trip (fuel + wear)</span>
+              <span>Source: Google Maps driving</span>
+              <span>Updated 26 Jul 2026</span>
+            </div>
+          </div>
+
+          <!-- Lorena -->
+          <div class="commute-person">
+            <div class="commute-person__header">
+              <span class="commute-person__name">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                Lorena → Aldgate
+              </span>
+              <span class="pill pill--orange">1h 36 · £38.40/wk</span>
+            </div>
+            <div class="commute-person__legs">
+              <div class="commute-leg">
+                <span class="commute-leg__mode">🚶</span>
+                <span class="commute-leg__desc">Walk to Maidenhead station</span>
+                <span class="commute-leg__time">8 min</span>
+              </div>
+              <div class="commute-leg">
+                <span class="commute-leg__mode">🚂</span>
+                <span class="commute-leg__desc">Elizabeth line → Paddington</span>
+                <span class="commute-leg__time">35 min</span>
+              </div>
+              <div class="commute-leg">
+                <span class="commute-leg__mode">🚇</span>
+                <span class="commute-leg__desc">Circle line → Aldgate</span>
+                <span class="commute-leg__time">22 min</span>
+              </div>
+              <div class="commute-leg">
+                <span class="commute-leg__mode">🚶</span>
+                <span class="commute-leg__desc">Walk to office</span>
+                <span class="commute-leg__time">5 min</span>
+              </div>
+            </div>
+            <div class="commute-person__meta">
+              <span>£38.40/week</span>
+              <span>Source: TfL API</span>
+              <span>Updated 26 Jul 2026</span>
+            </div>
+          </div>
+
+          <!-- George schools -->
+          <div class="commute-person">
+            <div class="commute-person__header">
+              <span class="commute-person__name">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"></path><path d="M6 12v5c0 1.1 2.7 3 6 3s6-1.9 6-3v-5"></path></svg>
+                George → Primary School
+              </span>
+              <span class="pill pill--green">18 min · Free</span>
+            </div>
+            <div class="commute-person__legs">
+              <div class="commute-leg">
+                <span class="commute-leg__mode">🚶</span>
+                <span class="commute-leg__desc">Walk to St Mary's Catholic Primary</span>
+                <span class="commute-leg__time">18 min</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="commute-person">
+            <div class="commute-person__header">
+              <span class="commute-person__name">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"></path><path d="M6 12v5c0 1.1 2.7 3 6 3s6-1.9 6-3v-5"></path></svg>
+                George → Secondary School
+              </span>
+              <span class="pill pill--green">14 min · Free</span>
+            </div>
+            <div class="commute-person__legs">
+              <div class="commute-leg">
+                <span class="commute-leg__mode">🚶</span>
+                <span class="commute-leg__desc">Walk to Desborough College</span>
+                <span class="commute-leg__time">14 min</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Provenance -->
+          <div class="provenance">
+            <span class="provenance__dot"></span>
+            Route data: TfL unified API · Fares: GWR + TfL fare tables (2026) · Driving: Google Maps Distance Matrix · Timestamps show last successful fetch
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Schools ═══ -->
+      <section class="detail-card" id="section-schools">
+        <div class="detail-card__header">
+          <div class="detail-card__header-left">
+            <div class="detail-card__icon detail-card__icon--schools">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"></path><path d="M6 12v5c0 1.1 2.7 3 6 3s6-1.9 6-3v-5"></path></svg>
+            </div>
+            <div>
+              <div class="detail-card__title">Schools</div>
+              <div class="detail-card__subtitle">2 nearby · George's age group</div>
+            </div>
+          </div>
+          <div class="detail-card__header-right">
+            <span class="pill pill--green pill--sm">Best: Outstanding</span>
+          </div>
+        </div>
+        <div class="detail-card__body">
+          <div class="school-item">
+            <div class="school-item__info">
+              <div class="school-item__name">Larchfield Primary and Nursery School</div>
+              <div class="school-item__meta">Primary · 0.8 km · Last inspected 2023</div>
+            </div>
+            <div class="school-item__right">
+              <span class="pill pill--green pill--sm">Outstanding</span>
+              <span style="font-size:var(--fs-xs);color:var(--text-muted)">18 min walk</span>
+            </div>
+          </div>
+          <div class="school-item">
+            <div class="school-item__info">
+              <div class="school-item__name">Desborough College</div>
+              <div class="school-item__meta">Secondary · 1.2 km · Last inspected 2022</div>
+            </div>
+            <div class="school-item__right">
+              <span class="pill pill--green pill--sm">Good</span>
+              <span style="font-size:var(--fs-xs);color:var(--text-muted)">14 min walk</span>
+            </div>
+          </div>
+
+          <div class="provenance">
+            <span class="provenance__dot"></span>
+            Ofsted data from EduBase API · Last updated 15 Jul 2026 · Walk times calculated from property coordinates
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Costs ═══ -->
+      <section class="detail-card" id="section-costs">
+        <div class="detail-card__header">
+          <div class="detail-card__header-left">
+            <div class="detail-card__icon detail-card__icon--costs">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"></path></svg>
+            </div>
+            <div>
+              <div class="detail-card__title">Costs</div>
+              <div class="detail-card__subtitle">Monthly breakdown · Within budget</div>
+            </div>
+          </div>
+          <div class="detail-card__header-right">
+            <span class="pill pill--green pill--sm">£2,850/mo</span>
+          </div>
+        </div>
+        <div class="detail-card__body">
+          <table class="cost-table">
+            <tr><td>Mortgage Payment</td><td>£1,875/mo</td></tr>
+            <tr><td>Council Tax</td><td>£200/mo</td></tr>
+            <tr><td>Sinking Fund</td><td>£150/mo</td></tr>
+            <tr>
+              <td>Commute Cost</td>
+              <td>£494/mo</td>
+            </tr>
+            <tr class="cost-table__sub"><td>Simon</td><td>£199/mo</td></tr>
+            <tr class="cost-table__sub"><td>Lorena</td><td>£294/mo</td></tr>
+            <tr class="cost-table__sub"><td>George</td><td>£0/mo</td></tr>
+            <tr><td>Utilities &amp; Broadband</td><td>£131/mo</td></tr>
+            <tr class="cost-table__total"><td>Total Monthly</td><td>£2,850/mo</td></tr>
+          </table>
+
+          <div style="display:flex;gap:var(--sp-4);flex-wrap:wrap;font-size:var(--fs-sm);color:var(--text-muted);padding-top:var(--sp-3);border-top:1px solid var(--divider)">
+            <span>Stamp Duty: £21,250</span>
+            <span>Net Contribution: £58,333</span>
+            <span>Mortgage Required: £550,000</span>
+          </div>
+
+          <div class="provenance">
+            <span class="provenance__dot"></span>
+            Mortgage: 25yr term, 4.5% rate, 70% LTV · Council Tax: RBWM Band F 2026/27 rates · Commute: calculated from weekly fares × 4.33
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Discussion ═══ -->
+      <section class="detail-card" id="section-discussion">
+        <div class="detail-card__header">
+          <div class="detail-card__header-left">
+            <div class="detail-card__icon detail-card__icon--notes">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"></path></svg>
+            </div>
+            <div>
+              <div class="detail-card__title">Discussion</div>
+              <div class="detail-card__subtitle">3 comments · Last: Simon, 2 hours ago</div>
+            </div>
+          </div>
+        </div>
+        <div class="detail-card__body">
+          <!-- Status -->
+          <div>
+            <div class="notes-field__label" style="margin-bottom:var(--sp-2)">Property Status</div>
+            <div class="status-selector">
+              <button class="status-btn status-btn--new">New</button>
+              <button class="status-btn status-btn--saved status-btn--active">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2.5"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"></path></svg>
+                Saved
+              </button>
+              <button class="status-btn status-btn--dismissed">Dismiss</button>
+              <button class="status-btn status-btn--seen">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                Mark Seen
+              </button>
+            </div>
+          </div>
+
+          <!-- Threaded discussion -->
+          <div style="border-top:1px solid var(--divider);padding-top:var(--sp-3)">
+            <div class="notes-field__label" style="margin-bottom:var(--sp-3)">Comments</div>
+            <div class="discussion">
+              <div class="discussion-entry">
+                <div class="discussion-avatar" style="background:var(--blue-bg);color:var(--blue-text)">A</div>
+                <div class="discussion-body">
+                  <span class="discussion-name">Ashby</span>
+                  <span class="discussion-time">Yesterday, 3:42pm</span>
+                  <div class="discussion-text">Excellent schools and good commute for Simon. The annexe question — there's a garage that could potentially be converted. Need to check with the agent if there's planning history.</div>
+                </div>
+              </div>
+              <div class="discussion-entry">
+                <div class="discussion-avatar" style="background:var(--green-bg);color:var(--green-text)">S</div>
+                <div class="discussion-body">
+                  <span class="discussion-name">Simon</span>
+                  <span class="discussion-time">Yesterday, 5:18pm</span>
+                  <div class="discussion-text">Commute to Pimlico is fine, Bracknell is quick too. Booked a viewing for Saturday 10am. The monthly cost is stretching it though — let's double check the mortgage calc.</div>
+                </div>
+              </div>
+              <div class="discussion-entry">
+                <div class="discussion-avatar" style="background:var(--amber-bg);color:var(--amber-text)">L</div>
+                <div class="discussion-body">
+                  <span class="discussion-name">Lorena</span>
+                  <span class="discussion-time">Today, 9:05am</span>
+                  <div class="discussion-text">Area looks lovely, walkable to town. My commute is long though — 1h36 each way. Need to think about whether that's sustainable. Also need to check parking situation.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="discussion-input" style="margin-top:var(--sp-3)">
+              <input type="text" placeholder="Add a comment...">
+              <button class="btn btn--primary" style="min-height:36px;padding:var(--sp-1) var(--sp-3);font-size:var(--fs-sm)">Send</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     BOTTOM TAB BAR
+     ═══════════════════════════════════════════════════════════════ -->
+<nav class="tab-bar" aria-label="Main navigation">
+  <a class="tab-bar__tab tab-bar__tab--active" href="#">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path><polyline points="9 22 9 12 15 12 15 22"></polyline></svg>
+    <span class="tab-bar__label">Properties</span>
+  </a>
+  <a class="tab-bar__tab" href="#">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"></path></svg>
+    <span class="tab-bar__label">Favourites</span>
+  </a>
+  <a class="tab-bar__tab" href="#">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>
+    <span class="tab-bar__label">Map</span>
+  </a>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     JAVASCRIPT
+     ═══════════════════════════════════════════════════════════════ -->
+<script>
+function switchPage(page) {
+  document.querySelectorAll('.page-view').forEach(v => v.classList.remove('page-view--active'));
+  document.getElementById('page-' + page).classList.add('page-view--active');
+  document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('view-tab--active'));
+  const tabs = document.querySelectorAll('.view-tab');
+  if (page === 'list') tabs[0].classList.add('view-tab--active');
+  if (page === 'detail') tabs[1].classList.add('view-tab--active');
+  window.scrollTo(0, 0);
+}
+
+// Status button toggle
+document.querySelectorAll('.status-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    btn.closest('.status-selector').querySelectorAll('.status-btn').forEach(b => b.classList.remove('status-btn--active'));
+    btn.classList.add('status-btn--active');
+  });
+});
+
+// Filter chip toggle
+document.querySelectorAll('.filter-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('filter-chip--active'));
+    chip.classList.add('filter-chip--active');
+  });
+});
+</script>
+
+</body>
+</html>

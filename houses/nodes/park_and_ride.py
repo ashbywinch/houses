@@ -13,7 +13,7 @@ from dataclasses import replace
 from money import Money
 from pint import Quantity
 
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt, Provenance, SourceType
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.car_park import CarParkRegistry
@@ -161,4 +161,10 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
             sources[dep._id] = await dep.build_provenance()
         label = self.display_name
         description = f"parking at {self._car_park_name}" if self._car_park_name else ""
-        return Provenance(label=label, description=description, sources=sources)
+        return Provenance(
+            label=label,
+            description=description,
+            source_type=SourceType.CALC,
+            freshness=self._attempt.created_at,
+            sources=sources,
+        )

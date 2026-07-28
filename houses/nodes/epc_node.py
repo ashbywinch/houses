@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt, Provenance, SourceType
 from dag.derived_node import DerivedNode
 from houses.services_provider import get_services
 
@@ -20,8 +20,17 @@ class EpcNode(DerivedNode[dict]):
             return Attempt.succeeded({"band": band, "potential": band})
         return Attempt.impossible("no EPC data")
 
+    @property
+    def provenance_source_type(self) -> SourceType:
+        return SourceType.API
+
     async def build_provenance(self):
-        return Provenance(label="EPC API", url="https://www.epcregister.com/")
+        return Provenance(
+            label="EPC API",
+            url="https://www.epcregister.com/",
+            source_type=SourceType.API,
+            freshness=self._attempt.created_at,
+        )
 
 
 class CouncilTaxNode(DerivedNode[dict]):
@@ -44,5 +53,14 @@ class CouncilTaxNode(DerivedNode[dict]):
             return Attempt.succeeded({"band": val.band, "yearly_cost": val.yearly_cost})
         return Attempt.impossible("no council tax data")
 
+    @property
+    def provenance_source_type(self) -> SourceType:
+        return SourceType.API
+
     async def build_provenance(self):
-        return Provenance(label="Council Tax", url="https://www.gov.uk/council-tax-bands")
+        return Provenance(
+            label="Council Tax",
+            url="https://www.gov.uk/council-tax-bands",
+            source_type=SourceType.API,
+            freshness=self._attempt.created_at,
+        )

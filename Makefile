@@ -71,8 +71,7 @@ frontend-build: frontend-setup
 test: setup lint frontend-setup
 	$(PYTEST) tests/unit/ -q --tb=short
 	$(PYTEST) tests/integration/ -q --tb=short
-	cd houses/frontend && npx vue-tsc -b --noEmit
-	cd houses/frontend && npx vitest run
+	cd houses/frontend && npm test
 
 test-e2e: setup lint
 	@$(PYTEST) tests/e2e/ -m e2e -q

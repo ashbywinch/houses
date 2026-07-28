@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt, Provenance, SourceType
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.geo import GeoPoint
@@ -19,8 +19,17 @@ class WalkabilityNode(DerivedNode[dict]):
         result = await svc.walkability_service.enrich(loc.lat, loc.lon, address.value_or_none() or "")
         return Attempt.succeeded(result)
 
+    @property
+    def provenance_source_type(self) -> SourceType:
+        return SourceType.API
+
     async def build_provenance(self):
-        return Provenance(label="walkability", url="https://maps.googleapis.com/")
+        return Provenance(
+            label="walkability",
+            url="https://maps.googleapis.com/",
+            source_type=SourceType.API,
+            freshness=self._attempt.created_at,
+        )
 
 
 class NearestTownNode(DerivedNode[str]):
@@ -40,8 +49,12 @@ class NearestTownNode(DerivedNode[str]):
             return Attempt.succeeded(town)
         return Attempt.impossible("could not determine nearest town")
 
+    @property
+    def provenance_source_type(self) -> SourceType:
+        return SourceType.GEOCODE
+
     async def build_provenance(self):
-        return Provenance(label="reverse_geocode")
+        return Provenance(label="reverse_geocode", source_type=SourceType.GEOCODE, freshness=self._attempt.created_at)
 
 
 class TownDescNode(DerivedNode[dict]):
@@ -66,8 +79,12 @@ class TownDescNode(DerivedNode[dict]):
         desc = await svc.town_desc_service.describe(town, pc)
         return Attempt.succeeded({"description": desc})
 
+    @property
+    def provenance_source_type(self) -> SourceType:
+        return SourceType.API
+
     async def build_provenance(self):
-        return Provenance(label="LLM")
+        return Provenance(label="LLM", source_type=SourceType.API, freshness=self._attempt.created_at)
 
 
 class TownNode(DerivedNode[str]):
@@ -82,5 +99,9 @@ class TownNode(DerivedNode[str]):
             return Attempt.succeeded(town)
         return Attempt.impossible("no town found in address")
 
+    @property
+    def provenance_source_type(self) -> SourceType:
+        return SourceType.GEOCODE
+
     async def build_provenance(self):
-        return Provenance(label="address")
+        return Provenance(label="address", source_type=SourceType.GEOCODE, freshness=self._attempt.created_at)

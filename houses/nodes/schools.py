@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt, Provenance, SourceType
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.geo import GeoPoint
@@ -9,6 +9,10 @@ from houses.services_provider import get_services
 
 
 class PrimarySchoolNode(DerivedNode[dict]):
+    @property
+    def provenance_source_type(self) -> SourceType:
+        return SourceType.API
+
     def __init__(self, node_id: str, *, best_location, best_address, acceptable: tuple[str, ...] = ("mixed",)):
         deps: tuple[Node, ...] = (best_location, best_address)
         super().__init__(node_id, dict, deps)
@@ -73,8 +77,17 @@ class SecondarySchoolNode(DerivedNode[dict]):
             result["lon"] = school.coords.lon
         return Attempt.succeeded(result)
 
+    @property
+    def provenance_source_type(self) -> SourceType:
+        return SourceType.API
+
     async def build_provenance(self):
-        return Provenance(label="GIAS CSV", url="https://get-information-schools.service.gov.uk/")
+        return Provenance(
+            label="GIAS CSV",
+            url="https://get-information-schools.service.gov.uk/",
+            source_type=SourceType.API,
+            freshness=self._attempt.created_at,
+        )
 
 
 class SchoolLocationNode(DerivedNode[str]):

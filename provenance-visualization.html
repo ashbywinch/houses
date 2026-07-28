@@ -1,0 +1,1156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Provenance Visualization — House Hunt</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   DESIGN SYSTEM — matches redesign.html tokens
+   ═══════════════════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --slate-900: #0f172a;
+  --slate-800: #1e293b;
+  --slate-700: #334155;
+  --slate-600: #475569;
+  --slate-500: #64748b;
+  --slate-400: #94a3b8;
+  --slate-300: #cbd5e1;
+  --slate-200: #e2e8f0;
+  --slate-100: #f1f5f9;
+  --slate-50:  #f8fafc;
+  --white: #ffffff;
+
+  --green:      #16a34a;
+  --green-bg:   #f0fdf4;
+  --green-text: #166534;
+  --orange:      #ea580c;
+  --orange-bg:   #fff7ed;
+  --orange-text: #9a3412;
+  --red:        #dc2626;
+  --red-bg:     #fef2f2;
+  --red-text:   #991b1b;
+  --blue:       #2563eb;
+  --blue-bg:    #eff6ff;
+  --blue-text:  #1e40af;
+  --amber:      #d97706;
+  --amber-bg:   #fffbeb;
+  --amber-text: #92400e;
+  --purple:     #7c3aed;
+  --purple-bg:  #f5f3ff;
+  --purple-text:#5b21b6;
+
+  --text:           var(--slate-900);
+  --text-secondary: var(--slate-500);
+  --text-muted:     var(--slate-400);
+  --border:         var(--slate-200);
+  --divider:        var(--slate-100);
+  --page-bg:        var(--slate-50);
+
+  --font:      "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+
+  --fs-xs:   0.6875rem;
+  --fs-sm:   0.75rem;
+  --fs-base: 0.875rem;
+  --fs-md:   0.9375rem;
+  --fs-lg:   1.125rem;
+  --fs-xl:   1.25rem;
+  --fs-2xl:  1.5rem;
+
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px;
+  --space-4: 16px; --space-5: 20px; --space-6: 24px;
+  --space-8: 32px; --space-10: 40px;
+
+  --radius-sm: 6px;  --radius: 10px;
+  --radius-lg: 14px; --radius-full: 9999px;
+
+  --shadow-sm:   0 1px 2px rgba(15,23,42,0.04);
+  --shadow:      0 1px 3px rgba(15,23,42,0.06), 0 1px 2px rgba(15,23,42,0.04);
+  --shadow-md:   0 4px 6px rgba(15,23,42,0.06), 0 2px 4px rgba(15,23,42,0.04);
+  --shadow-lg:   0 10px 15px rgba(15,23,42,0.06), 0 4px 6px rgba(15,23,42,0.04);
+
+  --transition: 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+body {
+  font-family: var(--font);
+  background: var(--page-bg);
+  color: var(--text);
+  font-size: var(--fs-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PAGE SHELL — matches property detail page
+   ═══════════════════════════════════════════════════════════════ */
+.page-header {
+  background: var(--slate-800);
+  color: var(--white);
+  padding: var(--space-4) var(--space-6);
+  position: sticky; top: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.page-header__title { font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em; }
+.page-header__back { color: var(--slate-400); text-decoration: none; font-size: var(--fs-sm); }
+.page-header__back:hover { color: var(--white); }
+
+.summary-bar {
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  padding: var(--space-4) var(--space-6);
+  display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 52px; z-index: 99;
+}
+.summary-bar__address { font-size: var(--fs-lg); font-weight: 700; }
+.summary-bar__sub { font-size: var(--fs-sm); color: var(--text-secondary); }
+.summary-bar__price { font-size: var(--fs-xl); font-weight: 800; color: var(--blue); }
+
+.detail-content {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4);
+}
+
+.detail-section {
+  background: var(--white);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  margin-bottom: var(--space-4);
+  overflow: hidden;
+}
+.detail-section__header {
+  padding: var(--space-4) var(--space-5);
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer;
+}
+.detail-section__title { font-size: var(--fs-md); font-weight: 700; }
+.detail-section__badge {
+  font-size: var(--fs-xl); font-weight: 800; color: var(--blue);
+}
+.detail-section__body { padding: 0 var(--space-5) var(--space-5); }
+
+/* ═══════════════════════════════════════════════════════════════
+   COST TABLE — existing pattern, enhanced with provenance
+   ═══════════════════════════════════════════════════════════════ */
+.cost-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--divider);
+}
+.cost-row:last-child { border-bottom: none; }
+
+.cost-row--sub { padding-left: var(--space-5); }
+.cost-row--sub .cost-label { font-size: var(--fs-sm); color: var(--text-secondary); }
+
+.cost-row--total {
+  background: var(--blue-bg);
+  margin: var(--space-3) calc(-1 * var(--space-5));
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius);
+  border-bottom: none;
+}
+.cost-row--total .cost-label { font-weight: 700; }
+.cost-row--total .cost-value { font-size: var(--fs-lg); font-weight: 800; color: var(--blue); }
+
+.cost-label {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.cost-value {
+  font-size: var(--fs-base);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PROVENANCE TRIGGER — the "how?" button on each value
+   ═══════════════════════════════════════════════════════════════ */
+.prov-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--slate-50);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  line-height: 1;
+  white-space: nowrap;
+}
+.prov-trigger:hover {
+  border-color: var(--slate-300);
+  color: var(--text-secondary);
+  background: var(--white);
+}
+.prov-trigger--active {
+  border-color: var(--blue);
+  color: var(--blue);
+  background: var(--blue-bg);
+}
+.prov-trigger__icon {
+  width: 12px; height: 12px;
+  stroke-width: 2; fill: none; stroke: currentColor;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   FRESHNESS DOT — color-coded staleness indicator
+   ═══════════════════════════════════════════════════════════════ */
+.freshness-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.freshness-dot--fresh   { background: var(--green); }
+.freshness-dot--aging   { background: var(--amber); }
+.freshness-dot--stale   { background: var(--red); }
+.freshness-dot--unknown { background: var(--slate-300); }
+
+/* ═══════════════════════════════════════════════════════════════
+   SOURCE BADGES — data origin indicators
+   ═══════════════════════════════════════════════════════════════ */
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.source-badge--user    { background: var(--blue-bg);   color: var(--blue-text); }
+.source-badge--api     { background: var(--orange-bg);  color: var(--orange-text); }
+.source-badge--calc    { background: var(--purple-bg);  color: var(--purple-text); }
+.source-badge--config  { background: var(--amber-bg);   color: var(--amber-text); }
+.source-badge--geocode { background: var(--green-bg);   color: var(--green-text); }
+.source-badge--db      { background: var(--slate-100);  color: var(--slate-600); }
+
+/* ═══════════════════════════════════════════════════════════════
+   PROVENANCE PANEL — the expandable detail view
+   ═══════════════════════════════════════════════════════════════ */
+.prov-panel {
+  background: var(--slate-50);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-top: var(--space-3);
+  overflow: hidden;
+}
+.prov-panel > .prov-panel__body {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height var(--transition-slow), opacity var(--transition);
+}
+.prov-panel[open] > .prov-panel__body {
+  max-height: 2000px;
+  opacity: 1;
+}
+
+/* Breadcrumb navigation for deep trees */
+.prov-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--white);
+  font-size: var(--fs-xs);
+  flex-wrap: wrap;
+}
+.prov-breadcrumb__item {
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color var(--transition);
+}
+.prov-breadcrumb__item:hover { color: var(--blue); }
+.prov-breadcrumb__item--current { color: var(--text); font-weight: 600; cursor: default; }
+.prov-breadcrumb__sep {
+  color: var(--slate-300);
+  font-size: 10px;
+}
+
+/* Controls row */
+.prov-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--divider);
+  background: var(--white);
+}
+.prov-controls__left { display: flex; gap: var(--space-2); align-items: center; }
+.prov-controls__depth {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.prov-btn {
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.prov-btn:hover { border-color: var(--slate-300); color: var(--text); }
+
+/* ═══════════════════════════════════════════════════════════════
+   PROVENANCE TREE — the actual tree nodes
+   ═══════════════════════════════════════════════════════════════ */
+.prov-tree {
+  padding: var(--space-3) var(--space-4);
+}
+
+.prov-node {
+  position: relative;
+  padding: var(--space-2) 0;
+}
+.prov-node + .prov-node {
+  border-top: 1px solid var(--divider);
+}
+
+.prov-node__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-height: 28px;
+}
+
+.prov-node__connector {
+  width: 20px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 6px;
+}
+.prov-node__dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--slate-300);
+  flex-shrink: 0;
+}
+.prov-node__dot--user    { background: var(--blue); }
+.prov-node__dot--api     { background: var(--orange); }
+.prov-node__dot--calc    { background: var(--purple); }
+.prov-node__dot--config  { background: var(--amber); }
+.prov-node__dot--geocode { background: var(--green); }
+.prov-node__dot--db      { background: var(--slate-400); }
+.prov-node__dot--root    { background: var(--blue); width: 10px; height: 10px; }
+
+.prov-node__content {
+  flex: 1;
+  min-width: 0;
+}
+
+.prov-node__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.prov-node__label {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+.prov-node__value {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+.prov-node__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: 2px;
+  flex-wrap: wrap;
+}
+.prov-node__description {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin-top: 2px;
+}
+.prov-node__link {
+  font-size: 10px;
+  color: var(--blue);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.prov-node__link:hover { text-decoration: underline; }
+.prov-node__link svg { width: 10px; height: 10px; stroke: currentColor; fill: none; stroke-width: 2; }
+
+/* Expandable children — uses <details>/<summary> for native expand/collapse */
+.prov-children {
+  margin-left: 10px;
+  padding-left: 10px;
+  border-left: 2px solid var(--slate-100);
+}
+
+/* Style the native summary as the expand toggle button */
+.prov-expand-summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 0;
+  margin: 0;
+}
+.prov-expand-summary::-webkit-details-marker { display: none; }
+.prov-expand-summary::marker { display: none; content: ''; }
+
+.prov-expand-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px; height: 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--white);
+  flex-shrink: 0;
+  transition: all var(--transition);
+}
+.prov-expand-chevron:hover { border-color: var(--slate-300); background: var(--slate-50); }
+.prov-expand-chevron svg {
+  width: 12px; height: 12px;
+  stroke: var(--text-muted);
+  fill: none;
+  stroke-width: 2;
+  transition: transform var(--transition);
+}
+.prov-children[open] > summary .prov-expand-chevron svg {
+  transform: rotate(90deg);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   FORMULA DISPLAY — shows how a value is computed
+   ═══════════════════════════════════════════════════════════════ */
+.prov-formula {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  margin-top: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.prov-formula__label {
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+.prov-formula__line {
+  display: flex;
+  justify-content: space-between;
+}
+.prov-formula__line--result {
+  font-weight: 700;
+  color: var(--text);
+  border-top: 1px solid var(--border);
+  margin-top: 2px;
+  padding-top: 2px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   FOCUS MODE — highlight selected subtree
+   ═══════════════════════════════════════════════════════════════ */
+.prov-node--dimmed { opacity: 0.35; }
+.prov-node--focused { background: var(--blue-bg); margin: 0 calc(-1 * var(--space-4)); padding: var(--space-2) var(--space-4); border-radius: var(--radius-sm); }
+
+/* ═══════════════════════════════════════════════════════════════
+   LEGEND
+   ═══════════════════════════════════════════════════════════════ */
+.prov-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--white);
+}
+.prov-legend__item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.prov-legend__dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════════════════════════ */
+@media (max-width: 480px) {
+  .detail-content { padding: var(--space-4) var(--space-3); }
+  .cost-row { padding: var(--space-2) 0; }
+  .prov-node__header { gap: var(--space-1); }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     HEADER
+     ═══════════════════════════════════════════════════════════════ -->
+<header class="page-header">
+ <a class="page-header__back" href="#">&larr; Properties</a>
+ <span class="page-header__title">48 Acacia Avenue</span>
+ <span></span>
+</header>
+
+<div class="summary-bar">
+ <div>
+   <div class="summary-bar__address">48 Acacia Avenue, Maidenhead SL6</div>
+   <div class="summary-bar__sub">3 bed semi-detached &middot; Freehold</div>
+ </div>
+ <div class="summary-bar__price">&pound;795,000</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CONTENT
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="detail-content">
+
+  <!-- Intro text explaining the provenance concept -->
+  <div style="margin-bottom:var(--space-5);padding:var(--space-4);background:var(--blue-bg);border:1px solid #bfdbfe;border-radius:var(--radius);font-size:var(--fs-sm);color:var(--blue-text);line-height:1.6">
+    <strong>How this page works:</strong> Every number below shows where it came from. Click the <span style="display:inline-flex;align-items:center;gap:2px;border:1px solid #93c5fd;padding:0 4px;border-radius:99px;font-size:10px;font-weight:600;background:var(--blue-bg)">ⓘ how?</span> badge next to any value to see its provenance — what data sources were used, whether the data is fresh, and the formula behind the calculation.
+  </div>
+
+  <!-- ═══════ COSTS SECTION ═══════ -->
+  <section class="detail-section" id="costs-section">
+    <div class="detail-section__header">
+      <span class="detail-section__title">Monthly Housing Costs</span>
+      <span class="detail-section__badge" id="costs-badge"></span>
+    </div>
+    <div class="detail-section__body" id="costs-body">
+      <!-- Rendered by renderProvTree() -->
+    </div>
+  </section>
+
+  <!-- ═══════ CONTEXT CARD ═══════ -->
+  <div style="background:var(--white);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--space-5);margin-bottom:var(--space-4);box-shadow:var(--shadow-sm)">
+    <div style="font-size:var(--fs-md);font-weight:700;margin-bottom:var(--space-3)">Understanding the provenance view</div>
+    <div style="display:flex;flex-direction:column;gap:var(--space-3);font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.6">
+      <div style="display:flex;gap:var(--space-3);align-items:flex-start">
+        <div style="width:8px;height:8px;border-radius:50%;background:var(--blue);flex-shrink:0;margin-top:6px"></div>
+        <div><strong>Blue dots</strong> = data you entered (addresses, deposit amounts, config settings). You can change these anytime.</div>
+      </div>
+      <div style="display:flex;gap:var(--space-3);align-items:flex-start">
+        <div style="width:8px;height:8px;border-radius:50%;background:var(--orange);flex-shrink:0;margin-top:6px"></div>
+        <div><strong>Orange dots</strong> = data fetched from external APIs (Rightmove, TfL, GOV.UK). These refresh automatically.</div>
+      </div>
+      <div style="display:flex;gap:var(--space-3);align-items:flex-start">
+        <div style="width:8px;height:8px;border-radius:50%;background:var(--purple);flex-shrink:0;margin-top:6px"></div>
+        <div><strong>Purple dots</strong> = calculated values (stamp duty, monthly payments). The formula is shown inside each node.</div>
+      </div>
+      <div style="display:flex;gap:var(--space-3);align-items:flex-start">
+        <div style="width:8px;height:8px;border-radius:50%;background:var(--amber);flex-shrink:0;margin-top:6px"></div>
+        <div><strong>Amber dots</strong> = configuration values (mortgage rates, term length). Change these in Settings.</div>
+      </div>
+      <div style="display:flex;gap:var(--space-3);align-items:flex-start">
+        <div><span class="freshness-dot freshness-dot--fresh"></span> <span class="freshness-dot freshness-dot--aging" style="margin-left:6px"></span> <span class="freshness-dot freshness-dot--stale" style="margin-left:6px"></div>
+        <div><strong>Freshness dots</strong> show how recent each data point is. Green = fresh (&lt;7 days), Amber = aging (7-30 days), Red = stale (&gt;30 days).</div>
+      </div>
+      <div style="display:flex;gap:var(--space-3);align-items:flex-start">
+        <div style="font-size:16px;flex-shrink:0;margin-top:2px">&#128279;</div>
+        <div><strong>Links</strong> (chain icon) take you to the original data source — Rightmove listings, GOV.UK council tax pages, etc.</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     JAVASCRIPT — data model + DOM rendering
+     ═══════════════════════════════════════════════════════════════ -->
+<script>
+/* ─────────────────────────────────────────────────────────────
+   DATA — the provenance tree as a JS object.
+   Uses { label, url?, description?, sources? } matching
+   the ProvenanceTree.vue component's data shape.
+   ───────────────────────────────────────────────────────────── */
+const provenanceData = {
+  label: "Total Monthly Cost",
+  value: "£4,924.95/mo",
+  sourceType: "calc",
+  freshness: "3d",
+  description: "Computed 2 min ago",
+  formula: {
+    label: "Formula",
+    lines: [
+      { text: "Mortgage", value: "£3,613.86" },
+      { text: "Council Tax", value: "£200.00" },
+      { text: "Commute (all)", value: "£871.09" },
+      { text: "Sinking Fund", value: "£120.00" }
+    ],
+    result: { text: "Total", value: "£4,924.95" }
+  },
+  sources: {
+    mortgage: {
+      label: "Monthly Mortgage",
+      value: "£3,613.86/mo",
+      sourceType: "calc",
+      freshness: "3d",
+      description: "Depends on property price, rate, term",
+      formula: {
+        label: "Repayment mortgage formula",
+        lines: [
+          { text: "Property price", value: "£795,000" },
+          { text: "− Deposit & equity", value: "£238,500" },
+          { text: "= Loan amount", value: "£556,500" },
+          { text: "Rate", value: "4.95% / 27yr" }
+        ],
+        result: { text: "Monthly payment", value: "£3,613.86" }
+      },
+      sources: {
+        price: {
+          label: "Property Price",
+          value: "£795,000",
+          sourceType: "api",
+          freshness: "30d",
+          description: "Scraped 8 days ago",
+          sourceBadgeText: "Rightmove",
+          url: "#"
+        },
+        stampDuty: {
+          label: "Stamp Duty",
+          value: "£27,250",
+          sourceType: "calc",
+          freshness: "3d",
+          description: "Standard rates, not first-time buyer",
+          sourceBadgeText: "HMRC rates",
+          url: "https://www.gov.uk/stamp-duty-land-tax/residential-property-rates",
+          sources: {
+            priceInput: {
+              label: "Property Price (input)",
+              value: "£795,000",
+              sourceType: "api",
+              freshness: "30d",
+              description: "Same as property listing price",
+              sourceBadgeText: "Rightmove"
+            },
+            buyerType: {
+              label: "Buyer Type",
+              value: "Standard",
+              sourceType: "config",
+              freshness: "—",
+              description: "Not first-time buyer — affects rates"
+            },
+            detail: {
+              label: "Calculation Detail",
+              sourceType: "calc",
+              freshness: "—",
+              formula: {
+                lines: [
+                  { text: "£0 – £250k", value: "0% = £0" },
+                  { text: "£250k – £795k", value: "5% = £27,250" }
+                ],
+                result: { text: "Stamp Duty", value: "£27,250" }
+              }
+            }
+          }
+        },
+        rate: {
+          label: "Mortgage Rate",
+          value: "4.95% / 27 years",
+          sourceType: "config",
+          freshness: "—",
+          description: "Set in financial settings"
+        },
+        deposit: {
+          label: "Deposit & Equity",
+          value: "£238,500",
+          sourceType: "user",
+          freshness: "3d",
+          description: "Your deposit + house sale equity",
+          sources: {
+            cash: {
+              label: "Cash Deposit",
+              value: "£83,500",
+              sourceType: "user",
+              freshness: "3d",
+              description: "From savings"
+            },
+            equity: {
+              label: "Current Home Equity",
+              value: "£155,000",
+              sourceType: "user",
+              freshness: "3d",
+              description: "Sale proceeds from current home"
+            }
+          }
+        }
+      }
+    },
+    councilTax: {
+      label: "Council Tax",
+      value: "£200.00/mo",
+      sourceType: "api",
+      freshness: "3d",
+      description: "Band F · £2,400/yr · Updated 3 days ago",
+      sourceBadgeText: "GOV.UK",
+      url: "https://www.gov.uk/council-tax-bands",
+      formula: {
+        lines: [
+          { text: "Yearly", value: "£2,400.00" }
+        ],
+        result: { text: "Monthly", value: "£200.00" }
+      }
+    },
+    commute: {
+      label: "Commute Costs",
+      value: "£871.09/mo",
+      sourceType: "calc",
+      freshness: "3d",
+      description: "22 working days × combined daily cost",
+      sourceBadgeText: "TfL + BODS",
+      sources: {
+        simon: {
+          label: "Simon → Pimlico",
+          value: "£8.00/day",
+          sourceType: "api",
+          freshness: "3d",
+          description: "61 min · 22 days/mo = £176.00/mo",
+          sourceBadgeText: "TfL API",
+          sources: {
+            home: {
+              label: "Home address",
+              value: "48 Acacia Avenue, Maidenhead",
+              sourceType: "user",
+              freshness: "3d"
+            },
+            office: {
+              label: "Office location",
+              value: "Pimlico, London",
+              sourceType: "user",
+              freshness: "3d"
+            },
+            route: {
+              label: "Route via TfL",
+              value: "61 min",
+              sourceType: "api",
+              freshness: "3d",
+              description: "Walk 9m → Train 40m → Walk 5m + transfer",
+              sourceBadgeText: "TfL API"
+            }
+          }
+        },
+        lorena: {
+          label: "Lorena → Aldgate",
+          value: "£5.30/day",
+          sourceType: "api",
+          freshness: "3d",
+          description: "48 min · 22 days/mo = £116.60/mo",
+          sourceBadgeText: "TfL API"
+        }
+      }
+    },
+    sinkingFund: {
+      label: "Sinking Fund",
+      value: "£120.00/mo",
+      sourceType: "config",
+      freshness: "3d",
+      description: "£1,440/yr ÷ 12 = £120/mo for maintenance reserve"
+    }
+  }
+};
+
+/* ─────────────────────────────────────────────────────────────
+   SVG ICONS — inline SVGs matching the original design
+   ───────────────────────────────────────────────────────────── */
+const SVG = {
+  chevron: '<svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>',
+  info: '<svg class="prov-trigger__icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
+  link: '<svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>'
+};
+
+/* ─────────────────────────────────────────────────────────────
+   HELPERS
+   ───────────────────────────────────────────────────────────── */
+
+/** Freshness string → CSS dot class */
+function freshnessClass(f) {
+  if (!f || f === '—') return 'freshness-dot--unknown';
+  const days = parseInt(f);
+  if (isNaN(days)) return 'freshness-dot--fresh';
+  if (days <= 7) return 'freshness-dot--fresh';
+  if (days <= 30) return 'freshness-dot--aging';
+  return 'freshness-dot--stale';
+}
+
+/** Source type → badge label */
+const SOURCE_LABELS = {
+  calc: 'Calculated', api: 'API', user: 'User input',
+  config: 'Config', geocode: 'Geocode', db: 'Database'
+};
+
+/** Create an element with optional className and innerHTML */
+function el(tag, cls, html) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html) e.innerHTML = html;
+  return e;
+}
+
+/** Count max depth of a provenance tree */
+function treeDepth(node) {
+  if (!node.sources) return 1;
+  const childDepths = Object.values(node.sources).map(treeDepth);
+  return 1 + Math.max.apply(null, childDepths);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   RENDERING — recursive DOM builder using <details>/<summary>
+   for native expand/collapse (zero JavaScript for toggle).
+   Matches the ProvenanceTree.vue recursive pattern.
+   ───────────────────────────────────────────────────────────── */
+
+/**
+ * Render a single provenance node into a container.
+ * If the node has sources (children), wraps them in a <details>
+ * element so expand/collapse works natively.
+ *
+ * DOM structure per node:
+ *   .prov-node
+ *     .prov-node__row
+ *       .prov-node__connector  →  .prov-node__dot
+ *       .prov-node__content    →  .prov-node__header + .prov-node__meta + .prov-formula?
+ *     <details .prov-children> (if has sources)
+ *       <summary>
+ *         .prov-node__row      →  connector + content (label + value + meta)
+ *       </summary>
+ *       .prov-node (child 1)
+ *       .prov-node (child 2)
+ *       ...
+ */
+function renderProvNode(node, container) {
+  var hasSources = node.sources && Object.keys(node.sources).length > 0;
+  var dotClass = 'prov-node__dot--' + (node.sourceType || 'calc');
+
+  // ── First node shown inline (not in <details>) ──
+  var nodeEl = el('div', 'prov-node');
+
+  var row = el('div', 'prov-node__row');
+
+  // Connector with dot
+  var connector = el('div', 'prov-node__connector');
+  connector.appendChild(el('div', 'prov-node__dot ' + dotClass));
+  row.appendChild(connector);
+
+  // Content: header + meta + formula
+  var content = buildNodeContent(node);
+  row.appendChild(content);
+
+  nodeEl.appendChild(row);
+  container.appendChild(nodeEl);
+
+  // ── Children via <details>/<summary> for native expand/collapse ──
+  if (hasSources) {
+    var details = el('details', 'prov-children');
+    details.setAttribute('open', '');  // open by default
+
+    // Summary: connector + content for the first child
+    var summary = el('summary', 'prov-expand-summary');
+    var summaryRow = el('div', 'prov-node__row');
+
+    var summaryConnector = el('div', 'prov-node__connector');
+    summaryConnector.appendChild(el('div', 'prov-node__dot ' + dotClass));
+    summaryRow.appendChild(summaryConnector);
+
+    // Wrap summary content in a div so it sits inside the summary
+    var summaryContent = document.createElement('div');
+    summaryContent.style.flex = '1';
+    summaryContent.style.minWidth = '0';
+    summaryContent.appendChild(buildNodeHeader(node));
+    summaryContent.appendChild(buildNodeMeta(node));
+    summaryRow.appendChild(summaryContent);
+
+    summary.appendChild(summaryRow);
+    details.appendChild(summary);
+
+    // Render each child
+    var keys = Object.keys(node.sources);
+    for (var i = 0; i < keys.length; i++) {
+      renderProvNode(node.sources[keys[i]], details);
+    }
+
+    container.appendChild(details);
+  }
+}
+
+/**
+ * Build the content block for a node (header + meta + formula).
+ */
+function buildNodeContent(node) {
+  var content = el('div', 'prov-node__content');
+  content.appendChild(buildNodeHeader(node));
+  content.appendChild(buildNodeMeta(node));
+  if (node.formula) {
+    content.appendChild(buildFormula(node.formula));
+  }
+  return content;
+}
+
+/**
+ * Build just the header row (label + value, no expand button — that's in <summary>).
+ */
+function buildNodeHeader(node) {
+  var header = el('div', 'prov-node__header');
+  header.appendChild(el('span', 'prov-node__label', node.label));
+  if (node.value) {
+    header.appendChild(el('span', 'prov-node__value', node.value));
+  }
+  return header;
+}
+
+/**
+ * Build the meta row: source badge + freshness dot + description + link.
+ */
+function buildNodeMeta(node) {
+  var meta = el('div', 'prov-node__meta');
+  var badgeLabel = node.sourceBadgeText || SOURCE_LABELS[node.sourceType] || node.sourceType;
+  meta.appendChild(el('span', 'source-badge source-badge--' + node.sourceType, badgeLabel));
+
+  if (node.freshness) {
+    meta.appendChild(el('span', 'freshness-dot ' + freshnessClass(node.freshness)));
+  }
+  if (node.description) {
+    var desc = document.createElement('span');
+    desc.style.cssText = 'font-size:10px;color:var(--text-muted)';
+    desc.textContent = node.description;
+    meta.appendChild(desc);
+  }
+  if (node.url) {
+    var a = el('a', 'prov-node__link', SVG.link + ' ' + (node.sourceBadgeText || 'View'));
+    a.href = node.url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    meta.appendChild(a);
+  }
+  return meta;
+}
+
+/**
+ * Build a formula box (monospace lines with label and result).
+ */
+function buildFormula(formula) {
+  var box = el('div', 'prov-formula');
+  if (formula.label) {
+    box.appendChild(el('div', 'prov-formula__label', formula.label));
+  }
+  if (formula.lines) {
+    for (var i = 0; i < formula.lines.length; i++) {
+      var line = formula.lines[i];
+      box.appendChild(el('div', 'prov-formula__line',
+        '<span>' + line.text + '</span><span>' + line.value + '</span>'));
+    }
+  }
+  if (formula.result) {
+    box.appendChild(el('div', 'prov-formula__line prov-formula__line--result',
+      '<span>' + formula.result.text + '</span><span>' + formula.result.value + '</span>'));
+  }
+  return box;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   PAGE RENDERING — builds cost rows + main panel + legend
+   ───────────────────────────────────────────────────────────── */
+
+/** Build the individual cost rows below the main tree */
+function renderCostRows(data) {
+  var frag = document.createDocumentFragment();
+
+  // Total row
+  var totalRow = el('div', 'cost-row cost-row--total');
+  totalRow.id = 'row-total';
+  totalRow.innerHTML =
+    '<span class="cost-label">' + data.label + '</span>' +
+    '<span class="cost-value">' +
+      '<span class="freshness-dot freshness-dot--fresh" title="Data is fresh"></span>' +
+      data.value.replace('/mo', '') +
+      '<button class="prov-trigger" onclick="toggleProvenance(\'panel-total\')" aria-label="Show provenance for ' + data.label + '">' +
+        SVG.info + ' how?' +
+      '</button>' +
+    '</span>';
+  frag.appendChild(totalRow);
+
+  // Individual cost rows
+  var keys = Object.keys(data.sources);
+  for (var i = 0; i < keys.length; i++) {
+    var child = data.sources[keys[i]];
+    var row = el('div', 'cost-row');
+    var panelId = 'panel-' + keys[i];
+
+    row.innerHTML =
+      '<span class="cost-label">' + child.label + '</span>' +
+      '<span class="cost-value">' +
+        '<span class="freshness-dot freshness-dot--fresh"></span>' +
+        child.value +
+        '<button class="prov-trigger" onclick="toggleProvenance(\'' + panelId + '\')">' +
+          SVG.info + ' how?' +
+        '</button>' +
+      '</span>';
+    frag.appendChild(row);
+
+    // Provenance panel for this cost item
+    var panel = el('details', 'prov-panel');
+    panel.id = panelId;
+    var treeContainer = el('div', 'prov-tree');
+    renderProvNode(child, treeContainer);
+    panel.appendChild(treeContainer);
+    frag.appendChild(panel);
+  }
+
+  return frag;
+}
+
+/** Build the main provenance panel for the root node */
+function renderMainPanel(data) {
+  var panel = el('details', 'prov-panel');
+  panel.id = 'panel-total';
+  panel.setAttribute('open', '');
+
+  var body = el('div', 'prov-panel__body');
+
+  // Breadcrumb
+  var breadcrumb = el('div', 'prov-breadcrumb');
+  breadcrumb.appendChild(el('span', 'prov-breadcrumb__item prov-breadcrumb__item--current', data.label));
+  body.appendChild(breadcrumb);
+
+  // Controls
+  var controls = el('div', 'prov-controls');
+  var depth = treeDepth(data);
+  controls.innerHTML =
+    '<div class="prov-controls__left">' +
+      '<span class="prov-controls__depth">Depth: ' + depth + ' levels</span>' +
+    '</div>' +
+    '<div style="display:flex;gap:var(--space-1)">' +
+      '<button class="prov-btn" onclick="expandAll()">Expand all</button>' +
+      '<button class="prov-btn" onclick="collapseAll()">Collapse all</button>' +
+    '</div>';
+  body.appendChild(controls);
+
+  // Tree
+  var treeContainer = el('div', 'prov-tree');
+  renderProvNode(data, treeContainer);
+  body.appendChild(treeContainer);
+
+  // Legend
+  var legend = el('div', 'prov-legend');
+  legend.innerHTML =
+    '<div class="prov-legend__item"><div class="prov-legend__dot" style="background:var(--blue)"></div> User input</div>' +
+    '<div class="prov-legend__item"><div class="prov-legend__dot" style="background:var(--orange)"></div> API / scraped</div>' +
+    '<div class="prov-legend__item"><div class="prov-legend__dot" style="background:var(--purple)"></div> Calculated</div>' +
+    '<div class="prov-legend__item"><div class="prov-legend__dot" style="background:var(--amber)"></div> Config</div>' +
+    '<div class="prov-legend__item"><div class="prov-legend__dot" style="background:var(--green)"></div> Geocoding</div>' +
+    '<div class="prov-legend__item"><span class="freshness-dot freshness-dot--fresh" style="margin-right:1px"></span> Fresh</div>' +
+    '<div class="prov-legend__item"><span class="freshness-dot freshness-dot--aging" style="margin-right:1px"></span> Aging</div>' +
+    '<div class="prov-legend__item"><span class="freshness-dot freshness-dot--stale" style="margin-right:1px"></span> Stale</div>';
+  body.appendChild(legend);
+
+  panel.appendChild(body);
+  return panel;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   INITIALIZATION
+   ───────────────────────────────────────────────────────────── */
+(function init() {
+  var badge = document.getElementById('costs-badge');
+  if (badge) badge.textContent = provenanceData.value;
+
+  var body = document.getElementById('costs-body');
+  if (body) {
+    body.appendChild(renderCostRows(provenanceData));
+    body.appendChild(renderMainPanel(provenanceData));
+  }
+})();
+
+/* ─────────────────────────────────────────────────────────────
+   INTERACTIONS — panel toggle + expand/collapse all
+   (Individual node expand/collapse is handled natively by <details>)
+   ───────────────────────────────────────────────────────────── */
+function toggleProvenance(panelId) {
+  var panel = document.getElementById(panelId);
+  if (!panel) return;
+
+  // Close all other open panels
+  document.querySelectorAll('.prov-panel[open]').forEach(function(p) {
+    if (p.id !== panelId) p.removeAttribute('open');
+  });
+
+  // Toggle this panel
+  if (panel.hasAttribute('open')) {
+    panel.removeAttribute('open');
+  } else {
+    panel.setAttribute('open', '');
+    // Smooth scroll to panel after it opens
+    setTimeout(function() {
+      panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 50);
+  }
+
+  // Update trigger button states
+  var trigger = document.querySelector('[onclick="toggleProvenance(\'' + panelId + '\')"]');
+  document.querySelectorAll('.prov-trigger').forEach(function(t) {
+    t.classList.remove('prov-trigger--active');
+  });
+  if (trigger && panel.hasAttribute('open')) {
+    trigger.classList.add('prov-trigger--active');
+  }
+}
+
+function expandAll() {
+  document.querySelectorAll('.prov-children').forEach(function(d) {
+    d.setAttribute('open', '');
+  });
+}
+
+function collapseAll() {
+  document.querySelectorAll('.prov-children').forEach(function(d) {
+    d.removeAttribute('open');
+  });
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wireframe Verification</title>
+<style>
+body { margin: 0; font-family: sans-serif; }
+iframe { border: none; width: 100%; }
+.label { padding: 8px 16px; background: #1e293b; color: white; font-size: 14px; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="label">1280px viewport</div>
+<iframe src="ux-review-and-wireframe.html" style="height: 900px;" id="f1"></iframe>
+<script>
+// Test at 375px
+const f2 = document.createElement('iframe');
+f2.src = 'ux-review-and-wireframe.html';
+f2.style.height = '812px';
+f2.style.width = '375px';
+f2.style.border = 'none';
+f2.style.display = 'block';
+f2.style.margin = '16px auto';
+const label2 = document.createElement('div');
+label2.textContent = '375px viewport';
+label2.style.cssText = 'padding: 8px 16px; background: #1e293b; color: white; font-size: 14px; font-weight: 600; text-align: center; margin-top: 16px;';
+document.body.appendChild(label2);
+document.body.appendChild(f2);
+</script>
+</body>
+</html>

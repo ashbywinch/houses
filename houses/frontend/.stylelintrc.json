@@ -1,0 +1,9 @@
+{
+  "customSyntax": "postcss-html",
+  "plugins": ["stylelint-value-no-unknown-custom-properties"],
+  "rules": {
+    "csstools/value-no-unknown-custom-properties": [true, {
+      "importFrom": ["src/_variables.css"]
+    }]
+  }
+}

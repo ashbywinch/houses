@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt, Provenance, SourceType
 from dag.derived_node import DerivedNode
 from dag.node import Node
 
@@ -66,4 +66,4 @@ class CommuteBreakdownNode(DerivedNode[dict]):
         )
 
     async def build_provenance(self):
-        return Provenance(label="commute_breakdown")
+        return Provenance(label="commute_breakdown", source_type=SourceType.CALC, freshness=self._attempt.created_at)

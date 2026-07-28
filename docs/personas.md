@@ -37,6 +37,10 @@ Four people buying a house together in/near London. Budget is fixed monthly. Req
 
 ## Shared Concerns
 
+### Commutes
+
+Commuters all care about the length of their commute and also the difficulty (does it have lots of changes, or long walks, or use a particularly nasty tube line?)
+
 ### Trust in calculations
 
 All four are suspicious of automated calculations. They need to see how each figure was arrived at — the formula, the inputs, the source, the timestamp. This applies particularly to monthly cost breakdown, commute times, school distances, walk times, EPC data.
@@ -57,8 +61,7 @@ Properties fall into three categories with different meanings:
 - **Dismissed:** hard no, ruled out
 - **Marked as seen:** physically visited — useful for finding the property again to look at pictures, not a decision status
 
-These are distinct needs, not interchangeable. A property can be dismissed without being seen, or seen without being dismissed.<｜end▁of▁thinking｜>
-
+These are distinct needs, not interchangeable. A property can be dismissed without being seen, or seen without being dismissed.
 
 
 ### Filters must match the workflow
@@ -79,7 +82,7 @@ EPC rating affects the running cost of the property, which feeds directly into t
 
 ### Property finding after visiting
 
-After physically visiting a property, the user needs to find it again easily to review pictures and details. The "Seen" state serves this lookup need, not a triage purpose.<｜end▁of▁thinking｜>
+After physically visiting a property, the user needs to find it again easily to review pictures and details. The "Seen" state serves this lookup need, not a triage purpose.
 
 ## User Journeys
 
@@ -92,7 +95,7 @@ Ashby opens the tool and sees newly discovered properties. There are lots of the
 - Are the commutes manageable for everyone?
 - Are the schools acceptable?
 
-If any of those is a clear no, rule it out. If all three look OK, flag it as a potential.
+If any of those is a clear no, rule it out. If a property looks particularly exciting, shortlist it.
 
 ### Journey 2: Evaluating survivors (the group)
 
@@ -106,4 +109,4 @@ Currently this happens via WhatsApp messages back and forth. The conclusion is e
 
 ### Journey 3: Deep dive into one property (any user)
 
-Someone wants to understand a specific property thoroughly. They check their priority dimension — Ashby looks at the cost breakdown, Simon checks his commute route, Lorena reads the area description and school details. They want the full detail, not a summary.
+Someone wants to understand a specific property thoroughly. They check their priority dimension — Ashby looks at the cost breakdown and property layout / potential annexe costs, Simon looks at costs and commute routes, Lorena reads commute details as well as the area description and school details. 

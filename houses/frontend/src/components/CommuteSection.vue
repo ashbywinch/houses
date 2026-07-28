@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { commuteDuration, commuteCost, pillColour } from '../formatters/commute'
 import ProvenanceTree from './ProvenanceTree.vue'
 
-defineProps<{
+const props = defineProps<{
   commutes: any
   goodThreshold?: number
   warnThreshold?: number
@@ -17,6 +17,12 @@ function toggleCommute(key: string) {
   } else {
     expandedCommutes.value.add(key)
   }
+}
+
+// ── Provenance toggle state (one at a time) ────────────
+const showProvenance = ref<string | null>(null)
+function toggleProvenance(key: string) {
+  showProvenance.value = showProvenance.value === key ? null : key
 }
 </script>
 
@@ -49,9 +55,19 @@ function toggleCommute(key: string) {
             {{ c.value.route_description }}
           </div>
         </div>
-        <div class="commute-provenance">
-          <ProvenanceTree v-if="c?.provenance" :provenance="c.provenance" />
-          <span v-else>unknown</span>
+
+        <!-- Provenance trigger -->
+        <div class="commute-provenance-trigger">
+          <button
+            class="how-btn"
+            :class="{ 'how-btn--active': showProvenance === key }"
+            @click="toggleProvenance(key as string)"
+          >
+            {{ showProvenance === key ? 'ⓘ hide source' : 'ⓘ how?' }}
+          </button>
+        </div>
+        <div v-if="showProvenance === key && c?.provenance" class="commute-provenance-tree">
+          <ProvenanceTree :provenance="c.provenance" />
         </div>
       </div>
     </div>
@@ -60,39 +76,96 @@ function toggleCommute(key: string) {
 
 <style scoped>
 .detail-section {
-  padding: 16px;
-  border-bottom: 8px solid var(--page-bg);
+  padding: var(--sp-5) var(--sp-6);
+  border-bottom: 8px solid var(--slate-50);
 }
 .detail-section__title {
-  font-size: 16px; font-weight: 700; margin: 0 0 12px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  color: var(--slate-800);
+  margin: 0 0 var(--sp-4);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
-.commute-accordion { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+
+.commute-accordion {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: var(--sp-2);
+  overflow: hidden;
+}
 .commute-accordion__header {
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 10px 12px; border: none; background: var(--card-bg);
-  cursor: pointer; font: inherit; text-align: left;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  border: none;
+  background: var(--card-bg);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
   min-height: 44px;
 }
-.commute-accordion__label { font-weight: 600; font-size: 14px; flex: 1; }
-.commute-accordion__chevron { font-size: 10px; color: var(--text-muted); transition: transform 0.2s; }
+.commute-accordion__header:hover { background: var(--slate-50); }
+.commute-accordion__label { font-weight: var(--fw-semibold); font-size: var(--fs-sm); flex: 1; }
+.commute-accordion__chevron { font-size: 10px; color: var(--text-muted); transition: transform var(--transition); }
 .commute-accordion__chevron--open { transform: rotate(180deg); }
-.commute-accordion__body { padding: 8px 12px 12px; border-top: 1px solid var(--border); background: #fafafa; }
-.commute-legs { display: flex; flex-direction: column; gap: 4px; }
-.commute-leg { display: flex; gap: 8px; font-size: 13px; }
-.commute-leg__mode { font-weight: 600; min-width: 60px; }
-.commute-leg__duration { color: var(--text-secondary); }
-.commute-leg__cost { color: var(--text-secondary); }
-.commute-leg__operator { font-size: 12px; color: var(--text-muted); font-style: italic; }
-.commute-leg__destination { font-size: 12px; color: var(--text-muted); }
-.commute-route { font-size: 12px; color: var(--text-muted); font-style: italic; margin-top: 4px; }
-.commute-provenance { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
-.pill {
-  display: inline-flex; align-items: center; padding: 2px 10px;
-  border-radius: 999px; font-size: 12px; font-weight: 700;
-  line-height: 1.6; white-space: nowrap;
+.commute-accordion__body {
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--border);
+  background: var(--slate-50);
 }
-.pill--good { background: var(--green-bg); color: var(--green); }
-.pill--warn { background: var(--orange-bg); color: var(--orange); }
-.pill--bad { background: var(--red-bg); color: var(--red); }
-.pill--muted { background: var(--muted-bg); color: var(--muted); }
+
+.commute-legs { display: flex; flex-direction: column; gap: var(--sp-1); }
+.commute-leg { display: flex; gap: var(--sp-2); font-size: var(--fs-sm); }
+.commute-leg__mode { font-weight: var(--fw-semibold); min-width: 56px; color: var(--slate-600); }
+.commute-leg__duration { color: var(--slate-700); }
+.commute-leg__cost { color: var(--text-secondary); }
+.commute-leg__operator { font-size: var(--fs-xs); color: var(--text-muted); font-style: italic; }
+.commute-leg__destination { font-size: var(--fs-xs); color: var(--text-muted); }
+.commute-route { font-size: var(--fs-xs); color: var(--text-muted); font-style: italic; margin-top: var(--sp-1); }
+
+/* Provenance trigger */
+.commute-provenance-trigger { margin-top: var(--sp-2); }
+.commute-provenance-tree {
+  margin-top: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  border: 1px solid var(--slate-200);
+}
+
+/* "How?" button */
+.how-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--slate-400);
+  background: none;
+  border: 1px solid var(--slate-200);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: all var(--transition);
+  font-family: var(--font);
+}
+.how-btn:hover { background: var(--slate-100); color: var(--slate-600); border-color: var(--slate-300); }
+.how-btn--active { background: var(--blue-bg); color: var(--blue-text); border-color: var(--blue); }
+
+/* Pill */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  line-height: 1.6;
+  white-space: nowrap;
+}
+.pill--good { background: var(--green-bg); color: var(--green-text); }
+.pill--warn { background: var(--orange-bg); color: var(--orange-text); }
+.pill--bad { background: var(--red-bg); color: var(--red-text); }
 </style>

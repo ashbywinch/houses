@@ -1,7 +1,26 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from houses.geo import GeoPoint
 from tests.unit.conftest import flush_all
+
+
+def _inject_session(client) -> None:
+    """Add a valid session cookie to the test client's default cookies."""
+    import secrets
+
+    from houses.web.auth import _sessions
+
+    token = secrets.token_urlsafe(32)
+    _sessions[token] = {
+        "email": "simon@example.com",
+        "name": "Simon",
+        "picture": "",
+        "is_superuser": True,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    client.cookies.set("session_token", token)
 
 
 class TestPropertyApi:
@@ -12,8 +31,9 @@ class TestPropertyApi:
         from houses.server import app
 
         _registry.clear()
-        # Routes already registered by server.py — no app.include_router needed
-        return TestClient(app), _registry
+        client = TestClient(app)
+        _inject_session(client)
+        return client, _registry
 
     def test_get_property_returns_json(self):
         from houses.nodes.property import PropertyNodes
@@ -81,7 +101,9 @@ class TestSettingsApi:
 
         from houses.server import app
 
-        return TestClient(app)
+        client = TestClient(app)
+        _inject_session(client)
+        return client
 
     def test_put_persons_with_list(self):
         """PUT /settings/persons must accept a raw JSON list body."""

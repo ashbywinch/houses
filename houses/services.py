@@ -15,6 +15,7 @@ from typing import Any, Protocol
 from dag.attempt import Attempt
 from dag.persistence import latest_node_result
 from dag.user_input_node import UserInputNode
+from houses.config import settings
 from houses.council_tax import lookup_council_tax
 from houses.council_tax_info import CouncilTaxInfo
 from houses.epc import lookup_epc
@@ -241,8 +242,13 @@ class _DefaultRailFare:
 # ── DI Container ──────────────────────────────────────────────────────
 
 
+def _default_auth_enabled() -> bool:
+    return bool(settings.google_client_id)
+
+
 @dataclasses.dataclass
 class Services:
+    auth_enabled: bool = dataclasses.field(default_factory=_default_auth_enabled)
     geocoder: GeocodingService = dataclasses.field(default_factory=_DefaultGeocoder)
     commute_router: CommuteRoutingService = dataclasses.field(default_factory=_DefaultCommuteRouter)
     school_lookup: SchoolLookupService = dataclasses.field(default_factory=_DefaultSchoolLookup)

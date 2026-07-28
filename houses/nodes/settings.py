@@ -23,6 +23,8 @@ def make_default_persons() -> list[Person]:
     return [
         Person(
             name="Simon",
+            email="",
+            is_superuser=False,
             has_car=True,
             bus_walk_penalty_minutes=20,
             deposit_equity=Money("177000", "GBP"),
@@ -46,6 +48,8 @@ def make_default_persons() -> list[Person]:
         ),
         Person(
             name="Lorena",
+            email="",
+            is_superuser=False,
             has_car=False,
             bus_walk_penalty_minutes=15,
             deposit_equity=Money("0", "GBP"),
@@ -57,6 +61,8 @@ def make_default_persons() -> list[Person]:
         ),
         Person(
             name="George",
+            email="",
+            is_superuser=False,
             has_car=False,
             is_child=True,
             acceptable_schools=("mixed", "boys", "girls"),

@@ -2,11 +2,28 @@ from __future__ import annotations
 
 from money import Money
 
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
 
 
 class TotalMonthlyHousingCostNode(DerivedNode[Money]):
+    @property
+    def provenance_formula(self) -> Formula | None:
+        if not self._attempt.succeeded or self._attempt.value_or_none() is None:
+            return None
+        try:
+            lines = []
+            deps_labels = ["Mortgage", "Sinking Fund", "Commute", "Council Tax"]
+            dep_indices = [0, 1, 3, 4]
+            for label, idx in zip(deps_labels, dep_indices, strict=False):
+                att = self._deps[idx].latest_attempt()
+                val = att.value_or_none() if att.succeeded else None
+                if val is not None:
+                    lines.append(FormulaLine(label=label, value=str(val)))
+            return Formula(lines=lines, result=str(self._attempt.value))
+        except Exception:
+            return None
+
     def __init__(
         self,
         node_id: str,
@@ -51,6 +68,3 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
             ct_val = council_tax.value_or_none() or {}
             total += Money(str(ct_val.get("yearly_cost", 0.0) / 12), "GBP")
         return Attempt.succeeded(total)
-
-    async def build_provenance(self):
-        return Provenance(label="total_monthly_formula")

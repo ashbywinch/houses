@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 150
     trace: bool = Field(default=False, alias="HOUSES_TRACE")
     epc_bearer_token: str = Field(default="", alias="EPC_BEARER_TOKEN")
+    google_client_id: str = Field(default="", alias="GOOGLE_CLIENT_ID")
+    google_client_secret: str = Field(default="", alias="GOOGLE_CLIENT_SECRET")
 
     rightmove_chrome_port: int = 9222
     rightmove_sample_page: str = ""

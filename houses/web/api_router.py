@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Body, HTTPException, WebSocket
+from fastapi import APIRouter, Body, HTTPException, Request, WebSocket
 
 from houses.geo import GeoPoint
 from houses.nodes.bootstrap import load_property_nodes_from_rows
@@ -183,6 +183,79 @@ async def patch_triage(rid: str, body: dict):
     if "triage_status" in body:
         prop.triage_status.push(str(body["triage_status"]), "user")
     return {"status": "ok"}
+
+
+@api_router.get("/properties/{rid}/comments")
+async def get_property_comments(rid: str):
+    """Return all comments for a property."""
+    from houses.comments import get_comments, migrate_old_comments
+
+    # On first access, migrate old flat comment fields to the new table
+    prop = get_registry_property(rid)
+    if prop is not None:
+        detail = await prop.to_json_detail()
+        old_comments = detail.get("comments", {})
+        return migrate_old_comments(rid, old_comments)
+    return get_comments(rid)
+
+
+@api_router.post("/properties/{rid}/comments")
+async def add_property_comment(rid: str, body: dict, request: Request):
+    """Add a comment for a property.
+
+    Two modes:
+    - Auth mode (GOOGLE_CLIENT_ID set): determine person from session
+      + optional X-Impersonate-Person header (superuser only).
+    - Debug mode (GOOGLE_CLIENT_ID empty): accept ``person`` from
+      request body directly (no auth required).
+    """
+    from houses.comments import add_comment
+    from houses.services_provider import get_services
+
+    text = body.get("text", "")
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+
+    svc = get_services()
+
+    # Debug mode — accept person from body directly
+    if not svc.auth_enabled:
+        person = body.get("person", "")
+        if not person:
+            raise HTTPException(status_code=400, detail="person is required in debug mode")
+        return add_comment(rid, person, text)
+
+    # Auth mode — determine person from session
+    from houses.web.auth import get_session_user
+
+    session_user = get_session_user(request)
+    if not session_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    impersonate = request.headers.get("X-Impersonate-Person", "")
+    if impersonate:
+        if not session_user.get("is_superuser"):
+            raise HTTPException(status_code=403, detail="Only superusers can impersonate")
+        person = impersonate
+    else:
+        persons_attempt = svc.persons_source.latest_attempt()
+        person = ""
+        if persons_attempt.succeeded:
+            for p in persons_attempt.value_or_none() or []:
+                if isinstance(p, dict):
+                    if p.get("email") == session_user.get("email"):
+                        person = p.get("name", "")
+                        break
+                elif hasattr(p, "email") and p.email == session_user.get("email"):
+                    person = getattr(p, "name", "")
+                    break
+        if not person:
+            raise HTTPException(
+                status_code=400,
+                detail="Your account is not linked to a person in settings",
+            )
+
+    return add_comment(rid, person, text)
 
 
 async def seed_properties():

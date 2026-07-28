@@ -1,129 +1,219 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
-import { usePropertiesStore } from '../stores/properties'
-import { patchTriage } from '../services/api'
+import { ref, onMounted } from 'vue'
+import { fetchComments, postComment, type CommentEntry } from '../services/api'
+import { useAuthStore } from '../stores/auth'
 
 const props = defineProps<{
   rid: string
-  triage: any
-  comments: any
 }>()
 
-const store = usePropertiesStore()
+const auth = useAuthStore()
+const comments = ref<CommentEntry[]>([])
+const newComment = ref('')
+const selectedPerson = ref('Ashby')
+const submitting = ref(false)
 
-// ── Notes state ────────────────────────────────────────
-const userNotes = ref('')
-const notesSaved = ref(false)
-const triageStatus = ref('')
+const persons = ['Ashby', 'Simon', 'Lorena', 'George']
 
-// Initialize notes from existing triage data when detail loads
-watch([() => props.triage, () => props.comments], () => {
-  const t = props.triage
-  if (t?.user_notes) userNotes.value = t.user_notes as string
-  if (t?.triage_status) triageStatus.value = t.triage_status as string
-}, { immediate: true })
-
-async function saveNotes() {
-  notesSaved.value = false
-  await patchTriage(props.rid, { user_notes: userNotes.value })
-  // Update local store state so it persists across page views
-  if (!store.triage[props.rid]) {
-    store.triage[props.rid] = { favourite: false, dismissed: false, is_viewed: false, user_notes: '', triage_status: '' }
-  }
-  store.triage[props.rid].user_notes = userNotes.value
-  notesSaved.value = true
-  setTimeout(() => { notesSaved.value = false }, 2000)
+function relativeTime(iso: string): string {
+  const d = new Date(iso)
+  const now = Date.now()
+  const diffMs = now - d.getTime()
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return 'just now'
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h ago`
+  const diffDay = Math.floor(diffHr / 24)
+  if (diffDay < 7) return `${diffDay}d ago`
+  return d.toLocaleDateString()
 }
 
-async function setStatus(status: string) {
-  triageStatus.value = status
-  await patchTriage(props.rid, { triage_status: status })
-  if (store.triage[props.rid]) {
-    store.triage[props.rid].triage_status = status
+async function loadComments() {
+  try {
+    comments.value = await fetchComments(props.rid)
+  } catch {
+    comments.value = []
   }
 }
 
-async function markViewed() {
-  await store.toggleTriage(props.rid, 'is_viewed', true)
+async function submitComment() {
+  const text = newComment.value.trim()
+  if (!text || submitting.value) return
+  submitting.value = true
+  try {
+    // In debug mode, send person from selector; in auth mode, server resolves it
+    const entry = auth.authAvailable
+      ? await postComment(props.rid, text)
+      : await postComment(props.rid, selectedPerson.value, text)
+    comments.value.push(entry)
+    newComment.value = ''
+  } catch {
+    // silently fail
+  } finally {
+    submitting.value = false
+  }
 }
+
+onMounted(loadComments)
 </script>
 
 <template>
   <section id="section-notes" class="detail-section">
     <h2 class="detail-section__title">Notes</h2>
 
-    <!-- Status dropdown -->
-    <div class="detail-field">
-      <span class="detail-field__label">Status</span>
-      <div class="detail-field__value">
-        <select v-model="triageStatus" class="notes-select" @change="setStatus(triageStatus)">
-          <option value="">None</option>
-          <option value="shortlisted">Shortlisted</option>
-          <option value="offer_made">Offer Made</option>
-          <option value="rejected">Rejected</option>
+    <div v-if="comments.length === 0" class="notes-empty">
+      No comments yet.
+    </div>
+    <div v-else class="notes-list">
+      <div v-for="(comment, i) in comments" :key="i" class="note-card">
+        <div class="note-card__header">
+          <div class="note-card__author">
+            <span class="note-card__avatar">{{ comment.person[0] }}</span>
+            <span class="note-card__name">{{ comment.person }}</span>
+          </div>
+          <span class="note-card__time">{{ relativeTime(comment.timestamp) }}</span>
+        </div>
+        <div class="note-card__body">{{ comment.text }}</div>
+      </div>
+    </div>
+
+    <!-- Add comment form -->
+    <div class="note-input">
+      <textarea
+        v-model="newComment"
+        class="note-input__textarea"
+        placeholder="Add a note…"
+        rows="2"
+      ></textarea>
+      <div class="note-input__actions">
+        <select
+          v-if="!auth.authAvailable"
+          v-model="selectedPerson"
+          class="note-input__select"
+        >
+          <option v-for="p in persons" :key="p" :value="p">{{ p }}</option>
         </select>
+        <button
+          class="note-input__btn"
+          :disabled="!newComment.trim() || submitting"
+          @click="submitComment"
+        >
+          {{ submitting ? 'Saving…' : 'Save' }}
+        </button>
       </div>
-    </div>
-
-    <!-- Free-text notes -->
-    <div class="detail-field detail-field--block">
-      <span class="detail-field__label">Personal Notes</span>
-      <textarea v-model="userNotes" class="notes-textarea" placeholder="Add your notes about this property..." rows="4" />
-      <div class="notes-actions">
-        <button class="btn--small" @click="saveNotes">Save Notes</button>
-        <span v-if="notesSaved" class="notes-saved">Saved!</span>
-      </div>
-    </div>
-
-    <!-- Mark as Viewed -->
-    <div class="detail-field">
-      <button class="btn--small btn--confirm" @click="markViewed">
-        {{ triage?.is_viewed ? '✓ Viewed' : 'Mark as Viewed' }}
-      </button>
-    </div>
-
-    <!-- Group notes (read-only) -->
-    <div v-if="comments?.group_notes?.value" class="detail-field detail-field--block">
-      <span class="detail-field__label">Group Notes</span>
-      <p class="notes-readonly">{{ comments.group_notes.value }}</p>
-    </div>
-    <div v-if="comments?.ashby_comments?.value" class="detail-field detail-field--block">
-      <span class="detail-field__label">Ashby's Notes</span>
-      <p class="notes-readonly">{{ comments.ashby_comments.value }}</p>
     </div>
   </section>
 </template>
 
 <style scoped>
-.detail-section {
-  padding: 16px;
-  border-bottom: 8px solid var(--page-bg);
+.notes-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: #888;
+  font-style: italic;
 }
-.detail-section__title {
-  font-size: 16px; font-weight: 700; margin: 0 0 12px;
+
+.notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
-.detail-field {
-  display: flex; flex-wrap: wrap; align-items: baseline;
-  gap: 8px; padding: 6px 0;
+
+.note-card {
+  background: var(--card-bg);
+  border-radius: 8px;
+  padding: 10px 14px;
 }
-.detail-field--block { flex-direction: column; align-items: stretch; }
-.detail-field__label { font-size: 13px; font-weight: 600; color: var(--text-secondary); min-width: 80px; }
-.detail-field__value { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 14px; }
-.notes-select {
-  font: inherit; padding: 8px 12px; border: 1px solid var(--border);
-  border-radius: 8px; font-size: 14px; min-width: 160px; min-height: 44px;
+
+.note-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
 }
-.notes-textarea {
-  font: inherit; padding: 8px 12px; border: 1px solid var(--border);
-  border-radius: 8px; font-size: 14px; width: 100%; resize: vertical;
+
+.note-card__author {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
-.notes-actions { display: flex; align-items: center; gap: 8px; }
-.notes-saved { font-size: 13px; color: var(--green); font-weight: 600; }
-.btn--small {
-  font-size: 12px; padding: 8px 16px; border: 1px solid var(--border);
-  border-radius: 8px; background: var(--card-bg); cursor: pointer;
-  min-width: 44px; min-height: 44px;
+
+.note-card__avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--blue, #1a73e8);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
 }
-.btn--confirm { background: var(--green-bg); color: var(--green); border-color: var(--green); }
-.notes-readonly { font-size: 14px; color: var(--text-secondary); margin: 0; white-space: pre-wrap; }
+
+.note-card__name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.note-card__time {
+  font-size: 11px;
+  color: #888;
+}
+
+.note-card__body {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.note-input {
+  margin-top: 12px;
+}
+
+.note-input__textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text);
+  resize: vertical;
+  font-family: inherit;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.note-input__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+.note-input__btn {
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: none;
+  background: var(--blue, #1a73e8);
+  color: #fff;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.note-input__select {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.note-input__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 </style>

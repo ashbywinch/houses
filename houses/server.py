@@ -30,6 +30,7 @@ from houses.sheets import (
 )
 from houses.sheets.reader import get_properties_data, resolve_tab
 from houses.web.api_router import api_router
+from houses.web.auth import auth_router
 from houses.web.json_utils import asdict_serializable
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,9 @@ async def lifespan(_app: FastAPI):
     # leaking API keys in the server log
     logging.getLogger("httpx").setLevel(logging.WARNING)
     init_dag_db()
+    from houses.comments import init_comments_db as init_comments
+
+    init_comments()
     from houses.property_registry import _reset as _reset_property_registry
     from houses.services import _reset_settings_cache
     from houses.town_desc import _reset as _reset_town_desc
@@ -123,16 +127,41 @@ app.add_middleware(
 
 app.mount("/static", StaticFiles(directory="houses/static"), name="static")
 app.include_router(api_router)
+app.include_router(auth_router)
 
 
 @app.middleware("http")
 async def _request_context(request, call_next):
-    """Set up per-request context (services container)."""
-    svc_token = _sp._request_services.set(Services())
-    try:
-        return await call_next(request)
-    finally:
-        _sp._request_services.reset(svc_token)
+    """Set up per-request context (services container) and require auth
+    on all /api/* routes except /api/auth/*.
+
+    Only sets the services default if nothing is already in context —
+    tests that pre-inject custom services via ``_sp.set()`` keep their
+    override.
+    """
+    existing = _sp._request_services.get()
+    if existing is None:
+        svc_token = _sp._request_services.set(Services())
+        try:
+            return await _require_auth(request, call_next)
+        finally:
+            _sp._request_services.reset(svc_token)
+    else:
+        return await _require_auth(request, call_next)
+
+
+async def _require_auth(request, call_next):
+    """Require authentication on /api/* routes (except /api/auth/*)."""
+    path = request.url.path
+    if path.startswith("/api/") and not path.startswith("/api/auth/"):
+        from houses.web.auth import get_session_user
+
+        session_user = get_session_user(request)
+        if session_user is None:
+            from fastapi.responses import JSONResponse
+
+            return JSONResponse(status_code=401, content={"detail": "Authentication required"})
+    return await call_next(request)
 
 
 @app.get("/properties")
