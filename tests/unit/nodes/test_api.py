@@ -1,26 +1,20 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from houses.geo import GeoPoint
 from tests.unit.conftest import flush_all
 
 
 def _inject_session(client) -> None:
-    """Add a valid session cookie to the test client's default cookies."""
-    import secrets
+    """Add a valid signed session cookie to the test client's default cookies."""
+    from houses.web.auth import _make_session_cookie
 
-    from houses.web.auth import _sessions
-
-    token = secrets.token_urlsafe(32)
-    _sessions[token] = {
-        "email": "simon@example.com",
-        "name": "Simon",
-        "picture": "",
-        "is_superuser": True,
-        "created_at": datetime.now(UTC).isoformat(),
-    }
-    client.cookies.set("session_token", token)
+    cookie = _make_session_cookie(
+        email="simon@example.com",
+        name="Simon",
+        picture="",
+        is_superuser=True,
+    )
+    client.cookies.set("session", cookie)
 
 
 class TestPropertyApi:

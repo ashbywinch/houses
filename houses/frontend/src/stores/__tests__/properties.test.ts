@@ -103,7 +103,7 @@ describe('properties store loadDetail', () => {
 
     const first = await store.loadDetail('prop999')
     expect(first).toBeNull()
-    expect(store.error).toBe('Error: Network error')
+    expect(store.error).toBe('Something went wrong loading this property. Please try again.')
 
     const second = await store.loadDetail('prop999')
     expect(second).toBeDefined()

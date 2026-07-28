@@ -13,13 +13,37 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
             return None
         try:
             lines = []
-            deps_labels = ["Mortgage", "Sinking Fund", "Commute", "Council Tax"]
-            dep_indices = [0, 1, 3, 4]
-            for label, idx in zip(deps_labels, dep_indices, strict=False):
-                att = self._deps[idx].latest_attempt()
-                val = att.value_or_none() if att.succeeded else None
-                if val is not None:
-                    lines.append(FormulaLine(label=label, value=str(val)))
+
+            # Mortgage (index 0)
+            mortgage_att = self._deps[0].latest_attempt()
+            mortgage_val = mortgage_att.value_or_none() if mortgage_att.succeeded else None
+            if mortgage_val is not None:
+                lines.append(FormulaLine(label="Mortgage", value=str(mortgage_val)))
+
+            # Sinking fund (index 1) — show yearly → monthly → our share
+            sinking_att = self._deps[1].latest_attempt()
+            sinking_val = sinking_att.value_or_none() if sinking_att.succeeded else None
+            if sinking_val is not None:
+                yearly = float(sinking_val.amount)
+                monthly = yearly / 12
+                our_share = monthly * 2 / 3
+                lines.append(FormulaLine(label="Sinking Fund (yearly)", value=str(sinking_val)))
+                lines.append(FormulaLine(label="  ÷ 12 (monthly)", value=f"{monthly:.2f} GBP"))
+                lines.append(FormulaLine(label="  × ⅔ (our share)", value=f"{our_share:.2f} GBP"))
+                lines.append(FormulaLine(label="Sinking Fund (monthly)", value=f"{our_share:.2f} GBP"))
+
+            # Commute (index 3)
+            commute_att = self._deps[3].latest_attempt()
+            commute_val = commute_att.value_or_none() if commute_att.succeeded else None
+            if commute_val is not None:
+                lines.append(FormulaLine(label="Commute", value=str(commute_val)))
+
+            # Council tax (index 4)
+            council_att = self._deps[4].latest_attempt()
+            council_val = council_att.value_or_none() if council_att.succeeded else None
+            if council_val is not None:
+                lines.append(FormulaLine(label="Council Tax", value=str(council_val)))
+
             return Formula(lines=lines, result=str(self._attempt.value))
         except Exception:
             return None

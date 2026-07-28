@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    host: str = "127.0.0.1"
+    host: str = "0.0.0.0"
     port: int = 8080
     reload: bool = True
 
@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     epc_bearer_token: str = Field(default="", alias="EPC_BEARER_TOKEN")
     google_client_id: str = Field(default="", alias="GOOGLE_CLIENT_ID")
     google_client_secret: str = Field(default="", alias="GOOGLE_CLIENT_SECRET")
+    auth_disabled: bool = Field(default=False, alias="HOUSES_AUTH_DISABLED")
+    session_secret: str = Field(default="", alias="HOUSES_SESSION_SECRET")
 
     rightmove_chrome_port: int = 9222
     rightmove_sample_page: str = ""
@@ -45,6 +47,9 @@ class Settings(BaseSettings):
     lorena_station_crs: str = "FST"
 
     sqlite_path: str = Field(default="data/houses.db", alias="HOUSES_SQLITE_PATH")
+
+    frontend_url: str = Field(default="http://localhost:5173", alias="HOUSES_FRONTEND_URL")
+    public_url: str = Field(default="http://localhost:8080", alias="HOUSES_PUBLIC_URL")
 
     working_weeks_per_year: int = 46
     weekly_simon_trips: int = 1

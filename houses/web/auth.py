@@ -6,40 +6,72 @@ Two modes:
 - Debug mode (GOOGLE_CLIENT_ID empty): returns ``auth_available: false``
   from the /me endpoint. The frontend falls back to the old dropdown.
 
-Session storage is in-memory (single-process).  Tokens expire after 24h.
+Session storage uses signed cookies (itsdangerous.URLSafeTimedSerializer).
+The cookie payload contains ``{email, name, picture, is_superuser, impersonating}``.
+Cookies are valid for 30 days and survive server restarts.
 """
 
 from __future__ import annotations
 
+import logging
 import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import quote
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from houses.config import settings
 
-# Frontend URL for redirects after OAuth — Vite dev server is 5173,
-# production would come from settings or behind a proxy.
-_FRONTEND_URL = "http://localhost:5173"
+_SESSION_MAX_AGE = timedelta(days=30)
+
+logger = logging.getLogger(__name__)
 
 auth_router = APIRouter(prefix="/api/auth")
 
-# In-memory OAuth state store — maps state_token to dict with code_verifier
+# In-memory OAuth state store — maps state_token to dict with code_verifier.
+# Ephemeral — lost on server restart, user retries the OAuth flow.
 _oauth_states: dict[str, dict] = {}
 
-# In-memory session store — maps session_token to user info
-_sessions: dict[str, dict[str, Any]] = {}
 
-SESSION_MAX_AGE = timedelta(hours=24)
+def _get_serializer() -> URLSafeTimedSerializer:
+    """Return a serializer for signing session cookies."""
+    return URLSafeTimedSerializer(settings.session_secret, salt="auth-session")
 
 
-def _clear_expired_sessions() -> None:
-    now = datetime.now(UTC)
-    expired = [k for k, v in _sessions.items() if now - datetime.fromisoformat(v["created_at"]) > SESSION_MAX_AGE]
-    for k in expired:
-        _sessions.pop(k, None)
+def get_session_user(request: Request) -> dict[str, Any] | None:
+    """Extract session user info from the signed ``session`` cookie.
+
+    Returns ``None`` if the cookie is missing, tampered, or expired.
+    Survives server restarts — the signed cookie is self-contained.
+    """
+    cookie = request.cookies.get("session")
+    if not cookie:
+        return None
+    try:
+        return _get_serializer().loads(cookie, max_age=int(_SESSION_MAX_AGE.total_seconds()))
+    except (BadSignature, SignatureExpired):
+        return None
+
+
+def _make_session_cookie(
+    email: str,
+    name: str,
+    picture: str,
+    is_superuser: bool,
+    impersonating: str | None = None,
+) -> str:
+    """Create a signed session cookie value."""
+    payload: dict[str, Any] = {
+        "email": email,
+        "name": name,
+        "picture": picture,
+        "is_superuser": is_superuser,
+        "impersonating": impersonating,
+    }
+    return _get_serializer().dumps(payload)
 
 
 def _lookup_person_by_email(email: str, persons_attempt_value: Any) -> str | None:
@@ -55,23 +87,30 @@ def _lookup_person_by_email(email: str, persons_attempt_value: Any) -> str | Non
     return None
 
 
-def get_session_user(request: Request) -> dict[str, Any] | None:
-    """Extract session user info from the request's session_token cookie.
+def _set_session_cookie(response, cookie_value: str, secure: bool) -> None:
+    """Set the signed session cookie on the response."""
+    response.set_cookie(
+        key="session",
+        value=cookie_value,
+        httponly=True,
+        samesite="lax",
+        path="/",
+        secure=secure,
+        max_age=int(_SESSION_MAX_AGE.total_seconds()),
+    )
 
-    Returns ``None`` if no valid session.  Expired sessions are cleaned up
-    on each call.
-    """
-    _clear_expired_sessions()
-    token = request.cookies.get("session_token")
-    if not token or token not in _sessions:
-        return None
-    session = _sessions[token]
-    # Double-check expiry
-    created = datetime.fromisoformat(session["created_at"])
-    if datetime.now(UTC) - created > SESSION_MAX_AGE:
-        _sessions.pop(token, None)
-        return None
-    return session
+
+def _clear_session_cookie(response, secure: bool) -> None:
+    """Clear the session cookie."""
+    response.set_cookie(
+        key="session",
+        value="",
+        httponly=True,
+        samesite="lax",
+        path="/",
+        secure=secure,
+        max_age=0,
+    )
 
 
 @auth_router.get("/login")
@@ -95,7 +134,7 @@ async def login():
                 "client_secret": settings.google_client_secret,
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": ["http://localhost:8080/api/auth/callback"],
+                "redirect_uris": [settings.public_url.rstrip("/") + "/api/auth/callback"],
             }
         }
         flow = Flow.from_client_config(
@@ -106,7 +145,7 @@ async def login():
                 "https://www.googleapis.com/auth/userinfo.profile",
             ],
         )
-        flow.redirect_uri = "http://localhost:8080/api/auth/callback"
+        flow.redirect_uri = settings.public_url.rstrip("/") + "/api/auth/callback"
         authorization_url, state_from_flow = flow.authorization_url(
             access_type="online",
             include_granted_scopes="false",
@@ -124,18 +163,18 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
     """Handle the Google OAuth callback.
 
     Verifies state, exchanges code for token, verifies id_token, and
-    creates a session.  Redirects to frontend root on success.
+    creates a signed session cookie.  Redirects to frontend root on success.
     """
     if error:
-        return RedirectResponse(url=f"{_FRONTEND_URL}/?auth_error=" + error)
+        return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=" + quote(error))
 
     if not code or not state:
-        return RedirectResponse(url=f"{_FRONTEND_URL}/?auth_error=missing_params")
+        return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=missing_params")
 
     # Verify and consume state token (prevents CSRF + replay)
     state_data = _oauth_states.pop(state, None)
     if state_data is None:
-        return RedirectResponse(url=f"{_FRONTEND_URL}/?auth_error=invalid_state")
+        return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=invalid_state")
 
     code_verifier = state_data.get("code_verifier", "") if isinstance(state_data, dict) else ""
 
@@ -148,7 +187,7 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
                 "client_secret": settings.google_client_secret,
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": ["http://localhost:8080/api/auth/callback"],
+                "redirect_uris": [settings.public_url.rstrip("/") + "/api/auth/callback"],
             }
         }
         flow = Flow.from_client_config(
@@ -159,30 +198,25 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
                 "https://www.googleapis.com/auth/userinfo.profile",
             ],
         )
-        flow.redirect_uri = "http://localhost:8080/api/auth/callback"
+        flow.redirect_uri = settings.public_url.rstrip("/") + "/api/auth/callback"
         # Restore the PKCE code_verifier from the login request
         if code_verifier:
             flow.code_verifier = code_verifier
         flow.fetch_token(code=code)
 
         # Verify the id_token
-        from google.auth import jwt as google_jwt
         from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token as id_token_verifier
 
         id_token = getattr(flow.credentials, "id_token", None)
         if not id_token:
-            return RedirectResponse(url=f"{_FRONTEND_URL}/?auth_error=no_id_token")
+            return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=no_id_token")
 
         request_adapter = google_requests.Request()
-        id_info = google_jwt.decode(id_token, verify=False)  # we verify with verify_oauth2_token below
-
-        # Use verify_oauth2_token for proper verification (signature, audience, expiry)
-        from google.oauth2 import id_token as id_token_verifier
-
         id_info = id_token_verifier.verify_oauth2_token(id_token, request_adapter, settings.google_client_id)
 
         if not id_info.get("email_verified", False):
-            return RedirectResponse(url=f"{_FRONTEND_URL}/?auth_error=email_not_verified")
+            return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=email_not_verified")
 
         email = id_info.get("email", "")
         name = id_info.get("name", email.split("@")[0] if email else "Unknown")
@@ -207,33 +241,17 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
         except Exception:
             pass  # Non-critical — user can still sign in, just not as superuser
 
-        # Create session
-        session_token = secrets.token_urlsafe(32)
-        _sessions[session_token] = {
-            "email": email,
-            "name": name,
-            "picture": picture,
-            "is_superuser": is_superuser,
-            "created_at": datetime.now(UTC).isoformat(),
-        }
+        # Create signed session cookie
+        cookie_value = _make_session_cookie(email, name, picture, is_superuser)
 
-        # Set cookie
         is_secure = request.url.scheme == "https"
-        response = RedirectResponse(url=f"{_FRONTEND_URL}/")
-        response.set_cookie(
-            key="session_token",
-            value=session_token,
-            httponly=True,
-            samesite="lax",
-            path="/",
-            secure=is_secure,
-        )
+        response = RedirectResponse(url=f"{settings.frontend_url}/")
+        _set_session_cookie(response, cookie_value, is_secure)
         return response
 
     except Exception as e:
-        logger = __import__("logging").getLogger(__name__)
         logger.exception("OAuth callback failed")
-        return RedirectResponse(url=f"{_FRONTEND_URL}/?auth_error=" + str(e))
+        return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=" + quote(str(e)))
 
 
 @auth_router.get("/me")
@@ -241,13 +259,13 @@ async def me(request: Request):
     """Return current authentication state.
 
     Always includes ``auth_available`` (true when Google OAuth is configured).
-    When authenticated, also includes email, name, picture, person, is_superuser.
+    When authenticated, also includes email, name, picture, person,
+    is_superuser, and impersonating (if a superuser is impersonating someone).
     """
-    _clear_expired_sessions()
     auth_available = bool(settings.google_client_id)
 
-    session_user = get_session_user(request)
-    if not session_user:
+    session = get_session_user(request)
+    if not session:
         return {"authenticated": False, "auth_available": auth_available}
 
     # Look up associated Person by email
@@ -258,34 +276,62 @@ async def me(request: Request):
         svc = get_services()
         persons_attempt = svc.persons_source.latest_attempt()
         if persons_attempt.succeeded:
-            person_name = _lookup_person_by_email(session_user["email"], persons_attempt.value_or_none())
+            person_name = _lookup_person_by_email(session["email"], persons_attempt.value_or_none())
     except Exception:
         pass
 
     return {
         "authenticated": True,
         "auth_available": auth_available,
-        "email": session_user["email"],
-        "name": session_user["name"],
-        "picture": session_user["picture"],
+        "email": session["email"],
+        "name": session["name"],
+        "picture": session.get("picture", ""),
         "person": person_name,
-        "is_superuser": session_user.get("is_superuser", False),
+        "is_superuser": session.get("is_superuser", False),
+        "impersonating": session.get("impersonating"),
     }
 
 
 @auth_router.post("/logout")
 async def logout(request: Request):
-    """Clear session and cookie."""
-    token = request.cookies.get("session_token")
-    if token and token in _sessions:
-        _sessions.pop(token, None)
+    """Clear session cookie."""
+    is_secure = request.url.scheme == "https"
     response = JSONResponse(content={"status": "ok"})
-    response.set_cookie(
-        key="session_token",
-        value="",
-        httponly=True,
-        samesite="lax",
-        path="/",
-        max_age=0,
+    _clear_session_cookie(response, is_secure)
+    return response
+
+
+@auth_router.post("/impersonate")
+async def impersonate(request: Request, body: dict):
+    """Set or clear impersonation for a superuser.
+
+    Body::
+
+        { "person": "Simon" }   # start impersonating
+        { "person": null }      # stop impersonating
+
+    Returns a new session cookie with the ``impersonating`` field updated.
+    Survives server restarts.
+    """
+    session = get_session_user(request)
+    if not session:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if not session.get("is_superuser"):
+        raise HTTPException(status_code=403, detail="Only superusers can impersonate")
+
+    person = body.get("person")
+    if person is not None and not isinstance(person, str):
+        raise HTTPException(status_code=400, detail="person must be a string or null")
+
+    new_cookie = _make_session_cookie(
+        email=session["email"],
+        name=session["name"],
+        picture=session.get("picture", ""),
+        is_superuser=True,
+        impersonating=person,
     )
+
+    is_secure = request.url.scheme == "https"
+    response = JSONResponse(content={"status": "ok", "impersonating": person})
+    _set_session_cookie(response, new_cookie, is_secure)
     return response

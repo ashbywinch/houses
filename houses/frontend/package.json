@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "npm run gen-vars && vite",
+    "dev": "npm run gen-vars && vite --host",
     "build": "vue-tsc -b && vite build",
     "test": "vue-tsc -b --noEmit && vitest run && vite build && npm run lint:css",
     "preview": "vite preview",

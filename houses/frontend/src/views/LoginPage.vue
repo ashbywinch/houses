@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
 const router = useRouter()
+const loginError = ref<string | null>(null)
 
 onMounted(() => {
   // If already authenticated, go straight to properties
@@ -13,8 +14,19 @@ onMounted(() => {
   }
 })
 
+// Auth state may resolve asynchronously after mount — redirect once it does
+watch(() => auth.user, (user) => {
+  if (user) {
+    router.push('/')
+  }
+})
+
 async function signIn() {
-  await auth.login()
+  loginError.value = null
+  const result = await auth.login()
+  if (!result.ok && result.error) {
+    loginError.value = result.error
+  }
 }
 </script>
 
@@ -31,7 +43,8 @@ async function signIn() {
       >
         {{ auth.loading ? 'Loading…' : 'Sign in with Google' }}
       </button>
-      <p v-else class="login-card__error">
+      <p v-if="loginError" class="login-card__error">{{ loginError }}</p>
+      <p v-else-if="!auth.authAvailable" class="login-card__error">
         Authentication is not configured.
       </p>
     </div>

@@ -5,7 +5,6 @@ import logging
 from fastapi import APIRouter, Body, HTTPException, Request, WebSocket
 
 from houses.geo import GeoPoint
-from houses.nodes.bootstrap import load_property_nodes_from_rows
 from houses.property_registry import get_property as get_registry_property
 from houses.property_registry import list_properties as list_registry_properties
 from houses.services_provider import get_services
@@ -187,15 +186,17 @@ async def patch_triage(rid: str, body: dict):
 
 @api_router.get("/properties/{rid}/comments")
 async def get_property_comments(rid: str):
-    """Return all comments for a property."""
-    from houses.comments import get_comments, migrate_old_comments
+    """Return all comments for a property.
 
-    # On first access, migrate old flat comment fields to the new table
+    Reads from the comments table only — old-style sheet comments are
+    migrated at deployment time via ``tools/migrate_comments.py``.
+    """
+    from houses.comments import get_comments
+
+    # Validate the property exists
     prop = get_registry_property(rid)
-    if prop is not None:
-        detail = await prop.to_json_detail()
-        old_comments = detail.get("comments", {})
-        return migrate_old_comments(rid, old_comments)
+    if prop is None:
+        raise HTTPException(status_code=404, detail="Property not found")
     return get_comments(rid)
 
 
@@ -209,6 +210,10 @@ async def add_property_comment(rid: str, body: dict, request: Request):
     from houses.comments import add_comment
     from houses.services_provider import get_services
     from houses.web.auth import get_session_user
+
+    prop = get_registry_property(rid)
+    if prop is None:
+        raise HTTPException(status_code=404, detail="Property not found")
 
     text = body.get("text", "")
     if not text:
@@ -244,14 +249,6 @@ async def add_property_comment(rid: str, body: dict, request: Request):
             )
 
     return add_comment(rid, person, text)
-
-
-async def seed_properties():
-    from houses.sheets.reader import get_properties_data
-
-    rows = get_properties_data()
-    count = load_property_nodes_from_rows(rows)
-    return {"seeded": count, "total": len(list_registry_properties())}
 
 
 @api_router.get("/settings")
@@ -324,21 +321,6 @@ async def put_persons(body: list = Body()):  # noqa: B008
 @api_router.patch("/settings/financial")
 async def patch_financial(body: dict):
     get_services().financial_source.push(body, "user")
-    return {"status": "ok"}
-
-
-@api_router.post("/admin/reseed")
-async def reseed_from_sheet():
-    """Re-seed the property registry from the Google Sheet.
-
-    This is intentionally NOT automatic on server start — auto-reloads
-    from code changes should not re-read the sheet.  Call this endpoint
-    explicitly after seeding the sheet with new properties.
-    """
-    from houses.sheets.reader import get_properties_data
-
-    rows = get_properties_data()
-    load_property_nodes_from_rows(rows)
     return {"status": "ok"}
 
 

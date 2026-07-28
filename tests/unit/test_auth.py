@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -11,7 +10,7 @@ from fastapi.testclient import TestClient
 from houses.config import settings
 from houses.server import app
 from houses.services_provider import _request_services as _sp
-from houses.web.auth import _oauth_states, _sessions
+from houses.web.auth import _make_session_cookie, _oauth_states
 from tests.helpers import make_services
 
 client = TestClient(app)
@@ -29,26 +28,35 @@ def _enable_auth():
     return token
 
 
+def _inject_session(
+    email: str = "simon@example.com",
+    is_superuser: bool = False,
+    impersonating: str | None = None,
+) -> str:
+    """Create a signed session cookie value for testing."""
+    return _make_session_cookie(
+        email=email,
+        name="Simon",
+        picture="",
+        is_superuser=is_superuser,
+        impersonating=impersonating,
+    )
+
+
 @pytest.fixture(autouse=True)
 def _clear_auth_state():
-    """Clear in-memory auth state between tests."""
-    _sessions.clear()
+    """Clear in-memory OAuth state and client cookies between tests."""
     _oauth_states.clear()
+    # TestClient accumulates cookies from set-cookie responses.  Clear them
+    # so auth state from one test doesn't leak into the next.
+    client.cookies.clear()
 
 
-def _inject_session(email: str = "simon@example.com", is_superuser: bool = False, age_hours: float = 0) -> str:
-    """Helper to create a session token for testing."""
-    import secrets
-
-    token = secrets.token_urlsafe(32)
-    _sessions[token] = {
-        "email": email,
-        "name": "Simon",
-        "picture": "",
-        "is_superuser": is_superuser,
-        "created_at": (datetime.now(UTC) - timedelta(hours=age_hours)).isoformat(),
-    }
-    return token
+@pytest.fixture(autouse=True)
+def _patch_registry():
+    """Patch get_registry_property in api_router so tests with fake RIDs pass."""
+    with patch("houses.web.api_router.get_registry_property", return_value=MagicMock()):
+        yield
 
 
 class TestLogin:
@@ -119,8 +127,8 @@ class TestMe:
             settings.google_client_id = original
 
     def test_authenticated_with_session(self):
-        token = _inject_session(email="simon@example.com")
-        resp = client.get("/api/auth/me", cookies={"session_token": token})
+        cookie = _inject_session(email="simon@example.com")
+        resp = client.get("/api/auth/me", cookies={"session": cookie})
         assert resp.status_code == 200
         data = resp.json()
         assert data["authenticated"] is True
@@ -128,42 +136,103 @@ class TestMe:
         assert data["is_superuser"] is False
 
     def test_authenticated_superuser(self):
-        token = _inject_session(email="simon@example.com", is_superuser=True)
-        resp = client.get("/api/auth/me", cookies={"session_token": token})
+        cookie = _inject_session(email="simon@example.com", is_superuser=True)
+        resp = client.get("/api/auth/me", cookies={"session": cookie})
         assert resp.status_code == 200
         data = resp.json()
         assert data["authenticated"] is True
         assert data["is_superuser"] is True
 
-    def test_invalid_session_token(self):
-        """A bogus token that doesn't match any session returns unauthenticated."""
-        resp = client.get("/api/auth/me", cookies={"session_token": "bogus-token"})
+    def test_returns_impersonating(self):
+        cookie = _inject_session(email="simon@example.com", is_superuser=True, impersonating="Ashby")
+        resp = client.get("/api/auth/me", cookies={"session": cookie})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["impersonating"] == "Ashby"
+
+    def test_returns_impersonating_null_when_not_impersonating(self):
+        cookie = _inject_session(email="simon@example.com", is_superuser=True)
+        resp = client.get("/api/auth/me", cookies={"session": cookie})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["impersonating"] is None
+
+    def test_no_cookie_returns_unauthenticated(self):
+        resp = client.get("/api/auth/me")
         assert resp.status_code == 200
         assert resp.json()["authenticated"] is False
 
-    def test_session_expired(self):
-        """Session older than 24h returns as unauthenticated."""
-        token = _inject_session(email="simon@example.com", age_hours=25)
-        resp = client.get("/api/auth/me", cookies={"session_token": token})
+    def test_tampered_cookie_returns_unauthenticated(self):
+        cookie = _inject_session(email="simon@example.com")
+        tampered = cookie[:-5] + "xxxxx"  # corrupt the signature
+        resp = client.get("/api/auth/me", cookies={"session": tampered})
         assert resp.status_code == 200
-        data = resp.json()
-        assert data["authenticated"] is False
+        assert resp.json()["authenticated"] is False
 
 
 class TestLogout:
-    def test_logout_clears_cookie_and_session(self):
-        token = _inject_session(email="simon@example.com")
-        resp = client.post("/api/auth/logout", cookies={"session_token": token})
+    def test_logout_clears_cookie(self):
+        cookie = _inject_session(email="simon@example.com")
+        resp = client.post("/api/auth/logout", cookies={"session": cookie})
         assert resp.status_code == 200
-        assert token not in _sessions
         set_cookie = resp.headers.get("set-cookie", "")
-        assert "session_token=" in set_cookie
+        assert "session=" in set_cookie
         assert "Max-Age=0" in set_cookie
 
     def test_logout_without_session_is_idempotent(self):
         resp = client.post("/api/auth/logout")
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
+
+
+class TestImpersonate:
+    def test_401_without_session(self):
+        resp = client.post("/api/auth/impersonate", json={"person": "Ashby"})
+        assert resp.status_code == 401
+
+    def test_403_non_superuser(self):
+        cookie = _inject_session(email="simon@example.com", is_superuser=False)
+        resp = client.post(
+            "/api/auth/impersonate",
+            json={"person": "Ashby"},
+            cookies={"session": cookie},
+        )
+        assert resp.status_code == 403
+
+    def test_400_non_string_person(self):
+        cookie = _inject_session(email="simon@example.com", is_superuser=True)
+        resp = client.post(
+            "/api/auth/impersonate",
+            json={"person": 123},
+            cookies={"session": cookie},
+        )
+        assert resp.status_code == 400
+
+    def test_start_impersonating(self):
+        cookie = _inject_session(email="simon@example.com", is_superuser=True)
+        resp = client.post(
+            "/api/auth/impersonate",
+            json={"person": "Ashby"},
+            cookies={"session": cookie},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["impersonating"] == "Ashby"
+        # Cookie should be updated (new set-cookie header)
+        set_cookie = resp.headers.get("set-cookie", "")
+        assert "session=" in set_cookie
+        assert "Max-Age=0" not in set_cookie
+
+    def test_stop_impersonating(self):
+        cookie = _inject_session(email="simon@example.com", is_superuser=True, impersonating="Ashby")
+        resp = client.post(
+            "/api/auth/impersonate",
+            json={"person": None},
+            cookies={"session": cookie},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["impersonating"] is None
 
 
 class TestProtectedEndpoints:
@@ -184,8 +253,8 @@ class TestProtectedEndpoints:
         assert resp.status_code == 401
 
     def test_authenticated_request_succeeds(self):
-        token = _inject_session()
-        resp = client.get("/api/properties/all", cookies={"session_token": token})
+        cookie = _inject_session()
+        resp = client.get("/api/properties/all", cookies={"session": cookie})
         assert resp.status_code == 200
 
     def test_health_is_public(self):
@@ -230,7 +299,6 @@ class TestCallback:
         _oauth_states["s1"] = {"code_verifier": "v1"}
         with (
             patch("google_auth_oauthlib.flow.Flow.from_client_config"),
-            patch("google.auth.jwt.decode"),
             patch("google.oauth2.id_token.verify_oauth2_token"),
             patch("google.auth.transport.requests.Request"),
         ):
@@ -243,7 +311,7 @@ class TestCallback:
     @patch("houses.web.auth.settings.google_client_id", "test-client-id")
     @patch("houses.web.auth.settings.google_client_secret", "test-secret")
     def test_success_creates_session(self):
-        """Happy path: mocked OAuth token exchange creates a session and cookie."""
+        """Happy path: mocked OAuth token exchange creates a session cookie."""
         _oauth_states["test_state"] = {"code_verifier": "test_verifier"}
         decoded_info = {
             "email": "ashby@example.com",
@@ -258,7 +326,6 @@ class TestCallback:
 
         with (
             patch("google_auth_oauthlib.flow.Flow.from_client_config", return_value=mock_flow) as mock_factory,
-            patch("google.auth.jwt.decode", return_value=decoded_info),
             patch("google.oauth2.id_token.verify_oauth2_token", return_value=decoded_info),
             patch("google.auth.transport.requests.Request"),
         ):
@@ -274,42 +341,44 @@ class TestCallback:
         assert "https://www.googleapis.com/auth/userinfo.email" in passed_scopes
 
         set_cookie = resp.headers.get("set-cookie", "")
-        assert "session_token=" in set_cookie
+        assert "session=" in set_cookie
         assert "Max-Age=0" not in set_cookie
         assert "httponly" in set_cookie.lower()
         assert "samesite" in set_cookie.lower()
 
-        assert len(_sessions) == 1
-        session = next(iter(_sessions.values()))
+        # Verify we can decode the cookie
+        cookie_value = set_cookie.split(";")[0].split("=", 1)[1]
+        from houses.web.auth import get_session_user
+
+        class _FakeRequest:
+            cookies = {"session": cookie_value}
+
+        session = get_session_user(_FakeRequest())  # type: ignore[arg-type]
+        assert session is not None
         assert session["email"] == "ashby@example.com"
         assert session["name"] == "Ashby"
         assert session["picture"] == "https://example.com/pic.jpg"
 
+    @patch("houses.web.auth.settings.google_client_id", "test-client-id")
+    @patch("houses.web.auth.settings.google_client_secret", "test-secret")
     def test_uses_full_scope_urls(self):
         """The OAuth flow uses full scope URLs to prevent scope mismatch."""
-        original = settings.google_client_id
-        settings.google_client_id = "test-client-id"
-        settings.google_client_secret = "test-secret"
-        try:
-            with patch("google_auth_oauthlib.flow.Flow.from_client_config") as mock_flow_cls:
-                mock_flow_cls.return_value.authorization_url.return_value = (
-                    "https://accounts.google.com/o/oauth2/auth?scope=test",
-                    "state123",
-                )
-                mock_flow_cls.return_value.redirect_uri = ""
-                client.get("/api/auth/login")
+        with patch("google_auth_oauthlib.flow.Flow.from_client_config") as mock_flow_cls:
+            mock_flow_cls.return_value.authorization_url.return_value = (
+                "https://accounts.google.com/o/oauth2/auth?scope=test",
+                "state123",
+            )
+            mock_flow_cls.return_value.redirect_uri = ""
+            client.get("/api/auth/login")
 
-            call_args = mock_flow_cls.call_args
-            assert call_args is not None
-            _args, kwargs = call_args
-            passed_scopes = kwargs.get("scopes", [])
-            assert "openid" in passed_scopes
-            assert "https://www.googleapis.com/auth/userinfo.email" in passed_scopes
-            assert "https://www.googleapis.com/auth/userinfo.profile" in passed_scopes
-            assert "email" not in passed_scopes
-        finally:
-            settings.google_client_id = original
-            settings.google_client_secret = ""
+        call_args = mock_flow_cls.call_args
+        assert call_args is not None
+        _args, kwargs = call_args
+        passed_scopes = kwargs.get("scopes", [])
+        assert "openid" in passed_scopes
+        assert "https://www.googleapis.com/auth/userinfo.email" in passed_scopes
+        assert "https://www.googleapis.com/auth/userinfo.profile" in passed_scopes
+        assert "email" not in passed_scopes
 
 
 class TestCommentAuth:
@@ -323,12 +392,12 @@ class TestCommentAuth:
 
     def test_post_400_empty_text(self):
         auth_token = _enable_auth()
-        session_token = _inject_session()
+        session_cookie = _inject_session()
         try:
             resp = client.post(
                 "/api/properties/test-rid/comments",
                 json={"text": ""},
-                cookies={"session_token": session_token},
+                cookies={"session": session_cookie},
             )
         finally:
             _sp.reset(auth_token)
@@ -337,12 +406,12 @@ class TestCommentAuth:
 
     def test_post_403_non_superuser_impersonates(self):
         auth_token = _enable_auth()
-        session_token = _inject_session(email="simon@example.com", is_superuser=False)
+        session_cookie = _inject_session(email="simon@example.com", is_superuser=False)
         try:
             resp = client.post(
                 "/api/properties/test-rid/comments",
                 json={"text": "hello"},
-                cookies={"session_token": session_token},
+                cookies={"session": session_cookie},
                 headers={"X-Impersonate-Person": "Ashby"},
             )
         finally:
@@ -353,12 +422,12 @@ class TestCommentAuth:
     def test_post_400_unlinked_email(self):
         """Email doesn't match any Person — 400."""
         auth_token = _enable_auth()
-        session_token = _inject_session(email="unlinked@example.com", is_superuser=False)
+        session_cookie = _inject_session(email="unlinked@example.com", is_superuser=False)
         try:
             resp = client.post(
                 "/api/properties/test-rid/comments",
                 json={"text": "hello"},
-                cookies={"session_token": session_token},
+                cookies={"session": session_cookie},
             )
         finally:
             _sp.reset(auth_token)
@@ -384,12 +453,12 @@ class TestCommentAuth:
         )
         svc_token = _sp.set(svc)
 
-        session_token = _inject_session(email="simon@example.com", is_superuser=True)
+        session_cookie = _inject_session(email="simon@example.com", is_superuser=True)
         try:
             resp = client.post(
                 "/api/properties/test-rid/comments",
                 json={"text": "hello from Ashby"},
-                cookies={"session_token": session_token},
+                cookies={"session": session_cookie},
                 headers={"X-Impersonate-Person": "Ashby"},
             )
         finally:
@@ -403,12 +472,12 @@ class TestCommentAuth:
 
 class TestSessionIsolation:
     def test_concurrent_sessions_independent(self):
-        """Two different session tokens see their own session data."""
-        token_a = _inject_session(email="alice@example.com", is_superuser=False)
-        token_b = _inject_session(email="bob@example.com", is_superuser=True)
+        """Two different session cookies see their own session data."""
+        cookie_a = _inject_session(email="alice@example.com", is_superuser=False)
+        cookie_b = _inject_session(email="bob@example.com", is_superuser=True)
 
-        resp_a = client.get("/api/auth/me", cookies={"session_token": token_a})
-        resp_b = client.get("/api/auth/me", cookies={"session_token": token_b})
+        resp_a = client.get("/api/auth/me", cookies={"session": cookie_a})
+        resp_b = client.get("/api/auth/me", cookies={"session": cookie_b})
 
         assert resp_a.json()["email"] == "alice@example.com"
         assert resp_a.json()["is_superuser"] is False

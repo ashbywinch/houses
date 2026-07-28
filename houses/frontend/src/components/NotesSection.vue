@@ -44,8 +44,8 @@ async function submitComment() {
   try {
     // In debug mode, send person from selector; in auth mode, server resolves it
     const entry = auth.authAvailable
-      ? await postComment(props.rid, text)
-      : await postComment(props.rid, selectedPerson.value, text)
+      ? await postComment({ rid: props.rid, text })
+      : await postComment({ rid: props.rid, text, person: selectedPerson.value })
     comments.value.push(entry)
     newComment.value = ''
   } catch {

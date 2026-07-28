@@ -29,6 +29,8 @@ from houses.sheets import (
     sync_view_formulas,
 )
 from houses.sheets.reader import get_properties_data, resolve_tab
+from houses.database import init_db as init_app_db
+from houses.admin_router import admin_router
 from houses.web.api_router import api_router
 from houses.web.auth import auth_router
 from houses.web.json_utils import asdict_serializable
@@ -69,10 +71,18 @@ async def lifespan(_app: FastAPI):
     # httpx logs full URLs including query params — suppress to avoid
     # leaking API keys in the server log
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    init_dag_db()
-    from houses.comments import init_comments_db as init_comments
+    if not settings.google_client_id and not settings.auth_disabled:
+        logger.error(
+            "GOOGLE_CLIENT_ID is not set and AUTH_DISABLED is False. "
+            "Set GOOGLE_CLIENT_ID in environment or set HOUSES_AUTH_DISABLED=true "
+            "to run without authentication."
+        )
+        raise RuntimeError("Authentication not configured")
+    if settings.auth_disabled:
+        logger.warning("AUTH_DISABLED=True — API endpoints are publicly accessible")
 
-    init_comments()
+    init_dag_db()
+    init_app_db()
     from houses.property_registry import _reset as _reset_property_registry
     from houses.services import _reset_settings_cache
     from houses.town_desc import _reset as _reset_town_desc
@@ -126,6 +136,7 @@ app.add_middleware(
 
 
 app.mount("/static", StaticFiles(directory="houses/static"), name="static")
+app.include_router(admin_router)
 app.include_router(api_router)
 app.include_router(auth_router)
 
@@ -151,7 +162,12 @@ async def _request_context(request, call_next):
 
 
 async def _require_auth(request, call_next):
-    """Require authentication on /api/* routes (except /api/auth/*)."""
+    """Require authentication on /api/* routes (except /api/auth/*).
+
+    When ``AUTH_DISABLED`` is set, all requests pass through.
+    """
+    if settings.auth_disabled:
+        return await call_next(request)
     path = request.url.path
     if path.startswith("/api/") and not path.startswith("/api/auth/"):
         from houses.web.auth import get_session_user

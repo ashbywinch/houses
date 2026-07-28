@@ -67,10 +67,9 @@ class MonthlyMortgagePaymentNode(DerivedNode[Money]):
         total_equity = 0.0
         if persons.succeeded:
             for person in persons.value_or_none() or []:
-                if not person.is_child:
-                    eq = person.deposit_equity
-                    if eq is not None:
-                        total_equity += float(eq.amount) if hasattr(eq, "amount") else float(eq)
+                eq = person.deposit_equity
+                if eq is not None:
+                    total_equity += float(eq.amount) if hasattr(eq, "amount") else float(eq)
 
         # Mortgage principal = price + stamp_duty - total_equity
         principal = p + sd_val - total_equity

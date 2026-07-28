@@ -18,7 +18,19 @@ export const useAuthStore = defineStore('auth', () => {
   const superuserMode = ref(false)
   const impersonating = ref<string | null>(null) // Person name being impersonated
 
+  let _pendingCheck: Promise<void> | null = null
+
   async function checkAuth() {
+    if (_pendingCheck) return _pendingCheck
+    _pendingCheck = _doCheck()
+    try {
+      return await _pendingCheck
+    } finally {
+      _pendingCheck = null
+    }
+  }
+
+  async function _doCheck() {
     try {
       const r = await fetch('/api/auth/me')
       if (!r.ok) {
@@ -58,22 +70,41 @@ export const useAuthStore = defineStore('auth', () => {
     impersonating.value = person
   }
 
-  async function login() {
-    const r = await fetch('/api/auth/login')
-    if (!r.ok) throw new Error('Auth unavailable')
-    const data = await r.json()
-    if (data.status === 'unconfigured') return false
-    if (data.auth_url) {
-      window.location.href = data.auth_url
+  async function login(): Promise<{ ok: boolean; error?: string }> {
+    try {
+      const r = await fetch('/api/auth/login')
+      if (!r.ok) {
+        console.error('Auth login failed:', r.status)
+        return { ok: false, error: 'Sign in is unavailable. Please try again later.' }
+      }
+      const data = await r.json()
+      if (data.status === 'error') {
+        console.error('Auth login error:', data.detail)
+        return { ok: false, error: 'Sign in is unavailable. Please try again later.' }
+      }
+      if (data.status === 'unconfigured') return { ok: false }
+      if (data.auth_url) {
+        window.location.href = data.auth_url
+        return { ok: true }
+      }
+      return { ok: true }
+    } catch (e) {
+      console.error('Auth login exception:', e)
+      return { ok: false, error: 'Could not connect to the server.' }
     }
-    return true
   }
 
   async function logout() {
-    await fetch('/api/auth/logout', { method: 'POST' })
-    user.value = null
-    superuserMode.value = false
-    impersonating.value = null
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' })
+    } catch {
+      console.error('Logout request failed — clearing local state anyway')
+    } finally {
+      user.value = null
+      authAvailable.value = false
+      superuserMode.value = false
+      impersonating.value = null
+    }
   }
 
   return {

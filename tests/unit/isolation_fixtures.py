@@ -12,6 +12,7 @@ import sqlite3
 
 import pytest
 
+import houses.database as db
 import dag.persistence as per
 from dag.scheduler import AsyncQueueScheduler, set_scheduler
 
@@ -36,10 +37,12 @@ def _sqlite_memory():
     conn.row_factory = sqlite3.Row
     per._get_db = lambda: conn
     per.init_db()
-    from houses.comments import init_comments_db as _init_comments
-    _init_comments()
+    db.testing = True
+    from houses.database import init_db as init_app_db
+    init_app_db()
     yield
     per.testing = False
+    db.testing = False
     per._get_db = saved
 
 

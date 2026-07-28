@@ -3,6 +3,36 @@ import { useAuthStore } from '../stores/auth'
 
 const BASE = '/api'
 
+function isAuthUrl(url: string): boolean {
+  return url.includes('/api/auth/')
+}
+
+function checkFor401(r: Response): Response {
+  if (r.status === 401 && !isAuthUrl(r.url)) {
+    window.location.href = '/login'
+    throw new Error('Session expired')
+  }
+  return r
+}
+
+async function parseJson<T>(r: Response): Promise<T> {
+  if (r.status === 204) {
+    console.warn('Unexpected 204 from', r.url)
+    return null as T
+  }
+  const text = await r.text()
+  if (!text) {
+    console.warn('Empty response from', r.url)
+    return null as T
+  }
+  try {
+    return JSON.parse(text) as T
+  } catch (e) {
+    console.error('Failed to parse JSON from', r.url, ':', text.slice(0, 200), e)
+    throw new Error('Unexpected response from server')
+  }
+}
+
 function authHeaders(): Record<string, string> {
   try {
     const store = useAuthStore()
@@ -16,18 +46,12 @@ function authHeaders(): Record<string, string> {
 }
 
 export function fetchAllSummaries(): Promise<Record<string, PropertySummary>> {
-  return fetch(`${BASE}/properties/all`).then(r => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`)
-    return r.json()
-  })
+  return fetch(`${BASE}/properties/all`, { headers: { ...authHeaders() } }).then(checkFor401).then(r => parseJson(r))
 }
 
 
 export function fetchPropertyDetail(rid: string): Promise<PropertyDetail> {
-  return fetch(`${BASE}/properties/${encodeURIComponent(rid)}/detail`).then(r => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`)
-    return r.json()
-  })
+  return fetch(`${BASE}/properties/${encodeURIComponent(rid)}/detail`, { headers: { ...authHeaders() } }).then(checkFor401).then(r => parseJson(r))
 }
 
 export function patchAddress(rid: string, address: string): Promise<Response> {
@@ -47,9 +71,9 @@ export function patchLocation(rid: string, lat: number, lon: number): Promise<Re
 }
 
 export async function fetchSettings(): Promise<Record<string, unknown>> {
-  const r = await fetch(`${BASE}/settings`)
+  const r = await fetch(`${BASE}/settings`, { headers: { ...authHeaders() } })
   if (!r.ok) throw new Error(`Failed to fetch settings: ${r.status}`)
-  return r.json()
+  return parseJson(r)
 }
 
 export function putPersons(persons: unknown[]): Promise<Response> {
@@ -89,21 +113,15 @@ export interface CommentEntry {
 }
 
 export function fetchComments(rid: string): Promise<CommentEntry[]> {
-  return fetch(`${BASE}/properties/${encodeURIComponent(rid)}/comments`).then(r => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`)
-    return r.json()
-  })
+  return fetch(`${BASE}/properties/${encodeURIComponent(rid)}/comments`, { headers: { ...authHeaders() } }).then(checkFor401).then(r => parseJson(r))
 }
 
-export function postComment(rid: string, text: string, person?: string): Promise<CommentEntry> {
-  const body: Record<string, string> = { text }
-  if (person !== undefined) body.person = person
-  return fetch(`${BASE}/properties/${encodeURIComponent(rid)}/comments`, {
+export function postComment(opts: { rid: string; text: string; person?: string }): Promise<CommentEntry> {
+  const body: Record<string, string> = { text: opts.text }
+  if (opts.person !== undefined) body.person = opts.person
+  return fetch(`${BASE}/properties/${encodeURIComponent(opts.rid)}/comments`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
-  }).then(r => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`)
-    return r.json()
-  })
+  }).then(checkFor401).then(r => parseJson(r))
 }
