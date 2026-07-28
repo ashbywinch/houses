@@ -17,3 +17,4 @@ require_tests_review = true
 require_security_review = true
 require_estimate_effort_to_review = true
 num_max_findings = 5
+extra_instructions = "Ground each finding in the loaded context files (docs/coding-standards.md, docs/testing-standards.md, docs/writing-documentation.md). Quote the specific rule that applies."

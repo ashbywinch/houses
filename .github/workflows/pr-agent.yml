@@ -33,12 +33,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Check the most recent PR-Agent comment — old failures from previous
-          # runs are stale, only the latest comment reflects the current review.
+          # Look for evidence of a successful review (PR Reviewer Guide or PR Code Suggestions).
+          # If PR-Agent failed entirely, it either posts "Failed to generate" or nothing at all.
           LAST=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.number }}/comments" --jq 'last(.[] | select(.user.login == "github-actions[bot]")) | .body' 2>/dev/null || echo "")
-          if echo "$LAST" | grep -qi "failed"; then
+          if echo "$LAST" | grep -q "PR Reviewer Guide\|PR Code Suggestions"; then
+            echo "Review check passed"
+          elif echo "$LAST" | grep -qi "failed"; then
             echo "::error::PR-Agent reported a failure:"
             echo "$LAST"
             exit 1
+          else
+            echo "::error::PR-Agent did not produce a review — possible silent failure"
+            exit 1
           fi
-          echo "Review check passed"
