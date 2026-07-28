@@ -6,6 +6,7 @@ api_base = "https://opencode.ai/zen/go/v1"
 model = "openai/deepseek-v4-flash"
 custom_model_max_tokens = 128000
 fallback_models = []
+repo_context_from_default_branch = false
 repo_context_files = [
     "docs/coding-standards.md",
     "docs/testing-standards.md",
