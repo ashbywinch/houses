@@ -1,6 +1,7 @@
 [config]
-model = "deepseek-v4-flash"
+model = "opencode-go/deepseek-v4-flash"
 base_url = "https://opencode.ai/zen/go/v1"
+custom_llm_provider = "openai"
 custom_model_max_tokens = 128000
 fallback_models = []
 repo_context_files = [
