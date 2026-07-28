@@ -34,9 +34,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          PR_NUM="${{ github.event.number }}"
+          if [ -z "$PR_NUM" ]; then
+            echo "Manual trigger — skipping review check (no PR number)"
+            exit 0
+          fi
           # Look for evidence of a successful review (PR Reviewer Guide or PR Code Suggestions).
           # If PR-Agent failed entirely, it either posts "Failed to generate" or nothing at all.
-          LAST=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.number }}/comments" --jq 'last(.[] | select(.user.login == "github-actions[bot]")) | .body' 2>/dev/null || echo "")
+          LAST=$(gh api "repos/${{ github.repository }}/issues/$PR_NUM/comments" --jq 'last(.[] | select(.user.login == "github-actions[bot]")) | .body' 2>/dev/null || echo "")
           if echo "$LAST" | grep -q "PR Reviewer Guide\|PR Code Suggestions"; then
             echo "Review check passed"
           elif echo "$LAST" | grep -qi "failed"; then
