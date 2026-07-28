@@ -31,14 +31,15 @@ class CommentEntry:
 
 
 def _get_db() -> sqlite3.Connection:
+    if testing:
+        import dag.persistence as per
+        return per._get_db()
     global _db_path
     if _db_path is None:
         _db_path = Path(settings.sqlite_path)
     if not hasattr(_connection_cache, "conn") or _connection_cache.conn is None:
         _connection_cache.conn = sqlite3.connect(str(_db_path))
         _connection_cache.conn.row_factory = sqlite3.Row
-        if testing:
-            _connection_cache.conn.execute("PRAGMA foreign_keys = ON")
     return _connection_cache.conn
 
 
