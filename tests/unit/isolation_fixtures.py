@@ -36,6 +36,8 @@ def _sqlite_memory():
     conn.row_factory = sqlite3.Row
     per._get_db = lambda: conn
     per.init_db()
+    from houses.comments import init_comments_db as _init_comments
+    _init_comments()
     yield
     per.testing = False
     per._get_db = saved
