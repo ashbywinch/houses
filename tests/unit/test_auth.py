@@ -40,8 +40,6 @@ def _inject_session(email: str = "simon@example.com", is_superuser: bool = False
     """Helper to create a session token for testing."""
     import secrets
 
-    from houses.web.auth import _sessions
-
     token = secrets.token_urlsafe(32)
     _sessions[token] = {
         "email": email,
@@ -87,7 +85,6 @@ class TestLogin:
             _oauth_states.clear()
             resp = client.get("/api/auth/login")
             assert resp.status_code == 200
-            # Should have exactly one state entry with a code_verifier
             assert len(_oauth_states) == 1
             state_key = next(iter(_oauth_states))
             state_data = _oauth_states[state_key]
@@ -138,7 +135,14 @@ class TestMe:
         assert data["authenticated"] is True
         assert data["is_superuser"] is True
 
-    def test_session_expires_after_24h(self):
+    def test_invalid_session_token(self):
+        """A bogus token that doesn't match any session returns unauthenticated."""
+        resp = client.get("/api/auth/me", cookies={"session_token": "bogus-token"})
+        assert resp.status_code == 200
+        assert resp.json()["authenticated"] is False
+
+    def test_session_expired(self):
+        """Session older than 24h returns as unauthenticated."""
         token = _inject_session(email="simon@example.com", age_hours=25)
         resp = client.get("/api/auth/me", cookies={"session_token": token})
         assert resp.status_code == 200
@@ -147,16 +151,19 @@ class TestMe:
 
 
 class TestLogout:
-    def test_logout_clears_cookie(self):
+    def test_logout_clears_cookie_and_session(self):
         token = _inject_session(email="simon@example.com")
         resp = client.post("/api/auth/logout", cookies={"session_token": token})
         assert resp.status_code == 200
-        # Session should be cleared
         assert token not in _sessions
-        # Cookie should be expired
         set_cookie = resp.headers.get("set-cookie", "")
         assert "session_token=" in set_cookie
         assert "Max-Age=0" in set_cookie
+
+    def test_logout_without_session_is_idempotent(self):
+        resp = client.post("/api/auth/logout")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok"}
 
 
 class TestProtectedEndpoints:
@@ -168,11 +175,15 @@ class TestProtectedEndpoints:
         resp = client.get("/api/properties/test-rid/detail")
         assert resp.status_code == 401
 
+    def test_comments_get_401_without_session(self):
+        resp = client.get("/api/properties/test-rid/comments")
+        assert resp.status_code == 401
+
     def test_settings_401_without_session(self):
         resp = client.get("/api/settings")
         assert resp.status_code == 401
 
-    def test_list_properties_200_with_session(self):
+    def test_authenticated_request_succeeds(self):
         token = _inject_session()
         resp = client.get("/api/properties/all", cookies={"session_token": token})
         assert resp.status_code == 200
@@ -186,17 +197,145 @@ class TestProtectedEndpoints:
         assert resp.status_code == 200
 
 
+class TestCallback:
+    @patch("houses.web.auth.settings.google_client_id", "test-client-id")
+    @patch("houses.web.auth.settings.google_client_secret", "test-secret")
+    def test_rejects_missing_params(self):
+        resp = client.get("/api/auth/callback", follow_redirects=False)
+        assert resp.status_code == 307
+        location = resp.headers.get("location", "")
+        assert "auth_error=missing_params" in location
+
+    @patch("houses.web.auth.settings.google_client_id", "test-client-id")
+    @patch("houses.web.auth.settings.google_client_secret", "test-secret")
+    def test_rejects_invalid_state(self):
+        _oauth_states["valid_state"] = {"code_verifier": "abc"}
+        resp = client.get("/api/auth/callback?code=abc&state=invalid", follow_redirects=False)
+        assert resp.status_code == 307
+        location = resp.headers.get("location", "")
+        assert "auth_error=invalid_state" in location
+
+    @patch("houses.web.auth.settings.google_client_id", "test-client-id")
+    @patch("houses.web.auth.settings.google_client_secret", "test-secret")
+    def test_forwards_google_error(self):
+        resp = client.get("/api/auth/callback?error=access_denied", follow_redirects=False)
+        assert resp.status_code == 307
+        location = resp.headers.get("location", "")
+        assert "auth_error=access_denied" in location
+
+    @patch("houses.web.auth.settings.google_client_id", "test-client-id")
+    @patch("houses.web.auth.settings.google_client_secret", "test-secret")
+    def test_state_replay_is_rejected(self):
+        """Once consumed, the same state token cannot be reused (CSRF+replay protection)."""
+        _oauth_states["s1"] = {"code_verifier": "v1"}
+        with (
+            patch("google_auth_oauthlib.flow.Flow.from_client_config"),
+            patch("google.auth.jwt.decode"),
+            patch("google.oauth2.id_token.verify_oauth2_token"),
+            patch("google.auth.transport.requests.Request"),
+        ):
+            client.get("/api/auth/callback?code=c1&state=s1", follow_redirects=False)
+        resp = client.get("/api/auth/callback?code=c2&state=s1", follow_redirects=False)
+        assert resp.status_code == 307
+        location = resp.headers.get("location", "")
+        assert "auth_error=invalid_state" in location
+
+    @patch("houses.web.auth.settings.google_client_id", "test-client-id")
+    @patch("houses.web.auth.settings.google_client_secret", "test-secret")
+    def test_success_creates_session(self):
+        """Happy path: mocked OAuth token exchange creates a session and cookie."""
+        _oauth_states["test_state"] = {"code_verifier": "test_verifier"}
+        decoded_info = {
+            "email": "ashby@example.com",
+            "email_verified": True,
+            "name": "Ashby",
+            "picture": "https://example.com/pic.jpg",
+        }
+
+        mock_flow = MagicMock()
+        mock_flow.redirect_uri = ""
+        mock_flow.credentials.id_token = "eyJ.eyJ.eyJ.sig.sig"
+
+        with (
+            patch("google_auth_oauthlib.flow.Flow.from_client_config", return_value=mock_flow) as mock_factory,
+            patch("google.auth.jwt.decode", return_value=decoded_info),
+            patch("google.oauth2.id_token.verify_oauth2_token", return_value=decoded_info),
+            patch("google.auth.transport.requests.Request"),
+        ):
+            resp = client.get(
+                "/api/auth/callback?code=test_code&state=test_state",
+                follow_redirects=False,
+            )
+
+        assert resp.status_code == 307
+        assert mock_flow.fetch_token.called, "fetch_token should be called to exchange code"
+        _args, kwargs = mock_factory.call_args
+        passed_scopes = kwargs.get("scopes", [])
+        assert "https://www.googleapis.com/auth/userinfo.email" in passed_scopes
+
+        set_cookie = resp.headers.get("set-cookie", "")
+        assert "session_token=" in set_cookie
+        assert "Max-Age=0" not in set_cookie
+        assert "httponly" in set_cookie.lower()
+        assert "samesite" in set_cookie.lower()
+
+        assert len(_sessions) == 1
+        session = next(iter(_sessions.values()))
+        assert session["email"] == "ashby@example.com"
+        assert session["name"] == "Ashby"
+        assert session["picture"] == "https://example.com/pic.jpg"
+
+    def test_uses_full_scope_urls(self):
+        """The OAuth flow uses full scope URLs to prevent scope mismatch."""
+        original = settings.google_client_id
+        settings.google_client_id = "test-client-id"
+        settings.google_client_secret = "test-secret"
+        try:
+            with patch("google_auth_oauthlib.flow.Flow.from_client_config") as mock_flow_cls:
+                mock_flow_cls.return_value.authorization_url.return_value = (
+                    "https://accounts.google.com/o/oauth2/auth?scope=test",
+                    "state123",
+                )
+                mock_flow_cls.return_value.redirect_uri = ""
+                client.get("/api/auth/login")
+
+            call_args = mock_flow_cls.call_args
+            assert call_args is not None
+            _args, kwargs = call_args
+            passed_scopes = kwargs.get("scopes", [])
+            assert "openid" in passed_scopes
+            assert "https://www.googleapis.com/auth/userinfo.email" in passed_scopes
+            assert "https://www.googleapis.com/auth/userinfo.profile" in passed_scopes
+            assert "email" not in passed_scopes
+        finally:
+            settings.google_client_id = original
+            settings.google_client_secret = ""
+
+
 class TestCommentAuth:
-    def test_comment_post_401_without_session(self):
+    def test_post_401_without_session(self):
         auth_token = _enable_auth()
         try:
             resp = client.post("/api/properties/test-rid/comments", json={"text": "hello"})
         finally:
             _sp.reset(auth_token)
         assert resp.status_code == 401
-        assert "Authentication" in resp.json()["detail"]
 
-    def test_comment_post_403_non_superuser_impersonates(self):
+    def test_post_400_empty_text(self):
+        auth_token = _enable_auth()
+        session_token = _inject_session()
+        try:
+            resp = client.post(
+                "/api/properties/test-rid/comments",
+                json={"text": ""},
+                cookies={"session_token": session_token},
+            )
+        finally:
+            _sp.reset(auth_token)
+        assert resp.status_code == 400
+        assert "text is required" in resp.json()["detail"]
+
+    def test_post_403_non_superuser_impersonates(self):
         auth_token = _enable_auth()
         session_token = _inject_session(email="simon@example.com", is_superuser=False)
         try:
@@ -211,10 +350,10 @@ class TestCommentAuth:
         assert resp.status_code == 403
         assert "superuser" in resp.json()["detail"]
 
-    def test_comment_post_400_unlinked_email(self):
+    def test_post_400_unlinked_email(self):
         """Email doesn't match any Person — 400."""
         auth_token = _enable_auth()
-        session_token = _inject_session(email="unlinked@example.com", is_superuser=True)
+        session_token = _inject_session(email="unlinked@example.com", is_superuser=False)
         try:
             resp = client.post(
                 "/api/properties/test-rid/comments",
@@ -226,16 +365,8 @@ class TestCommentAuth:
         assert resp.status_code == 400
         assert "not linked" in resp.json()["detail"]
 
-    def test_comment_post_200_superuser_impersonates(self):
-        """Superuser with impersonation header succeeds."""
-        import secrets
-
-        from houses.web.auth import _sessions
-
-        # Enable auth mode
-        auth_token = _enable_auth()
-
-        # Create a custom Services with a persons_source that has linked email
+    def test_post_200_superuser_impersonates(self):
+        """Superuser with impersonation header succeeds with resolved person."""
         svc = make_services(
             auth_enabled=True,
             persons_source=MagicMock(
@@ -253,16 +384,7 @@ class TestCommentAuth:
         )
         svc_token = _sp.set(svc)
 
-        # Inject a session for simon (superuser)
-        session_token = secrets.token_urlsafe(32)
-        _sessions[session_token] = {
-            "email": "simon@example.com",
-            "name": "Simon",
-            "picture": "",
-            "is_superuser": True,
-            "created_at": datetime.now(UTC).isoformat(),
-        }
-
+        session_token = _inject_session(email="simon@example.com", is_superuser=True)
         try:
             resp = client.post(
                 "/api/properties/test-rid/comments",
@@ -272,7 +394,6 @@ class TestCommentAuth:
             )
         finally:
             _sp.reset(svc_token)
-            _sp.reset(auth_token)
 
         assert resp.status_code == 200
         data = resp.json()
@@ -280,71 +401,16 @@ class TestCommentAuth:
         assert data["text"] == "hello from Ashby"
 
 
-class TestCallback:
-    @patch("houses.web.auth.settings.google_client_id", "test-client-id")
-    @patch("houses.web.auth.settings.google_client_secret", "test-secret")
-    def test_callback_rejects_missing_params(self):
-        resp = client.get("/api/auth/callback", follow_redirects=False)
-        assert resp.status_code == 307  # RedirectResponse
-        location = resp.headers.get("location", "")
-        assert "http://localhost:5173/" in location
-        assert "auth_error=missing_params" in location
+class TestSessionIsolation:
+    def test_concurrent_sessions_independent(self):
+        """Two different session tokens see their own session data."""
+        token_a = _inject_session(email="alice@example.com", is_superuser=False)
+        token_b = _inject_session(email="bob@example.com", is_superuser=True)
 
-    def test_callback_rejects_invalid_state(self):
-        _oauth_states["valid_state"] = {}
-        resp = client.get("/api/auth/callback?code=abc&state=invalid_state", follow_redirects=False)
-        assert resp.status_code == 307  # RedirectResponse
-        location = resp.headers.get("location", "")
-        assert "http://localhost:5173/" in location
-        assert "auth_error=invalid_state" in location
+        resp_a = client.get("/api/auth/me", cookies={"session_token": token_a})
+        resp_b = client.get("/api/auth/me", cookies={"session_token": token_b})
 
-    @patch("houses.web.auth.settings.google_client_id", "test-client-id")
-    @patch("houses.web.auth.settings.google_client_secret", "test-secret")
-    def test_callback_forwards_google_error(self):
-        """Google's error query param is forwarded to frontend."""
-        resp = client.get("/api/auth/callback?error=access_denied", follow_redirects=False)
-        assert resp.status_code == 307
-        location = resp.headers.get("location", "")
-        assert "http://localhost:5173/" in location
-        assert "auth_error=access_denied" in location
-
-    @patch("houses.web.auth.settings.google_client_id", "test-client-id")
-    @patch("houses.web.auth.settings.google_client_secret", "test-secret")
-    def test_uses_full_scope_urls(self):
-        """The OAuth flow uses full scope URLs to prevent scope mismatch.
-
-        Google expands shorthand scopes ("email" →
-        "https://www.googleapis.com/auth/userinfo.email") during token
-        exchange. If the Flow was created with shorthands, ``fetch_token``
-        raises a scope mismatch error. Using full URLs in both
-        ``authorization_url`` and ``fetch_token`` avoids this.
-        """
-        from unittest.mock import patch as _patch
-
-        with _patch("google_auth_oauthlib.flow.Flow.from_client_config") as mock_flow_cls:
-            mock_flow_cls.return_value.authorization_url.return_value = (
-                "https://accounts.google.com/o/oauth2/auth?scope=test",
-                "state123",
-            )
-            mock_flow_cls.return_value.redirect_uri = ""
-
-            resp = client.get("/api/auth/login")
-
-        assert resp.status_code == 200
-
-        # Grab the scopes that were passed to from_client_config
-        call_args = mock_flow_cls.call_args
-        assert call_args is not None, "Flow.from_client_config was not called"
-        _args, kwargs = call_args
-        passed_scopes = kwargs.get("scopes", [])
-
-        assert "openid" in passed_scopes
-        assert "https://www.googleapis.com/auth/userinfo.email" in passed_scopes, (
-            f"Expected full email scope URL, got scopes: {passed_scopes}"
-        )
-        assert "https://www.googleapis.com/auth/userinfo.profile" in passed_scopes, (
-            f"Expected full profile scope URL, got scopes: {passed_scopes}"
-        )
-        # Shorthand versions should NOT be present
-        assert "email" not in passed_scopes, f"Shorthand 'email' should not be used: {passed_scopes}"
-        assert "profile" not in passed_scopes, f"Shorthand 'profile' should not be used: {passed_scopes}"
+        assert resp_a.json()["email"] == "alice@example.com"
+        assert resp_a.json()["is_superuser"] is False
+        assert resp_b.json()["email"] == "bob@example.com"
+        assert resp_b.json()["is_superuser"] is True

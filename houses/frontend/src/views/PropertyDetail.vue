@@ -67,19 +67,6 @@ async function shareProperty() {
 async function toggleFavourite() {
   await store.toggleTriage(rid.value, 'favourite', !triage.value?.favourite)
 }
-
-// ── User notes ───────────────────────────────────────
-const userNotes = ref('')
-
-watch(triage, (t) => {
-  if (t?.user_notes !== undefined) {
-    userNotes.value = t.user_notes
-  }
-}, { immediate: true })
-
-async function saveNotes() {
-  await store.toggleTriage(rid.value, 'user_notes', userNotes.value)
-}
 </script>
 
 <template>
@@ -202,18 +189,6 @@ async function saveNotes() {
       />
 
       <!-- ═══════════ NOTES ═══════════ -->
-      <section class="detail-section">
-        <h2 class="detail-section__title">Notes</h2>
-        <textarea
-          v-model="userNotes"
-          class="notes-textarea"
-          placeholder="Your private notes about this property…"
-          rows="3"
-        ></textarea>
-        <div class="notes-actions">
-          <button class="btn--primary" @click="saveNotes">Save Notes</button>
-        </div>
-      </section>
       <NotesSection :rid="rid" />
     </template>
   </main>
