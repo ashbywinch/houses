@@ -22,7 +22,21 @@ jobs:
           fi
 
       - uses: the-pr-agent/pr-agent@main
+        id: pr-agent
         env:
           OPENAI_KEY: ${{ secrets.OPENCODE_GO_HOUSES_API_KEY }}
           OPENAI_BASE_URL: https://opencode.ai/zen/go/v1
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_AGENT_CONFIG_BRANCH: ${{ github.head_ref }}
+
+      - name: Check review succeeded
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # PR-Agent posts an issue comment on failure. Check for it.
+          COMMENTS=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.number }}/comments" --jq '.[] | select(.user.login == "github-actions[bot]") | .body' 2>/dev/null || echo "")
+          if echo "$COMMENTS" | grep -qi "failed"; then
+            echo "::error::PR-Agent reported a failure:"
+            echo "$COMMENTS"
+            exit 1
+          fi
