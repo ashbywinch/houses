@@ -75,3 +75,4 @@ tools/captures/
 var/
 venv/
 wheels/
+node_modules/.vite/vitest/*/results.json
