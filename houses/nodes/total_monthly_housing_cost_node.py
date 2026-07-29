@@ -108,6 +108,8 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
     ) -> Attempt[Money]:
         if mortgage.impossible:
             return Attempt.impossible(mortgage.error)
+        if council_tax.impossible:
+            return Attempt.impossible(council_tax.error)
 
         # Determine if property is owner-occupied (Current = no housing costs)
         is_current = (

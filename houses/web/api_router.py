@@ -328,7 +328,7 @@ async def put_persons(body: list = Body()):  # noqa: B008
 
     from houses.model.domain import Person, PlaceOfInterest
 
-    _MONEY_FIELDS = {"home_sale_price", "outstanding_mortgage", "cash_contribution"}
+    _MONEY_FIELDS = {"home_sale_price", "outstanding_mortgage", "cash_contribution", "life_insurance_monthly"}
 
     def _validate_money_fields(d: dict) -> dict:
         for f in _MONEY_FIELDS:
