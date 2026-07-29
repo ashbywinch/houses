@@ -410,11 +410,22 @@ async def patch_works_estimate(
 
 
 async def _sync_works_estimate_to_sheet(rid: str, person: str, value) -> None:
-    """Write back a works estimate to the View tab."""
+    """Write back a works estimate to the View tab.
+
+    Runs blocking gspread calls in a thread to avoid blocking the event loop.
+    Only Ashby's estimates are synced — other persons have no column yet.
+    """
     import logging
 
     logger = logging.getLogger(__name__)
-    try:
+
+    if person != "Ashby":
+        logger.debug(
+            "Sheet sync only supported for Ashby, got %s", person
+        )
+        return
+
+    def _sync() -> None:
         from houses.config import settings
         from houses.sheets import get_client
 
@@ -426,20 +437,28 @@ async def _sync_works_estimate_to_sheet(rid: str, person: str, value) -> None:
         all_rows = ws.get_all_values()
         headers = all_rows[0]
 
-        # Find Rightmove ID column and Ashby Works Estimate column
         try:
             rid_col = headers.index("Rightmove ID")
             works_col = headers.index("Ashby Works Estimate (£)")
         except ValueError:
-            logger.warning("Could not find required columns in View tab")
+            logger.warning(
+                "Could not find required columns in View tab"
+            )
             return
 
         for i, row in enumerate(all_rows[1:], start=2):
             if row[rid_col].strip() == rid:
                 ws.update_cell(i, works_col + 1, value or "")
                 break
+
+    try:
+        import asyncio
+
+        await asyncio.to_thread(_sync)
     except Exception as e:
-        logger.warning("Failed to sync works estimate to sheet: %s", e)
+        logger.warning(
+            "Failed to sync works estimate to sheet: %s", e
+        )
 
 
 @api_router.get("/persons")

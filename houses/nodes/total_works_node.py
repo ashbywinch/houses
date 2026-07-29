@@ -36,6 +36,8 @@ class TotalWorksNode(DerivedNode[Money]):
     ) -> Attempt[Money]:
         if works_ests.impossible:
             return Attempt.impossible(works_ests.error)
+        if persons.impossible:
+            return Attempt.impossible(persons.error)
         ps = persons.value_or_none() or []
         buyers = [p for p in ps if not getattr(p, "is_child", False)]
         wd = (
@@ -56,5 +58,8 @@ class TotalWorksNode(DerivedNode[Money]):
                 f"Works estimate required for: {names}"
             )
 
-        total = sum(Decimal(str(v)) for v in wd.values())
+        # Filter out None values (cleared estimates)
+        total = sum(
+            Decimal(str(v)) for v in wd.values() if v is not None
+        )
         return Attempt.succeeded(Money(str(total), "GBP"))
