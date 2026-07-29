@@ -17,10 +17,31 @@ api_router = APIRouter(prefix="/api")
 
 @api_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
-    from houses.web.auth import get_session_user
+    from houses.web.auth import _get_serializer, _SESSION_MAX_AGE
+    from itsdangerous import BadSignature, SignatureExpired
 
-    # Reject unauthenticated connections — property data is sensitive
-    session = get_session_user(Request(scope=websocket.scope))
+    # Extract session cookie from WebSocket headers — Starlette's Request
+    # requires an HTTP scope and can't be constructed from a websocket scope.
+    cookies_str = ""
+    for key, value in websocket.headers.items():
+        if key.lower() == "cookie":
+            cookies_str = value
+            break
+
+    session = None
+    for part in cookies_str.split(";"):
+        part = part.strip()
+        if part.startswith("session="):
+            cookie_val = part[len("session=") :]
+            try:
+                session = _get_serializer().loads(
+                    cookie_val,
+                    max_age=int(_SESSION_MAX_AGE.total_seconds()),
+                )
+            except (BadSignature, SignatureExpired):
+                pass
+            break
+
     if not session:
         await websocket.close(code=4001)
         return
