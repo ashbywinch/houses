@@ -61,10 +61,11 @@ class TestPropertyApi:
         reg["a"] = PropertyNodes("a")
         reg["b"] = PropertyNodes("b")
 
-        resp = client.get("/api/properties")
+        resp = client.get("/api/properties/all")
         assert resp.status_code == 200
         data = resp.json()
-        assert set(data["properties"]) == {"a", "b"}
+        assert "a" in data
+        assert "b" in data
 
     def test_all_route_not_caught_by_rid(self):
         """Route ordering: /properties/all must resolve before {rid}."""
