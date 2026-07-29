@@ -32,12 +32,12 @@ class EquityTotalNode(DerivedNode[Money]):
         return Formula(lines=lines, result=str(self._attempt.value))
 
     def __init__(self, node_id: str, *, persons_source, status_node=None):
-        deps = [persons_source]
+        self._persons_source = persons_source
         self._status_node = status_node
+        deps = [persons_source]
         if status_node is not None:
             deps.append(status_node)
         super().__init__(node_id, Money, tuple(deps))
-        self._persons_source = persons_source
 
     def _get_active_deps(self) -> tuple:
         if self._status_node is not None:

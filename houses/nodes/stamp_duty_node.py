@@ -25,12 +25,12 @@ class StampDutyNode(DerivedNode[Money]):
         return Formula(lines=lines, result=str(self._attempt.value))
 
     def __init__(self, node_id: str, *, rightmove_price, status_node=None):
-        deps = [rightmove_price]
+        self._price_node = rightmove_price
         self._status_node = status_node
+        deps = [rightmove_price]
         if status_node is not None:
             deps.append(status_node)
         super().__init__(node_id, Money, tuple(deps))
-        self._price_node = rightmove_price
 
     def _get_active_deps(self):
         if self._status_node is not None:
