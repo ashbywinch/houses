@@ -28,6 +28,7 @@ jobs:
         run: |
           PR_NUM="${{ github.event.number }}"
           SHA="${{ github.event.pull_request.head.sha }}"
+          SHORT_SHA="${SHA:0:7}"
           if [ -z "$PR_NUM" ]; then
             echo "Manual trigger — skipping review check (no PR number)"
             exit 0
@@ -36,7 +37,7 @@ jobs:
           # PR-Agent's persistent review includes the SHA: "Review updated until commit .../SHA"
           # and code suggestions include: "<!-- SHA -->".
           # This avoids race conditions from concurrent runs (unlike timestamp-based filtering).
-          THIS_RUN_CMTS=$(gh api "repos/${{ github.repository }}/issues/$PR_NUM/comments" --jq "[.[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$SHA\")))]" 2>/dev/null || echo "[]")
+          THIS_RUN_CMTS=$(gh api "repos/${{ github.repository }}/issues/$PR_NUM/comments" --jq "[.[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$SHORT_SHA\")))]" 2>/dev/null || echo "[]")
           echo "$THIS_RUN_CMTS" | jq -e 'length == 0' > /dev/null 2>&1 && NO_COMMENTS=true || NO_COMMENTS=false
           if echo "$THIS_RUN_CMTS" | jq -e 'any(.[].body; test("PR Reviewer Guide|PR Code Suggestions"))' > /dev/null 2>&1; then
             echo "Review check passed"
