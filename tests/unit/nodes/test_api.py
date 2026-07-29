@@ -195,6 +195,7 @@ class TestWorksEstimateApi:
         prop.works_estimates.push({}, "test")
         from money import Money
         prop.rental_income.push(Money("0", "GBP"), "test")
+        prop.comment_status.push("", "test")
 
         register_property(rid, prop)
 

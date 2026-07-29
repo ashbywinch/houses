@@ -15,6 +15,9 @@ class EquityTotalNode(DerivedNode[Money]):
 
     For each person:
         max(0, home_sale_price - outstanding_mortgage) + cash_contribution
+
+    When the property Status is "Current" (owner-occupied), cash_contributions
+    are excluded — they apply only to new property purchases.
     """
 
     @property
@@ -28,13 +31,34 @@ class EquityTotalNode(DerivedNode[Money]):
         ]
         return Formula(lines=lines, result=str(self._attempt.value))
 
-    def __init__(self, node_id: str, *, persons_source):
-        super().__init__(node_id, Money, (persons_source,))
+    def __init__(self, node_id: str, *, persons_source, status_node=None):
+        deps = [persons_source]
+        self._status_node = status_node
+        if status_node is not None:
+            deps.append(status_node)
+        super().__init__(node_id, Money, tuple(deps))
         self._persons_source = persons_source
 
-    def compute(self, persons: Attempt[list]) -> Attempt[Money]:
+    def _get_active_deps(self) -> tuple:
+        if self._status_node is not None:
+            return (self._persons_source, self._status_node)
+        return (self._persons_source,)
+
+    def compute(
+        self,
+        persons: Attempt[list],
+        status: Attempt[str] | None = None,
+    ) -> Attempt[Money]:
         if persons.impossible:
             return Attempt.impossible(persons.error)
+
+        is_current = (
+            status is not None
+            and status.succeeded
+            and status.value_or_none()
+            and status.value_or_none().strip().lower() == "current"
+        )
+
         zero = Money("0", "GBP")
         ps = persons.value_or_none() or []
         total = _ZERO
@@ -57,6 +81,9 @@ class EquityTotalNode(DerivedNode[Money]):
                 if isinstance(cash, Money)
                 else Decimal(str(cash))
             )
-            equity = max(_ZERO, sale_amt - mortgage_amt) + cash_amt
+            equity = max(_ZERO, sale_amt - mortgage_amt)
+            # Cash contributions excluded for Current (owner-occupied) properties
+            if not is_current:
+                equity += cash_amt
             total += equity
         return Attempt.succeeded(Money(str(total), "GBP"))

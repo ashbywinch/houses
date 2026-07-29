@@ -153,6 +153,7 @@ class PropertyNodes:
         self.stamp_duty = StampDutyNode(
             f"{rid}/stamp_duty",
             rightmove_price=self.rightmove_price,
+            status_node=self.comment_status,
         )
         # ── Works Estimates ───────────────────────────────────────────
         self.total_works = TotalWorksNode(
@@ -163,6 +164,7 @@ class PropertyNodes:
         self.total_equity = EquityTotalNode(
             f"{rid}/total_equity",
             persons_source=self._svc.persons_source,
+            status_node=self.comment_status,
         )
         self.life_insurance_total = LifeInsuranceTotalNode(
             f"{rid}/life_insurance_total",

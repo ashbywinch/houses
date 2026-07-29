@@ -47,6 +47,7 @@ async def test_detail_includes_stamp_duty():
     prop.rightmove_bedrooms.push("3", "Rightmove")
     prop.rightmove_price.push(Money("795000", "GBP"), "Rightmove")
     prop.rightmove_location.push(GeoPoint(51.5, -0.1), "Rightmove map")
+    prop.comment_status.push("", "test")
     from dag.scheduler import flush_processor
 
     await flush_processor()
