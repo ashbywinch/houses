@@ -13,16 +13,13 @@ class StampDutyNode(DerivedNode[Money]):
     def provenance_formula(self) -> Formula | None:
         if not self._attempt.succeeded or self._attempt.value_or_none() is None:
             return None
-        try:
-            price_att = self._price_node.latest_attempt()
-            price_val = price_att.value_or_none()
-            lines = [
-                FormulaLine(label="Property Price", value=str(price_val) if price_val else "—"),
-                FormulaLine(label="First-time buyer relief", value="N/A"),
-            ]
-            return Formula(lines=lines, result=str(self._attempt.value))
-        except Exception:
-            return None
+        price_att = self._price_node.latest_attempt()
+        price_val = price_att.value_or_none()
+        lines = [
+            FormulaLine(label="Property Price", value=str(price_val) if price_val else "—"),
+            FormulaLine(label="First-time buyer relief", value="N/A"),
+        ]
+        return Formula(lines=lines, result=str(self._attempt.value))
 
     def __init__(self, node_id: str, *, rightmove_price):
         super().__init__(node_id, Money, (rightmove_price,))

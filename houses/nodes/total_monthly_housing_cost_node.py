@@ -11,42 +11,39 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
     def provenance_formula(self) -> Formula | None:
         if not self._attempt.succeeded or self._attempt.value_or_none() is None:
             return None
-        try:
-            lines = []
+        lines = []
 
-            # Mortgage
-            mortgage_att = self._mortgage_node.latest_attempt()
-            mortgage_val = mortgage_att.value_or_none() if mortgage_att.succeeded else None
-            if mortgage_val is not None:
-                lines.append(FormulaLine(label="Mortgage", value=str(mortgage_val)))
+        # Mortgage
+        mortgage_att = self._mortgage_node.latest_attempt()
+        mortgage_val = mortgage_att.value_or_none() if mortgage_att.succeeded else None
+        if mortgage_val is not None:
+            lines.append(FormulaLine(label="Mortgage", value=str(mortgage_val)))
 
-            # Sinking fund — show yearly → monthly → our share
-            sinking_att = self._sinking_node.latest_attempt()
-            sinking_val = sinking_att.value_or_none() if sinking_att.succeeded else None
-            if sinking_val is not None:
-                yearly = float(sinking_val.amount)
-                monthly = yearly / 12
-                our_share = monthly * 2 / 3
-                lines.append(FormulaLine(label="Sinking Fund (yearly)", value=str(sinking_val)))
-                lines.append(FormulaLine(label="  ÷ 12 (monthly)", value=f"{monthly:.2f} GBP"))
-                lines.append(FormulaLine(label="  × ⅔ (our share)", value=f"{our_share:.2f} GBP"))
-                lines.append(FormulaLine(label="Sinking Fund (monthly)", value=f"{our_share:.2f} GBP"))
+        # Sinking fund — show yearly → monthly → our share
+        sinking_att = self._sinking_node.latest_attempt()
+        sinking_val = sinking_att.value_or_none() if sinking_att.succeeded else None
+        if sinking_val is not None:
+            yearly = float(sinking_val.amount)
+            monthly = yearly / 12
+            our_share = monthly * 2 / 3
+            lines.append(FormulaLine(label="Sinking Fund (yearly)", value=str(sinking_val)))
+            lines.append(FormulaLine(label="  ÷ 12 (monthly)", value=f"{monthly:.2f} GBP"))
+            lines.append(FormulaLine(label="  × ⅔ (our share)", value=f"{our_share:.2f} GBP"))
+            lines.append(FormulaLine(label="Sinking Fund (monthly)", value=f"{our_share:.2f} GBP"))
 
-            # Commute
-            commute_att = self._commute_node.latest_attempt()
-            commute_val = commute_att.value_or_none() if commute_att.succeeded else None
-            if commute_val is not None:
-                lines.append(FormulaLine(label="Commute", value=str(commute_val)))
+        # Commute
+        commute_att = self._commute_node.latest_attempt()
+        commute_val = commute_att.value_or_none() if commute_att.succeeded else None
+        if commute_val is not None:
+            lines.append(FormulaLine(label="Commute", value=str(commute_val)))
 
-            # Council tax
-            council_att = self._council_tax_node.latest_attempt()
-            council_val = council_att.value_or_none() if council_att.succeeded else None
-            if council_val is not None:
-                lines.append(FormulaLine(label="Council Tax", value=str(council_val)))
+        # Council tax
+        council_att = self._council_tax_node.latest_attempt()
+        council_val = council_att.value_or_none() if council_att.succeeded else None
+        if council_val is not None:
+            lines.append(FormulaLine(label="Council Tax", value=str(council_val)))
 
-            return Formula(lines=lines, result=str(self._attempt.value))
-        except Exception:
-            return None
+        return Formula(lines=lines, result=str(self._attempt.value))
 
     def __init__(
         self,

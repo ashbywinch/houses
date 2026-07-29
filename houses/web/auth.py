@@ -305,7 +305,7 @@ async def impersonate(request: Request, body: dict):
         email=session["email"],
         name=session["name"],
         picture=session.get("picture", ""),
-        is_superuser=True,
+        is_superuser=session.get("is_superuser", False),
         impersonating=person,
     )
 

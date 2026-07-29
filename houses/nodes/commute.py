@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import replace
 
 from money import Money
@@ -10,6 +11,8 @@ from dag.node import Node
 from houses.commute import CostGroup, LegMode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute
+
+logger = logging.getLogger(__name__)
 
 
 def _has_unpriced_transit(commute: Commute | None) -> bool:
@@ -203,6 +206,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
             try:
                 result["value"] = self._adapter.dump_python(attempt.value_or_none(), mode="json")
             except Exception:
+                logger.exception("Failed to serialize commute value to JSON")
                 result["value"] = None
         if attempt.impossible:
             result["error"] = attempt.error

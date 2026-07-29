@@ -11,40 +11,37 @@ class MonthlyMortgagePaymentNode(DerivedNode[Money]):
     def provenance_formula(self) -> Formula | None:
         if not self._attempt.succeeded or self._attempt.value_or_none() is None:
             return None
-        try:
-            price_att = self._price_node.latest_attempt()
-            sd_att = self._stamp_duty_node.latest_attempt()
-            fin_att = self._financial_source.latest_attempt()
+        price_att = self._price_node.latest_attempt()
+        sd_att = self._stamp_duty_node.latest_attempt()
+        fin_att = self._financial_source.latest_attempt()
 
-            lines = []
-            price_val = price_att.value_or_none()
-            if price_val is not None:
-                lines.append(FormulaLine(label="Price", value=str(price_val)))
+        lines = []
+        price_val = price_att.value_or_none()
+        if price_val is not None:
+            lines.append(FormulaLine(label="Price", value=str(price_val)))
 
-            sd_val = sd_att.value_or_none() if sd_att.succeeded else None
-            if sd_val is not None:
-                lines.append(FormulaLine(label="Stamp Duty", value=str(sd_val)))
+        sd_val = sd_att.value_or_none() if sd_att.succeeded else None
+        if sd_val is not None:
+            lines.append(FormulaLine(label="Stamp Duty", value=str(sd_val)))
 
-            # Equity from persons
-            persons_att = self._persons_source.latest_attempt()
-            equity_total = 0.0
-            if persons_att.succeeded:
-                for p in persons_att.value_or_none() or []:
-                    eq = getattr(p, "deposit_equity", None)
-                    if eq is not None:
-                        equity_total += float(getattr(eq, "amount", eq))
-            if equity_total > 0:
-                lines.append(FormulaLine(label="Total Equity", value=str(equity_total)))
+        # Equity from persons
+        persons_att = self._persons_source.latest_attempt()
+        equity_total = 0.0
+        if persons_att.succeeded:
+            for p in persons_att.value_or_none() or []:
+                eq = getattr(p, "deposit_equity", None)
+                if eq is not None:
+                    equity_total += float(getattr(eq, "amount", eq))
+        if equity_total > 0:
+            lines.append(FormulaLine(label="Total Equity", value=str(equity_total)))
 
-            fin = fin_att.value_or_none() or {} if fin_att.succeeded else {}
-            rate = float(fin.get("mortgage_rate", 0.045))
-            term = int(fin.get("mortgage_term_years", 30))
-            lines.append(FormulaLine(label="Interest Rate", value=f"{rate * 100:.1f}%"))
-            lines.append(FormulaLine(label="Term", value=f"{term} years"))
+        fin = fin_att.value_or_none() or {} if fin_att.succeeded else {}
+        rate = float(fin.get("mortgage_rate", 0.045))
+        term = int(fin.get("mortgage_term_years", 30))
+        lines.append(FormulaLine(label="Interest Rate", value=f"{rate * 100:.1f}%"))
+        lines.append(FormulaLine(label="Term", value=f"{term} years"))
 
-            return Formula(lines=lines, result=str(self._attempt.value))
-        except Exception:
-            return None
+        return Formula(lines=lines, result=str(self._attempt.value))
 
     def __init__(self, node_id: str, *, rightmove_price, stamp_duty_node, persons_source, financial_source):
         super().__init__(node_id, Money, (rightmove_price, stamp_duty_node, persons_source, financial_source))
