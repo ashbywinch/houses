@@ -209,27 +209,7 @@ class PropertyNodes:
                 self._slots.append(slot)
                 node.changed.connect(slot)
 
-        # Seed works_estimates: migrate old float, or set default empty dict.
-        if self.works_estimates.latest_attempt().pending:
-            self._migrate_old_ashby_works()
-            if self.works_estimates.latest_attempt().pending:
-                self.works_estimates.push({}, "default")
 
-        # Seed rental_income with default £0 so the DAG chain resolves.
-        if self.rental_income.latest_attempt().pending:
-            self.rental_income.push(Money("0", "GBP"), "default")
-
-    def _migrate_old_ashby_works(self) -> None:
-        from houses.nodes.cutover import migrate_old_ashby_works_sync
-
-        try:
-            migrate_old_ashby_works_sync(self)
-        except Exception:
-            import logging
-
-            logging.getLogger(__name__).exception(
-                "Failed to migrate ashby_works for %s", self.rid
-            )
 
     def _build_commute_pipeline(self) -> None:
         from houses.nodes.commute_pipeline_builder import build_commute_pipeline

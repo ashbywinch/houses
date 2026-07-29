@@ -221,6 +221,12 @@ def load_property_nodes_from_rows(rows: list[dict[str, Any]]) -> int:
                 logger.warning(
                     "Invalid works estimate for RID %s: %s", raw_rid, ws_value
                 )
+        else:
+            # Default empty dict so the DAG chain resolves
+            prop.works_estimates.push({}, "default")
+
+        # Default rental_income to £0 so total_monthly_cost resolves
+        prop.rental_income.push(Money("0", "GBP"), "default")
 
         register_property(raw_rid, prop)
         count += 1
