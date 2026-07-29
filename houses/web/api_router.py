@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Body, HTTPException, Request, WebSocket
+from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Request, WebSocket
 from pydantic import BaseModel, Field, field_validator
 
 from houses.geo import GeoPoint
@@ -371,7 +371,11 @@ async def patch_financial(body: dict):
 
 
 @api_router.patch("/properties/{rid}/works-estimate")
-async def patch_works_estimate(rid: str, body: dict):
+async def patch_works_estimate(
+    rid: str,
+    body: dict,
+    background_tasks: BackgroundTasks,
+):
     """Update the works estimate for a person on this property.
 
     Body: {"person": "Ashby", "value": 15000}
@@ -387,14 +391,20 @@ async def patch_works_estimate(rid: str, body: dict):
         raise HTTPException(status_code=400, detail="person is required")
 
     value = body.get("value")
+    if value is not None and not isinstance(value, (int, float)):
+        raise HTTPException(
+            status_code=400,
+            detail="value must be a number",
+        )
+
     current = prop.works_estimates.latest_attempt().value_or_none() or {}
     current[person_name] = value
     prop.works_estimates.push(current, "user")
 
-    # Async write back to sheet (best-effort)
-    import asyncio
-
-    asyncio.ensure_future(_sync_works_estimate_to_sheet(rid, person_name, value))
+    # Write back to sheet in background (best-effort)
+    background_tasks.add_task(
+        _sync_works_estimate_to_sheet, rid, person_name, value
+    )
 
     return {"status": "ok"}
 

@@ -49,6 +49,8 @@ class MortgageRequiredNode(DerivedNode[Money]):
         tw: Attempt[Money],
         te: Attempt[Money],
     ) -> Attempt[Money]:
+        if sd.impossible:
+            return Attempt.impossible(sd.error)
         if tw.impossible:
             return Attempt.impossible(tw.error)
         if te.impossible:

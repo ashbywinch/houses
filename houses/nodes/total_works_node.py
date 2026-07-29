@@ -34,6 +34,8 @@ class TotalWorksNode(DerivedNode[Money]):
         persons: Attempt[list],
         works_ests: Attempt[dict],
     ) -> Attempt[Money]:
+        if works_ests.impossible:
+            return Attempt.impossible(works_ests.error)
         ps = persons.value_or_none() or []
         buyers = [p for p in ps if not getattr(p, "is_child", False)]
         wd = (
