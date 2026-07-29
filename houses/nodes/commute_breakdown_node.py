@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from money import Money
+
 from dag.attempt import Attempt, Provenance, SourceType
 from dag.derived_node import DerivedNode
 from dag.node import Node
@@ -28,12 +30,12 @@ class CommuteBreakdownNode(DerivedNode[dict]):
         commute_attempts = args[:-1]
 
         persons_list = persons_attempt.value_or_none() if persons_attempt.succeeded else []
-        yearly_total = 0.0
+        yearly_total = Money("0", "GBP")
         per_person: dict[str, dict] = {}
         selector_values = list(self._commute_selectors.values())
         for p in persons_list or []:
-            person_yearly = 0.0
-            amount = 0.0
+            person_yearly = Money("0", "GBP")
+            daily_amount: Money | None = None
             pois = p.get("places_of_interest", ()) if isinstance(p, dict) else getattr(p, "places_of_interest", ())
             name = p.get("name") if isinstance(p, dict) else getattr(p, "name", "?")
             for poi in pois or ():
@@ -51,16 +53,19 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                 if not val:
                     continue
                 daily = getattr(val, "daily_cost", None)
-                daily_amount = float(daily.amount) if daily is not None else 0.0
-                amount = daily_amount
-                yearly_person_poi = daily_amount * poi.trips_per_week * poi.weeks_per_year
-                person_yearly += yearly_person_poi
-                yearly_total += yearly_person_poi
-            per_person[name] = {"daily_gbp": amount, "yearly_gbp": person_yearly}
+                if daily is not None:
+                    daily_amount = daily
+                    yearly_person_poi = daily_amount * poi.trips_per_week * poi.weeks_per_year
+                    person_yearly += yearly_person_poi
+                    yearly_total += yearly_person_poi
+            per_person[name] = {
+                "daily_gbp": str(daily_amount.amount) if daily_amount is not None else "0",
+                "yearly_gbp": str(person_yearly.amount),
+            }
         return Attempt.succeeded(
             {
                 "persons": per_person,
-                "yearly_total_gbp": yearly_total,
+                "yearly_total_gbp": str(yearly_total.amount),
                 "formula_explanation": "Aggregated from DAG nodes",
             }
         )

@@ -29,13 +29,15 @@ def test_property_payload_minimal() -> None:
 
 
 def test_enriched_property_defaults() -> None:
+    from money import Money
+
     ep = EnrichedProperty(
         url="https://www.rightmove.co.uk/properties/123",
     )
     assert ep.address == ""
     assert ep.postcode == ""
     assert ep.bedrooms == 0
-    assert ep.price == 0.0
+    assert ep.price == Money("0", "GBP")
     assert ep.simon_commute is None
     assert ep.lorena_commute is None
     assert ep.petrol is None
@@ -91,22 +93,26 @@ def test_bracknell_commute_defaults() -> None:
 
 
 def test_council_tax_info() -> None:
-    c = CouncilTaxInfo(band="D", yearly_cost=2000.0, evidence_url="https://gov.uk/council-tax-bands")
+    from money import Money
+
+    c = CouncilTaxInfo(band="D", yearly_cost=Money("2000", "GBP"), evidence_url="https://gov.uk/council-tax-bands")
     assert c.band == "D"
-    assert c.yearly_cost == 2000.0
+    assert c.yearly_cost == Money("2000", "GBP")
     assert c.evidence_url == "https://gov.uk/council-tax-bands"
 
 
 def test_commute_breakdown() -> None:
+    from money import Money
+
     b = CommuteBreakdown(
-        simon_daily_gbp=15.0,
-        lorena_daily_gbp=24.0,
-        bracknell_daily_gbp=10.0,
-        yearly_total_gbp=3358.0,
+        simon_daily_gbp=Money("15", "GBP"),
+        lorena_daily_gbp=Money("24", "GBP"),
+        bracknell_daily_gbp=Money("10", "GBP"),
+        yearly_total_gbp=Money("3358", "GBP"),
         formula_explanation="46wk x (1x10.0 + 1x15.0 + 2x24.0)",
     )
-    assert b.simon_daily_gbp == 15.0
-    assert b.lorena_daily_gbp == 24.0
-    assert b.bracknell_daily_gbp == 10.0
-    assert b.yearly_total_gbp == 3358.0
+    assert b.simon_daily_gbp == Money("15", "GBP")
+    assert b.lorena_daily_gbp == Money("24", "GBP")
+    assert b.bracknell_daily_gbp == Money("10", "GBP")
+    assert b.yearly_total_gbp == Money("3358", "GBP")
     assert "46wk" in b.formula_explanation

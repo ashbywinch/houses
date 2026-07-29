@@ -82,8 +82,8 @@ class TestExtractTown:
             try:
                 # Address has no town to extract — should fall back to reverse geocode
                 result = await enrich_walkability(51.5, -0.1, "Some Street, SW1V 2QQ")
-                assert result["walk_to_town_minutes"] == 15, (
-                    f"Expected 15 from reverse geocode fallback, got {result['walk_to_town_minutes']}"
+                assert result["walk_to_town"]["value"] == 15, (
+                    f"Expected 15 from reverse geocode fallback, got {result['walk_to_town']}"
                 )
             finally:
                 w._find_town_centre_by_reverse_geocode = original_rev
@@ -126,7 +126,7 @@ class TestExtractTown:
             w._find_town_centre_by_reverse_geocode = mock_rev
             try:
                 result = await enrich_walkability(51.5, -0.1, "Some Street, Southall, UB2 4GN")
-                assert result["walk_to_town_minutes"] == 10
+                assert result["walk_to_town"]["value"] == 10
                 assert not rev_called, "Reverse geocode should NOT be called when address works"
             finally:
                 w._extract_town_centre = original_extract

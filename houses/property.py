@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from money import Money
+from pint import Quantity
+
 from houses.commute import CommuteBreakdown
 from houses.council_tax_info import CouncilTaxInfo
 from houses.location import resolve_house_location
@@ -34,7 +37,7 @@ class Property:
     address: str = ""
     postcode: str = ""
     bedrooms: int | None = None
-    price: float | None = None
+    price: Money | None = None
     tab: str = "Properties Data"
     actual_latitude: float | None = None
     actual_longitude: float | None = None
@@ -63,7 +66,7 @@ class EnrichedProperty:
     address: str = ""
     postcode: str = ""
     bedrooms: int = 0
-    price: float = 0.0
+    price: Money = Money("0", "GBP")
 
     # Commute enrichment
     simon_commute: Commute | None = None
@@ -75,13 +78,13 @@ class EnrichedProperty:
     # Schools
     primary_school: School | None = None
     primary_school_commute: Commute | None = None
-    primary_school_distance_km: float | None = None
+    primary_school_distance: Quantity | None = None
     secondary_school: School | None = None
     secondary_school_commute: Commute | None = None
-    secondary_school_distance_km: float | None = None
+    secondary_school_distance: Quantity | None = None
 
     town_description: str = ""
-    walk_to_town_minutes: int | None = None
+    walk_to_town: Quantity | None = None
     walkable_amenities: str = ""
     primary_ofsted: str = ""
     secondary_ofsted: str = ""

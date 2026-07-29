@@ -57,7 +57,7 @@ class TestCommute:
         destination = PlaceOfInterest(label="Office", address="EC3A 7LP")
         leg = JourneyLeg(
             mode=LegMode.TUBE,
-            duration_minutes=15,
+            duration=Quantity(15, "minute"),
             line_name="Central",
             end_station="Bank",
         )
@@ -214,16 +214,16 @@ class TestEpcRating:
 class TestWalkability:
     def test_construction(self):
         w = Walkability(
-            walk_to_town_minutes=15,
+            walk_to_town=Quantity(15, "minute"),
             amenities="Supermarket, Park",
             town_description="A lovely town",
         )
-        assert w.walk_to_town_minutes == 15
+        assert w.walk_to_town == Quantity(15, "minute")
         assert w.amenities == "Supermarket, Park"
         assert w.town_description == "A lovely town"
 
     def test_defaults(self):
         w = Walkability()
-        assert w.walk_to_town_minutes is None
+        assert w.walk_to_town is None
         assert w.amenities == ""
         assert w.town_description == ""

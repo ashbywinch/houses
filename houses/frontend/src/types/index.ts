@@ -21,13 +21,13 @@ export interface GeoPoint {
 }
 
 export interface MoneyValue {
-  amount: number
+  amount: string
   currency: string
 }
 
 export interface JourneyLeg {
   mode: string
-  duration_minutes: number
+  duration: { value: number; unit: string }
   start_station?: string
   end_station?: string
   line_name?: string
@@ -35,13 +35,13 @@ export interface JourneyLeg {
 export interface CostGroup {
   legs: JourneyLeg[]
   operator?: string
-  cost?: { amount: number; currency: string } | number | null
+  cost?: { amount: string; currency: string } | number | null
 }
 export interface CommuteValue {
   label?: string
   mode?: string
   duration?: { value: number; unit: string }
-  daily_cost?: { amount: number; currency: string }
+  daily_cost?: { amount: string; currency: string }
   details?: CostGroup[]
   route_description?: string
   is_child?: boolean
@@ -50,7 +50,7 @@ export interface CommuteValue {
 export interface SchoolValue {
   name: string
   ofsted: string
-  distance_km: number
+  distance: { value: number; unit: string }
   url: string
 }
 

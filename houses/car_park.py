@@ -346,7 +346,7 @@ class CarParkRegistry:
 
         cost_str = ""
         if car_park.daily_cost is not None:
-            cost_str = f"{float(car_park.daily_cost.amount):.2f}"
+            cost_str = f"{car_park.daily_cost.amount:.2f}"
 
         if _PARKING_RATES_PATH.is_file():
             with _PARKING_RATES_PATH.open(newline="") as f:

@@ -12,6 +12,7 @@ This rewrites them to {"amount": <value>, "currency": "GBP"}.
 import json
 import sqlite3
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 MONEY_NODES = {
@@ -51,7 +52,7 @@ def migrate_node_results(db_path: str | Path) -> int:
 
         if isinstance(value, (str, float, int)):
             try:
-                amount = float(value)
+                amount = str(Decimal(str(value)))
             except (ValueError, TypeError):
                 continue
             result["value"] = {"amount": amount, "currency": "GBP"}

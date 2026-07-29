@@ -31,8 +31,7 @@ def _get_dag_db() -> sqlite3.Connection:
 def get_property_rids(dag: sqlite3.Connection) -> list[str]:
     """Extract unique property RIDs from DAG node IDs."""
     rows = dag.execute(
-        "SELECT DISTINCT substr(node_id, 1, instr(node_id, '/') - 1) AS rid "
-        "FROM node_results WHERE node_id LIKE '%/%'"
+        "SELECT DISTINCT substr(node_id, 1, instr(node_id, '/') - 1) AS rid FROM node_results WHERE node_id LIKE '%/%'"
     ).fetchall()
     rids = sorted({row["rid"] for row in rows if row["rid"]})
     return rids
@@ -103,10 +102,7 @@ def main() -> None:
         old = get_old_comments(dag, rid)
         result = migrate_old_comments(rid, old)
 
-        new_for_rid = len([
-            c for c in result
-            if isinstance(c, dict) and c.get("timestamp", "").startswith("1980")
-        ])
+        new_for_rid = len([c for c in result if isinstance(c, dict) and c.get("timestamp", "").startswith("1980")])
         if new_for_rid > 0:
             migrated += 1
             comment_rows += new_for_rid

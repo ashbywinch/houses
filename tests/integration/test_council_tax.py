@@ -6,6 +6,7 @@ from collections import namedtuple
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from money import Money
 
 from houses.council_tax import lookup_council_tax
 
@@ -70,7 +71,7 @@ class TestLookupCouncilTax:
     async def test_match_returns_band(self):
         with (
             patch("uk_property_apis.voa.VOAClient") as mock_voa,
-            patch("houses.council_tax._lookup_yearly_cost", return_value=1500.0),
+            patch("houses.council_tax._lookup_yearly_cost", return_value=Money("1500", "GBP")),
         ):
             instance = AsyncMock()
             mock_voa.return_value = instance
@@ -89,14 +90,14 @@ class TestLookupCouncilTax:
             assert result.succeeded
             ct = result.value_or_none()
             assert ct.band == "B"
-            assert ct.yearly_cost == 1500.0
+            assert ct.yearly_cost == Money("1500", "GBP")
             assert "west-berkshire" in ct.evidence_url
 
     @pytest.mark.asyncio
     async def test_match_among_deleted_and_active(self):
         with (
             patch("uk_property_apis.voa.VOAClient") as mock_voa,
-            patch("houses.council_tax._lookup_yearly_cost", return_value=1800.0),
+            patch("houses.council_tax._lookup_yearly_cost", return_value=Money("1800", "GBP")),
         ):
             instance = AsyncMock()
             mock_voa.return_value = instance
@@ -247,7 +248,7 @@ class TestLookupYearlyCost:
                 from houses.council_tax import _lookup_yearly_cost
 
                 result = _lookup_yearly_cost("F", "Woking")
-                assert result == 3752.67
+                assert result == Money("3752.67", "GBP")
 
     def test_civaccount_success_used_first(self):
         with patch("houses.council_tax._load_rates") as mock_rates:
@@ -260,7 +261,7 @@ class TestLookupYearlyCost:
                 from houses.council_tax import _lookup_yearly_cost
 
                 result = _lookup_yearly_cost("D", "Woking")
-                assert result == 500.0
+                assert result == Money("500", "GBP")
 
     def test_prefix_match_fallback(self):
         with patch("houses.council_tax._load_rates") as mock_rates:
@@ -273,7 +274,7 @@ class TestLookupYearlyCost:
                 from houses.council_tax import _lookup_yearly_cost
 
                 result = _lookup_yearly_cost("F", "Woking")
-                assert result == 3752.67
+                assert result == Money("3752.67", "GBP")
 
     def test_unknown_authority_returns_none(self):
         with patch("houses.council_tax._load_rates") as mock_rates:
@@ -298,4 +299,4 @@ class TestLookupYearlyCost:
 
                 result = _lookup_yearly_cost("E", "Ealing")
                 assert result is not None
-                assert result == 1905.44
+                assert result == Money("1905.44", "GBP")

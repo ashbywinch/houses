@@ -57,8 +57,8 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         logger.debug(
             "PETROL_DEBUG: %d drive legs, total_min=%d, distances=%s",
             len(drive_legs),
-            sum(leg.duration_minutes for leg in drive_legs),
-            [leg.distance_km for leg in drive_legs],
+            sum(int(leg.duration.magnitude) for leg in drive_legs),
+            [leg.distance.magnitude if leg.distance else 0 for leg in drive_legs],
         )
 
         # Get settings from financial source (user-editable)
@@ -67,12 +67,14 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         cost_per_litre = float(fin.get("petrol_cost_per_litre", 1.45))
 
         # Use actual distance_km when available (>0), otherwise estimate from minutes
-        actual_distance = sum(leg.distance_km for leg in drive_legs if leg.distance_km > 0)
+        actual_distance = sum(
+            leg.distance.magnitude for leg in drive_legs if leg.distance and leg.distance.magnitude > 0
+        )
         if actual_distance > 0:
             # Round trip — commute shows one way, costs are daily (round trip)
             round_trip_km = actual_distance * 2
         else:
-            total_drive_min = sum(leg.duration_minutes for leg in drive_legs)
+            total_drive_min = sum(int(leg.duration.magnitude) for leg in drive_legs)
             if total_drive_min <= 0:
                 return commute
             # Estimate distance: 48 km/h average speed, round trip
@@ -95,7 +97,14 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         for i, cg in enumerate(new_details):
             has_drive = any(leg.mode == LegMode.DRIVE for leg in cg.legs)
             if has_drive:
-                new_cg_cost = cg.cost + fuel_cost if isinstance(cg.cost, Money) else fuel_cost
+                if cg.cost is None:
+                    new_cg_cost = fuel_cost
+                else:
+                    if not isinstance(cg.cost, Money):
+                        raise TypeError(
+                            f"CostGroup.cost must be Money or None, got {type(cg.cost).__name__}: {cg.cost}"
+                        )
+                    new_cg_cost = cg.cost + fuel_cost
                 new_details[i] = replace(cg, cost=new_cg_cost)
                 break
 

@@ -31,8 +31,10 @@ def _make_commute(
         legs = tuple(
             JourneyLeg(
                 mode=LegMode.DRIVE,
-                duration_minutes=m,
-                distance_km=drive_distances_km[i] if drive_distances_km and i < len(drive_distances_km) else 0.0,
+                duration=Quantity(m, "minute"),
+                distance=Quantity(drive_distances_km[i], "km")
+                if drive_distances_km and i < len(drive_distances_km)
+                else None,
             )
             for i, m in enumerate(drive_legs_minutes)
         )
@@ -159,7 +161,7 @@ class TestPetrolCostAugmentNode:
                 mode="drive",
                 details=(
                     CostGroup(
-                        legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=30),),
+                        legs=(JourneyLeg(mode=LegMode.WALK, duration=Quantity(30, "minute")),),
                         operator="TfL",
                         cost=Money("5.00", "GBP"),
                     ),

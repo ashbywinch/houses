@@ -64,7 +64,6 @@ async def staleness_check(rid: str, nodes: str = ""):
     return {"rid": rid, "nodes": stale_map, "fresh": fresh}
 
 
-
 def _score_from_summary(s: dict) -> int:
     """Compute card score matching old ``card_data`` formula:
     green=2, orange=1, red=-1, muted=0, summed across 8 metrics.
@@ -100,22 +99,32 @@ def _score_from_summary(s: dict) -> int:
     ps = s.get("schools", {}).get("primary", {}).get("school", {}).get("value", {})
     if ps:
         score += _ofsted_score(ps.get("ofsted"))
-        walk = ps.get("walk_minutes")
-        if walk is not None:
+        walk = ps.get("walk")
+        if isinstance(walk, dict):
+            val = walk.get("value")
+            if val is not None:
+                score += _walk_score(int(val))
+        elif walk is not None:
             score += _walk_score(walk)
     ss = s.get("schools", {}).get("secondary", {}).get("school", {}).get("value", {})
     if ss:
         score += _ofsted_score(ss.get("ofsted"))
-        walk = ss.get("walk_minutes")
-        if walk is not None:
+        walk = ss.get("walk")
+        if isinstance(walk, dict):
+            val = walk.get("value")
+            if val is not None:
+                score += _walk_score(int(val))
+        elif walk is not None:
             score += _walk_score(walk)
     walk_val = s.get("walkability", {})
     if isinstance(walk_val, dict):
         wv = walk_val.get("value")
         if isinstance(wv, dict):
-            wt = wv.get("walk_to_town_minutes")
-            if wt is not None:
-                score += _walk_score(int(wt))
+            wt = wv.get("walk_to_town")
+            if isinstance(wt, dict):
+                val = wt.get("value")
+                if val is not None:
+                    score += _walk_score(int(val))
     return score
 
 
@@ -209,6 +218,7 @@ class CommentBody(BaseModel):
     """Validated request body for posting a comment.
     Person is determined server-side from the session, not from this body.
     """
+
     text: str = Field(min_length=1, max_length=5000)
 
     @field_validator("text")

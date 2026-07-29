@@ -62,7 +62,7 @@ def build_commute_pipeline(prop) -> None:
                 f"{prop.rid}/{key}/walk",
                 best_location=prop.best_location,
                 poi=poi_src,
-                max_walk=p_info.bus_walk_penalty_minutes,
+                max_walk=int(p_info.bus_walk_penalty.magnitude),
             )
 
             drive_node = DriveNode(
@@ -90,7 +90,7 @@ def build_commute_pipeline(prop) -> None:
                 best_location=prop.best_location,
                 poi=poi_src,
                 has_car=p_info.has_car,
-                max_walk=p_info.bus_walk_penalty_minutes,
+                max_walk=int(p_info.bus_walk_penalty.magnitude),
                 no_bus_node=no_bus_node,
                 with_bus_node=with_bus_node,
             )
@@ -102,7 +102,7 @@ def build_commute_pipeline(prop) -> None:
                 best_location=prop.best_location,
                 postcode_node=prop.postcode,
                 has_car=p_info.has_car,
-                max_walk=p_info.bus_walk_penalty_minutes,
+                max_walk=int(p_info.bus_walk_penalty.magnitude),
             )
 
             bus_route_node = BusRouteNode(
@@ -122,7 +122,7 @@ def build_commute_pipeline(prop) -> None:
                 transit_input=park_and_ride,
                 bus_route_node=bus_route_node,
                 bods_fare_node=bods_fare_node,
-                max_walk=p_info.bus_walk_penalty_minutes,
+                max_walk=int(p_info.bus_walk_penalty.magnitude),
             )
 
             # Create a RailFareNode for non-child commutes to apply NR fares
@@ -163,7 +163,7 @@ def build_commute_pipeline(prop) -> None:
                 transit_result=bus_augment,
                 drive_result=drive_node,
                 is_child=is_child,
-                max_walk=p_info.bus_walk_penalty_minutes,
+                max_walk=int(p_info.bus_walk_penalty.magnitude),
             )
 
             merge_node = MergeRailFareNode(

@@ -36,7 +36,7 @@ class PrimarySchoolNode(DerivedNode[dict]):
         result = {
             "name": school.name,
             "ofsted": school.ofsted_rating,
-            "walk_minutes": None,
+            "walk": None,
             "url": school.url,
         }
         if school.coords:
@@ -69,7 +69,7 @@ class SecondarySchoolNode(DerivedNode[dict]):
         result = {
             "name": school.name,
             "ofsted": school.ofsted_rating,
-            "walk_minutes": None,
+            "walk": None,
             "url": school.url,
         }
         if school.coords:

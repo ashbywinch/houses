@@ -38,7 +38,7 @@ setup: frontend-setup
 omp-config-install:
 	$(MAKE) -C $(OMP_CONFIG_DIR) install
 
-LAN_IP := $(shell hostname -I | awk '{print $$1}')
+LAN_IP := $(shell ip -4 route get 1 2>/dev/null | awk '{print $$7; exit}')
 
 run: setup
 	@if [ -z "$(LAN_IP)" ]; then echo "${RED}Could not detect LAN IP${NC}"; exit 1; fi

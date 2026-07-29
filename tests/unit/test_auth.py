@@ -18,11 +18,15 @@ client = TestClient(app)
 
 class _FakeProperty:
     """Minimal property stand-in for auth tests that need a valid RID."""
+
     __slots__ = ()
+
     async def to_json_summary(self) -> dict:
         return {}
+
     async def to_json(self) -> dict:
         return {}
+
     async def to_json_detail(self) -> dict:
         return {}
 
@@ -292,9 +296,11 @@ class TestCallback:
             "name": "Ashby",
             "picture": "https://example.com/pic.jpg",
         }
-        token = _sp.set(make_services(
-            oauth_service=FakeOAuthService(id_info=id_info),
-        ))
+        token = _sp.set(
+            make_services(
+                oauth_service=FakeOAuthService(id_info=id_info),
+            )
+        )
         try:
             resp = client.get(
                 "/api/auth/callback?code=test_code&state=test_state",
@@ -313,6 +319,7 @@ class TestCallback:
 
         # Verify we can decode the cookie
         cookie_value = set_cookie.split(";")[0].split("=", 1)[1]
+
         class _FakeRequest:
             cookies = {"session": cookie_value}
 

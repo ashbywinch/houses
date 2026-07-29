@@ -58,4 +58,4 @@ async def test_detail_includes_stamp_duty():
     assert sd.get("succeeded"), f"stamp_duty not succeeded: {sd}"
     val = sd.get("value")
     assert val is not None, f"stamp_duty has no value: {sd}"
-    assert val["amount"] > 0, f"stamp_duty should be positive for a £795k property, got {val}"
+    assert float(val["amount"]) > 0, f"stamp_duty should be positive for a £795k property, got {val}"

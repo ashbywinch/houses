@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from money import Money
 
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
+
+_ZERO = Decimal("0")
+_TWO = Decimal("2")
+_TWELVE = Decimal("12")
+_HUNDRED = Decimal("100")
 
 
 class MonthlyMortgagePaymentNode(DerivedNode[Money]):
@@ -26,19 +33,19 @@ class MonthlyMortgagePaymentNode(DerivedNode[Money]):
 
         # Equity from persons
         persons_att = self._persons_source.latest_attempt()
-        equity_total = 0.0
+        equity_total = _ZERO
         if persons_att.succeeded:
             for p in persons_att.value_or_none() or []:
                 eq = getattr(p, "deposit_equity", None)
                 if eq is not None:
-                    equity_total += float(getattr(eq, "amount", eq))
-        if equity_total > 0:
+                    equity_total += eq.amount if hasattr(eq, "amount") else Decimal(str(eq))
+        if equity_total > _ZERO:
             lines.append(FormulaLine(label="Total Equity", value=str(equity_total)))
 
         fin = fin_att.value_or_none() or {} if fin_att.succeeded else {}
-        rate = float(fin.get("mortgage_rate", 0.045))
+        rate = Decimal(str(fin.get("mortgage_rate", "0.045")))
         term = int(fin.get("mortgage_term_years", 30))
-        lines.append(FormulaLine(label="Interest Rate", value=f"{rate * 100:.1f}%"))
+        lines.append(FormulaLine(label="Interest Rate", value=f"{float(rate) * 100:.1f}%"))
         lines.append(FormulaLine(label="Term", value=f"{term} years"))
 
         return Formula(lines=lines, result=str(self._attempt.value))
@@ -56,35 +63,33 @@ class MonthlyMortgagePaymentNode(DerivedNode[Money]):
         if not price.succeeded or price.value_or_none() is None:
             return Attempt.succeeded(Money("0", "GBP"))
         price_val = price.value_or_none()
-        p = float(price_val.amount)
+        p = price_val.amount
         fin = (financial.value_or_none() or {}) if financial.succeeded else {}
-        if p == 0:
+        if p == _ZERO:
             return Attempt.succeeded(Money("0", "GBP"))
 
         # Total deposit equity from all persons
-        sd_val = (
-            float(stamp_duty.value_or_none().amount) if stamp_duty.succeeded and stamp_duty.value_or_none() else 0.0
-        )
-        total_equity = 0.0
+        sd_val = stamp_duty.value_or_none().amount if stamp_duty.succeeded and stamp_duty.value_or_none() else _ZERO
+        total_equity = _ZERO
         if persons.succeeded:
             for person in persons.value_or_none() or []:
                 eq = person.deposit_equity
                 if eq is not None:
-                    total_equity += float(eq.amount) if hasattr(eq, "amount") else float(eq)
+                    total_equity += eq.amount if hasattr(eq, "amount") else Decimal(str(eq))
 
         # Mortgage principal = price + stamp_duty - total_equity
         principal = p + sd_val - total_equity
-        if principal <= 0:
+        if principal <= _ZERO:
             return Attempt.succeeded(Money("0", "GBP"))
 
-        rate = float(fin.get("mortgage_rate", 0.045))
+        rate = Decimal(str(fin.get("mortgage_rate", "0.045")))
         term = int(fin.get("mortgage_term_years", 30))
-        monthly_rate = rate / 12
+        monthly_rate = rate / _TWELVE
         n_payments = term * 12
-        if monthly_rate == 0:
+        if monthly_rate == _ZERO:
             monthly = principal / n_payments
         else:
             numerator = monthly_rate * (1 + monthly_rate) ** n_payments
             denominator = (1 + monthly_rate) ** n_payments - 1
             monthly = principal * numerator / denominator
-        return Attempt.succeeded(Money(str(round(monthly, 2)), "GBP"))
+        return Attempt.succeeded(Money(str(monthly.quantize(Decimal("0.01"))), "GBP"))

@@ -23,7 +23,7 @@ const location = computed(() => props.data.best_location.succeeded
   : null)
 
 const price = computed(() => props.data.rightmove_price.succeeded
-  ? props.data.rightmove_price.value?.amount ?? null
+  ? parseFloat(props.data.rightmove_price.value?.amount ?? '0') || null
   : null)
 
 const bedrooms = computed(() => props.data.rightmove_bedrooms.succeeded
@@ -31,7 +31,7 @@ const bedrooms = computed(() => props.data.rightmove_bedrooms.succeeded
   : null)
 
 const monthlyCost = computed(() => props.data.total_monthly_cost.succeeded
-  ? props.data.total_monthly_cost.value?.amount ?? null
+  ? parseFloat(props.data.total_monthly_cost.value?.amount ?? '0') || null
   : null)
 
 // Border color based on triage state
@@ -87,7 +87,7 @@ function commuteCost(commute: unknown): number | null {
   if (!val) return null
   const dailyCost = val.daily_cost as Record<string, unknown> | null
   if (!dailyCost) return null
-  const amount = dailyCost.amount as number | undefined
+  const amount = typeof dailyCost.amount === 'string' ? parseFloat(dailyCost.amount) : (dailyCost.amount as number | undefined)
   return amount ?? null
 }
 
@@ -98,14 +98,14 @@ function commuteMode(commute: unknown): string | undefined {
   return (val?.mode as string) || undefined
 }
 
-function getSchoolWalkMinutes(labelPart: string): number | null {
+function getSchoolWalkMinutes(labelPart: string): { value: number; unit: string } | null {
   if (!props.data.commutes) return null
   for (const [key, v] of Object.entries(props.data.commutes)) {
     if (!key.includes(labelPart)) continue
     const val = (v.commute?.value as Record<string, unknown> | undefined)
     if (!val?.is_child) continue
-    const dur = (val.duration as Record<string, unknown> | undefined)?.value
-    return typeof dur === 'number' ? Math.round(dur) : null
+    const dur = val.duration as { value: number; unit: string } | undefined
+    return dur ? { value: Math.round(dur.value), unit: 'minute' } : null
   }
   return null
 }

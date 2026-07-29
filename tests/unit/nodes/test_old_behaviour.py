@@ -107,10 +107,12 @@ class TestCouncilTaxNode:
         class CapturingService:
             async def lookup(self, postcode, address=""):
                 captured["postcode"] = postcode
+                from money import Money
+
                 from dag.attempt import Attempt
                 from houses.council_tax_info import CouncilTaxInfo
 
-                return Attempt.succeeded(CouncilTaxInfo(band="D", yearly_cost=1800.0))
+                return Attempt.succeeded(CouncilTaxInfo(band="D", yearly_cost=Money("1800", "GBP")))
 
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services

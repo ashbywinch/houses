@@ -29,8 +29,8 @@ from houses.config import settings
 logger = logging.getLogger(__name__)
 
 testing: bool = False
-_connection_cache: contextvars.ContextVar[sqlite3.Connection | None] = (
-    contextvars.ContextVar("_connection_cache", default=None)
+_connection_cache: contextvars.ContextVar[sqlite3.Connection | None] = contextvars.ContextVar(
+    "_connection_cache", default=None
 )
 
 

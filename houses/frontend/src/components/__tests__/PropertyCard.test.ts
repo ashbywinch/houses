@@ -19,10 +19,10 @@ function makeSummary(overrides?: Partial<PropertySummary>): PropertySummary {
     rid: '123',
     best_address: { succeeded: true, value: '1 Main St, London', error: null, provenance: { label: 'test' } },
     best_location: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 'test' } },
-    rightmove_price: { succeeded: true, value: {amount: 500000, currency: 'GBP'}, error: null, provenance: { label: 'test' } },
+    rightmove_price: { succeeded: true, value: {amount: "500000", currency: 'GBP'}, error: null, provenance: { label: 'test' } },
     rightmove_bedrooms: { succeeded: true, value: '3', error: null, provenance: { label: 'test' } },
-    total_monthly_cost: { succeeded: true, value: {amount: 2500, currency: "GBP"}, error: null, provenance: { label: 'test' } },
-    walkability: { succeeded: true, value: { walk_to_town_minutes: 15 }, error: null, provenance: { label: 'test' } },
+    total_monthly_cost: { succeeded: true, value: {amount: "2500", currency: "GBP"}, error: null, provenance: { label: 'test' } },
+    walkability: { succeeded: true, value: { walk_to_town: {value: 15, unit: 'minute'} }, error: null, provenance: { label: 'test' } },
     town_name: { succeeded: true, value: 'London', error: null, provenance: { label: 'test' } },
     commutes: {},
     schools: {
@@ -105,7 +105,7 @@ describe('PropertyCard commute filtering', () => {
         primary: {
           school: {
             succeeded: true,
-            value: { name: 'Test Primary', ofsted: 'Good', distance_km: 1, url: '' },
+            value: { name: 'Test Primary', ofsted: 'Good', distance: {value: 1, unit: 'km'}, url: '' },
             error: null, provenance: { label: 'test' },
           },
         },
@@ -184,7 +184,7 @@ describe('PropertyCard error handling', () => {
   it('handles empty ofsted string without throwing', () => {
     const summary = makeSummary({
       schools: {
-        primary: { school: { succeeded: true, value: { name: 'Test Primary', ofsted: '', distance_km: 1, url: '' }, error: null, provenance: { label: 'test' } } },
+        primary: { school: { succeeded: true, value: { name: 'Test Primary', ofsted: '', distance: {value: 1, unit: 'km'}, url: '' }, error: null, provenance: { label: 'test' } } },
         secondary: { school: { succeeded: false, value: null, error: null, provenance: { label: 'test' } } },
       },
     })
@@ -194,7 +194,7 @@ describe('PropertyCard error handling', () => {
   it('handles null ofsted value without throwing', () => {
     const summary = makeSummary({
       schools: {
-        primary: { school: { succeeded: true, value: { name: 'Test Primary', ofsted: null as unknown as string, distance_km: 1, url: '' }, error: null, provenance: { label: 'test' } } },
+        primary: { school: { succeeded: true, value: { name: 'Test Primary', ofsted: null as unknown as string, distance: {value: 1, unit: 'km'}, url: '' }, error: null, provenance: { label: 'test' } } },
         secondary: { school: { succeeded: false, value: null, error: null, provenance: { label: 'test' } } },
       },
     })
@@ -204,7 +204,7 @@ describe('PropertyCard error handling', () => {
   it('handles missing ofsted property without throwing', () => {
     const summary = makeSummary({
       schools: {
-        primary: { school: { succeeded: true, value: { name: 'Test Primary', distance_km: 1, url: '' } as unknown as { name: string; ofsted: string; distance_km: number; url: string }, error: null, provenance: { label: 'test' } } },
+        primary: { school: { succeeded: true, value: { name: 'Test Primary', distance: {value: 1, unit: 'km'}, url: '' } as unknown as { name: string; ofsted: string; distance: {value: number, unit: string}; url: string }, error: null, provenance: { label: 'test' } } },
         secondary: { school: { succeeded: false, value: null, error: null, provenance: { label: 'test' } } },
       },
     })

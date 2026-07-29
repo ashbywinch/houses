@@ -510,10 +510,12 @@ class TestParkAndRideCostGroup:
             ]
         }
 
-        parking_cost, new_cost, parking_groups = await route._add_parking_cost(data, 30.0, _registry=registry)
+        parking_cost, new_cost, parking_groups = await route._add_parking_cost(
+            data, Money("30", "GBP"), _registry=registry
+        )
 
-        assert parking_cost == 10.90, f"Expected 10.90, got {parking_cost}"
-        assert new_cost == 40.90, f"Expected 40.90, got {new_cost}"
+        assert parking_cost == Money("10.90", "GBP"), f"Expected 10.90, got {parking_cost}"
+        assert new_cost == Money("40.90", "GBP"), f"Expected 40.90, got {new_cost}"
         assert len(parking_groups) == 1, "Expected one parking CostGroup"
         assert parking_groups[0].cost == Money("10.90", "GBP"), (
             f"Parking CostGroup should have cost=Money('10.90', 'GBP'), got {parking_groups[0].cost}"

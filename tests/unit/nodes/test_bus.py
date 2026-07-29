@@ -139,7 +139,7 @@ class TestBodsFareNode:
             val = a.value_or_none()
             assert val is not None
             assert val["stop_fares"] == {
-                "Stop A": {"amount": 4.0, "currency": "GBP"},
+                "Stop A": {"amount": "4.00", "currency": "GBP"},
             }
         finally:
             _request_services.reset(token)
@@ -174,7 +174,7 @@ class TestBusLegAugmentNode:
             duration=Quantity(30, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="transit",
-            details=(CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=5),)),),
+            details=(CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration=Quantity(5, "minute")),)),),
         )
         transit.push(commute, "test")
         route.push({}, "test")
@@ -214,8 +214,8 @@ class TestBusLegAugmentNode:
             daily_cost=Money("12.50", "GBP"),
             mode="transit",
             details=(
-                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=46),)),
-                CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration_minutes=42),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration=Quantity(46, "minute")),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(42, "minute")),)),
             ),
         )
         transit.push(commute, "test")
@@ -257,9 +257,9 @@ class TestBusLegAugmentNode:
             daily_cost=Money("12.50", "GBP"),
             mode="transit",
             details=(
-                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=46),)),
-                CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration_minutes=42),)),
-                CostGroup(legs=(JourneyLeg(mode=LegMode.TUBE, duration_minutes=4),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration=Quantity(46, "minute")),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(42, "minute")),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TUBE, duration=Quantity(4, "minute")),)),
             ),
         )
         transit.push(commute, "test")
@@ -281,7 +281,7 @@ class TestBusLegAugmentNode:
         )
         fare.push(
             {
-                "stop_fares": {"Stop A": {"amount": 1.90, "currency": "GBP"}},
+                "stop_fares": {"Stop A": {"amount": "1.90", "currency": "GBP"}},
             },
             "test",
         )
@@ -296,7 +296,7 @@ class TestBusLegAugmentNode:
         # Walk leg should be replaced with BUS
         first_leg = val.details[0].legs[0]
         assert first_leg.mode == LegMode.BUS, f"Expected first leg BUS, got {first_leg.mode}"
-        assert first_leg.duration_minutes == 15
+        assert int(first_leg.duration.magnitude) == 15
 
         # Bus CostGroup should carry the fare (BodsFareNode returns round-trip amount)
         assert val.details[0].cost is not None
@@ -336,9 +336,9 @@ class TestBusLegAugmentNode:
             daily_cost=Money("12.50", "GBP"),
             mode="transit",
             details=(
-                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=46),)),
-                CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration_minutes=42),)),
-                CostGroup(legs=(JourneyLeg(mode=LegMode.TUBE, duration_minutes=4),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration=Quantity(46, "minute")),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(42, "minute")),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TUBE, duration=Quantity(4, "minute")),)),
             ),
         )
         transit.push(commute, "test")
@@ -360,7 +360,7 @@ class TestBusLegAugmentNode:
         )
         fare.push(
             {
-                "stop_fares": {"Stop A": {"amount": 1.90, "currency": "GBP"}},
+                "stop_fares": {"Stop A": {"amount": "1.90", "currency": "GBP"}},
             },
             "test",
         )
@@ -406,8 +406,8 @@ class TestBusLegAugmentNode:
             daily_cost=Money("12.50", "GBP"),
             mode="transit",
             details=(
-                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=9),)),
-                CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration_minutes=42),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration=Quantity(9, "minute")),)),
+                CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(42, "minute")),)),
             ),
         )
         transit.push(commute, "test")

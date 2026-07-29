@@ -264,7 +264,9 @@ class MergeRailFareNode(DerivedNode[Commute]):
         total = Money("0", "GBP")
         for cg in new_details:
             if cg.cost is not None:
-                total += cg.cost if isinstance(cg.cost, Money) else Money(str(cg.cost), "GBP")
+                if not isinstance(cg.cost, Money):
+                    raise TypeError(f"CostGroup.cost must be Money or None, got {type(cg.cost).__name__}: {cg.cost}")
+                total += cg.cost
 
         merged = replace(val, daily_cost=total, details=new_details)
         return Attempt.succeeded(merged)

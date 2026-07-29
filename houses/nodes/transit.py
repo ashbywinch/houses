@@ -28,7 +28,7 @@ class CommuteLeg:
     duration: Quantity
     line_name: str = ""  # e.g. "Bakerloo", "Great Western Railway"
     destination: str = ""  # e.g. "Oxford Circus", "Paddington"
-    cost: float | None = None  # attributed cost (parking fees, etc.)
+    cost: Money | None = None  # attributed cost (parking fees, etc.)
     operator: str = ""  # operator name for cost-bearing legs, e.g. "ParkCo"
 
 
@@ -67,13 +67,13 @@ def _build_details(commute: Commute) -> tuple[CommuteLeg, ...]:
     """
     legs: list[CommuteLeg] = []
     for cg in commute.details:
-        cg_cost = float(cg.cost.amount) if cg.cost else None
+        cg_cost: Money | None = cg.cost
         for i, leg in enumerate(cg.legs):
             mode_name = leg.mode.name.lower() if hasattr(leg.mode, "name") else str(leg.mode)
             legs.append(
                 CommuteLeg(
                     mode=mode_name,
-                    duration=Quantity(leg.duration_minutes, "minute"),
+                    duration=leg.duration,
                     line_name=leg.line_name,
                     destination=leg.end_station,
                     cost=cg_cost if i == 0 else None,
@@ -110,7 +110,7 @@ class WalkLegCheckNode(DerivedNode[bool]):
             return Attempt.succeeded(False)
         if val.details and val.details[0].legs:
             first_leg = val.details[0].legs[0]
-            walk_time = first_leg.duration_minutes if first_leg.mode == LegMode.WALK else 0
+            walk_time = int(first_leg.duration.magnitude) if first_leg.mode == LegMode.WALK else 0
         else:
             walk_time = 0
         return Attempt.succeeded(walk_time > self._max_walk)

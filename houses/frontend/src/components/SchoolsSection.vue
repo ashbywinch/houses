@@ -7,14 +7,14 @@ defineProps<{
   commutes: any
 }>()
 
-function getSchoolWalkMinutes(commutes: any, labelPart: string): number | null {
+function getSchoolWalkMinutes(commutes: any, labelPart: string): { value: number; unit: string } | null {
   if (!commutes) return null
   for (const [key, v] of Object.entries(commutes)) {
     if (!key.includes(labelPart)) continue
     const val = (v as any)?.value as any
     if (!val?.is_child) continue
-    const dur = val.duration?.value
-    return typeof dur === 'number' ? Math.round(dur) : null
+    const dur = val.duration as { value: number; unit: string } | undefined
+    return dur ? { value: Math.round(dur.value), unit: 'minute' } : null
   }
   return null
 }

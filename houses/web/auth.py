@@ -312,6 +312,3 @@ async def impersonate(request: Request, body: dict):
     response = JSONResponse(content={"status": "ok", "impersonating": person})
     _set_session_cookie(response, new_cookie, _is_secure(request))
     return response
-
-
-
