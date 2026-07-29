@@ -28,7 +28,8 @@ const sortOptions = [
 function priceNum(rid: string) {
   const p = store.summaries[rid]?.rightmove_price
   if (!p?.succeeded || !p.value) return Infinity
-  return typeof p.value === 'string' ? Number(p.value) : p.value.amount
+  if (typeof p.value === 'string') return Number(p.value)
+  return parseFloat(p.value.amount)
 }
 function bedroomNum(rid: string) {
   const b = store.summaries[rid]?.rightmove_bedrooms
@@ -37,7 +38,8 @@ function bedroomNum(rid: string) {
 function monthlyCostNum(rid: string) {
   const m = store.summaries[rid]?.total_monthly_cost
   if (!m?.succeeded || m.value == null) return Infinity
-  return typeof m.value === 'number' ? m.value : m.value.amount
+  if (typeof m.value === 'number') return m.value
+  return parseFloat(m.value.amount)
 }
 function bestCommuteMin(rid: string) {
   const commutes = store.summaries[rid]?.commutes

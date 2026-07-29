@@ -26,20 +26,20 @@ function makeRealisticData(): Record<string, PropertySummary> {
     rid: '',
     best_address: { succeeded: true, value: '1 Test Road, London', error: null, provenance: { label: 'test' } },
     best_location: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 'test' } },
-    rightmove_price: { succeeded: true, value: { amount: 350000, currency: 'GBP' }, error: null, provenance: { label: 'test' } },
+    rightmove_price: { succeeded: true, value: { amount: "350000", currency: 'GBP' }, error: null, provenance: { label: 'test' } },
     rightmove_bedrooms: { succeeded: true, value: '3', error: null, provenance: { label: 'test' } },
-    total_monthly_cost: { succeeded: true, value: { amount: 2000, currency: 'GBP' }, error: null, provenance: { label: 'test' } },
+    total_monthly_cost: { succeeded: true, value: { amount: "2000", currency: 'GBP' }, error: null, provenance: { label: 'test' } },
     town_name: { succeeded: true, value: 'Test Town', error: null, provenance: { label: 'test' } },
     commutes: {
       'Simon/Office': {
-        commute: { succeeded: true, value: { duration: { value: 45, unit: 'minute' }, mode: 'transit', daily_cost: { amount: 8, currency: 'GBP' }, label: 'Office' }, error: null, provenance: { label: 'test' } },
+        commute: { succeeded: true, value: { duration: { value: 45, unit: 'minute' }, mode: 'transit', daily_cost: { amount: "8", currency: 'GBP' }, label: 'Office' }, error: null, provenance: { label: 'test' } },
       },
     },
     schools: {
       primary: { school: { succeeded: false, value: null, error: null, provenance: { label: 'test' } } },
       secondary: { school: { succeeded: false, value: null, error: null, provenance: { label: 'test' } } },
     },
-    walkability: { succeeded: true, value: { walk_to_town_minutes: 15 }, error: null, provenance: { label: 'test' } },
+    walkability: { succeeded: true, value: { walk_to_town: {value: 15, unit: 'minute'} }, error: null, provenance: { label: 'test' } },
     epc: { succeeded: true, value: { band: 'C' }, error: null, provenance: { label: 'test' } },
     freshness: { property_added_at: '2026-07-15T10:00:00+00:00' },
   }
@@ -49,15 +49,15 @@ function makeRealisticData(): Record<string, PropertySummary> {
       ...base,
       rid: 'prop-complete',
       schools: {
-        primary: { school: { succeeded: true, value: { name: 'St Marys', ofsted: 'Good', distance_km: 0.8, url: 'https://example.com/1' }, error: null, provenance: { label: 'test' } } },
-        secondary: { school: { succeeded: true, value: { name: 'High School', ofsted: 'Outstanding', distance_km: 1.5, url: '' }, error: null, provenance: { label: 'test' } } },
+        primary: { school: { succeeded: true, value: { name: 'St Marys', ofsted: 'Good', distance: {value: 0.8, unit: 'km'}, url: 'https://example.com/1' }, error: null, provenance: { label: 'test' } } },
+        secondary: { school: { succeeded: true, value: { name: 'High School', ofsted: 'Outstanding', distance: {value: 1.5, unit: 'km'}, url: '' }, error: null, provenance: { label: 'test' } } },
       },
     },
     'prop-empty-ofsted': {
       ...base,
       rid: 'prop-empty-ofsted',
       schools: {
-        primary: { school: { succeeded: true, value: { name: 'No Rating School', ofsted: '', distance_km: 1.2, url: '' }, error: null, provenance: { label: 'test' } } },
+        primary: { school: { succeeded: true, value: { name: 'No Rating School', ofsted: '', distance: {value: 1.2, unit: 'km'}, url: '' }, error: null, provenance: { label: 'test' } } },
         secondary: { school: { succeeded: false, value: null, error: null, provenance: { label: 'test' } } },
       },
     },
@@ -66,7 +66,7 @@ function makeRealisticData(): Record<string, PropertySummary> {
       rid: 'prop-partial',
       commutes: {},
       schools: {
-        primary: { school: { succeeded: true, value: { name: 'Partial Primary', ofsted: 'Requires Improvement', distance_km: 2.0, url: 'https://example.com/2' }, error: null, provenance: { label: 'test' } } },
+        primary: { school: { succeeded: true, value: { name: 'Partial Primary', ofsted: 'Requires Improvement', distance: {value: 2.0, unit: 'km'}, url: 'https://example.com/2' }, error: null, provenance: { label: 'test' } } },
         secondary: { school: { succeeded: false, value: null, error: 'not found', provenance: { label: 'test' } } },
       },
     },

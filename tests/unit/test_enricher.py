@@ -448,7 +448,7 @@ class TestCommuteSelectorPipeline:
         assert isinstance(val, dict), "value should be a dict"
         assert "duration" in val, "value missing duration"
         assert "daily_cost" in val, "value missing daily_cost"
-        assert val.get("daily_cost", {}).get("amount") == 4.5
+        assert val.get("daily_cost", {}).get("amount") == "4.50"
         assert j["is_child"] is False
         assert "error" not in j
         assert "provenance" in j
@@ -548,7 +548,7 @@ class TestCommuteBreakdown:
         # Simon Bracknell: 10.0 * 1 * 46 = 460
         # Lorena: 24.0 * 2 * 46 = 2208
         # Total: 3358
-        assert val["yearly_total_gbp"] == 3358.0
+        assert val["yearly_total_gbp"] == "3358.0"
 
     @pytest.mark.asyncio
     async def test_missing_cost_means_partial_total(self):
@@ -612,7 +612,7 @@ class TestCommuteBreakdown:
         # Simon Bracknell: 10.0 * 1 * 46 = 460
         # Lorena: 24.0 * 2 * 46 = 2208
         # Total: 2668
-        assert val["yearly_total_gbp"] == 2668.0
+        assert val["yearly_total_gbp"] == "2668.0"
 
     @pytest.mark.asyncio
     async def test_returns_defaults_when_no_commutes(self):
@@ -633,7 +633,7 @@ class TestCommuteBreakdown:
 
         a = await node.attempt()
         assert a.succeeded
-        assert a.value_or_none()["yearly_total_gbp"] == 0.0
+        assert a.value_or_none()["yearly_total_gbp"] == "0"
 
     @pytest.mark.asyncio
     async def test_missing_commute_does_not_crash(self):
@@ -684,7 +684,7 @@ class TestCommuteBreakdown:
 
         a = await node.attempt()
         assert a.succeeded
-        assert a.value_or_none()["yearly_total_gbp"] == 0.0
+        assert a.value_or_none()["yearly_total_gbp"] == "0"
 
 
 # ======================================================================

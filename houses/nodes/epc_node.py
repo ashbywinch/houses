@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dag.attempt import Attempt, Provenance, SourceType
 from dag.derived_node import DerivedNode
+from houses.council_tax_info import CouncilTaxInfo
 from houses.services_provider import get_services
 
 
@@ -33,11 +34,11 @@ class EpcNode(DerivedNode[dict]):
         )
 
 
-class CouncilTaxNode(DerivedNode[dict]):
+class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
     def __init__(self, node_id: str, *, best_address, postcode_node):
-        super().__init__(node_id, dict, (best_address, postcode_node))
+        super().__init__(node_id, CouncilTaxInfo, (best_address, postcode_node))
 
-    async def compute(self, address: Attempt[str], postcode: Attempt[str]) -> Attempt[dict]:
+    async def compute(self, address: Attempt[str], postcode: Attempt[str]) -> Attempt[CouncilTaxInfo]:
         if not address.succeeded or not postcode.succeeded:
             extra = {}
             if not address.succeeded:
@@ -49,8 +50,7 @@ class CouncilTaxNode(DerivedNode[dict]):
         svc = get_services()
         result = await svc.council_tax_service.lookup(postcode.value_or_none() or "", address=addr)
         if result.succeeded:
-            val = result.value_or_none()
-            return Attempt.succeeded({"band": val.band, "yearly_cost": val.yearly_cost})
+            return Attempt.succeeded(result.value_or_none())
         return Attempt.impossible("no council tax data")
 
     @property

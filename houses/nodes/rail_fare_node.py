@@ -36,7 +36,7 @@ class RailFareNode(DerivedNode[Commute]):
         transit_attempt = self.transit_result.latest_attempt()
         if transit_attempt.succeeded:
             val = transit_attempt.value_or_none()
-            if val is not None and float(val.daily_cost.amount) == 0:
+            if val is not None and val.daily_cost.amount == 0:
                 deps.append(self.best_location)
         return tuple(deps)
 
@@ -48,7 +48,7 @@ class RailFareNode(DerivedNode[Commute]):
             return Attempt.impossible("transit value is None")
 
         # If already has a fare, pass through
-        if float(commute.daily_cost.amount) > 0:
+        if commute.daily_cost.amount > 0:
             return transit_attempt
 
         return await self._enrich_rail_fare(commute, location)

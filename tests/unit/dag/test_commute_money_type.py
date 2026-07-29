@@ -89,5 +89,5 @@ async def test_money_daily_cost_serialises_ok():
     j = await node.to_json()
     assert j["status"] == "succeeded"
     cost = j.get("value", {}).get("daily_cost", {})
-    assert cost.get("amount") == 7.2
+    assert cost.get("amount") == "7.20"
     assert cost.get("currency") == "GBP"

@@ -41,7 +41,7 @@ function toggleProvenance(key: string) {
 
       <div class="costs-row">
         <span class="costs-label">Council Tax</span>
-        <span class="costs-value">{{ affordability?.council_tax?.value?.band ?? '?' }} · £{{ affordability?.council_tax?.value?.yearly_cost ?? '?' }}/yr</span>
+        <span class="costs-value">{{ affordability?.council_tax?.value?.band ?? '?' }} · £{{ affordability?.council_tax?.value?.yearly_cost?.amount ?? '?' }}/yr</span>
         <button
           v-if="affordability?.council_tax?.provenance"
           class="how-btn"
@@ -69,7 +69,7 @@ function toggleProvenance(key: string) {
 
       <div class="costs-row">
         <span class="costs-label">Commute Cost</span>
-        <span class="costs-value">£{{ affordability?.monthly_commute_cost?.value?.yearly_total_gbp != null ? (affordability.monthly_commute_cost.value.yearly_total_gbp / 12).toFixed(2) : '?' }}</span>
+        <span class="costs-value">£{{ affordability?.monthly_commute_cost?.value?.yearly_total_gbp != null ? (parseFloat(affordability.monthly_commute_cost.value.yearly_total_gbp ?? '0') / 12).toFixed(2) : '?' }}</span>
         <button
           v-if="affordability?.monthly_commute_cost?.provenance"
           class="how-btn"
@@ -80,7 +80,7 @@ function toggleProvenance(key: string) {
       <div v-if="affordability?.monthly_commute_cost?.succeeded && affordability?.monthly_commute_cost?.value?.persons" class="costs-subsection">
         <div v-for="(cost, name) in affordability.monthly_commute_cost.value.persons" :key="name" class="costs-row costs-row--sub">
           <span class="costs-label">{{ name }}</span>
-          <span class="costs-value">£{{ (cost.yearly_gbp / 12).toFixed(2) }}/mo</span>
+          <span class="costs-value">£{{ (parseFloat(cost.yearly_gbp ?? '0') / 12).toFixed(2) }}/mo</span>
         </div>
       </div>
       <div v-if="showProvenance === 'commute_cost' && affordability?.monthly_commute_cost?.provenance" class="costs-provenance">

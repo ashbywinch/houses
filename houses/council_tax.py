@@ -9,6 +9,7 @@ from collections import namedtuple
 from pathlib import Path
 
 import httpx
+from money import Money
 
 from dag.attempt import Attempt
 from houses.api_cache import cached_sync_client, get_cached, set_cached
@@ -81,8 +82,10 @@ def _normalise(text: str) -> str:
     return re.sub(r"[^A-Z0-9 ]", "", text.upper().strip())
 
 
-def _lookup_yearly_cost(band: str, local_authority: str) -> float | None:
+def _lookup_yearly_cost(band: str, local_authority: str) -> Money | None:
     """Fetch the Band D rate from CivAccount, falling back to the CSV.
+
+    Returns a ``Money`` in GBP, or ``None`` if no rate could be found.
 
     CivAccount is called via ``cached_sync_client`` which automatically
     caches every response to disk — no manual ``get_cached``/``set_cached``
@@ -97,7 +100,7 @@ def _lookup_yearly_cost(band: str, local_authority: str) -> float | None:
                 civ_data = civ.json()
                 band_d_rate = civ_data.get("band_d_rate")
                 if band_d_rate and band in BAND_RATIOS:
-                    return round(band_d_rate * BAND_RATIOS[band], 2)
+                    return Money(str(round(band_d_rate * BAND_RATIOS[band], 2)), "GBP")
     except Exception:
         logger.warning("CivAccount lookup failed for %s (%s)", local_authority, slug)
 
@@ -160,7 +163,7 @@ def _lookup_yearly_cost(band: str, local_authority: str) -> float | None:
                     break
 
     if band_d_rate and band in BAND_RATIOS:
-        return round(band_d_rate * BAND_RATIOS[band], 2)
+        return Money(str(round(band_d_rate * BAND_RATIOS[band], 2)), "GBP")
 
     return None
 

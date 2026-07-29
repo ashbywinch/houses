@@ -70,7 +70,7 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         if commute.details[0].legs[0].mode != LegMode.WALK:
             return transit
 
-        walk_min = commute.details[0].legs[0].duration_minutes
+        walk_min = int(commute.details[0].legs[0].duration.magnitude)
 
         # If the walk is acceptable, no parking needed
         if walk_min <= self._max_walk:
@@ -118,7 +118,7 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         # rail fare can be attributed independently.
         first_cg = commute.details[0]
         first_leg = first_cg.legs[0]
-        new_drive_leg = replace(first_leg, mode=LegMode.DRIVE, duration_minutes=drive_minutes)
+        new_drive_leg = replace(first_leg, mode=LegMode.DRIVE, duration=Quantity(drive_minutes, "minute"))
         new_drive_group = CostGroup(
             legs=(new_drive_leg,),
             cost=None,
@@ -127,7 +127,7 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         # with the original operator and cost.
         transit_legs = first_cg.legs[1:]
         new_parking_group = CostGroup(
-            legs=(JourneyLeg(mode=LegMode.PARK, duration_minutes=0),),
+            legs=(JourneyLeg(mode=LegMode.PARK, duration=Quantity(0, "minute")),),
             operator=car_park.name,
             cost=car_park.daily_cost,
         )
@@ -144,7 +144,7 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         else:
             new_details = (new_drive_group, new_parking_group) + commute.details[1:]
         # Recalculate duration from replaced legs
-        new_duration = Quantity(sum(leg.duration_minutes for cg in new_details for leg in cg.legs), "minute")
+        new_duration = Quantity(sum(int(leg.duration.magnitude) for cg in new_details for leg in cg.legs), "minute")
         new_commute = replace(
             commute,
             daily_cost=new_cost,

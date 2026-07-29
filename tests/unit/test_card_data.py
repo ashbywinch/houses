@@ -164,7 +164,7 @@ class TestOfstedColour:
         return {
             "commutes": {},
             "schools": {
-                "primary": {"school": {"status": "succeeded", "value": {"ofsted": ofsted, "walk_minutes": None}}},
+                "primary": {"school": {"status": "succeeded", "value": {"ofsted": ofsted, "walk": None}}},
                 "secondary": {"school": {"status": "impossible", "value": None}},
             },
             "walkability": {"value": None},
@@ -206,7 +206,7 @@ class TestWalkColour:
                 "primary": {"school": {"status": "impossible", "value": None}},
                 "secondary": {"school": {"status": "impossible", "value": None}},
             },
-            "walkability": {"value": {"walk_to_town_minutes": minutes}},
+            "walkability": {"value": {"walk_to_town": {"value": minutes, "unit": "minute"}}},
         }
 
     def test_good_under_15(self):
@@ -373,7 +373,7 @@ class TestSchoolData:
             assert "name" in val, f"{phase} school value missing name"
             assert "ofsted" in val, f"{phase} school value missing ofsted"
             assert "url" in val, f"{phase} school value missing url"
-            assert "walk_minutes" in val, f"{phase} school value missing walk_minutes"
+            assert "walk" in val, f"{phase} school value missing walk"
 
     @pytest.mark.asyncio
     async def test_school_data_envelope(self, prop):
@@ -416,10 +416,20 @@ class TestScoring:
                 },
             },
             "schools": {
-                "primary": {"school": {"status": "succeeded", "value": {"ofsted": "Outstanding", "walk_minutes": 5}}},
-                "secondary": {"school": {"status": "succeeded", "value": {"ofsted": "Outstanding", "walk_minutes": 5}}},
+                "primary": {
+                    "school": {
+                        "status": "succeeded",
+                        "value": {"ofsted": "Outstanding", "walk": {"value": 5, "unit": "minute"}},
+                    }
+                },
+                "secondary": {
+                    "school": {
+                        "status": "succeeded",
+                        "value": {"ofsted": "Outstanding", "walk": {"value": 5, "unit": "minute"}},
+                    }
+                },
             },
-            "walkability": {"value": {"walk_to_town_minutes": 5}},
+            "walkability": {"value": {"walk_to_town": {"value": 5, "unit": "minute"}}},
         }
         score = _score_from_summary(summary)
         assert score == 16  # 8 metrics × 2
@@ -438,10 +448,20 @@ class TestScoring:
                 },
             },
             "schools": {
-                "primary": {"school": {"status": "succeeded", "value": {"ofsted": "Outstanding", "walk_minutes": 5}}},
-                "secondary": {"school": {"status": "succeeded", "value": {"ofsted": "Good", "walk_minutes": 5}}},
+                "primary": {
+                    "school": {
+                        "status": "succeeded",
+                        "value": {"ofsted": "Outstanding", "walk": {"value": 5, "unit": "minute"}},
+                    }
+                },
+                "secondary": {
+                    "school": {
+                        "status": "succeeded",
+                        "value": {"ofsted": "Good", "walk": {"value": 5, "unit": "minute"}},
+                    }
+                },
             },
-            "walkability": {"value": {"walk_to_town_minutes": 5}},
+            "walkability": {"value": {"walk_to_town": {"value": 5, "unit": "minute"}}},
         }
         score = _score_from_summary(summary)
         assert score == 14  # 2×3 + 1 + 2×3 + 2 + 1 + 2
@@ -460,10 +480,15 @@ class TestScoring:
                 },
             },
             "schools": {
-                "primary": {"school": {"status": "succeeded", "value": {"ofsted": "Inadequate", "walk_minutes": 50}}},
-                "secondary": {"school": {"status": "succeeded", "value": {"ofsted": "", "walk_minutes": None}}},
+                "primary": {
+                    "school": {
+                        "status": "succeeded",
+                        "value": {"ofsted": "Inadequate", "walk": {"value": 50, "unit": "minute"}},
+                    }
+                },
+                "secondary": {"school": {"status": "succeeded", "value": {"ofsted": "", "walk": None}}},
             },
-            "walkability": {"value": {"walk_to_town_minutes": None}},
+            "walkability": {"value": {"walk_to_town": None}},
         }
         score = _score_from_summary(summary)
         assert score == -5  # 3 red commutes (-1 each) + red ofsted (-1) + bad walk (-1)
@@ -517,8 +542,18 @@ class TestCardSorting:
         mid = {
             "commutes": {},
             "schools": {
-                "primary": {"school": {"status": "succeeded", "value": {"ofsted": "Outstanding", "walk_minutes": 5}}},
-                "secondary": {"school": {"status": "succeeded", "value": {"ofsted": "Good", "walk_minutes": 5}}},
+                "primary": {
+                    "school": {
+                        "status": "succeeded",
+                        "value": {"ofsted": "Outstanding", "walk": {"value": 5, "unit": "minute"}},
+                    }
+                },
+                "secondary": {
+                    "school": {
+                        "status": "succeeded",
+                        "value": {"ofsted": "Good", "walk": {"value": 5, "unit": "minute"}},
+                    }
+                },
             },
             "walkability": {"value": None},
         }

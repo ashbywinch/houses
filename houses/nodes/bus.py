@@ -123,7 +123,7 @@ class BodsFareNode(DerivedNode[dict]):
             cheapest = cheapest_round_trip(fares, reader.national_max_single)
             if cheapest is not None:
                 stop_fares[dep_name] = {
-                    "amount": round(float(cheapest.amount), 2),
+                    "amount": str(cheapest.amount),
                     "currency": "GBP",
                 }
 
@@ -172,7 +172,7 @@ class BusLegAugmentNode(DerivedNode[Commute]):
             return False
         if first_legs[0].mode != LegMode.WALK:
             return False
-        return first_legs[0].duration_minutes > self._max_walk
+        return int(first_legs[0].duration.magnitude) > self._max_walk
 
     def compute(
         self,
@@ -219,15 +219,15 @@ class BusLegAugmentNode(DerivedNode[Commute]):
             if fare_info:
                 total_bus_cost += Money(str(fare_info["amount"]), fare_info["currency"])
 
-        walk_minutes = commute.details[0].legs[0].duration_minutes
-        penalty = settings.bus_walk_penalty_minutes
+        walk_minutes = int(commute.details[0].legs[0].duration.magnitude)
+        penalty = int(settings.bus_walk_penalty.magnitude)
         savings = walk_minutes - bus_time
         if savings < penalty:
             return Attempt.succeeded(commute)
 
         # Build the bus CostGroup
         bus_cg = CostGroup(
-            legs=(JourneyLeg(mode=LegMode.BUS, duration_minutes=bus_time),),
+            legs=(JourneyLeg(mode=LegMode.BUS, duration=Quantity(bus_time, "minute")),),
             cost=total_bus_cost if total_bus_cost > Money("0", "GBP") else None,
         )
 

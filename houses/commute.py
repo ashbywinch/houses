@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from money import Money
+from pint import Quantity
 
 from houses.stations import Station
 
@@ -78,8 +79,8 @@ class JourneyLeg:
     """One segment of a commute journey."""
 
     mode: LegMode
-    duration_minutes: int
-    distance_km: float = 0.0
+    duration: Quantity
+    distance: Quantity | None = None
     start_station: str = ""
     end_station: str = ""
     line_name: str = ""
@@ -111,8 +112,8 @@ class CostGroup:
 class CommuteBreakdown:
     """Individual daily costs plus yearly total."""
 
-    simon_daily_gbp: float | None = None
-    lorena_daily_gbp: float | None = None
-    bracknell_daily_gbp: float | None = None
-    yearly_total_gbp: float | None = None
+    simon_daily_gbp: Money | None = None
+    lorena_daily_gbp: Money | None = None
+    bracknell_daily_gbp: Money | None = None
+    yearly_total_gbp: Money | None = None
     formula_explanation: str = ""

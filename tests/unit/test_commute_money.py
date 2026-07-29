@@ -34,11 +34,11 @@ def test_cost_groups_tfl_cost_sum():
         mode="transit",
         details=(
             CostGroup(
-                legs=(JourneyLeg(mode=LegMode.TRAIN, duration_minutes=45),),
+                legs=(JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(45, "minute")),),
                 operator="TfL",
                 cost=Money("15.00", "GBP"),
             ),
         ),
     )
     non_rail = Row._calc_non_rail_cost(commute)
-    assert non_rail == 0.0
+    assert non_rail == Money("0", "GBP")

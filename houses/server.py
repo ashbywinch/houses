@@ -73,20 +73,15 @@ async def lifespan(_app: FastAPI):
     logging.getLogger("httpx").setLevel(logging.WARNING)
     if not settings.google_client_id:
         logger.error(
-            "GOOGLE_CLIENT_ID is not set. Set GOOGLE_CLIENT_ID in .env "
-            "to configure Google OAuth authentication."
+            "GOOGLE_CLIENT_ID is not set. Set GOOGLE_CLIENT_ID in .env to configure Google OAuth authentication."
         )
         raise RuntimeError("Authentication not configured")
     if not settings.google_client_secret:
-        logger.error(
-            "GOOGLE_CLIENT_ID is set but GOOGLE_CLIENT_SECRET is missing. "
-            "Set GOOGLE_CLIENT_SECRET in .env."
-        )
+        logger.error("GOOGLE_CLIENT_ID is set but GOOGLE_CLIENT_SECRET is missing. Set GOOGLE_CLIENT_SECRET in .env.")
         raise RuntimeError("Google Client Secret not configured")
     if not settings.session_secret:
         logger.error(
-            "GOOGLE_CLIENT_ID is set but HOUSES_SESSION_SECRET is empty. "
-            "Set a non-empty HOUSES_SESSION_SECRET in .env."
+            "GOOGLE_CLIENT_ID is set but HOUSES_SESSION_SECRET is empty. Set a non-empty HOUSES_SESSION_SECRET in .env."
         )
         raise RuntimeError("Session secret not configured")
 
@@ -127,6 +122,7 @@ async def lifespan(_app: FastAPI):
     _bc_task.cancel()
     logger.info("Houses server shutting down")
     from houses.database import close_db as close_app_db
+
     close_app_db()
     await stop_chrome()
 

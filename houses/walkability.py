@@ -307,6 +307,7 @@ async def enrich_walkability(
     address: str,
 ) -> dict[str, Any]:
     walk_to_town_minutes: int | None = None
+
     town = _extract_town(address)
 
     if town:
@@ -332,6 +333,6 @@ async def enrich_walkability(
         walk_to_town_minutes = None
 
     return {
-        "walk_to_town_minutes": walk_to_town_minutes,
+        "walk_to_town": {"value": walk_to_town_minutes, "unit": "minute"} if walk_to_town_minutes is not None else None,
         "amenities": amenities,
     }

@@ -73,7 +73,9 @@ class TflClient:
         """Fetch TfL route, enrich with costs, and return a Commute."""
         data = await self._fetch_data()
         if data is not None and self._park_and_ride:
-            data = await _apply_park_and_ride_to_journeys(data, self._origin, settings.max_walk_to_station_minutes)
+            data = await _apply_park_and_ride_to_journeys(
+                data, self._origin, int(settings.max_walk_to_station.magnitude)
+            )
         return await self._process_data(data)
 
     # ── TfL helper functions ─────────────────────────────────────────
@@ -242,7 +244,7 @@ class TflClient:
 
             jl = JourneyLeg(
                 mode=leg_mode,
-                duration_minutes=duration,
+                duration=Quantity(duration, "minute"),
                 start_station=dep_station,
                 end_station=arr_station,
                 line_name=line_name,
@@ -353,9 +355,9 @@ class TflClient:
     async def _add_parking_cost(
         self,
         data: dict,
-        current_cost: float | None,
+        current_cost: Money | None = None,
         _registry: CarParkRegistry | None = None,
-    ) -> tuple[float | None, float | None, list[CostGroup]]:
+    ) -> tuple[Money | None, Money | None, list[CostGroup]]:
         """Look up parking costs when park-and-ride used a driving leg.
 
         Returns ``(parking_cost, new_daily_cost, cost_groups)`` where
@@ -397,15 +399,13 @@ class TflClient:
         if car_park is None or car_park.daily_cost is None:
             return None, current_cost, []
 
-        parking_cost = float(car_park.daily_cost.amount)
-        new_cost = current_cost
-        if new_cost is not None:
-            new_cost = round(new_cost + parking_cost, 2)
+        parking_cost = car_park.daily_cost
+        new_cost = current_cost + parking_cost if current_cost is not None else parking_cost
 
         parking_group = CostGroup(
-            legs=(JourneyLeg(mode=LegMode.PARK, duration_minutes=0),),
+            legs=(JourneyLeg(mode=LegMode.PARK, duration=Quantity(0, "minute")),),
             operator=f"ParkCo: {car_park.name}",
-            cost=car_park.daily_cost,
+            cost=parking_cost,
         )
         return parking_cost, new_cost, [parking_group]
 

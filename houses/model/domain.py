@@ -41,7 +41,7 @@ class Person:
     name: str
     has_car: bool
     is_child: bool = False
-    bus_walk_penalty_minutes: int = 30
+    bus_walk_penalty: _Quantity = _Quantity(30, "minute")
     acceptable_schools: tuple[str, ...] = ("mixed",)
     deposit_equity: Money | None = None
     places_of_interest: tuple[PlaceOfInterest, ...] = ()
@@ -119,6 +119,6 @@ class EpcRating:
 class Walkability:
     """Walkability data for a property — town access and amenities."""
 
-    walk_to_town_minutes: int | None = None
+    walk_to_town: _Quantity | None = None
     amenities: str = ""
     town_description: str = ""

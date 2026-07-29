@@ -4,6 +4,7 @@ from money import Money
 
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
+from houses.council_tax_info import CouncilTaxInfo
 
 
 class TotalMonthlyHousingCostNode(DerivedNode[Money]):
@@ -23,13 +24,12 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
         sinking_att = self._sinking_node.latest_attempt()
         sinking_val = sinking_att.value_or_none() if sinking_att.succeeded else None
         if sinking_val is not None:
-            yearly = float(sinking_val.amount)
-            monthly = yearly / 12
-            our_share = monthly * 2 / 3
+            monthly_money = sinking_val / 12
+            our_share = monthly_money * 2 / 3
             lines.append(FormulaLine(label="Sinking Fund (yearly)", value=str(sinking_val)))
-            lines.append(FormulaLine(label="  ÷ 12 (monthly)", value=f"{monthly:.2f} GBP"))
-            lines.append(FormulaLine(label="  × ⅔ (our share)", value=f"{our_share:.2f} GBP"))
-            lines.append(FormulaLine(label="Sinking Fund (monthly)", value=f"{our_share:.2f} GBP"))
+            lines.append(FormulaLine(label="  ÷ 12 (monthly)", value=f"{monthly_money.amount:.2f} GBP"))
+            lines.append(FormulaLine(label="  × ⅔ (our share)", value=f"{our_share.amount:.2f} GBP"))
+            lines.append(FormulaLine(label="Sinking Fund (monthly)", value=f"{our_share.amount:.2f} GBP"))
 
         # Commute
         commute_att = self._commute_node.latest_attempt()
@@ -77,19 +77,23 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
         sinking: Attempt[Money],
         financial: Attempt[dict],
         commute: Attempt[dict],
-        council_tax: Attempt[dict],
+        council_tax: Attempt[CouncilTaxInfo],
     ) -> Attempt[Money]:
         total = Money("0", "GBP")
         if mortgage.succeeded and mortgage.value_or_none():
             total += mortgage.value_or_none()
         if sinking.succeeded and sinking.value_or_none():
             sv = sinking.value_or_none()
-            monthly_sinking = round(float(sv.amount) / 12 * 2 / 3, 2)
-            total += Money(str(monthly_sinking), "GBP")
+            total += sv / 12 * 2 / 3
         if commute.succeeded:
             cb = commute.value_or_none() or {}
-            total += Money(str(cb.get("yearly_total_gbp", 0.0) / 12), "GBP")
+            yt = cb.get("yearly_total_gbp", "0")
+            if isinstance(yt, Money):
+                total += yt / 12
+            else:
+                total += Money(str(yt), "GBP") / 12
         if council_tax.succeeded:
-            ct_val = council_tax.value_or_none() or {}
-            total += Money(str(ct_val.get("yearly_cost", 0.0) / 12), "GBP")
+            ct_val = council_tax.value_or_none()
+            if ct_val is not None and ct_val.yearly_cost is not None:
+                total += ct_val.yearly_cost / 12
         return Attempt.succeeded(total)

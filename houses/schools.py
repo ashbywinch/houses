@@ -108,13 +108,13 @@ async def find_nearest(
         sc = school.coords
         if sc is not None:
             dist = property_coords.distance_km_to(sc)
-            if dist <= settings.school_search_radius_km:
+            if dist <= settings.school_search_radius.magnitude:
                 candidates.append((dist, school))
         elif school._postcode_centroid is not None:
             # No reliable coords but we have a postcode centroid —
             # check if this school is roughly nearby.
             dist = property_coords.distance_km_to(school._postcode_centroid)
-            if dist <= settings.school_search_radius_km:
+            if dist <= settings.school_search_radius.magnitude:
                 skipped_no_coords = True
     if not candidates:
         if skipped_no_coords:

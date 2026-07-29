@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from money import Money
+from pint import Quantity
 
 import dag.user_input_node  # noqa: F401 — register Money/Quantity pydantic schemas
 from dag.attempt import Attempt
@@ -361,8 +362,8 @@ class TestMergeRailFareNode:
 
         office = PlaceOfInterest("Office", "SW1V 2QQ")
         person = Person("Simon", True, places_of_interest=(office,))
-        train_leg = JourneyLeg(mode=LegMode.TRAIN, duration_minutes=30, end_station="London Waterloo")
-        park_leg = JourneyLeg(mode=LegMode.PARK, duration_minutes=0)
+        train_leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(30, "minute"), end_station="London Waterloo")
+        park_leg = JourneyLeg(mode=LegMode.PARK, duration=Quantity(0, "minute"))
         transit_commute = Commute(
             person=person,
             label="Office",
@@ -416,7 +417,7 @@ class TestMergeRailFareNode:
             mode="walk",
             details=(
                 CostGroup(
-                    legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=20),),
+                    legs=(JourneyLeg(mode=LegMode.WALK, duration=Quantity(20, "minute")),),
                     operator="",
                     cost=Money("0", "GBP"),
                 ),
@@ -443,7 +444,7 @@ class TestWalkLegCheckNode:
         from houses.commute import CostGroup
         from houses.nodes.transit import WalkLegCheckNode
 
-        walk_leg = JourneyLeg(mode=LegMode.WALK, duration_minutes=10)
+        walk_leg = JourneyLeg(mode=LegMode.WALK, duration=Quantity(10, "minute"))
         transit_commute = _make_commute(duration_min=32, cost_gbp=4.50)
         transit_commute = Commute(
             person=transit_commute.person,
@@ -468,7 +469,7 @@ class TestWalkLegCheckNode:
         from houses.commute import CostGroup
         from houses.nodes.transit import WalkLegCheckNode
 
-        walk_leg = JourneyLeg(mode=LegMode.WALK, duration_minutes=45)
+        walk_leg = JourneyLeg(mode=LegMode.WALK, duration=Quantity(45, "minute"))
         transit_commute = _make_commute(duration_min=32, cost_gbp=4.50)
         transit_commute = Commute(
             person=transit_commute.person,
@@ -492,10 +493,10 @@ class TestWalkLegCheckNode:
 # ── helpers ────────────────────────────────────────────────────────────────
 
 
-def _make_person(bus_walk_penalty_minutes: int = 30, name: str = "Simon"):
+def _make_person(bus_walk_penalty: int = 30, name: str = "Simon"):
     """Create a minimal Person-like object with the attributes WalkLegCheckNode reads."""
     office = PlaceOfInterest("Office", "SW1V 2QQ")
-    return Person(name, True, places_of_interest=(office,), bus_walk_penalty_minutes=bus_walk_penalty_minutes)
+    return Person(name, True, places_of_interest=(office,), bus_walk_penalty=Quantity(bus_walk_penalty, "minute"))
 
 
 def _make_commute(duration_min=32, cost_gbp=4.50):
@@ -505,7 +506,7 @@ def _make_commute(duration_min=32, cost_gbp=4.50):
 
     office = PlaceOfInterest("Office", "SW1V 2QQ")
     person = Person("Simon", True, places_of_interest=(office,))
-    leg = JourneyLeg(mode=LegMode.TRAIN, duration_minutes=duration_min, end_station="London Paddington")
+    leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(duration_min, "minute"), end_station="London Paddington")
     return Commute(
         person=person,
         label=office.label,
@@ -763,11 +764,15 @@ class TestRailFareNode:
                 CostGroup(
                     legs=(
                         JourneyLeg(
-                            mode=LegMode.BUS, duration_minutes=10, start_station="", end_station="", line_name=""
+                            mode=LegMode.BUS,
+                            duration=Quantity(10, "minute"),
+                            start_station="",
+                            end_station="",
+                            line_name="",
                         ),
                         JourneyLeg(
                             mode=LegMode.TRAIN,
-                            duration_minutes=30,
+                            duration=Quantity(30, "minute"),
                             start_station="WOK",
                             end_station="Fenchurch Street",
                             line_name="Great Western Railway",

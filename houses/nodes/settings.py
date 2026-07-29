@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from money import Money
+from pint import Quantity
 
 from houses.config import settings
 from houses.model.domain import Person, PlaceOfInterest
@@ -26,7 +27,7 @@ def make_default_persons() -> list[Person]:
             email="",
             is_superuser=False,
             has_car=True,
-            bus_walk_penalty_minutes=20,
+            bus_walk_penalty=Quantity(20, "minute"),
             deposit_equity=Money("177000", "GBP"),
             places_of_interest=(
                 PlaceOfInterest(
@@ -51,7 +52,7 @@ def make_default_persons() -> list[Person]:
             email="",
             is_superuser=False,
             has_car=False,
-            bus_walk_penalty_minutes=15,
+            bus_walk_penalty=Quantity(15, "minute"),
             deposit_equity=Money("0", "GBP"),
             places_of_interest=(
                 PlaceOfInterest(

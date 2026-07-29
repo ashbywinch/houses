@@ -39,6 +39,7 @@ def _sqlite_memory():
     per.init_db()
     db.testing = True
     from houses.database import init_db as init_app_db
+
     init_app_db()
     yield
     per.testing = False

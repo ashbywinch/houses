@@ -166,12 +166,13 @@ class FakeSchoolLookup:
 
 
 class FakeWalkability:
-    def __init__(self, walk_to_town_minutes: int = 10, amenities: str = ""):
-        self.walk_to_town_minutes = walk_to_town_minutes
+    def __init__(self, walk_to_town: int = 10, amenities: str = ""):
+        self.walk_to_town_minutes = walk_to_town
         self.amenities = amenities
 
     async def enrich(self, lat: float, lng: float, address: str) -> dict[str, Any]:
-        return {"walk_to_town_minutes": self.walk_to_town_minutes, "amenities": self.amenities}
+        val = {"value": self.walk_to_town_minutes, "unit": "minute"} if self.walk_to_town_minutes is not None else None
+        return {"walk_to_town": val, "amenities": self.amenities}
 
 
 class FakeTownDesc:
@@ -191,7 +192,7 @@ class FakeEPC:
 
 class FakeCouncilTax:
     def __init__(self, result: CouncilTaxInfo | None = None):
-        self.result = result or CouncilTaxInfo(band="D", yearly_cost=2000)
+        self.result = result or CouncilTaxInfo(band="D", yearly_cost=Money("2000", "GBP"))
 
     async def lookup(self, postcode: str, address: str = "") -> Attempt[CouncilTaxInfo]:
         return Attempt.succeeded(self.result)
@@ -264,7 +265,7 @@ def make_services(**overrides: Any) -> Services:
         geocoder=FakeGeocoder(),
         commute_router=FakeCommuteRouter(),
         school_lookup=FakeSchoolLookup(school=_DEFAULT_SCHOOL),
-        walkability_service=FakeWalkability(walk_to_town_minutes=10, amenities="Shops, cafe"),
+        walkability_service=FakeWalkability(walk_to_town=10, amenities="Shops, cafe"),
         town_desc_service=FakeTownDesc(),
         epc_service=FakeEPC(),
         council_tax_service=FakeCouncilTax(),

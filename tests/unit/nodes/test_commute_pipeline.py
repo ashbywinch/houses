@@ -34,7 +34,7 @@ def _person(name: str, has_car: bool) -> Person:
         name=name,
         has_car=has_car,
         places_of_interest=(PlaceOfInterest("Office", "SW1V 2QQ"),),
-        bus_walk_penalty_minutes=30,
+        bus_walk_penalty=Quantity(30, "minute"),
     )
 
 
@@ -52,8 +52,8 @@ def _pimlico_commute() -> Commute:
         details=(
             CostGroup(
                 legs=(
-                    JourneyLeg(mode=LegMode.WALK, duration_minutes=5, end_station="Clapham Junction"),
-                    JourneyLeg(mode=LegMode.TRAIN, duration_minutes=12, end_station="Wandsworth Town"),
+                    JourneyLeg(mode=LegMode.WALK, duration=Quantity(5, "minute"), end_station="Clapham Junction"),
+                    JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(12, "minute"), end_station="Wandsworth Town"),
                 ),
                 operator="TfL",
                 cost=None,
@@ -77,8 +77,10 @@ def _maidenhead_commute() -> Commute:
         details=(
             CostGroup(
                 legs=(
-                    JourneyLeg(mode=LegMode.WALK, duration_minutes=15, end_station="Maidenhead Rail Station"),
-                    JourneyLeg(mode=LegMode.TRAIN, duration_minutes=25, end_station="London Paddington"),
+                    JourneyLeg(
+                        mode=LegMode.WALK, duration=Quantity(15, "minute"), end_station="Maidenhead Rail Station"
+                    ),
+                    JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(25, "minute"), end_station="London Paddington"),
                 ),
                 operator="TfL",
                 cost=None,
@@ -465,7 +467,9 @@ class TestFullCommutePipeline:
             mode="drive",
             details=(
                 CostGroup(
-                    legs=(JourneyLeg(mode=LegMode.DRIVE, duration_minutes=40, distance_km=32.0),),
+                    legs=(
+                        JourneyLeg(mode=LegMode.DRIVE, duration=Quantity(40, "minute"), distance=Quantity(32.0, "km")),
+                    ),
                     cost=None,
                 ),
             ),

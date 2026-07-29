@@ -27,11 +27,19 @@ _connection_cache = threading.local()
 
 
 class DagJSONEncoder(json.JSONEncoder):
-    """Handles enums and other non-serializable types in DAG node results."""
+    """Handles enums, Quantity, and other non-serializable types in DAG node results."""
 
     def default(self, o):
         if isinstance(o, Enum):
             return o.name.lower()
+        try:
+            from pint import Quantity as _Q  # noqa: N814
+
+            if isinstance(o, _Q):
+                m = float(o.magnitude)
+                return {"value": int(m) if m == int(m) else m, "unit": str(o.units)}
+        except ImportError:
+            pass
         return super().default(o)
 
 

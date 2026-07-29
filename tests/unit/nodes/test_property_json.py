@@ -230,7 +230,7 @@ class TestCommuteData:
             j = await selector.to_json()
             assert j["status"] == "succeeded", f"{key}: {j.get('error')}"
             cost = j["value"]["daily_cost"]
-            assert isinstance(cost["amount"], (int, float)), f"{key}: cost.amount not numeric"
+            assert isinstance(cost["amount"], str), f"{key}: cost.amount not a string"
             assert cost["currency"] == "GBP", f"{key}: cost.currency not GBP"
 
     @pytest.mark.asyncio

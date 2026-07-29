@@ -5,6 +5,7 @@ from money import Money
 
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
+from houses.council_tax_info import CouncilTaxInfo
 
 
 class TestMonthlyMortgagePaymentNode:
@@ -117,7 +118,7 @@ class TestCommuteBreakdownNode:
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
-        assert a.value_or_none()["yearly_total_gbp"] == 0.0
+        assert a.value_or_none()["yearly_total_gbp"] == "0"
 
 
 class TestTotalMonthlyHousingCostNode:
@@ -129,7 +130,7 @@ class TestTotalMonthlyHousingCostNode:
         sf = UserInputNode[Money]("sf", Money)
         fin = UserInputNode[dict]("fin_tm", dict)
         cb = UserInputNode[dict]("cb_tm", dict)
-        ct = UserInputNode[dict]("ct_tm", dict)
+        ct = UserInputNode[CouncilTaxInfo]("ct_tm", CouncilTaxInfo)
         node = TotalMonthlyHousingCostNode(
             "tm",
             monthly_mortgage_node=mg,
@@ -142,7 +143,7 @@ class TestTotalMonthlyHousingCostNode:
         sf.push(Money("0", "GBP"), "test")
         fin.push({}, "test")
         cb.push({}, "test")
-        ct.push({}, "test")
+        ct.push(CouncilTaxInfo(), "test")
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
@@ -159,7 +160,7 @@ class TestTotalMonthlyHousingCostNode:
         sf = UserInputNode[Money]("sf2", Money)
         fin = UserInputNode[dict]("fin2", dict)
         cb = UserInputNode[dict]("cb2", dict)
-        ct = UserInputNode[dict]("ct2", dict)
+        ct = UserInputNode[CouncilTaxInfo]("ct2", CouncilTaxInfo)
         node = TotalMonthlyHousingCostNode(
             "tm2",
             monthly_mortgage_node=mg,
@@ -174,7 +175,7 @@ class TestTotalMonthlyHousingCostNode:
         sf.push(Money("0", "GBP"), "test")
         fin.push({}, "test")
         cb.push({}, "test")
-        ct.push({}, "test")
+        ct.push(CouncilTaxInfo(), "test")
         await flush_processor()
         a = await node.attempt()
         assert a.value_or_none() == Money("1000", "GBP")
@@ -194,7 +195,7 @@ class TestTotalMonthlyHousingCostNode:
         assert float(a.value_or_none().amount) == pytest.approx(expected, abs=0.01)
 
         # Council tax: yearly_cost 1800 / 12 = 150
-        ct.push({"band": "D", "yearly_cost": 1800.0}, "test")
+        ct.push(CouncilTaxInfo(band="D", yearly_cost=Money("1800", "GBP")), "test")
         await flush_processor()
         a = await node.attempt()
         expected = round(1000.0 + 1200.0 / 12 * 2 / 3 + 4600.0 / 12 + 1800.0 / 12, 2)

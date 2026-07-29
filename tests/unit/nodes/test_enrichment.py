@@ -43,6 +43,8 @@ class TestCouncilTaxNode:
     @pytest.mark.asyncio
     async def test_returns_yearly_cost_key(self):
         """CouncilTaxNode returns yearly_cost not cost (matches frontend expectation)."""
+        from money import Money
+
         from houses.council_tax_info import CouncilTaxInfo
         from houses.nodes.epc_node import CouncilTaxNode
         from houses.services_provider import _request_services as _sp
@@ -52,7 +54,7 @@ class TestCouncilTaxNode:
             async def lookup(self, postcode, address=""):
                 from dag.attempt import Attempt
 
-                return Attempt.succeeded(CouncilTaxInfo(band="D", yearly_cost=1800.0))
+                return Attempt.succeeded(CouncilTaxInfo(band="D", yearly_cost=Money("1800", "GBP")))
 
         svc = make_services(council_tax_service=_FakeCT())
         token = _sp.set(svc)
@@ -71,9 +73,8 @@ class TestCouncilTaxNode:
             assert a.succeeded
             val = a.value_or_none()
             assert val is not None
-            # Must have yearly_cost, not cost
-            assert "yearly_cost" in val, f"Expected 'yearly_cost' key, got {list(val.keys())}"
-            assert val["yearly_cost"] == 1800.0
+            assert val.band == "D"
+            assert val.yearly_cost == Money("1800", "GBP")
         finally:
             _sp.reset(token)
 
@@ -235,8 +236,8 @@ class TestParkAndRideAugmentNode:
 
         from houses.commute import CostGroup, JourneyLeg, LegMode
 
-        walk_leg = JourneyLeg(mode=LegMode.WALK, duration_minutes=walk_min, end_station=end_station)
-        train_leg = JourneyLeg(mode=LegMode.TRAIN, duration_minutes=20, end_station="London Paddington")
+        walk_leg = JourneyLeg(mode=LegMode.WALK, duration=Quantity(walk_min, "minute"), end_station=end_station)
+        train_leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(20, "minute"), end_station="London Paddington")
         group = CostGroup(legs=(walk_leg, train_leg), operator="", cost=None)
         return Commute(
             person=Person(name="Simon", has_car=True),
@@ -302,7 +303,7 @@ class TestParkAndRideAugmentNode:
             assert val is not None
             # First CG: drive leg (replaced walk)
             assert val.details[0].legs[0].mode.name == "DRIVE"
-            assert val.details[0].legs[0].duration_minutes == 10
+            assert int(val.details[0].legs[0].duration.magnitude) == 10
             # Second CG: parking
             assert val.details[1].legs[0].mode.name == "PARK"
             # Third CG: remaining transit legs (train from original first CG)
@@ -352,16 +353,18 @@ class TestParkAndRideAugmentNode:
             loc = UserInputNode[GeoPoint]("loc_mcg", GeoPoint)
             # Production _build_cost_groups shape: walk before transit in its own CG
             walk_cg = CostGroup(
-                legs=(JourneyLeg(mode=LegMode.WALK, duration_minutes=39, end_station="Woking Rail Station"),),
+                legs=(
+                    JourneyLeg(mode=LegMode.WALK, duration=Quantity(39, "minute"), end_station="Woking Rail Station"),
+                ),
                 cost=None,
                 operator="",
             )
             transit_cg = CostGroup(
                 legs=(
-                    JourneyLeg(mode=LegMode.TRAIN, duration_minutes=26),
-                    JourneyLeg(mode=LegMode.TUBE, duration_minutes=8),
-                    JourneyLeg(mode=LegMode.TUBE, duration_minutes=3),
-                    JourneyLeg(mode=LegMode.WALK, duration_minutes=7),
+                    JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(26, "minute")),
+                    JourneyLeg(mode=LegMode.TUBE, duration=Quantity(8, "minute")),
+                    JourneyLeg(mode=LegMode.TUBE, duration=Quantity(3, "minute")),
+                    JourneyLeg(mode=LegMode.WALK, duration=Quantity(7, "minute")),
                 ),
                 cost=Money("12.50", "GBP"),
                 operator="TfL",
@@ -404,7 +407,7 @@ class TestParkAndRideAugmentNode:
             assert val.details[2].legs[0].mode.name == "TRAIN"
 
             # Duration must sum ALL legs, not just the drive leg
-            total_legs = sum(leg.duration_minutes for cg in val.details for leg in cg.legs)
+            total_legs = sum(int(leg.duration.magnitude) for cg in val.details for leg in cg.legs)
             assert int(val.duration.magnitude) == total_legs, (
                 f"duration {int(val.duration.magnitude)} != sum of legs {total_legs}"
             )
@@ -431,7 +434,7 @@ class TestParkAndRideAugmentNode:
         assert val is not None
         # Walk leg unchanged
         assert val.details[0].legs[0].mode.name == "WALK"
-        assert val.details[0].legs[0].duration_minutes == 10
+        assert int(val.details[0].legs[0].duration.magnitude) == 10
         # No parking group
         assert len(val.details) == 1
 
@@ -445,8 +448,8 @@ class TestParkAndRideAugmentNode:
         from houses.commute import CostGroup, JourneyLeg, LegMode
         from houses.geo import GeoPoint
 
-        train_leg = JourneyLeg(mode=LegMode.TRAIN, duration_minutes=20, end_station="London Paddington")
-        walk_leg = JourneyLeg(mode=LegMode.WALK, duration_minutes=5, end_station="Platform 1")
+        train_leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(20, "minute"), end_station="London Paddington")
+        walk_leg = JourneyLeg(mode=LegMode.WALK, duration=Quantity(5, "minute"), end_station="Platform 1")
         group = CostGroup(legs=(train_leg, walk_leg), operator="", cost=None)
         commute = Commute(
             person=Person(name="Simon", has_car=True),
@@ -500,7 +503,7 @@ class TestParkAndRideAugmentNode:
             val = a.value_or_none()
             assert val is not None
             assert val.details[0].legs[0].mode.name == "WALK"
-            assert val.details[0].legs[0].duration_minutes == 35
+            assert int(val.details[0].legs[0].duration.magnitude) == 35
             assert len(val.details) == 1
         finally:
             _sp.reset(token)
@@ -565,8 +568,10 @@ class TestTransitCostAttribution:
             pc.push("SL6 3YZ", "test")
             loc.push(GeoPoint(51.5, -0.1), "test")
 
-            walk_leg = JourneyLeg(mode=LegMode.WALK, duration_minutes=30, end_station="Maidenhead Rail Station")
-            train_leg = JourneyLeg(mode=LegMode.TRAIN, duration_minutes=30, end_station="London Paddington")
+            walk_leg = JourneyLeg(
+                mode=LegMode.WALK, duration=Quantity(30, "minute"), end_station="Maidenhead Rail Station"
+            )
+            train_leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(30, "minute"), end_station="London Paddington")
             group = CostGroup(legs=(walk_leg, train_leg), operator="TfL", cost=None)
             c = Commute(
                 person=Person(name="Simon", has_car=True),
@@ -640,8 +645,10 @@ class TestTransitCostAttribution:
             pc.push("SL6 3YZ", "test")
             loc.push(GeoPoint(51.5, -0.1), "test")
 
-            walk_leg = JourneyLeg(mode=LegMode.WALK, duration_minutes=30, end_station="Maidenhead Rail Station")
-            train_leg = JourneyLeg(mode=LegMode.TRAIN, duration_minutes=30, end_station="London Paddington")
+            walk_leg = JourneyLeg(
+                mode=LegMode.WALK, duration=Quantity(30, "minute"), end_station="Maidenhead Rail Station"
+            )
+            train_leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(30, "minute"), end_station="London Paddington")
             group = CostGroup(legs=(walk_leg, train_leg), operator="TfL", cost=None)
             c = Commute(
                 person=Person(name="Simon", has_car=True),

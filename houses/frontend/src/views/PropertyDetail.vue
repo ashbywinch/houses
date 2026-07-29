@@ -31,13 +31,13 @@ function scrollTo(id: string) {
 const address = computed(() => detail.value?.best_address?.value ?? rid.value)
 
 const price = computed(() => detail.value?.rightmove_price?.succeeded
-  ? detail.value.rightmove_price.value?.amount ?? null : null)
+  ? parseFloat(detail.value.rightmove_price.value?.amount ?? '0') || null : null)
 
 const bedrooms = computed(() => detail.value?.rightmove_bedrooms?.succeeded
   ? detail.value.rightmove_bedrooms.value : null)
 
 const monthlyCost = computed(() => detail.value?.affordability?.total_monthly_housing_cost?.succeeded
-  ? detail.value.affordability.total_monthly_housing_cost.value?.amount ?? null : null)
+  ? parseFloat(detail.value.affordability.total_monthly_housing_cost.value?.amount ?? '0') || null : null)
 
 // ── Surface existing data ────────────────────────────
 const townDescription = computed(() => {
@@ -153,7 +153,7 @@ async function toggleFavourite() {
         <div v-if="walkability" class="detail-field">
           <span class="detail-field__label">Walk Score</span>
           <span class="detail-field__value">
-            {{ (walkability as Record<string, unknown>).walk_to_town_minutes ?? '?' }} min to {{ detail?.town_name?.value ?? 'town' }}
+            {{ ((walkability as Record<string, unknown>).walk_to_town as any)?.value ?? '?' }} min to {{ detail?.town_name?.value ?? 'town' }}
           </span>
         </div>
 

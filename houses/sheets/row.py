@@ -14,6 +14,7 @@ from typing import ClassVar
 
 import gspread
 from money import Money
+from pint import Quantity
 
 from houses.commute import LegMode, _render_leg_description
 from houses.model.domain import Commute
@@ -152,21 +153,17 @@ class Row:
         return ""
 
     @classmethod
-    def _fmt_cost(cls, val: Money | float | None) -> str:
-        """String representation for a cost value.
-
-        Extracts the amount from ``Money`` objects; passes ``float`` through
-        as-is (backward compat).  ``None`` returns ``""``.
-        """
+    def _fmt_cost(cls, val: Money | None) -> str:
+        """String representation for a cost value."""
         if val is None:
             return ""
-        if isinstance(val, Money):
-            return str(val.amount)
-        return str(val)
+        return str(val.amount)
 
     @classmethod
-    def _fmt_dist(cls, distance_km: float | None) -> str:
-        return f"{distance_km:.2f}" if distance_km is not None else ""
+    def _fmt_dist(cls, distance: Quantity | None) -> str:
+        if distance is None:
+            return ""
+        return f"{distance.magnitude:.2f}"
 
     @classmethod
     def _fmt_walk(cls, commute: Commute | None) -> str:
@@ -213,21 +210,20 @@ class Row:
         for idx, leg in enumerate(all_legs):
             desc = _render_leg_description(leg)
             if leg.mode == LegMode.WALK and idx == total - 1:
-                parts.append(f"walk {leg.duration_minutes}m")
+                parts.append(f"walk {int(leg.duration.magnitude)}m")
             else:
-                parts.append(f"{desc} ({leg.duration_minutes}m)")
+                parts.append(f"{desc} ({int(leg.duration.magnitude)}m)")
         return " \u2192 ".join(parts)
 
     @classmethod
-    def _calc_non_rail_cost(cls, commute: Commute) -> float:
+    def _calc_non_rail_cost(cls, commute: Commute) -> Money:
         """Sum of costs from non-TfL cost groups."""
-        total = 0.0
+        total = Money("0", "GBP")
         for cg in commute.details:
             if cg.cost is not None and cg.operator != "TfL":
-                if isinstance(cg.cost, Money):
-                    total += float(cg.cost.amount)
-                else:
-                    total += cg.cost
+                if not isinstance(cg.cost, Money):
+                    raise TypeError(f"CostGroup.cost must be Money, got {type(cg.cost).__name__}: {cg.cost}")
+                total += cg.cost
         return total
 
     # ── Domain-to-sheet mapping ─────────────────────────────────────
@@ -268,20 +264,20 @@ class Row:
         r["Bracknell Time (min)"] = str(bt) if bt is not None else ""
         r["Bracknell Cost (£)"] = cls._fmt_cost(property_.petrol.daily_cost if property_.petrol else None)
         r["Primary School"] = property_.primary_school.name if property_.primary_school else ""
-        r["Primary Distance (km)"] = cls._fmt_dist(property_.primary_school_distance_km)
+        r["Primary Distance (km)"] = cls._fmt_dist(property_.primary_school_distance)
         r["Primary Walk (min)"] = cls._fmt_walk(property_.primary_school_commute)
         r["Primary School Link"] = cls._fmt_school_link(property_.primary_school)
         r["Primary Ofsted"] = property_.primary_ofsted
         r["Primary Inspection Year"] = property_.primary_inspection_year
         r["Secondary School"] = property_.secondary_school.name if property_.secondary_school else ""
-        r["Secondary Distance (km)"] = cls._fmt_dist(property_.secondary_school_distance_km)
+        r["Secondary Distance (km)"] = cls._fmt_dist(property_.secondary_school_distance)
         r["Secondary Walk (min)"] = cls._fmt_walk(property_.secondary_school_commute)
         r["Secondary School Link"] = cls._fmt_school_link(property_.secondary_school)
         r["Secondary Ofsted"] = property_.secondary_ofsted
         r["Secondary Inspection Year"] = property_.secondary_inspection_year
         r["Area Description"] = property_.town_description
         r["Walk to Town (min)"] = (
-            str(property_.walk_to_town_minutes) if property_.walk_to_town_minutes is not None else ""
+            str(int(property_.walk_to_town.magnitude)) if property_.walk_to_town is not None else ""
         )
         r["Walkable Amenities"] = property_.walkable_amenities
         r["EPC Rating"] = property_.epc_rating

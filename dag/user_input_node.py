@@ -20,15 +20,30 @@ try:
     if not hasattr(Money, "__get_pydantic_core_schema__"):
 
         def _money_schema(_source, _handler):
+            from decimal import Decimal as _Decimal
+
+            _gbp_scale = _Decimal("0.01")
+
             def validate(v):
                 if isinstance(v, Money):
                     return v
                 if isinstance(v, dict):
-                    return Money(v.get("amount", 0), v.get("currency", "GBP"))
+                    amount = v.get("amount", 0)
+                    currency = v.get("currency", "GBP")
+                    if isinstance(amount, str):
+                        return Money(amount, currency)
+                    return Money(str(amount), currency)
+                if isinstance(v, (int, float)):
+                    return Money(str(v), "GBP")
+                if isinstance(v, _Decimal):
+                    return Money(str(v), "GBP")
                 raise ValueError(f"Cannot convert {type(v)} to Money")
 
             def serialize(m):
-                return {"amount": float(m.amount), "currency": m.currency}
+                return {
+                    "amount": str(m.amount.quantize(_gbp_scale)),
+                    "currency": m.currency,
+                }
 
             return core_schema.no_info_plain_validator_function(
                 validate,

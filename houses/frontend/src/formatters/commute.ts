@@ -24,7 +24,8 @@ export function commuteDuration(dur: unknown): string {
 export function commuteCost(cost: unknown): string {
     if (!cost || typeof cost !== 'object') return ''
     const c = cost as Record<string, unknown>
-    return `£${(c.amount as number).toFixed(2)}`
+    const amount = typeof c.amount === 'string' ? parseFloat(c.amount) : (c.amount as number)
+    return `£${amount.toFixed(2)}`
 }
 
 /** Extract mode string from a commute object */

@@ -79,9 +79,7 @@ class OAuthService(Protocol):
         """Return (authorization_url, code_verifier)."""
         ...
 
-    def exchange_code(
-        self, code: str, code_verifier: str, state: str
-    ) -> dict:
+    def exchange_code(self, code: str, code_verifier: str, state: str) -> dict:
         """Exchange an authorization code for user info.
         Returns a dict with keys: email, name, picture, etc.
         """

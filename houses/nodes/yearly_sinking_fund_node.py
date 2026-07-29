@@ -24,6 +24,6 @@ class YearlySinkingFundNode(DerivedNode[Money]):
         if p == 0:
             return Attempt.succeeded(Money("0", "GBP"))
         fin = (financial.value_or_none() or {}) if financial.succeeded else {}
-        rate = float(fin.get("sinking_fund_rate", 0.01))
-        result = p * Decimal(str(rate))
-        return Attempt.succeeded(Money(str(round(float(result), 2)), "GBP"))
+        rate = Decimal(str(fin.get("sinking_fund_rate", "0.01")))
+        result = p * rate
+        return Attempt.succeeded(Money(str(result.quantize(Decimal("0.01"))), "GBP"))
