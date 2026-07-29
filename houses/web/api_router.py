@@ -17,6 +17,14 @@ api_router = APIRouter(prefix="/api")
 
 @api_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
+    from houses.web.auth import get_session_user
+
+    # Reject unauthenticated connections — property data is sensitive
+    session = get_session_user(Request(scope=websocket.scope))
+    if not session:
+        await websocket.close(code=4001)
+        return
+
     from houses.web.broadcaster import register_client
 
     await register_client(websocket)

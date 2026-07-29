@@ -32,6 +32,7 @@ auth_router = APIRouter(prefix="/api/auth")
 # and created_at timestamp. Ephemeral — lost on server restart.
 _oauth_states: dict[str, dict] = {}
 _STATE_MAX_AGE = timedelta(minutes=10)
+_STATE_MAX_ENTRIES = 100
 
 
 def _sweep_stale_states() -> None:
@@ -154,6 +155,12 @@ async def login():
 
     if not code_verifier:
         return {"status": "error", "detail": "PKCE code_verifier not generated"}
+
+    # Enforce a hard cap on the in-memory state store to prevent DoS
+    if len(_oauth_states) >= _STATE_MAX_ENTRIES:
+        _sweep_stale_states()
+    if len(_oauth_states) >= _STATE_MAX_ENTRIES:
+        return {"status": "error", "detail": "Too many login attempts, try again"}
 
     _oauth_states[state] = {
         "code_verifier": code_verifier,
