@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { epcClass } from '../formatters/format'
+import { patchWorksEstimate } from '../services/api'
 import ProvenanceTree from './ProvenanceTree.vue'
 
 const props = defineProps<{
   affordability: any
   epc: any
+  persons?: any
+  rid?: string
 }>()
 
 function epcStepClass(band: string): string {
@@ -19,16 +22,51 @@ function toggleProvenance(key: string) {
   showProvenance.value = showProvenance.value === key ? null : key
 }
 
-// ── Helpers ────────────────────────────────────────────
-function attemptValue(val: any): string | null {
-  if (!val) return null
-  if (val.succeeded && val.value != null) return val.value
-  if (!val.succeeded && val.error) return 'Impossible'
-  return null
-}
-
 function isImpossible(val: any): boolean {
   return val && !val.succeeded && val.error != null
+}
+
+// ── Works estimate inline editing ─────────────────────
+const editingPerson = ref<string | null>(null)
+const editValue = ref<string>('')
+
+function startEdit(person: string, currentValue: number | null) {
+  editingPerson.value = person
+  editValue.value = currentValue != null ? String(currentValue) : ''
+}
+
+function cancelEdit() {
+  editingPerson.value = null
+  editValue.value = ''
+}
+
+async function saveEdit(person: string) {
+  editingPerson.value = null
+  const parsed = editValue.value === '' ? null : Number(editValue.value)
+  if (isNaN(parsed as number) && editValue.value !== '') return
+  if (!props.rid) return
+  await patchWorksEstimate(props.rid, person, parsed as number | null)
+}
+
+function handleKeydown(e: KeyboardEvent, person: string) {
+  if (e.key === 'Enter') saveEdit(person)
+  else if (e.key === 'Escape') cancelEdit()
+}
+
+// ── Helpers for works display ─────────────────────────
+const worksEstimates = () =>
+  props.affordability?.works_estimates?.succeeded
+    ? (props.affordability.works_estimates.value as Record<string, number> ?? {})
+    : {}
+
+const personList = () =>
+  props.persons?.value
+    ? (props.persons.value as Array<Record<string, unknown>>)
+    : []
+
+function personRequiresWorks(personName: string): boolean {
+  const p = personList().find((x: any) => x.name === personName)
+  return p?.works_estimate_required === true
 }
 </script>
 
@@ -94,7 +132,53 @@ function isImpossible(val: any): boolean {
           @click="toggleProvenance('total_works')"
         >{{ showProvenance === 'total_works' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
       </div>
-      <div v-if="showProvenance === 'total_works' && affordability?.total_works?.provenance && affordability?.works_estimates?.provenance" class="costs-provenance">
+      <!-- Per-person works breakdown -->
+      <div v-if="affordability?.works_estimates?.succeeded" class="costs-subsection">
+        <div
+          v-for="(val, name) in worksEstimates()"
+          :key="String(name)"
+          class="costs-row costs-row--sub"
+        >
+          <span class="costs-label">{{ name }}</span>
+          <div v-if="editingPerson === name" class="costs-edit-group">
+            <span class="costs-edit-prefix">£</span>
+            <input
+              v-model="editValue"
+              type="number"
+              class="costs-edit-input"
+              autofocus
+              @keydown="handleKeydown($event, name)"
+              @blur="saveEdit(name)"
+            />
+          </div>
+          <span v-else class="costs-value costs-value--clickable" @click="startEdit(name, val)">
+            {{ val != null ? '£' + val.toLocaleString() : '£? — required' }}
+          </span>
+        </div>
+        <!-- Persons who require works but have no estimate yet -->
+        <div
+          v-for="p in personList().filter((x: any) => x.works_estimate_required && !(x.name in worksEstimates()))"
+          :key="String(p.name)"
+          class="costs-row costs-row--sub"
+        >
+          <span class="costs-label">{{ p.name }}</span>
+          <div v-if="editingPerson === p.name" class="costs-edit-group">
+            <span class="costs-edit-prefix">£</span>
+            <input
+              v-model="editValue"
+              type="number"
+              class="costs-edit-input"
+              autofocus
+              @keydown="handleKeydown($event, p.name as string)"
+              @blur="saveEdit(p.name as string)"
+            />
+          </div>
+          <span v-else class="costs-value costs-value--clickable costs-value--required" @click="startEdit(p.name as string, null)">
+            £? — required
+          </span>
+        </div>
+      </div>
+      <div v-if="showProvenance === 'total_works' && affordability?.total_works?.provenance" class="costs-provenance">
         <ProvenanceTree :provenance="affordability.total_works.provenance" />
       </div>
 
@@ -181,8 +265,22 @@ function isImpossible(val: any): boolean {
 .costs-label { font-size: var(--fs-sm); color: var(--text); }
 .costs-value { font-size: var(--fs-sm); font-weight: var(--fw-semibold); margin-left: auto; margin-right: var(--sp-2); }
 .costs-value--impossible { color: var(--red); font-style: italic; }
+.costs-value--clickable { cursor: pointer; border-bottom: 1px dashed var(--slate-300); }
+.costs-value--required { color: var(--red); font-style: italic; }
 .costs-subsection { display: flex; flex-direction: column; }
 .costs-provenance { background: var(--slate-50); padding: var(--sp-3) var(--sp-4); border-radius: var(--radius); margin: var(--sp-2) 0; }
+.costs-edit-group { display: flex; align-items: center; gap: 2px; margin-left: auto; margin-right: var(--sp-2); }
+.costs-edit-prefix { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text); }
+.costs-edit-input {
+  width: 100px;
+  padding: 2px 6px;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  border: 1px solid var(--blue);
+  border-radius: var(--radius);
+  outline: none;
+  text-align: right;
+}
 
 .how-btn {
   font-size: var(--fs-xs);

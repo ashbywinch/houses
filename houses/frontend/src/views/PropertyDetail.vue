@@ -186,6 +186,8 @@ async function toggleFavourite() {
       <CostsSection
         :affordability="detail.affordability"
         :epc="detail.epc"
+        :persons="detail.settings?.persons"
+        :rid="rid"
       />
 
       <!-- ═══════════ NOTES ═══════════ -->

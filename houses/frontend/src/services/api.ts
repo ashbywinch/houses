@@ -93,6 +93,24 @@ export function patchFinancial(financial: Record<string, unknown>): Promise<Resp
   }).then(checkFor401)
 }
 
+export function patchWorksEstimate(
+  rid: string,
+  person: string,
+  value: number | null,
+): Promise<Response> {
+  return fetch(
+    `${BASE}/properties/${encodeURIComponent(rid)}/works-estimate`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders(),
+      },
+      body: JSON.stringify({ person, value }),
+    },
+  ).then(checkFor401)
+}
+
 export async function patchTriage(rid: string, data: Partial<{
   favourite: boolean;
   dismissed: boolean;
