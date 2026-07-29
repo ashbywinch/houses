@@ -93,6 +93,23 @@ export function patchFinancial(financial: Record<string, unknown>): Promise<Resp
   }).then(checkFor401)
 }
 
+export function patchRentalIncome(
+  rid: string,
+  value: number | null,
+): Promise<Response> {
+  return fetch(
+    `${BASE}/properties/${encodeURIComponent(rid)}/rental-income`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders(),
+      },
+      body: JSON.stringify({ value }),
+    },
+  ).then(checkFor401)
+}
+
 export function patchWorksEstimate(
   rid: string,
   person: string,

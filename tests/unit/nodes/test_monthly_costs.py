@@ -116,6 +116,9 @@ class TestTotalMonthlyHousingCostNode:
 
         mg = UserInputNode[Money]("mg", Money)
         sf = UserInputNode[Money]("sf", Money)
+        li = UserInputNode[Money]("li_tm", Money)
+        ri = UserInputNode[Money]("ri_tm", Money)
+        st = UserInputNode[str]("st_tm", str)
         fin = UserInputNode[dict]("fin_tm", dict)
         cb = UserInputNode[dict]("cb_tm", dict)
         ct = UserInputNode[CouncilTaxInfo]("ct_tm", CouncilTaxInfo)
@@ -123,12 +126,18 @@ class TestTotalMonthlyHousingCostNode:
             "tm",
             monthly_mortgage_node=mg,
             yearly_sinking_fund_node=sf,
+            life_insurance_node=li,
+            rental_income_node=ri,
+            status_node=st,
             financial_source=fin,
             commute_breakdown_node=cb,
             council_tax_node=ct,
         )
         mg.push(Money("0", "GBP"), "test")
         sf.push(Money("0", "GBP"), "test")
+        li.push(Money("0", "GBP"), "test")
+        ri.push(Money("0", "GBP"), "test")
+        st.push("", "test")
         fin.push({}, "test")
         cb.push({}, "test")
         ct.push(CouncilTaxInfo(), "test")
@@ -146,6 +155,9 @@ class TestTotalMonthlyHousingCostNode:
 
         mg = UserInputNode[Money]("mg2", Money)
         sf = UserInputNode[Money]("sf2", Money)
+        li = UserInputNode[Money]("li2_tm", Money)
+        ri = UserInputNode[Money]("ri2_tm", Money)
+        st = UserInputNode[str]("st2_tm", str)
         fin = UserInputNode[dict]("fin2", dict)
         cb = UserInputNode[dict]("cb2", dict)
         ct = UserInputNode[CouncilTaxInfo]("ct2", CouncilTaxInfo)
@@ -153,6 +165,9 @@ class TestTotalMonthlyHousingCostNode:
             "tm2",
             monthly_mortgage_node=mg,
             yearly_sinking_fund_node=sf,
+            life_insurance_node=li,
+            rental_income_node=ri,
+            status_node=st,
             financial_source=fin,
             commute_breakdown_node=cb,
             council_tax_node=ct,
@@ -161,6 +176,9 @@ class TestTotalMonthlyHousingCostNode:
         # Mortgage alone contributes 1000
         mg.push(Money("1000", "GBP"), "test")
         sf.push(Money("0", "GBP"), "test")
+        li.push(Money("0", "GBP"), "test")
+        ri.push(Money("0", "GBP"), "test")
+        st.push("", "test")
         fin.push({}, "test")
         cb.push({}, "test")
         ct.push(CouncilTaxInfo(), "test")

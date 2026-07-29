@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { epcClass } from '../formatters/format'
-import { patchWorksEstimate } from '../services/api'
+import { patchRentalIncome, patchWorksEstimate } from '../services/api'
 import { usePropertiesStore } from '../stores/properties'
 import ProvenanceTree from './ProvenanceTree.vue'
 
@@ -49,7 +49,6 @@ async function saveEdit(person: string) {
   if (isNaN(parsed as number) && editValue.value !== '') return
   if (!props.rid) return
   await patchWorksEstimate(props.rid, person, parsed as number | null)
-  // Refresh detail so the new value appears
   if (props.rid) {
     await store.loadDetail(props.rid, true)
   }
@@ -58,6 +57,37 @@ async function saveEdit(person: string) {
 function handleKeydown(e: KeyboardEvent, person: string) {
   if (e.key === 'Enter') saveEdit(person)
   else if (e.key === 'Escape') cancelEdit()
+}
+
+// ── Rental income inline editing ──────────────────────
+const editingRental = ref(false)
+const editRentalValue = ref<string>('')
+
+function startEditRental() {
+  const current = props.affordability?.rental_income?.value?.amount
+  editRentalValue.value = current != null ? String(current) : '0'
+  editingRental.value = true
+}
+
+function cancelEditRental() {
+  editingRental.value = false
+  editRentalValue.value = ''
+}
+
+async function saveRental() {
+  editingRental.value = false
+  const parsed = editRentalValue.value === '' ? null : Number(editRentalValue.value)
+  if (isNaN(parsed as number) && editRentalValue.value !== '') return
+  if (!props.rid) return
+  await patchRentalIncome(props.rid, parsed as number | null)
+  if (props.rid) {
+    await store.loadDetail(props.rid, true)
+  }
+}
+
+function handleRentalKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter') saveRental()
+  else if (e.key === 'Escape') cancelEditRental()
 }
 
 // ── Helpers for works display ─────────────────────────
@@ -123,6 +153,21 @@ function canEdit(personName: string): boolean {
       </div>
       <div v-if="showProvenance === 'sinking_fund' && affordability?.monthly_sinking_fund?.provenance" class="costs-provenance">
         <ProvenanceTree :provenance="affordability.monthly_sinking_fund.provenance" />
+      </div>
+
+      <!-- Life Insurance -->
+      <div class="costs-row">
+        <span class="costs-label">Life Insurance</span>
+        <span class="costs-value">£{{ affordability?.life_insurance_total?.value?.amount ?? '?' }}</span>
+        <button
+          v-if="affordability?.life_insurance_total?.provenance"
+          class="how-btn"
+          :class="{ 'how-btn--active': showProvenance === 'life_insurance' }"
+          @click="toggleProvenance('life_insurance')"
+        >{{ showProvenance === 'life_insurance' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
+      </div>
+      <div v-if="showProvenance === 'life_insurance' && affordability?.life_insurance_total?.provenance" class="costs-provenance">
+        <ProvenanceTree :provenance="affordability.life_insurance_total.provenance" />
       </div>
 
       <!-- Cost of Works -->
@@ -214,6 +259,42 @@ function canEdit(personName: string): boolean {
       </div>
       <div v-if="showProvenance === 'commute_cost' && affordability?.monthly_commute_cost?.provenance" class="costs-provenance">
         <ProvenanceTree :provenance="affordability.monthly_commute_cost.provenance" />
+      </div>
+
+      <!-- Rental Income (editable by current person) -->
+      <div class="costs-row">
+        <span class="costs-label">Rental Income</span>
+        <div v-if="editingRental" class="costs-edit-group">
+          <span class="costs-edit-prefix">£</span>
+          <input
+            v-model="editRentalValue"
+            type="number"
+            class="costs-edit-input"
+            autofocus
+            @keydown="handleRentalKeydown"
+            @blur="saveRental"
+          />
+        </div>
+        <span
+          v-else
+          class="costs-value"
+          :class="{ 'costs-value--editable': !!currentPerson }"
+          @click="currentPerson ? startEditRental() : null"
+        >
+          <template v-if="affordability?.rental_income?.succeeded && affordability?.rental_income?.value">
+            £{{ affordability.rental_income.value.amount }}
+          </template>
+          <template v-else>£0</template>
+        </span>
+        <button
+          v-if="affordability?.rental_income?.provenance"
+          class="how-btn"
+          :class="{ 'how-btn--active': showProvenance === 'rental_income' }"
+          @click="toggleProvenance('rental_income')"
+        >{{ showProvenance === 'rental_income' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
+      </div>
+      <div v-if="showProvenance === 'rental_income' && affordability?.rental_income?.provenance" class="costs-provenance">
+        <ProvenanceTree :provenance="affordability.rental_income.provenance" />
       </div>
 
       <!-- Total Monthly -->

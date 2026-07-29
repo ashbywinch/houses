@@ -46,6 +46,7 @@ class Person:
     home_sale_price: Money = Money("0", "GBP")
     outstanding_mortgage: Money = Money("0", "GBP")
     cash_contribution: Money = Money("0", "GBP")
+    life_insurance_monthly: Money = Money("0", "GBP")
     works_estimate_required: bool = False
     places_of_interest: tuple[PlaceOfInterest, ...] = ()
     email: str = ""

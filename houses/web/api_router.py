@@ -370,6 +370,38 @@ async def patch_financial(body: dict):
     return {"status": "ok"}
 
 
+@api_router.patch("/properties/{rid}/rental-income")
+async def patch_rental_income(
+    rid: str,
+    body: dict,
+    background_tasks: BackgroundTasks,
+):
+    """Update the monthly rental income for a property.
+
+    Body: {"value": 1200} or {"value": null} to clear.
+    """
+    from houses.property_registry import get_property
+
+    prop = get_property(rid)
+    if prop is None:
+        raise HTTPException(status_code=404, detail="Property not found")
+
+    value = body.get("value")
+    if value is not None and not isinstance(value, (int, float)):
+        raise HTTPException(
+            status_code=400,
+            detail="value must be a number",
+        )
+
+    from money import Money as _Money
+
+    prop.rental_income.push(
+        _Money(str(value), "GBP") if value is not None else _Money("0", "GBP"),
+        "user",
+    )
+    return {"status": "ok"}
+
+
 @api_router.patch("/properties/{rid}/works-estimate")
 async def patch_works_estimate(
     rid: str,

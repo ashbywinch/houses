@@ -11,6 +11,7 @@ from houses.geo import GeoPoint
 from houses.nodes.area import NearestTownNode, TownDescNode, TownNode, WalkabilityNode
 from houses.nodes.epc_node import CouncilTaxNode, EpcNode
 from houses.nodes.geocode import GeocodeNode
+from houses.nodes.life_insurance_node import LifeInsuranceTotalNode
 from houses.nodes.location import BestAddressNode, BestLocationNode
 from houses.nodes.equity_total_node import EquityTotalNode
 from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNode
@@ -64,6 +65,7 @@ class PropertyNodes:
         self.comment_group_notes = UserInputNode[str](f"{rid}/group_notes", str)
         self.comment_ashby_comments = UserInputNode[str](f"{rid}/ashby_comments", str)
         self.works_estimates = UserInputNode[dict](f"{rid}/works_estimates", dict)
+        self.rental_income = UserInputNode[Money](f"{rid}/rental_income", Money)
         self.comment_design_needed = UserInputNode[str](f"{rid}/design_needed", str)
         self.comment_planning_needed = UserInputNode[str](f"{rid}/planning_needed", str)
 
@@ -162,6 +164,10 @@ class PropertyNodes:
             f"{rid}/total_equity",
             persons_source=self._svc.persons_source,
         )
+        self.life_insurance_total = LifeInsuranceTotalNode(
+            f"{rid}/life_insurance_total",
+            persons_source=self._svc.persons_source,
+        )
         self.mortgage_required = MortgageRequiredNode(
             f"{rid}/mortgage_required",
             rightmove_price=self.rightmove_price,
@@ -183,6 +189,9 @@ class PropertyNodes:
             f"{rid}/total_monthly_cost",
             monthly_mortgage_node=self.monthly_mortgage,
             yearly_sinking_fund_node=self.yearly_sinking_fund,
+            life_insurance_node=self.life_insurance_total,
+            rental_income_node=self.rental_income,
+            status_node=self.comment_status,
             financial_source=self._svc.financial_source,
             commute_breakdown_node=self.commute_breakdown,
             council_tax_node=self.council_tax,
@@ -282,7 +291,7 @@ class PropertyNodes:
             monthly = round(yearly_amount / 12 * 2 / 3, 2)
             return {
                 "status": "succeeded",
-                "value": monthly,
+                "value": {"amount": str(monthly), "currency": "GBP"},
                 "provenance": {"label": "formula:monthly_sinking", "description": f"{yearly_amount}/12*2/3"},
             }
         return yearly
@@ -318,10 +327,12 @@ class PropertyNodes:
                 "works_estimates": await self.works_estimates.to_json(),
                 "total_works": await self.total_works.to_json(),
                 "total_equity": await self.total_equity.to_json(),
+                "life_insurance_total": await self.life_insurance_total.to_json(),
                 "mortgage_required": await self.mortgage_required.to_json(),
                 "monthly_mortgage": await self.monthly_mortgage.to_json(),
                 "monthly_sinking_fund": await self._monthly_sinking(),
                 "monthly_commute_cost": await self.commute_breakdown.to_json(),
+                "rental_income": await self.rental_income.to_json(),
                 "total_monthly_housing_cost": await self.total_monthly_cost.to_json(),
             },
             "area": {

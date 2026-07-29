@@ -138,10 +138,12 @@ class TestDetailShape:
             "works_estimates",
             "total_works",
             "total_equity",
+            "life_insurance_total",
             "mortgage_required",
             "monthly_mortgage",
             "monthly_sinking_fund",
             "monthly_commute_cost",
+            "rental_income",
             "total_monthly_housing_cost",
         )
         for key in expected:
@@ -201,7 +203,7 @@ class TestDetailShape:
         d = await prop.to_json_detail()
         sf = d["affordability"]["monthly_sinking_fund"]
         assert sf["status"] == "succeeded"
-        assert sf["value"] < 1000, f"sinking fund {sf['value']} looks like yearly, not monthly"
+        assert float(sf["value"]["amount"]) < 1000, f"sinking fund {sf['value']} looks like yearly, not monthly"
 
 
 class TestCommuteData:

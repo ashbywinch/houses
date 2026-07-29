@@ -90,9 +90,9 @@ describe('CostsSection works estimates', () => {
     const text = wrapper.text()
     expect(text).toContain('Simon')
     expect(text).toContain('Lorena')
-    // Only one editable row (Ashby is the current person)
+    // Editable rows: Ashby's works + rental income (currentPerson is set)
     const editableEls = wrapper.findAll('.costs-value--editable')
-    expect(editableEls.length).toBe(1)
+    expect(editableEls.length).toBe(2)
     // Non-current persons should have readonly class
     const readonlyEls = wrapper.findAll('.costs-value--readonly')
     expect(readonlyEls.length).toBe(2)

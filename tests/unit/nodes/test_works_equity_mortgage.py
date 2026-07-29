@@ -556,6 +556,9 @@ class TestTotalMonthlyHousingCostImpossible:
 
         mg = UserInputNode[Money]("tm_ok_mg", Money)
         sf = UserInputNode[Money]("tm_ok_sf", Money)
+        li = UserInputNode[Money]("li_ok", Money)
+        ri = UserInputNode[Money]("ri_ok", Money)
+        st = UserInputNode[str]("st_ok", str)
         fin = UserInputNode[dict]("tm_ok_fin", dict)
         cb = UserInputNode[dict]("tm_ok_cb", dict)
         ct = UserInputNode[CouncilTaxInfo](
@@ -565,6 +568,9 @@ class TestTotalMonthlyHousingCostImpossible:
             "tm_ok",
             monthly_mortgage_node=mg,
             yearly_sinking_fund_node=sf,
+            life_insurance_node=li,
+            rental_income_node=ri,
+            status_node=st,
             financial_source=fin,
             commute_breakdown_node=cb,
             council_tax_node=ct,
@@ -572,6 +578,9 @@ class TestTotalMonthlyHousingCostImpossible:
 
         mg.push(Money("1000", "GBP"), "test")
         sf.push(Money("1200", "GBP"), "test")
+        li.push(Money("0", "GBP"), "test")
+        ri.push(Money("0", "GBP"), "test")
+        st.push("", "test")
         fin.push({}, "test")
         cb.push({}, "test")
         ct.push(CouncilTaxInfo(), "test")
