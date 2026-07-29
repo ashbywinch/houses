@@ -175,7 +175,7 @@ async def _request_context(request, call_next):
 async def _require_auth(request, call_next):
     """Require authentication on /api/* routes (except /api/auth/*)."""
     path = request.url.path
-    if path.startswith("/api/") and not path.startswith("/api/auth/"):
+    if path.startswith("/api/") and not path.startswith("/api/auth/") and not path.startswith("/api/ws"):
         from houses.web.auth import get_session_user
 
         session_user = get_session_user(request)

@@ -37,7 +37,9 @@ def get_connection() -> sqlite3.Connection:
     if testing:
         import dag.persistence as per
 
-        return per._get_db()
+        conn = per._get_db()
+        conn.row_factory = sqlite3.Row
+        return conn
 
     path = Path(settings.sqlite_path)
     path.parent.mkdir(parents=True, exist_ok=True)
