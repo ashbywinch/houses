@@ -171,8 +171,11 @@ async def login():
             state=state,
         )
         # Persist the code_verifier so the callback can use it (PKCE)
+        code_verifier: str = getattr(flow, "code_verifier", None) or ""  # type: ignore[arg-type]
+        if not code_verifier:
+            return {"status": "error", "detail": "PKCE code_verifier not generated"}
         _oauth_states[state] = {
-            "code_verifier": getattr(flow, "code_verifier", None) or "",
+            "code_verifier": code_verifier,
             "created_at": datetime.now(UTC).timestamp(),
         }
         return {"auth_url": authorization_url}
