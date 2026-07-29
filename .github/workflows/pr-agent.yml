@@ -27,7 +27,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PR_NUM="${{ github.event.number }}"
-          SHA="${{ github.sha }}"
+          SHA="${{ github.event.pull_request.head.sha }}"
           if [ -z "$PR_NUM" ]; then
             echo "Manual trigger — skipping review check (no PR number)"
             exit 0
