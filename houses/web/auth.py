@@ -207,29 +207,23 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
 
         # Look up Person by email to determine superuser status
         is_superuser = False
-        try:
-            from houses.services_provider import get_services
-
-            svc = get_services()
-            persons_attempt = svc.persons_source.latest_attempt()
-            if persons_attempt.succeeded:
-                for p in persons_attempt.value_or_none() or []:
-                    if isinstance(p, dict):
-                        pe = p.get("email")
-                        if pe is not None and pe.casefold() == folded_email and p.get("is_superuser"):
-                            is_superuser = True
-                            break
-                    elif (
-                        hasattr(p, "email")
-                        and p.email is not None
-                        and p.email.casefold() == folded_email
-                        and hasattr(p, "is_superuser")
-                        and p.is_superuser
-                    ):
+        persons_attempt = svc.persons_source.latest_attempt()
+        if persons_attempt.succeeded:
+            for p in persons_attempt.value_or_none() or []:
+                if isinstance(p, dict):
+                    pe = p.get("email")
+                    if pe is not None and pe.casefold() == folded_email and p.get("is_superuser"):
                         is_superuser = True
                         break
-        except Exception:
-            pass  # Non-critical — user can still sign in, just not as superuser
+                elif (
+                    hasattr(p, "email")
+                    and p.email is not None
+                    and p.email.casefold() == folded_email
+                    and hasattr(p, "is_superuser")
+                    and p.is_superuser
+                ):
+                    is_superuser = True
+                    break
 
         # Create signed session cookie with casefolded email
         cookie_value = _make_session_cookie(folded_email, name, picture, is_superuser)
@@ -256,15 +250,15 @@ async def me(request: Request):
 
     # Look up associated Person by email
     person_name = None
-    try:
-        from houses.services_provider import get_services
+    from houses.services_provider import get_services
 
-        svc = get_services()
+    svc = get_services()
+    try:
         persons_attempt = svc.persons_source.latest_attempt()
         if persons_attempt.succeeded:
             person_name = _lookup_person_by_email(session["email"], persons_attempt.value_or_none())
     except Exception:
-        pass
+        logger.exception("Failed to look up person name")
 
     return {
         "authenticated": True,
