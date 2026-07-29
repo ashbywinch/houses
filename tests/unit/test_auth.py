@@ -1,6 +1,7 @@
 """Tests for OAuth endpoints and session-based comment attribution."""
 
 from __future__ import annotations
+
 from unittest.mock import MagicMock
 
 import pytest

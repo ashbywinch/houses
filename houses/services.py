@@ -171,9 +171,9 @@ class _DefaultOAuthService:
         return authorization_url, code_verifier
 
     def exchange_code(self, code: str, code_verifier: str, state: str) -> dict:
-        from google_auth_oauthlib.flow import Flow
-        from google.oauth2 import id_token
         from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token
+        from google_auth_oauthlib.flow import Flow
 
         client_config = {
             "web": {
