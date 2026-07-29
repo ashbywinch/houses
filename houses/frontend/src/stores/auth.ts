@@ -63,7 +63,12 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  function setImpersonating(person: string) {
+  async function setImpersonating(person: string | null) {
+    const resp = await api.impersonate(person)
+    if (!resp.ok) {
+      console.error('Failed to update impersonation on server')
+      return
+    }
     impersonating.value = person
   }
 

@@ -126,3 +126,10 @@ export function postComment(opts: { rid: string; text: string; person?: string }
     body: JSON.stringify(body),
   }).then(checkFor401).then(r => parseJson(r))
 }
+
+export async function impersonate(person: string | null): Promise<Response> {
+  return fetch(`${BASE}/auth/impersonate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ person }),
+  })

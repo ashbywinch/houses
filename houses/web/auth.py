@@ -144,43 +144,22 @@ async def login():
     _sweep_stale_states()
     state = secrets.token_urlsafe(32)
 
-    try:
-        from google_auth_oauthlib.flow import Flow
+    from houses.services_provider import get_services
 
-        client_config = {
-            "web": {
-                "client_id": settings.google_client_id,
-                "client_secret": settings.google_client_secret,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [settings.public_url.rstrip("/") + "/api/auth/callback"],
-            }
-        }
-        flow = Flow.from_client_config(
-            client_config,
-            scopes=[
-                "openid",
-                "https://www.googleapis.com/auth/userinfo.email",
-                "https://www.googleapis.com/auth/userinfo.profile",
-            ],
-        )
-        flow.redirect_uri = settings.public_url.rstrip("/") + "/api/auth/callback"
-        authorization_url, state_from_flow = flow.authorization_url(
-            access_type="online",
-            include_granted_scopes="false",
-            state=state,
-        )
-        # Persist the code_verifier so the callback can use it (PKCE)
-        code_verifier: str = getattr(flow, "code_verifier", None) or ""  # type: ignore[arg-type]
-        if not code_verifier:
-            return {"status": "error", "detail": "PKCE code_verifier not generated"}
-        _oauth_states[state] = {
-            "code_verifier": code_verifier,
-            "created_at": datetime.now(UTC).timestamp(),
-        }
-        return {"auth_url": authorization_url}
+    svc = get_services()
+    try:
+        authorization_url, code_verifier = svc.oauth_service.create_authorization_url(state)
     except ImportError:
         return {"status": "error", "detail": "google-auth libraries not installed"}
+
+    if not code_verifier:
+        return {"status": "error", "detail": "PKCE code_verifier not generated"}
+
+    _oauth_states[state] = {
+        "code_verifier": code_verifier,
+        "created_at": datetime.now(UTC).timestamp(),
+    }
+    return {"auth_url": authorization_url}
 
 
 @auth_router.get("/callback")
@@ -203,42 +182,11 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
 
     code_verifier = state_data.get("code_verifier", "") if isinstance(state_data, dict) else ""
 
+    from houses.services_provider import get_services
+
+    svc = get_services()
     try:
-        from google_auth_oauthlib.flow import Flow
-
-        client_config = {
-            "web": {
-                "client_id": settings.google_client_id,
-                "client_secret": settings.google_client_secret,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [settings.public_url.rstrip("/") + "/api/auth/callback"],
-            }
-        }
-        flow = Flow.from_client_config(
-            client_config,
-            scopes=[
-                "openid",
-                "https://www.googleapis.com/auth/userinfo.email",
-                "https://www.googleapis.com/auth/userinfo.profile",
-            ],
-        )
-        flow.redirect_uri = settings.public_url.rstrip("/") + "/api/auth/callback"
-        # Restore the PKCE code_verifier from the login request
-        if code_verifier:
-            flow.code_verifier = code_verifier
-        flow.fetch_token(code=code)
-
-        # Verify the id_token
-        from google.auth.transport import requests as google_requests
-        from google.oauth2 import id_token as id_token_verifier
-
-        id_token = getattr(flow.credentials, "id_token", None)
-        if not id_token:
-            return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=no_id_token")
-
-        request_adapter = google_requests.Request()
-        id_info = id_token_verifier.verify_oauth2_token(id_token, request_adapter, settings.google_client_id)
+        id_info = svc.oauth_service.exchange_code(code, code_verifier, state)
 
         if not id_info.get("email_verified", False):
             return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=email_not_verified")

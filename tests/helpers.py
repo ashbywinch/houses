@@ -209,6 +209,28 @@ class FakeRailFare:
         return None, None
 
 
+class FakeOAuthService:
+    """Fake Google OAuth service for tests.
+
+    Returns canned authorization URLs and id_info.
+    """
+
+    def __init__(self, auth_url: str = "https://accounts.google.com/o/oauth2/auth?fake", id_info: dict | None = None):
+        self.auth_url = auth_url
+        self._id_info = id_info or {
+            "email": "ashby@example.com",
+            "email_verified": True,
+            "name": "Ashby",
+            "picture": "",
+        }
+
+    def create_authorization_url(self, state: str) -> tuple[str, str]:
+        return self.auth_url, "fake_code_verifier"
+
+    def exchange_code(self, code: str, code_verifier: str, state: str) -> dict:
+        return self._id_info
+
+
 # ── Composite helper ──────────────────────────────────────────────────
 
 
@@ -247,6 +269,7 @@ def make_services(**overrides: Any) -> Services:
         epc_service=FakeEPC(),
         council_tax_service=FakeCouncilTax(),
         rail_fare_service=FakeRailFare(),
+        oauth_service=FakeOAuthService(),
     )
     base.update(overrides)
     return Services(**base)
