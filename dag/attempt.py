@@ -101,7 +101,7 @@ class Attempt[T](metaclass=_AttemptMeta):
 
     _now: Callable[[], datetime] = lambda: datetime.now(UTC)
 
-    def __init__(self, status: _Status, value: T | None = None, error: str = "", metadata: dict | None = None) -> None:
+    def __init__(self, status: _Status, value: T | None = None, error: str = "", metadata: dict | None = None, *, _now: Callable[[], datetime] | None = None) -> None:
         if status is _Status.SUCCEEDED and isinstance(value, Attempt):
             raise TypeError(
                 f"Cannot create Attempt.succeeded() with an Attempt as value. "
@@ -113,7 +113,7 @@ class Attempt[T](metaclass=_AttemptMeta):
         object.__setattr__(self, "_value", value)
         object.__setattr__(self, "_error", error)
         object.__setattr__(self, "_metadata", metadata or {})
-        object.__setattr__(self, "_created_at", Attempt._now())
+        object.__setattr__(self, "_created_at", (_now or Attempt._now)())
 
     # ── Predicates (instance properties) ─────────────────────────
 
