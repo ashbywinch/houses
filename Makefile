@@ -3,7 +3,7 @@
 
 # Variables
 PYTHON := .venv/bin/python
-UV := uv
+UV := $(shell command -v uv 2>/dev/null || echo $(HOME)/.local/bin/uv)
 RUFF := .venv/bin/ruff
 PYTEST := .venv/bin/pytest
 OMP_CONFIG_DIR ?= $(HOME)/Documents/code/omp-config
@@ -55,7 +55,7 @@ run: setup
 		HOUSES_HOST=0.0.0.0 HOUSES_PUBLIC_URL=http://$(LAN_IP).sslip.io:5173 HOUSES_FRONTEND_URL=http://$(LAN_IP).sslip.io:5173 \
 		nohup sh -c 'cd houses/frontend && npm run dev' > .logs/frontend.log 2>&1 & echo $$! > .logs/frontend.pid; \
 		HOUSES_HOST=0.0.0.0 HOUSES_PUBLIC_URL=http://$(LAN_IP).sslip.io:5173 HOUSES_FRONTEND_URL=http://$(LAN_IP).sslip.io:5173 \
-		nohup uv run python -m houses > .logs/backend.log 2>&1 & echo $$! > .logs/backend.pid;
+		nohup $(UV) run python -m houses > .logs/backend.log 2>&1 & echo $$! > .logs/backend.pid;
 
 stop:
 	@echo "Stopping dev processes..."
