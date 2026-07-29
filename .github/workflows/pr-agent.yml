@@ -40,9 +40,9 @@ jobs:
           SINCE="${{ env.REVIEW_START }}"
           NEW_CMTS=$(gh api "repos/${{ github.repository }}/issues/$PR_NUM/comments" --jq "[.[] | select(.user.login == \"github-actions[bot]\" and .updated_at >= \"$SINCE\")]" 2>/dev/null || echo "[]")
           echo "$NEW_CMTS" | jq -e 'length == 0' > /dev/null 2>&1 && NO_COMMENTS=true || NO_COMMENTS=false
-          if echo "$NEW_CMTS" | jq -e '.[].body | test("PR Reviewer Guide|PR Code Suggestions")' > /dev/null 2>&1; then
+          if echo "$NEW_CMTS" | jq -e 'any(.[].body; test("PR Reviewer Guide|PR Code Suggestions"))' > /dev/null 2>&1; then
             echo "Review check passed"
-          elif echo "$NEW_CMTS" | jq -e '.[].body | test("failed"; "i")' > /dev/null 2>&1; then
+          elif echo "$NEW_CMTS" | jq -e 'any(.[].body; test("failed"; "i"))' > /dev/null 2>&1; then
             echo "::error::PR-Agent reported a failure:"
             echo "$NEW_CMTS" | jq -r '.[].body'
             exit 1
