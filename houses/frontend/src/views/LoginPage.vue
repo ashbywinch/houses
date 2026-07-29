@@ -9,14 +9,14 @@ const loginError = ref<string | null>(null)
 
 onMounted(() => {
   // If already authenticated, go straight to properties
-  if (auth.user) {
+  if (auth.user && !auth.loading) {
     router.push('/')
   }
 })
 
 // Auth state may resolve asynchronously after mount — redirect once it does
 watch(() => auth.user, (user) => {
-  if (user) {
+  if (user && !auth.loading) {
     router.push('/')
   }
 })

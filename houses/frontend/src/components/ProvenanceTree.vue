@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { Provenance } from '../types'
 
 const props = withDefaults(defineProps<{
@@ -10,6 +10,12 @@ const props = withDefaults(defineProps<{
   showControls: false,
   depth: 0,
 })
+
+const treeEl = ref<HTMLElement | null>(null)
+
+function toggleAll(open: boolean) {
+  treeEl.value?.querySelectorAll<HTMLDetailsElement>('details')?.forEach(d => d.open = open)
+}
 
 const hasChildren = computed(() => {
   return props.provenance.sources && Object.keys(props.provenance.sources).length > 0
@@ -62,7 +68,7 @@ function sourceLabel(st: string | undefined): string {
 </script>
 
 <template>
-  <div class="prov-tree" :class="{ 'prov-tree--root': depth === 0 }">
+  <div ref="treeEl" class="prov-tree" :class="{ 'prov-tree--root': depth === 0 }">
     <!-- Breadcrumb trail (top level only) -->
     <div v-if="showControls && depth === 0" class="prov-breadcrumb">
       <span v-for="(crumb, i) in breadcrumb" :key="i" class="prov-breadcrumb__item">
@@ -73,10 +79,10 @@ function sourceLabel(st: string | undefined): string {
 
     <!-- Expand/collapse all controls (top level only) -->
     <div v-if="showControls && depth === 0 && hasChildren" class="prov-controls">
-      <button class="prov-controls__btn" @click="($el as HTMLElement)?.querySelectorAll<HTMLDetailsElement>('details')?.forEach(d => d.open = true)">
+      <button class="prov-controls__btn" @click="toggleAll(true)">
         Expand all
       </button>
-      <button class="prov-controls__btn" @click="($el as HTMLElement)?.querySelectorAll<HTMLDetailsElement>('details')?.forEach(d => d.open = false)">
+      <button class="prov-controls__btn" @click="toggleAll(false)">
         Collapse all
       </button>
     </div>
