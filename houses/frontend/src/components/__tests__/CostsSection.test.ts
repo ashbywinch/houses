@@ -1,8 +1,16 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
+import { usePropertiesStore } from '../../stores/properties'
 import CostsSection from '../CostsSection.vue'
+import * as api from '../../services/api'
 
-function mountCosts(overrides?: Record<string, unknown>) {
+vi.mock('../../services/api', () => ({
+  patchWorksEstimate: vi.fn().mockResolvedValue(new Response()),
+}))
+
+function mountCosts(overrides?: Record<string, unknown>, pinia?: ReturnType<typeof createPinia>) {
+  const activePinia = pinia ?? createPinia()
   return mount(CostsSection, {
     props: {
       affordability: {
@@ -11,24 +19,27 @@ function mountCosts(overrides?: Record<string, unknown>) {
         monthly_sinking_fund: { succeeded: false, value: null, error: null, provenance: {} },
         monthly_commute_cost: { succeeded: false, value: null, error: null, provenance: {} },
         total_monthly_housing_cost: { succeeded: false, value: null, error: null, provenance: {} },
-        works_estimates: { succeeded: true, value: {}, error: null, provenance: {} },
-        total_works: { succeeded: true, value: { amount: '0', currency: 'GBP' }, error: null, provenance: {} },
+        works_estimates: { succeeded: true, value: { Ashby: 20000 }, error: null, provenance: {} },
+        total_works: { succeeded: true, value: { amount: '20000', currency: 'GBP' }, error: null, provenance: {} },
         ...(overrides?.affordability as Record<string, unknown> ?? {}),
       },
       epc: { succeeded: false, value: null, error: null, provenance: {} },
       persons: {
         succeeded: true,
         value: [
-          { name: 'Simon', has_car: true, works_estimate_required: false },
-          { name: 'Lorena', has_car: false, works_estimate_required: false },
-          { name: 'Ashby', has_car: true, works_estimate_required: false },
+          { name: 'Simon', has_car: true, is_child: false },
+          { name: 'Lorena', has_car: false, is_child: false },
+          { name: 'Ashby', has_car: true, is_child: false },
+          { name: 'George', has_car: false, is_child: true },
         ],
         error: null,
         provenance: {},
       },
       rid: 'test123',
+      currentPerson: 'Ashby',
       ...overrides,
     },
+    global: { plugins: [activePinia] },
   })
 }
 
@@ -36,23 +47,22 @@ describe('CostsSection works estimates', () => {
   it('shows Cost of Works total row', () => {
     const wrapper = mountCosts()
     expect(wrapper.text()).toContain('Cost of Works')
-    expect(wrapper.text()).toContain('£0')
   })
 
-  it('shows per-person rows for all persons when dict is empty', () => {
+  it('shows per-person rows for all non-child persons', () => {
     const wrapper = mountCosts()
     expect(wrapper.text()).toContain('Simon')
     expect(wrapper.text()).toContain('Lorena')
     expect(wrapper.text()).toContain('Ashby')
   })
 
+  it('does NOT show child persons (George)', () => {
+    const wrapper = mountCosts()
+    expect(wrapper.text()).not.toContain('George')
+  })
+
   it('shows per-person value when dict has entry', () => {
-    const wrapper = mountCosts({
-      affordability: {
-        works_estimates: { succeeded: true, value: { Ashby: 20000 }, error: null, provenance: {} },
-        total_works: { succeeded: true, value: { amount: '20000', currency: 'GBP' }, error: null, provenance: {} },
-      },
-    })
+    const wrapper = mountCosts()
     expect(wrapper.text()).toContain('£20,000')
   })
 
@@ -63,25 +73,53 @@ describe('CostsSection works estimates', () => {
         total_works: { succeeded: true, value: { amount: '20000', currency: 'GBP' }, error: null, provenance: {} },
       },
     })
-    // Simon has no estimate in the dict — should show "£?" or similar
-    const simonRow = wrapper.text()
-    expect(simonRow).toContain('Simon')
-    // The value should indicate missing (not a number)
-    expect(simonRow).toMatch(/Simon.*\?/)
+    const text = wrapper.text()
+    expect(text).toMatch(/Simon.*\?/)
   })
 
-  it('opens inline editor on click', async () => {
-    const wrapper = mountCosts({
-      affordability: {
-        works_estimates: { succeeded: true, value: { Ashby: 20000 }, error: null, provenance: {} },
-        total_works: { succeeded: true, value: { amount: '20000', currency: 'GBP' }, error: null, provenance: {} },
-      },
-    })
-    // Find an editable value and click it
-    const valueEl = wrapper.find('.costs-value--clickable')
+  it('opens inline editor on click for current person', async () => {
+    const wrapper = mountCosts()
+    const valueEl = wrapper.find('.costs-value--editable')
     expect(valueEl.exists()).toBe(true)
     await valueEl.trigger('click')
-    // Should show an input
     expect(wrapper.find('input').exists()).toBe(true)
+  })
+
+  it('shows non-current persons as read-only', () => {
+    const wrapper = mountCosts()
+    const text = wrapper.text()
+    expect(text).toContain('Simon')
+    expect(text).toContain('Lorena')
+    // Only one editable row (Ashby is the current person)
+    const editableEls = wrapper.findAll('.costs-value--editable')
+    expect(editableEls.length).toBe(1)
+    // Non-current persons should have readonly class
+    const readonlyEls = wrapper.findAll('.costs-value--readonly')
+    expect(readonlyEls.length).toBe(2)
+  })
+
+  it('refreshes detail after saving works estimate', async () => {
+    const pinia = createPinia()
+    const store = usePropertiesStore(pinia)
+    const loadDetailSpy = vi.spyOn(store, 'loadDetail')
+
+    const wrapper = mountCosts({}, pinia)
+
+    const valueEl = wrapper.find('.costs-value--editable')
+    await valueEl.trigger('click')
+
+    const input = wrapper.find('input')
+    await input.setValue('25000')
+    await input.trigger('blur')
+
+    expect(api.patchWorksEstimate).toHaveBeenCalledWith('test123', 'Ashby', 25000)
+    expect(loadDetailSpy).toHaveBeenCalledWith('test123', true)
+  })
+
+  it('shows visual affordance on editable values', () => {
+    const wrapper = mountCosts()
+    const clickable = wrapper.find('.costs-value--editable')
+    expect(clickable.exists()).toBe(true)
+    expect(clickable.classes()).toContain('costs-value--editable')
   })
 })

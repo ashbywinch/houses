@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { epcClass } from '../formatters/format'
 import { patchWorksEstimate } from '../services/api'
+import { usePropertiesStore } from '../stores/properties'
 import ProvenanceTree from './ProvenanceTree.vue'
 
 const props = defineProps<{
@@ -9,6 +10,7 @@ const props = defineProps<{
   epc: any
   persons?: any
   rid?: string
+  currentPerson?: string | null
 }>()
 
 function epcStepClass(band: string): string {
@@ -29,6 +31,7 @@ function isImpossible(val: any): boolean {
 // ── Works estimate inline editing ─────────────────────
 const editingPerson = ref<string | null>(null)
 const editValue = ref<string>('')
+const store = usePropertiesStore()
 
 function startEdit(person: string, currentValue: number | null) {
   editingPerson.value = person
@@ -46,6 +49,10 @@ async function saveEdit(person: string) {
   if (isNaN(parsed as number) && editValue.value !== '') return
   if (!props.rid) return
   await patchWorksEstimate(props.rid, person, parsed as number | null)
+  // Refresh detail so the new value appears
+  if (props.rid) {
+    await store.loadDetail(props.rid, true)
+  }
 }
 
 function handleKeydown(e: KeyboardEvent, person: string) {
@@ -59,14 +66,13 @@ const worksEstimates = () =>
     ? (props.affordability.works_estimates.value as Record<string, number> ?? {})
     : {}
 
-const personList = () =>
+const buyerList = () =>
   props.persons?.value
-    ? (props.persons.value as Array<Record<string, unknown>>)
+    ? (props.persons.value as Array<Record<string, unknown>>).filter((p: any) => !p.is_child)
     : []
 
-function personRequiresWorks(personName: string): boolean {
-  const p = personList().find((x: any) => x.name === personName)
-  return p?.works_estimate_required === true
+function canEdit(personName: string): boolean {
+  return props.currentPerson != null && props.currentPerson === personName
 }
 </script>
 
@@ -135,11 +141,12 @@ function personRequiresWorks(personName: string): boolean {
       <!-- Per-person works breakdown -->
       <div v-if="affordability?.works_estimates?.succeeded" class="costs-subsection">
         <div
-          v-for="p in personList()"
+          v-for="p in buyerList()"
           :key="String(p.name)"
           class="costs-row costs-row--sub"
         >
           <span class="costs-label">{{ p.name }}</span>
+          <!-- Editing state (current person only) -->
           <div v-if="editingPerson === p.name" class="costs-edit-group">
             <span class="costs-edit-prefix">£</span>
             <input
@@ -151,20 +158,37 @@ function personRequiresWorks(personName: string): boolean {
               @blur="saveEdit(p.name as string)"
             />
           </div>
+          <!-- Editable value (current person) -->
+          <span
+            v-else-if="canEdit(p.name as string) && p.name in worksEstimates() && worksEstimates()[p.name as string] != null"
+            class="costs-value costs-value--editable"
+            title="Click to edit your works estimate"
+            @click="startEdit(p.name as string, worksEstimates()[p.name as string])"
+          >✎ £{{ worksEstimates()[p.name as string].toLocaleString() }}</span>
+          <span
+            v-else-if="canEdit(p.name as string) && (p as any).works_estimate_required"
+            class="costs-value costs-value--editable costs-value--required"
+            title="Click to add your works estimate"
+            @click="startEdit(p.name as string, null)"
+          >✎ £? — required</span>
+          <span
+            v-else-if="canEdit(p.name as string)"
+            class="costs-value costs-value--editable"
+            title="Click to add your works estimate"
+            @click="startEdit(p.name as string, null)"
+          >✎ £?</span>
+          <!-- Read-only value (other person) -->
           <span
             v-else-if="p.name in worksEstimates() && worksEstimates()[p.name as string] != null"
-            class="costs-value costs-value--clickable"
-            @click="startEdit(p.name as string, worksEstimates()[p.name as string])"
+            class="costs-value costs-value--readonly"
           >£{{ worksEstimates()[p.name as string].toLocaleString() }}</span>
           <span
             v-else-if="(p as any).works_estimate_required"
-            class="costs-value costs-value--clickable costs-value--required"
-            @click="startEdit(p.name as string, null)"
+            class="costs-value costs-value--readonly costs-value--required"
           >£? — required</span>
           <span
             v-else
-            class="costs-value costs-value--clickable"
-            @click="startEdit(p.name as string, null)"
+            class="costs-value costs-value--readonly"
           >£?</span>
         </div>
       </div>
@@ -255,8 +279,18 @@ function personRequiresWorks(personName: string): boolean {
 .costs-label { font-size: var(--fs-sm); color: var(--text); }
 .costs-value { font-size: var(--fs-sm); font-weight: var(--fw-semibold); margin-left: auto; margin-right: var(--sp-2); }
 .costs-value--impossible { color: var(--red); font-style: italic; }
-.costs-value--clickable { cursor: pointer; border-bottom: 1px dashed var(--slate-300); }
+.costs-value--readonly { color: var(--text-secondary); }
 .costs-value--required { color: var(--red); font-style: italic; }
+.costs-value--editable {
+  color: var(--blue);
+  cursor: pointer;
+  border-bottom: 1px dashed var(--blue);
+  padding-bottom: 1px;
+}
+.costs-value--editable:hover {
+  background: var(--slate-50);
+  border-radius: 2px;
+}
 .costs-subsection { display: flex; flex-direction: column; }
 .costs-provenance { background: var(--slate-50); padding: var(--sp-3) var(--sp-4); border-radius: var(--radius); margin: var(--sp-2) 0; }
 .costs-edit-group { display: flex; align-items: center; gap: 2px; margin-left: auto; margin-right: var(--sp-2); }

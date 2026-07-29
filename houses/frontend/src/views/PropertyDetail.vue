@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
 import { usePropertiesStore } from '../stores/properties'
 import Header from '../components/Header.vue'
 import CommuteSection from '../components/CommuteSection.vue'
@@ -10,6 +11,9 @@ import NotesSection from '../components/NotesSection.vue'
 const route = useRoute()
 const router = useRouter()
 const store = usePropertiesStore()
+const auth = useAuthStore()
+
+const currentPerson = computed(() => auth.user?.person ?? null)
 
 const rid = computed(() => route.params.rid as string)
 const detail = computed(() => store.details[rid.value])
@@ -188,6 +192,7 @@ async function toggleFavourite() {
         :epc="detail.epc"
         :persons="detail.settings?.persons"
         :rid="rid"
+        :current-person="currentPerson"
       />
 
       <!-- ═══════════ NOTES ═══════════ -->
