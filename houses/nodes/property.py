@@ -218,6 +218,19 @@ class PropertyNodes:
             self._slots.append(slot)
             node.changed.connect(slot)
 
+        # Wire derived affordability nodes so the frontend is notified
+        # when they recompute (e.g. after works_estimates changes).
+        for node in (
+            self.total_works,
+            self.total_equity,
+            self.mortgage_required,
+            self.monthly_mortgage,
+            self.total_monthly_cost,
+        ):
+            slot = Slot(self._on_node_changed)
+            self._slots.append(slot)
+            node.changed.connect(slot)
+
         # Migrate old ashby_works float → works_estimates dict
         self._migrate_old_ashby_works()
 

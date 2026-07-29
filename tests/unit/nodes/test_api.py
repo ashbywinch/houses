@@ -168,3 +168,66 @@ class TestWorksEstimateApi:
             f"Expected 200, got {resp.status_code}: {resp.text[:500]}"
         )
         assert resp.json() == {"status": "ok"}
+
+    def test_works_estimate_propagates_to_detail(self):
+        """After PATCH, GET detail must show updated mortgage
+        WITHOUT requiring an explicit flush."""
+        from money import Money
+
+        from houses.geo import GeoPoint
+        from houses.nodes.property import PropertyNodes
+        from houses.property_registry import register_property
+
+        rid = "22345678"
+
+        client = self._setup()
+        prop = PropertyNodes(rid)
+
+        # Seed DAG data so mortgage_required computes
+        prop.rightmove_price.push(Money("500000", "GBP"), "test")
+        prop.rightmove_address.push("1 Test St", "test")
+        prop.rightmove_bedrooms.push("3", "test")
+        prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.postcode.push("SW1V 2QQ", "test")
+        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+
+        register_property(rid, prop)
+
+        from tests.unit.conftest import flush_all
+
+        flush_all()
+        flush_all()
+
+        # Get baseline detail
+        resp = client.get(f"/api/properties/{rid}/detail")
+        assert resp.status_code == 200, resp.text[:500]
+        detail_before = resp.json()
+
+        af = detail_before.get("affordability")
+        assert af is not None, "detail missing affordability"
+        baseline_mortgage = af.get("mortgage_required")
+        assert baseline_mortgage is not None
+
+        # Push a works estimate via the PATCH endpoint
+        resp = client.patch(
+            f"/api/properties/{rid}/works-estimate",
+            json={"person": "Ashby", "value": 20000},
+        )
+        assert resp.status_code == 200, resp.text[:500]
+
+        # Re-fetch detail IMMEDIATELY — no manual flush.
+        # The PATCH endpoint must flush the processor itself.
+        resp = client.get(f"/api/properties/{rid}/detail")
+        assert resp.status_code == 200, resp.text[:500]
+        detail_after = resp.json()
+
+        af_after = detail_after.get("affordability")
+        updated_mortgage = af_after.get("mortgage_required")
+
+        assert updated_mortgage is not None
+        assert updated_mortgage != baseline_mortgage, (
+            f"mortgage_required did not change after works update: "
+            f"baseline={baseline_mortgage}, updated={updated_mortgage}"
+        )
