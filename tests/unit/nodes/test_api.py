@@ -134,3 +134,37 @@ class TestSettingsApi:
             resp = client.post("/api/admin/reseed")
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
+
+
+class TestWorksEstimateApi:
+    """PATCH /api/properties/{rid}/works-estimate endpoint."""
+
+    def _setup(self):
+        from fastapi.testclient import TestClient
+        from houses.server import app
+        from houses.property_registry import _reset as _reset_registry
+
+        _reset_registry()
+        client = TestClient(app)
+        _inject_session(client)
+        return client
+
+    def test_patch_works_estimate_updates_value(self):
+        """PATCH must update the works_estimates dict and return 200."""
+        from houses.nodes.property import PropertyNodes
+        from houses.property_registry import register_property
+
+        rid = "12345678"
+
+        client = self._setup()
+        prop = PropertyNodes(rid)
+        register_property(rid, prop)
+
+        resp = client.patch(
+            f"/api/properties/{rid}/works-estimate",
+            json={"person": "Ashby", "value": 15000},
+        )
+        assert resp.status_code == 200, (
+            f"Expected 200, got {resp.status_code}: {resp.text[:500]}"
+        )
+        assert resp.json() == {"status": "ok"}

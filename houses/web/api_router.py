@@ -380,9 +380,9 @@ async def patch_works_estimate(
 
     Body: {"person": "Ashby", "value": 15000}
     """
-    from houses.property_registry import get_registry_property
+    from houses.property_registry import get_property
 
-    prop = get_registry_property(rid)
+    prop = get_property(rid)
     if prop is None:
         raise HTTPException(status_code=404, detail="Property not found")
 
