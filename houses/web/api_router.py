@@ -56,10 +56,6 @@ async def staleness_check(rid: str, nodes: str = ""):
     return {"rid": rid, "nodes": stale_map, "fresh": fresh}
 
 
-@api_router.get("/properties")
-async def list_properties():
-    return {"properties": list_registry_properties()}
-
 
 def _score_from_summary(s: dict) -> int:
     """Compute card score matching old ``card_data`` formula:
