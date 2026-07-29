@@ -50,7 +50,7 @@ class TotalWorksNode(DerivedNode[Money]):
             p
             for p in buyers
             if getattr(p, "works_estimate_required", False)
-            and p.name not in wd
+            and (p.name not in wd or wd[p.name] is None)
         ]
         if missing:
             names = ", ".join(p.name for p in missing)

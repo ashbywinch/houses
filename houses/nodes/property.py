@@ -200,14 +200,13 @@ class PropertyNodes:
                 self._slots.append(slot)
                 node.changed.connect(slot)
 
-        # Migrate old ashby_works float → works_estimates dict
-        self._migrate_old_ashby_works()
-
-        # Ensure works_estimates has a default empty dict so the DAG chain
-        # resolves (total_works, mortgage_required, etc.) even when no
-        # sheet data or migration value is available.
+        # Seed works_estimates: migrate old float, or set default empty dict.
+        # Only do this if the node has no value yet (e.g. from View tab bootstrap
+        # or a previous user edit).
         if self.works_estimates.latest_attempt().pending:
-            self.works_estimates.push({}, "default")
+            self._migrate_old_ashby_works()
+            if self.works_estimates.latest_attempt().pending:
+                self.works_estimates.push({}, "default")
 
     def _migrate_old_ashby_works(self) -> None:
         from houses.nodes.cutover import migrate_old_ashby_works_sync

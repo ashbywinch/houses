@@ -42,7 +42,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 pass
             break
 
-    if not session:
+    if not session or not session.get("email"):
         await websocket.close(code=4001)
         return
 
