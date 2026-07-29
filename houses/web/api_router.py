@@ -240,6 +240,8 @@ async def add_property_comment(rid: str, body: CommentBody, request: Request):
     if impersonate:
         if not session_user.get("is_superuser"):
             raise HTTPException(status_code=403, detail="Only superusers can impersonate")
+        if not impersonate.strip():
+            raise HTTPException(status_code=400, detail="Impersonation person name must not be empty")
         person = impersonate
     else:
         folded_email = session_user.get("email", "").casefold()

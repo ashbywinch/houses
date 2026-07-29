@@ -19,9 +19,9 @@ replaced with an in-memory SQLite database (same mechanism as
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import sqlite3
-import threading
 from pathlib import Path
 
 from houses.config import settings
@@ -29,11 +29,13 @@ from houses.config import settings
 logger = logging.getLogger(__name__)
 
 testing: bool = False
-_connection_cache = threading.local()
+_connection_cache: contextvars.ContextVar[sqlite3.Connection | None] = (
+    contextvars.ContextVar("_connection_cache", default=None)
+)
 
 
 def get_connection() -> sqlite3.Connection:
-    """Return a thread-local SQLite connection with WAL mode enabled."""
+    """Return a context-local SQLite connection with WAL mode enabled."""
     if testing:
         import dag.persistence as per
 
@@ -44,20 +46,22 @@ def get_connection() -> sqlite3.Connection:
     path = Path(settings.sqlite_path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    if not hasattr(_connection_cache, "conn") or _connection_cache.conn is None:
+    conn = _connection_cache.get()
+    if conn is None:
         conn = sqlite3.connect(str(path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=5000")
-        _connection_cache.conn = conn
-    return _connection_cache.conn
+        _connection_cache.set(conn)
+    return conn
 
 
 def close_db() -> None:
-    """Close the cached thread-local connection and clear it."""
-    if hasattr(_connection_cache, "conn") and _connection_cache.conn is not None:
-        _connection_cache.conn.close()
-        _connection_cache.conn = None
+    """Close the cached context-local connection and clear it."""
+    conn = _connection_cache.get()
+    if conn is not None:
+        conn.close()
+        _connection_cache.set(None)
 
 
 _COMMENTS_TABLE = """

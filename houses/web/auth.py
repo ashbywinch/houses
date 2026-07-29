@@ -181,6 +181,8 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
         return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=invalid_state")
 
     code_verifier = state_data.get("code_verifier", "") if isinstance(state_data, dict) else ""
+    if not code_verifier:
+        return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=missing_code_verifier")
 
     from houses.services_provider import get_services
 
