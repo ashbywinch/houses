@@ -3,7 +3,7 @@
 Changes:
 - ``duration_minutes: <int>`` → ``duration: {"value": <int>, "unit": "minute"}``
 - ``distance_km: <float>`` → ``distance: {"value": <float>, "unit": "km"}``
-- ``bus_walk_penalty_minutes: <int>`` → ``bus_walk_penalty: {"magnitude": <int>, "unit": "minute"}``
+- ``bus_walk_penalty_minutes: <int>`` → ``bus_walk_penalty: {"value": <int>, "unit": "minute"}``
 - ``walk_to_town_minutes: <int>`` → ``walk_to_town: {"value": <int>, "unit": "minute"}``
 """
 
@@ -28,9 +28,9 @@ def _migrate_value(val):
             if k == "distance_km" and isinstance(v, (int, float)):
                 rewritten["distance"] = {"value": float(v), "unit": "km"}
                 continue
-            # `bus_walk_penalty_minutes: N` → `bus_walk_penalty: {"magnitude": N, "unit": "minute"}`
+            # `bus_walk_penalty_minutes: N` → `bus_walk_penalty: {"value": N, "unit": "minute"}`
             if k == "bus_walk_penalty_minutes" and isinstance(v, (int, float)):
-                rewritten["bus_walk_penalty"] = {"magnitude": int(v), "unit": "minute"}
+                rewritten["bus_walk_penalty"] = {"value": int(v), "unit": "minute"}
                 continue
             # `walk_to_town_minutes: N` → `walk_to_town: {"value": N, "unit": "minute"}`
             if k == "walk_to_town_minutes" and isinstance(v, (int, float)):
@@ -39,6 +39,10 @@ def _migrate_value(val):
             # `daily_cost: {"amount": float, ...}` → string amount (pre-Money migration)
             if k == "amount" and isinstance(v, (int, float)) and not isinstance(v, bool):
                 rewritten[k] = str(v)
+                continue
+            # `{"magnitude": N, ...}` → `{"value": N, ...}` (first migration pass used "magnitude")
+            if k == "magnitude":
+                rewritten["value"] = _migrate_value(v)
                 continue
             rewritten[k] = _migrate_value(v)
         return rewritten
@@ -57,7 +61,8 @@ def migrate_node_results(db_path: str | Path) -> int:
         "WHERE result_json LIKE '%duration_minutes%' "
         "OR result_json LIKE '%distance_km%' "
         "OR result_json LIKE '%bus_walk_penalty_minutes%' "
-        "OR result_json LIKE '%walk_to_town_minutes%'"
+        "OR result_json LIKE '%walk_to_town_minutes%' "
+        "OR result_json LIKE '%magnitude%'"
     ).fetchall()
 
     for row in rows:

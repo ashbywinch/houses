@@ -12,7 +12,7 @@ def _parse_quantity(v: object, default_unit: str) -> Quantity:
     - ``Quantity`` — pass through
     - ``int`` / ``float`` — treated as magnitude in ``default_unit``
     - ``str`` like ``"10 km"`` — parsed by pint (number + optional unit)
-    - ``dict`` with ``magnitude`` and optional ``unit`` keys
+    - ``dict`` with ``value`` and optional ``unit`` keys
     """
     if isinstance(v, Quantity):
         return v
@@ -24,7 +24,7 @@ def _parse_quantity(v: object, default_unit: str) -> Quantity:
         except Exception:
             return Quantity(float(v), default_unit)
     if isinstance(v, dict):
-        return Quantity(v["magnitude"], v.get("unit", default_unit))
+        return Quantity(v["value"], v.get("unit", default_unit))
     raise TypeError(f"Cannot convert {type(v).__name__} to Quantity")
 
 
