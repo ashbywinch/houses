@@ -133,3 +133,4 @@ export async function impersonate(person: string | null): Promise<Response> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ person }),
   })
+}
