@@ -210,12 +210,14 @@ class PropertyNodes:
                 node.changed.connect(slot)
 
         # Seed works_estimates: migrate old float, or set default empty dict.
-        # Only do this if the node has no value yet (e.g. from View tab bootstrap
-        # or a previous user edit).
         if self.works_estimates.latest_attempt().pending:
             self._migrate_old_ashby_works()
             if self.works_estimates.latest_attempt().pending:
                 self.works_estimates.push({}, "default")
+
+        # Seed rental_income with default £0 so the DAG chain resolves.
+        if self.rental_income.latest_attempt().pending:
+            self.rental_income.push(Money("0", "GBP"), "default")
 
     def _migrate_old_ashby_works(self) -> None:
         from houses.nodes.cutover import migrate_old_ashby_works_sync
