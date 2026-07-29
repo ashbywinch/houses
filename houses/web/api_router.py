@@ -206,9 +206,10 @@ async def get_property_comments(rid: str):
 
 
 class CommentBody(BaseModel):
-    """Validated request body for posting a comment."""
+    """Validated request body for posting a comment.
+    Person is determined server-side from the session, not from this body.
+    """
     text: str = Field(min_length=1, max_length=5000)
-    person: str | None = None
 
     @field_validator("text")
     @classmethod

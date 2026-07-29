@@ -32,7 +32,7 @@ from houses.sheets import (
 )
 from houses.sheets.reader import get_properties_data, resolve_tab
 from houses.web.api_router import api_router
-from houses.web.auth import auth_router
+from houses.web.auth import auth_router, get_session_user
 from houses.web.json_utils import asdict_serializable
 
 logger = logging.getLogger(__name__)
@@ -178,12 +178,9 @@ async def _require_auth(request, call_next):
     if path.startswith("/api/") and not path.startswith("/api/auth/") and not path.startswith("/api/ws"):
         if request.method == "OPTIONS":
             return await call_next(request)
-        from houses.web.auth import get_session_user
 
         session_user = get_session_user(request)
         if session_user is None:
-            from fastapi.responses import JSONResponse
-
             return JSONResponse(status_code=401, content={"detail": "Authentication required"})
     return await call_next(request)
 

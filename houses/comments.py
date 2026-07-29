@@ -43,10 +43,10 @@ def add_comment(rid: str, person: str, text: str) -> dict[str, Any]:
     now = datetime.now(UTC).isoformat()
     conn.execute(
         "INSERT INTO comments (rid, person, text, created_at) VALUES (?, ?, ?, ?)",
-        (rid, person, text.strip(), now),
+        (rid, person, text, now),
     )
     conn.commit()
-    return {"person": person, "text": text.strip(), "timestamp": now}
+    return {"person": person, "text": text, "timestamp": now}
 
 
 def migrate_old_comments(rid: str, old_comments: dict[str, Any]) -> list[dict[str, Any]]:

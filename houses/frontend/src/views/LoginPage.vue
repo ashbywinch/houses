@@ -53,15 +53,15 @@ async function signIn() {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: var(--bg, #f5f5f5);
+  background: var(--page-bg);
 }
 
 .login-card {
-  background: #fff;
-  border-radius: 12px;
+  background: var(--card-bg, #fff);
+  border-radius: var(--radius, 12px);
   padding: 40px;
   text-align: center;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.08));
   max-width: 360px;
   width: 100%;
 }
@@ -70,20 +70,20 @@ async function signIn() {
   font-size: 28px;
   font-weight: 700;
   margin: 0 0 8px;
-  color: #1a1a1a;
+  color: var(--text);
 }
 
 .login-card__desc {
   font-size: 14px;
-  color: #666;
+  color: var(--text-secondary, #666);
   margin: 0 0 24px;
 }
 
 .login-card__btn {
   padding: 12px 24px;
-  border-radius: 8px;
+  border-radius: var(--radius, 8px);
   border: none;
-  background: #1a73e8;
+  background: var(--blue, #1a73e8);
   color: #fff;
   font-size: 15px;
   font-weight: 600;
@@ -98,6 +98,6 @@ async function signIn() {
 
 .login-card__error {
   font-size: 13px;
-  color: #999;
+  color: var(--text-muted);
 }
 </style>
