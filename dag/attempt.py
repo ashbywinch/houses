@@ -61,7 +61,7 @@ class _AttemptMeta(type):
 
     @property
     def succeeded(cls):
-        return lambda value, error="": cls(_Status.SUCCEEDED, value=value, error=error)
+        return lambda value, error="", **kwargs: cls(_Status.SUCCEEDED, value=value, error=error, **kwargs)
 
     @succeeded.setter
     def succeeded(cls, value):
