@@ -1,8 +1,31 @@
 """Configuration — postcodes, API keys, sheet IDs."""
 
 from pint import Quantity
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _parse_quantity(v: object, default_unit: str) -> Quantity:
+    """Parse a value into a Quantity.
+
+    Accepts:
+    - ``Quantity`` — pass through
+    - ``int`` / ``float`` — treated as magnitude in ``default_unit``
+    - ``str`` like ``"10 km"`` — parsed by pint (number + optional unit)
+    - ``dict`` with ``value`` and optional ``unit`` keys
+    """
+    if isinstance(v, Quantity):
+        return v
+    if isinstance(v, (int, float)):
+        return Quantity(v, default_unit)
+    if isinstance(v, str):
+        try:
+            return Quantity(v)
+        except Exception:
+            return Quantity(float(v), default_unit)
+    if isinstance(v, dict):
+        return Quantity(v["value"], v.get("unit", default_unit))
+    raise TypeError(f"Cannot convert {type(v).__name__} to Quantity")
 
 
 class Settings(BaseSettings):
@@ -42,6 +65,16 @@ class Settings(BaseSettings):
     school_search_radius: Quantity = Quantity(5, "km")
     max_walk_to_station: Quantity = Quantity(20, "minute")
     bus_walk_penalty: Quantity = Quantity(10, "minute")
+
+    _parse_school_radius = field_validator("school_search_radius", mode="before")(
+        lambda v: _parse_quantity(v, "km")
+    )
+    _parse_max_walk = field_validator("max_walk_to_station", mode="before")(
+        lambda v: _parse_quantity(v, "minute")
+    )
+    _parse_bus_penalty = field_validator("bus_walk_penalty", mode="before")(
+        lambda v: _parse_quantity(v, "minute")
+    )
 
     simon_station_crs: str = "VIC"
     lorena_station_crs: str = "FST"
