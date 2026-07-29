@@ -34,10 +34,11 @@ jobs:
             echo "Manual trigger — skipping review check (no PR number)"
             exit 0
           fi
-          # Only inspect comments posted during this workflow run (since REVIEW_START).
-          # This prevents stale comments from previous runs producing false passes.
+          # PR-Agent uses persistent comments (updates existing comment rather than
+          # posting new). The ?since= filter checks created_at, which misses updates.
+          # Instead, get all bot comments and compare updated_at to REVIEW_START.
           SINCE="${{ env.REVIEW_START }}"
-          NEW_CMTS=$(gh api "repos/${{ github.repository }}/issues/$PR_NUM/comments?since=$SINCE" --jq '[.[] | select(.user.login == "github-actions[bot]")]' 2>/dev/null || echo "[]")
+          NEW_CMTS=$(gh api "repos/${{ github.repository }}/issues/$PR_NUM/comments" --jq "[.[] | select(.user.login == \"github-actions[bot]\" and .updated_at >= \"$SINCE\")]" 2>/dev/null || echo "[]")
           echo "$NEW_CMTS" | jq -e 'length == 0' > /dev/null 2>&1 && NO_COMMENTS=true || NO_COMMENTS=false
           if echo "$NEW_CMTS" | jq -e '.[].body | test("PR Reviewer Guide|PR Code Suggestions")' > /dev/null 2>&1; then
             echo "Review check passed"
