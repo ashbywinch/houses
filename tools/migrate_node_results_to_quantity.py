@@ -3,14 +3,17 @@
 Changes:
 - ``duration_minutes: <int>`` → ``duration: {"value": <int>, "unit": "minute"}``
 - ``distance_km: <float>`` → ``distance: {"value": <float>, "unit": "km"}``
-- ``bus_walk_penalty_minutes: <int>`` → ``bus_walk_penalty: {"magnitude": <int>, "units": "minute"}``
+- ``bus_walk_penalty_minutes: <int>`` → ``bus_walk_penalty: {"magnitude": <int>, "unit": "minute"}``
 - ``walk_to_town_minutes: <int>`` → ``walk_to_town: {"value": <int>, "unit": "minute"}``
 """
 
 import json
+import logging
 import sqlite3
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = Path("data/houses.db")
 
@@ -28,9 +31,9 @@ def _migrate_value(val):
             if k == "distance_km" and isinstance(v, (int, float)):
                 rewritten["distance"] = {"value": float(v), "unit": "km"}
                 continue
-            # `bus_walk_penalty_minutes: N` → `bus_walk_penalty: {"magnitude": N, "units": "minute"}`
+            # `bus_walk_penalty_minutes: N` → `bus_walk_penalty: {"magnitude": N, "unit": "minute"}`
             if k == "bus_walk_penalty_minutes" and isinstance(v, (int, float)):
-                rewritten["bus_walk_penalty"] = {"magnitude": int(v), "units": "minute"}
+                rewritten["bus_walk_penalty"] = {"magnitude": int(v), "unit": "minute"}
                 continue
             # `walk_to_town_minutes: N` → `walk_to_town: {"value": N, "unit": "minute"}`
             if k == "walk_to_town_minutes" and isinstance(v, (int, float)):
@@ -63,8 +66,8 @@ def migrate_node_results(db_path: str | Path) -> int:
     for row in rows:
         try:
             result = json.loads(row["result_json"])
-        except (json.JSONDecodeError, TypeError):
-            continue
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.debug("Skipping row %s: %s", row["id"], e)
 
         new_result = _migrate_value(result)
         if new_result == result:
