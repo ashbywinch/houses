@@ -135,29 +135,7 @@ function personRequiresWorks(personName: string): boolean {
       <!-- Per-person works breakdown -->
       <div v-if="affordability?.works_estimates?.succeeded" class="costs-subsection">
         <div
-          v-for="(val, name) in worksEstimates()"
-          :key="String(name)"
-          class="costs-row costs-row--sub"
-        >
-          <span class="costs-label">{{ name }}</span>
-          <div v-if="editingPerson === name" class="costs-edit-group">
-            <span class="costs-edit-prefix">£</span>
-            <input
-              v-model="editValue"
-              type="number"
-              class="costs-edit-input"
-              autofocus
-              @keydown="handleKeydown($event, name)"
-              @blur="saveEdit(name)"
-            />
-          </div>
-          <span v-else class="costs-value costs-value--clickable" @click="startEdit(name, val)">
-            {{ val != null ? '£' + val.toLocaleString() : '£? — required' }}
-          </span>
-        </div>
-        <!-- Persons who require works but have no estimate yet -->
-        <div
-          v-for="p in personList().filter((x: any) => x.works_estimate_required && !(x.name in worksEstimates()))"
+          v-for="p in personList()"
           :key="String(p.name)"
           class="costs-row costs-row--sub"
         >
@@ -173,9 +151,21 @@ function personRequiresWorks(personName: string): boolean {
               @blur="saveEdit(p.name as string)"
             />
           </div>
-          <span v-else class="costs-value costs-value--clickable costs-value--required" @click="startEdit(p.name as string, null)">
-            £? — required
-          </span>
+          <span
+            v-else-if="p.name in worksEstimates() && worksEstimates()[p.name as string] != null"
+            class="costs-value costs-value--clickable"
+            @click="startEdit(p.name as string, worksEstimates()[p.name as string])"
+          >£{{ worksEstimates()[p.name as string].toLocaleString() }}</span>
+          <span
+            v-else-if="(p as any).works_estimate_required"
+            class="costs-value costs-value--clickable costs-value--required"
+            @click="startEdit(p.name as string, null)"
+          >£? — required</span>
+          <span
+            v-else
+            class="costs-value costs-value--clickable"
+            @click="startEdit(p.name as string, null)"
+          >£?</span>
         </div>
       </div>
       <div v-if="showProvenance === 'total_works' && affordability?.total_works?.provenance" class="costs-provenance">
