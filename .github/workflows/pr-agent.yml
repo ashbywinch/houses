@@ -12,6 +12,9 @@ jobs:
       pull-requests: write
       issues: write
     steps:
+      - name: Record start time
+        run: echo "REVIEW_START=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
 
       - uses: the-pr-agent/pr-agent@b249e568e0c0fb6c674ace55fe95d02f62f8f3b3
@@ -31,19 +34,22 @@ jobs:
             echo "Manual trigger — skipping review check (no PR number)"
             exit 0
           fi
-          # Look for evidence of a successful review (PR Reviewer Guide or PR Code Suggestions).
-          # If PR-Agent failed entirely, it either posts "Failed to generate" or nothing at all.
-          LAST=$(gh api "repos/${{ github.repository }}/issues/$PR_NUM/comments" --jq '[.[] | select(.user.login == "github-actions[bot]")] | last | .body' 2>/dev/null || echo "")
-          ALL=$(gh api "repos/${{ github.repository }}/issues/$PR_NUM/comments" --jq '[.[] | select(.user.login == "github-actions[bot]") | .body] | join(" ")' 2>/dev/null || echo "")
-          if echo "$LAST" | grep -q "PR Reviewer Guide\|PR Code Suggestions"; then
+          # Only inspect comments posted during this workflow run (since REVIEW_START).
+          # This prevents stale comments from previous runs producing false passes.
+          SINCE="${{ env.REVIEW_START }}"
+          NEW_CMTS=$(gh api "repos/${{ github.repository }}/issues/$PR_NUM/comments?since=$SINCE" --jq '[.[] | select(.user.login == "github-actions[bot]")]' 2>/dev/null || echo "[]")
+          echo "$NEW_CMTS" | jq -e 'length == 0' > /dev/null 2>&1 && NO_COMMENTS=true || NO_COMMENTS=false
+          if echo "$NEW_CMTS" | jq -e '.[].body | test("PR Reviewer Guide|PR Code Suggestions")' > /dev/null 2>&1; then
             echo "Review check passed"
-          elif echo "$ALL" | grep -q "PR Reviewer Guide\|PR Code Suggestions"; then
-            echo "Review check passed (using earlier review)"
-          elif echo "$LAST" | grep -qi "failed"; then
+          elif echo "$NEW_CMTS" | jq -e '.[].body | test("failed"; "i")' > /dev/null 2>&1; then
             echo "::error::PR-Agent reported a failure:"
-            echo "$LAST"
+            echo "$NEW_CMTS" | jq -r '.[].body'
+            exit 1
+          elif [ "$NO_COMMENTS" = true ]; then
+            echo "::error::PR-Agent posted no comments — review was skipped or failed silently"
             exit 1
           else
-            echo "::error::PR-Agent did not produce a review — possible silent failure"
+            echo "::error::PR-Agent comment found but did not match success or failure pattern"
+            echo "$NEW_CMTS" | jq -r '.[].body'
             exit 1
           fi
