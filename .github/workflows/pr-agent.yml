@@ -14,13 +14,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate secrets
-        run: |
-          if [ -z "${{ secrets.OPENCODE_GO_HOUSES_API_KEY }}" ]; then
-            echo "::error::OPENCODE_GO_HOUSES_API_KEY secret is not set. Set it in GitHub repo → Settings → Secrets and variables → Actions."
-            exit 1
-          fi
-
       - uses: the-pr-agent/pr-agent@main
         id: pr-agent
         env:
