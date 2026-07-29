@@ -60,7 +60,7 @@ export function patchAddress(rid: string, address: string): Promise<Response> {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ address }),
-  })
+  }).then(checkFor401)
 }
 
 export function patchLocation(rid: string, lat: number, lon: number): Promise<Response> {
@@ -68,11 +68,11 @@ export function patchLocation(rid: string, lat: number, lon: number): Promise<Re
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ lat, lon }),
-  })
+  }).then(checkFor401)
 }
 
 export async function fetchSettings(): Promise<Record<string, unknown>> {
-  const r = await fetch(`${BASE}/settings`, { headers: { ...authHeaders() } })
+  const r = await fetch(`${BASE}/settings`, { headers: { ...authHeaders() } }).then(checkFor401)
   if (!r.ok) throw new Error(`Failed to fetch settings: ${r.status}`)
   return parseJson(r)
 }
@@ -82,7 +82,7 @@ export function putPersons(persons: unknown[]): Promise<Response> {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(persons),
-  })
+  }).then(checkFor401)
 }
 
 export function patchFinancial(financial: Record<string, unknown>): Promise<Response> {
@@ -90,7 +90,7 @@ export function patchFinancial(financial: Record<string, unknown>): Promise<Resp
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(financial),
-  })
+  }).then(checkFor401)
 }
 
 export async function patchTriage(rid: string, data: Partial<{
@@ -104,7 +104,7 @@ export async function patchTriage(rid: string, data: Partial<{
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(data),
-  })
+  }).then(checkFor401)
 }
 
 export interface CommentEntry {
