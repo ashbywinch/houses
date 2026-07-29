@@ -203,7 +203,7 @@ async def get_property_comments(rid: str):
 
 class CommentBody(BaseModel):
     """Validated request body for posting a comment."""
-    text: str = Field(min_length=1)
+    text: str = Field(min_length=1, max_length=5000)
     person: str | None = None
 
     @field_validator("text")

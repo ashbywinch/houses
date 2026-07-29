@@ -60,51 +60,37 @@ def _patch_registry():
 
 
 class TestLogin:
-    def test_configured_returns_auth_url(self):
-        original = settings.google_client_id
-        settings.google_client_id = "test-client-id"
-        settings.google_client_secret = "test-secret"
-        try:
-            resp = client.get("/api/auth/login")
-            assert resp.status_code == 200
-            data = resp.json()
-            assert "auth_url" in data
-            assert data["auth_url"].startswith("https://accounts.google.com")
-        finally:
-            settings.google_client_id = original
-            settings.google_client_secret = ""
+    @patch("houses.web.auth.settings.google_client_id", "test-client-id")
+    @patch("houses.web.auth.settings.google_client_secret", "test-secret")
+    def test_configured_returns_auth_url(self, *_):
+        resp = client.get("/api/auth/login")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "auth_url" in data
+        assert data["auth_url"].startswith("https://accounts.google.com")
 
-    def test_login_stores_code_verifier(self):
+    @patch("houses.web.auth.settings.google_client_id", "test-client-id")
+    @patch("houses.web.auth.settings.google_client_secret", "test-secret")
+    def test_login_stores_code_verifier(self, *_):
         """Login stores the PKCE code_verifier in _oauth_states."""
-        original = settings.google_client_id
-        settings.google_client_id = "test-client-id"
-        settings.google_client_secret = "test-secret"
-        try:
-            _oauth_states.clear()
-            resp = client.get("/api/auth/login")
-            assert resp.status_code == 200
-            assert len(_oauth_states) == 1
-            state_key = next(iter(_oauth_states))
-            state_data = _oauth_states[state_key]
-            assert isinstance(state_data, dict)
-            assert "code_verifier" in state_data
-            assert len(state_data["code_verifier"]) > 0
-        finally:
-            settings.google_client_id = original
-            settings.google_client_secret = ""
-            _oauth_states.clear()
+        _oauth_states.clear()
+        resp = client.get("/api/auth/login")
+        assert resp.status_code == 200
+        assert len(_oauth_states) == 1
+        state_key = next(iter(_oauth_states))
+        state_data = _oauth_states[state_key]
+        assert isinstance(state_data, dict)
+        assert "code_verifier" in state_data
+        assert len(state_data["code_verifier"]) > 0
+        _oauth_states.clear()
 
 
 class TestMe:
-    def test_not_authenticated(self):
-        original = settings.google_client_id
-        settings.google_client_id = "test-client-id"
-        try:
-            resp = client.get("/api/auth/me")
-            assert resp.status_code == 200
-            assert resp.json() == {"authenticated": False}
-        finally:
-            settings.google_client_id = original
+    @patch("houses.web.auth.settings.google_client_id", "test-client-id")
+    def test_not_authenticated(self, _):
+        resp = client.get("/api/auth/me")
+        assert resp.status_code == 200
+        assert resp.json() == {"authenticated": False}
 
     def test_authenticated_with_session(self):
         cookie = _inject_session(email="simon@example.com")
