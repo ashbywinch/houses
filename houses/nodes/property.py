@@ -212,10 +212,7 @@ class PropertyNodes:
         from houses.nodes.cutover import migrate_old_ashby_works_sync
 
         try:
-            import dag.persistence as _dp
-
-            if not _dp.testing or (self.rid.isdigit() and len(self.rid) >= 6):
-                migrate_old_ashby_works_sync(self)
+            migrate_old_ashby_works_sync(self)
         except Exception:
             import logging
 

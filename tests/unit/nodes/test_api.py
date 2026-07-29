@@ -197,6 +197,9 @@ class TestWorksEstimateApi:
 
         from tests.unit.conftest import flush_all
 
+        # Two flushes needed: first processes TotalWorksNode/EquityTotalNode,
+        # second processes MortgageRequiredNode → MonthlyMortgagePaymentNode
+        # → TotalMonthlyHousingCostNode (two-level DAG wave).
         flush_all()
         flush_all()
 

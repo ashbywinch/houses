@@ -70,12 +70,12 @@ class MortgageRequiredNode(DerivedNode[Money]):
         )
         w = (
             Decimal(tw.value_or_none().amount)
-            if tw.succeeded
+            if tw.succeeded and tw.value_or_none() is not None
             else _ZERO
         )
         e = (
             Decimal(te.value_or_none().amount)
-            if te.succeeded
+            if te.succeeded and te.value_or_none() is not None
             else _ZERO
         )
 

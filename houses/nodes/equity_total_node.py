@@ -44,17 +44,17 @@ class EquityTotalNode(DerivedNode[Money]):
             cash = getattr(p, "cash_contribution", zero)
             sale_amt = (
                 sale.amount
-                if hasattr(sale, "amount")
+                if isinstance(sale, Money)
                 else Decimal(str(sale))
             )
             mortgage_amt = (
                 mortgage.amount
-                if hasattr(mortgage, "amount")
+                if isinstance(mortgage, Money)
                 else Decimal(str(mortgage))
             )
             cash_amt = (
                 cash.amount
-                if hasattr(cash, "amount")
+                if isinstance(cash, Money)
                 else Decimal(str(cash))
             )
             equity = max(_ZERO, sale_amt - mortgage_amt) + cash_amt
