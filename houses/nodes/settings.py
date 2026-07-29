@@ -63,6 +63,16 @@ def make_default_persons() -> list[Person]:
             ),
         ),
         Person(
+            name="Ashby",
+            email="",
+            is_superuser=False,
+            has_car=True,
+            bus_walk_penalty=Quantity(10, "minute"),
+            cash_contribution=Money("300000", "GBP"),
+            works_estimate_required=True,
+            places_of_interest=(),
+        ),
+        Person(
             name="George",
             email="",
             is_superuser=False,
