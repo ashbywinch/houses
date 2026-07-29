@@ -12,9 +12,9 @@ class MonthlyMortgagePaymentNode(DerivedNode[Money]):
         if not self._attempt.succeeded or self._attempt.value_or_none() is None:
             return None
         try:
-            price_att = self._deps[0].latest_attempt()
-            sd_att = self._deps[1].latest_attempt()
-            fin_att = self._deps[3].latest_attempt()
+            price_att = self._price_node.latest_attempt()
+            sd_att = self._stamp_duty_node.latest_attempt()
+            fin_att = self._financial_source.latest_attempt()
 
             lines = []
             price_val = price_att.value_or_none()
@@ -26,7 +26,7 @@ class MonthlyMortgagePaymentNode(DerivedNode[Money]):
                 lines.append(FormulaLine(label="Stamp Duty", value=str(sd_val)))
 
             # Equity from persons
-            persons_att = self._deps[2].latest_attempt()
+            persons_att = self._persons_source.latest_attempt()
             equity_total = 0.0
             if persons_att.succeeded:
                 for p in persons_att.value_or_none() or []:
@@ -48,6 +48,10 @@ class MonthlyMortgagePaymentNode(DerivedNode[Money]):
 
     def __init__(self, node_id: str, *, rightmove_price, stamp_duty_node, persons_source, financial_source):
         super().__init__(node_id, Money, (rightmove_price, stamp_duty_node, persons_source, financial_source))
+        self._price_node = rightmove_price
+        self._stamp_duty_node = stamp_duty_node
+        self._persons_source = persons_source
+        self._financial_source = financial_source
 
     def compute(
         self, price: Attempt[Money], stamp_duty: Attempt[Money], persons: Attempt[list], financial: Attempt[dict]

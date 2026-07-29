@@ -335,6 +335,27 @@ async def patch_financial(body: dict):
     return {"status": "ok"}
 
 
+@api_router.get("/persons")
+async def list_persons():
+    """Return the list of persons with non-empty email addresses.
+
+    Used by the frontend superuser impersonation dropdown.
+    Requires authentication via the /api/ middleware.
+    """
+    svc = get_services()
+    persons_attempt = svc.persons_source.latest_attempt()
+    result: list[dict[str, str]] = []
+    if persons_attempt.succeeded:
+        for p in persons_attempt.value_or_none() or []:
+            if isinstance(p, dict):
+                email = p.get("email", "")
+                if email:
+                    result.append({"name": p.get("name", ""), "email": email})
+            elif hasattr(p, "email") and p.email:
+                result.append({"name": getattr(p, "name", ""), "email": p.email})
+    return {"persons": result}
+
+
 @api_router.get("/debug/scheduler")
 async def debug_scheduler():
     """Dump the entire scheduler queue — for debugging stalled background processing."""

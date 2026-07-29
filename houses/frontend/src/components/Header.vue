@@ -15,7 +15,7 @@ const persons = ref<PersonEntry[]>([])
 
 async function fetchPersons() {
   try {
-    const r = await fetch('/api/auth/persons')
+    const r = await fetch('/api/persons')
     if (r.ok) {
       const data = await r.json()
       persons.value = data.persons ?? []

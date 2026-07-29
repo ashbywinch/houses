@@ -14,7 +14,7 @@ class StampDutyNode(DerivedNode[Money]):
         if not self._attempt.succeeded or self._attempt.value_or_none() is None:
             return None
         try:
-            price_att = self._deps[0].latest_attempt()
+            price_att = self._price_node.latest_attempt()
             price_val = price_att.value_or_none()
             lines = [
                 FormulaLine(label="Property Price", value=str(price_val) if price_val else "—"),
@@ -26,6 +26,7 @@ class StampDutyNode(DerivedNode[Money]):
 
     def __init__(self, node_id: str, *, rightmove_price):
         super().__init__(node_id, Money, (rightmove_price,))
+        self._price_node = rightmove_price
 
     def compute(self, price: Attempt[Money]) -> Attempt[Money]:
         if not price.succeeded:

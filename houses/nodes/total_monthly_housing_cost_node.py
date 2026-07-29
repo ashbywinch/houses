@@ -14,14 +14,14 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
         try:
             lines = []
 
-            # Mortgage (index 0)
-            mortgage_att = self._deps[0].latest_attempt()
+            # Mortgage
+            mortgage_att = self._mortgage_node.latest_attempt()
             mortgage_val = mortgage_att.value_or_none() if mortgage_att.succeeded else None
             if mortgage_val is not None:
                 lines.append(FormulaLine(label="Mortgage", value=str(mortgage_val)))
 
-            # Sinking fund (index 1) — show yearly → monthly → our share
-            sinking_att = self._deps[1].latest_attempt()
+            # Sinking fund — show yearly → monthly → our share
+            sinking_att = self._sinking_node.latest_attempt()
             sinking_val = sinking_att.value_or_none() if sinking_att.succeeded else None
             if sinking_val is not None:
                 yearly = float(sinking_val.amount)
@@ -32,14 +32,14 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
                 lines.append(FormulaLine(label="  × ⅔ (our share)", value=f"{our_share:.2f} GBP"))
                 lines.append(FormulaLine(label="Sinking Fund (monthly)", value=f"{our_share:.2f} GBP"))
 
-            # Commute (index 3)
-            commute_att = self._deps[3].latest_attempt()
+            # Commute
+            commute_att = self._commute_node.latest_attempt()
             commute_val = commute_att.value_or_none() if commute_att.succeeded else None
             if commute_val is not None:
                 lines.append(FormulaLine(label="Commute", value=str(commute_val)))
 
-            # Council tax (index 4)
-            council_att = self._deps[4].latest_attempt()
+            # Council tax
+            council_att = self._council_tax_node.latest_attempt()
             council_val = council_att.value_or_none() if council_att.succeeded else None
             if council_val is not None:
                 lines.append(FormulaLine(label="Council Tax", value=str(council_val)))
@@ -69,6 +69,10 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
                 council_tax_node,
             ),
         )
+        self._mortgage_node = monthly_mortgage_node
+        self._sinking_node = yearly_sinking_fund_node
+        self._commute_node = commute_breakdown_node
+        self._council_tax_node = council_tax_node
 
     def compute(
         self,

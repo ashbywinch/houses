@@ -313,23 +313,4 @@ async def impersonate(request: Request, body: dict):
     return response
 
 
-@auth_router.get("/persons")
-async def list_persons():
-    """Return the list of persons with non-empty email addresses.
 
-    Used by the frontend superuser impersonation dropdown.
-    """
-    from houses.services_provider import get_services
-
-    svc = get_services()
-    persons_attempt = svc.persons_source.latest_attempt()
-    result: list[dict[str, str]] = []
-    if persons_attempt.succeeded:
-        for p in persons_attempt.value_or_none() or []:
-            if isinstance(p, dict):
-                email = p.get("email", "")
-                if email:
-                    result.append({"name": p.get("name", ""), "email": email})
-            elif hasattr(p, "email") and p.email:
-                result.append({"name": getattr(p, "name", ""), "email": p.email})
-    return {"persons": result}
