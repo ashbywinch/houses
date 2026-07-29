@@ -98,12 +98,14 @@ def _lookup_person_by_email(email: str, persons_attempt_value: Any) -> str | Non
 def _is_secure(request: Request) -> bool:
     """Return True if the request arrived over HTTPS.
 
-    Checks ``X-Forwarded-Proto`` for deployments behind a TLS-terminating
-    proxy, falling back to ``request.url.scheme`` for direct connections.
+    When ``public_url`` starts with ``https://`` the app expects to be behind
+    a TLS-terminating proxy, so ``X-Forwarded-Proto`` is trusted. Otherwise
+    only ``request.url.scheme`` is used — the header could be spoofed.
     """
-    forwarded = request.headers.get("x-forwarded-proto", "")
-    if forwarded == "https":
-        return True
+    if settings.public_url.startswith("https://"):
+        forwarded = request.headers.get("x-forwarded-proto", "")
+        if forwarded == "https":
+            return True
     return request.url.scheme == "https"
 
 
