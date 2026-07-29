@@ -8,12 +8,9 @@ Changes:
 """
 
 import json
-import logging
 import sqlite3
 import sys
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
 
 DB_PATH = Path("data/houses.db")
 
@@ -67,7 +64,8 @@ def migrate_node_results(db_path: str | Path) -> int:
         try:
             result = json.loads(row["result_json"])
         except (json.JSONDecodeError, TypeError) as e:
-            logger.debug("Skipping row %s: %s", row["id"], e)
+            print(f"SKIP {row['node_id']}: {e}", file=sys.stderr)
+            continue
 
         new_result = _migrate_value(result)
         if new_result == result:
