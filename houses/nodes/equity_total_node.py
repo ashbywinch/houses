@@ -1,0 +1,60 @@
+from __future__ import annotations
+
+from decimal import Decimal
+
+from money import Money
+
+from dag.attempt import Attempt, Formula, FormulaLine
+from dag.derived_node import DerivedNode
+
+_ZERO = Decimal("0")
+
+
+class EquityTotalNode(DerivedNode[Money]):
+    """Total equity from all persons.
+
+    For each person:
+        max(0, home_sale_price - outstanding_mortgage) + cash_contribution
+    """
+
+    @property
+    def provenance_formula(self) -> Formula | None:
+        if not self._attempt.succeeded or self._attempt.value_or_none() is None:
+            return None
+        lines = [
+            FormulaLine(
+                label="Total Equity", value=str(self._attempt.value)
+            ),
+        ]
+        return Formula(lines=lines, result=str(self._attempt.value))
+
+    def __init__(self, node_id: str, *, persons_source):
+        super().__init__(node_id, Money, (persons_source,))
+        self._persons_source = persons_source
+
+    def compute(self, persons: Attempt[list]) -> Attempt[Money]:
+        zero = Money("0", "GBP")
+        ps = persons.value_or_none() or []
+        total = _ZERO
+        for p in ps:
+            sale = getattr(p, "home_sale_price", zero)
+            mortgage = getattr(p, "outstanding_mortgage", zero)
+            cash = getattr(p, "cash_contribution", zero)
+            sale_amt = (
+                sale.amount
+                if hasattr(sale, "amount")
+                else Decimal(str(sale))
+            )
+            mortgage_amt = (
+                mortgage.amount
+                if hasattr(mortgage, "amount")
+                else Decimal(str(mortgage))
+            )
+            cash_amt = (
+                cash.amount
+                if hasattr(cash, "amount")
+                else Decimal(str(cash))
+            )
+            equity = max(_ZERO, sale_amt - mortgage_amt) + cash_amt
+            total += equity
+        return Attempt.succeeded(Money(str(total), "GBP"))

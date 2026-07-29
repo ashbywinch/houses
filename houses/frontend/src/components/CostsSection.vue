@@ -18,6 +18,18 @@ const showProvenance = ref<string | null>(null)
 function toggleProvenance(key: string) {
   showProvenance.value = showProvenance.value === key ? null : key
 }
+
+// ── Helpers ────────────────────────────────────────────
+function attemptValue(val: any): string | null {
+  if (!val) return null
+  if (val.succeeded && val.value != null) return val.value
+  if (!val.succeeded && val.error) return 'Impossible'
+  return null
+}
+
+function isImpossible(val: any): boolean {
+  return val && !val.succeeded && val.error != null
+}
 </script>
 
 <template>
@@ -25,9 +37,11 @@ function toggleProvenance(key: string) {
     <h2 class="detail-section__title">Costs</h2>
 
     <div class="costs-table">
-      <div class="costs-row">
+      <div class="costs-row" :class="{ 'costs-row--impossible': isImpossible(affordability?.monthly_mortgage) }">
         <span class="costs-label">Mortgage</span>
-        <span class="costs-value">£{{ affordability?.monthly_mortgage?.value?.amount ?? '?' }}</span>
+        <span v-if="affordability?.monthly_mortgage?.succeeded && affordability?.monthly_mortgage?.value" class="costs-value">£{{ affordability.monthly_mortgage.value.amount }}</span>
+        <span v-else-if="isImpossible(affordability?.monthly_mortgage)" class="costs-value costs-value--impossible">Impossible</span>
+        <span v-else class="costs-value">?</span>
         <button
           v-if="affordability?.monthly_mortgage?.provenance"
           class="how-btn"
@@ -67,6 +81,23 @@ function toggleProvenance(key: string) {
         <ProvenanceTree :provenance="affordability.monthly_sinking_fund.provenance" />
       </div>
 
+      <!-- Cost of Works -->
+      <div class="costs-row" :class="{ 'costs-row--impossible': isImpossible(affordability?.total_works) }">
+        <span class="costs-label">Cost of Works</span>
+        <span v-if="affordability?.total_works?.succeeded && affordability?.total_works?.value" class="costs-value">£{{ affordability.total_works.value.amount }}</span>
+        <span v-else-if="isImpossible(affordability?.total_works)" class="costs-value costs-value--impossible">£? — required</span>
+        <span v-else class="costs-value">?</span>
+        <button
+          v-if="affordability?.total_works?.provenance"
+          class="how-btn"
+          :class="{ 'how-btn--active': showProvenance === 'total_works' }"
+          @click="toggleProvenance('total_works')"
+        >{{ showProvenance === 'total_works' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
+      </div>
+      <div v-if="showProvenance === 'total_works' && affordability?.total_works?.provenance && affordability?.works_estimates?.provenance" class="costs-provenance">
+        <ProvenanceTree :provenance="affordability.total_works.provenance" />
+      </div>
+
       <div class="costs-row">
         <span class="costs-label">Commute Cost</span>
         <span class="costs-value">£{{ affordability?.monthly_commute_cost?.value?.yearly_total_gbp != null ? (parseFloat(affordability.monthly_commute_cost.value.yearly_total_gbp ?? '0') / 12).toFixed(2) : '?' }}</span>
@@ -87,9 +118,12 @@ function toggleProvenance(key: string) {
         <ProvenanceTree :provenance="affordability.monthly_commute_cost.provenance" />
       </div>
 
-      <div class="costs-row costs-row--total">
+      <!-- Total Monthly -->
+      <div class="costs-row costs-row--total" :class="{ 'costs-row--impossible': isImpossible(affordability?.total_monthly_housing_cost) }">
         <span class="costs-label">Total Monthly</span>
-        <span class="costs-value">£{{ affordability?.total_monthly_housing_cost?.value?.amount ?? '?' }}</span>
+        <span v-if="affordability?.total_monthly_housing_cost?.succeeded && affordability?.total_monthly_housing_cost?.value" class="costs-value">£{{ affordability.total_monthly_housing_cost.value.amount }}</span>
+        <span v-else-if="isImpossible(affordability?.total_monthly_housing_cost)" class="costs-value costs-value--impossible">Impossible</span>
+        <span v-else class="costs-value">?</span>
         <button
           v-if="affordability?.total_monthly_housing_cost?.provenance"
           class="how-btn"
@@ -139,66 +173,51 @@ function toggleProvenance(key: string) {
   justify-content: space-between;
   align-items: center;
   padding: var(--sp-2) 0;
-  border-bottom: 1px solid var(--divider);
-  font-size: var(--fs-sm);
-  gap: var(--sp-2);
+  border-bottom: 1px solid var(--border);
 }
-.costs-row:last-child { border-bottom: none; }
-.costs-row--sub { padding-left: var(--sp-4); font-size: var(--fs-xs); color: var(--text-secondary); }
-.costs-row--total {
-  font-weight: var(--fw-bold);
-  font-size: var(--fs-base);
-  border-top: 2px solid var(--blue);
-  margin-top: var(--sp-1);
-  padding-top: var(--sp-3);
-}
-.costs-row--total .costs-value { color: var(--blue); }
-.costs-label { color: var(--text-secondary); }
-.costs-value { font-weight: var(--fw-semibold); white-space: nowrap; }
+.costs-row--sub { padding-left: var(--sp-5); border-bottom: none; }
+.costs-row--total { font-weight: var(--fw-bold); border-bottom: none; border-top: 2px solid var(--slate-200); margin-top: var(--sp-2); padding-top: var(--sp-3); }
+.costs-row--impossible { opacity: 0.5; }
+.costs-label { font-size: var(--fs-sm); color: var(--text); }
+.costs-value { font-size: var(--fs-sm); font-weight: var(--fw-semibold); margin-left: auto; margin-right: var(--sp-2); }
+.costs-value--impossible { color: var(--red); font-style: italic; }
+.costs-subsection { display: flex; flex-direction: column; }
+.costs-provenance { background: var(--slate-50); padding: var(--sp-3) var(--sp-4); border-radius: var(--radius); margin: var(--sp-2) 0; }
 
-/* Provenance inline */
-.costs-provenance {
-  padding: var(--sp-2) var(--sp-3);
-  background: var(--slate-50);
-  border-radius: var(--radius);
-  border: 1px solid var(--slate-200);
-  margin-bottom: var(--sp-1);
-}
-
-/* "How?" button */
 .how-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  color: var(--slate-400);
-  background: none;
-  border: 1px solid var(--slate-200);
-  border-radius: var(--radius-sm);
-  padding: 2px 8px;
+  font-size: var(--fs-xs);
+  padding: 0.25em 0.5em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-bg);
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: all var(--transition);
-  font-family: var(--font);
-  flex-shrink: 0;
+  white-space: nowrap;
 }
-.how-btn:hover { background: var(--slate-100); color: var(--slate-600); border-color: var(--slate-300); }
-.how-btn--active { background: var(--blue-bg); color: var(--blue-text); border-color: var(--blue); }
+.how-btn--active { background: var(--slate-100); border-color: var(--blue); color: var(--blue); }
 
-/* Stamp duty — removed per design (in provenance chain) */
-
-.epc-section { margin-top: var(--sp-4); }
-.epc-title { font-size: var(--fs-sm); font-weight: var(--fw-semibold); margin: 0 0 var(--sp-2); }
-.epc-scale { display: flex; gap: var(--sp-1); }
+/* EPC */
+.epc-section { margin-top: var(--sp-6); }
+.epc-title { font-size: var(--fs-sm); font-weight: var(--fw-bold); margin: 0 0 var(--sp-3); color: var(--slate-700); }
+.epc-scale { display: flex; gap: 2px; }
 .epc-step {
-  flex: 1; text-align: center; padding: var(--sp-2) var(--sp-1);
-  border-radius: var(--radius-sm); font-size: var(--fs-sm); font-weight: var(--fw-bold); color: #fff;
+  flex: 1;
+  text-align: center;
+  padding: var(--sp-2) 0;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  border-radius: 4px;
+  color: var(--slate-500);
+  background: var(--slate-100);
   position: relative;
 }
-.epc-step--a { background: #2e7d32; }
-.epc-step--bc { background: #1565c0; }
-.epc-step--d { background: var(--amber); color: #1a1a1a; }
-.epc-step--e { background: #e65100; }
-.epc-step--fg { background: #c62828; }
-.epc-step__marker { position: absolute; bottom: -16px; left: 50%; transform: translateX(-50%); font-size: var(--fs-xs); color: var(--slate-800); }
+.epc-step__marker { position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%); font-size: 12px; }
+.epc-step--a { background: var(--green); color: #fff; }
+.epc-step--b { background: var(--green-light); }
+.epc-step--c { background: var(--yellow-light); }
+.epc-step--d { background: var(--yellow); }
+.epc-step--e { background: var(--orange); color: #fff; }
+.epc-step--f { background: var(--orange-dark); color: #fff; }
+.epc-step--g { background: var(--red); color: #fff; }
 .epc-potential { font-size: var(--fs-sm); color: var(--text-secondary); margin-top: var(--sp-5); }
 </style>

@@ -10,23 +10,17 @@ from houses.council_tax_info import CouncilTaxInfo
 
 class TestMonthlyMortgagePaymentNode:
     @pytest.mark.asyncio
-    async def test_zero_when_no_price(self):
+    async def test_zero_when_no_principal(self):
         from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNode
 
-        price = UserInputNode[Money]("price_mm", Money)
-        fin = UserInputNode[dict]("fin_mm", dict)
-        sd = UserInputNode[Money]("sd_mm", Money)
-        persons = UserInputNode[list]("ps_mm", list)
+        mr = UserInputNode[Money]("mmp_old_mr", Money)
+        fin = UserInputNode[dict]("mmp_old_fin", dict)
         node = MonthlyMortgagePaymentNode(
-            "mm",
-            rightmove_price=price,
-            stamp_duty_node=sd,
-            persons_source=persons,
+            "mmp_old",
+            mortgage_required_node=mr,
             financial_source=fin,
         )
-        price.push(Money("0", "GBP"), "test")
-        sd.push(Money("0", "GBP"), "test")
-        persons.push([], "test")
+        mr.push(Money("0", "GBP"), "test")
         fin.push({}, "test")
         await flush_processor()
         a = await node.attempt()
@@ -37,20 +31,14 @@ class TestMonthlyMortgagePaymentNode:
     async def test_computes_with_valid_data(self):
         from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNode
 
-        price = UserInputNode[Money]("price_mm2", Money)
-        fin = UserInputNode[dict]("fin_mm2", dict)
-        sd = UserInputNode[Money]("sd_mm2", Money)
-        persons = UserInputNode[list]("ps_mm2", list)
+        mr = UserInputNode[Money]("mmp_old_mr2", Money)
+        fin = UserInputNode[dict]("mmp_old_fin2", dict)
         node = MonthlyMortgagePaymentNode(
-            "mm2",
-            rightmove_price=price,
-            stamp_duty_node=sd,
-            persons_source=persons,
+            "mmp_old2",
+            mortgage_required_node=mr,
             financial_source=fin,
         )
-        price.push(Money("300000", "GBP"), "test")
-        sd.push(Money("0", "GBP"), "test")
-        persons.push([], "test")
+        mr.push(Money("300000", "GBP"), "test")
         fin.push(
             {
                 "mortgage_rate": 0.045,

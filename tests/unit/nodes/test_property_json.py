@@ -70,6 +70,7 @@ def prop():
     p.precise_location.push(GeoPoint(51.5, -0.37), "test")
     p.postcode.push("SW1V 2QQ", "test")
     p.user_entered_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+    p.works_estimates.push({}, "test")
     return p
 
 
@@ -134,6 +135,10 @@ class TestDetailShape:
         af = d["affordability"]
         expected = (
             "council_tax",
+            "works_estimates",
+            "total_works",
+            "total_equity",
+            "mortgage_required",
             "monthly_mortgage",
             "monthly_sinking_fund",
             "monthly_commute_cost",
@@ -153,7 +158,6 @@ class TestDetailShape:
             "status_reason",
             "group_notes",
             "ashby_comments",
-            "ashby_works_estimate",
             "design_needed",
             "planning_needed",
         )
@@ -278,7 +282,6 @@ class TestFinancialSettingsPropagation:
         # Read detail baseline
         d1 = await prop.to_json_detail()
         fin1 = d1["settings"]["financial"]["value"]
-        fin1["mortgage_rate"]
         old_mortgage = d1["affordability"]["monthly_mortgage"]["value"]
 
         # Push new financial settings via the shared Services instance

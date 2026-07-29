@@ -43,7 +43,10 @@ class Person:
     is_child: bool = False
     bus_walk_penalty: _Quantity = _Quantity(30, "minute")
     acceptable_schools: tuple[str, ...] = ("mixed",)
-    deposit_equity: Money | None = None
+    home_sale_price: Money = Money("0", "GBP")
+    outstanding_mortgage: Money = Money("0", "GBP")
+    cash_contribution: Money = Money("0", "GBP")
+    works_estimate_required: bool = False
     places_of_interest: tuple[PlaceOfInterest, ...] = ()
     email: str = ""
     is_superuser: bool = False

@@ -84,7 +84,6 @@ def test_rejects_stale_test_data_from_db():
                 "is_child": False,
                 "bus_walk_penalty_minutes": 30,
                 "acceptable_schools": ["mixed"],
-                "deposit_equity": None,
                 "places_of_interest": [
                     {
                         "label": "Office",

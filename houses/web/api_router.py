@@ -303,24 +303,19 @@ async def put_persons(body: list = Body()):  # noqa: B008
     if not body:
         raise HTTPException(status_code=400, detail="At least one person is required")
 
-    # Validate deposit_equity — the Money validator rejects bare numbers
-    # (int/float) but accepts {'amount': ..., 'currency': ...} dicts.
-    # We also need to CONVERT the dict to Money here because Pydantic's
-    # dataclass handling doesn't call the Money schema for Money|None
-    # union fields, so dump_python() later would fail serializing a dict.
     from money import Money as _Money
 
     from houses.model.domain import Person, PlaceOfInterest
 
-    def _validate_de(d: dict) -> dict:
-        de = d.get("deposit_equity")
-        if isinstance(de, (int, float)):
-            raise HTTPException(
-                status_code=400,
-                detail=f"deposit_equity must be a dict or null, got {type(de).__name__}: {de}",
-            )
-        if isinstance(de, dict):
-            d["deposit_equity"] = _Money(de["amount"], de.get("currency", "GBP"))
+    _MONEY_FIELDS = {"home_sale_price", "outstanding_mortgage", "cash_contribution"}
+
+    def _validate_money_fields(d: dict) -> dict:
+        for f in _MONEY_FIELDS:
+            v = d.get(f)
+            if isinstance(v, (int, float)):
+                d[f] = _Money(str(v), "GBP")
+            elif isinstance(v, dict):
+                d[f] = _Money(v["amount"], v.get("currency", "GBP"))
         return d
 
     validated = []
@@ -328,7 +323,7 @@ async def put_persons(body: list = Body()):  # noqa: B008
         if not isinstance(p, dict):
             validated.append(p)
             continue
-        _validate_de(p)
+        _validate_money_fields(p)
         validated.append(
             Person(
                 **{
@@ -352,6 +347,68 @@ async def put_persons(body: list = Body()):  # noqa: B008
 async def patch_financial(body: dict):
     get_services().financial_source.push(body, "user")
     return {"status": "ok"}
+
+
+@api_router.patch("/properties/{rid}/works-estimate")
+async def patch_works_estimate(rid: str, body: dict):
+    """Update the works estimate for a person on this property.
+
+    Body: {"person": "Ashby", "value": 15000}
+    """
+    from houses.property_registry import get_registry_property
+
+    prop = get_registry_property(rid)
+    if prop is None:
+        raise HTTPException(status_code=404, detail="Property not found")
+
+    person_name = body.get("person", "")
+    if not person_name:
+        raise HTTPException(status_code=400, detail="person is required")
+
+    value = body.get("value")
+    current = prop.works_estimates.latest_attempt().value_or_none() or {}
+    current[person_name] = value
+    prop.works_estimates.push(current, "user")
+
+    # Async write back to sheet (best-effort)
+    import asyncio
+
+    asyncio.ensure_future(_sync_works_estimate_to_sheet(rid, person_name, value))
+
+    return {"status": "ok"}
+
+
+async def _sync_works_estimate_to_sheet(rid: str, person: str, value) -> None:
+    """Write back a works estimate to the View tab."""
+    import logging
+
+    logger = logging.getLogger(__name__)
+    try:
+        from houses.config import settings
+        from houses.sheets import get_client
+
+        client = get_client()
+        if not client:
+            return
+        sh = client.open_by_key(settings.sheet_id)
+        ws = sh.worksheet("Properties View")
+        all_rows = ws.get_all_values()
+        headers = all_rows[0]
+
+        # Find Rightmove ID column and Ashby Works Estimate column
+        try:
+            rid_col = headers.index("Rightmove ID")
+            works_col = headers.index("Ashby Works Estimate (£)")
+        except ValueError:
+            logger.warning("Could not find required columns in View tab")
+            return
+
+        for i, row in enumerate(all_rows[1:], start=2):
+            if row[rid_col].strip() == rid:
+                ws.update_cell(i, works_col + 1, value or "")
+                break
+    except Exception as e:
+        logger.warning("Failed to sync works estimate to sheet: %s", e)
 
 
 @api_router.get("/persons")

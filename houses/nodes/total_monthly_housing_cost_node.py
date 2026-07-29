@@ -79,6 +79,9 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
         commute: Attempt[dict],
         council_tax: Attempt[CouncilTaxInfo],
     ) -> Attempt[Money]:
+        if mortgage.impossible:
+            return Attempt.impossible(mortgage.error)
+
         total = Money("0", "GBP")
         if mortgage.succeeded and mortgage.value_or_none():
             total += mortgage.value_or_none()
