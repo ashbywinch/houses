@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from abc import abstractmethod
 import traceback
+from abc import abstractmethod
 from datetime import UTC, datetime, timedelta
 from inspect import iscoroutine
 from typing import Generic, TypeVar
 
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt, Formula, Provenance, SourceType
+from dag.http_error import HttpError
 from dag.node import Node
 from dag.scheduler import _get_scheduler
-from dag.http_error import HttpError
 from dag.signals import Connection, Slot
 
 logger = logging.getLogger(__name__)
@@ -22,8 +22,8 @@ T = TypeVar("T")
 class DerivedNode(Node[T], Generic[T]):
     """A node whose value is computed from other nodes."""
 
-    def __init__(self, node_id: str, value_type: type[T], deps: tuple[Node, ...]) -> None:
-        super().__init__(node_id, value_type)
+    def __init__(self, node_id: str, value_type: type[T], deps: tuple[Node, ...], source_url: str = "") -> None:
+        super().__init__(node_id, value_type, source_url)
         self._deps = deps
         self._attempt: Attempt[T] = Attempt.pending()
         self._connections: list[Connection] = []
@@ -129,7 +129,7 @@ class DerivedNode(Node[T], Generic[T]):
             return True
         if isinstance(exc, HttpError):
             return exc.is_rate_limit() or exc.is_server_error()
-        if hasattr(exc, 'status'):
+        if hasattr(exc, "status"):
             try:
                 return int(exc.status) in (429, 502, 503, 504)
             except (ValueError, TypeError):
@@ -251,8 +251,25 @@ class DerivedNode(Node[T], Generic[T]):
             label=self.display_name,
             description=description,
             value=self._attempt.value,
+            url=self._source_url,
+            source_type=self.provenance_source_type,
+            freshness=self._attempt.created_at,
+            formula=self.provenance_formula,
             sources=sources,
         )
+
+    @property
+    def provenance_source_type(self) -> SourceType:
+        """Subclass declares its data source category.
+        Default is CALC — override in subclasses that source from
+        APIs, geocoding, config, or user input."""
+        return SourceType.CALC
+
+    @property
+    def provenance_formula(self) -> Formula | None:
+        """Override to return a Formula for computed values.
+        Default is None — no formula."""
+        return None
 
     async def to_json(self) -> dict:
         result = await super().to_json()

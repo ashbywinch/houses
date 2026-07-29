@@ -99,3 +99,4 @@ make stop                       # Stop dev server + frontend
 | `dag/` | DAG library: `Node`, `SourceNode`, `ComputedNode`, `Attempt`, `Provenance` |
 | `docs/current-ui/` | Saved reference HTML from the old frontend — compare `capture_dom.py` output against this |
 | `tools/capture_dom.py` | Reusable script to capture rendered Vue frontend DOM + screenshot |
+

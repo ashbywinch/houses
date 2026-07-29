@@ -2,13 +2,53 @@ from __future__ import annotations
 
 from money import Money
 
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
 
 
 class MonthlyMortgagePaymentNode(DerivedNode[Money]):
+    @property
+    def provenance_formula(self) -> Formula | None:
+        if not self._attempt.succeeded or self._attempt.value_or_none() is None:
+            return None
+        price_att = self._price_node.latest_attempt()
+        sd_att = self._stamp_duty_node.latest_attempt()
+        fin_att = self._financial_source.latest_attempt()
+
+        lines = []
+        price_val = price_att.value_or_none()
+        if price_val is not None:
+            lines.append(FormulaLine(label="Price", value=str(price_val)))
+
+        sd_val = sd_att.value_or_none() if sd_att.succeeded else None
+        if sd_val is not None:
+            lines.append(FormulaLine(label="Stamp Duty", value=str(sd_val)))
+
+        # Equity from persons
+        persons_att = self._persons_source.latest_attempt()
+        equity_total = 0.0
+        if persons_att.succeeded:
+            for p in persons_att.value_or_none() or []:
+                eq = getattr(p, "deposit_equity", None)
+                if eq is not None:
+                    equity_total += float(getattr(eq, "amount", eq))
+        if equity_total > 0:
+            lines.append(FormulaLine(label="Total Equity", value=str(equity_total)))
+
+        fin = fin_att.value_or_none() or {} if fin_att.succeeded else {}
+        rate = float(fin.get("mortgage_rate", 0.045))
+        term = int(fin.get("mortgage_term_years", 30))
+        lines.append(FormulaLine(label="Interest Rate", value=f"{rate * 100:.1f}%"))
+        lines.append(FormulaLine(label="Term", value=f"{term} years"))
+
+        return Formula(lines=lines, result=str(self._attempt.value))
+
     def __init__(self, node_id: str, *, rightmove_price, stamp_duty_node, persons_source, financial_source):
         super().__init__(node_id, Money, (rightmove_price, stamp_duty_node, persons_source, financial_source))
+        self._price_node = rightmove_price
+        self._stamp_duty_node = stamp_duty_node
+        self._persons_source = persons_source
+        self._financial_source = financial_source
 
     def compute(
         self, price: Attempt[Money], stamp_duty: Attempt[Money], persons: Attempt[list], financial: Attempt[dict]
@@ -21,17 +61,16 @@ class MonthlyMortgagePaymentNode(DerivedNode[Money]):
         if p == 0:
             return Attempt.succeeded(Money("0", "GBP"))
 
-        # Total equity from all non-child persons
+        # Total deposit equity from all persons
         sd_val = (
             float(stamp_duty.value_or_none().amount) if stamp_duty.succeeded and stamp_duty.value_or_none() else 0.0
         )
         total_equity = 0.0
         if persons.succeeded:
             for person in persons.value_or_none() or []:
-                if not person.is_child:
-                    eq = person.deposit_equity
-                    if eq is not None:
-                        total_equity += float(eq.amount) if hasattr(eq, "amount") else float(eq)
+                eq = person.deposit_equity
+                if eq is not None:
+                    total_equity += float(eq.amount) if hasattr(eq, "amount") else float(eq)
 
         # Mortgage principal = price + stamp_duty - total_equity
         principal = p + sd_val - total_equity
@@ -49,6 +88,3 @@ class MonthlyMortgagePaymentNode(DerivedNode[Money]):
             denominator = (1 + monthly_rate) ** n_payments - 1
             monthly = principal * numerator / denominator
         return Attempt.succeeded(Money(str(round(monthly, 2)), "GBP"))
-
-    async def build_provenance(self):
-        return Provenance(label="mortgage_formula")

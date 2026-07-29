@@ -45,6 +45,8 @@ class Person:
     acceptable_schools: tuple[str, ...] = ("mixed",)
     deposit_equity: Money | None = None
     places_of_interest: tuple[PlaceOfInterest, ...] = ()
+    email: str = ""
+    is_superuser: bool = False
 
 
 @dataclass(frozen=True)

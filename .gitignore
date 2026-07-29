@@ -1,90 +1,78 @@
+
+# API cache from development/server runs (backfill, migration, enrichment)
+# BODS bus fare data cache (5.1 GB of NeTEx XMLs)
+# DAG database (recreatable)
+# DOM capture tool output (timestamped HTML + PNG screenshots)
+# IDEs
+# Large generated data files
+# Logs directory (PID files, dev server logs)
+# NOT for test fixtures — use tests/fixtures/api_cache/ for committed test cache
+# OS
+# OpenCode
+# Playwright MCP browser snapshots
+# Project specific
 # Python
-__pycache__/
-*.py[cod]
+# Rightmove page cache (fetched HTML used during development)
+# Testing
+# Virtual environments
 *$py.class
+*.egg
+*.egg-info/
+*.log
+*.py[cod]
 *.so
+*.swo
+*.swp
+*~
+.DS_Store
 .Python
+.code-review-graph/
+.coverage
+.eggs/
+.env
+.env.local
+.idea/
+.logs/
+.nox/
+.opencode/
+.playwright-mcp/
+.pytest_cache/
+.ropeproject/
+.sisyphus/
+.tox/
+.venv/
+.vscode/
+/tmp/gias_*.zip
+ENV/
+Thumbs.db
+__pycache__/
 build/
+config.local.json
+data/.bus_fares_checkpoints/
+data/api_cache/
+data/bods_cache/
+data/bods_stops.csv
+data/edubaseall_full.csv
+data/edubaseallacademies*.csv
+data/edubaseallstatefunded*.csv
+data/houses.db*
+data/ofsted_inspections.csv
+data/rightmove_pages/
 develop-eggs/
 dist/
 downloads/
 eggs/
-.eggs/
+env/
+extract.zip
+htmlcov/
 lib/
 lib64/
 parts/
 sdist/
-var/
-wheels/
-*.egg-info/
-*.egg
-
-# Virtual environments
-.venv/
-venv/
-ENV/
-env/
-
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.nox/
-test-results/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Project specific
-*.log
-config.local.json
 service-account.json
-.env.local
-extract.zip
-data/edubaseallstatefunded*.csv
-data/edubaseallacademies*.csv
-data/edubaseall_full.csv
-data/ofsted_inspections.csv
-
-
-# Playwright MCP browser snapshots
-.playwright-mcp/
-
-# Rightmove page cache (fetched HTML used during development)
-data/rightmove_pages/
-
-# API cache from development/server runs (backfill, migration, enrichment)
-# NOT for test fixtures — use tests/fixtures/api_cache/ for committed test cache
-data/api_cache/
-
-# Large generated data files
-/tmp/gias_*.zip
-
-# BODS bus fare data cache (5.1 GB of NeTEx XMLs)
-data/bods_cache/
-data/.bus_fares_checkpoints/
-data/bods_stops.csv
-
-# OpenCode
-.opencode/
-.sisyphus/
-.code-review-graph/
-.ropeproject/
-
-# DAG database (recreatable)
-data/houses.db*
-
-# Logs directory (PID files, dev server logs)
-.logs/
-
-# DOM capture tool output (timestamped HTML + PNG screenshots)
+test-results/
 tools/captures/
+var/
+venv/
+wheels/
+node_modules/.vite/vitest/*/results.json

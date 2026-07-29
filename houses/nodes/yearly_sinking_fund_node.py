@@ -4,11 +4,15 @@ from decimal import Decimal
 
 from money import Money
 
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt, SourceType
 from dag.derived_node import DerivedNode
 
 
 class YearlySinkingFundNode(DerivedNode[Money]):
+    @property
+    def provenance_source_type(self) -> SourceType:
+        return SourceType.CONFIG
+
     def __init__(self, node_id: str, *, rightmove_price, financial_source):
         super().__init__(node_id, Money, (rightmove_price, financial_source))
 
@@ -23,6 +27,3 @@ class YearlySinkingFundNode(DerivedNode[Money]):
         rate = float(fin.get("sinking_fund_rate", 0.01))
         result = p * Decimal(str(rate))
         return Attempt.succeeded(Money(str(round(float(result), 2)), "GBP"))
-
-    async def build_provenance(self):
-        return Provenance(label="sinking_fund_formula")

@@ -4,7 +4,7 @@ from dataclasses import replace
 
 from money import Money
 
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt, SourceType
 from dag.derived_node import DerivedNode
 from houses.commute import LegMode
 from houses.geo import GeoPoint
@@ -21,6 +21,10 @@ class RailFareNode(DerivedNode[Commute]):
     to find stations — the NR fare system uses terminal zones (PAD, VIC,
     WAT, …) as destinations, and the route already tells us which one.
     """
+
+    @property
+    def provenance_source_type(self) -> SourceType:
+        return SourceType.API
 
     def __init__(self, node_id: str, *, transit_result, best_location):
         self.transit_result = transit_result
@@ -105,6 +109,3 @@ class RailFareNode(DerivedNode[Commute]):
                 new_details[i] = replace(cg, cost=total)
         new_commute = replace(commute, daily_cost=Money(str(total.amount), "GBP"), details=tuple(new_details))
         return Attempt.succeeded(new_commute)
-
-    async def build_provenance(self):
-        return Provenance(label="rail_fare_formula")

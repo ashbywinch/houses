@@ -14,12 +14,34 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import Enum, auto
+from datetime import UTC, datetime
+from enum import Enum, StrEnum, auto
 from typing import Any, TypeVar
 
 T = TypeVar("T")
 U = TypeVar("U")
 R = TypeVar("R")
+
+
+class SourceType(StrEnum):
+    API = "api"
+    CALC = "calc"
+    USER = "user"
+    CONFIG = "config"
+    GEOCODE = "geocode"
+    DB = "db"
+
+
+@dataclass
+class FormulaLine:
+    label: str
+    value: str
+
+
+@dataclass
+class Formula:
+    lines: list[FormulaLine]
+    result: str
 
 
 class _Status(Enum):
@@ -39,7 +61,7 @@ class _AttemptMeta(type):
 
     @property
     def succeeded(cls):
-        return lambda value, error="": cls(_Status.SUCCEEDED, value=value, error=error)
+        return lambda value, error="", **kwargs: cls(_Status.SUCCEEDED, value=value, error=error, **kwargs)
 
     @succeeded.setter
     def succeeded(cls, value):
@@ -75,9 +97,19 @@ class Attempt[T](metaclass=_AttemptMeta):
     properties.  For exhaustive handling, use ``.match()``.
     """
 
-    __slots__ = ("_status", "_value", "_error", "_metadata")
+    __slots__ = ("_status", "_value", "_error", "_metadata", "_created_at")
 
-    def __init__(self, status: _Status, value: T | None = None, error: str = "", metadata: dict | None = None) -> None:
+    _now: Callable[[], datetime] = lambda: datetime.now(UTC)
+
+    def __init__(
+        self,
+        status: _Status,
+        value: T | None = None,
+        error: str = "",
+        metadata: dict | None = None,
+        *,
+        _now: Callable[[], datetime] | None = None,
+    ) -> None:
         if status is _Status.SUCCEEDED and isinstance(value, Attempt):
             raise TypeError(
                 f"Cannot create Attempt.succeeded() with an Attempt as value. "
@@ -89,6 +121,7 @@ class Attempt[T](metaclass=_AttemptMeta):
         object.__setattr__(self, "_value", value)
         object.__setattr__(self, "_error", error)
         object.__setattr__(self, "_metadata", metadata or {})
+        object.__setattr__(self, "_created_at", (_now or Attempt._now)())
 
     # ── Predicates (instance properties) ─────────────────────────
 
@@ -178,6 +211,10 @@ class Attempt[T](metaclass=_AttemptMeta):
             return on_pending()
         return on_impossible(self._error)
 
+    @property
+    def created_at(self) -> datetime:
+        return self._created_at
+
     # ── Equality ───────────────────────────────────────────────────────
 
     def __eq__(self, other: object) -> bool:
@@ -208,6 +245,9 @@ class Provenance:
     description: str = ""
     value: Any = None
     url: str = ""
+    source_type: SourceType | None = None
+    freshness: datetime | None = None
+    formula: Formula | None = None
     sources: dict[str, Provenance] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -226,6 +266,15 @@ class Provenance:
                 result["value"] = self.value
             except (TypeError, ValueError, OverflowError):
                 result["value"] = str(self.value)
+        if self.source_type is not None:
+            result["sourceType"] = self.source_type.value
+        if self.freshness is not None:
+            result["freshness"] = self.freshness.isoformat()
+        if self.formula is not None:
+            result["formula"] = {
+                "lines": [{"label": line.label, "value": line.value} for line in self.formula.lines],
+                "result": self.formula.result,
+            }
         if self.sources:
             result["sources"] = {k: v.to_dict() for k, v in self.sources.items()}
         return result

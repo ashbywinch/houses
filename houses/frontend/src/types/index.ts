@@ -9,6 +9,9 @@ export interface Provenance {
   label: string
   description?: string
   url?: string
+  sourceType?: "api" | "calc" | "user" | "config" | "geocode" | "db"
+  freshness?: string
+  formula?: { lines: Array<{ label: string; value: string }>; result: string }
   sources?: Record<string, Provenance>
 }
 

@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import type { PropertySummary } from '../types'
 import { usePropertiesStore } from '../stores/properties'
 import CommutePill from './CommutePill.vue'
-import { simpleOfsted, ofstedClass, epcClass } from '../formatters/format'
+import { simpleOfsted, ofstedClass } from '../formatters/format'
 import { schoolWalkMin } from '../formatters/school'
 
 const store = usePropertiesStore()
@@ -44,11 +44,6 @@ const borderClass = computed(() => {
   return 'card__border--active'
 })
 
-// EPC badge color class — uses group from format.ts with 'epc--' prefix
-function epcBadgeClass(band: string | undefined): string {
-    const g = epcClass(band)
-    return g ? `epc--${g}` : 'epc--muted'
-}
 
 // Freshness badge — how many days ago the property was added
 const freshnessDays = computed(() => {
@@ -121,6 +116,13 @@ function commuteLabel(c: unknown, key: string): string {
   return key.split("/").slice(1).join("/")
 }
 
+const adultCommutes = computed(() => {
+  if (!props.data.commutes) return {}
+  return Object.fromEntries(
+    Object.entries(props.data.commutes).filter(([, v]) => !isChildCommute(v.commute))
+  )
+})
+
 function isChildCommute(c: unknown): boolean {
   return (c as Record<string, unknown> | undefined)?.is_child === true
 }
@@ -140,12 +142,12 @@ async function toggleViewed() {
 
 <template>
   <article class="card" :class="{ 'card--dismissed': triage?.dismissed }">
-    <!-- Left border -->
+    <!-- Accent border -->
     <div class="card__border" :class="borderClass" />
 
     <div class="card__body">
-      <!-- Row 1: Address | Monthly cost -->
-      <div class="card__row card__row--top">
+      <!-- Top row: Address | Monthly cost -->
+      <div class="card__top">
         <a :href="'#/property/' + rid" class="card__address" :aria-label="'View details for ' + address">
           <h3 class="card__address-text">{{ address }}</h3>
         </a>
@@ -154,50 +156,65 @@ async function toggleViewed() {
         </span>
       </div>
 
-      <!-- Row 2: Price + bedrooms | Freshness -->
-      <div class="card__row card__row--specs">
-        <span class="card__specs">
-          <span v-if="price" class="card__price">£{{ price.toLocaleString() }}</span>
-          <span v-if="bedrooms" class="card__bedrooms">{{ bedrooms }} bed</span>
-        </span>
+      <!-- Specs row: price · bedrooms · freshness -->
+      <div class="card__specs">
+        <span v-if="price" class="card__price">£{{ price.toLocaleString() }}</span>
+        <span v-if="bedrooms">{{ bedrooms }} bed</span>
         <span v-if="freshnessLabel" class="pill pill--sm" :class="freshnessClass">{{ freshnessLabel }}</span>
       </div>
 
-      <!-- Row 3: Commutes with cost -->
-      <div class="card__row card__commutes">
-        <template v-for="(c, key) in data.commutes" :key="key">
-          <span v-if="!isChildCommute(c.commute)" class="commute-unit">
-            <span class="card__metric-label">{{ commuteLabel(c.commute, key) }}</span>
-            <a v-if="location" :href="'https://www.google.com/maps/dir/' + location.lat + ',' + location.lon + '/' + encodeURIComponent(commuteLabel(c.commute, key))" class="pill-link" target="_blank" rel="noopener">
-              <CommutePill :label="''" :duration="commuteDuration(c.commute)" :mode="commuteMode(c.commute)" :cost="commuteCost(c.commute)" :goodMax="commuteMode(c.commute) === 'walk' ? 15 : 45" :fineMax="commuteMode(c.commute) === 'walk' ? 30 : 75" />
+      <!-- Commute rows: per-person -->
+      <div v-if="data.commutes" class="card__commutes">
+        <div v-for="(c, key) in adultCommutes" :key="key" class="card__commute-row">
+          <span class="card__commute-person">{{ commuteLabel(c.commute, key) }}</span>
+          <div class="card__commute-data">
+            <a
+              v-if="location"
+              :href="'https://www.google.com/maps/dir/' + location.lat + ',' + location.lon + '/' + encodeURIComponent(commuteLabel(c.commute, key))"
+              class="pill-link"
+              target="_blank"
+              rel="noopener"
+            >
+              <CommutePill
+                :label="''"
+                :duration="commuteDuration(c.commute)"
+                :mode="commuteMode(c.commute)"
+                :cost="commuteCost(c.commute)"
+                :goodMax="commuteMode(c.commute) === 'walk' ? 15 : 45"
+                :fineMax="commuteMode(c.commute) === 'walk' ? 30 : 75"
+              />
             </a>
-          </span>
-        </template>
+            <span v-if="commuteCost(c.commute) !== null" class="card__commute-cost">
+              £{{ commuteCost(c.commute)!.toFixed(2) }}/day
+            </span>
+          </div>
+        </div>
       </div>
 
-      <!-- Row 4: Schools + EPC (two-column) -->
-      <div v-if="data.schools || data.epc" class="card__row card__row--section card__schools-epc">
-        <div class="schools-col">
-          <div v-if="data.schools?.primary?.school?.succeeded" class="school-line">
-            <a v-if="data.schools.primary.school.value!.url" :href="data.schools.primary.school.value!.url" target="_blank" class="school__name">{{ data.schools.primary.school.value!.name }}</a>
-            <span v-else class="school__name">{{ data.schools.primary.school.value!.name }}</span>
-            <span class="pill pill--xs" :class="ofstedClass(data.schools.primary.school.value!.ofsted)">{{ simpleOfsted(data.schools.primary.school.value!.ofsted) }}</span>
-            <span v-if="getSchoolWalkMinutes('Primary') !== null" class="pill pill--xs pill--good">{{ schoolWalkMin(getSchoolWalkMinutes('Primary')) }}</span>
-          </div>
-          <div v-if="data.schools?.secondary?.school?.succeeded" class="school-line">
-            <a v-if="data.schools.secondary.school.value!.url" :href="data.schools.secondary.school.value!.url" target="_blank" class="school__name">{{ data.schools.secondary.school.value!.name }}</a>
-            <span v-else class="school__name">{{ data.schools.secondary.school.value!.name }}</span>
-            <span class="pill pill--xs" :class="ofstedClass(data.schools.secondary.school.value!.ofsted)">{{ simpleOfsted(data.schools.secondary.school.value!.ofsted) }}</span>
-            <span v-if="getSchoolWalkMinutes('Secondary') !== null" class="pill pill--xs pill--good">{{ schoolWalkMin(getSchoolWalkMinutes('Secondary')) }}</span>
-          </div>
+      <!-- Schools / EPC -->
+      <div v-if="data.schools?.primary?.school?.succeeded || data.schools?.secondary?.school?.succeeded || data.epc?.succeeded" class="card__schools">
+        <div v-if="data.schools?.primary?.school?.succeeded" class="card__school-row">
+          <span class="card__school-type">Primary</span>
+          <a v-if="data.schools.primary.school.value!.url" :href="data.schools.primary.school.value!.url" target="_blank" class="card__school-name">{{ data.schools.primary.school.value!.name }}</a>
+          <span v-else class="card__school-name">{{ data.schools.primary.school.value!.name }}</span>
+          <span class="pill pill--xs" :class="ofstedClass(data.schools.primary.school.value!.ofsted)">{{ simpleOfsted(data.schools.primary.school.value!.ofsted) }}</span>
+          <span v-if="getSchoolWalkMinutes('Primary') !== null" class="pill pill--xs pill--slate">{{ schoolWalkMin(getSchoolWalkMinutes('Primary')) }}</span>
         </div>
-        <div class="epc-col">
-          <div v-if="data.epc?.succeeded && data.epc.value?.band" class="epc-badge" :class="epcBadgeClass(data.epc.value.band)">
-            {{ data.epc.value.band }}
-          </div>
+        <div v-if="data.schools?.secondary?.school?.succeeded" class="card__school-row">
+          <span class="card__school-type">Secondary</span>
+          <a v-if="data.schools.secondary.school.value!.url" :href="data.schools.secondary.school.value!.url" target="_blank" class="card__school-name">{{ data.schools.secondary.school.value!.name }}</a>
+          <span v-else class="card__school-name">{{ data.schools.secondary.school.value!.name }}</span>
+          <span class="pill pill--xs" :class="ofstedClass(data.schools.secondary.school.value!.ofsted)">{{ simpleOfsted(data.schools.secondary.school.value!.ofsted) }}</span>
+          <span v-if="getSchoolWalkMinutes('Secondary') !== null" class="pill pill--xs pill--slate">{{ schoolWalkMin(getSchoolWalkMinutes('Secondary')) }}</span>
+        </div>
+        <div v-if="data.epc?.succeeded && data.epc.value" class="card__school-row card__schools-epc">
+          <span class="card__school-type">EPC</span>
+          <span class="card__school-name">{{ data.epc.value.band }}</span>
         </div>
       </div>
-      <div class="card__row card__row--section card__triage">
+
+      <!-- Triage buttons -->
+      <div class="card__triage">
         <button class="triage-btn" :class="{ 'triage-btn--active': triage?.favourite }" @click="toggleFavourite" aria-label="Toggle favourite">
           <svg width="20" height="20" viewBox="0 0 24 24" :fill="triage?.favourite ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
             <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
@@ -220,56 +237,154 @@ async function toggleViewed() {
     </div>
   </article>
 </template>
-
 <style scoped>
-.card { position: relative; background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.card {
+  position: relative;
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: box-shadow var(--transition), transform var(--transition);
+}
+.card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+.card:focus-within {
+  box-shadow: var(--shadow-md);
+}
 .card--dismissed { opacity: 0.6; }
-.card__border { position: absolute; top: 0; left: 0; width: 4px; height: 100%; border-radius: var(--radius) 0 0 var(--radius); }
+
+.card__border {
+  position: absolute;
+  top: 0; left: 0;
+  width: 4px; height: 100%;
+  border-radius: var(--radius) 0 0 var(--radius);
+}
 .card__border--active { background: var(--green); }
-.card__border--favourite { background: #f9a825; }
+.card__border--favourite { background: var(--amber); }
 .card__border--dismissed { background: var(--red); }
 .card__border--viewed { background: var(--blue); }
-.card__body { padding: 14px; display: flex; flex-direction: column; gap: 8px; }
-.card__row { display: flex; align-items: center; gap: 8px; }
-.card__row--top { align-items: flex-start; }
-.card__row--section { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--divider); }
-.card__address { flex: 1; min-width: 0; text-decoration: none; color: var(--blue); }
-.card__address-text { font-size: 15px; font-weight: 600; margin: 0; word-break: break-word; }
-.card__address:hover .card__address-text { text-decoration: underline; }
-.card__monthly-cost { font-size: 14px; font-weight: 700; color: var(--green); white-space: nowrap; }
-.card__row--specs { justify-content: space-between; }
-.card__specs { display: flex; gap: 8px; font-size: 13px; color: var(--text-secondary); }
-.card__price { font-weight: 600; }
-.card__bedrooms { color: var(--text-secondary); }
-.card__commutes { display: flex; flex-wrap: wrap; gap: 4px; line-height: 1.6; }
-.commute-unit { display: inline-flex; align-items: center; gap: 4px; }
-.card__metric-label { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; }
-.pill-link { text-decoration: none; }
-.card__schools-epc { display: flex; gap: 12px; }
-.schools-col { flex: 1; display: flex; flex-direction: column; gap: 4px; padding-right: 8px; border-right: 1px solid var(--divider); }
-.school-line { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-.school__name { font-size: 12px; color: var(--blue); text-decoration: none; }
-.school__name:hover { text-decoration: underline; }
-.epc-col { display: flex; align-items: center; justify-content: center; min-width: 48px; }
-.epc-badge {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
+
+.card__body {
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+/* Top row */
+.card__top {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+.card__address {
+  flex: 1;
+  min-width: 0;
+  text-decoration: none;
+  color: var(--slate-800);
+}
+.card__address-text {
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+  margin: 0;
+  word-break: break-word;
+  line-height: var(--lh-tight);
+}
+.card__address:hover .card__address-text { color: var(--blue); text-decoration: underline; }
+
+.card__monthly-cost {
+  flex-shrink: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  color: var(--green);
+  white-space: nowrap;
+}
+
+/* Specs row */
+.card__specs {
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  font-weight: 800;
-  color: #fff;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
 }
-.epc--a { background: #2e7d32; }
-.epc--bc { background: #1565c0; }
-.epc--d { background: #f9a825; color: #1a1a1a; }
-.epc--e { background: #e65100; }
-.epc--fg { background: #c62828; }
-.epc--muted { background: var(--muted); }
+.card__price { font-weight: var(--fw-semibold); color: var(--slate-700); }
 
-.card__triage { display: flex; justify-content: space-around; gap: 4px; }
+/* Commute rows */
+.card__commutes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.card__commute-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+.card__commute-person {
+  font-weight: var(--fw-medium);
+  color: var(--slate-700);
+  min-width: 70px;
+  white-space: nowrap;
+}
+.card__commute-data {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text-secondary);
+}
+.card__commute-cost { color: var(--slate-500); font-size: var(--fs-xs); }
+.pill-link { text-decoration: none; }
+
+/* School rows */
+.card__schools {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--divider);
+}
+.card__school-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+.card__school-type {
+  font-weight: var(--fw-medium);
+  color: var(--slate-500);
+  min-width: 70px;
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.card__school-name {
+  color: var(--blue);
+  text-decoration: none;
+  font-weight: var(--fw-medium);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card__school-name:hover { text-decoration: underline; }
+
+/* Triage buttons */
+.card__triage {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--divider);
+  margin-top: auto;
+}
 .triage-btn {
   display: flex;
   flex-direction: column;
@@ -277,36 +392,38 @@ async function toggleViewed() {
   gap: 2px;
   min-width: 44px;
   min-height: 44px;
-  padding: 6px 12px;
+  padding: var(--sp-2) var(--sp-1);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--card-bg);
   color: var(--text-secondary);
   cursor: pointer;
   font-size: 11px;
-  font-weight: 500;
-  flex: 1;
+  font-weight: var(--fw-medium);
+  transition: all var(--transition);
 }
-.triage-btn:hover { background: #f5f5f5; }
+.triage-btn:hover { background: var(--slate-50); border-color: var(--slate-300); }
 .triage-btn--active { border-color: var(--blue); color: var(--blue); background: var(--blue-bg); }
 .triage-btn--danger.triage-btn--active { border-color: var(--red); color: var(--red); background: var(--red-bg); }
 .triage-btn--confirm.triage-btn--active { border-color: var(--green); color: var(--green); background: var(--green-bg); }
 .triage-btn__label { font-size: 10px; }
 
+/* Pill system */
 .pill {
   display: inline-flex;
   align-items: center;
-  padding: 2px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
   line-height: 1.6;
   white-space: nowrap;
 }
-.pill--xs { font-size: 10px; padding: 1px 6px; }
+.pill--xs { font-size: 10px; padding: 1px 5px; }
 .pill--sm { font-size: 11px; padding: 1px 7px; }
-.pill--good { background: var(--green-bg); color: var(--green); }
-.pill--warn { background: var(--orange-bg); color: var(--orange); }
-.pill--bad { background: var(--red-bg); color: var(--red); }
-.pill--muted { background: var(--muted-bg); color: var(--muted); }
+.pill--good { background: var(--green-bg); color: var(--green-text); }
+.pill--warn { background: var(--orange-bg); color: var(--orange-text); }
+.pill--bad { background: var(--red-bg); color: var(--red-text); }
+.pill--slate { background: var(--slate-100); color: var(--slate-600); }
 </style>

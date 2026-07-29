@@ -64,5 +64,5 @@ function formatDuration(minutes: number | null): string {
 .pill--good { background: var(--green-bg); color: var(--green); }
 .pill--warn { background: var(--orange-bg); color: var(--orange); }
 .pill--bad { background: var(--red-bg); color: var(--red); }
-.pill--muted { background: var(--muted-bg); color: var(--muted); }
+.pill--muted { background: var(--slate-100); color: var(--text-muted); }
 </style>

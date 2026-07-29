@@ -1,0 +1,1799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Property Finder Wireframe</title>
+    <style>
+        /* ═══════════════════════════════════════════
+           DESIGN SYSTEM
+           ═══════════════════════════════════════════ */
+        :root {
+            /* Palette — tinted neutrals, no pure black/white */
+            --slate-50: #f8fafc;
+            --slate-100: #f1f5f9;
+            --slate-200: #e2e8f0;
+            --slate-300: #cbd5e1;
+            --slate-400: #94a3b8;
+            --slate-500: #64748b;
+            --slate-600: #475569;
+            --slate-700: #334155;
+            --slate-800: #1e293b;
+            --slate-900: #0f172a;
+
+            --green-50: #f0fdf4;
+            --green-100: #dcfce7;
+            --green-600: #16a34a;
+            --green-700: #15803d;
+            --green-800: #166534;
+
+            --orange-50: #fff7ed;
+            --orange-100: #ffedd5;
+            --orange-500: #f97316;
+            --orange-600: #ea580c;
+
+            --red-50: #fef2f2;
+            --red-100: #fee2e2;
+            --red-600: #dc2626;
+            --red-700: #b91c1c;
+
+            --blue-50: #eff6ff;
+            --blue-100: #dbeafe;
+            --blue-500: #3b82f6;
+            --blue-600: #2563eb;
+
+            --amber-100: #fef3c7;
+            --amber-500: #f59e0b;
+
+            /* Typography */
+            --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+            --mono: "JetBrains Mono", "SF Mono", "Cascadia Code", monospace;
+            --fs-xs: 0.6875rem;
+            --fs-sm: 0.8125rem;
+            --fs-base: 0.9375rem;
+            --fs-lg: 1.0625rem;
+            --fs-xl: 1.25rem;
+            --fs-2xl: 1.5rem;
+            --fw-normal: 400;
+            --fw-medium: 500;
+            --fw-semibold: 600;
+            --fw-bold: 700;
+
+            /* Spacing — 4px base */
+            --sp-1: 4px;
+            --sp-2: 8px;
+            --sp-3: 12px;
+            --sp-4: 16px;
+            --sp-5: 20px;
+            --sp-6: 24px;
+            --sp-8: 32px;
+            --sp-10: 40px;
+            --sp-12: 48px;
+
+            /* Radii */
+            --r-sm: 4px;
+            --r-md: 8px;
+            --r-lg: 12px;
+            --r-xl: 16px;
+
+            /* Shadows */
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
+            --shadow-md: 0 2px 8px rgba(0,0,0,0.08);
+            --shadow-lg: 0 8px 24px rgba(0,0,0,0.12);
+
+            /* Borders */
+            --border: #e2e8f0;
+
+            /* Transitions */
+            --ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+            --dur: 150ms;
+        }
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: var(--sans);
+            background: var(--slate-50);
+            color: var(--slate-800);
+            font-size: var(--fs-base);
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ═══════════════════════════════════════════
+           GLOBAL COMPONENTS
+           ═══════════════════════════════════════════ */
+
+        /* --- Header --- */
+        .app-header {
+            background: var(--slate-800);
+            color: var(--slate-100);
+            padding: var(--sp-4) var(--sp-6);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .app-header__title {
+            font-size: var(--fs-lg);
+            font-weight: var(--fw-semibold);
+            letter-spacing: -0.01em;
+        }
+        .app-header__actions { display: flex; gap: var(--sp-2); }
+
+        /* --- Tab bar (view switcher) --- */
+        .view-tabs {
+            display: flex;
+            background: var(--slate-700);
+            position: sticky;
+            top: 52px;
+            z-index: 99;
+        }
+        .view-tab {
+            flex: 1;
+            text-align: center;
+            padding: 10px;
+            color: var(--slate-400);
+            font-size: var(--fs-sm);
+            font-weight: var(--fw-medium);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+        }
+        .view-tab:hover { color: #fff; }
+        .view-tab--active { color: #fff; border-bottom-color: #fff; }
+
+        /* --- Page container toggle --- */
+        #list-page { display: block; }
+        #detail-page { display: none; }
+
+        /* --- Tag / Pill --- */
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: var(--fs-xs);
+            font-weight: var(--fw-bold);
+            line-height: 1.6;
+            white-space: nowrap;
+        }
+        .pill--green { background: var(--green-100); color: var(--green-700); }
+        .pill--orange { background: var(--orange-100); color: var(--orange-600); }
+        .pill--red { background: var(--red-100); color: var(--red-700); }
+        .pill--blue { background: var(--blue-100); color: var(--blue-600); }
+        .pill--slate { background: var(--slate-100); color: var(--slate-600); }
+        .pill--amber { background: var(--amber-100); color: #92400e; }
+        .pill--xs { font-size: 10px; padding: 1px 5px; }
+        .pill--sm { font-size: 11px; padding: 1px 7px; }
+
+        /* --- Buttons --- */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            font-family: var(--sans);
+            font-weight: var(--fw-semibold);
+            font-size: var(--fs-sm);
+            padding: var(--sp-2) var(--sp-4);
+            border: 1px solid transparent;
+            border-radius: var(--r-md);
+            cursor: pointer;
+            transition: all var(--dur) var(--ease);
+            text-decoration: none;
+            min-height: 36px;
+        }
+        .btn:focus-visible { outline: 2px solid var(--blue-500); outline-offset: 2px; }
+        .btn--primary { background: var(--blue-500); color: #fff; border-color: var(--blue-500); }
+        .btn--primary:hover { background: var(--blue-600); }
+        .btn--secondary { background: var(--slate-100); color: var(--slate-700); border-color: var(--border); }
+        .btn--secondary:hover { background: var(--slate-200); }
+        .btn--ghost { background: transparent; color: var(--slate-600); border-color: transparent; }
+        .btn--ghost:hover { background: var(--slate-100); }
+
+        /* --- Icon helper --- */
+        .icon { width: 1em; height: 1em; stroke-width: 2.5; fill: none; stroke: currentColor; vertical-align: -0.125em; }
+        .icon--sm { width: 0.875em; height: 0.875em; }
+
+        /* --- Section separator --- */
+        .section-gap { height: 8px; background: var(--slate-100); }
+
+        /* ═══════════════════════════════════════════
+           LIST PAGE
+           ═══════════════════════════════════════════ */
+
+        /* --- Filter bar --- */
+        .filter-bar {
+            display: flex;
+            align-items: center;
+            gap: var(--sp-2);
+            padding: var(--sp-3) var(--sp-4);
+            background: #fff;
+            border-bottom: 1px solid var(--border);
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .filter-bar__label {
+            font-size: var(--fs-sm);
+            font-weight: var(--fw-semibold);
+            color: var(--slate-500);
+            white-space: nowrap;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .filter-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 5px 12px;
+            border-radius: 999px;
+            font-size: var(--fs-sm);
+            font-weight: var(--fw-medium);
+            border: 1px solid var(--border);
+            background: #fff;
+            color: var(--slate-600);
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all var(--dur) var(--ease);
+        }
+        .filter-chip:hover { border-color: var(--slate-400); }
+        .filter-chip--active { background: var(--slate-800); color: #fff; border-color: var(--slate-800); }
+        .filter-chip__count {
+            background: rgba(255,255,255,0.2);
+            padding: 0 5px;
+            border-radius: 999px;
+            font-size: 10px;
+        }
+        .filter-chip:not(.filter-chip--active) .filter-chip__count {
+            background: var(--slate-100);
+            color: var(--slate-500);
+        }
+
+        /* --- Property grid --- */
+        .property-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+            gap: var(--sp-4);
+            padding: var(--sp-4);
+        }
+
+        /* --- Property card --- */
+        .card {
+            background: #fff;
+            border-radius: var(--r-lg);
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            transition: box-shadow var(--dur) var(--ease), transform var(--dur) var(--ease);
+            position: relative;
+        }
+        .card:hover {
+            box-shadow: var(--shadow-md);
+            transform: translateY(-2px);
+        }
+        .card__border {
+            position: absolute;
+            top: 0; left: 0;
+            width: 4px; height: 100%;
+            border-radius: var(--r-lg) 0 0 var(--r-lg);
+        }
+        .card__border--green { background: var(--green-600); }
+        .card__border--amber { background: var(--amber-500); }
+        .card__border--red { background: var(--red-600); }
+        .card__border--blue { background: var(--blue-500); }
+        .card__border--slate { background: var(--slate-300); }
+
+        .card__body {
+            padding: var(--sp-4);
+            display: flex;
+            flex-direction: column;
+            gap: var(--sp-3);
+        }
+
+        /* Card: top row — address + monthly cost */
+        .card__top { display: flex; align-items: flex-start; gap: var(--sp-3); }
+        .card__address {
+            flex: 1;
+            min-width: 0;
+            font-size: var(--fs-base);
+            font-weight: var(--fw-semibold);
+            color: var(--slate-800);
+            text-decoration: none;
+            line-height: 1.3;
+        }
+        .card__address:hover { color: var(--blue-600); text-decoration: underline; }
+        .card__monthly-cost {
+            flex-shrink: 0;
+            font-size: var(--fs-sm);
+            font-weight: var(--fw-bold);
+            white-space: nowrap;
+        }
+        .card__monthly-cost--green { color: var(--green-600); }
+        .card__monthly-cost--orange { color: var(--orange-600); }
+        .card__monthly-cost--red { color: var(--red-600); }
+
+        /* Card: specs row — price, beds, freshness */
+        .card__specs {
+            display: flex;
+            align-items: center;
+            gap: var(--sp-3);
+            font-size: var(--fs-sm);
+            color: var(--slate-500);
+        }
+        .card__price { font-weight: var(--fw-semibold); color: var(--slate-700); }
+
+        /* Card: commute row — per-person data */
+        .card__commutes {
+            display: flex;
+            flex-direction: column;
+            gap: var(--sp-1);
+        }
+        .card__commute-row {
+            display: flex;
+            align-items: center;
+            gap: var(--sp-2);
+            font-size: var(--fs-sm);
+        }
+        .card__commute-person {
+            font-weight: var(--fw-medium);
+            color: var(--slate-700);
+            min-width: 70px;
+            white-space: nowrap;
+        }
+        .card__commute-data {
+            display: flex;
+            align-items: center;
+            gap: var(--sp-2);
+            color: var(--slate-600);
+        }
+        .card__commute-time { font-weight: var(--fw-semibold); }
+        .card__commute-cost { color: var(--slate-500); font-size: var(--fs-xs); }
+
+        /* Card: school row — Ofsted + walk time */
+        .card__schools {
+            display: flex;
+            flex-direction: column;
+            gap: var(--sp-1);
+            padding-top: var(--sp-2);
+            border-top: 1px solid var(--slate-100);
+        }
+        .card__school-row {
+            display: flex;
+            align-items: center;
+            gap: var(--sp-2);
+            font-size: var(--fs-sm);
+        }
+        .card__school-type {
+            font-weight: var(--fw-medium);
+            color: var(--slate-500);
+            min-width: 70px;
+            font-size: var(--fs-xs);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .card__school-name {
+            color: var(--blue-600);
+            text-decoration: none;
+            font-weight: var(--fw-medium);
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .card__school-name:hover { text-decoration: underline; }
+
+        /* Card: group status */
+        .card__group {
+            display: flex;
+            gap: var(--sp-3);
+            font-size: var(--fs-xs);
+            color: var(--slate-500);
+        }
+        .card__group-item {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+
+        /* Card: triage buttons */
+        .card__triage {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: var(--sp-2);
+            padding-top: var(--sp-3);
+            border-top: 1px solid var(--slate-100);
+            margin-top: auto;
+        }
+        .triage-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            padding: var(--sp-2) var(--sp-1);
+            border: 1px solid var(--border);
+            border-radius: var(--r-md);
+            background: #fff;
+            color: var(--slate-500);
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: var(--fw-medium);
+            transition: all var(--dur) var(--ease);
+            min-height: 44px;
+        }
+        .triage-btn:hover { background: var(--slate-50); border-color: var(--slate-300); }
+        .triage-btn--active-save { border-color: var(--blue-500); color: var(--blue-600); background: var(--blue-50); }
+        .triage-btn--active-dismiss { border-color: var(--red-600); color: var(--red-600); background: var(--red-50); }
+        .triage-btn--active-seen { border-color: var(--green-600); color: var(--green-600); background: var(--green-50); }
+        .triage-btn__icon { font-size: 16px; line-height: 1; }
+        .triage-btn__label { font-size: 10px; }
+
+        /* ═══════════════════════════════════════════
+           DETAIL PAGE
+           ═══════════════════════════════════════════ */
+
+        .detail-page {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 0 0 80px;
+        }
+
+        /* Detail: summary bar */
+        .summary-bar {
+            background: #fff;
+            padding: var(--sp-4) var(--sp-6);
+            border-bottom: 1px solid var(--border);
+        }
+        .summary-address {
+            font-size: var(--fs-xl);
+            font-weight: var(--fw-bold);
+            color: var(--slate-900);
+            margin-bottom: var(--sp-2);
+            line-height: 1.3;
+        }
+        .summary-meta {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: var(--sp-3);
+            font-size: var(--fs-sm);
+        }
+        .summary-price { font-weight: var(--fw-bold); color: var(--slate-800); font-size: var(--fs-base); }
+        .summary-monthly { font-weight: var(--fw-bold); }
+        .summary-bedrooms { color: var(--slate-500); }
+
+        /* Detail: section nav */
+        .section-nav-wrap {
+            position: sticky;
+            top: 52px;
+            z-index: 50;
+            background: #fff;
+            border-bottom: 1px solid var(--border);
+            overflow-x: auto;
+        }
+        .section-nav {
+            display: flex;
+            max-width: 960px;
+            margin: 0 auto;
+        }
+        .section-nav__btn {
+            flex: 1;
+            min-width: 0;
+            padding: var(--sp-3) var(--sp-2);
+            border: none;
+            background: none;
+            cursor: pointer;
+            font-size: var(--fs-sm);
+            font-weight: var(--fw-medium);
+            color: var(--slate-500);
+            white-space: nowrap;
+            text-align: center;
+            border-bottom: 2px solid transparent;
+            transition: all var(--dur) var(--ease);
+        }
+        .section-nav__btn:hover { color: var(--slate-800); }
+        .section-nav__btn--active {
+            color: var(--slate-900);
+            font-weight: var(--fw-bold);
+            border-bottom-color: var(--slate-900);
+        }
+
+        /* Detail: sections */
+        .detail-section {
+            background: #fff;
+            padding: var(--sp-5) var(--sp-6);
+            border-bottom: 8px solid var(--slate-50);
+        }
+        .detail-section__title {
+            font-size: var(--fs-base);
+            font-weight: var(--fw-bold);
+            color: var(--slate-800);
+            margin-bottom: var(--sp-4);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            font-size: var(--fs-xs);
+        }
+
+        /* Detail: field rows */
+        .field-row {
+            display: flex;
+            align-items: baseline;
+            gap: var(--sp-3);
+            padding: var(--sp-2) 0;
+        }
+        .field-row + .field-row { border-top: 1px solid var(--slate-100); }
+        .field-label {
+            font-size: var(--fs-sm);
+            font-weight: var(--fw-semibold);
+            color: var(--slate-500);
+            min-width: 100px;
+            flex-shrink: 0;
+        }
+        .field-value {
+            font-size: var(--fs-sm);
+            color: var(--slate-700);
+            display: flex;
+            align-items: center;
+            gap: var(--sp-2);
+            flex-wrap: wrap;
+        }
+        .field-value a {
+            color: var(--blue-600);
+            text-decoration: none;
+        }
+        .field-value a:hover { text-decoration: underline; }
+
+        /* Detail: commute accordion */
+        .commute-acc {
+            border: 1px solid var(--border);
+            border-radius: var(--r-md);
+            margin-bottom: var(--sp-2);
+            overflow: hidden;
+        }
+        .commute-acc__head {
+            display: flex;
+            align-items: center;
+            gap: var(--sp-3);
+            width: 100%;
+            padding: var(--sp-3) var(--sp-4);
+            border: none;
+            background: #fff;
+            cursor: pointer;
+            font: inherit;
+            text-align: left;
+            min-height: 44px;
+        }
+        .commute-acc__head:hover { background: var(--slate-50); }
+        .commute-acc__person { font-weight: var(--fw-semibold); font-size: var(--fs-sm); flex: 1; }
+        .commute-acc__chevron {
+            font-size: 10px;
+            color: var(--slate-400);
+            transition: transform var(--dur) var(--ease);
+        }
+        .commute-acc__chevron--open { transform: rotate(180deg); }
+        .commute-acc__body {
+            padding: var(--sp-3) var(--sp-4);
+            border-top: 1px solid var(--border);
+            background: var(--slate-50);
+        }
+
+        /* Detail: commute legs */
+        .commute-legs { display: flex; flex-direction: column; gap: var(--sp-1); }
+        .commute-leg {
+            display: flex;
+            gap: var(--sp-3);
+            font-size: var(--fs-sm);
+            padding: var(--sp-1) 0;
+        }
+        .commute-leg__mode { font-weight: var(--fw-semibold); min-width: 56px; color: var(--slate-600); }
+        .commute-leg__dur { color: var(--slate-700); }
+        .commute-leg__cost { color: var(--slate-500); }
+        .commute-leg__op { font-size: var(--fs-xs); color: var(--slate-400); font-style: italic; }
+        .commute-route { font-size: var(--fs-xs); color: var(--slate-400); font-style: italic; margin-top: var(--sp-1); }
+
+        /* Detail: school cards */
+        .school-card {
+            display: flex;
+            align-items: center;
+            gap: var(--sp-3);
+            padding: var(--sp-3) var(--sp-4);
+            border: 1px solid var(--border);
+            border-radius: var(--r-md);
+            margin-bottom: var(--sp-2);
+        }
+        .school-card__type {
+            font-size: var(--fs-xs);
+            font-weight: var(--fw-bold);
+            color: var(--slate-400);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            min-width: 72px;
+        }
+        .school-card__name {
+            font-weight: var(--fw-semibold);
+            font-size: var(--fs-sm);
+            color: var(--blue-600);
+            text-decoration: none;
+            flex: 1;
+        }
+        .school-card__name:hover { text-decoration: underline; }
+        .school-card__data { display: flex; gap: var(--sp-2); align-items: center; }
+
+        /* Detail: costs table */
+        .costs-table { width: 100%; }
+        .costs-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: var(--sp-2) 0;
+            border-bottom: 1px solid var(--slate-100);
+            font-size: var(--fs-sm);
+        }
+        .costs-row:last-child { border-bottom: none; }
+        .costs-row--sub { padding-left: var(--sp-4); color: var(--slate-500); font-size: var(--fs-xs); }
+        .costs-row--total {
+            font-weight: var(--fw-bold);
+            font-size: var(--fs-base);
+            border-top: 2px solid var(--blue-500);
+            margin-top: var(--sp-1);
+            padding-top: var(--sp-3);
+        }
+        .costs-row--total .costs-value { color: var(--blue-600); }
+        .costs-label { color: var(--slate-600); }
+        .costs-value { font-weight: var(--fw-semibold); }
+
+        /* ═══════════════════════════════════════════
+           PROVENANCE TREE — expandable DAG trace
+           ═══════════════════════════════════════════ */
+
+        .prov-tree { font-size: var(--fs-xs); }
+        .prov-node { margin-bottom: var(--sp-1); }
+        .prov-node__head {
+            display: flex;
+            align-items: center;
+            gap: var(--sp-2);
+            padding: var(--sp-1) var(--sp-2);
+            border-radius: var(--r-sm);
+            cursor: pointer;
+            user-select: none;
+            transition: background var(--dur) var(--ease);
+        }
+        .prov-node__head:hover { background: var(--slate-100); }
+        .prov-node__chevron {
+            font-size: 8px;
+            color: var(--slate-400);
+            transition: transform var(--dur) var(--ease);
+            width: 12px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        .prov-node__chevron--open { transform: rotate(90deg); }
+        .prov-node__chevron--leaf { visibility: hidden; }
+        .prov-node__label {
+            font-weight: var(--fw-semibold);
+            color: var(--slate-700);
+        }
+        .prov-node__desc {
+            color: var(--slate-500);
+            margin-left: var(--sp-1);
+        }
+        .prov-node__link {
+            color: var(--blue-500);
+            text-decoration: none;
+            margin-left: var(--sp-1);
+        }
+        .prov-node__link:hover { text-decoration: underline; }
+        .prov-node__time {
+            color: var(--slate-400);
+            margin-left: auto;
+            font-family: var(--mono);
+            font-size: 10px;
+            flex-shrink: 0;
+        }
+        .prov-node__children {
+            margin-left: 20px;
+            padding-left: 12px;
+            border-left: 1px solid var(--slate-200);
+            overflow: hidden;
+            transition: max-height var(--dur) var(--ease);
+        }
+        .prov-node__children--collapsed { display: none; }
+
+        /* Provenance: inline data summary */
+        .prov-data {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--sp-2);
+            padding: var(--sp-2) var(--sp-3);
+            background: var(--slate-50);
+            border-radius: var(--r-sm);
+            margin-top: var(--sp-1);
+        }
+        .prov-data__item {
+            font-size: 11px;
+            color: var(--slate-600);
+        }
+        .prov-data__key { font-weight: var(--fw-semibold); color: var(--slate-500); }
+        /* Inline provenance toggle — per data point */
+        .prov-inline {
+            margin-top: var(--sp-2);
+        }
+        .prov-inline__toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 10px;
+            color: var(--slate-400);
+            background: none;
+            border: 1px solid var(--slate-200);
+            border-radius: var(--r-sm);
+            padding: 2px 8px;
+            cursor: pointer;
+            transition: all var(--dur) var(--ease);
+            font-family: var(--sans);
+        }
+        .prov-inline__toggle:hover { background: var(--slate-100); color: var(--slate-600); border-color: var(--slate-300); }
+        .prov-inline__tree {
+            display: none;
+            margin-top: var(--sp-2);
+            padding: var(--sp-2) var(--sp-3);
+            background: var(--slate-50);
+            border-radius: var(--r-md);
+            border: 1px solid var(--slate-200);
+        }
+        .prov-inline__tree--open { display: block; }
+
+        /* Detail: notes section */
+        .notes-list { display: flex; flex-direction: column; gap: var(--sp-3); }
+        .note-card {
+            padding: var(--sp-3) var(--sp-4);
+            border: 1px solid var(--border);
+            border-radius: var(--r-md);
+        }
+        .note-card__header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--sp-2);
+        }
+        .note-card__author { font-weight: var(--fw-semibold); font-size: var(--fs-sm); }
+        .note-card__time { font-size: var(--fs-xs); color: var(--slate-400); }
+        .note-card__body { font-size: var(--fs-sm); color: var(--slate-600); line-height: 1.6; }
+
+        /* Detail: map placeholder */
+        .map-embed {
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: var(--slate-200);
+            border-radius: var(--r-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--slate-400);
+            margin-bottom: var(--sp-3);
+        }
+
+        /* Detail: compact map strip — correction #1 */
+        .map-strip {
+            width: 100%;
+            height: 120px;
+            background: var(--slate-200);
+            border-radius: var(--r-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--slate-400);
+            position: relative;
+            overflow: hidden;
+            cursor: pointer;
+            transition: height var(--dur) var(--ease);
+        }
+        .map-strip:hover { background: var(--slate-300); }
+        .map-strip__label {
+            font-size: var(--fs-xs);
+            color: var(--slate-500);
+            display: flex;
+            align-items: center;
+            gap: var(--sp-2);
+        }
+        .map-strip__expand {
+            position: absolute;
+            bottom: var(--sp-2);
+            right: var(--sp-2);
+            font-size: 10px;
+            background: rgba(255,255,255,0.9);
+            padding: 2px 8px;
+            border-radius: var(--r-sm);
+            color: var(--slate-600);
+        }
+
+        /* Detail: action buttons */
+        .detail-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-3); flex-wrap: wrap; }
+
+        /* ═══════════════════════════════════════════
+           BOTTOM TAB BAR (mobile)
+           ═══════════════════════════════════════════ */
+        .tab-bar {
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            height: 56px;
+            background: #fff;
+            border-top: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-around;
+            z-index: 100;
+            padding-bottom: env(safe-area-inset-bottom, 0);
+        }
+        .tab-bar__btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            color: var(--slate-400);
+            min-width: 56px;
+            min-height: 44px;
+            padding: var(--sp-1) var(--sp-3);
+        }
+        .tab-bar__btn--active { color: var(--blue-600); }
+        .tab-bar__label { font-size: 10px; font-weight: var(--fw-semibold); }
+
+        /* ═══════════════════════════════════════════
+           RESPONSIVE
+           ═══════════════════════════════════════════ */
+
+        @media (max-width: 767px) {
+            .property-grid {
+                grid-template-columns: 1fr;
+                gap: var(--sp-3);
+                padding: var(--sp-3);
+            }
+            .card__body { padding: var(--sp-3); }
+            .detail-section { padding: var(--sp-4); }
+            .summary-bar { padding: var(--sp-3) var(--sp-4); }
+            .field-row { flex-direction: column; gap: var(--sp-1); }
+            .field-label { min-width: unset; }
+            .section-nav { overflow-x: auto; }
+            .section-nav__btn { padding: var(--sp-3); font-size: var(--fs-xs); }
+        }
+
+        @media (min-width: 768px) {
+            .property-grid {
+                grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+            }
+        }
+
+        /* ═══════════════════════════════════════════
+           UTILITIES
+           ═══════════════════════════════════════════ */
+        .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
+    </style>
+</head>
+<body>
+
+    <!-- ═══════════════════════════════════════════
+         APP HEADER
+         ═══════════════════════════════════════════ -->
+    <header class="app-header">
+        <span class="app-header__title">Properties</span>
+        <div class="app-header__actions">
+            <button class="btn btn--ghost" style="color: var(--slate-300);" aria-label="Settings">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- View tabs -->
+    <div class="view-tabs">
+        <div class="view-tab view-tab--active" onclick="switchView('list')">Property List</div>
+        <div class="view-tab" onclick="switchView('detail')">Property Detail</div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════
+         LIST PAGE
+         ═══════════════════════════════════════════ -->
+    <div id="list-page">
+        <!-- Filter bar -->
+        <div class="filter-bar">
+            <span class="filter-bar__label">Filter</span>
+            <button class="filter-chip filter-chip--active">New <span class="filter-chip__count">12</span></button>
+            <button class="filter-chip">Saved <span class="filter-chip__count">5</span></button>
+            <button class="filter-chip">Dismissed <span class="filter-chip__count">3</span></button>
+            <button class="filter-chip">Seen <span class="filter-chip__count">8</span></button>
+            <button class="filter-chip">All <span class="filter-chip__count">28</span></button>
+        </div>
+
+        <main>
+            <div class="property-grid">
+
+                <!-- ─── CARD 1: Within budget, good commutes ─── -->
+                <article class="card">
+                    <div class="card__border card__border--green"></div>
+                    <div class="card__body">
+                        <div class="card__top">
+                            <a href="#" class="card__address" onclick="switchView('detail'); return false;">Thurby Way, Maidenhead, SL6 3YZ</a>
+                            <span class="card__monthly-cost card__monthly-cost--green">£3,127/mo</span>
+                        </div>
+                        <div class="card__specs">
+                            <span class="card__price">£650,000</span>
+                            <span>4 bed semi-detached</span>
+                            <span class="pill pill--sm pill--green">Added 2d ago</span>
+                        </div>
+                        <div class="card__commutes">
+                            <div class="card__commute-row">
+                                <span class="card__commute-person">Simon</span>
+                                <div class="card__commute-data">
+                                    <span class="pill pill--green pill--sm">54 min</span>
+                                    <span class="card__commute-cost">£48.27/day</span>
+                                    <span style="font-size: var(--fs-xs); color: var(--slate-400);">via Pimlico</span>
+                                </div>
+                            </div>
+                            <div class="card__commute-row">
+                                <span class="card__commute-person">Lorena</span>
+                                <div class="card__commute-data">
+                                    <span class="pill pill--orange pill--sm">1h 36m</span>
+                                    <span class="card__commute-cost">£38.40/day</span>
+                                    <span style="font-size: var(--fs-xs); color: var(--slate-400);">via Aldgate</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card__schools">
+                            <div class="card__school-row">
+                                <span class="card__school-type">Primary</span>
+                                <a href="#" class="card__school-name">St Mary's Catholic</a>
+                                <span class="pill pill--xs pill--green">Outstanding</span>
+                                <span class="pill pill--xs pill--slate">18 min walk</span>
+                            </div>
+                            <div class="card__school-row">
+                                <span class="card__school-type">Secondary</span>
+                                <a href="#" class="card__school-name">Huron secondary (2528m)</a>
+                                <span class="pill pill--xs pill--blue">Good</span>
+                                <span class="pill pill--xs pill--slate">32 min walk</span>
+                            </div>
+                        </div>
+                        <div class="card__group">
+                            <span class="card__group-item">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                                3 interested
+                            </span>
+                            <span class="card__group-item">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--amber-500)" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                                1 maybe
+                            </span>
+                        </div>
+                        <div class="card__triage">
+                            <button class="triage-btn triage-btn--active-save">
+                                <span class="triage-btn__icon">♥</span>
+                                <span class="triage-btn__label">Saved</span>
+                            </button>
+                            <button class="triage-btn">
+                                <span class="triage-btn__icon">✕</span>
+                                <span class="triage-btn__label">Dismiss</span>
+                            </button>
+                            <button class="triage-btn">
+                                <span class="triage-btn__icon">✓</span>
+                                <span class="triage-btn__label">Mark Seen</span>
+                            </button>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- ─── CARD 2: Over budget (hard rule-out indicator) ─── -->
+                <article class="card">
+                    <div class="card__border card__border--red"></div>
+                    <div class="card__body">
+                        <div class="card__top">
+                            <a href="#" class="card__address">Heyford Road, Didcot, OX11 0JA</a>
+                            <span class="card__monthly-cost card__monthly-cost--red">£4,892/mo</span>
+                        </div>
+                        <div class="card__specs">
+                            <span class="card__price">£825,000</span>
+                            <span>5 bed detached house</span>
+                            <span class="pill pill--sm pill--green">Added today</span>
+                        </div>
+                        <!-- NOTE: over budget — red cost. This is the ONLY hard pass/fail indicator -->
+                        <div class="card__commutes">
+                            <div class="card__commute-row">
+                                <span class="card__commute-person">Simon</span>
+                                <div class="card__commute-data">
+                                    <span class="pill pill--green pill--sm">38 min</span>
+                                    <span class="card__commute-cost">£32.50/day</span>
+                                    <span style="font-size: var(--fs-xs); color: var(--slate-400);">via Didcot Parkway</span>
+                                </div>
+                            </div>
+                            <div class="card__commute-row">
+                                <span class="card__commute-person">Lorena</span>
+                                <div class="card__commute-data">
+                                    <span class="pill pill--green pill--sm">42 min</span>
+                                    <span class="card__commute-cost">£29.80/day</span>
+                                    <span style="font-size: var(--fs-xs); color: var(--slate-400);">via Liverpool St</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card__schools">
+                            <div class="card__school-row">
+                                <span class="card__school-type">Primary</span>
+                                <a href="#" class="card__school-name">All Saints CE Primary</a>
+                                <span class="pill pill--xs pill--green">Outstanding</span>
+                                <span class="pill pill--xs pill--slate">6 min walk</span>
+                            </div>
+                            <div class="card__school-row">
+                                <span class="card__school-type">Secondary</span>
+                                <a href="#" class="card__school-name">Didcot Girls School</a>
+                                <span class="pill pill--xs pill--green">Outstanding</span>
+                                <span class="pill pill--xs pill--slate">12 min walk</span>
+                            </div>
+                        </div>
+                        <div class="card__triage">
+                            <button class="triage-btn">
+                                <span class="triage-btn__icon">♥</span>
+                                <span class="triage-btn__label">Save</span>
+                            </button>
+                            <button class="triage-btn triage-btn--active-dismiss">
+                                <span class="triage-btn__icon">✕</span>
+                                <span class="triage-btn__label">Dismissed</span>
+                            </button>
+                            <button class="triage-btn">
+                                <span class="triage-btn__icon">✓</span>
+                                <span class="triage-btn__label">Mark Seen</span>
+                            </button>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- ─── CARD 3: Long commutes, user judges ─── -->
+                <article class="card">
+                    <div class="card__border card__border--amber"></div>
+                    <div class="card__body">
+                        <div class="card__top">
+                            <a href="#" class="card__address">Maidenbridge Park Area, Weybridge, KT13</a>
+                            <span class="card__monthly-cost card__monthly-cost--orange">£3,720/mo</span>
+                        </div>
+                        <div class="card__specs">
+                            <span class="card__price">£775,000</span>
+                            <span>3 bed flat</span>
+                            <span class="pill pill--sm pill--orange">Added 14d ago</span>
+                        </div>
+                        <div class="card__commutes">
+                            <div class="card__commute-row">
+                                <span class="card__commute-person">Simon</span>
+                                <div class="card__commute-data">
+                                    <span class="pill pill--red pill--sm">1h 22m</span>
+                                    <span class="card__commute-cost">£52.10/day</span>
+                                    <span style="font-size: var(--fs-xs); color: var(--slate-400);">via Weybridge + Tube</span>
+                                </div>
+                            </div>
+                            <div class="card__commute-row">
+                                <span class="card__commute-person">Lorena</span>
+                                <div class="card__commute-data">
+                                    <span class="pill pill--red pill--sm">1h 48m</span>
+                                    <span class="card__commute-cost">£44.60/day</span>
+                                    <span style="font-size: var(--fs-xs); color: var(--slate-400);">via Waterloo</span>
+                                </div>
+                            </div>
+                            <!-- Child school walk — data shown, no judgment -->
+                            <div class="card__commute-row">
+                                <span class="card__commute-person">George</span>
+                                <div class="card__commute-data">
+                                    <span class="pill pill--green pill--sm">14 min walk</span>
+                                    <span style="font-size: var(--fs-xs); color: var(--slate-400);">to school</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card__schools">
+                            <div class="card__school-row">
+                                <span class="card__school-type">Primary</span>
+                                <a href="#" class="card__school-name">St George's College Junior</a>
+                                <span class="pill pill--xs pill--blue">Good</span>
+                                <span class="pill pill--xs pill--slate">14 min walk</span>
+                            </div>
+                            <div class="card__school-row">
+                                <span class="card__school-type">Secondary</span>
+                                <a href="#" class="card__school-name">Brooklands College</a>
+                                <span class="pill pill--xs pill--amber">Requires Improvement</span>
+                                <span class="pill pill--xs pill--slate">22 min walk</span>
+                            </div>
+                        </div>
+                        <div class="card__triage">
+                            <button class="triage-btn">
+                                <span class="triage-btn__icon">♥</span>
+                                <span class="triage-btn__label">Save</span>
+                            </button>
+                            <button class="triage-btn">
+                                <span class="triage-btn__icon">✕</span>
+                                <span class="triage-btn__label">Dismiss</span>
+                            </button>
+                            <button class="triage-btn triage-btn--active-seen">
+                                <span class="triage-btn__icon">✓</span>
+                                <span class="triage-btn__label">Seen</span>
+                            </button>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- ─── CARD 4: Missing commute data ─── -->
+                <article class="card">
+                    <div class="card__border card__border--blue"></div>
+                    <div class="card__body">
+                        <div class="card__top">
+                            <a href="#" class="card__address">17 Harrowdene Avenue, Pyrford, GU22</a>
+                            <span class="card__monthly-cost card__monthly-cost--green">£2,985/mo</span>
+                        </div>
+                        <div class="card__specs">
+                            <span class="card__price">£575,000</span>
+                            <span>3 bed semi-detached</span>
+                            <span class="pill pill--sm pill--slate">Stale (90d+)</span>
+                        </div>
+                        <div class="card__commutes">
+                            <div class="card__commute-row">
+                                <span class="card__commute-person">Simon</span>
+                                <div class="card__commute-data">
+                                    <span class="pill pill--orange pill--sm">58 min</span>
+                                    <span class="card__commute-cost">£41.20/day</span>
+                                    <span style="font-size: var(--fs-xs); color: var(--slate-400);">via West Byfleet</span>
+                                </div>
+                            </div>
+                            <!-- Lorena commute pending — shows "in progress" state -->
+                            <div class="card__commute-row">
+                                <span class="card__commute-person">Lorena</span>
+                                <div class="card__commute-data">
+                                    <span class="pill pill--slate pill--sm">Calculating…</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card__schools">
+                            <div class="card__school-row">
+                                <span class="card__school-type">Primary</span>
+                                <a href="#" class="card__school-name">The Hermitage Infant</a>
+                                <span class="pill pill--xs pill--green">Outstanding</span>
+                                <span class="pill pill--xs pill--slate">8 min walk</span>
+                            </div>
+                            <div class="card__school-row">
+                                <span class="card__school-type">Secondary</span>
+                                <span style="font-size: var(--fs-xs); color: var(--slate-400);">No data yet</span>
+                            </div>
+                        </div>
+                        <div class="card__triage">
+                            <button class="triage-btn">
+                                <span class="triage-btn__icon">♥</span>
+                                <span class="triage-btn__label">Save</span>
+                            </button>
+                            <button class="triage-btn">
+                                <span class="triage-btn__icon">✕</span>
+                                <span class="triage-btn__label">Dismiss</span>
+                            </button>
+                            <button class="triage-btn">
+                                <span class="triage-btn__icon">✓</span>
+                                <span class="triage-btn__label">Mark Seen</span>
+                            </button>
+                        </div>
+                    </div>
+                </article>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- ═══════════════════════════════════════════
+         DETAIL PAGE
+         ═══════════════════════════════════════════ -->
+    <div id="detail-page">
+        <div class="detail-page">
+
+            <!-- Summary bar (sticky) -->
+            <div class="summary-bar">
+                <div style="display:flex; align-items:center; gap: var(--sp-3); margin-bottom: var(--sp-2);">
+                    <button class="btn btn--ghost" onclick="switchView('list')" style="font-size: 18px; min-height: 36px; min-width: 36px; padding: 0;">←</button>
+                    <h1 class="summary-address" style="margin:0; flex:1;">Thurby Way, Maidenhead, SL6 3YZ</h1>
+                    <button class="btn btn--ghost" aria-label="Share" style="font-size: 16px;">↗</button>
+                    <button class="btn btn--ghost" aria-label="Favourite" style="font-size: 16px; color: var(--amber-500);">♥</button>
+                </div>
+                <div class="summary-meta">
+                    <span class="summary-price">£650,000</span>
+                    <span class="summary-monthly pill--green">£3,127/mo</span>
+                    <span class="summary-bedrooms">4 bed · 2 bath</span>
+                    <span class="pill pill--sm pill--green">Affordable</span>
+                    <span class="pill pill--sm pill--green">EPC: B</span>
+                </div>
+            </div>
+
+            <!-- Section nav (sticky) -->
+            <div class="section-nav-wrap">
+                <nav class="section-nav">
+                    <button class="section-nav__btn section-nav__btn--active">Summary</button>
+                    <button class="section-nav__btn">Commute</button>
+                    <button class="section-nav__btn">Schools</button>
+                    <button class="section-nav__btn">Costs</button>
+                    <button class="section-nav__btn">Notes</button>
+                </nav>
+            </div>
+
+            <!-- ═══ SUMMARY ═══ -->
+            <section class="detail-section">
+                <h2 class="detail-section__title">Summary</h2>
+                <!-- Content first — above the fold -->
+                <div class="field-row">
+                    <span class="field-label">Walk to town</span>
+                    <span class="field-value">40 min walk to Maidenhead centre</span>
+                </div>
+                <div class="field-row">
+                    <span class="field-label">Area</span>
+                    <span class="field-value" style="line-height: 1.6;">A riverside town with a mix of modern development and historic charm. Good transport links to London via Elizabeth Line and GWR from Maidenhead station.</span>
+                </div>
+                <div class="detail-actions">
+                    <a href="#" class="btn btn--primary" target="_blank" rel="noopener">View on Rightmove</a>
+                    <a href="#" class="btn btn--secondary" target="_blank" rel="noopener">Get Directions</a>
+                </div>
+                <!-- Compact map — below content, expandable -->
+                <div class="map-strip" onclick="this.classList.toggle('map-strip--expanded')" title="Click to expand map">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    <span class="map-strip__label">Map: Thurby Way, Maidenhead</span>
+                    <span class="map-strip__expand">Expand ↗</span>
+                </div>
+                <!-- Hidden full map — shown on expand -->
+                <div class="map-embed" style="display:none; margin-top: var(--sp-3); aspect-ratio: 16/9;">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    <span style="font-size: var(--fs-sm);">Map: Thurby Way, Maidenhead</span>
+                </div>
+            </section>
+
+            <!-- ═══ COMMUTE ═══ -->
+            <section class="detail-section">
+                <h2 class="detail-section__title">Commute</h2>
+
+                <!-- Simon -->
+                <div class="commute-acc">
+                    <button class="commute-acc__head" onclick="toggleAcc(this)">
+                        <span class="commute-acc__person">Simon → Pimlico</span>
+                        <span class="pill pill--green">54 min · £48.27/day</span>
+                        <span class="commute-acc__chevron">▼</span>
+                    </button>
+                    <div class="commute-acc__body" style="display:none;">
+                        <div class="commute-legs">
+                            <div class="commute-leg">
+                                <span class="commute-leg__mode">Walk</span>
+                                <span class="commute-leg__dur">8 min</span>
+                            </div>
+                            <div class="commute-leg">
+                                <span class="commute-leg__mode">Rail</span>
+                                <span class="commute-leg__dur">32 min</span>
+                                <span class="commute-leg__cost">£18.90</span>
+                                <span class="commute-leg__op">GWR</span>
+                            </div>
+                            <div class="commute-leg">
+                                <span class="commute-leg__mode">Tube</span>
+                                <span class="commute-leg__dur">14 min</span>
+                                <span class="commute-leg__cost">£29.37</span>
+                                <span class="commute-leg__op">TfL</span>
+                            </div>
+                        </div>
+                        <div class="commute-route">Maidenhead → Paddington → Pimlico (Victoria)</div>
+                        <!-- Provenance trace for this commute -->
+                        <div style="margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--border);">
+                            <div style="font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: var(--slate-500); margin-bottom: var(--sp-2); text-transform: uppercase; letter-spacing: 0.05em;">Data source</div>
+                            <div class="prov-tree">
+                                <div class="prov-node">
+                                    <div class="prov-node__head" onclick="toggleProv(this)">
+                                        <span class="prov-node__chevron">▶</span>
+                                        <span class="prov-node__label">TfL Unified API</span>
+                                        <span class="prov-node__desc">— Journey Planner</span>
+                                        <span class="prov-node__link" href="#">🔗</span>
+                                        <span class="prov-node__time">2024-01-15 14:23</span>
+                                    </div>
+                                    <div class="prov-node__children prov-node__children--collapsed">
+                                        <div class="prov-node">
+                                            <div class="prov-node__head" onclick="toggleProv(this)">
+                                                <span class="prov-node__chevron">▶</span>
+                                                <span class="prov-node__label">Input</span>
+                                            </div>
+                                            <div class="prov-node__children prov-node__children--collapsed">
+                                                <div class="prov-data">
+                                                    <span class="prov-data__item"><span class="prov-data__key">from:</span> 51.5205,-0.1438 (Maidenhead)</span>
+                                                    <span class="prov-data__item"><span class="prov-data__key">to:</span> 51.4914,-0.1497 (Pimlico)</span>
+                                                    <span class="prov-data__item"><span class="prov-data__key">time:</span> 07:30</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="prov-node">
+                                            <div class="prov-node__head" onclick="toggleProv(this)">
+                                                <span class="prov-node__chevron">▶</span>
+                                                <span class="prov-node__label">Decision</span>
+                                            </div>
+                                            <div class="prov-node__children prov-node__children--collapsed">
+                                                <div class="prov-data">
+                                                    <span class="prov-data__item">Selected fastest route from 3 options (54m, 58m, 1h 12m)</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="prov-node">
+                                            <div class="prov-node__head" onclick="toggleProv(this)">
+                                                <span class="prov-node__chevron prov-node__chevron--leaf"></span>
+                                                <span class="prov-node__label">Output</span>
+                                            </div>
+                                            <div class="prov-node__children prov-node__children--collapsed">
+                                                <div class="prov-data">
+                                                    <span class="prov-data__item"><span class="prov-data__key">duration:</span> 54 min</span>
+                                                    <span class="prov-data__item"><span class="prov-data__key">fare:</span> £48.27</span>
+                                                    <span class="prov-data__item"><span class="prov-data__key">legs:</span> 3</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="prov-node">
+                                    <div class="prov-node__head" onclick="toggleProv(this)">
+                                        <span class="prov-node__chevron prov-node__chevron--leaf"></span>
+                                        <span class="prov-node__label">Rail fare lookup</span>
+                                        <span class="prov-node__desc">— GWR season ticket rate</span>
+                                        <span class="prov-node__time">2024-01-15 14:23</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Lorena -->
+                <div class="commute-acc">
+                    <button class="commute-acc__head" onclick="toggleAcc(this)">
+                        <span class="commute-acc__person">Lorena → Aldgate</span>
+                        <span class="pill pill--orange">1h 36m · £38.40/day</span>
+                        <span class="commute-acc__chevron">▼</span>
+                    </button>
+                    <div class="commute-acc__body" style="display:none;">
+                        <div class="commute-legs">
+                            <div class="commute-leg">
+                                <span class="commute-leg__mode">Bus</span>
+                                <span class="commute-leg__dur">12 min</span>
+                                <span class="commute-leg__cost">£1.75</span>
+                            </div>
+                            <div class="commute-leg">
+                                <span class="commute-leg__mode">Tube</span>
+                                <span class="commute-leg__dur">58 min</span>
+                                <span class="commute-leg__cost">£36.65</span>
+                                <span class="commute-leg__op">Metropolitan → Hammersmith & City</span>
+                            </div>
+                            <div class="commute-leg">
+                                <span class="commute-leg__mode">Walk</span>
+                                <span class="commute-leg__dur">6 min</span>
+                            </div>
+                        </div>
+                        <div class="commute-route">Maidenhead → Baker Street → Aldgate</div>
+                        <div style="margin-top: var(--sp-3); padding-top: var(--sp-3); border-top: 1px solid var(--border);">
+                            <div style="font-size: var(--fs-xs); font-weight: var(--fw-semibold); color: var(--slate-500); margin-bottom: var(--sp-2); text-transform: uppercase; letter-spacing: 0.05em;">Data source</div>
+                            <div class="prov-tree">
+                                <div class="prov-node">
+                                    <div class="prov-node__head" onclick="toggleProv(this)">
+                                        <span class="prov-node__chevron prov-node__chevron--leaf"></span>
+                                        <span class="prov-node__label">TfL Unified API</span>
+                                        <span class="prov-node__desc">— Journey Planner</span>
+                                        <span class="prov-node__time">2024-01-15 14:24</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- George (school walk) -->
+                <div class="commute-acc">
+                    <button class="commute-acc__head" onclick="toggleAcc(this)">
+                        <span class="commute-acc__person">George → School</span>
+                        <span class="pill pill--green">14 min walk</span>
+                        <span class="commute-acc__chevron">▼</span>
+                    </button>
+                    <div class="commute-acc__body" style="display:none;">
+                        <div class="commute-legs">
+                            <div class="commute-leg">
+                                <span class="commute-leg__mode">Walk</span>
+                                <span class="commute-leg__dur">14 min</span>
+                                <span class="commute-leg__cost">Free</span>
+                            </div>
+                        </div>
+                        <div class="commute-route">Property → St Mary's Catholic Primary</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ═══ SCHOOLS ═══ -->
+            <section class="detail-section">
+                <h2 class="detail-section__title">Schools</h2>
+
+                <div class="school-card" style="flex-wrap: wrap;">
+                    <span class="school-card__type">Primary</span>
+                    <a href="#" class="school-card__name">St Mary's Catholic Primary School</a>
+                    <div class="school-card__data">
+                        <span class="pill pill--green">Outstanding</span>
+                        <span class="pill pill--slate">18 min walk</span>
+                    </div>
+                    <div class="prov-inline" style="width: 100%;">
+                        <button class="prov-inline__toggle" onclick="toggleInlineProv(this)">▶ Data source</button>
+                        <div class="prov-inline__tree">
+                            <div class="prov-tree">
+                                <div class="prov-node">
+                                    <div class="prov-node__head" onclick="toggleProv(this)">
+                                        <span class="prov-node__chevron">▶</span>
+                                        <span class="prov-node__label">Ofsted API</span>
+                                        <span class="prov-node__time">2024-01-15 14:24</span>
+                                    </div>
+                                    <div class="prov-node__children prov-node__children--collapsed">
+                                        <div class="prov-data">
+                                            <span class="prov-data__item"><span class="prov-data__key">urn:</span> 102345</span>
+                                            <span class="prov-data__item"><span class="prov-data__key">rating:</span> Outstanding</span>
+                                            <span class="prov-data__item"><span class="prov-data__key">inspection:</span> 2023-06-15</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="prov-node">
+                                    <div class="prov-node__head" onclick="toggleProv(this)">
+                                        <span class="prov-node__chevron prov-node__chevron--leaf"></span>
+                                        <span class="prov-node__label">OSM Routing</span>
+                                        <span class="prov-node__desc">— walk time</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="school-card" style="flex-wrap: wrap;">
+                    <span class="school-card__type">Secondary</span>
+                    <a href="#" class="school-card__name">Huron secondary school</a>
+                    <div class="school-card__data">
+                        <span class="pill pill--blue">Good</span>
+                        <span class="pill pill--slate">32 min walk</span>
+                        <span style="font-size: var(--fs-xs); color: var(--slate-400);">(2528m)</span>
+                    </div>
+                    <div class="prov-inline" style="width: 100%;">
+                        <button class="prov-inline__toggle" onclick="toggleInlineProv(this)">▶ Data source</button>
+                        <div class="prov-inline__tree">
+                            <div class="prov-tree">
+                                <div class="prov-node">
+                                    <div class="prov-node__head" onclick="toggleProv(this)">
+                                        <span class="prov-node__chevron">▶</span>
+                                        <span class="prov-node__label">Ofsted API</span>
+                                        <span class="prov-node__time">2024-01-15 14:24</span>
+                                    </div>
+                                    <div class="prov-node__children prov-node__children--collapsed">
+                                        <div class="prov-data">
+                                            <span class="prov-data__item"><span class="prov-data__key">urn:</span> 102346</span>
+                                            <span class="prov-data__item"><span class="prov-data__key">rating:</span> Good</span>
+                                            <span class="prov-data__item"><span class="prov-data__key">inspection:</span> 2022-11-08</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="prov-node">
+                                    <div class="prov-node__head" onclick="toggleProv(this)">
+                                        <span class="prov-node__chevron prov-node__chevron--leaf"></span>
+                                        <span class="prov-node__label">OSM Routing</span>
+                                        <span class="prov-node__desc">— 32 min, 2528m</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top: var(--sp-4); padding: var(--sp-3); background: var(--slate-50); border-radius: var(--r-md); font-size: var(--fs-xs); color: var(--slate-500); line-height: 1.6;">
+                    <strong>Ofsted ratings</strong> are the latest available inspection outcome. Walk times are estimated from the property location. School data sourced from Ofsted API and OpenStreetMap routing.
+                </div>
+            </section>
+
+            <!-- ═══ COSTS ═══ -->
+            <section class="detail-section">
+                <h2 class="detail-section__title">Costs</h2>
+
+                <div class="costs-table">
+                    <div class="costs-row">
+                        <span class="costs-label">Monthly Mortgage</span>
+                        <span class="costs-value">£2,284.00</span>
+                    </div>
+                    <div class="costs-row costs-row--sub">
+                        <span class="costs-label">25yr @ 4.5% · 75% LTV</span>
+                        <span class="costs-value"></span>
+                    </div>
+                    <div class="costs-row">
+                        <span class="costs-label">Council Tax (Band E)</span>
+                        <span class="costs-value">£250.00/mo</span>
+                    </div>
+                    <div class="costs-row">
+                        <span class="costs-label">Sinking Fund</span>
+                        <span class="costs-value">£100.00/mo</span>
+                    </div>
+                    <div class="costs-row">
+                        <span class="costs-label">Commute Cost (combined)</span>
+                        <span class="costs-value">£493.00/mo</span>
+                    </div>
+                    <div class="costs-row costs-row--total">
+                        <span class="costs-label">Est. Total Monthly</span>
+                        <span class="costs-value">£3,127.00/mo</span>
+                    </div>
+                </div>
+                <!-- Provenance for total monthly cost -->
+                <div class="prov-inline">
+                    <button class="prov-inline__toggle" onclick="toggleInlineProv(this)">▶ How this was calculated</button>
+                    <div class="prov-inline__tree">
+                        <div class="prov-tree">
+                            <div class="prov-node">
+                                <div class="prov-node__head" onclick="toggleProv(this)">
+                                    <span class="prov-node__chevron">▶</span>
+                                    <span class="prov-node__label">Cost Calculation Pipeline</span>
+                                    <span class="prov-node__time">2024-01-15 14:21</span>
+                                </div>
+                                <div class="prov-node__children prov-node__children--collapsed">
+                                    <div class="prov-node">
+                                        <div class="prov-node__head" onclick="toggleProv(this)">
+                                            <span class="prov-node__chevron">▶</span>
+                                            <span class="prov-node__label">Mortgage</span>
+                                        </div>
+                                        <div class="prov-node__children prov-node__children--collapsed">
+                                            <div class="prov-data">
+                                                <span class="prov-data__item"><span class="prov-data__key">price:</span> £650,000</span>
+                                                <span class="prov-data__item"><span class="prov-data__key">deposit:</span> 25% (£162,500)</span>
+                                                <span class="prov-data__item"><span class="prov-data__key">rate:</span> 4.5% (BoE base + 1.5%)</span>
+                                                <span class="prov-data__item"><span class="prov-data__key">term:</span> 25 years</span>
+                                                <span class="prov-data__item"><span class="prov-data__key">result:</span> £2,284/mo</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="prov-node">
+                                        <div class="prov-node__head" onclick="toggleProv(this)">
+                                            <span class="prov-node__chevron prov-node__chevron--leaf"></span>
+                                            <span class="prov-node__label">Council Tax</span>
+                                            <span class="prov-node__desc">— RBWM API</span>
+                                        </div>
+                                    </div>
+                                    <div class="prov-node">
+                                        <div class="prov-node__head" onclick="toggleProv(this)">
+                                            <span class="prov-node__chevron prov-node__chevron--leaf"></span>
+                                            <span class="prov-node__label">Sinking Fund</span>
+                                            <span class="prov-node__desc">— £100/mo fixed</span>
+                                        </div>
+                                    </div>
+                                    <div class="prov-node">
+                                        <div class="prov-node__head" onclick="toggleProv(this)">
+                                            <span class="prov-node__chevron prov-node__chevron--leaf"></span>
+                                            <span class="prov-node__label">Commute Costs</span>
+                                            <span class="prov-node__desc">— TfL + GWR combined</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top: var(--sp-4);">
+                    <div class="field-row" style="border-top: none;">
+                        <span class="field-label">Stamp Duty</span>
+                        <span class="field-value">£20,000 estimate</span>
+                    </div>
+                    <!-- Provenance for Stamp Duty -->
+                    <div class="prov-inline">
+                        <button class="prov-inline__toggle" onclick="toggleInlineProv(this)">▶ Data source</button>
+                        <div class="prov-inline__tree">
+                            <div class="prov-tree">
+                                <div class="prov-node">
+                                    <div class="prov-node__head" onclick="toggleProv(this)">
+                                        <span class="prov-node__chevron prov-node__chevron--leaf"></span>
+                                        <span class="prov-node__label">UK SDLT Calculator</span>
+                                        <span class="prov-node__time">2024-01-15 14:21</span>
+                                    </div>
+                                    <div class="prov-node__children prov-node__children--collapsed">
+                                        <div class="prov-data">
+                                            <span class="prov-data__item"><span class="prov-data__key">formula:</span> UK SDLT rates 2024</span>
+                                            <span class="prov-data__item"><span class="prov-data__key">is_ftb:</span> false</span>
+                                            <span class="prov-data__item"><span class="prov-data__key">result:</span> £20,000</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <span class="field-label">EPC</span>
+                        <span class="field-value">
+                            <span class="pill pill--green" style="font-size: 14px; font-weight: 800; min-width: 32px; text-align: center;">B</span>
+                            <span style="font-size: var(--fs-xs); color: var(--slate-500);">Potential: A (290432)</span>
+                        </span>
+                    </div>
+                    <!-- Provenance for EPC -->
+                    <div class="prov-inline">
+                        <button class="prov-inline__toggle" onclick="toggleInlineProv(this)">▶ Data source</button>
+                        <div class="prov-inline__tree">
+                            <div class="prov-tree">
+                                <div class="prov-node">
+                                    <div class="prov-node__head" onclick="toggleProv(this)">
+                                        <span class="prov-node__chevron prov-node__chevron--leaf"></span>
+                                        <span class="prov-node__label">Landmark API</span>
+                                        <span class="prov-node__time">2024-01-15 14:24</span>
+                                    </div>
+                                    <div class="prov-node__children prov-node__children--collapsed">
+                                        <div class="prov-data">
+                                            <span class="prov-data__item"><span class="prov-data__key">band:</span> B (82)</span>
+                                            <span class="prov-data__item"><span class="prov-data__key">potential:</span> A (92)</span>
+                                            <span class="prov-data__item"><span class="prov-data__key">valid:</span> 2024-01-15</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- EPC scale visual -->
+                <div style="display: flex; gap: 3px; margin-top: var(--sp-3);">
+                    <div style="flex:1; text-align:center; padding: 6px 2px; border-radius: var(--r-sm); font-size: 11px; font-weight: 700; color: #fff; background: #2e7d32;">A</div>
+                    <div style="flex:1; text-align:center; padding: 6px 2px; border-radius: var(--r-sm); font-size: 11px; font-weight: 700; color: #fff; background: #1565c0; outline: 2px solid var(--slate-800); outline-offset: 1px;">B</div>
+                    <div style="flex:1; text-align:center; padding: 6px 2px; border-radius: var(--r-sm); font-size: 11px; font-weight: 700; color: #fff; background: #1565c0;">C</div>
+                    <div style="flex:1; text-align:center; padding: 6px 2px; border-radius: var(--r-sm); font-size: 11px; font-weight: 700; color: #1a1a1a; background: #f9a825;">D</div>
+                    <div style="flex:1; text-align:center; padding: 6px 2px; border-radius: var(--r-sm); font-size: 11px; font-weight: 700; color: #fff; background: #e65100;">E</div>
+                    <div style="flex:1; text-align:center; padding: 6px 2px; border-radius: var(--r-sm); font-size: 11px; font-weight: 700; color: #fff; background: #c62828;">F</div>
+                    <div style="flex:1; text-align:center; padding: 6px 2px; border-radius: var(--r-sm); font-size: 11px; font-weight: 700; color: #fff; background: #c62828;">G</div>
+                </div>
+            </section>
+
+            <!-- ═══ NOTES ═══ -->
+            <section class="detail-section">
+                <h2 class="detail-section__title">Notes</h2>
+                <div class="notes-list">
+                    <div class="note-card">
+                        <div class="note-card__header">
+                            <span class="note-card__author">Lorena</span>
+                            <span class="note-card__time">2 hours ago</span>
+                        </div>
+                        <div class="note-card__body">Great area for the kids. The river walk to school is really pleasant. My only concern is the commute — 1h 36m each way is a lot. Let me check if there are faster routes via the Elizabeth line instead.</div>
+                    </div>
+                    <div class="note-card">
+                        <div class="note-card__header">
+                            <span class="note-card__author">Simon</span>
+                            <span class="note-card__time">5 hours ago</span>
+                        </div>
+                        <div class="note-card__body">Train to Paddington is fast. Can expense the commute so the daily cost isn't a dealbreaker for me. Worth a viewing.</div>
+                    </div>
+                    <div class="note-card">
+                        <div class="note-card__header">
+                            <span class="note-card__author">George</span>
+                            <span class="note-card__time">1 day ago</span>
+                        </div>
+                        <div class="note-card__body">The secondary school is a 32-minute walk. That's a bit far. Is there a school bus?</div>
+                    </div>
+                </div>
+
+                <!-- Add comment -->
+                <div style="margin-top: var(--sp-4); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md);">
+                    <textarea placeholder="Add a note…" style="width: 100%; border: none; resize: vertical; font-family: var(--sans); font-size: var(--fs-sm); min-height: 60px; outline: none;"></textarea>
+                    <div style="display: flex; justify-content: flex-end; gap: var(--sp-2); margin-top: var(--sp-2);">
+                        <button class="btn btn--secondary btn--sm">Save</button>
+                    </div>
+                </div>
+            </section>
+
+
+            <!-- ═══ ACTION BUTTONS ═══ -->
+            <section class="detail-section" style="border-bottom: none;">
+                <div style="display: flex; gap: var(--sp-3);">
+                    <button class="triage-btn triage-btn--active-save" style="flex: 1; flex-direction: row; justify-content: center; gap: var(--sp-2);">
+                        <span>♥</span> Saved
+                    </button>
+                    <button class="triage-btn" style="flex: 1; flex-direction: row; justify-content: center; gap: var(--sp-2);">
+                        <span>✕</span> Dismiss
+                    </button>
+                    <button class="triage-btn" style="flex: 1; flex-direction: row; justify-content: center; gap: var(--sp-2);">
+                        <span>✓</span> Mark Seen
+                    </button>
+                </div>
+            </section>
+
+        </div>
+
+        <!-- Bottom tab bar -->
+        <nav class="tab-bar">
+            <button class="tab-bar__btn tab-bar__btn--active">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+                <span class="tab-bar__label">Properties</span>
+            </button>
+            <button class="tab-bar__btn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+                <span class="tab-bar__label">Favourites</span>
+            </button>
+            <button class="tab-bar__btn">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                <span class="tab-bar__label">Map</span>
+            </button>
+        </nav>
+    </div>
+
+    <!-- ═══════════════════════════════════════════
+         JAVASCRIPT
+         ═══════════════════════════════════════════ -->
+    <script>
+    function switchView(view) {
+        document.getElementById('list-page').style.display = view === 'list' ? 'block' : 'none';
+        document.getElementById('detail-page').style.display = view === 'detail' ? 'block' : 'none';
+        document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('view-tab--active'));
+        document.querySelectorAll('.view-tab').forEach(t => {
+            if ((view === 'list' && t.textContent.includes('List')) ||
+                (view === 'detail' && t.textContent.includes('Detail'))) {
+                t.classList.add('view-tab--active');
+            }
+        });
+        window.scrollTo(0, 0);
+    }
+
+    // Commute accordion toggle
+    function toggleAcc(btn) {
+        const body = btn.nextElementSibling;
+        const chevron = btn.querySelector('.commute-acc__chevron');
+        if (body.style.display === 'none') {
+            body.style.display = 'block';
+            chevron.classList.add('commute-acc__chevron--open');
+        } else {
+            body.style.display = 'none';
+            chevron.classList.remove('commute-acc__chevron--open');
+        }
+    }
+
+    // Provenance tree expand/collapse
+    function toggleProv(head) {
+        const children = head.parentElement.querySelector('.prov-node__children');
+        const chevron = head.querySelector('.prov-node__chevron');
+        if (!children) return;
+        if (children.classList.contains('prov-node__children--collapsed')) {
+            children.classList.remove('prov-node__children--collapsed');
+            chevron.classList.add('prov-node__chevron--open');
+        } else {
+            children.classList.add('prov-node__children--collapsed');
+            chevron.classList.remove('prov-node__chevron--open');
+        }
+    }
+    // Inline provenance toggle (per data point)
+    function toggleInlineProv(btn) {
+        const tree = btn.nextElementSibling;
+        if (!tree) return;
+        const isOpen = tree.classList.contains('prov-inline__tree--open');
+        tree.classList.toggle('prov-inline__tree--open');
+        btn.textContent = (isOpen ? '▶ ' : '▼ ') + btn.textContent.slice(2);
+    }
+
+    // Map expand/collapse
+    document.querySelectorAll('.map-strip').forEach(strip => {
+        strip.addEventListener('click', function() {
+            const fullMap = this.nextElementSibling;
+            if (!fullMap || !fullMap.classList.contains('map-embed')) return;
+            const isHidden = fullMap.style.display === 'none';
+            fullMap.style.display = isHidden ? 'flex' : 'none';
+            this.querySelector('.map-strip__expand').textContent = isHidden ? 'Collapse' : 'Expand ↗';
+            this.style.height = isHidden ? '48px' : '120px';
+        });
+    });
+
+    // Filter chip toggle (demo)
+    document.querySelectorAll('.filter-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('filter-chip--active'));
+            chip.classList.add('filter-chip--active');
+        });
+    });
+
+    // Section nav highlight (demo)
+    document.querySelectorAll('.section-nav__btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.section-nav__btn').forEach(b => b.classList.remove('section-nav__btn--active'));
+            btn.classList.add('section-nav__btn--active');
+        });
+    });
+    </script>
+
+</body>
+</html>

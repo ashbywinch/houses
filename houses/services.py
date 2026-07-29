@@ -15,6 +15,7 @@ from typing import Any, Protocol
 from dag.attempt import Attempt
 from dag.persistence import latest_node_result
 from dag.user_input_node import UserInputNode
+from houses.config import settings
 from houses.council_tax import lookup_council_tax
 from houses.council_tax_info import CouncilTaxInfo
 from houses.epc import lookup_epc
@@ -70,6 +71,23 @@ class SchoolLookupService(Protocol):
     async def school_commute(self, postcode: str, school: School) -> Commute | None: ...
 
 
+class OAuthService(Protocol):
+    """Generate an OAuth authorization URL and exchange an authorization code
+    for user identity information."""
+
+    def create_authorization_url(self, state: str) -> tuple[str, str]:
+        """Return (authorization_url, code_verifier)."""
+        ...
+
+    def exchange_code(
+        self, code: str, code_verifier: str, state: str
+    ) -> dict:
+        """Exchange an authorization code for user info.
+        Returns a dict with keys: email, name, picture, etc.
+        """
+        ...
+
+
 class WalkabilityService(Protocol):
     """Walk time to town centre and nearby amenities."""
 
@@ -118,6 +136,71 @@ class _DefaultDriveTimeService:
         from houses.transit_route import _get_drive_minutes
 
         return await _get_drive_minutes(origin_postcode, station_name)
+
+
+class _DefaultOAuthService:
+    """Real Google OAuth implementation."""
+
+    def create_authorization_url(self, state: str) -> tuple[str, str]:
+        from google_auth_oauthlib.flow import Flow
+
+        client_config = {
+            "web": {
+                "client_id": settings.google_client_id,
+                "client_secret": settings.google_client_secret,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [settings.public_url.rstrip("/") + "/api/auth/callback"],
+            }
+        }
+        flow = Flow.from_client_config(
+            client_config,
+            scopes=[
+                "openid",
+                "https://www.googleapis.com/auth/userinfo.email",
+                "https://www.googleapis.com/auth/userinfo.profile",
+            ],
+        )
+        flow.redirect_uri = settings.public_url.rstrip("/") + "/api/auth/callback"
+        authorization_url, _state_from_flow = flow.authorization_url(
+            access_type="online",
+            include_granted_scopes="false",
+            state=state,
+        )
+        code_verifier: str = getattr(flow, "code_verifier", None) or ""  # type: ignore[arg-type]
+        return authorization_url, code_verifier
+
+    def exchange_code(self, code: str, code_verifier: str, state: str) -> dict:
+        from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token
+        from google_auth_oauthlib.flow import Flow
+
+        client_config = {
+            "web": {
+                "client_id": settings.google_client_id,
+                "client_secret": settings.google_client_secret,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [settings.public_url.rstrip("/") + "/api/auth/callback"],
+            }
+        }
+        flow = Flow.from_client_config(
+            client_config,
+            scopes=[
+                "openid",
+                "https://www.googleapis.com/auth/userinfo.email",
+                "https://www.googleapis.com/auth/userinfo.profile",
+            ],
+        )
+        flow.redirect_uri = settings.public_url.rstrip("/") + "/api/auth/callback"
+        flow.code_verifier = code_verifier
+        flow.fetch_token(code=code)
+        id_info = id_token.verify_oauth2_token(
+            flow.credentials.id_token,
+            google_requests.Request(),
+            settings.google_client_id,
+        )
+        return id_info
 
 
 # Settings sources are cached by node_id so that the same UserInputNode
@@ -241,8 +324,13 @@ class _DefaultRailFare:
 # ── DI Container ──────────────────────────────────────────────────────
 
 
+def _default_auth_enabled() -> bool:
+    return bool(settings.google_client_id)
+
+
 @dataclasses.dataclass
 class Services:
+    auth_enabled: bool = dataclasses.field(default_factory=_default_auth_enabled)
     geocoder: GeocodingService = dataclasses.field(default_factory=_DefaultGeocoder)
     commute_router: CommuteRoutingService = dataclasses.field(default_factory=_DefaultCommuteRouter)
     school_lookup: SchoolLookupService = dataclasses.field(default_factory=_DefaultSchoolLookup)
@@ -252,6 +340,7 @@ class Services:
     council_tax_service: CouncilTaxService = dataclasses.field(default_factory=_DefaultCouncilTax)
     rail_fare_service: RailFareService = dataclasses.field(default_factory=_DefaultRailFare)
     drive_time_service: DriveTimeService = dataclasses.field(default_factory=_DefaultDriveTimeService)
+    oauth_service: OAuthService = dataclasses.field(default_factory=_DefaultOAuthService)
     persons_source: UserInputNode[list[Person]] = dataclasses.field(
         default_factory=lambda: _make_settings_source("persons", list[Person], make_default_persons)
     )

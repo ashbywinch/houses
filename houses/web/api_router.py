@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Body, HTTPException, WebSocket
+from fastapi import APIRouter, Body, HTTPException, Request, WebSocket
+from pydantic import BaseModel, Field, field_validator
 
 from houses.geo import GeoPoint
-from houses.nodes.bootstrap import load_property_nodes_from_rows
 from houses.property_registry import get_property as get_registry_property
 from houses.property_registry import list_properties as list_registry_properties
 from houses.services_provider import get_services
@@ -17,6 +17,14 @@ api_router = APIRouter(prefix="/api")
 
 @api_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
+    from houses.web.auth import get_session_user
+
+    # Reject unauthenticated connections — property data is sensitive
+    session = get_session_user(Request(scope=websocket.scope))
+    if not session:
+        await websocket.close(code=4001)
+        return
+
     from houses.web.broadcaster import register_client
 
     await register_client(websocket)
@@ -55,10 +63,6 @@ async def staleness_check(rid: str, nodes: str = ""):
     fresh = not any(stale_map.values())
     return {"rid": rid, "nodes": stale_map, "fresh": fresh}
 
-
-@api_router.get("/properties")
-async def list_properties():
-    return {"properties": list_registry_properties()}
 
 
 def _score_from_summary(s: dict) -> int:
@@ -185,12 +189,86 @@ async def patch_triage(rid: str, body: dict):
     return {"status": "ok"}
 
 
-async def seed_properties():
-    from houses.sheets.reader import get_properties_data
+@api_router.get("/properties/{rid}/comments")
+async def get_property_comments(rid: str):
+    """Return all comments for a property.
 
-    rows = get_properties_data()
-    count = load_property_nodes_from_rows(rows)
-    return {"seeded": count, "total": len(list_registry_properties())}
+    Reads from the comments table only — old-style sheet comments are
+    migrated at deployment time via ``tools/migrate_comments.py``.
+    """
+    from houses.comments import get_comments
+
+    # Validate the property exists
+    prop = get_registry_property(rid)
+    if prop is None:
+        raise HTTPException(status_code=404, detail="Property not found")
+    return get_comments(rid)
+
+
+class CommentBody(BaseModel):
+    """Validated request body for posting a comment.
+    Person is determined server-side from the session, not from this body.
+    """
+    text: str = Field(min_length=1, max_length=5000)
+
+    @field_validator("text")
+    @classmethod
+    def not_blank(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("text must not be whitespace-only")
+        return stripped
+
+
+@api_router.post("/properties/{rid}/comments")
+async def add_property_comment(rid: str, body: CommentBody, request: Request):
+    """Add a comment for a property.
+
+    Person is determined from the authenticated session, with optional
+    X-Impersonate-Person header for superusers.
+    """
+    from houses.comments import add_comment
+    from houses.services_provider import get_services
+    from houses.web.auth import get_session_user
+
+    prop = get_registry_property(rid)
+    if prop is None:
+        raise HTTPException(status_code=404, detail="Property not found")
+
+    session_user = get_session_user(request)
+    if not session_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    svc = get_services()
+
+    impersonate = request.headers.get("X-Impersonate-Person", "")
+    if impersonate:
+        if not session_user.get("is_superuser"):
+            raise HTTPException(status_code=403, detail="Only superusers can impersonate")
+        if not impersonate.strip():
+            raise HTTPException(status_code=400, detail="Impersonation person name must not be empty")
+        person = impersonate
+    else:
+        folded_email = session_user.get("email", "").casefold()
+        persons_attempt = svc.persons_source.latest_attempt()
+        person = ""
+        if persons_attempt.succeeded:
+            for p in persons_attempt.value_or_none() or []:
+                if isinstance(p, dict):
+                    pe = p.get("email")
+                    if pe is not None and pe.casefold() == folded_email:
+                        person = p.get("name", "")
+                        break
+                elif hasattr(p, "email") and p.email is not None and p.email.casefold() == folded_email:
+                    person = getattr(p, "name", "")
+                    break
+        if not person:
+            raise HTTPException(
+                status_code=400,
+                detail="Your account is not linked to a person in settings",
+            )
+
+    return add_comment(rid, person, body.text)
 
 
 @api_router.get("/settings")
@@ -266,19 +344,25 @@ async def patch_financial(body: dict):
     return {"status": "ok"}
 
 
-@api_router.post("/admin/reseed")
-async def reseed_from_sheet():
-    """Re-seed the property registry from the Google Sheet.
+@api_router.get("/persons")
+async def list_persons():
+    """Return the list of persons with non-empty email addresses.
 
-    This is intentionally NOT automatic on server start — auto-reloads
-    from code changes should not re-read the sheet.  Call this endpoint
-    explicitly after seeding the sheet with new properties.
+    Used by the frontend superuser impersonation dropdown.
+    Requires authentication via the /api/ middleware.
     """
-    from houses.sheets.reader import get_properties_data
-
-    rows = get_properties_data()
-    load_property_nodes_from_rows(rows)
-    return {"status": "ok"}
+    svc = get_services()
+    persons_attempt = svc.persons_source.latest_attempt()
+    result: list[dict[str, str]] = []
+    if persons_attempt.succeeded:
+        for p in persons_attempt.value_or_none() or []:
+            if isinstance(p, dict):
+                email = p.get("email", "")
+                if email:
+                    result.append({"name": p.get("name", ""), "email": email})
+            elif hasattr(p, "email") and p.email:
+                result.append({"name": getattr(p, "name", ""), "email": p.email})
+    return {"persons": result}
 
 
 @api_router.get("/debug/scheduler")

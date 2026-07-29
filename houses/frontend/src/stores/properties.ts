@@ -34,7 +34,8 @@ export const usePropertiesStore = defineStore('properties', () => {
         }
       }
     } catch (e) {
-      error.value = String(e)
+      console.error('Failed to load properties:', e)
+      error.value = 'Something went wrong loading properties. Please try again.'
     } finally {
       loading.value = false
     }
@@ -58,7 +59,8 @@ export const usePropertiesStore = defineStore('properties', () => {
       details.value[rid] = detail
       return detail
     } catch (e) {
-      error.value = String(e)
+      console.error('Failed to load property detail:', e)
+      error.value = 'Something went wrong loading this property. Please try again.'
       return null
     } finally {
       loading.value = false

@@ -4,10 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "npm run gen-vars && vite --host",
     "build": "vue-tsc -b && vite build",
-    "test": "vue-tsc -b --noEmit && vitest run",
-    "preview": "vite preview"
+    "test": "vue-tsc -b --noEmit && vitest run && vite build && npm run lint:css",
+    "preview": "vite preview",
+    "gen-vars": "sed -n '/^:root {/,/^}/p' src/App.vue > src/_variables.css",
+    "lint:css": "npm run gen-vars && stylelint --config .stylelintrc.json 'src/**/*.vue'"
   },
   "dependencies": {
     "pinia": "^3.0.4",
@@ -20,6 +22,9 @@
     "@vue/test-utils": "^2.4.11",
     "@vue/tsconfig": "^0.9.1",
     "jsdom": "^29.1.1",
+    "postcss-html": "^1.8.1",
+    "stylelint": "^17.14.1",
+    "stylelint-value-no-unknown-custom-properties": "^6.1.1",
     "typescript": "~6.0.2",
     "vite": "^8.1.5",
     "vitest": "^4.1.9",

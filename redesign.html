@@ -1,0 +1,2315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>House Hunt — Redesign</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   DESIGN SYSTEM TOKENS
+   ═══════════════════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  /* ── Palette ── */
+  --slate-900: #0f172a;
+  --slate-800: #1e293b;
+  --slate-700: #334155;
+  --slate-600: #475569;
+  --slate-500: #64748b;
+  --slate-400: #94a3b8;
+  --slate-300: #cbd5e1;
+  --slate-200: #e2e8f0;
+  --slate-100: #f1f5f9;
+  --slate-50:  #f8fafc;
+
+  --white: #ffffff;
+
+  /* ── Semantic colours ── */
+  --green:      #16a34a;
+  --green-bg:   #f0fdf4;
+  --green-text: #166534;
+
+  --orange:      #ea580c;
+  --orange-bg:   #fff7ed;
+  --orange-text: #9a3412;
+
+  --red:        #dc2626;
+  --red-bg:     #fef2f2;
+  --red-text:   #991b1b;
+
+  --blue:       #2563eb;
+  --blue-bg:    #eff6ff;
+  --blue-text:  #1e40af;
+
+  --amber:      #d97706;
+  --amber-bg:   #fffbeb;
+  --amber-text: #92400e;
+
+  --muted:      #94a3b8;
+  --muted-bg:   #f1f5f9;
+
+  /* ── Neutral ── */
+  --text:          var(--slate-900);
+  --text-secondary: var(--slate-500);
+  --text-muted:    var(--slate-400);
+  --border:        var(--slate-200);
+  --divider:       var(--slate-100);
+  --card-bg:       var(--white);
+  --page-bg:       var(--slate-50);
+  --header-bg:     var(--slate-800);
+  --header-text:   var(--white);
+
+  /* ── Typography ── */
+  --font:     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", SFMono-Regular, ui-monospace, Menlo, monospace;
+
+  /* Scale: major-second (1.125) */
+  --fs-xs:   0.6875rem;   /* 11px */
+  --fs-sm:   0.75rem;     /* 12px */
+  --fs-base: 0.875rem;    /* 14px */
+  --fs-md:   0.9375rem;   /* 15px */
+  --fs-lg:   1.125rem;    /* 18px */
+  --fs-xl:   1.25rem;     /* 20px */
+  --fs-2xl:  1.5rem;      /* 24px */
+
+  --lh-tight: 1.25;
+  --lh:       1.5;
+  --lh-loose: 1.6;
+
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --fw-extrabold: 800;
+
+  /* ── Spacing (8px grid) ── */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ── Radii ── */
+  --radius-sm:   6px;
+  --radius:      10px;
+  --radius-lg:   14px;
+  --radius-xl:   18px;
+  --radius-full: 9999px;
+
+  /* ── Shadows ── */
+  --shadow-sm:   0 1px 2px rgba(15,23,42,0.04);
+  --shadow:      0 1px 3px rgba(15,23,42,0.06), 0 1px 2px rgba(15,23,42,0.04);
+  --shadow-md:   0 4px 6px rgba(15,23,42,0.06), 0 2px 4px rgba(15,23,42,0.04);
+  --shadow-lg:   0 10px 15px rgba(15,23,42,0.06), 0 4px 6px rgba(15,23,42,0.04);
+  --shadow-xl:   0 20px 25px rgba(15,23,42,0.08), 0 8px 10px rgba(15,23,42,0.04);
+
+  /* ── Transitions ── */
+  --transition: 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── Layout ── */
+  --header-h:       52px;
+  --tabbar-h:       56px;
+  --content-max-w:  1200px;
+  --card-min-w:     320px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   BASE
+   ═══════════════════════════════════════════════════════════════ */
+html { font-size: 16px; -webkit-text-size-adjust: 100%; }
+body {
+  font-family: var(--font);
+  font-size: var(--fs-base);
+  line-height: var(--lh);
+  color: var(--text);
+  background: var(--page-bg);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+button { font: inherit; cursor: pointer; border: none; background: none; }
+a { color: inherit; text-decoration: none; }
+[hidden] { display: none !important; }
+
+/* ── Focus ring ── */
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   COMPONENT: Header
+   ═══════════════════════════════════════════════════════════════ */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--header-bg);
+  color: var(--header-text);
+}
+.header__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--header-h);
+  padding: 0 var(--space-4);
+  max-width: var(--content-max-w);
+  margin: 0 auto;
+  gap: var(--space-3);
+}
+.header__start,
+.header__end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 80px;
+}
+.header__end { justify-content: flex-end; }
+.header__title {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.01em;
+  flex: 1;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.header__back {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: rgba(255,255,255,0.75);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  transition: all var(--transition);
+  min-height: 36px;
+}
+.header__back:hover { color: #fff; background: rgba(255,255,255,0.1); }
+.header__back svg { transition: transform var(--transition); }
+.header__back:hover svg { transform: translateX(-2px); }
+
+.btn-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255,255,255,0.7);
+  transition: all var(--transition);
+}
+.btn-icon:hover { color: #fff; background: rgba(255,255,255,0.12); }
+.btn-icon--active { color: var(--amber) !important; }
+
+/* ═══════════════════════════════════════════════════════════════
+   COMPONENT: Tabs (page switcher)
+   ═══════════════════════════════════════════════════════════════ */
+.view-tabs {
+  display: flex;
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: var(--header-h);
+  z-index: 90;
+}
+.view-tab {
+  flex: 1;
+  text-align: center;
+  padding: var(--space-3) var(--space-3);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+  position: relative;
+  transition: color var(--transition);
+  min-height: 44px;
+}
+.view-tab::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 2px;
+  background: var(--blue);
+  border-radius: 1px;
+  transition: width var(--transition);
+}
+.view-tab:hover { color: var(--text); }
+.view-tab--active { color: var(--blue); font-weight: var(--fw-semibold); }
+.view-tab--active::after { width: 60%; }
+.view-tab__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: var(--fw-bold);
+  background: var(--blue-bg);
+  color: var(--blue);
+  min-width: 18px;
+  height: 18px;
+  border-radius: var(--radius-full);
+  padding: 0 5px;
+  margin-left: var(--space-1);
+  vertical-align: middle;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   COMPONENT: Badge / Pill
+   ═══════════════════════════════════════════════════════════════ */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  line-height: 1.5;
+  white-space: nowrap;
+  transition: opacity var(--transition);
+}
+.pill--green   { background: var(--green-bg); color: var(--green-text); }
+.pill--orange  { background: var(--orange-bg); color: var(--orange-text); }
+.pill--red     { background: var(--red-bg); color: var(--red-text); }
+.pill--blue    { background: var(--blue-bg); color: var(--blue-text); }
+.pill--amber   { background: var(--amber-bg); color: var(--amber-text); }
+.pill--muted   { background: var(--muted-bg); color: var(--slate-500); }
+
+.pill--sm { font-size: 10px; padding: 1px 6px; }
+.pill--xs { font-size: 9px; padding: 1px 4px; letter-spacing: 0.02em; }
+
+/* ── Dual dot ── */
+.dual-dots {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1.5px solid transparent;
+  transition: transform var(--transition);
+  cursor: default;
+}
+.dot:hover { transform: scale(1.3); }
+.dot--green   { background: var(--green); border-color: var(--green); }
+.dot--orange  { background: var(--orange); border-color: var(--orange); }
+.dot--red     { background: var(--red); border-color: var(--red); }
+.dot--muted   { background: var(--slate-200); border-color: var(--slate-300); }
+.dot--amber   { background: var(--amber); border-color: var(--amber); }
+
+/* ── Status dot ── */
+.status-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 2px solid var(--slate-300);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.status-dot:hover { transform: scale(1.2); }
+.status-dot--maybe     { background: var(--blue); border-color: var(--blue); }
+.status-dot--favourite { background: var(--amber); border-color: var(--amber); }
+.status-dot--dismissed { background: var(--red); border-color: var(--red); }
+.status-dot--home      { background: var(--green); border-color: var(--green); }
+
+/* ═══════════════════════════════════════════════════════════════
+   COMPONENT: Property Card
+   ═══════════════════════════════════════════════════════════════ */
+.card {
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  transition: box-shadow var(--transition), transform var(--transition);
+  position: relative;
+  cursor: pointer;
+}
+.card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+.card:focus-visible {
+  box-shadow: 0 0 0 2px var(--blue), var(--shadow-md);
+  transform: translateY(-1px);
+}
+.card__accent {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+.card__accent--maybe     { background: var(--blue); }
+.card__accent--favourite { background: var(--amber); }
+.card__accent--dismissed { background: var(--red); }
+.card__accent--home      { background: var(--green); }
+.card__body { padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); }
+
+/* Card primary row */
+.card__primary {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.card__address {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+  color: var(--blue-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.card__price-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+  gap: 1px;
+}
+.card__price {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+.card__monthly {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--green-text);
+  white-space: nowrap;
+}
+
+/* Card specs row */
+.card__specs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+.card__specs-sep {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--slate-300);
+  flex-shrink: 0;
+}
+.card__specs-highlight {
+  color: var(--text);
+  font-weight: var(--fw-semibold);
+}
+
+/* Card section separator */
+.card__section {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--divider);
+}
+.card__section-label {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: var(--space-1);
+}
+
+/* Commute pills row */
+.card__commutes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.card__commit-unit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.card__commit-label {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+}
+
+/* Schools row (compact) */
+.card__schools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.school-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 3px 8px;
+  background: var(--slate-50);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  transition: all var(--transition);
+  cursor: default;
+}
+.school-chip:hover {
+  border-color: var(--slate-300);
+  background: var(--white);
+}
+.school-chip__name {
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Financial line */
+.card__finance {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text);
+}
+.card__finance--em {
+  color: var(--green-text);
+}
+.card__finance--neg {
+  color: var(--red-text);
+}
+.card__finance-sep {
+  color: var(--slate-300);
+}
+
+/* ── Skeleton card ── */
+.skeleton {
+  background: var(--white);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.skeleton__pulse {
+  background: linear-gradient(90deg, var(--slate-100) 25%, var(--slate-50) 50%, var(--slate-100) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-sm);
+}
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton__body {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.skeleton__primary {
+  display: flex; gap: var(--space-2);
+}
+.skeleton__addr {
+  flex: 1;
+  height: 16px;
+  width: 60%;
+}
+.skeleton__price {
+  width: 80px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.skeleton__specs {
+  height: 12px;
+  width: 40%;
+}
+.skeleton__commutes {
+  height: 22px;
+  width: 70%;
+}
+.skeleton__schools {
+  height: 22px;
+  width: 55%;
+}
+.skeleton__finance {
+  height: 12px;
+  width: 45%;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   COMPONENT: Empty State
+   ═══════════════════════════════════════════════════════════════ */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--space-12) var(--space-6);
+  gap: var(--space-4);
+}
+.empty-state__icon {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-xl);
+  background: var(--slate-100);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--slate-400);
+}
+.empty-state__title {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--text);
+}
+.empty-state__desc {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  max-width: 360px;
+  line-height: var(--lh-loose);
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+  transition: all var(--transition);
+  min-height: 44px;
+  white-space: nowrap;
+}
+.btn--primary {
+  background: var(--blue);
+  color: #fff;
+}
+.btn--primary:hover { background: #1d4ed8; box-shadow: var(--shadow-md); }
+.btn--primary:active { transform: scale(0.98); }
+.btn--outline {
+  border: 1px solid var(--border);
+  color: var(--text);
+  background: var(--white);
+}
+.btn--outline:hover { border-color: var(--slate-300); background: var(--slate-50); }
+
+/* ═══════════════════════════════════════════════════════════════
+   COMPONENT: Filter Bar
+   ═══════════════════════════════════════════════════════════════ */
+.filter-bar {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.filter-bar::-webkit-scrollbar { display: none; }
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--white);
+  border: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  transition: all var(--transition);
+  min-height: 32px;
+  cursor: pointer;
+}
+.filter-chip:hover { border-color: var(--slate-300); background: var(--slate-50); }
+.filter-chip--active {
+  background: var(--blue-bg);
+  border-color: var(--blue);
+  color: var(--blue-text);
+}
+.filter-chip--clear {
+  border: none;
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-size: var(--fs-xs);
+}
+.filter-chip--clear:hover { color: var(--text); }
+
+.sort-select {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--white);
+  border: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition);
+  min-height: 32px;
+}
+.sort-select:hover { border-color: var(--slate-300); }
+.sort-select svg { opacity: 0.5; }
+
+.results-meta {
+  padding: 0 var(--space-4) var(--space-3);
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.results-meta strong { color: var(--text-secondary); font-weight: var(--fw-semibold); }
+
+/* ═══════════════════════════════════════════════════════════════
+   LAYOUT: Property List
+   ═══════════════════════════════════════════════════════════════ */
+.page {
+  max-width: var(--content-max-w);
+  margin: 0 auto;
+  padding: 0 0 calc(var(--tabbar-h) + var(--space-4));
+}
+.card-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   COMPONENT: Tab Bar (bottom)
+   ═══════════════════════════════════════════════════════════════ */
+.tab-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: var(--tabbar-h);
+  background: var(--white);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: stretch;
+  justify-content: space-around;
+  z-index: 80;
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+.tab-bar__tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  flex: 1;
+  color: var(--text-muted);
+  transition: color var(--transition);
+  min-height: 44px;
+  padding: var(--space-1) var(--space-2);
+  position: relative;
+}
+.tab-bar__tab:hover { color: var(--text-secondary); }
+.tab-bar__tab--active { color: var(--blue); }
+.tab-bar__tab--active svg { stroke: var(--blue); }
+.tab-bar__label {
+  font-size: 10px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.01em;
+}
+.tab-bar__badge {
+  position: absolute;
+  top: 6px;
+  right: 50%;
+  transform: translateX(calc(50% + 8px));
+  min-width: 16px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--blue);
+  color: #fff;
+  font-size: 9px;
+  font-weight: var(--fw-bold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   COMPONENT: Summary Bar (detail)
+   ═══════════════════════════════════════════════════════════════ */
+.summary-bar {
+  position: sticky;
+  top: calc(var(--header-h) + 44px);
+  z-index: 85;
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.summary-bar__info { flex: 1; min-width: 0; }
+.summary-bar__address {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.summary-bar__address-sub {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+.summary-bar__right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+.summary-bar__price {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.01em;
+}
+.summary-bar__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   COMPONENT: Section Nav (detail)
+   ═══════════════════════════════════════════════════════════════ */
+.section-nav-wrap {
+  position: sticky;
+  top: calc(var(--header-h) + 44px + 67px); /* tabs + summary-bar */
+  z-index: 84;
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  padding: 0 var(--space-3);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.section-nav-wrap::-webkit-scrollbar { display: none; }
+.section-nav {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
+}
+.section-nav__tab {
+  flex-shrink: 0;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+  background: transparent;
+  transition: all var(--transition);
+  min-height: 32px;
+  white-space: nowrap;
+}
+.section-nav__tab:hover { background: var(--slate-50); color: var(--text); }
+.section-nav__tab--active {
+  background: var(--slate-800);
+  color: #fff;
+  font-weight: var(--fw-semibold);
+}
+.section-nav__tab--active:hover { background: var(--slate-700); }
+
+/* ═══════════════════════════════════════════════════════════════
+   COMPONENT: Detail Sections
+   ═══════════════════════════════════════════════════════════════ */
+.detail-content {
+  padding: var(--space-4) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.detail-card {
+  background: var(--white);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  transition: box-shadow var(--transition);
+}
+.detail-card:hover { box-shadow: var(--shadow); }
+
+.detail-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--transition);
+  min-height: 48px;
+}
+.detail-card__header:hover { background: var(--slate-50); }
+.detail-card__header-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1;
+  min-width: 0;
+}
+.detail-card__icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #fff;
+}
+.detail-card__icon--summary  { background: var(--blue); }
+.detail-card__icon--commute { background: var(--orange); }
+.detail-card__icon--schools { background: var(--green); }
+.detail-card__icon--costs   { background: var(--slate-700); }
+.detail-card__icon--notes   { background: var(--amber); }
+
+.detail-card__title {
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+}
+.detail-card__summary {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.detail-card__toggle {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--slate-400);
+  transition: transform var(--transition);
+}
+.detail-card__toggle--open { transform: rotate(180deg); }
+.detail-card__body {
+  border-top: 1px solid var(--border);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.detail-card__body--closed { display: none; }
+
+/* ── Detail map ── */
+.map-embed {
+  background: var(--slate-100);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  position: relative;
+}
+.map-embed__grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(148,163,184,0.15) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148,163,184,0.15) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+.map-embed__pin {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -100%);
+  width: 0;
+  height: 0;
+  border-left: 10px solid transparent;
+  border-right: 10px solid transparent;
+  border-bottom: 20px solid var(--blue);
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+}
+.map-embed__pin::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translate(-50%, -2px);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--blue);
+}
+
+/* ── Detail fields ── */
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+.detail-row + .detail-row {
+  border-top: 1px solid var(--divider);
+}
+.detail-row__label {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+.detail-row__value {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  text-align: right;
+  flex-shrink: 0;
+}
+.detail-row__value--green { color: var(--green-text); }
+.detail-row__value--orange { color: var(--orange-text); }
+.detail-row__value--red { color: var(--red-text); }
+
+/* ── Detail commute block ── */
+.commute-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.commute-person {
+  padding: var(--space-3);
+  background: var(--slate-50);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.commute-person__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-2);
+}
+.commute-person__name {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.commute-person__time {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-bold);
+}
+.commute-person__legs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.commute-leg {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+.commute-leg__icon {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-sm);
+  background: var(--slate-200);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.commute-leg__line {
+  flex: 1;
+}
+.commute-leg__time {
+  font-weight: var(--fw-medium);
+  color: var(--text);
+}
+.commute-person__meta {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--divider);
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+/* ── School detail list ── */
+.school-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.school-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--slate-50);
+  border: 1px solid var(--border);
+}
+.school-item__info {
+  flex: 1;
+  min-width: 0;
+}
+.school-item__name {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+.school-item__dist {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.school-item__rating {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* ── Cost breakdown ── */
+.cost-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.cost-table td {
+  padding: var(--space-2) 0;
+  font-size: var(--fs-sm);
+}
+.cost-table td:last-child {
+  text-align: right;
+  font-weight: var(--fw-semibold);
+}
+.cost-table tr + tr td { border-top: 1px solid var(--divider); }
+.cost-table__total td {
+  border-top: 2px solid var(--slate-300) !important;
+  font-weight: var(--fw-bold);
+  font-size: var(--fs-base);
+  padding-top: var(--space-3);
+  color: var(--text);
+}
+.cost-table__total td:last-child {
+  font-size: var(--fs-md);
+  color: var(--green-text);
+}
+
+/* ── Notes / Triage ── */
+.notes-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.triage-group {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.triage-btn {
+  flex: 1;
+  min-width: 100px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  transition: all var(--transition);
+  min-height: 56px;
+}
+.triage-btn:hover { border-color: var(--slate-300); background: var(--slate-50); }
+.triage-btn--active { border-color: var(--blue); background: var(--blue-bg); }
+.triage-btn--danger.triage-btn--active { border-color: var(--red); background: var(--red-bg); }
+.triage-btn--confirm.triage-btn--active { border-color: var(--green); background: var(--green-bg); }
+.triage-btn__emoji { font-size: 18px; line-height: 1; }
+.triage-btn__label { font-size: var(--fs-xs); font-weight: var(--fw-medium); color: var(--text-secondary); }
+.triage-btn--active .triage-btn__label { color: var(--text); }
+
+.notes-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.notes-field__label {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--text-secondary);
+}
+.notes-field__input {
+  font: inherit;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-base);
+  width: 100%;
+  min-height: 44px;
+  transition: border-color var(--transition);
+}
+.notes-field__input:focus { border-color: var(--blue); outline: none; box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+.notes-field__textarea {
+  font: inherit;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-base);
+  width: 100%;
+  min-height: 80px;
+  resize: vertical;
+  transition: border-color var(--transition);
+}
+.notes-field__textarea:focus { border-color: var(--blue); outline: none; box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+
+/* ═══════════════════════════════════════════════════════════════
+   PAGE: Detail
+   ═══════════════════════════════════════════════════════════════ */
+.page-detail { padding: 0 0 calc(var(--tabbar-h) + var(--space-4)); }
+.detail-skeleton {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE: >= 640px (tablet)
+   ═══════════════════════════════════════════════════════════════ */
+@media (min-width: 640px) {
+  .card-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-4);
+    padding: 0 var(--space-4) var(--space-4);
+  }
+  .page { padding-left: 0; padding-right: 0; }
+  .view-tab { font-size: var(--fs-base); }
+  .filter-bar { padding: var(--space-3) var(--space-4) var(--space-2); }
+  .detail-content { padding: var(--space-5) var(--space-4); gap: var(--space-5); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE: >= 1024px (desktop)
+   ═══════════════════════════════════════════════════════════════ */
+@media (min-width: 1024px) {
+  .card-grid {
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: var(--space-5);
+    padding: 0 var(--space-6) var(--space-5);
+  }
+  .filter-bar { padding: var(--space-4) var(--space-6) var(--space-3); }
+  .results-meta { padding: 0 var(--space-6) var(--space-3); }
+  .detail-content {
+    padding: var(--space-6);
+    max-width: 800px;
+    margin: 0 auto;
+    gap: var(--space-6);
+  }
+  .school-chip__name { max-width: 160px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PAGE MANAGER (tabs)
+   ═══════════════════════════════════════════════════════════════ */
+.page-view { display: none; }
+.page-view--active { display: block; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     HEADER
+     ═══════════════════════════════════════════════════════════════ -->
+<header class="header" id="appHeader">
+  <div class="header__inner">
+    <div class="header__start">
+      <button class="header__back" id="headerBackBtn" hidden>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+        Back
+      </button>
+    </div>
+    <h1 class="header__title" id="headerTitle">Houses</h1>
+    <div class="header__end">
+      <button class="btn-icon" aria-label="Search" title="Search properties">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+      </button>
+      <button class="btn-icon" aria-label="Add property" title="Add property">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     VIEW TABS
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="view-tabs" id="viewTabs">
+  <button class="view-tab view-tab--active" data-view="list" onclick="switchView('list')">
+    Property List
+    <span class="view-tab__badge">6</span>
+  </button>
+  <button class="view-tab" data-view="detail" onclick="switchView('detail')">
+    Property Detail
+  </button>
+  <button class="view-tab" data-view="skeleton" onclick="switchView('skeleton')">
+    Loading States
+  </button>
+  <button class="view-tab" data-view="empty" onclick="switchView('empty')">
+    Empty State
+  </button>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     PAGE: PROPERTY LIST
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="page-view page-view--active" id="page-list">
+  <main class="page" role="main">
+
+    <!-- Filter bar -->
+    <div class="filter-bar">
+      <button class="filter-chip filter-chip--active">All</button>
+      <button class="filter-chip">Maybe</button>
+      <button class="filter-chip">Favourites</button>
+      <button class="filter-chip">Undecided</button>
+      <button class="filter-chip filter-chip--clear">Show dismissed (2)</button>
+      <div class="sort-select" tabindex="0" role="button" aria-haspopup="listbox">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="4" y1="6" x2="20" y2="6"></line>
+          <line x1="8" y1="12" x2="20" y2="12"></line>
+          <line x1="12" y1="18" x2="20" y2="18"></line>
+        </svg>
+        Sort
+      </div>
+    </div>
+
+    <!-- Results meta -->
+    <div class="results-meta">
+      <strong>6 properties</strong> &middot; 3 Maybe &middot; 1 Favourite &middot; 2 Dismissed
+    </div>
+
+    <!-- Card grid -->
+    <div class="card-grid">
+
+      <!-- ─── Card 1: Favourite ─── -->
+      <article class="card" tabindex="0" onclick="openDetail()">
+        <div class="card__accent card__accent--favourite"></div>
+        <div class="card__body">
+          <div class="card__primary">
+            <a class="card__address" href="#">48 Acacia Avenue, Maidenhead, SL6 2NE</a>
+            <div class="card__price-group">
+              <span class="card__price">&pound;795,000</span>
+              <span class="card__monthly">~&pound;2,850/mo</span>
+            </div>
+            <span class="status-dot status-dot--favourite" title="Favourite"></span>
+          </div>
+          <div class="card__specs">
+            <span class="card__specs-highlight">5 bed</span>
+            <span class="card__specs-sep"></span>
+            <span>2 bath</span>
+            <span class="card__specs-sep"></span>
+            <span>SL6</span>
+          </div>
+          <div class="card__section">
+            <div class="card__commutes">
+              <span class="card__commit-unit">
+                <span class="card__commit-label">Simon</span>
+                <span class="pill pill--green">32 min</span>
+              </span>
+              <span class="card__commit-unit">
+                <span class="card__commit-label">Lorena</span>
+                <span class="pill pill--orange">48 min</span>
+              </span>
+              <span class="card__commit-unit">
+                <span class="card__commit-label">Bracknell</span>
+                <span class="pill pill--green">22 min</span>
+              </span>
+              <span class="card__commit-unit">
+                <span class="card__commit-label">Pimlico</span>
+                <span class="pill pill--green">37 min</span>
+              </span>
+            </div>
+          </div>
+          <div class="card__section">
+            <div class="card__schools">
+              <span class="school-chip">
+                <span class="school-chip__name">St Mary's Catholic Primary</span>
+                <span class="dual-dots">
+                  <span class="dot dot--green" title="Ofsted: Outstanding"></span>
+                  <span class="dot dot--green" title="Walk: 8 min"></span>
+                </span>
+              </span>
+              <span class="school-chip">
+                <span class="school-chip__name">The Academy</span>
+                <span class="dual-dots">
+                  <span class="dot dot--orange" title="Ofsted: Good"></span>
+                  <span class="dot dot--green" title="Walk: 12 min"></span>
+                </span>
+              </span>
+            </div>
+          </div>
+          <div class="card__section">
+            <div class="card__finance">
+              <span class="card__finance--em">~&pound;2,850/mo</span>
+              <span class="card__finance-sep">&middot;</span>
+              <span class="card__finance--neg">+&pound;800 vs now</span>
+              <span class="card__finance-sep">&middot;</span>
+              <span class="pill pill--green pill--sm">Walk 12 min</span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ─── Card 2: Maybe ─── -->
+      <article class="card" tabindex="0" onclick="openDetail()">
+        <div class="card__accent card__accent--maybe"></div>
+        <div class="card__body">
+          <div class="card__primary">
+            <a class="card__address" href="#">Shoppenhangers Road, Maidenhead, SL6 2QL</a>
+            <div class="card__price-group">
+              <span class="card__price">&pound;625,000</span>
+              <span class="card__monthly">~&pound;2,100/mo</span>
+            </div>
+            <span class="status-dot status-dot--maybe" title="Maybe"></span>
+          </div>
+          <div class="card__specs">
+            <span class="card__specs-highlight">4 bed</span>
+            <span class="card__specs-sep"></span>
+            <span>2 bath</span>
+            <span class="card__specs-sep"></span>
+            <span>SL6</span>
+          </div>
+          <div class="card__section">
+            <div class="card__commutes">
+              <span class="card__commit-unit">
+                <span class="card__commit-label">Simon</span>
+                <span class="pill pill--green">28 min</span>
+              </span>
+              <span class="card__commit-unit">
+                <span class="card__commit-label">Lorena</span>
+                <span class="pill pill--red">82 min</span>
+              </span>
+              <span class="card__commit-unit">
+                <span class="card__commit-label">Bracknell</span>
+                <span class="pill pill--green">15 min</span>
+              </span>
+            </div>
+          </div>
+          <div class="card__section">
+            <div class="card__schools">
+              <span class="school-chip">
+                <span class="school-chip__name">St Mary's Catholic Primary</span>
+                <span class="dual-dots">
+                  <span class="dot dot--green" title="Ofsted: Outstanding"></span>
+                  <span class="dot dot--green" title="Walk: 10 min"></span>
+                </span>
+              </span>
+              <span class="school-chip">
+                <span class="school-chip__name">Maidenhead High School</span>
+                <span class="dual-dots">
+                  <span class="dot dot--orange" title="Ofsted: Good"></span>
+                  <span class="dot dot--orange" title="Walk: 18 min"></span>
+                </span>
+              </span>
+              <span class="school-chip">
+                <span class="school-chip__name">St Piran's</span>
+                <span class="dual-dots">
+                  <span class="dot dot--muted" title="Ofsted: Unknown"></span>
+                  <span class="dot dot--green" title="Walk: 5 min"></span>
+                </span>
+              </span>
+            </div>
+          </div>
+          <div class="card__section">
+            <div class="card__finance">
+              <span class="card__finance--em">~&pound;2,100/mo</span>
+              <span class="card__finance-sep">&middot;</span>
+              <span>+&pound;50 vs now</span>
+              <span class="card__finance-sep">&middot;</span>
+              <span class="pill pill--green pill--sm">Walk 8 min</span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ─── Card 3: Current Home ─── -->
+      <article class="card" tabindex="0">
+        <div class="card__accent card__accent--home"></div>
+        <div class="card__body">
+          <div class="card__primary">
+            <a class="card__address" href="#">12 Maple Road, London, NW5 3TB</a>
+            <div class="card__price-group">
+              <span class="card__price">&pound;525,000</span>
+              <span class="card__monthly" style="color:var(--slate-500)">Current home</span>
+            </div>
+            <span class="status-dot status-dot--home" title="Current home"></span>
+          </div>
+          <div class="card__specs">
+            <span class="card__specs-highlight">4 bed</span>
+            <span class="card__specs-sep"></span>
+            <span>2 bath</span>
+            <span class="card__specs-sep"></span>
+            <span>NW5</span>
+          </div>
+          <div class="card__section">
+            <div class="card__commutes">
+              <span class="card__commit-unit">
+                <span class="card__commit-label">Simon</span>
+                <span class="pill pill--orange">55 min</span>
+              </span>
+              <span class="card__commit-unit">
+                <span class="card__commit-label">Lorena</span>
+                <span class="pill pill--green">38 min</span>
+              </span>
+            </div>
+          </div>
+          <div class="card__section">
+            <div class="card__finance">
+              <span class="card__finance--em">Total monthly: &pound;3,100/mo</span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ─── Card 4: Maybe ─── -->
+      <article class="card" tabindex="0" onclick="openDetail()">
+        <div class="card__accent card__accent--maybe"></div>
+        <div class="card__body">
+          <div class="card__primary">
+            <a class="card__address" href="#">Pembroke Avenue, Hersham, KT12 4NT</a>
+            <div class="card__price-group">
+              <span class="card__price">&pound;600,000</span>
+              <span class="card__monthly">~&pound;2,050/mo</span>
+            </div>
+            <span class="status-dot status-dot--maybe" title="Maybe"></span>
+          </div>
+          <div class="card__specs">
+            <span class="card__specs-highlight">4 bed</span>
+            <span class="card__specs-sep"></span>
+            <span>1 bath</span>
+            <span class="card__specs-sep"></span>
+            <span>KT12</span>
+          </div>
+          <div class="card__section">
+            <div class="card__commutes">
+              <span class="card__commit-unit">
+                <span class="card__commit-label">Simon</span>
+                <span class="pill pill--green">18 min</span>
+              </span>
+              <span class="card__commit-unit">
+                <span class="card__commit-label">Lorena</span>
+                <span class="pill pill--red">62 min</span>
+              </span>
+              <span class="card__commit-unit">
+                <span class="card__commit-label">Bracknell</span>
+                <span class="pill pill--green">12 min</span>
+              </span>
+            </div>
+          </div>
+          <div class="card__section">
+            <div class="card__schools">
+              <span class="school-chip">
+                <span class="school-chip__name">St George's Primary</span>
+                <span class="dual-dots">
+                  <span class="dot dot--green" title="Ofsted: Outstanding"></span>
+                  <span class="dot dot--green" title="Walk: 5 min"></span>
+                </span>
+              </span>
+              <span class="school-chip">
+                <span class="school-chip__name">Esher High</span>
+                <span class="dual-dots">
+                  <span class="dot dot--orange" title="Ofsted: Good"></span>
+                  <span class="dot dot--orange" title="Walk: 22 min"></span>
+                </span>
+              </span>
+            </div>
+          </div>
+          <div class="card__section">
+            <div class="card__finance card__finance--em">
+              ~&pound;2,050/mo
+              <span class="card__finance-sep">&middot;</span>
+              -&pound;1,050 vs now
+              <span class="card__finance-sep">&middot;</span>
+              <span class="pill pill--green pill--sm">Walk 4 min</span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ─── Card 5: Dismissed ─── -->
+      <article class="card" tabindex="0" style="opacity:0.55">
+        <div class="card__accent card__accent--dismissed"></div>
+        <div class="card__body">
+          <div class="card__primary">
+            <a class="card__address" href="#" style="color:var(--text-secondary)">15 Victoria Road, London, E8 3DF</a>
+            <div class="card__price-group">
+              <span class="card__price" style="color:var(--text-secondary)">&pound;325,000</span>
+              <span class="card__monthly" style="color:var(--text-muted)">~&pound;2,400/mo</span>
+            </div>
+            <span class="status-dot status-dot--dismissed" title="Dismissed"></span>
+          </div>
+          <div class="card__specs">
+            <span class="card__specs-highlight" style="color:var(--text-secondary)">2 bed</span>
+            <span class="card__specs-sep"></span>
+            <span>1 bath</span>
+            <span class="card__specs-sep"></span>
+            <span>E8</span>
+          </div>
+          <div class="card__section">
+            <div class="card__commutes">
+              <span class="card__commit-unit">
+                <span class="card__commit-label">Simon</span>
+                <span class="pill pill--green">32 min</span>
+              </span>
+              <span class="card__commit-unit">
+                <span class="card__commit-label">Lorena</span>
+                <span class="pill pill--orange">55 min</span>
+              </span>
+            </div>
+          </div>
+          <div class="card__section">
+            <div class="card__finance">
+              &pound;325,000
+              <span class="card__finance-sep">&middot;</span>
+              <span class="pill pill--muted pill--sm">Walk Unknown</span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ─── Card 6: Dismissed ─── -->
+      <article class="card" tabindex="0" style="opacity:0.55">
+        <div class="card__accent card__accent--dismissed"></div>
+        <div class="card__body">
+          <div class="card__primary">
+            <a class="card__address" href="#" style="color:var(--text-secondary)">7 Oak Lane, London, SE15 4TU</a>
+            <div class="card__price-group">
+              <span class="card__price" style="color:var(--text-secondary)">&pound;380,000</span>
+              <span class="card__monthly" style="color:var(--text-muted)">~&pound;2,600/mo</span>
+            </div>
+            <span class="status-dot status-dot--dismissed" title="Dismissed"></span>
+          </div>
+          <div class="card__specs">
+            <span class="card__specs-highlight" style="color:var(--text-secondary)">3 bed</span>
+            <span class="card__specs-sep"></span>
+            <span>1 bath</span>
+            <span class="card__specs-sep"></span>
+            <span>SE15</span>
+          </div>
+          <div class="card__section">
+            <div class="card__commutes">
+              <span class="card__commit-unit">
+                <span class="card__commit-label">Simon</span>
+                <span class="pill pill--green">18 min</span>
+              </span>
+              <span class="card__commit-unit">
+                <span class="card__commit-label">Lorena</span>
+                <span class="pill pill--red">62 min</span>
+              </span>
+              <span class="card__commit-unit">
+                <span class="card__commit-label">Bracknell</span>
+                <span class="pill pill--green">12 min</span>
+              </span>
+            </div>
+          </div>
+          <div class="card__section">
+            <div class="card__schools">
+              <span class="school-chip">
+                <span class="school-chip__name">Harris Academy</span>
+                <span class="dual-dots">
+                  <span class="dot dot--green" title="Ofsted: Outstanding"></span>
+                  <span class="dot dot--orange" title="Walk: 18 min"></span>
+                </span>
+              </span>
+            </div>
+          </div>
+          <div class="card__section">
+            <div class="card__finance">
+              &pound;380,000
+              <span class="card__finance-sep">&middot;</span>
+              <span class="pill pill--muted pill--sm">Walk Unknown</span>
+            </div>
+          </div>
+        </div>
+      </article>
+
+    </div>
+  </main>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     PAGE: PROPERTY DETAIL
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="page-view" id="page-detail">
+  <main class="page-detail" role="main">
+
+    <!-- Summary bar (sticky) -->
+    <div class="summary-bar" id="detailSummaryBar">
+      <div class="summary-bar__info">
+        <div class="summary-bar__address">48 Acacia Avenue</div>
+        <div class="summary-bar__address-sub">Maidenhead, SL6 2NE</div>
+      </div>
+      <div class="summary-bar__right">
+        <span class="summary-bar__price">&pound;795,000</span>
+        <span class="summary-bar__status">
+          <span class="status-dot status-dot--favourite" title="Favourite" style="width:10px;height:10px"></span>
+          <span class="pill pill--amber pill--xs">Favourite</span>
+        </span>
+      </div>
+    </div>
+
+    <!-- Section nav (sticky) -->
+    <div class="section-nav-wrap" id="detailSectionNav">
+      <nav class="section-nav" aria-label="Section navigation">
+        <button class="section-nav__tab section-nav__tab--active" data-section="summary" onclick="scrollToSection('summary')">Summary</button>
+        <button class="section-nav__tab" data-section="commute" onclick="scrollToSection('commute')">Commute</button>
+        <button class="section-nav__tab" data-section="schools" onclick="scrollToSection('schools')">Schools</button>
+        <button class="section-nav__tab" data-section="costs" onclick="scrollToSection('costs')">Costs</button>
+        <button class="section-nav__tab" data-section="notes" onclick="scrollToSection('notes')">Notes</button>
+      </nav>
+    </div>
+
+    <!-- Detail sections -->
+    <div class="detail-content">
+
+      <!-- ═══ Summary ═══ -->
+      <section class="detail-card" id="section-summary">
+        <div class="detail-card__header" onclick="toggleSection(this)">
+          <div class="detail-card__header-left">
+            <div class="detail-card__icon detail-card__icon--summary">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"></path>
+                <circle cx="12" cy="10" r="3"></circle>
+              </svg>
+            </div>
+            <div>
+              <div class="detail-card__title">Summary</div>
+              <div class="detail-card__summary" style="font-size:11px;color:var(--text-muted)">Location &amp; overview</div>
+            </div>
+          </div>
+          <span class="detail-card__summary">
+            <span class="pill pill--green pill--sm">EPC B</span>
+          </span>
+          <span class="detail-card__toggle detail-card__toggle--open">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </span>
+        </div>
+        <div class="detail-card__body">
+          <!-- Map -->
+          <div class="map-embed">
+            <div class="map-embed__grid"></div>
+            <div class="map-embed__pin"></div>
+            <span style="position:relative;z-index:1;opacity:0.5;font-size:var(--fs-xs)">Maidenhead, SL6 2NE</span>
+          </div>
+
+          <!-- Key stats -->
+          <div class="detail-row">
+            <span class="detail-row__label">Price</span>
+            <span class="detail-row__value">&pound;795,000</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-row__label">Bedrooms</span>
+            <span class="detail-row__value">5 bed</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-row__label">Bathrooms</span>
+            <span class="detail-row__value">2 bath</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-row__label">Council Tax</span>
+            <span class="detail-row__value">Band F &middot; &pound;2,400/yr</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-row__label">EPC Rating</span>
+            <span class="detail-row__value detail-row__value--green">B &middot; Good</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-row__label">Walk to town</span>
+            <span class="detail-row__value"><span class="pill pill--green pill--sm">12 min</span></span>
+          </div>
+
+          <!-- Action buttons -->
+          <div style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-top:var(--space-2)">
+            <a href="#" class="btn btn--primary" style="flex:1;justify-content:center">View on Rightmove</a>
+            <a href="#" class="btn btn--outline" style="flex:1;justify-content:center">Get Directions</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Commute ═══ -->
+      <section class="detail-card" id="section-commute">
+        <div class="detail-card__header" onclick="toggleSection(this)">
+          <div class="detail-card__header-left">
+            <div class="detail-card__icon detail-card__icon--commute">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+              </svg>
+            </div>
+            <div>
+              <div class="detail-card__title">Commute &amp; Area</div>
+              <div class="detail-card__summary" style="font-size:11px;color:var(--text-muted)">4 routes tracked</div>
+            </div>
+          </div>
+          <span class="detail-card__summary">Simon 32m</span>
+          <span class="detail-card__toggle detail-card__toggle--open">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </span>
+        </div>
+        <div class="detail-card__body">
+          <div class="commute-block">
+
+            <!-- Simon -->
+            <div class="commute-person">
+              <div class="commute-person__header">
+                <span class="commute-person__name">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"></path>
+                    <circle cx="12" cy="7" r="4"></circle>
+                  </svg>
+                  Simon &rarr; Victoria
+                </span>
+                <span class="commute-person__time">
+                  <span class="pill pill--green">32 min</span>
+                </span>
+              </div>
+              <div class="commute-person__legs">
+                <div class="commute-leg">
+                  <span class="commute-leg__icon">&#x1F696;</span>
+                  <span class="commute-leg__line">Walk to Maidenhead station</span>
+                  <span class="commute-leg__time">8 min</span>
+                </div>
+                <div class="commute-leg">
+                  <span class="commute-leg__icon">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="8" width="18" height="8" rx="1"/></svg>
+                  </span>
+                  <span class="commute-leg__line">Bakerloo &rarr; Oxford Circus &rarr; Victoria</span>
+                  <span class="commute-leg__time">19 min</span>
+                </div>
+                <div class="commute-leg">
+                  <span class="commute-leg__icon">&#x1F696;</span>
+                  <span class="commute-leg__line">Walk to office</span>
+                  <span class="commute-leg__time">5 min</span>
+                </div>
+              </div>
+              <div class="commute-person__meta">
+                <span>&pound;4.50/day</span>
+                <span>Source: TfL API</span>
+                <span>Updated 26 Jun 2026</span>
+              </div>
+            </div>
+
+            <!-- Lorena -->
+            <div class="commute-person">
+              <div class="commute-person__header">
+                <span class="commute-person__name">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"></path>
+                    <circle cx="12" cy="7" r="4"></circle>
+                  </svg>
+                  Lorena &rarr; Aldgate
+                </span>
+                <span class="commute-person__time">
+                  <span class="pill pill--orange">48 min</span>
+                </span>
+              </div>
+              <div class="commute-person__legs">
+                <div class="commute-leg">
+                  <span class="commute-leg__icon">&#x1F696;</span>
+                  <span class="commute-leg__line">Walk to Maidenhead station</span>
+                  <span class="commute-leg__time">8 min</span>
+                </div>
+                <div class="commute-leg">
+                  <span class="commute-leg__icon">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="8" width="18" height="8" rx="1"/></svg>
+                  </span>
+                  <span class="commute-leg__line">Elizabeth line &rarr; Paddington &rarr; Circle line</span>
+                  <span class="commute-leg__time">35 min</span>
+                </div>
+                <div class="commute-leg">
+                  <span class="commute-leg__icon">&#x1F696;</span>
+                  <span class="commute-leg__line">Walk to office</span>
+                  <span class="commute-leg__time">5 min</span>
+                </div>
+              </div>
+              <div class="commute-person__meta">
+                <span>&pound;2.80/day</span>
+                <span>Source: TfL API</span>
+                <span>Updated 26 Jun 2026</span>
+              </div>
+            </div>
+
+            <!-- Bracknell -->
+            <div class="commute-person">
+              <div class="commute-person__header">
+                <span class="commute-person__name">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"></path>
+                    <circle cx="12" cy="7" r="4"></circle>
+                  </svg>
+                  Bracknell
+                </span>
+                <span class="commute-person__time">
+                  <span class="pill pill--green">22 min</span>
+                </span>
+              </div>
+              <div class="commute-person__legs">
+                <div class="commute-leg">
+                  <span class="commute-leg__icon">&#x1F698;</span>
+                  <span class="commute-leg__line">A404(M) &rarr; M4</span>
+                  <span class="commute-leg__time">22 min</span>
+                </div>
+              </div>
+              <div class="commute-person__meta">
+                <span>&pound;6.00/day</span>
+                <span>Source: Google Maps</span>
+                <span>Updated 26 Jun 2026</span>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Area description -->
+          <div style="padding:var(--space-3);background:var(--slate-50);border-radius:var(--radius-sm);border:1px solid var(--border)">
+            <div style="font-size:var(--fs-xs);font-weight:var(--fw-semibold);color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:var(--space-1)">Area Overview</div>
+            <p style="font-size:var(--fs-sm);color:var(--text-secondary);line-height:var(--lh-loose);margin:0">
+              Maidenhead town centre is 12 min walk away. Local amenities include Co-op, GP surgery, park, and a cinema. 
+              Direct trains to Paddington in about 20 min. Council tax Band F.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Schools ═══ -->
+      <section class="detail-card" id="section-schools">
+        <div class="detail-card__header" onclick="toggleSection(this)">
+          <div class="detail-card__header-left">
+            <div class="detail-card__icon detail-card__icon--schools">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 10v6M2 10l10-5 10 5-10 5z"></path>
+                <path d="M6 12v5c0 1.1 2.7 3 6 3s6-1.9 6-3v-5"></path>
+              </svg>
+            </div>
+            <div>
+              <div class="detail-card__title">Schools</div>
+              <div class="detail-card__summary" style="font-size:11px;color:var(--text-muted)">2 nearby schools</div>
+            </div>
+          </div>
+          <span class="detail-card__summary">
+            <span class="pill pill--green pill--sm">Outstanding</span>
+          </span>
+          <span class="detail-card__toggle detail-card__toggle--open">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </span>
+        </div>
+        <div class="detail-card__body">
+          <div class="school-list">
+            <div class="school-item">
+              <div class="school-item__info">
+                <div class="school-item__name">St Mary's Catholic Primary School</div>
+                <div class="school-item__dist">0.8 km &middot; Primary</div>
+              </div>
+              <div class="school-item__rating">
+                <span class="pill pill--green pill--sm">Outstanding</span>
+                <span style="font-size:var(--fs-xs);color:var(--text-muted)">Inspected 2023</span>
+              </div>
+              <span class="pill pill--green pill--sm" style="margin-left:var(--space-1)">8 min walk</span>
+            </div>
+            <div class="school-item">
+              <div class="school-item__info">
+                <div class="school-item__name">The Academy</div>
+                <div class="school-item__dist">2.1 km &middot; Secondary</div>
+              </div>
+              <div class="school-item__rating">
+                <span class="pill pill--orange pill--sm">Good</span>
+                <span style="font-size:var(--fs-xs);color:var(--text-muted)">Inspected 2022</span>
+              </div>
+              <span class="pill pill--green pill--sm" style="margin-left:var(--space-1)">12 min walk</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Costs ═══ -->
+      <section class="detail-card" id="section-costs">
+        <div class="detail-card__header" onclick="toggleSection(this)">
+          <div class="detail-card__header-left">
+            <div class="detail-card__icon detail-card__icon--costs">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="1" x2="12" y2="23"></line>
+                <path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"></path>
+              </svg>
+            </div>
+            <div>
+              <div class="detail-card__title">Costs</div>
+              <div class="detail-card__summary" style="font-size:11px;color:var(--text-muted)">Monthly breakdown</div>
+            </div>
+          </div>
+          <span class="detail-card__summary">
+            <span class="pill pill--green pill--sm">&pound;2,850/mo</span>
+          </span>
+          <span class="detail-card__toggle detail-card__toggle--open">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </span>
+        </div>
+        <div class="detail-card__body">
+          <table class="cost-table">
+            <tr><td>Mortgage Payment</td><td>&pound;1,200/mo</td></tr>
+            <tr><td>Sinking Fund</td><td>&pound;150/mo</td></tr>
+            <tr><td>Life Insurance</td><td>&pound;25/mo</td></tr>
+            <tr><td>Commute Cost</td><td>&pound;320/mo</td></tr>
+            <tr><td>Council Tax</td><td>&pound;200/mo</td></tr>
+            <tr><td>Utilities &amp; Broadband</td><td>&pound;180/mo</td></tr>
+            <tr><td>Service Charge</td><td>&pound;75/mo</td></tr>
+            <tr class="cost-table__total"><td>Total Monthly Housing</td><td>&pound;2,850/mo</td></tr>
+          </table>
+          <div style="display:flex;gap:var(--space-3);flex-wrap:wrap;font-size:var(--fs-sm);color:var(--text-muted);padding-top:var(--space-3);border-top:1px solid var(--divider)">
+            <span>Stamp Duty: &pound;21,250</span>
+            <span>Net Contribution: &pound;58,333</span>
+            <span>Mortgage Required: &pound;225,000</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Notes ═══ -->
+      <section class="detail-card" id="section-notes">
+        <div class="detail-card__header" onclick="toggleSection(this)">
+          <div class="detail-card__header-left">
+            <div class="detail-card__icon detail-card__icon--notes">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+              </svg>
+            </div>
+            <div>
+              <div class="detail-card__title">Notes &amp; Inputs</div>
+              <div class="detail-card__summary" style="font-size:11px;color:var(--text-muted)">2 notes, 3 fields set</div>
+            </div>
+          </div>
+          <span class="detail-card__summary">
+            <span class="pill pill--amber pill--sm">Favourite</span>
+          </span>
+          <span class="detail-card__toggle detail-card__toggle--open">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </span>
+        </div>
+        <div class="detail-card__body">
+          <div class="notes-grid">
+            <!-- Triage -->
+            <div>
+              <div class="notes-field__label" style="margin-bottom:var(--space-2)">Status</div>
+              <div class="triage-group">
+                <button class="triage-btn">
+                  <span class="triage-btn__emoji">&#x2753;</span>
+                  <span class="triage-btn__label">Undecided</span>
+                </button>
+                <button class="triage-btn triage-btn--confirm triage-btn--active">
+                  <span class="triage-btn__emoji">&#x1F44D;</span>
+                  <span class="triage-btn__label">Maybe</span>
+                </button>
+                <button class="triage-btn">
+                  <span class="triage-btn__emoji">&#x2B50;</span>
+                  <span class="triage-btn__label">Favourite</span>
+                </button>
+                <button class="triage-btn triage-btn--danger">
+                  <span class="triage-btn__emoji">&#x274C;</span>
+                  <span class="triage-btn__label">Dismissed</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Notes fields -->
+            <div class="notes-field">
+              <label class="notes-field__label">Reason</label>
+              <input class="notes-field__input" type="text" placeholder="e.g. Great location, needs work" value="Excellent schools, good commute for Simon">
+            </div>
+            <div class="notes-field">
+              <label class="notes-field__label">Design Needed</label>
+              <input class="notes-field__input" type="text" value="Yes" placeholder="Yes / No">
+            </div>
+            <div class="notes-field">
+              <label class="notes-field__label">Planning Needed</label>
+              <input class="notes-field__input" type="text" value="No" placeholder="Yes / No">
+            </div>
+            <div class="notes-field">
+              <label class="notes-field__label">Ashby Works Estimate</label>
+              <input class="notes-field__input" type="text" value="&pound;15,000" placeholder="&pound;...">
+            </div>
+
+            <!-- Comments -->
+            <div style="display:flex;flex-direction:column;gap:var(--space-2);padding-top:var(--space-2);border-top:1px solid var(--divider)">
+              <span class="notes-field__label">Group Notes</span>
+              <div style="background:var(--slate-50);border:1px solid var(--border);border-radius:var(--radius-sm);padding:var(--space-3);font-size:var(--fs-sm);color:var(--text-secondary);line-height:var(--lh-loose)">
+                Simon: Booked viewing Sat 10am<br>
+                Lorena: Need to check parking situation
+              </div>
+              <span class="notes-field__label">Ashby Comments</span>
+              <textarea class="notes-field__textarea" placeholder="Add your comments...">Needs new boiler. Check structural survey.</textarea>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     PAGE: SKELETON / LOADING STATES
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="page-view" id="page-skeleton">
+  <main class="page" role="main">
+    <!-- Filter bar skeleton -->
+    <div class="filter-bar">
+      <div class="skeleton__pulse" style="height:32px;width:60px;border-radius:var(--radius-full)"></div>
+      <div class="skeleton__pulse" style="height:32px;width:80px;border-radius:var(--radius-full)"></div>
+      <div class="skeleton__pulse" style="height:32px;width:70px;border-radius:var(--radius-full)"></div>
+      <div class="skeleton__pulse" style="height:32px;width:40px;border-radius:var(--radius-full)"></div>
+    </div>
+    <div class="results-meta">
+      <div class="skeleton__pulse" style="height:12px;width:120px"></div>
+    </div>
+    <div class="card-grid">
+      <div class="skeleton">
+        <div class="skeleton__body">
+          <div class="skeleton__primary">
+            <div class="skeleton__pulse skeleton__addr"></div>
+            <div class="skeleton__pulse skeleton__price"></div>
+          </div>
+          <div class="skeleton__pulse skeleton__specs"></div>
+          <div class="skeleton__pulse skeleton__commutes"></div>
+          <div class="skeleton__pulse skeleton__schools"></div>
+          <div class="skeleton__pulse skeleton__finance"></div>
+        </div>
+      </div>
+      <div class="skeleton">
+        <div class="skeleton__body">
+          <div class="skeleton__primary">
+            <div class="skeleton__pulse skeleton__addr"></div>
+            <div class="skeleton__pulse skeleton__price"></div>
+          </div>
+          <div class="skeleton__pulse skeleton__specs"></div>
+          <div class="skeleton__pulse skeleton__commutes"></div>
+          <div class="skeleton__pulse skeleton__schools"></div>
+          <div class="skeleton__pulse skeleton__finance"></div>
+        </div>
+      </div>
+      <div class="skeleton">
+        <div class="skeleton__body">
+          <div class="skeleton__primary">
+            <div class="skeleton__pulse skeleton__addr"></div>
+            <div class="skeleton__pulse skeleton__price"></div>
+          </div>
+          <div class="skeleton__pulse skeleton__specs"></div>
+          <div class="skeleton__pulse skeleton__commutes"></div>
+          <div class="skeleton__pulse skeleton__schools"></div>
+          <div class="skeleton__pulse skeleton__finance"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     PAGE: EMPTY STATE
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="page-view" id="page-empty">
+  <main class="page" role="main">
+    <div class="empty-state">
+      <div class="empty-state__icon">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path>
+          <polyline points="9 22 9 12 15 12 15 22"></polyline>
+        </svg>
+      </div>
+      <h2 class="empty-state__title">No houses yet</h2>
+      <p class="empty-state__desc">
+        Paste a Rightmove link to get started. We'll pull in the details, calculate commutes, and find nearby schools.
+      </p>
+      <button class="btn btn--primary">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        Add your first property
+      </button>
+      <button class="btn btn--outline">Learn how it works</button>
+    </div>
+  </main>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     BOTTOM TAB BAR
+     ═══════════════════════════════════════════════════════════════ -->
+<nav class="tab-bar" aria-label="Main navigation">
+  <button class="tab-bar__tab tab-bar__tab--active">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"></path>
+      <polyline points="9 22 9 12 15 12 15 22"></polyline>
+    </svg>
+    <span class="tab-bar__label">Properties</span>
+  </button>
+  <button class="tab-bar__tab">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"></path>
+    </svg>
+    <span class="tab-bar__label">Favourites</span>
+    <span class="tab-bar__badge">1</span>
+  </button>
+  <button class="tab-bar__tab">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"></path>
+      <circle cx="12" cy="10" r="3"></circle>
+    </svg>
+    <span class="tab-bar__label">Map</span>
+  </button>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     JAVASCRIPT
+     ═══════════════════════════════════════════════════════════════ -->
+<script>
+// ── View switching ──
+function switchView(viewId) {
+  // Update tabs
+  document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('view-tab--active'));
+  document.querySelector(`.view-tab[data-view="${viewId}"]`)?.classList.add('view-tab--active');
+
+  // Update pages
+  document.querySelectorAll('.page-view').forEach(p => p.classList.remove('page-view--active'));
+  const page = document.getElementById('page-' + viewId);
+  if (page) page.classList.add('page-view--active');
+
+  // Toggle header back button for detail view
+  const backBtn = document.getElementById('headerBackBtn');
+  const title = document.getElementById('headerTitle');
+  if (viewId === 'detail') {
+    backBtn.hidden = false;
+    title.textContent = 'Property Detail';
+  } else {
+    backBtn.hidden = true;
+    title.textContent = 'Houses';
+  }
+}
+
+// ── Detail section accordion ──
+function toggleSection(headerEl) {
+  const body = headerEl.parentElement.querySelector('.detail-card__body');
+  const toggle = headerEl.querySelector('.detail-card__toggle');
+  if (body && toggle) {
+    body.classList.toggle('detail-card__body--closed');
+    toggle.classList.toggle('detail-card__toggle--open');
+  }
+}
+
+// ── Detail section scroll + nav highlight ──
+function scrollToSection(id) {
+  const el = document.getElementById('section-' + id);
+  if (el) {
+    const navHeight = document.getElementById('detailSectionNav')?.offsetHeight || 40;
+    const summaryBarHeight = document.getElementById('detailSummaryBar')?.offsetHeight || 60;
+    const headerH = 52;
+    const tabsH = 44;
+    const offset = headerH + tabsH + summaryBarHeight + navHeight + 10;
+    const top = el.getBoundingClientRect().top + window.pageYOffset - offset;
+    window.scrollTo({ top, behavior: 'smooth' });
+  }
+
+  // Update active nav tab
+  document.querySelectorAll('.section-nav__tab').forEach(t => t.classList.remove('section-nav__tab--active'));
+  document.querySelector(`.section-nav__tab[data-section="${id}"]`)?.classList.add('section-nav__tab--active');
+}
+
+// ── Intersection Observer for section nav auto-highlight ──
+(function() {
+  const sections = ['summary', 'commute', 'schools', 'costs', 'notes'];
+  const sectionEls = sections.map(id => document.getElementById('section-' + id)).filter(Boolean);
+
+  if (sectionEls.length && 'IntersectionObserver' in window) {
+    const navH = document.getElementById('detailSectionNav')?.offsetHeight || 40;
+    const summaryH = document.getElementById('detailSummaryBar')?.offsetHeight || 60;
+    const headerH = 52;
+    const tabsH = 44;
+    const offset = headerH + tabsH + summaryH + 20;
+
+    const obs = new IntersectionObserver((entries) => {
+      let maxRatio = 0;
+      let activeId = sections[0];
+      entries.forEach(entry => {
+        if (entry.intersectionRatio > maxRatio) {
+          maxRatio = entry.intersectionRatio;
+          activeId = entry.target.id.replace('section-', '');
+        }
+      });
+      if (maxRatio > 0) {
+        document.querySelectorAll('.section-nav__tab').forEach(t => t.classList.remove('section-nav__tab--active'));
+        const tab = document.querySelector(`.section-nav__tab[data-section="${activeId}"]`);
+        if (tab) tab.classList.add('section-nav__tab--active');
+      }
+    }, { rootMargin: `-${offset}px 0px -40% 0px`, threshold: [0, 0.25, 0.5, 0.75, 1] });
+
+    sectionEls.forEach(el => obs.observe(el));
+  }
+})();
+
+// ── Open detail from card click ──
+function openDetail() {
+  switchView('detail');
+  window.scrollTo(0, 0);
+}
+
+// ── Back from detail ──
+document.getElementById('headerBackBtn')?.addEventListener('click', function(e) {
+  e.preventDefault();
+  switchView('list');
+  window.scrollTo(0, 0);
+});
+</script>
+</body>
+</html>

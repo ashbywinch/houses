@@ -5,12 +5,15 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import { usePropertiesStore } from '../../stores/properties'
 import PropertyDetail from '../PropertyDetail.vue'
 import type { PropertyDetail as PropertyDetailType } from '../../types'
+import * as api from '../../services/api'
 
 // Mock the API module so fetch-based calls don't fail in test environment
 vi.mock('../../services/api', () => ({
   patchTriage: vi.fn().mockResolvedValue({ ok: true }),
   patchAddress: vi.fn(),
   patchLocation: vi.fn(),
+  fetchComments: vi.fn().mockResolvedValue([]),
+  postComment: vi.fn().mockResolvedValue({ person: 'Ashby', text: '', timestamp: new Date().toISOString() }),
 }))
 
 function makeDetail(): PropertyDetailType {
@@ -193,42 +196,7 @@ describe('PropertyDetail town description', () => {
 })
 
 describe('PropertyDetail notes', () => {
-  it('initializes userNotes from existing triage data', async () => {
-    const router = createRouter({
-      history: createWebHashHistory(),
-      routes: [{ path: '/property/:rid', component: PropertyDetail }],
-    })
-    router.push('/property/123')
-    await router.isReady()
-
-    const wrapper = mount(PropertyDetail, {
-      global: {
-        plugins: [createPinia(), router],
-      },
-    })
-
-    const store = usePropertiesStore()
-    const detail = makeDetail()
-    store.details['123'] = detail
-    store.triage['123'] = {
-      favourite: false,
-      dismissed: false,
-      is_viewed: false,
-      user_notes: 'Existing note from previous session',
-      triage_status: '',
-    }
-    store.loading = false
-
-    await wrapper.vm.$nextTick()
-    await wrapper.vm.$nextTick()
-
-    // The textarea should contain the existing notes
-    const textarea = wrapper.find('textarea')
-    expect(textarea.exists()).toBe(true)
-    expect((textarea.element as HTMLTextAreaElement).value).toContain('Existing note')
-  })
-
-  it('updates store triage after saving notes', async () => {
+  it('renders notes section with textarea and save button', async () => {
     const router = createRouter({
       history: createWebHashHistory(),
       routes: [{ path: '/property/:rid', component: PropertyDetail }],
@@ -249,19 +217,186 @@ describe('PropertyDetail notes', () => {
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
 
-    // Type in the textarea
-    const textarea = wrapper.find('textarea')
-    await textarea.setValue('New test note')
+    // Notes section exists
+    const section = wrapper.find('#section-notes')
+    expect(section.exists()).toBe(true)
 
-    // Click Save
-    const saveBtn = wrapper.findAll('button').filter(b => b.text().includes('Save Notes'))
-    if (saveBtn.length > 0) {
-      await saveBtn[0].trigger('click')
-    }
+    // Textarea for new comments
+    const textarea = section.find('textarea')
+    expect(textarea.exists()).toBe(true)
+
+    // Save button
+    const saveBtn = section.find('button')
+    expect(saveBtn.exists()).toBe(true)
+    expect(saveBtn.text()).toBe('Save')
+  })
+
+  it('calls postComment when save is clicked', async () => {
+    const postCommentMock = vi.mocked(api.postComment)
+    postCommentMock.mockResolvedValue({
+      person: 'Ashby',
+      text: 'A new comment',
+      timestamp: new Date().toISOString(),
+    })
+
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/property/:rid', component: PropertyDetail }],
+    })
+    router.push('/property/123')
+    await router.isReady()
+
+    const wrapper = mount(PropertyDetail, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+
+    const store = usePropertiesStore()
+    store.details['123'] = makeDetail()
+    store.loading = false
+
+    await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
 
-    // Store should have the note
-    expect(store.triage['123']?.user_notes).toBe('New test note')
+    const textarea = wrapper.find('textarea')
+    await textarea.setValue('A new comment')
+
+    const saveBtn = wrapper.find('#section-notes .note-input__btn')
+    await saveBtn.trigger('click')
+
+    await wrapper.vm.$nextTick()
+
+    expect(postCommentMock).toHaveBeenCalled()
+    // The textarea should be cleared after successful post
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('')
+  })
+
+  it('shows empty state when no comments exist', async () => {
+    vi.mocked(api.fetchComments).mockResolvedValue([])
+
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/property/:rid', component: PropertyDetail }],
+    })
+    router.push('/property/123')
+    await router.isReady()
+
+    const wrapper = mount(PropertyDetail, {
+      global: { plugins: [createPinia(), router] },
+    })
+
+    const store = usePropertiesStore()
+    store.details['123'] = makeDetail()
+    store.loading = false
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('#section-notes').text()).toContain('No comments yet.')
+  })
+
+  it('renders existing comments with person, text, and timestamp', async () => {
+    vi.mocked(api.fetchComments).mockResolvedValue([
+      { person: 'Ashby', text: 'First comment', timestamp: '2026-07-01T10:00:00Z' },
+      { person: 'Simon', text: 'Second comment', timestamp: '2026-07-02T12:00:00Z' },
+    ])
+
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/property/:rid', component: PropertyDetail }],
+    })
+    router.push('/property/123')
+    await router.isReady()
+
+    const wrapper = mount(PropertyDetail, {
+      global: { plugins: [createPinia(), router] },
+    })
+
+    const store = usePropertiesStore()
+    store.details['123'] = makeDetail()
+    store.loading = false
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    const notesText = wrapper.find('#section-notes').text()
+    expect(notesText).toContain('Ashby')
+    expect(notesText).toContain('First comment')
+    expect(notesText).toContain('Simon')
+    expect(notesText).toContain('Second comment')
+  })
+
+  it('calls fetchComments on mount', async () => {
+    const fetchCommentsMock = vi.mocked(api.fetchComments)
+    fetchCommentsMock.mockResolvedValue([])
+
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/property/:rid', component: PropertyDetail }],
+    })
+    router.push('/property/123')
+    await router.isReady()
+
+    const wrapper = mount(PropertyDetail, {
+      global: { plugins: [createPinia(), router] },
+    })
+
+    const store = usePropertiesStore()
+    store.details['123'] = makeDetail()
+    store.loading = false
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    expect(fetchCommentsMock).toHaveBeenCalledWith('123')
+  })
+
+  it('silently handles postComment failure', async () => {
+    vi.mocked(api.postComment).mockRejectedValue(new Error('Network error'))
+
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/property/:rid', component: PropertyDetail }],
+    })
+    router.push('/property/123')
+    await router.isReady()
+
+    const wrapper = mount(PropertyDetail, {
+      global: { plugins: [createPinia(), router] },
+    })
+
+    const store = usePropertiesStore()
+    store.details['123'] = makeDetail()
+    store.loading = false
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    const textarea = wrapper.find('textarea')
+    await textarea.setValue('This will fail')
+
+    const saveBtn = wrapper.find('#section-notes .note-input__btn')
+    // Should not throw
+    await expect(saveBtn.trigger('click')).resolves.toBeUndefined()
+  })
+
+  it('disables save button when textarea is empty', async () => {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/property/:rid', component: PropertyDetail }],
+    })
+    router.push('/property/123')
+    await router.isReady()
+
+    const wrapper = mount(PropertyDetail, {
+      global: { plugins: [createPinia(), router] },
+    })
+
+    const store = usePropertiesStore()
+    store.details['123'] = makeDetail()
+    store.loading = false
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    const saveBtn = wrapper.find('#section-notes .note-input__btn')
+    expect((saveBtn.element as HTMLButtonElement).disabled).toBe(true)
   })
 })
 

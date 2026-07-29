@@ -13,7 +13,9 @@ from fastapi.staticfiles import StaticFiles
 
 import houses.services_provider as _sp
 from dag.persistence import init_db as init_dag_db
+from houses.admin_router import admin_router
 from houses.config import settings
+from houses.database import init_db as init_app_db
 from houses.location import extract_postcode, is_outcode
 from houses.nodes.bootstrap import load_property_nodes_from_db, load_property_nodes_from_rows
 from houses.nodes.cutover import push_enriched_property
@@ -30,6 +32,7 @@ from houses.sheets import (
 )
 from houses.sheets.reader import get_properties_data, resolve_tab
 from houses.web.api_router import api_router
+from houses.web.auth import auth_router, get_session_user
 from houses.web.json_utils import asdict_serializable
 
 logger = logging.getLogger(__name__)
@@ -68,7 +71,27 @@ async def lifespan(_app: FastAPI):
     # httpx logs full URLs including query params — suppress to avoid
     # leaking API keys in the server log
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    if not settings.google_client_id:
+        logger.error(
+            "GOOGLE_CLIENT_ID is not set. Set GOOGLE_CLIENT_ID in .env "
+            "to configure Google OAuth authentication."
+        )
+        raise RuntimeError("Authentication not configured")
+    if not settings.google_client_secret:
+        logger.error(
+            "GOOGLE_CLIENT_ID is set but GOOGLE_CLIENT_SECRET is missing. "
+            "Set GOOGLE_CLIENT_SECRET in .env."
+        )
+        raise RuntimeError("Google Client Secret not configured")
+    if not settings.session_secret:
+        logger.error(
+            "GOOGLE_CLIENT_ID is set but HOUSES_SESSION_SECRET is empty. "
+            "Set a non-empty HOUSES_SESSION_SECRET in .env."
+        )
+        raise RuntimeError("Session secret not configured")
+
     init_dag_db()
+    init_app_db()
     from houses.property_registry import _reset as _reset_property_registry
     from houses.services import _reset_settings_cache
     from houses.town_desc import _reset as _reset_town_desc
@@ -103,6 +126,8 @@ async def lifespan(_app: FastAPI):
     _proc_task.cancel()
     _bc_task.cancel()
     logger.info("Houses server shutting down")
+    from houses.database import close_db as close_app_db
+    close_app_db()
     await stop_chrome()
 
 
@@ -122,17 +147,42 @@ app.add_middleware(
 
 
 app.mount("/static", StaticFiles(directory="houses/static"), name="static")
+app.include_router(admin_router)
 app.include_router(api_router)
+app.include_router(auth_router)
 
 
 @app.middleware("http")
 async def _request_context(request, call_next):
-    """Set up per-request context (services container)."""
-    svc_token = _sp._request_services.set(Services())
-    try:
-        return await call_next(request)
-    finally:
-        _sp._request_services.reset(svc_token)
+    """Set up per-request context (services container) and require auth
+    on all /api/* routes except /api/auth/*.
+
+    Only sets the services default if nothing is already in context —
+    tests that pre-inject custom services via ``_sp.set()`` keep their
+    override.
+    """
+    existing = _sp._request_services.get()
+    if existing is None:
+        svc_token = _sp._request_services.set(Services())
+        try:
+            return await _require_auth(request, call_next)
+        finally:
+            _sp._request_services.reset(svc_token)
+    else:
+        return await _require_auth(request, call_next)
+
+
+async def _require_auth(request, call_next):
+    """Require authentication on /api/* routes (except /api/auth/*, /api/ws, OPTIONS)."""
+    path = request.url.path
+    if path.startswith("/api/") and not path.startswith("/api/auth/") and not path.startswith("/api/ws"):
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
+        session_user = get_session_user(request)
+        if session_user is None:
+            return JSONResponse(status_code=401, content={"detail": "Authentication required"})
+    return await call_next(request)
 
 
 @app.get("/properties")

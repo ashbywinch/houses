@@ -301,16 +301,16 @@ class TestEnrichmentApi:
 
     @pytest.mark.asyncio
     async def test_list_properties_returns_registered_rid(self):
-        """A registered property appears in the API listing."""
+        """A registered property appears in the property registry."""
         from houses.nodes.property import PropertyNodes
+        from houses.property_registry import list_properties as registry_list
         from houses.property_registry import register_property
-        from houses.web.api_router import list_properties
 
         prop = PropertyNodes(RID)
         register_property(RID, prop)
 
-        result = await list_properties()
-        assert RID in result.get("properties", [])
+        rids = registry_list()
+        assert RID in rids
 
 
 # ── Bootstrap / import flow ──────────────────────────────────────────

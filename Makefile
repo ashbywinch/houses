@@ -19,7 +19,7 @@ help:
 	@echo "Available commands:"
 	@echo "  ${GREEN}make setup${NC}              Create venv and install dependencies"
 	@echo "  ${GREEN}make run-prod${NC}           Serve backend + built frontend (no Vite)"
-	@echo "  ${GREEN}make run${NC}                Start backend + frontend dev server"
+	@echo "  ${GREEN}make run${NC}                Start backend + frontend dev server (local + LAN)"
 	@echo "  ${GREEN}make test${NC}               Run unit + integration tests (fast, mocked APIs)"
 	@echo "  ${GREEN}make test-all${NC}           Run all tests including e2e (hits real APIs)"
 	@echo "  ${GREEN}make test-integration${NC}   Run only integration tests"
@@ -30,7 +30,7 @@ help:
 	@echo "  ${GREEN}make coverage${NC}           Run tests with coverage report"
 	@echo "  ${GREEN}make clean${NC}              Clean up generated files"
 
-setup:
+setup: frontend-setup
 	@$(UV) --version >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
 	@$(UV) sync --all-extras
 	@echo "${GREEN}✓ Setup complete${NC}"
@@ -38,10 +38,15 @@ setup:
 omp-config-install:
 	$(MAKE) -C $(OMP_CONFIG_DIR) install
 
-run: setup frontend-setup
-	@echo "${YELLOW}Backend: http://127.0.0.1:8080  Frontend: http://localhost:5173${NC}"
+LAN_IP := $(shell hostname -I | awk '{print $$1}')
+
+run: setup
+	@if [ -z "$(LAN_IP)" ]; then echo "${RED}Could not detect LAN IP${NC}"; exit 1; fi
+	@echo "${YELLOW}Backend: http://$(LAN_IP):8080  Frontend: http://$(LAN_IP).sslip.io:5173${NC}"
 	@mkdir -p .logs; \
+		HOUSES_HOST=0.0.0.0 HOUSES_PUBLIC_URL=http://$(LAN_IP).sslip.io:5173 HOUSES_FRONTEND_URL=http://$(LAN_IP).sslip.io:5173 \
 		nohup sh -c 'cd houses/frontend && npm run dev' > .logs/frontend.log 2>&1 & echo $$! > .logs/frontend.pid; \
+		HOUSES_HOST=0.0.0.0 HOUSES_PUBLIC_URL=http://$(LAN_IP).sslip.io:5173 HOUSES_FRONTEND_URL=http://$(LAN_IP).sslip.io:5173 \
 		nohup uv run python -m houses > .logs/backend.log 2>&1 & echo $$! > .logs/backend.pid;
 
 stop:
@@ -68,11 +73,10 @@ frontend-build: frontend-setup
 	@cd $(FRONTEND) && $(NPM) run build
 	@echo "${GREEN}✓ Frontend build complete${NC}"
 
-test: setup lint frontend-setup
+test: setup lint
 	$(PYTEST) tests/unit/ -q --tb=short
 	$(PYTEST) tests/integration/ -q --tb=short
-	cd houses/frontend && npx vue-tsc -b --noEmit
-	cd houses/frontend && npx vitest run
+	cd houses/frontend && npm test
 
 test-e2e: setup lint
 	@$(PYTEST) tests/e2e/ -m e2e -q
@@ -87,6 +91,7 @@ coverage: setup
 
 lint: setup
 	@$(RUFF) check houses/ tests/
+	cd houses/frontend && npm run lint:css
 
 format: setup
 	@$(RUFF) check --fix houses/ tests/

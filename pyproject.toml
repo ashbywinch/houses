@@ -21,6 +21,7 @@ dependencies = [
     "python-multipart>=0.0.20",
     "uk-postcodes-parsing>=2.1.0",
     "httpx2>=2.9.1",
+    "itsdangerous>=2.2.0",
 ]
 
 [project.optional-dependencies]
@@ -42,8 +43,7 @@ requires = ["setuptools>=64.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["houses*"]
-
+include = ["houses*", "dag*"]
 [tool.ruff]
 target-version = "py312"
 line-length = 120
