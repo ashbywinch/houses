@@ -4,6 +4,7 @@ from typing import Any
 
 from money import Money
 
+from dag.node import Node
 from dag.signals import Signal, Slot
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
@@ -188,48 +189,16 @@ class PropertyNodes:
         )
 
         # ── Signal wiring ──────────────────────────────────────────────
-        all_nodes: list = [
-            self.rightmove_url,
-            self.rightmove_address,
-            self.rightmove_bedrooms,
-            self.rightmove_price,
-            self.rightmove_location,
-            self.precise_location,
-            self.corrected_address,
-            self.user_entered_address,
-            self.postcode,
-            self.comment_status,
-            self.comment_status_reason,
-            self.comment_group_notes,
-            self.comment_ashby_comments,
-            self.works_estimates,
-            self.comment_design_needed,
-            self.comment_planning_needed,
-            # Triage state
-            self.favourite,
-            self.dismissed,
-            self.is_viewed,
-            self.user_notes,
-            self.triage_status,
-        ]
+        # Wire every Node to PropertyNodes.changed so the frontend
+        # is notified via WebSocket whenever any value changes.
+        # Automatic — no manual list to keep in sync.
         self._slots: list[Slot] = []
-        for node in all_nodes:
-            slot = Slot(self._on_node_changed)
-            self._slots.append(slot)
-            node.changed.connect(slot)
-
-        # Wire derived affordability nodes so the frontend is notified
-        # when they recompute (e.g. after works_estimates changes).
-        for node in (
-            self.total_works,
-            self.total_equity,
-            self.mortgage_required,
-            self.monthly_mortgage,
-            self.total_monthly_cost,
-        ):
-            slot = Slot(self._on_node_changed)
-            self._slots.append(slot)
-            node.changed.connect(slot)
+        for attr in dir(self):
+            node = getattr(self, attr, None)
+            if isinstance(node, Node):
+                slot = Slot(self._on_node_changed)
+                self._slots.append(slot)
+                node.changed.connect(slot)
 
         # Migrate old ashby_works float → works_estimates dict
         self._migrate_old_ashby_works()
