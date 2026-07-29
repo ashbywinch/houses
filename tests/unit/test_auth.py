@@ -8,12 +8,28 @@ import pytest
 from fastapi.testclient import TestClient
 
 from houses.config import settings
+from houses.property_registry import _registry as _property_registry
 from houses.server import app
 from houses.services_provider import _request_services as _sp
 from houses.web.auth import _make_session_cookie, _oauth_states
 from tests.helpers import make_services
 
 client = TestClient(app)
+
+
+class _FakeProperty:
+    """Minimal property stand-in for auth tests that need a valid RID."""
+    __slots__ = ()
+
+
+@pytest.fixture(autouse=True)
+def _fake_registry():
+    """Insert a minimal fake property so endpoints that validate RIDs don't 404."""
+    _property_registry["test-rid"] = _FakeProperty()
+    try:
+        yield
+    finally:
+        _property_registry.pop("test-rid", None)
 
 
 def _enable_auth():
@@ -50,13 +66,6 @@ def _clear_auth_state():
     # TestClient accumulates cookies from set-cookie responses.  Clear them
     # so auth state from one test doesn't leak into the next.
     client.cookies.clear()
-
-
-@pytest.fixture(autouse=True)
-def _patch_registry():
-    """Patch get_registry_property in api_router so tests with fake RIDs pass."""
-    with patch("houses.web.api_router.get_registry_property", return_value=MagicMock()):
-        yield
 
 
 class TestLogin:
