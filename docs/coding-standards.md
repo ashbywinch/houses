@@ -342,10 +342,48 @@ DAG resolves once; everything else reads the result.
   fail naturally. The shared coding standards call this principle explicitly:
   "Don't silence errors with fallbacks BUT don't check for failure before
   trying, just let the code fail."
-- A function should not pre-validate API keys before making the call.
+  A function should not pre-validate API keys before making the call.
   The HTTP transport mock handles requests in tests regardless of the key
   value. In production, a missing key causes a 403 which propagates as a
   regular API error.
+
+### No Backward Compatibility Shims
+
+**Delete dead code, don't deprecate it.** If a function, endpoint, or
+parameter is no longer used, remove it — don't leave a deprecated wrapper
+"in case someone depends on it." The git log preserves history.
+
+A backward compatibility shim is worse than dead code: it compiles, it
+passes tests, it lulls future readers into thinking it's a real code path,
+and it never gets cleaned up because nobody knows who depends on it.
+
+If you rename or remove something, update every caller in the same commit.
+No aliases, no re-exports, no "will remove in a future version" comments.
+
+### Never Swallow Errors
+
+**Don't catch an exception and silently continue.** Every ``except`` block
+must either log the error, re-raise, or handle the failure in a way the
+caller can observe. A bare ``except: pass`` or ``except Exception:`` with
+no logging is forbidden.
+
+If the error is genuinely safe to ignore, log it at ``DEBUG`` level with
+an explanation. The next developer reading the log shouldn't have to guess
+whether the silence was intentional.
+
+```python
+# Wrong — error is invisible
+try:
+    do_something()
+except Exception:
+    pass
+
+# Right — failure is observable
+try:
+    do_something()
+except Exception as e:
+    logger.debug("do_something failed (non-fatal): %s", e)
+```
 
 ### Cache Key Hygiene
 
