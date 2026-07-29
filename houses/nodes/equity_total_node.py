@@ -51,12 +51,13 @@ class EquityTotalNode(DerivedNode[Money]):
     ) -> Attempt[Money]:
         if persons.impossible:
             return Attempt.impossible(persons.error)
+        if status is not None and status.impossible:
+            return Attempt.impossible(status.error)
 
         is_current = (
             status is not None
             and status.succeeded
-            and status.value_or_none()
-            and status.value_or_none().strip().lower() == "current"
+            and (status.value_or_none() or "").strip().lower() == "current"
         )
 
         zero = Money("0", "GBP")

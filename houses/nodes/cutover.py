@@ -44,13 +44,13 @@ def push_enriched_property(
             Money(str(enriched.price or "0"), "GBP"), "Rightmove"
         )
     if enriched.approx_latitude is not None and enriched.approx_longitude is not None:
-            sources["rightmove_location"].push(
-                GeoPoint(
-                    lat=enriched.approx_latitude,
-                    lon=enriched.approx_longitude,
-                ),
-                "Rightmove map",
-            )
+        sources["rightmove_location"].push(
+            GeoPoint(
+                lat=enriched.approx_latitude,
+                lon=enriched.approx_longitude,
+            ),
+            "Rightmove map",
+        )
     if enriched.postcode and "postcode" in sources:
         sources["postcode"].push(enriched.postcode, "Rightmove")
     if (

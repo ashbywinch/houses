@@ -114,8 +114,7 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
         # Determine if property is owner-occupied (Current = no housing costs)
         is_current = (
             status.succeeded
-            and status.value_or_none()
-            and status.value_or_none().strip().lower() == "current"
+            and (status.value_or_none() or "").strip().lower() == "current"
         )
 
         total = Money("0", "GBP")

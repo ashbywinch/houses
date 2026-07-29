@@ -47,13 +47,14 @@ class StampDutyNode(DerivedNode[Money]):
         price_val = price.value_or_none()
         if price_val is None:
             return Attempt.impossible("no price")
+        if status is not None and status.impossible:
+            return Attempt.impossible(status.error)
 
         # Current properties pay no stamp duty
         is_current = (
             status is not None
             and status.succeeded
-            and status.value_or_none()
-            and status.value_or_none().strip().lower() == "current"
+            and (status.value_or_none() or "").strip().lower() == "current"
         )
         if is_current:
             return Attempt.succeeded(Money("0", "GBP"))
