@@ -42,6 +42,14 @@ LAN_IP := $(shell ip -4 route get 1 2>/dev/null | awk '{print $$7; exit}')
 
 run: setup
 	@if [ -z "$(LAN_IP)" ]; then echo "${RED}Could not detect LAN IP${NC}"; exit 1; fi
+	@pid=$$(cat .logs/backend.pid 2>/dev/null); \
+	 if [ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null; then \
+		echo "${YELLOW}Backend already running (PID $$pid) — use 'make stop' first${NC}"; exit 1; \
+	 fi
+	@pid=$$(cat .logs/frontend.pid 2>/dev/null); \
+	 if [ -n "$$pid" ] && kill -0 "$$pid" 2>/dev/null; then \
+		echo "${YELLOW}Frontend already running (PID $$pid) — use 'make stop' first${NC}"; exit 1; \
+	 fi
 	@echo "${YELLOW}Backend: http://$(LAN_IP):8080  Frontend: http://$(LAN_IP).sslip.io:5173${NC}"
 	@mkdir -p .logs; \
 		HOUSES_HOST=0.0.0.0 HOUSES_PUBLIC_URL=http://$(LAN_IP).sslip.io:5173 HOUSES_FRONTEND_URL=http://$(LAN_IP).sslip.io:5173 \
