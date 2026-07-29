@@ -68,7 +68,8 @@ def main() -> None:
     print(f"DAG database: {db_path}")
 
     # Initialise the comments table
-    from houses.database import init_db, get_connection as get_app_connection
+    from houses.database import get_connection as get_app_connection
+    from houses.database import init_db
 
     init_db()
     app_conn = get_app_connection()

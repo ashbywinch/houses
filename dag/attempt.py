@@ -101,7 +101,15 @@ class Attempt[T](metaclass=_AttemptMeta):
 
     _now: Callable[[], datetime] = lambda: datetime.now(UTC)
 
-    def __init__(self, status: _Status, value: T | None = None, error: str = "", metadata: dict | None = None, *, _now: Callable[[], datetime] | None = None) -> None:
+    def __init__(
+        self,
+        status: _Status,
+        value: T | None = None,
+        error: str = "",
+        metadata: dict | None = None,
+        *,
+        _now: Callable[[], datetime] | None = None,
+    ) -> None:
         if status is _Status.SUCCEEDED and isinstance(value, Attempt):
             raise TypeError(
                 f"Cannot create Attempt.succeeded() with an Attempt as value. "
