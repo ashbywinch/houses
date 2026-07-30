@@ -20,6 +20,11 @@ class RailFareNode(DerivedNode[Commute]):
     nearest station to that terminal.  This avoids geocoding POI postcodes
     to find stations — the NR fare system uses terminal zones (PAD, VIC,
     WAT, …) as destinations, and the route already tells us which one.
+
+    Stable deps: transit_result (for destination station) and
+    best_location (for origin station lookup).  The compute() method
+    early-returns when transit already has a cost, avoiding the NR API
+    call when it's not needed.
     """
 
     @property
@@ -29,25 +34,16 @@ class RailFareNode(DerivedNode[Commute]):
     def __init__(self, node_id: str, *, transit_result, best_location):
         self.transit_result = transit_result
         self.best_location = best_location
-        super().__init__(node_id, Commute, (transit_result,))
+        super().__init__(node_id, Commute, (transit_result, best_location))
 
-    def _get_active_deps(self):
-        deps = [self.transit_result]
-        transit_attempt = self.transit_result.latest_attempt()
-        if transit_attempt.succeeded:
-            val = transit_attempt.value_or_none()
-            if val is not None and val.daily_cost.amount == 0:
-                deps.append(self.best_location)
-        return tuple(deps)
-
-    async def compute(self, transit_attempt: Attempt[Commute], location: Attempt[GeoPoint] = None) -> Attempt[Commute]:
+    async def compute(self, transit_attempt: Attempt[Commute], location: Attempt[GeoPoint]) -> Attempt[Commute]:
         if not transit_attempt.succeeded:
             return Attempt.impossible("transit not succeeded")
         commute = transit_attempt.value_or_none()
         if commute is None:
             return Attempt.impossible("transit value is None")
 
-        # If already has a fare, pass through
+        # If already has a fare, pass through — no NR lookup needed
         if commute.daily_cost.amount > 0:
             return transit_attempt
 

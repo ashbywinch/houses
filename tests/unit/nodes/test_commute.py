@@ -711,24 +711,24 @@ class TestRailFareNode:
         assert a.pending, f"Expected pending, got {a.status}"
 
     @pytest.mark.asyncio
-    async def test_impossible_when_location_missing(self):
-        """Node returns impossible when location dep isn't activated (cost > 0)."""
+    async def test_passes_through_when_transit_has_cost(self):
+        """When transit already has a cost (>0), node passes through without NR lookup."""
         from houses.nodes.rail_fare_node import RailFareNode
 
         transit = UserInputNode[Commute]("rf_skip", Commute)
         location = UserInputNode[GeoPoint]("rf_skip_loc", GeoPoint)
 
         transit.push(_make_commute(cost_gbp=5.0), "TfL")
+        location.push(GeoPoint(51.5, -0.1), "test")
 
         node = RailFareNode("rf_skip_test", transit_result=transit, best_location=location)
-        # Transit cost is non-zero, so location won't be activated
         await flush_processor()
 
         a = await node.attempt()
-        assert a.succeeded  # passes through transit_attempt
+        assert a.succeeded
         val = a.value_or_none()
         assert val is not None
-        assert val.daily_cost.amount == 5.0  # unchanged from transit
+        assert val.daily_cost.amount == 5.0  # unchanged from transit, no NR lookup
 
     @pytest.mark.asyncio
     async def test_enriches_commute_with_rail_fare(self, tmp_path):

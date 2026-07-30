@@ -7,6 +7,7 @@ from money import Money
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
+from dag.expression import Choose, Expression, Ref
 from dag.node import Node
 from houses.commute import CostGroup, LegMode
 from houses.geo import GeoPoint
@@ -149,6 +150,39 @@ class CommuteSelectorNode(DerivedNode[Commute]):
             deps.append(self.drive_result)
         return tuple(deps)
 
+    @property
+    def expression(self):
+        alts: dict[str, Expression] = {}
+        if self.walk_result is not None:
+            alts["walk"] = Ref(self.walk_result)
+        alts["transit"] = Ref(self.transit_result)
+        if self.drive_result is not None:
+            alts["drive"] = Ref(self.drive_result)
+        return Choose(
+            alternatives=alts,
+            selector=self._pick_best,
+            description="Selects the fastest feasible commute mode",
+        )
+
+    def _pick_best(self, results):
+        """Choose the fastest feasible commute from available results."""
+        best = None
+        best_duration = None
+        for name, attempt in results.items():
+            if not attempt.succeeded:
+                continue
+            val = attempt.value_or_none()
+            if val is None or val.infeasible:
+                continue
+            # Walk has a max distance limit
+            if name == "walk" and val.duration.magnitude > self._max_walk:
+                continue
+            d = val.duration.magnitude
+            if best is None or d < best_duration:
+                best = name
+                best_duration = d
+        return best
+
     def compute(
         self,
         origin: Attempt[GeoPoint],
@@ -157,51 +191,19 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         walk: Attempt[Commute] | None = None,
         drive: Attempt[Commute] | None = None,
     ) -> Attempt[Commute]:
-        self._assert_deps_succeeded(
-            origin=origin,
-            poi=poi,
-            transit=transit,
-            walk=walk,
-            drive=drive,
-        )
-
-        candidates = []
-
-        # 1. Walk (Google Routes) — add if within max_walk
-        if (
-            walk is not None
-            and walk.value_or_none() is not None
-            and not walk.value_or_none().infeasible
-            and walk.value_or_none().duration.magnitude <= self._max_walk
-        ):
-            candidates.append(walk)
-
-        # 2. Transit
-        if (
-            transit.value_or_none() is not None
-            and not transit.value_or_none().infeasible
-        ):
-            best_transit = transit
-            candidates.append(best_transit)
-
-        # 3. Drive
-        if (
-            drive is not None
-            and drive.value_or_none() is not None
-            and not drive.value_or_none().infeasible
-        ):
-            candidates.append(drive)
-
-        if not candidates:
-            return self._impossible({"walk_result": walk, "transit_result": transit, "drive_result": drive})
-
-        # Pick fastest
-        selected = min(candidates, key=lambda a: a.value_or_none().duration.magnitude)
-        val = selected.value_or_none()
-        if val is not None:
-            val = replace(val, is_child=self.is_child)
-
-        return Attempt.succeeded(val)
+        result = self.expression.evaluate()
+        if result.succeeded and result.value is not None:
+            val = replace(result.value, is_child=self.is_child)
+            return Attempt.succeeded(val)
+        # Build detailed error from all alternatives
+        errors = []
+        for name in ("walk", "transit", "drive"):
+            r = self.expression.last_results.get(name) if self.expression.last_results else None
+            if r and r.impossible:
+                errors.append(f"{name}: {r.error}")
+        if errors:
+            return Attempt.impossible("; ".join(errors))
+        return result
 
     async def to_json(self) -> dict:
         attempt = await self.attempt()

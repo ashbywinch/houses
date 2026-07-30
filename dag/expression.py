@@ -619,3 +619,81 @@ class Attr(Expression):
         if hasattr(val, self.attr):
             return Attempt.succeeded(getattr(val, self.attr))
         return Attempt.impossible(f"Cannot access attr {self.attr!r} from {type(val).__name__}")
+
+
+class Choose(Expression):
+    """Evaluates all alternatives and selects the best one.
+
+    All alternatives are DAG node references that are already computed.
+    The selector function receives ``{name: Attempt}`` and returns the
+    name of the winner.  ``to_formula_lines()`` shows each alternative
+    with its result, clearly indicating which was selected.
+
+    Example — commute mode selection::
+
+        Choose(
+            alternatives={
+                "walk": Ref(walk_node),
+                "transit": Ref(transit_node),
+                "drive": Ref(drive_node),
+            },
+            selector=lambda results: min(
+                results, key=lambda k: results[k].value_or_none().duration
+            ),
+        )
+
+    The selector can return ``None`` to indicate no valid choice.
+    """
+
+    def __init__(
+        self,
+        alternatives: dict[str, Expression],
+        selector,
+        description: str = "",
+    ):
+        self.alternatives = alternatives
+        self.selector = selector
+        self.description = description
+        self.last_results: dict[str, Attempt] | None = None
+        """Results dict from the most recent evaluate() call, exposed for provenance."""
+
+    def evaluate(self):
+        results: dict[str, Attempt] = {}
+        for name, expr in self.alternatives.items():
+            results[name] = expr.evaluate()
+        self.last_results = results
+
+        try:
+            winner = self.selector(results)
+        except Exception as e:
+            return Attempt.impossible(f"Choose selector failed: {e}")
+
+        if winner is None:
+            return Attempt.impossible("Choose: no alternative selected")
+
+        return results[winner]
+
+    def to_formula_lines(self):
+        if not self.last_results:
+            return [FormulaLine(label="Choose", value="not evaluated")]
+
+        lines: list[FormulaLine] = []
+        # Determine winner by re-running selector on stored results
+        try:
+            winner = self.selector(self.last_results)
+        except Exception:
+            winner = None
+
+        for name, attempt in self.last_results.items():
+            if attempt.succeeded:
+                val_str = self._format_value(attempt.value)
+                prefix = "✓" if name == winner else "✗"
+                lines.append(FormulaLine(label=f"{prefix} {name}", value=val_str))
+            elif attempt.impossible:
+                prefix = "✗"
+                err = attempt.error or "failed"
+                lines.append(FormulaLine(label=f"{prefix} {name}", value=f"❌ {err}"))
+            else:
+                lines.append(FormulaLine(label=f"⏳ {name}", value="pending"))
+
+        return lines
