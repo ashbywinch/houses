@@ -332,7 +332,7 @@ class TflClient:
             duration=Quantity(duration_minutes, "minute") if duration_minutes is not None else None,
             daily_cost=daily_cost_gbp,
             mode="transit",
-            details=tuple(cost_groups),
+            _details=tuple(cost_groups),
         )
         if duration_minutes is not None:
             return Attempt.succeeded(result)

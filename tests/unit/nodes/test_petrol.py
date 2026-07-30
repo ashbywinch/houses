@@ -49,7 +49,7 @@ def _make_commute(
         duration=Quantity(duration_min, "minute"),
         daily_cost=Money(str(cost_gbp), "GBP"),
         mode=mode,
-        details=details,
+        _details=details,
     )
 
 

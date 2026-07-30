@@ -107,5 +107,5 @@ class RailFareNode(DerivedNode[Commute]):
         for i, cg in enumerate(new_details):
             if cg.operator == "TfL" or any(leg.mode in _transit_modes for leg in cg.legs):
                 new_details[i] = replace(cg, cost=total)
-        new_commute = replace(commute, daily_cost=Money(str(total.amount), "GBP"), details=tuple(new_details))
+        new_commute = replace(commute, daily_cost=Money(str(total.amount), "GBP"), _details=tuple(new_details))
         return Attempt.succeeded(new_commute)

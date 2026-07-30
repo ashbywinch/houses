@@ -174,7 +174,7 @@ class TestBusLegAugmentNode:
             duration=Quantity(30, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="transit",
-            details=(CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration=Quantity(5, "minute")),)),),
+            _details=(CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration=Quantity(5, "minute")),)),),
         )
         transit.push(commute, "test")
         route.push({}, "test")
@@ -213,7 +213,7 @@ class TestBusLegAugmentNode:
             duration=Quantity(90, "minute"),
             daily_cost=Money("12.50", "GBP"),
             mode="transit",
-            details=(
+            _details=(
                 CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration=Quantity(46, "minute")),)),
                 CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(42, "minute")),)),
             ),
@@ -256,7 +256,7 @@ class TestBusLegAugmentNode:
             duration=Quantity(90, "minute"),
             daily_cost=Money("12.50", "GBP"),
             mode="transit",
-            details=(
+            _details=(
                 CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration=Quantity(46, "minute")),)),
                 CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(42, "minute")),)),
                 CostGroup(legs=(JourneyLeg(mode=LegMode.TUBE, duration=Quantity(4, "minute")),)),
@@ -335,7 +335,7 @@ class TestBusLegAugmentNode:
             duration=Quantity(90, "minute"),
             daily_cost=Money("12.50", "GBP"),
             mode="transit",
-            details=(
+            _details=(
                 CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration=Quantity(46, "minute")),)),
                 CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(42, "minute")),)),
                 CostGroup(legs=(JourneyLeg(mode=LegMode.TUBE, duration=Quantity(4, "minute")),)),
@@ -405,7 +405,7 @@ class TestBusLegAugmentNode:
             duration=Quantity(90, "minute"),
             daily_cost=Money("12.50", "GBP"),
             mode="transit",
-            details=(
+            _details=(
                 CostGroup(legs=(JourneyLeg(mode=LegMode.WALK, duration=Quantity(9, "minute")),)),
                 CostGroup(legs=(JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(42, "minute")),)),
             ),

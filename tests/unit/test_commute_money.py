@@ -32,7 +32,7 @@ def test_cost_groups_tfl_cost_sum():
         duration=Quantity(45, "minute"),
         daily_cost=Money("15.00", "GBP"),
         mode="transit",
-        details=(
+        _details=(
             CostGroup(
                 legs=(JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(45, "minute")),),
                 operator="TfL",

@@ -64,7 +64,7 @@ class _CommutePassthroughNode(DerivedNode[Commute]):
                 duration=Quantity(45, "minute"),
                 daily_cost=Money("7.20", "GBP"),
                 mode="transit",
-                details=(),
+                _details=(),
                 is_child=False,
             )
         )

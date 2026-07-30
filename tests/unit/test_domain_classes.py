@@ -74,7 +74,7 @@ class TestCommute:
             destination=destination,
             duration=Quantity(32, "minute"),
             daily_cost=Money("4.50", "GBP"),
-            details=(cost_group,),
+            _details=(cost_group,),
         )
         assert commute.person == person
         assert commute.label == "Office"

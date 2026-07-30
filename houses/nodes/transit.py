@@ -26,7 +26,7 @@ def _infeasible_commute(label: str = "") -> Attempt[Commute]:
             duration=Quantity(0, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="",
-            details=(),
+            _details=(),
             infeasible=True,
         )
     )
@@ -292,6 +292,6 @@ class TransitNode(DerivedNode[Commute]):
             duration=val.duration,
             daily_cost=daily_cost,
             mode=mode,
-            details=val.details,
+            _details=val.details,
         )
         return Attempt.succeeded(result)

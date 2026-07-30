@@ -148,7 +148,7 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         new_commute = replace(
             commute,
             daily_cost=new_cost,
-            details=new_details,
+            _details=new_details,
             duration=new_duration,
         )
 

@@ -242,7 +242,7 @@ class CommuteRouter:
                 duration=Quantity(0, "minute"),
                 daily_cost=Money("0", "GBP"),
                 mode="",
-                details=(),
+                _details=(),
                 infeasible=True,
             )
         )
@@ -313,7 +313,7 @@ class CommuteRouter:
                 duration=Quantity(duration_min, "minute"),
                 daily_cost=daily or Money("0", "GBP"),
                 mode="walk" if mode == "WALK" else "drive",
-                details=(
+                _details=(
                     CostGroup(
                         legs=(leg,),
                         cost=daily,

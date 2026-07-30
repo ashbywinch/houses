@@ -379,7 +379,7 @@ class TestMergeRailFareNode:
             duration=Quantity(60, "minute"),
             daily_cost=Money("10.90", "GBP"),  # parking cost only
             mode="transit",
-            details=(
+            _details=(
                 CostGroup(legs=(train_leg,), operator="", cost=None),  # unpriced transit!
                 CostGroup(legs=(park_leg,), operator="Ascot Car Park", cost=Money("10.90", "GBP")),
             ),
@@ -423,7 +423,7 @@ class TestMergeRailFareNode:
             duration=Quantity(20, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="walk",
-            details=(
+            _details=(
                 CostGroup(
                     legs=(JourneyLeg(mode=LegMode.WALK, duration=Quantity(20, "minute")),),
                     operator="",
@@ -461,7 +461,7 @@ class TestWalkLegCheckNode:
             duration=transit_commute.duration,
             daily_cost=transit_commute.daily_cost,
             mode=transit_commute.mode,
-            details=(CostGroup(legs=(walk_leg,), operator="", cost=None),),
+            _details=(CostGroup(legs=(walk_leg,), operator="", cost=None),),
         )
         transit = UserInputNode[Commute]("transit_wl", Commute)
         node = WalkLegCheckNode("walk_check_wl", transit_node=transit, max_walk=30)
@@ -486,7 +486,7 @@ class TestWalkLegCheckNode:
             duration=transit_commute.duration,
             daily_cost=transit_commute.daily_cost,
             mode=transit_commute.mode,
-            details=(CostGroup(legs=(walk_leg,), operator="", cost=None),),
+            _details=(CostGroup(legs=(walk_leg,), operator="", cost=None),),
         )
         transit = UserInputNode[Commute]("transit_we", Commute)
         node = WalkLegCheckNode("walk_check_we", transit_node=transit, max_walk=30)
@@ -521,7 +521,7 @@ def _make_commute(duration_min=32, cost_gbp=4.50):
         destination=office,
         duration=Quantity(duration_min, "minute"),
         daily_cost=Money(str(cost_gbp), "GBP"),
-        details=(CostGroup(legs=(leg,), operator="TfL", cost=Money(str(cost_gbp), "GBP")),),
+        _details=(CostGroup(legs=(leg,), operator="TfL", cost=Money(str(cost_gbp), "GBP")),),
     )
 
 
@@ -768,7 +768,7 @@ class TestRailFareNode:
             destination=office,
             duration=Quantity(78, "minute"),
             daily_cost=Money("0", "GBP"),
-            details=(
+            _details=(
                 CostGroup(
                     legs=(
                         JourneyLeg(

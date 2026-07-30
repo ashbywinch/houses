@@ -49,7 +49,7 @@ def _pimlico_commute() -> Commute:
         duration=Quantity(17, "minute"),
         daily_cost=Money("0", "GBP"),
         mode="transit",
-        details=(
+        _details=(
             CostGroup(
                 legs=(
                     JourneyLeg(mode=LegMode.WALK, duration=Quantity(5, "minute"), end_station="Clapham Junction"),
@@ -74,7 +74,7 @@ def _maidenhead_commute() -> Commute:
         duration=Quantity(40, "minute"),
         daily_cost=Money("0", "GBP"),
         mode="transit",
-        details=(
+        _details=(
             CostGroup(
                 legs=(
                     JourneyLeg(
@@ -471,7 +471,7 @@ class TestFullCommutePipeline:
             duration=Quantity(40, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="drive",
-            details=(
+            _details=(
                 CostGroup(
                     legs=(
                         JourneyLeg(mode=LegMode.DRIVE, duration=Quantity(40, "minute"), distance=Quantity(32.0, "km")),

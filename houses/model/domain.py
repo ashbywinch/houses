@@ -60,13 +60,13 @@ class Commute:
     Every field is produced by a DerivedNode — duration, daily_cost, and
     details are never assigned ad-hoc outside the DAG.
 
-    ``details`` replaces the old ``cost_groups`` name. Callers look here
-    for both legs and costs.
+    ``_details`` is the stored field.  ``details`` is a property that
+    guards access — it raises ``ValueError`` when the Commute is
+    infeasible, catching bugs where caller code assumes a route exists
+    without checking the ``infeasible`` flag first.
 
-    When ``infeasible`` is True the Commute represents a route that is
-    not viable (e.g. walking is too far).  Accessing ``details`` on an
-    infeasible Commute raises ``ValueError`` to catch bugs where caller
-    code assumes a route exists without checking feasibility first.
+    ``__repr__``, ``__eq__``, and ``__hash__`` use ``_details``
+    directly, so they never trigger the guard.
     """
 
     person: Person
@@ -75,17 +75,18 @@ class Commute:
     duration: _Quantity
     daily_cost: Money
     mode: str = "transit"
-    details: tuple[CostGroup, ...] = ()
+    _details: tuple[CostGroup, ...] = ()
     is_child: bool = False
     infeasible: bool = False
 
-    def __getattribute__(self, name: str) -> object:
-        if name == "details" and object.__getattribute__(self, "infeasible"):
+    @property
+    def details(self) -> tuple[CostGroup, ...]:
+        if self.infeasible:
             raise ValueError(
                 "Cannot access route details of an infeasible Commute. "
-                "Check the ``infeasible`` flag before accessing legs/costs."
+                "Check the infeasible flag before accessing legs/costs."
             )
-        return object.__getattribute__(self, name)
+        return self._details
 
 
 @dataclass(frozen=True)
