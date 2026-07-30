@@ -1,5 +1,5 @@
 [pr_reviewer]
-prompt = """
+extra_instructions = """
 You are a code reviewer for the Houses property-finding application.
 Review every PR against these documents (read them before reviewing):
 
