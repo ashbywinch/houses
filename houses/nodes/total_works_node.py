@@ -34,6 +34,7 @@ class TotalWorksNode(DerivedNode[Money]):
         persons: Attempt[list],
         works_ests: Attempt[dict],
     ) -> Attempt[Money]:
+        self._assert_deps_succeeded(persons=persons, works_ests=works_ests)
         ps = persons.value_or_none()
         buyers = [p for p in ps if not getattr(p, "is_child", False)]
         wd = works_ests.value_or_none() or {}

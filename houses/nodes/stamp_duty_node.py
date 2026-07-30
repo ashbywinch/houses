@@ -42,23 +42,16 @@ class StampDutyNode(DerivedNode[Money]):
         price: Attempt[Money],
         status: Attempt[str] | None = None,
     ) -> Attempt[Money]:
-        if not price.succeeded:
-            return Attempt.impossible("no price")
-        price_val = price.value_or_none()
-        if price_val is None:
-            return Attempt.impossible("no price")
-        if status is not None and status.impossible:
-            return Attempt.impossible(status.error)
+        self._assert_deps_succeeded(price=price, status=status)
 
         # Current properties pay no stamp duty
         is_current = (
             status is not None
-            and status.succeeded
-            and (status.value_or_none() or "").strip().lower() == "current"
+            and status.value_or_none().strip().lower() == "current"
         )
         if is_current:
             return Attempt.succeeded(Money("0", "GBP"))
 
         from houses.stamp_duty import stamp_duty_land_tax
 
-        return Attempt.succeeded(stamp_duty_land_tax(price_val))
+        return Attempt.succeeded(stamp_duty_land_tax(price.value_or_none()))

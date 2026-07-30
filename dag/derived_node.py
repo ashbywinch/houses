@@ -187,6 +187,9 @@ class DerivedNode(Node[T], Generic[T]):
             result = Attempt.impossible(f"{self._id}: dep failed ({errors})")
             self._attempt = result
             self._computed_at = datetime.now(UTC)
+            # _db_created_at may be None for deps never persisted (e.g. a
+            # freshly-created node).  Storing None means the next staleness
+            # check skips this dep — the _computed_at comparison still works.
             dep_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
             self._retry_at = None
             self._retry_count = 0
@@ -227,6 +230,9 @@ class DerivedNode(Node[T], Generic[T]):
         self._attempt = result
         self._computed_at = datetime.now(UTC)
 
+        # _db_created_at may be None for deps never persisted (e.g. a
+        # freshly-created node).  Storing None means the next staleness
+        # check skips this dep — the _computed_at comparison still works.
         dep_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
 
         if result.pending:
