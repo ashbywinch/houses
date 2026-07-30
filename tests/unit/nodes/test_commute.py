@@ -84,8 +84,6 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            walk_result=_impossible_commute("walk"),
-            drive_result=_impossible_commute("drive"),
             max_walk=30,
         )
 
@@ -141,8 +139,6 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            walk_result=_impossible_commute("walk"),
-            drive_result=_impossible_commute("drive"),
             max_walk=30,
         )
 
@@ -838,16 +834,13 @@ async def test_commute_selector_impossible_without_bus():
         origin=origin,
         poi=poi,
         transit_result=transit,
-        walk_result=_impossible_commute("walk"),
-        drive_result=_impossible_commute("drive"),
         max_walk=30,
     )
 
     origin.push(GeoPoint(51.5, -0.1), "user")
     poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
     # Don't push transit — it'll be pending, so the selector can't
-    # pick any route.  Crash was in _impossible() receiving None
-    # for non-active deps.
+    # run compute.
     await flush_processor()
 
     a = await node.attempt()

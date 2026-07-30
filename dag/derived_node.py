@@ -178,9 +178,9 @@ class DerivedNode(Node[T], Generic[T]):
                     f"Active deps: {[d._id if d else None for d in active_deps]}"
                 )
         dep_attempts = [await dep.attempt() for dep in active_deps]
-        if any(a.pending for a in dep_attempts):
-            return
-        # Propagate impossible from any dep automatically.
+        # Propagate impossible before checking pending — if a dep is
+        # impossible and another is pending, fail fast rather than
+        # waiting indefinitely for the pending dep to resolve.
         impossible_deps = [a for a in dep_attempts if a.impossible]
         if impossible_deps:
             errors = "; ".join(a.error or "unknown" for a in impossible_deps)
@@ -197,6 +197,8 @@ class DerivedNode(Node[T], Generic[T]):
             self._persist(result_dict, dep_timestamps)
             self.changed.emit()
             _get_scheduler().after_refresh(self)
+            return
+        if any(a.pending for a in dep_attempts):
             return
         try:
             result = self.compute(*dep_attempts)

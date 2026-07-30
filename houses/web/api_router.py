@@ -446,7 +446,6 @@ async def patch_works_estimate(
     current[person_name] = value
     prop.works_estimates.push(current, "user")
 
-    # Write back to sheet in background (best-effort)
     return {"status": "ok"}
 
 
