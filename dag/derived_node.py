@@ -94,15 +94,11 @@ class DerivedNode(Node[T], Generic[T]):
         if self._attempt.pending:
             return True
         for dep in self._get_active_deps():
-            if dep._persisted_at is not None and self._computed_at is not None:
-                # Normalize both to offset-naive for comparison (DB stores without tz)
-                persisted = dep._persisted_at
-                computed = self._computed_at
-                if hasattr(persisted, "tzinfo") and persisted.tzinfo is not None:
-                    persisted = persisted.replace(tzinfo=None)
-                if hasattr(computed, "tzinfo") and computed.tzinfo is not None:
-                    computed = computed.replace(tzinfo=None)
-                if persisted > computed:
+            if (
+                dep._persisted_at is not None
+                and self._computed_at is not None
+                and dep._persisted_at > self._computed_at
+            ):
                     logger.warning(
                         "STALE1: %s dep=%s persisted=%s > computed=%s",
                         self._id,
@@ -115,14 +111,8 @@ class DerivedNode(Node[T], Generic[T]):
                 isinstance(dep, DerivedNode)
                 and dep._computed_at is not None
                 and self._computed_at is not None
+                and dep._computed_at > self._computed_at
             ):
-                dep_comp = dep._computed_at
-                self_comp = self._computed_at
-                if hasattr(dep_comp, "tzinfo") and dep_comp.tzinfo is not None:
-                    dep_comp = dep_comp.replace(tzinfo=None)
-                if hasattr(self_comp, "tzinfo") and self_comp.tzinfo is not None:
-                    self_comp = self_comp.replace(tzinfo=None)
-                if dep_comp > self_comp:
                     logger.warning(
                         "STALE2: %s dep=%s computed=%s > self_computed=%s",
                         self._id,

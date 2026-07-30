@@ -297,7 +297,55 @@ DAG resolves once; everything else reads the result.
 
 ## Houses-Specific Practices
 
-### Never Trash the Sheet
+### Datetimes: Always UTC, Always Aware, Explicit on Boundaries
+
+Every datetime in the system MUST be:
+
+1. **Stored and processed in UTC.** Never use naive datetimes. Always
+   construct with ``datetime.now(UTC)``, never ``datetime.now()``.
+
+2. **Displayed in the user's local timezone.** Conversion to local time
+   happens at the presentation boundary (template rendering, API response).
+   The internal model never stores local times.
+
+3. **Read from external sources with explicit timezone handling.** When
+   an external API (TfL, VOA, Google Maps) provides a time or date in
+   local time, document which timezone the source uses and convert
+   explicitly to UTC before storing.
+
+4. **Loaded from the database as timezone-aware.** ``datetime.fromisoformat``
+   may return a naive datetime if the stored string has no timezone.
+   After ``fromisoformat``, always check ``dt.tzinfo is None`` and if so
+   call ``dt.replace(tzinfo=UTC)``.
+
+### Rationale
+
+Naive datetimes are a systemic source of bugs: comparisons between
+aware and naive datetimes raise ``TypeError``, and arithmetic produces
+wrong results around DST transitions. Storing in UTC eliminates the
+ambiguity; converting at the presentation boundary keeps the model
+simple.
+
+### Validation
+
+```python
+from datetime import UTC, datetime
+
+# Correct
+now = datetime.now(UTC)
+
+# Wrong — raises TypeError when compared with UTC datetimes
+now = datetime.now()
+
+# Correct — parse then ensure aware
+raw = db_row["created_at"]
+dt = datetime.fromisoformat(raw)
+if dt.tzinfo is None:
+    dt = dt.replace(tzinfo=UTC)
+
+# Wrong — may produce offset-naive datetime
+self._persisted_at = datetime.fromisoformat(raw)
+```
 
 - Never clear and regenerate the whole sheet. Manual data (listing
   addresses, notes, status) is irreplaceable.

@@ -62,7 +62,11 @@ class Node(ABC, Generic[T]):
         persisted = stored.get("_persisted_at", "")
         if persisted:
             try:
-                self._persisted_at = datetime.fromisoformat(persisted)
+                dt = datetime.fromisoformat(persisted)
+                # Ensure offset-aware — DB may have stored naive timestamps
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=UTC)
+                self._persisted_at = dt
             except (ValueError, TypeError):
                 self._persisted_at = None
         self._db_created_at = persisted
@@ -83,7 +87,10 @@ class Node(ABC, Generic[T]):
         if status == "pending":
             retry_at = stored.get("retry_at")
             if retry_at:
-                self._retry_at = datetime.fromisoformat(retry_at)
+                dt = datetime.fromisoformat(retry_at)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=UTC)
+                self._retry_at = dt
                 self._retry_count = stored.get("retry_count", 0)
             return None
 

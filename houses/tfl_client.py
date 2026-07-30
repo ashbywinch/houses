@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from money import Money
 from pint import Quantity
@@ -124,11 +124,12 @@ class TflClient:
 
     @staticmethod
     def _next_weekday_date_params() -> dict[str, str]:
-        """Return ``date`` and ``time`` params for the next upcoming weekday at 09:00."""
-        now = datetime.now()
-        if now.weekday() < 5 and now.hour < 9:
-            return {"date": now.strftime("%Y%m%d"), "time": "0900"}
-        target = now + timedelta(days=1)
+        """Return ``date`` and ``time`` params for the next upcoming weekday at 09:00 local time."""
+        # Work in local time since TfL API expects local dates
+        now_local = datetime.now(UTC).astimezone()
+        if now_local.weekday() < 5 and now_local.hour < 9:
+            return {"date": now_local.strftime("%Y%m%d"), "time": "0900"}
+        target = now_local + timedelta(days=1)
         while target.weekday() >= 5:
             target += timedelta(days=1)
         return {"date": target.strftime("%Y%m%d"), "time": "0900"}
