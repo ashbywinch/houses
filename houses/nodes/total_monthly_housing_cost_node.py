@@ -106,49 +106,47 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
         commute: Attempt[dict],
         council_tax: Attempt[CouncilTaxInfo],
     ) -> Attempt[Money]:
-        if mortgage.impossible:
-            return Attempt.impossible(mortgage.error)
-        if council_tax.impossible:
-            return Attempt.impossible(council_tax.error)
+        self._assert_deps_succeeded(
+            mortgage=mortgage,
+            sinking=sinking,
+            life_insurance=life_insurance,
+            rental_income=rental_income,
+            status=status,
+            financial=financial,
+            commute=commute,
+            council_tax=council_tax,
+        )
 
-        # Determine if property is owner-occupied (Current = no housing costs)
         is_current = (
-            status.succeeded
-            and (status.value_or_none() or "").strip().lower() == "current"
+            status.value_or_none().strip().lower() == "current"
         )
 
         total = Money("0", "GBP")
 
-        if mortgage.succeeded and mortgage.value_or_none():
-            total += mortgage.value_or_none()
+        total += mortgage.value_or_none()
 
         if not is_current:
-            # Sinking fund (yearly / 12 * 2/3 share)
-            if sinking.succeeded and sinking.value_or_none():
-                sv = sinking.value_or_none()
-                total += sv / 12 * 2 / 3
+            sv = sinking.value_or_none()
+            total += sv / 12 * 2 / 3
 
-            # Life insurance
-            if life_insurance.succeeded and life_insurance.value_or_none():
-                total += life_insurance.value_or_none()
+            total += life_insurance.value_or_none()
 
         # Commute cost
-        if commute.succeeded:
-            cb = commute.value_or_none() or {}
-            yt = cb.get("yearly_total_gbp", "0")
-            if isinstance(yt, Money):
-                total += yt / 12
-            else:
-                total += Money(str(yt), "GBP") / 12
+        cb = commute.value_or_none() or {}
+        yt = cb.get("yearly_total_gbp", "0")
+        if isinstance(yt, Money):
+            total += yt / 12
+        else:
+            total += Money(str(yt), "GBP") / 12
 
         # Council tax
-        if council_tax.succeeded:
-            ct_val = council_tax.value_or_none()
-            if ct_val is not None and ct_val.yearly_cost is not None:
-                total += ct_val.yearly_cost / 12
+        ct_val = council_tax.value_or_none()
+        if ct_val is not None and ct_val.yearly_cost is not None:
+            total += ct_val.yearly_cost / 12
 
         # Rental income (subtracted)
-        if rental_income.succeeded and rental_income.value_or_none():
-            total -= rental_income.value_or_none()
+        ri = rental_income.value_or_none()
+        if ri.amount > 0:
+            total -= ri
 
         return Attempt.succeeded(total)

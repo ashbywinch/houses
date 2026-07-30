@@ -309,5 +309,24 @@ class DerivedNode(Node[T], Generic[T]):
             result["stale"] = self._is_stale()
         return result
 
+    @staticmethod
+    def _assert_deps_succeeded(**deps: Attempt) -> None:
+        """Assert all named dependencies are succeeded.
+
+        Auto-propagation in _refresh() catches impossible/pending deps
+        before compute() is ever called.  This assertion is a safety net
+        to fail fast if that contract is violated.
+        """
+        failed = {
+            name: att.status
+            for name, att in deps.items()
+            if att is not None and not att.succeeded
+        }
+        if failed:
+            raise AssertionError(
+                f"Dependencies not succeeded: {failed}. "
+                "Auto-propagation should have caught these before compute()."
+            )
+
     @abstractmethod
     def compute(self, *dep_attempts: Attempt) -> Attempt[T]: ...

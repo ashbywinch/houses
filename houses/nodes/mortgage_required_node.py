@@ -46,26 +46,17 @@ class MortgageRequiredNode(DerivedNode[Money]):
         tw: Attempt[Money],
         te: Attempt[Money],
     ) -> Attempt[Money]:
-        p = (
-            Decimal(price.value_or_none().amount)
-            if price.succeeded and price.value_or_none()
-            else _ZERO
+        self._assert_deps_succeeded(
+            price=price,
+            sd=sd,
+            tw=tw,
+            te=te,
         )
-        sdv = (
-            Decimal(sd.value_or_none().amount)
-            if sd.succeeded and sd.value_or_none()
-            else _ZERO
-        )
-        w = (
-            Decimal(tw.value_or_none().amount)
-            if tw.succeeded and tw.value_or_none() is not None
-            else _ZERO
-        )
-        e = (
-            Decimal(te.value_or_none().amount)
-            if te.succeeded and te.value_or_none() is not None
-            else _ZERO
-        )
+
+        p = Decimal(price.value_or_none().amount)
+        sdv = Decimal(sd.value_or_none().amount)
+        w = Decimal(tw.value_or_none().amount)
+        e = Decimal(te.value_or_none().amount)
 
         result = max(_ZERO, p + sdv + w - e)
         return Attempt.succeeded(Money(str(result), "GBP"))

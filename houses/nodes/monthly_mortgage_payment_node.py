@@ -66,22 +66,16 @@ class MonthlyMortgagePaymentNode(DerivedNode[Money]):
         mortgage_required: Attempt[Money],
         financial: Attempt[dict],
     ) -> Attempt[Money]:
-        if mortgage_required.impossible:
-            return Attempt.impossible(mortgage_required.error)
+        self._assert_deps_succeeded(
+            mortgage_required=mortgage_required,
+            financial=financial,
+        )
 
-        principal_att = mortgage_required.value_or_none()
-        if not mortgage_required.succeeded or principal_att is None:
-            return Attempt.succeeded(Money("0", "GBP"))
-
-        principal = principal_att.amount
+        principal = mortgage_required.value_or_none().amount
         if principal == _ZERO:
             return Attempt.succeeded(Money("0", "GBP"))
 
-        fin = (
-            (financial.value_or_none() or {})
-            if financial.succeeded
-            else {}
-        )
+        fin = financial.value_or_none() or {}
         rate = Decimal(str(fin.get("mortgage_rate", "0.045")))
         term = int(fin.get("mortgage_term_years", 30))
         monthly_rate = rate / _TWELVE

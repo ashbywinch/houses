@@ -157,28 +157,31 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         walk: Attempt[Commute] | None = None,
         drive: Attempt[Commute] | None = None,
     ) -> Attempt[Commute]:
-        if not origin.succeeded or not poi.succeeded:
-            return self._impossible({"origin": origin, "poi": poi})
+        self._assert_deps_succeeded(
+            origin=origin,
+            poi=poi,
+            transit=transit,
+            walk=walk,
+            drive=drive,
+        )
 
         candidates = []
 
         # 1. Walk (Google Routes) — add if within max_walk
         if (
             walk is not None
-            and walk.succeeded
             and walk.value_or_none() is not None
             and walk.value_or_none().duration.magnitude <= self._max_walk
         ):
             candidates.append(walk)
 
-        # 2. Transit — add if succeeded
-        best_transit: Attempt[Commute] | None = None
-        if transit.succeeded and transit.value_or_none() is not None:
+        # 2. Transit
+        if transit.value_or_none() is not None:
             best_transit = transit
             candidates.append(best_transit)
 
         # 3. Drive
-        if drive is not None and drive.succeeded and drive.value_or_none() is not None:
+        if drive is not None and drive.value_or_none() is not None:
             candidates.append(drive)
 
         if not candidates:
