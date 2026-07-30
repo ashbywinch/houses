@@ -79,8 +79,7 @@ make stop                       # Stop dev server + frontend
 - **Architecture overview**: [docs/architecture.md](docs/architecture.md)
 - **Add a column**: [docs/column-reference.md](docs/column-reference.md)
 - **Add an enrichment module**: [docs/adding-a-new-enrichment-module.md](docs/adding-a-new-enrichment-module.md)
-- **Understand the DAG library**: [docs/dag-library.md](docs/dag-library.md)
-- **Add a DAG node**: [docs/dag-model.md](docs/dag-model.md)
+- **DAG library & adding a node**: [docs/dag-library.md](docs/dag-library.md)
 - **Capture / compare the frontend DOM**: Run `tools/capture_dom.py`, then compare against `docs/current-ui/`. See `docs/development.md` → *Capturing the Frontend DOM for Comparison*.
 - **Write docs**: [docs/writing-documentation.md](docs/writing-documentation.md)
 - **Use the API**: [docs/api.md](docs/api.md)
