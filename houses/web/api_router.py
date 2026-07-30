@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Request, WebSocket
+from fastapi import APIRouter, Body, HTTPException, Request, WebSocket
 from pydantic import BaseModel, Field, field_validator
 
 from houses.geo import GeoPoint
@@ -374,7 +374,6 @@ async def patch_financial(body: dict):
 async def patch_rental_income(
     rid: str,
     body: dict,
-    background_tasks: BackgroundTasks,
 ):
     """Update the monthly rental income for a property.
 
@@ -406,7 +405,6 @@ async def patch_rental_income(
 async def patch_works_estimate(
     rid: str,
     body: dict,
-    background_tasks: BackgroundTasks,
 ):
     """Update the works estimate for a person on this property.
 
@@ -434,63 +432,7 @@ async def patch_works_estimate(
     prop.works_estimates.push(current, "user")
 
     # Write back to sheet in background (best-effort)
-    background_tasks.add_task(
-        _sync_works_estimate_to_sheet, rid, person_name, value
-    )
-
     return {"status": "ok"}
-
-
-async def _sync_works_estimate_to_sheet(rid: str, person: str, value) -> None:
-    """Write back a works estimate to the View tab.
-
-    Runs blocking gspread calls in a thread to avoid blocking the event loop.
-    Only Ashby's estimates are synced — other persons have no column yet.
-    """
-    import logging
-
-    logger = logging.getLogger(__name__)
-
-    if person != "Ashby":
-        logger.debug(
-            "Sheet sync only supported for Ashby, got %s", person
-        )
-        return
-
-    def _sync() -> None:
-        from houses.config import settings
-        from houses.sheets import get_client
-
-        client = get_client()
-        if not client:
-            return
-        sh = client.open_by_key(settings.sheet_id)
-        ws = sh.worksheet("Properties View")
-        all_rows = ws.get_all_values()
-        headers = all_rows[0]
-
-        try:
-            rid_col = headers.index("Rightmove ID")
-            works_col = headers.index("Ashby Works Estimate (£)")
-        except ValueError:
-            logger.warning(
-                "Could not find required columns in View tab"
-            )
-            return
-
-        for i, row in enumerate(all_rows[1:], start=2):
-            if row[rid_col].strip() == rid:
-                ws.update_cell(i, works_col + 1, value or "")
-                break
-
-    try:
-        import asyncio
-
-        await asyncio.to_thread(_sync)
-    except Exception as e:
-        logger.warning(
-            "Failed to sync works estimate to sheet: %s", e
-        )
 
 
 @api_router.get("/persons")
