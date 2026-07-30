@@ -4,6 +4,7 @@ to mortgage_required, monthly_mortgage, and total_monthly_cost."""
 from __future__ import annotations
 
 import pytest
+from decimal import Decimal
 from money import Money
 
 from dag.scheduler import flush_processor
@@ -29,7 +30,8 @@ class TestWorksPropagatesToMortgage:
         sd = UserInputNode[Money]("wpm_sd", Money)
         persons = UserInputNode[list]("wpm_persons", list)
         works = UserInputNode[dict]("wpm_works", dict)
-        fin = UserInputNode[dict]("wpm_fin", dict)
+        rate = UserInputNode("wpm_rate", Decimal)
+        term = UserInputNode("wpm_term", int)
 
         # ── Derived nodes ─────────────────────────────────────────
         te = EquityTotalNode(
@@ -65,13 +67,8 @@ class TestWorksPropagatesToMortgage:
             "test",
         )
         works.push({}, "test")
-        fin.push(
-            {
-                "mortgage_rate": 0.0495,
-                "mortgage_term_years": 27,
-            },
-            "test",
-        )
+        rate.push(Decimal("0.0495"), "test")
+        term.push(27, "test")
 
         await flush_processor()
         await flush_processor()
@@ -122,7 +119,8 @@ class TestWorksPropagatesToMortgage:
         sd = UserInputNode[Money]("wpm2_sd", Money)
         persons = UserInputNode[list]("wpm2_persons", list)
         works = UserInputNode[dict]("wpm2_works", dict)
-        fin = UserInputNode[dict]("wpm2_fin", dict)
+        rate = UserInputNode("wpm2_rate", Decimal)
+        term = UserInputNode("wpm2_term", int)
 
         te = EquityTotalNode(
             "wpm2_te", persons_source=persons,
@@ -142,7 +140,8 @@ class TestWorksPropagatesToMortgage:
         mm = MonthlyMortgagePaymentNode(
             "wpm2_mm",
             mortgage_required_node=mr,
-            financial_source=fin,
+            mortgage_rate_node=rate,
+            mortgage_term_node=term,
         )
 
         price.push(Money("500000", "GBP"), "test")
@@ -162,13 +161,8 @@ class TestWorksPropagatesToMortgage:
             "test",
         )
         works.push({}, "test")
-        fin.push(
-            {
-                "mortgage_rate": 0.0495,
-                "mortgage_term_years": 27,
-            },
-            "test",
-        )
+        rate.push(Decimal("0.0495"), "test")
+        term.push(27, "test")
 
         await flush_processor()
         await flush_processor()

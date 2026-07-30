@@ -8,7 +8,8 @@ from datetime import UTC, datetime, timedelta
 from inspect import iscoroutine
 from typing import Generic, TypeVar
 
-from dag.attempt import Attempt, Formula, Provenance, SourceType
+from dag.attempt import Attempt, Formula, FormulaLine, Provenance, SourceType
+from dag.expression import Expression
 from dag.http_error import HttpError
 from dag.node import Node
 from dag.scheduler import _get_scheduler
@@ -21,6 +22,27 @@ T = TypeVar("T")
 
 class DerivedNode(Node[T], Generic[T]):
     """A node whose value is computed from other nodes."""
+
+    # ── Expression system ────────────────────────────────
+    # Subclasses set ``expression`` (or override it as a ``@property``)
+    # to an ``Expression`` tree. If set, ``build_provenance`` uses it
+    # for formula generation.
+
+    _expression: Expression | None = None
+
+    @property
+    def expression(self) -> Expression | None:
+        return self._expression
+
+    def _build_formula_from_expression(self) -> Formula | None:
+        """Build a Formula from the expression tree, if one is set."""
+        expr = self.expression
+        if expr is None:
+            return None
+        try:
+            return expr.to_formula()
+        except Exception:
+            return None
 
     def __init__(self, node_id: str, value_type: type[T], deps: tuple[Node, ...], source_url: str = "") -> None:
         super().__init__(node_id, value_type, source_url)
@@ -272,6 +294,12 @@ class DerivedNode(Node[T], Generic[T]):
                     label=getattr(dep, "display_name", dep._id),
                     description=f"build_provenance failed: {e}\n{traceback.format_exc()}",
                 )
+
+        # Use expression system for formula if available
+        formula = self.provenance_formula
+        if formula is None:
+            formula = self._build_formula_from_expression()
+
         description = self._attempt.error if self._attempt.impossible else None
         return Provenance(
             label=self.display_name,
@@ -280,7 +308,7 @@ class DerivedNode(Node[T], Generic[T]):
             url=self._source_url,
             source_type=self.provenance_source_type,
             freshness=self._attempt.created_at,
-            formula=self.provenance_formula,
+            formula=formula,
             sources=sources,
         )
 

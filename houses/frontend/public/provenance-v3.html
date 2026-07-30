@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ProvenanceView V3 — Generic Provenance Display Prototype</title>
+<style>
+/* ═══ Design Tokens (matching houses/frontend design system) ═══ */
+:root {
+  --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0;
+  --slate-300: #cbd5e1; --slate-400: #94a3b8; --slate-500: #64748b;
+  --slate-600: #475569; --slate-700: #334155; --slate-800: #1e293b; --slate-900: #0f172a;
+  --green: #16a34a; --green-bg: #dcfce7; --green-text: #15803d;
+  --orange: #f97316; --orange-bg: #ffedd5; --orange-text: #ea580c;
+  --red: #dc2626; --red-bg: #fee2e2; --red-text: #b91c1c;
+  --blue: #3b82f6; --blue-bg: #dbeafe; --blue-text: #2563eb;
+  --amber: #f59e0b; --amber-bg: #fef3c7; --amber-text: #92400e;
+  --purple: #8b5cf6; --purple-bg: #ede9fe; --purple-text: #6d28d9;
+  --text: #0f172a; --text-secondary: #475569; --text-muted: #94a3b8;
+  --border: #e2e8f0; --card-bg: #fff; --page-bg: #f8fafc;
+  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", monospace;
+  --fs-xs: 0.6875rem; --fs-sm: 0.8125rem; --fs-base: 0.9375rem;
+  --fs-lg: 1.0625rem; --fs-xl: 1.25rem; --fs-2xl: 1.5rem;
+  --lh-tight: 1.25; --lh: 1.5; --lh-loose: 1.75;
+  --fw-normal: 400; --fw-medium: 500; --fw-semibold: 600; --fw-bold: 700;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-8: 32px;
+  --radius-sm: 4px; --radius: 8px; --radius-lg: 12px; --radius-full: 999px;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.06); --shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+/* ═══ Reset & Page ═══ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--font); color: var(--text); background: var(--page-bg);
+  line-height: var(--lh); padding: var(--sp-6);
+}
+button { font: inherit; cursor: pointer; border: none; background: none; }
+
+/* ═══ Page Header ═══ */
+.page-header { max-width: 800px; margin: 0 auto var(--sp-8); }
+.page-title { font-size: var(--fs-2xl); font-weight: var(--fw-bold); margin-bottom: var(--sp-1); }
+.page-subtitle { font-size: var(--fs-sm); color: var(--text-muted); line-height: var(--lh-loose); }
+
+/* ═══ Tab Bar (scenario switcher) ═══ */
+.scenario-tabs {
+  display: flex; gap: 0; border-bottom: 1px solid var(--border);
+  max-width: 800px; margin: 0 auto var(--sp-6);
+}
+.scenario-tab {
+  padding: var(--sp-3) var(--sp-5); font-size: var(--fs-sm); font-weight: var(--fw-medium);
+  color: var(--text-muted); border-bottom: 2px solid transparent;
+  margin-bottom: -1px; transition: all 150ms ease; min-height: 44px;
+  display: flex; align-items: center; gap: var(--sp-2);
+}
+.scenario-tab:hover { color: var(--text-secondary); }
+.scenario-tab[aria-selected="true"] { color: var(--blue); border-bottom-color: var(--blue); }
+.scenario-tab__badge {
+  font-size: 10px; padding: 1px 6px; border-radius: var(--radius-full);
+  background: var(--slate-100); color: var(--slate-500); font-weight: var(--fw-semibold);
+}
+
+/* ═══ Container ═══ */
+.prov-card {
+  max-width: 800px; margin: 0 auto;
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--card-bg); box-shadow: var(--shadow-sm);
+  overflow: hidden; font-size: var(--fs-sm);
+}
+
+/* ═══ Trust Bar ═══ */
+.trust-bar {
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--border);
+  background: var(--slate-50); flex-wrap: wrap;
+}
+.trust-bar__left { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 200px; }
+.trust-bar__label {
+  font-size: var(--fs-xs); color: var(--text-muted); text-transform: uppercase;
+  letter-spacing: 0.04em; font-weight: var(--fw-semibold);
+}
+.trust-bar__value {
+  font-size: var(--fs-xl); font-weight: var(--fw-bold); color: var(--slate-900);
+  line-height: var(--lh-tight);
+}
+.trust-bar__right {
+  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+}
+
+/* ═══ Status Pill ═══ */
+.status-pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: var(--fs-xs); font-weight: var(--fw-medium);
+  padding: var(--sp-1) var(--sp-3); border-radius: var(--radius-full); white-space: nowrap;
+}
+.status-pill--ok { background: var(--green-bg); color: var(--green-text); }
+.status-pill--warn { background: var(--amber-bg); color: var(--amber-text); }
+.status-pill--error { background: var(--red-bg); color: var(--red-text); }
+.status-pill__dot { width: 6px; height: 6px; border-radius: var(--radius-full); background: currentColor; }
+
+/* ═══ Error Banner ═══ */
+.error-banner {
+  display: flex; align-items: flex-start; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5); background: var(--amber-bg);
+  border-bottom: 1px solid #fde68a; font-size: var(--fs-xs); color: var(--amber-text);
+  line-height: var(--lh);
+}
+.error-banner__icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+
+/* ═══ Tree ═══ */
+.tree { padding: var(--sp-3) 0; }
+
+/* ═══ Node Row ═══ */
+.node {
+  display: grid; grid-template-columns: auto 1fr; gap: 0;
+  position: relative; transition: background 120ms ease;
+}
+.node:hover { background: var(--slate-50); }
+
+/* Depth gutter — color-coded left border */
+.node__gutter {
+  width: var(--sp-4); position: relative; flex-shrink: 0;
+}
+.node__border {
+  position: absolute; left: 7px; top: 0; bottom: 0;
+  width: 2px; border-radius: 1px;
+}
+.node--depth-0 .node__border { display: none; }
+.node--depth-1 .node__border { top: 18px; }
+.node--depth-2 .node__border { top: 0; }
+
+/* Node content */
+.node__body { padding: var(--sp-2) var(--sp-4) var(--sp-2) var(--sp-3); min-width: 0; }
+
+/* Node header line: icon + label + value + meta */
+.node__header {
+  display: flex; align-items: center; gap: var(--sp-2); min-height: 28px;
+}
+.node__icon {
+  width: 20px; height: 20px; border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; flex-shrink: 0; font-weight: var(--fw-bold); color: #fff;
+}
+.node__icon--api { background: var(--orange); }
+.node__icon--calc { background: var(--purple); }
+.node__icon--user { background: var(--blue); }
+.node__icon--config { background: var(--amber); }
+.node__icon--geocode { background: var(--green); }
+.node__icon--db { background: var(--slate-400); }
+.node__icon--error { background: var(--red); }
+
+.node__label {
+  font-weight: var(--fw-semibold); color: var(--slate-800); line-height: var(--lh-tight);
+}
+.node__label--empty { color: var(--text-muted); font-style: italic; font-weight: var(--fw-normal); }
+.node__label--opaque { color: var(--text-muted); }
+
+.node__value {
+  font-family: var(--font-mono); font-weight: var(--fw-semibold); color: var(--slate-700);
+  margin-left: auto; flex-shrink: 0; white-space: nowrap;
+}
+.node__value--rate {
+  font-size: var(--fs-xs); background: var(--slate-100); padding: 1px 6px;
+  border-radius: var(--radius-sm);
+}
+.node__value--missing {
+  font-family: var(--font); font-weight: var(--fw-normal); color: var(--text-muted);
+  font-style: italic;
+}
+.node__value--object {
+  font-family: var(--font); font-weight: var(--fw-normal); color: var(--text-muted);
+  font-size: var(--fs-xs); font-style: italic;
+}
+
+/* Node meta line (freshness, description, etc.) */
+.node__meta {
+  display: flex; align-items: center; gap: var(--sp-2); margin-top: 2px;
+  font-size: var(--fs-xs); color: var(--text-muted); flex-wrap: wrap;
+}
+.node__freshness { white-space: nowrap; }
+.node__freshness--fresh { color: var(--green); }
+.node__freshness--aging { color: var(--amber-text); }
+.node__freshness--stale { color: var(--red); }
+.node__freshness--none { color: var(--slate-300); }
+
+.node__desc {
+  color: var(--text-secondary); line-height: var(--lh); max-width: 500px;
+}
+.node__url {
+  color: var(--blue); text-decoration: none; display: inline-flex;
+  align-items: center; gap: 3px;
+}
+.node__url:hover { text-decoration: underline; }
+
+/* ═══ Reference Chip (duplicate nodes) ═══ */
+.ref-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; background: var(--blue-bg); color: var(--blue-text);
+  border-radius: var(--radius-sm); font-size: 10px; font-weight: var(--fw-medium);
+  white-space: nowrap; cursor: default; text-decoration: none;
+}
+.ref-chip:hover { background: var(--blue); color: #fff; }
+
+/* ═══ Warning Card (error state node) ═══ */
+.node--warn .node__body {
+  background: #fffbeb; border: 1px solid #fde68a;
+  border-radius: var(--radius); margin: var(--sp-1) 0;
+}
+.warn-label { color: var(--amber-text); font-weight: var(--fw-semibold); }
+
+/* ═══ Config Grid (expanding config blobs) ═══ */
+.config-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--sp-2); margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3);
+  background: var(--slate-50); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.config-item {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: var(--sp-2); padding: var(--sp-1) 0; font-size: var(--fs-xs);
+}
+.config-item__key {
+  color: var(--text-muted); font-weight: var(--fw-medium);
+  text-transform: none; /* don't uppercase — these are user-facing settings */
+}
+.config-item__val {
+  font-family: var(--font-mono); font-weight: var(--fw-semibold); color: var(--slate-700);
+}
+.config-item__val--zero { color: var(--text-muted); }
+
+/* ═══ Formula ═══ */
+.formula {
+  margin-top: var(--sp-2); padding: var(--sp-3); background: var(--slate-50);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.formula__line {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding: var(--sp-1) 0; font-size: var(--fs-xs);
+}
+.formula__line-label { color: var(--text-secondary); }
+.formula__line-value {
+  font-family: var(--font-mono); font-weight: var(--fw-semibold); color: var(--slate-700);
+}
+.formula__result {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding-top: var(--sp-2); margin-top: var(--sp-2); border-top: 2px solid var(--slate-200);
+  font-size: var(--fs-sm); font-weight: var(--fw-bold); color: var(--slate-900);
+}
+.formula__result-value { font-family: var(--font-mono); }
+
+/* ═══ Shared References Section ═══ */
+.shared-refs {
+  padding: var(--sp-4) var(--sp-5); background: var(--slate-50);
+  border-top: 1px solid var(--border);
+}
+.shared-refs__title {
+  font-size: var(--fs-xs); font-weight: var(--fw-bold); color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: var(--sp-3);
+}
+.shared-refs__grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--sp-2);
+}
+.shared-ref {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3); background: var(--card-bg);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+}
+.shared-ref__dot { width: 8px; height: 8px; border-radius: var(--radius-full); flex-shrink: 0; }
+.shared-ref__label { font-weight: var(--fw-semibold); color: var(--slate-700); }
+.shared-ref__value { margin-left: auto; font-family: var(--font-mono); color: var(--text-muted); font-size: 10px; }
+
+/* ═══ Legend ═══ */
+.legend {
+  display: flex; gap: var(--sp-4); padding: var(--sp-3) var(--sp-5);
+  background: var(--slate-50); border-top: 1px solid var(--border); flex-wrap: wrap;
+}
+.legend__item {
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  font-size: 11px; color: var(--text-muted);
+}
+.legend__dot { width: 8px; height: 8px; border-radius: var(--radius-full); }
+
+/* ═══ Annotations Panel ═══ */
+.annotations {
+  max-width: 800px; margin: var(--sp-8) auto 0;
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--card-bg); overflow: hidden;
+}
+.annotations__toggle {
+  width: 100%; padding: var(--sp-4) var(--sp-5);
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-secondary);
+  background: var(--slate-50); border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.annotations__toggle:hover { background: var(--slate-100); }
+.annotations__chevron { transition: transform 200ms ease; font-size: var(--fs-xs); color: var(--text-muted); }
+.annotations__toggle[aria-expanded="true"] .annotations__chevron { transform: rotate(180deg); }
+.annotations__body { padding: var(--sp-5); display: none; }
+.annotations__body.is-open { display: block; }
+.annotations__grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4);
+}
+@media (max-width: 640px) { .annotations__grid { grid-template-columns: 1fr; } }
+.annotation-card {
+  padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius);
+  font-size: var(--fs-xs); line-height: var(--lh-loose);
+}
+.annotation-card__num {
+  font-weight: var(--fw-bold); color: var(--blue); margin-right: var(--sp-1);
+}
+.annotation-card__title { font-weight: var(--fw-semibold); color: var(--slate-700); margin-bottom: var(--sp-1); }
+.annotation-card__text { color: var(--text-secondary); }
+.annotation-card--design {
+  background: var(--purple-bg); border-color: #ddd6fe;
+}
+.annotation-card--design .annotation-card__title { color: var(--purple-text); }
+.annotation-card--invisible {
+  background: var(--green-bg); border-color: #bbf7d0;
+}
+.annotation-card--invisible .annotation-card__title { color: var(--green-text); }
+
+/* ═══ Source type label mapping (used in rendering) ═══ */
+.source-type-label--db { background: var(--slate-100); color: var(--slate-600); }
+
+/* ═══ Accessibility ═══ */
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1 class="page-title">ProvenanceView V3</h1>
+  <p class="page-subtitle">
+    Generic provenance display — ONE component renders ANY provenance JSON.<br>
+    Every node preserved. No new backend fields. All 10 data quality problems handled.
+  </p>
+</div>
+
+<!-- ═══ Scenario Tabs ═══ -->
+<div class="scenario-tabs" role="tablist" aria-label="Provenance scenarios">
+  <button class="scenario-tab" role="tab" aria-selected="true" data-tab="monthly-cost"
+    onclick="switchTab('monthly-cost', this)">
+    Total Monthly Cost <span class="scenario-tab__badge">23 nodes</span>
+  </button>
+  <button class="scenario-tab" role="tab" aria-selected="false" data-tab="epc"
+    onclick="switchTab('epc', this)">
+    EPC Rating <span class="scenario-tab__badge">5 nodes</span>
+  </button>
+</div>
+
+<!-- ═══ Main Card ═══ -->
+<div id="prov-card" class="prov-card"></div>
+
+<!-- ═══ Annotations Panel ═══ -->
+<div class="annotations">
+  <button class="annotations__toggle" aria-expanded="false" onclick="toggleAnnotations(this)">
+    <span>Annotations — Design decisions &amp; data quality handling</span>
+    <span class="annotations__chevron">&#9660;</span>
+  </button>
+  <div class="annotations__body" id="annotations-body">
+    <div class="annotations__grid" id="annotations-grid"></div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// PROVENANCE V3 — Generic Renderer
+// ═══════════════════════════════════════════════════════════════════
+
+// ── Real data from the backend ──
+const TOTAL_MONTHLY_COST = {
+  "label": "Total Monthly Cost",
+  "description": "89306649/total_monthly_cost: dep failed (Works estimate required for: Ashby; no council tax data)",
+  "sourceType": "calc",
+  "freshness": "2026-07-30T07:21:57.139579+00:00",
+  "sources": {
+    "89306649/monthly_mortgage": {
+      "label": "Monthly Mortgage",
+      "description": "Works estimate required for: Ashby",
+      "sourceType": "calc",
+      "freshness": "2026-07-30T07:21:56.979960+00:00",
+      "sources": {
+        "89306649/mortgage_required": {
+          "label": "Mortgage Required",
+          "description": "Works estimate required for: Ashby",
+          "sourceType": "calc",
+          "freshness": "2026-07-30T07:21:56.979845+00:00",
+          "sources": {
+            "89306649/rightmove_price": {
+              "label": "Rightmove",
+              "value": "GBP 800,000.00",
+              "sourceType": "user"
+            },
+            "89306649/stamp_duty": {
+              "label": "Stamp Duty",
+              "value": "GBP 27,500.00",
+              "sourceType": "calc",
+              "freshness": "2026-07-30T07:21:56.979513+00:00",
+              "formula": { "lines": [
+                  { "label": "Property Price", "value": "GBP 800,000.00" },
+                  { "label": "First-time buyer relief", "value": "N/A" }
+                ], "result": "GBP 27,500.00" },
+              "sources": {
+                "89306649/rightmove_price": {
+                  "label": "Rightmove",
+                  "value": "GBP 800,000.00", "sourceType": "user" },
+                "89306649/status": { "label": "", "sourceType": "user" }
+              }
+            },
+            "89306649/total_works": {
+              "label": "Total Works",
+              "description": "Works estimate required for: Ashby",
+              "sourceType": "calc",
+              "freshness": "2026-07-30T07:21:56.979586+00:00",
+              "sources": {
+                "persons": { "label": "db", "sourceType": "user" },
+                "89306649/works_estimates": { "label": "default", "value": {}, "sourceType": "user" }
+              }
+            },
+            "89306649/total_equity": {
+              "label": "Total Equity",
+              "value": "GBP 477,000.00",
+              "sourceType": "calc",
+              "freshness": "2026-07-30T07:21:56.979671+00:00",
+              "sources": {
+                "persons": { "label": "db", "sourceType": "user" },
+                "89306649/status": { "label": "", "sourceType": "user" }
+              }
+            }
+          }
+        },
+        "financial": {
+          "label": "config",
+          "value": {
+            "current_home_sale_price": 0,
+            "current_home_outstanding_mortgage": 0,
+            "mortgage_rate": 0.0495,
+            "mortgage_term_years": 27,
+            "sinking_fund_rate": 0.01,
+            "rental_income_monthly": 0,
+            "life_insurance_monthly": 150,
+            "working_weeks_per_year": 46
+          },
+          "sourceType": "user"
+        }
+      }
+    },
+    "89306649/yearly_sinking_fund": {
+      "label": "Yearly Sinking Fund",
+      "value": "GBP 8,000.00",
+      "sourceType": "config",
+      "freshness": "2026-07-30T07:21:56.980035+00:00",
+      "sources": {
+        "89306649/rightmove_price": {
+          "label": "Rightmove",
+          "value": "GBP 800,000.00", "sourceType": "user" },
+        "financial": {
+          "label": "config",
+          "value": { "sinking_fund_rate": 0.01 },
+          "sourceType": "user"
+        }
+      }
+    },
+    "89306649/life_insurance_total": {
+      "label": "Life Insurance Total",
+      "value": "GBP 150.00",
+      "sourceType": "calc",
+      "freshness": "2026-07-30T07:21:56.979753+00:00",
+      "sources": {
+        "persons": { "label": "db", "sourceType": "user" }
+      }
+    },
+    "89306649/rental_income": {
+      "label": "default",
+      "value": "GBP 0.00",
+      "sourceType": "user"
+    },
+    "89306649/status": { "label": "", "sourceType": "user" },
+    "financial": {
+      "label": "config",
+      "value": {
+        "current_home_sale_price": 0,
+        "current_home_outstanding_mortgage": 0,
+        "mortgage_rate": 0.0495,
+        "mortgage_term_years": 27,
+        "sinking_fund_rate": 0.01,
+        "rental_income_monthly": 0,
+        "life_insurance_monthly": 150,
+        "working_weeks_per_year": 46
+      },
+      "sourceType": "user"
+    },
+    "89306649/commute_breakdown": {
+      "label": "commute_breakdown",
+      "sourceType": "calc",
+      "freshness": "2026-07-30T07:21:56.979416+00:00"
+    },
+    "89306649/council_tax": {
+      "label": "Council Tax",
+      "url": "https://www.gov.uk/council-tax-bands",
+      "sourceType": "api",
+      "freshness": "2026-07-30T07:21:56.960072+00:00"
+    }
+  }
+};
+
+const EPC_RATING = {
+  "label": "EPC Rating",
+  "description": "Energy Performance Certificate from the official gov.uk register",
+  "sourceType": "api",
+  "freshness": "2026-07-22T10:15:00+00:00",
+  "value": "Band C (68)",
+  "url": "https://www.epcregister.com/",
+  "sources": {
+    "postcode": {
+      "label": "postcode",
+      "sourceType": "user",
+      "freshness": "2026-07-30T09:15:00+00:00"
+    },
+    "best_address": {
+      "label": "best_address",
+      "sourceType": "calc",
+      "sources": {
+        "user_entered_address": {
+          "label": "user_entered_address",
+          "sourceType": "user",
+          "freshness": "2026-07-29T14:00:00+00:00"
+        },
+        "rightmove_address": {
+          "label": "rightmove_address",
+          "sourceType": "user",
+          "freshness": "2026-07-29T14:00:00+00:00"
+        }
+      }
+    }
+  }
+};
+
+const SCENARIOS = {
+  'monthly-cost': {
+    data: TOTAL_MONTHLY_COST,
+    annotations: [
+      { type: 'quality', num: 'Q1', title: 'Empty label', text: 'The "status" node has label: "". It renders as "(unnamed)" with italic muted text and a user badge. The node is NOT hidden — the user can see it exists but has no label.' },
+      { type: 'quality', num: 'Q2', title: 'Error in description', text: 'Root node description contains "dep failed (Works estimate required...)". Rendered in an amber warning banner below the trust bar. The error is visible and flagged — not silently swallowed.' },
+      { type: 'quality', num: 'Q3', title: 'Missing values', text: 'commute_breakdown, council_tax, total_works, and works_estimates all lack a value. Each shows "No value" in italic. The node is present, its sourceType is shown, but the absence of data is explicit.' },
+      { type: 'quality', num: 'Q4', title: 'Duplicate nodes', text: 'rightmove_price appears under mortgage_required, stamp_duty, and yearly_sinking_fund — three times. Strategy: render the canonical copy fully on first encounter; subsequent occurrences become a compact reference chip (blue pill) linking to the original. The Shared References section at the bottom lists every deduplicated node once.' },
+      { type: 'quality', num: 'Q5', title: 'Opaque internal names', text: 'label: "db", label: "config", label: "default". The sourceType badge (colored dot) and icon provide context. The label is shown verbatim so the user knows the internal name. A "db" label with a user badge means "data from your profile stored in the database." Not ideal, but honest.' },
+      { type: 'quality', num: 'Q6', title: 'Config blobs', text: 'financial.value is a JSON object with 8 key-value pairs. Instead of rendering as "GBP 800,000.00" (one value), it expands into a grid showing each setting: mortgage_rate: 4.95%, mortgage_term_years: 27, sinking_fund_rate: 1.0%, etc. Zero values are shown in muted text to indicate they\'re defaulted.' },
+      { type: 'quality', num: 'Q7', title: 'Missing calculation details', text: 'total_equity (GBP 477,000) has no formula. life_insurance_total (GBP 150) has no per-person breakdown. The value is shown but no formula section appears — the gap is implicitly visible. The user sees the number but knows the calculation steps are not provided.' },
+      { type: 'quality', num: 'Q8', title: 'Inconsistent value formats', text: 'Money is "GBP 800,000.00" (string), rates are 0.0495 (decimal). In the config grid, rates are formatted as percentages (4.95%) using a simple *100 transform. Money values keep the original GBP string format. No backend changes needed.' },
+      { type: 'quality', num: 'Q9', title: 'Dead-end leaves', text: 'commute_breakdown has sourceType "calc" but no value, no sources, no formula. Rendered as a leaf with an amber warning — "calc" sourceType with nothing to show. council_tax has a URL (gov.uk link) but no value — the link is rendered as a clickable reference.' },
+      { type: 'quality', num: 'Q10', title: 'Mixed sourceType meaning', text: 'financial has sourceType "user" but it\'s user-configured settings. yearly_sinking_fund has sourceType "config" but it\'s calculated. The sourceType icon/badge is shown verbatim (no reinterpretation), but the expanded config grid and formula section provide context that clarifies what the node actually is.' },
+    ],
+    invisible: [
+      { title: 'Root error message', text: 'The old ProvenanceTree showed the root with a generic badge. The description field\'s error message was invisible or collapsed. V3 shows it in a full-width amber banner.' },
+      { title: 'Config blob values', text: 'The old tree rendered "financial" as a single card with label "config" — the actual mortgage rate, term, and other settings were never shown. V3 expands the config.value object into a readable grid.' },
+      { title: 'Formula for stamp duty', text: 'The old tree showed the formula label but not the step-by-step breakdown. V3 shows each formula line (Property Price: GBP 800,000.00, First-time buyer relief: N/A) with a result.' },
+      { title: 'Duplicate node frequency', text: 'The old tree showed rightmove_price 3 times (confusing) or once (lost context). V3 shows it once + reference chips with "same as" markers, plus a Shared References section.' },
+      { title: 'Freshness per node', text: 'The old tree had a single freshness dot. V3 shows freshness on every node individually — some are fresh (today), some aging, some missing entirely.' },
+      { title: 'Empty-label node existence', text: 'The old tree may have hidden nodes with empty labels. V3 explicitly renders them with "(unnamed)" so the user knows the data point exists but is unlabeled.' },
+    ]
+  },
+  'epc': {
+    data: EPC_RATING,
+    annotations: [
+      { type: 'quality', num: 'Q1', title: 'Empty labels', text: 'No empty labels in this dataset — all nodes have meaningful labels.' },
+      { type: 'quality', num: 'Q2', title: 'Error descriptions', text: 'No error descriptions. The root description is a user-friendly explanation.' },
+      { type: 'quality', num: 'Q3', title: 'Missing values', text: 'postcode and best_address have no value — they\'re intermediate lookup nodes. Shown as "No value" leaves.' },
+      { type: 'quality', num: 'Q4', title: 'Duplicate nodes', text: 'No duplicates in this smaller tree.' },
+      { type: 'quality', num: 'Q5', title: 'Opaque internal names', text: '"postcode" and "best_address" are borderline — slightly opaque but understandable in context.' },
+      { type: 'quality', num: 'Q6', title: 'Config blobs', text: 'No config blobs in this dataset.' },
+      { type: 'quality', num: 'Q7', title: 'Missing calculation details', text: 'best_address is a calc node with no formula — the "how" of address resolution is invisible.' },
+      { type: 'quality', num: 'Q8', title: 'Inconsistent formats', text: 'The root value is "Band C (68)" — a string, not money. The same renderer handles it gracefully.' },
+      { type: 'quality', num: 'Q9', title: 'Dead-end leaves', text: 'postcode and user_entered_address are leaf nodes with no value — they\'re inputs, not outputs.' },
+      { type: 'quality', num: 'Q10', title: 'Mixed sourceType', text: 'best_address has sourceType "calc" but its sources are all "user" — the resolution logic is invisible. Same renderer, same behavior.' },
+    ],
+    invisible: [
+      { title: 'URL rendering', text: 'The old tree might have shown the URL as text. V3 renders it as a clickable link in the trust bar.' },
+      { title: 'Root value prominence', text: 'The old tree buried the root value in the tree. V3 shows it prominently in the trust bar.' },
+    ]
+  }
+};
+
+// ═══════════════════════════════════════════════════
+// RENDERING ENGINE
+// ═══════════════════════════════════════════════════
+
+const ICONS = {
+  api: 'A', calc: 'C', user: 'U', config: 'K', geocode: 'G', db: 'D'
+};
+
+const SOURCE_COLORS = {
+  api: 'var(--orange)', calc: 'var(--purple)', user: 'var(--blue)',
+  config: 'var(--amber)', geocode: 'var(--green)', db: 'var(--slate-400)'
+};
+
+const SOURCE_TYPE_NAMES = {
+  api: 'External API', calc: 'Calculation', user: 'User Input',
+  config: 'Configuration', geocode: 'Geocoding', db: 'Database'
+};
+
+// ── Formatting helpers ──
+function formatMoney(val) {
+  if (!val || typeof val !== 'string') return String(val ?? '');
+  // "GBP 800,000.00" -> "£800,000"
+  return val.replace(/^GBP\s*/, '£').replace(/\.00$/, '').replace(/,(\d{3})/g, ',$1');
+}
+
+function formatRate(val) {
+  if (typeof val !== 'number') return String(val);
+  return (val * 100).toFixed(val < 0.1 ? 1 : 0) + '%';
+}
+
+function formatValue(val) {
+  if (val === undefined || val === null) return null;
+  if (typeof val === 'object') return null; // config blob — handled separately
+  if (typeof val === 'string' && val.startsWith('GBP')) return formatMoney(val);
+  if (typeof val === 'number' && val < 1 && val > 0) return formatRate(val);
+  return String(val);
+}
+
+function freshnessClass(ts) {
+  if (!ts) return 'none';
+  const days = (Date.now() - new Date(ts).getTime()) / (1000 * 60 * 60 * 24);
+  if (days <= 1) return 'fresh';
+  if (days <= 7) return 'fresh';
+  if (days <= 30) return 'aging';
+  return 'stale';
+}
+
+function freshnessText(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const now = new Date();
+  const days = Math.floor((now - d) / (1000 * 60 * 60 * 24));
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  return days + 'd ago';
+}
+
+function freshnessIcon(cls) {
+  return cls === 'fresh' ? '&#9679;' : cls === 'aging' ? '&#9679;' : cls === 'stale' ? '&#9679;' : '';
+}
+
+// ── Config key display names ──
+const CONFIG_KEY_NAMES = {
+  current_home_sale_price: 'Current home sale price',
+  current_home_outstanding_mortgage: 'Outstanding mortgage',
+  mortgage_rate: 'Mortgage rate',
+  mortgage_term_years: 'Mortgage term',
+  sinking_fund_rate: 'Sinking fund rate',
+  rental_income_monthly: 'Rental income',
+  life_insurance_monthly: 'Life insurance',
+  working_weeks_per_year: 'Working weeks/year'
+};
+
+function formatConfigValue(key, val) {
+  if (typeof val === 'number') {
+    if (key.includes('rate') && val < 1) return formatRate(val);
+    if (key.includes('price') || key.includes('mortgage') || key.includes('income') || key.includes('insurance'))
+      return '£' + val.toLocaleString('en-GB');
+    return String(val);
+  }
+  return String(val);
+}
+
+// ═══════════════════════════════════════════════════
+// TREE BUILDER — flattens recursive tree into rows
+// ═══════════════════════════════════════════════════
+
+function buildTree(prov, sourceKey, depth, seen, rows) {
+  const isDuplicate = seen.has(sourceKey);
+
+  rows.push({
+    depth,
+    sourceKey,
+    node: prov,
+    isDuplicate,
+    hasChildren: prov.sources && Object.keys(prov.sources).length > 0
+  });
+
+  if (!isDuplicate) {
+    seen.add(sourceKey);
+  }
+
+  // Only recurse into children if this is the first time we see this node
+  if (!isDuplicate && prov.sources) {
+    for (const [childKey, childNode] of Object.entries(prov.sources)) {
+      buildTree(childNode, childKey, depth + 1, seen, rows);
+    }
+  }
+}
+
+function collectSharedRefs(prov, rows) {
+  // First pass: count how many times each sourceKey appears across the ENTIRE tree
+  const keyCounts = new Map();
+  const keyNodes = new Map(); // first occurrence node
+  function countAll(node, key) {
+    if (!keyCounts.has(key)) {
+      keyCounts.set(key, 0);
+      keyNodes.set(key, node);
+    }
+    keyCounts.set(key, keyCounts.get(key) + 1);
+    if (node.sources) {
+      for (const [k, v] of Object.entries(node.sources)) {
+        countAll(v, k);
+      }
+    }
+  }
+  countAll(prov, '_root');
+  // Second pass: collect nodes that appear more than once
+  for (const [key, count] of keyCounts) {
+    if (key === '_root') continue; // skip artificial root
+    if (count > 1) {
+      rows.push({ key, node: keyNodes.get(key), count });
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// HTML RENDERERS
+// ═══════════════════════════════════════════════════
+
+function renderTrustBar(prov) {
+  const ftCls = freshnessClass(prov.freshness);
+  const ftTxt = freshnessText(prov.freshness);
+  const val = formatValue(prov.value);
+  const hasError = prov.description && prov.description.includes('failed');
+  const statusCls = hasError ? 'warn' : 'ok';
+  const statusText = hasError ? 'Incomplete' : 'Computed';
+
+  let html = `<div class="trust-bar">
+    <div class="trust-bar__left">
+      <span class="trust-bar__label">${esc(prov.label)}</span>
+      <span class="trust-bar__value">${val ? esc(val) : (hasError ? '<span style="color:var(--amber-text);font-size:var(--fs-lg)">Calculation incomplete</span>' : esc(prov.label))}</span>
+    </div>
+    <div class="trust-bar__right">
+      <span class="status-pill status-pill--${statusCls}">
+        <span class="status-pill__dot"></span>${statusText}
+      </span>
+      ${ftTxt ? `<span class="status-pill status-pill--${ftCls === 'none' ? 'ok' : ftCls}">
+        <span class="status-pill__dot"></span>${ftTxt}
+      </span>` : ''}
+    </div>
+  </div>`;
+
+  if (hasError) {
+    html += `<div class="error-banner">
+      <span class="error-banner__icon">&#9888;</span>
+      <span>${esc(prov.description)}</span>
+    </div>`;
+  }
+
+  if (!hasError && prov.description) {
+    html += `<div class="error-banner" style="background:var(--slate-50);border-color:var(--border);color:var(--text-secondary);">
+      <span>${esc(prov.description)}</span>
+    </div>`;
+  }
+
+  return html;
+}
+
+function renderNode(row, allRows) {
+  const { depth, sourceKey, node, isDuplicate, hasChildren } = row;
+  const st = node.sourceType || 'user';
+  const icon = ICONS[st] || '?';
+  const stColor = SOURCE_COLORS[st] || 'var(--slate-400)';
+  const ftCls = freshnessClass(node.freshness);
+  const ftTxt = freshnessText(node.freshness);
+  const val = formatValue(node.value);
+  const isConfigBlob = node.value && typeof node.value === 'object' && Object.keys(node.value).length > 0;
+  const isEmptyLabel = !node.label || node.label.trim() === '';
+  const isOpaqueLabel = ['db', 'config', 'default'].includes(node.label);
+  const hasFormula = node.formula && node.formula.lines;
+  const hasUrl = !!node.url;
+  const hasError = node.description && node.description.includes('failed');
+
+  // Determine if this node has meaningful content to show
+  const hasValue = val !== null || isConfigBlob;
+  const hasContent = hasValue || hasFormula || hasUrl || node.description || hasChildren || isEmptyLabel;
+
+  // Duplicate: show as reference chip
+  if (isDuplicate) {
+    // Find the canonical row to show what it is
+    const canonicalRow = allRows.find(r => r.sourceKey === sourceKey && !r.isDuplicate);
+    const canonicalLabel = canonicalRow ? (canonicalRow.node.label || sourceKey.split('/').pop()) : sourceKey;
+    return `<div class="node node--depth-${depth}">
+      <div class="node__gutter"><div class="node__border" style="background:${stColor}"></div></div>
+      <div class="node__body">
+        <div class="node__header">
+          <a href="#node-${CSS.escape(sourceKey)}" class="ref-chip" title="Same node as above">
+            &#128206; Same as ${esc(canonicalLabel)}
+          </a>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  // Full node render
+  let html = `<div class="node node--depth-${depth} ${hasError ? 'node--warn' : ''}" id="node-${CSS.escape(sourceKey)}">
+    <div class="node__gutter"><div class="node__border" style="background:${stColor}"></div></div>
+    <div class="node__body">
+      <div class="node__header">
+        <div class="node__icon node__icon--${st}" title="${SOURCE_TYPE_NAMES[st] || st}">${icon}</div>
+        <span class="node__label ${isEmptyLabel ? 'node__label--empty' : ''} ${isOpaqueLabel ? 'node__label--opaque' : ''}">${isEmptyLabel ? '(unnamed)' : esc(node.label)}</span>
+        ${val !== null ? `<span class="node__value">${esc(val)}</span>` : ''}
+        ${isConfigBlob ? '<span class="node__value node__value--object">see settings below</span>' : ''}
+      </div>
+      <div class="node__meta">
+        ${ftTxt ? `<span class="node__freshness node__freshness--${ftCls}">${freshnessIcon(ftCls)} ${ftTxt}</span>` : '<span class="node__freshness node__freshness--none">no date</span>'}
+        ${hasUrl ? `<a href="${esc(node.url)}" target="_blank" rel="noopener" class="node__url">&#8599; View source</a>` : ''}
+      </div>
+      ${node.description && !hasError ? `<div class="node__meta"><span class="node__desc">${esc(node.description)}</span></div>` : ''}
+      ${hasError ? `<div class="node__meta"><span class="node__desc" style="color:var(--amber-text)">&#9888; ${esc(node.description)}</span></div>` : ''}
+    </div>`;
+
+  // Config blob expansion
+  if (isConfigBlob) {
+    html += renderConfigGrid(node.value);
+  }
+
+  // Formula expansion
+  if (hasFormula) {
+    html += renderFormula(node.formula);
+  }
+
+  html += `</div>`;
+
+  return html;
+}
+
+function renderConfigGrid(val) {
+  let html = '<div class="config-grid">';
+  for (const [k, v] of Object.entries(val)) {
+    const displayName = CONFIG_KEY_NAMES[k] || k.replace(/_/g, ' ');
+    const formatted = formatConfigValue(k, v);
+    const isZero = v === 0;
+    html += `<div class="config-item">
+      <span class="config-item__key">${esc(displayName)}</span>
+      <span class="config-item__val ${isZero ? 'config-item__val--zero' : ''}">${esc(formatted)}</span>
+    </div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+function renderFormula(formula) {
+  let html = '<div class="formula">';
+  for (const line of formula.lines) {
+    const lineVal = formatValue(line.value) || line.value;
+    html += `<div class="formula__line">
+      <span class="formula__line-label">${esc(line.label)}</span>
+      <span class="formula__line-value">${esc(lineVal)}</span>
+    </div>`;
+  }
+  if (formula.result) {
+    html += `<div class="formula__result">
+      <span>Result</span>
+      <span class="formula__result-value">${esc(formatMoney(formula.result))}</span>
+    </div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+function renderTree(prov) {
+  const rows = [];
+  buildTree(prov, '_root', 0, new Set(), rows);
+
+  let html = '<div class="tree">';
+  for (const row of rows) {
+    html += renderNode(row, rows);
+  }
+  html += '</div>';
+  return html;
+}
+
+function renderSharedRefs(prov) {
+  const refs = [];
+  collectSharedRefs(prov, refs);
+
+  if (refs.length === 0) return '';
+
+  let html = `<div class="shared-refs">
+    <div class="shared-refs__title">Shared References (${refs.length} unique nodes)</div>
+    <div class="shared-refs__grid">`;
+
+  for (const ref of refs) {
+    const st = ref.node.sourceType || 'user';
+    const stColor = SOURCE_COLORS[st] || 'var(--slate-400)';
+    const label = ref.node.label || ref.key.split('/').pop();
+    const val = formatValue(ref.node.value);
+    const ftTxt = freshnessText(ref.node.freshness);
+
+    html += `<div class="shared-ref" id="ref-${CSS.escape(ref.key)}">
+      <div class="shared-ref__dot" style="background:${stColor}"></div>
+      <span class="shared-ref__label">${esc(label)}</span>
+      ${val ? `<span class="shared-ref__value">${esc(val)}</span>` : ''}
+    </div>`;
+  }
+
+  html += '</div></div>';
+  return html;
+}
+
+function renderLegend() {
+  return `<div class="legend">
+    ${Object.entries(SOURCE_TYPE_NAMES).map(([k, v]) =>
+      `<span class="legend__item"><span class="legend__dot" style="background:${SOURCE_COLORS[k]}"></span>${v}</span>`
+    ).join('')}
+  </div>`;
+}
+
+// ── Escape HTML ──
+function esc(str) {
+  if (str === null || str === undefined) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ═══════════════════════════════════════════════════
+// MAIN RENDER
+// ═══════════════════════════════════════════════════
+
+let currentTab = 'monthly-cost';
+
+function renderScenario(key) {
+  const scenario = SCENARIOS[key];
+  const prov = scenario.data;
+
+  let html = renderTrustBar(prov);
+  html += renderTree(prov);
+  html += renderSharedRefs(prov);
+  html += renderLegend();
+
+  document.getElementById('prov-card').innerHTML = html;
+  renderAnnotations(scenario.annotations, scenario.invisible);
+}
+
+function renderAnnotations(qualityNotes, invisibleNotes) {
+  const grid = document.getElementById('annotations-grid');
+  let html = '';
+
+  // Data Quality section header
+  html += '<div style="grid-column: 1 / -1; margin-bottom: var(--sp-2);">';
+  html += '<strong style="font-size:var(--fs-sm);color:var(--slate-700);">Data Quality Handling</strong>';
+  html += '</div>';
+
+  for (const note of qualityNotes) {
+    html += `<div class="annotation-card">
+      <div class="annotation-card__title"><span class="annotation-card__num">${note.num}</span>${esc(note.title)}</div>
+      <div class="annotation-card__text">${esc(note.text)}</div>
+    </div>`;
+  }
+
+  // Invisible info section header
+  if (invisibleNotes && invisibleNotes.length > 0) {
+    html += '<div style="grid-column: 1 / -1; margin-top: var(--sp-4); margin-bottom: var(--sp-2);">';
+    html += '<strong style="font-size:var(--fs-sm);color:var(--green-text);">Previously Invisible Information (now surfaced)</strong>';
+    html += '</div>';
+
+    for (const note of invisibleNotes) {
+      html += `<div class="annotation-card annotation-card--invisible">
+        <div class="annotation-card__title">&#128065; ${esc(note.title)}</div>
+        <div class="annotation-card__text">${esc(note.text)}</div>
+      </div>`;
+    }
+  }
+
+  grid.innerHTML = html;
+}
+
+function switchTab(key, btn) {
+  currentTab = key;
+  document.querySelectorAll('.scenario-tab').forEach(t => t.setAttribute('aria-selected', 'false'));
+  btn.setAttribute('aria-selected', 'true');
+  renderScenario(key);
+}
+
+function toggleAnnotations(btn) {
+  const expanded = btn.getAttribute('aria-expanded') === 'true';
+  btn.setAttribute('aria-expanded', String(!expanded));
+  document.getElementById('annotations-body').classList.toggle('is-open');
+}
+
+// ── Initial render ──
+renderScenario('monthly-cost');
+</script>
+
+</body>
+</html>

@@ -144,7 +144,7 @@ class TestCurrentPropertyGating:
             life_insurance_node=li,
             rental_income_node=ri,
             status_node=st,
-            financial_source=fin,
+
             commute_breakdown_node=cb,
             council_tax_node=ct,
         )
@@ -191,7 +191,7 @@ class TestCurrentPropertyGating:
             life_insurance_node=li,
             rental_income_node=ri,
             status_node=st,
-            financial_source=fin,
+
             commute_breakdown_node=cb,
             council_tax_node=ct,
         )
@@ -233,7 +233,7 @@ class TestCurrentPropertyGating:
             life_insurance_node=li,
             rental_income_node=ri,
             status_node=st,
-            financial_source=fin,
+
             commute_breakdown_node=cb,
             council_tax_node=ct,
         )

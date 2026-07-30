@@ -1,29 +1,27 @@
 from __future__ import annotations
 
-from decimal import Decimal
-
 from money import Money
 
 from dag.attempt import Attempt, SourceType
 from dag.derived_node import DerivedNode
+from dag.expression import Ref
+
+SINKING_FUND_RATE_NODE_ID = "settings/sinking_fund_rate"
 
 
 class YearlySinkingFundNode(DerivedNode[Money]):
+    """Yearly sinking fund = property_price × sinking_fund_rate."""
+
     @property
     def provenance_source_type(self) -> SourceType:
         return SourceType.CONFIG
 
-    def __init__(self, node_id: str, *, rightmove_price, financial_source):
-        super().__init__(node_id, Money, (rightmove_price, financial_source))
+    def __init__(self, node_id: str, *, rightmove_price, sinking_fund_rate_node):
+        super().__init__(node_id, Money, (rightmove_price, sinking_fund_rate_node))
 
-    def compute(self, price: Attempt[Money], financial: Attempt[dict]) -> Attempt[Money]:
-        if not price.succeeded or price.value_or_none() is None:
-            return Attempt.succeeded(Money("0", "GBP"))
-        price_val = price.value_or_none()
-        p = price_val.amount  # Decimal
-        if p == 0:
-            return Attempt.succeeded(Money("0", "GBP"))
-        fin = (financial.value_or_none() or {}) if financial.succeeded else {}
-        rate = Decimal(str(fin.get("sinking_fund_rate", "0.01")))
-        result = p * rate
-        return Attempt.succeeded(Money(str(result.quantize(Decimal("0.01"))), "GBP"))
+    @property
+    def expression(self):
+        return Ref(self._deps[0]) * Ref(self._deps[1])
+
+    def compute(self, price: Attempt[Money], rate: Attempt) -> Attempt[Money]:
+        return self.expression.evaluate()

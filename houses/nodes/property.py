@@ -180,12 +180,13 @@ class PropertyNodes:
         self.monthly_mortgage = MonthlyMortgagePaymentNode(
             f"{rid}/monthly_mortgage",
             mortgage_required_node=self.mortgage_required,
-            financial_source=self._svc.financial_source,
+            mortgage_rate_node=self._svc.setting_nodes.get("settings/mortgage_rate"),
+            mortgage_term_node=self._svc.setting_nodes.get("settings/mortgage_term"),
         )
         self.yearly_sinking_fund = YearlySinkingFundNode(
             f"{rid}/yearly_sinking_fund",
             rightmove_price=self.rightmove_price,
-            financial_source=self._svc.financial_source,
+            sinking_fund_rate_node=self._svc.setting_nodes.get("settings/sinking_fund_rate"),
         )
         self.total_monthly_cost = TotalMonthlyHousingCostNode(
             f"{rid}/total_monthly_cost",
@@ -194,7 +195,6 @@ class PropertyNodes:
             life_insurance_node=self.life_insurance_total,
             rental_income_node=self.rental_income,
             status_node=self.comment_status,
-            financial_source=self._svc.financial_source,
             commute_breakdown_node=self.commute_breakdown,
             council_tax_node=self.council_tax,
         )

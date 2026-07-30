@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { epcClass } from '../formatters/format'
 import { patchRentalIncome, patchWorksEstimate } from '../services/api'
 import { usePropertiesStore } from '../stores/properties'
-import ProvenanceTree from './ProvenanceTree.vue'
+import ProvenanceView from './ProvenanceView.vue'
 
 const props = defineProps<{
   affordability: any
@@ -124,7 +124,7 @@ function canEdit(personName: string): boolean {
         >{{ showProvenance === 'mortgage' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
       </div>
       <div v-if="showProvenance === 'mortgage' && affordability?.monthly_mortgage?.provenance" class="costs-provenance">
-        <ProvenanceTree :provenance="affordability.monthly_mortgage.provenance" />
+        <ProvenanceView :provenance="affordability.monthly_mortgage.provenance" title="Monthly mortgage" />
       </div>
 
       <div class="costs-row">
@@ -138,7 +138,7 @@ function canEdit(personName: string): boolean {
         >{{ showProvenance === 'council_tax' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
       </div>
       <div v-if="showProvenance === 'council_tax' && affordability?.council_tax?.provenance" class="costs-provenance">
-        <ProvenanceTree :provenance="affordability.council_tax.provenance" />
+        <ProvenanceView :provenance="affordability.council_tax.provenance" title="Council Tax" />
       </div>
 
       <div class="costs-row">
@@ -152,7 +152,7 @@ function canEdit(personName: string): boolean {
         >{{ showProvenance === 'sinking_fund' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
       </div>
       <div v-if="showProvenance === 'sinking_fund' && affordability?.monthly_sinking_fund?.provenance" class="costs-provenance">
-        <ProvenanceTree :provenance="affordability.monthly_sinking_fund.provenance" />
+        <ProvenanceView :provenance="affordability.monthly_sinking_fund.provenance" title="Sinking fund" />
       </div>
 
       <!-- Life Insurance -->
@@ -167,7 +167,7 @@ function canEdit(personName: string): boolean {
         >{{ showProvenance === 'life_insurance' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
       </div>
       <div v-if="showProvenance === 'life_insurance' && affordability?.life_insurance_total?.provenance" class="costs-provenance">
-        <ProvenanceTree :provenance="affordability.life_insurance_total.provenance" />
+        <ProvenanceView :provenance="affordability.life_insurance_total.provenance" title="Life insurance" />
       </div>
 
       <!-- Cost of Works -->
@@ -238,7 +238,7 @@ function canEdit(personName: string): boolean {
         </div>
       </div>
       <div v-if="showProvenance === 'total_works' && affordability?.total_works?.provenance" class="costs-provenance">
-        <ProvenanceTree :provenance="affordability.total_works.provenance" />
+        <ProvenanceView :provenance="affordability.total_works.provenance" title="Cost of works" />
       </div>
 
       <div class="costs-row">
@@ -258,7 +258,7 @@ function canEdit(personName: string): boolean {
         </div>
       </div>
       <div v-if="showProvenance === 'commute_cost' && affordability?.monthly_commute_cost?.provenance" class="costs-provenance">
-        <ProvenanceTree :provenance="affordability.monthly_commute_cost.provenance" />
+        <ProvenanceView :provenance="affordability.monthly_commute_cost.provenance" title="Monthly commute cost" />
       </div>
 
       <!-- Rental Income (editable by current person) -->
@@ -294,7 +294,7 @@ function canEdit(personName: string): boolean {
         >{{ showProvenance === 'rental_income' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
       </div>
       <div v-if="showProvenance === 'rental_income' && affordability?.rental_income?.provenance" class="costs-provenance">
-        <ProvenanceTree :provenance="affordability.rental_income.provenance" />
+        <ProvenanceView :provenance="affordability.rental_income.provenance" title="Rental income" />
       </div>
 
       <!-- Total Monthly -->
@@ -311,7 +311,7 @@ function canEdit(personName: string): boolean {
         >{{ showProvenance === 'total' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
       </div>
       <div v-if="showProvenance === 'total' && affordability?.total_monthly_housing_cost?.provenance" class="costs-provenance">
-        <ProvenanceTree :provenance="affordability.total_monthly_housing_cost.provenance" />
+        <ProvenanceView :provenance="affordability.total_monthly_housing_cost.provenance" title="Total monthly housing cost" />
       </div>
     </div>
 
@@ -373,7 +373,7 @@ function canEdit(personName: string): boolean {
   border-radius: 2px;
 }
 .costs-subsection { display: flex; flex-direction: column; }
-.costs-provenance { background: var(--slate-50); padding: var(--sp-3) var(--sp-4); border-radius: var(--radius); margin: var(--sp-2) 0; }
+.costs-provenance { margin: var(--sp-2) 0; }
 .costs-edit-group { display: flex; align-items: center; gap: 2px; margin-left: auto; margin-right: var(--sp-2); }
 .costs-edit-prefix { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text); }
 .costs-edit-input {

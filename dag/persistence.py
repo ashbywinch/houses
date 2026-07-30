@@ -27,11 +27,15 @@ _connection_cache = threading.local()
 
 
 class DagJSONEncoder(json.JSONEncoder):
-    """Handles enums, Money, Quantity, and other non-serializable types in DAG node results."""
+    """Handles enums, Decimal, Money, Quantity, and other non-serializable types in DAG node results."""
 
     def default(self, o):
         if isinstance(o, Enum):
             return o.name.lower()
+        from decimal import Decimal as _Decimal
+
+        if isinstance(o, _Decimal):
+            return float(o)
         from money import Money as _Money
 
         if isinstance(o, _Money):

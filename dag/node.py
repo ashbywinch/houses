@@ -165,3 +165,70 @@ class Node(ABC, Generic[T]):
                 detail = attempt.error or "unknown"
                 parts.append(f"{name}: {detail}")
         return Attempt.impossible("; ".join(parts))
+
+
+# ── Expression operators ────────────────────────────────
+# These let you use Node objects directly in expressions:
+#   self._price_node + self._stamp_duty_node - self._equity_node
+# instead of wrapping each in Ref().
+# Each method uses lazy imports to avoid circular imports.
+
+
+def _to_expr(value):
+    """Convert a plain value to an Expression if it isn't already one."""
+    from dag.expression import Expression, Literal, Ref
+
+    if isinstance(value, Expression):
+        return value
+    if isinstance(value, Node):
+        return Ref(value)
+    return Literal(value)
+
+
+def _with_ops(self, other):
+    return _to_expr(self), _to_expr(other)
+
+
+def _node_add(self, other):
+    from dag.expression import Add
+
+    a, b = _with_ops(self, other)
+    return Add(a, b)
+
+
+def _node_sub(self, other):
+    from dag.expression import Sub
+
+    a, b = _with_ops(self, other)
+    return Sub(a, b)
+
+
+def _node_neg(self):
+    from dag.expression import Negate, Ref
+
+    return Negate(Ref(self))
+
+
+def _node_mul(self, other):
+    from dag.expression import Mul
+
+    a, b = _with_ops(self, other)
+    return Mul(a, b)
+
+
+def _node_div(self, other):
+    from dag.expression import Div
+
+    a, b = _with_ops(self, other)
+    return Div(a, b)
+
+
+Node.__add__ = _node_add
+Node.__radd__ = _node_add  # same — addition is commutative
+Node.__sub__ = _node_sub
+Node.__rsub__ = lambda self, other: _to_expr(other) - _to_expr(self)
+Node.__neg__ = _node_neg
+Node.__mul__ = _node_mul
+Node.__rmul__ = _node_mul  # same — multiplication is commutative
+Node.__truediv__ = _node_div
+Node.__rtruediv__ = lambda self, other: _to_expr(other) / _to_expr(self)

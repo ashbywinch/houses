@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dag.attempt import Attempt, Provenance, SourceType
+from dag.attempt import Attempt, SourceType
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.geo import GeoPoint
@@ -23,14 +23,6 @@ class WalkabilityNode(DerivedNode[dict]):
     def provenance_source_type(self) -> SourceType:
         return SourceType.API
 
-    async def build_provenance(self):
-        return Provenance(
-            label="walkability",
-            url="https://maps.googleapis.com/",
-            source_type=SourceType.API,
-            freshness=self._attempt.created_at,
-        )
-
 
 class NearestTownNode(DerivedNode[str]):
     """Reverse-geocode the property's location to find the nearest town name."""
@@ -52,9 +44,6 @@ class NearestTownNode(DerivedNode[str]):
     @property
     def provenance_source_type(self) -> SourceType:
         return SourceType.GEOCODE
-
-    async def build_provenance(self):
-        return Provenance(label="reverse_geocode", source_type=SourceType.GEOCODE, freshness=self._attempt.created_at)
 
 
 class TownDescNode(DerivedNode[dict]):
@@ -83,9 +72,6 @@ class TownDescNode(DerivedNode[dict]):
     def provenance_source_type(self) -> SourceType:
         return SourceType.API
 
-    async def build_provenance(self):
-        return Provenance(label="LLM", source_type=SourceType.API, freshness=self._attempt.created_at)
-
 
 class TownNode(DerivedNode[str]):
     def __init__(self, node_id: str, *, best_address):
@@ -103,5 +89,4 @@ class TownNode(DerivedNode[str]):
     def provenance_source_type(self) -> SourceType:
         return SourceType.CALC
 
-    async def build_provenance(self):
-        return Provenance(label="address", source_type=SourceType.CALC, freshness=self._attempt.created_at)
+    # Default build_provenance() walks active deps and uses provenance_source_type.

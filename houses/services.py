@@ -327,6 +327,10 @@ class Services:
     persons_source: UserInputNode[list[Person]] = dataclasses.field(
         default_factory=lambda: _make_settings_source("persons", list[Person], make_default_persons)
     )
+    # Individual financial setting nodes (created in __post_init__)
+    setting_nodes: dict[str, UserInputNode] = dataclasses.field(default_factory=dict)
+    # SettingsNode aggregate (lazily created, accessed via settings_view)
+    _settings_view: Any | None = dataclasses.field(default=None)
     financial_source: UserInputNode[dict] = dataclasses.field(
         default_factory=lambda: _make_settings_source("financial", dict, make_default_financials)
     )
@@ -338,6 +342,33 @@ class Services:
     geo_cache: dict | None = None
     bus_fare_registry: Any | None = None
     rail_fare_registry: Any | None = None
+
+    def __post_init__(self):
+        from houses.nodes.settings_node import SETTING_DEFAULTS
+
+        # Create individual setting nodes alongside the existing financial_source
+        if not self.setting_nodes:
+            self.setting_nodes = {}
+            for node_id, (val_type, default_fn) in SETTING_DEFAULTS.items():
+                self.setting_nodes[node_id] = _make_settings_source(
+                    node_id, val_type, default_fn
+                )
+
+    @property
+    def settings_view(self):
+        """Lazy SettingsNode aggregate for API use.
+
+        Reads from individual setting nodes and returns the same dict
+        shape as financial_source did. Created once per Services instance.
+        """
+        if self._settings_view is None:
+            from houses.nodes.settings_node import SettingsNode
+
+            self._settings_view = SettingsNode(
+                "financial_aggregate",
+                setting_nodes=self.setting_nodes,
+            )
+        return self._settings_view
 
     async def tfl_plan(self, origin: str, destination: str, label: str) -> Attempt[Commute]:
         """Plan a TfL transit route. Wraps the real client for DI."""

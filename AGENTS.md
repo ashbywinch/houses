@@ -79,6 +79,7 @@ make stop                       # Stop dev server + frontend
 - **Architecture overview**: [docs/architecture.md](docs/architecture.md)
 - **Add a column**: [docs/column-reference.md](docs/column-reference.md)
 - **Add an enrichment module**: [docs/adding-a-new-enrichment-module.md](docs/adding-a-new-enrichment-module.md)
+- **Understand the DAG library**: [docs/dag-library.md](docs/dag-library.md)
 - **Add a DAG node**: [docs/dag-model.md](docs/dag-model.md)
 - **Capture / compare the frontend DOM**: Run `tools/capture_dom.py`, then compare against `docs/current-ui/`. See `docs/development.md` → *Capturing the Frontend DOM for Comparison*.
 - **Write docs**: [docs/writing-documentation.md](docs/writing-documentation.md)
@@ -96,7 +97,7 @@ make stop                       # Stop dev server + frontend
 | `houses/sheets/` | gspread integration, column schema (`Row`), View tab sync (`View`), formulas |
 | `tests/helpers.py` | Reusable fakes: `FakeCommuteRouter`, `FakeEPC`, `make_services()` |
 | `houses/nodes/` | New DAG node implementations (replaces old `houses/model/` DAG) |
-| `dag/` | DAG library: `Node`, `SourceNode`, `ComputedNode`, `Attempt`, `Provenance` |
+| `dag/` | DAG library: `Node`, `DerivedNode`, `UserInputNode`, `Attempt`, `Provenance` — see [docs/dag-library.md](docs/dag-library.md) |
 | `docs/current-ui/` | Saved reference HTML from the old frontend — compare `capture_dom.py` output against this |
 | `tools/capture_dom.py` | Reusable script to capture rendered Vue frontend DOM + screenshot |
 

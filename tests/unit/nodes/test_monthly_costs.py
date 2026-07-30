@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 from money import Money
 
@@ -13,15 +15,18 @@ class TestMonthlyMortgagePaymentNode:
     async def test_zero_when_no_principal(self):
         from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNode
 
-        mr = UserInputNode[Money]("mmp_old_mr", Money)
-        fin = UserInputNode[dict]("mmp_old_fin", dict)
+        mr = UserInputNode[Money]("mmp_mr1", Money)
+        rate = UserInputNode("mmp_rate1", Decimal)
+        term = UserInputNode("mmp_term1", int)
         node = MonthlyMortgagePaymentNode(
-            "mmp_old",
+            "mmp1",
             mortgage_required_node=mr,
-            financial_source=fin,
+            mortgage_rate_node=rate,
+            mortgage_term_node=term,
         )
         mr.push(Money("0", "GBP"), "test")
-        fin.push({}, "test")
+        rate.push(Decimal("0.045"), "test")
+        term.push(30, "test")
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
@@ -31,21 +36,18 @@ class TestMonthlyMortgagePaymentNode:
     async def test_computes_with_valid_data(self):
         from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNode
 
-        mr = UserInputNode[Money]("mmp_old_mr2", Money)
-        fin = UserInputNode[dict]("mmp_old_fin2", dict)
+        mr = UserInputNode[Money]("mmp_mr2", Money)
+        rate = UserInputNode("mmp_rate2", Decimal)
+        term = UserInputNode("mmp_term2", int)
         node = MonthlyMortgagePaymentNode(
-            "mmp_old2",
+            "mmp2",
             mortgage_required_node=mr,
-            financial_source=fin,
+            mortgage_rate_node=rate,
+            mortgage_term_node=term,
         )
         mr.push(Money("300000", "GBP"), "test")
-        fin.push(
-            {
-                "mortgage_rate": 0.045,
-                "mortgage_term_years": 30,
-            },
-            "test",
-        )
+        rate.push(Decimal("0.045"), "test")
+        term.push(30, "test")
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
@@ -57,15 +59,15 @@ class TestYearlySinkingFundNode:
     async def test_zero_when_no_price(self):
         from houses.nodes.yearly_sinking_fund_node import YearlySinkingFundNode
 
-        price = UserInputNode[Money]("price_ys", Money)
-        fin = UserInputNode[dict]("fin_ys", dict)
+        price = UserInputNode[Money]("ys_price1", Money)
+        rate = UserInputNode("ys_rate1", Decimal)
         node = YearlySinkingFundNode(
-            "ys",
+            "ys1",
             rightmove_price=price,
-            financial_source=fin,
+            sinking_fund_rate_node=rate,
         )
         price.push(Money("0", "GBP"), "test")
-        fin.push({}, "test")
+        rate.push(Decimal("0.01"), "test")
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
@@ -75,38 +77,19 @@ class TestYearlySinkingFundNode:
     async def test_computes_with_price(self):
         from houses.nodes.yearly_sinking_fund_node import YearlySinkingFundNode
 
-        price = UserInputNode[Money]("price_ys2", Money)
-        fin = UserInputNode[dict]("fin_ys2", dict)
+        price = UserInputNode[Money]("ys_price2", Money)
+        rate = UserInputNode("ys_rate2", Decimal)
         node = YearlySinkingFundNode(
             "ys2",
             rightmove_price=price,
-            financial_source=fin,
+            sinking_fund_rate_node=rate,
         )
         price.push(Money("500000", "GBP"), "test")
-        fin.push({"sinking_fund_rate": 0.01}, "test")
+        rate.push(Decimal("0.01"), "test")
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() == Money("5000", "GBP")
-
-
-class TestCommuteBreakdownNode:
-    @pytest.mark.asyncio
-    async def test_returns_defaults_when_no_commutes(self):
-        from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
-
-        persons = UserInputNode[list]("persons_cb", list)
-        selectors = {}
-        node = CommuteBreakdownNode(
-            "cb",
-            commute_selectors=selectors,
-            persons_source=persons,
-        )
-        persons.push([{"name": "Simon", "places_of_interest": []}], "test")
-        await flush_processor()
-        a = await node.attempt()
-        assert a.succeeded
-        assert a.value_or_none()["yearly_total_gbp"] == "0"
 
 
 class TestTotalMonthlyHousingCostNode:
@@ -114,22 +97,20 @@ class TestTotalMonthlyHousingCostNode:
     async def test_returns_zero_when_no_data(self):
         from houses.nodes.total_monthly_housing_cost_node import TotalMonthlyHousingCostNode
 
-        mg = UserInputNode[Money]("mg", Money)
-        sf = UserInputNode[Money]("sf", Money)
-        li = UserInputNode[Money]("li_tm", Money)
-        ri = UserInputNode[Money]("ri_tm", Money)
-        st = UserInputNode[str]("st_tm", str)
-        fin = UserInputNode[dict]("fin_tm", dict)
-        cb = UserInputNode[dict]("cb_tm", dict)
-        ct = UserInputNode[CouncilTaxInfo]("ct_tm", CouncilTaxInfo)
+        mg = UserInputNode[Money]("tmg", Money)
+        sf = UserInputNode[Money]("tsf", Money)
+        li = UserInputNode[Money]("tli", Money)
+        ri = UserInputNode[Money]("tri", Money)
+        st = UserInputNode[str]("tst", str)
+        cb = UserInputNode[dict]("tcb", dict)
+        ct = UserInputNode[CouncilTaxInfo]("tct", CouncilTaxInfo)
         node = TotalMonthlyHousingCostNode(
-            "tm",
+            "tmc",
             monthly_mortgage_node=mg,
             yearly_sinking_fund_node=sf,
             life_insurance_node=li,
             rental_income_node=ri,
             status_node=st,
-            financial_source=fin,
             commute_breakdown_node=cb,
             council_tax_node=ct,
         )
@@ -138,71 +119,45 @@ class TestTotalMonthlyHousingCostNode:
         li.push(Money("0", "GBP"), "test")
         ri.push(Money("0", "GBP"), "test")
         st.push("", "test")
-        fin.push({}, "test")
-        cb.push({}, "test")
-        ct.push(CouncilTaxInfo(), "test")
+        cb.push({"yearly_total_gbp": "0"}, "test")
+        ct.push(CouncilTaxInfo(yearly_cost=Money("0", "GBP")), "test")
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
         assert isinstance(a.value_or_none(), Money)
+        assert float(a.value_or_none().amount) == 0
 
     @pytest.mark.asyncio
-    async def test_includes_all_cost_components(self):
-        """Each cost component contributes to the total.
-        Replaces the old spreadsheet formula test that checked
-        named range references in VIEW_FORMULA_COLS."""
+    async def test_computes_total_from_components(self):
         from houses.nodes.total_monthly_housing_cost_node import TotalMonthlyHousingCostNode
 
-        mg = UserInputNode[Money]("mg2", Money)
-        sf = UserInputNode[Money]("sf2", Money)
-        li = UserInputNode[Money]("li2_tm", Money)
-        ri = UserInputNode[Money]("ri2_tm", Money)
-        st = UserInputNode[str]("st2_tm", str)
-        fin = UserInputNode[dict]("fin2", dict)
-        cb = UserInputNode[dict]("cb2", dict)
-        ct = UserInputNode[CouncilTaxInfo]("ct2", CouncilTaxInfo)
+        mg = UserInputNode[Money]("tmg2", Money)
+        sf = UserInputNode[Money]("tsf2", Money)
+        li = UserInputNode[Money]("tli2", Money)
+        ri = UserInputNode[Money]("tri2", Money)
+        st = UserInputNode[str]("tst2", str)
+        cb = UserInputNode[dict]("tcb2", dict)
+        ct = UserInputNode[CouncilTaxInfo]("tct2", CouncilTaxInfo)
         node = TotalMonthlyHousingCostNode(
-            "tm2",
+            "tmc2",
             monthly_mortgage_node=mg,
             yearly_sinking_fund_node=sf,
             life_insurance_node=li,
             rental_income_node=ri,
             status_node=st,
-            financial_source=fin,
             commute_breakdown_node=cb,
             council_tax_node=ct,
         )
-
-        # Mortgage alone contributes 1000
-        mg.push(Money("1000", "GBP"), "test")
-        sf.push(Money("0", "GBP"), "test")
-        li.push(Money("0", "GBP"), "test")
+        mg.push(Money("2000", "GBP"), "test")
+        sf.push(Money("6000", "GBP"), "test")
+        li.push(Money("50", "GBP"), "test")
         ri.push(Money("0", "GBP"), "test")
         st.push("", "test")
-        fin.push({}, "test")
-        cb.push({}, "test")
-        ct.push(CouncilTaxInfo(), "test")
+        cb.push({"yearly_total_gbp": "1200"}, "test")
+        ct.push(CouncilTaxInfo(yearly_cost=Money("2400", "GBP")), "test")
         await flush_processor()
         a = await node.attempt()
-        assert a.value_or_none() == Money("1000", "GBP")
-
-        # Sinking fund: 1200 / 12 * 2 / 3 = 66.67
-        sf.push(Money("1200", "GBP"), "test")
-        await flush_processor()
-        a = await node.attempt()
-        expected = round(1000.0 + 1200.0 / 12 * 2 / 3, 2)
-        assert float(a.value_or_none().amount) == pytest.approx(expected, abs=0.01)
-
-        # Commute: yearly_total_gbp = 4600 / 12 = 383.33
-        cb.push({"yearly_total_gbp": 4600.0}, "test")
-        await flush_processor()
-        a = await node.attempt()
-        expected = round(1000.0 + 1200.0 / 12 * 2 / 3 + 4600.0 / 12, 2)
-        assert float(a.value_or_none().amount) == pytest.approx(expected, abs=0.01)
-
-        # Council tax: yearly_cost 1800 / 12 = 150
-        ct.push(CouncilTaxInfo(band="D", yearly_cost=Money("1800", "GBP")), "test")
-        await flush_processor()
-        a = await node.attempt()
-        expected = round(1000.0 + 1200.0 / 12 * 2 / 3 + 4600.0 / 12 + 1800.0 / 12, 2)
+        assert a.succeeded
+        # 2000 + (6000/12*2/3) + 50 + (1200/12) + (2400/12) - 0
+        expected = 2000 + 333.33 + 50 + 100 + 200
         assert float(a.value_or_none().amount) == pytest.approx(expected, abs=0.01)

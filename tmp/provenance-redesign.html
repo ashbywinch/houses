@@ -1,0 +1,1995 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Provenance Redesign — Prototype</title>
+<style>
+/* ══════════════════════════════════════════════════════════
+   CSS Variables — mirrors App.vue
+   ══════════════════════════════════════════════════════════ */
+:root {
+  /* Slate palette */
+  --slate-50: #f8fafc;
+  --slate-100: #f1f5f9;
+  --slate-200: #e2e8f0;
+  --slate-300: #cbd5e1;
+  --slate-400: #94a3b8;
+  --slate-500: #64748b;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1e293b;
+  --slate-900: #0f172a;
+
+  /* Semantic colors */
+  --green: #16a34a;
+  --green-bg: #dcfce7;
+  --green-text: #15803d;
+  --orange: #f97316;
+  --orange-bg: #ffedd5;
+  --orange-text: #ea580c;
+  --red: #dc2626;
+  --red-bg: #fee2e2;
+  --red-text: #b91c1c;
+  --blue: #3b82f6;
+  --blue-bg: #dbeafe;
+  --blue-text: #2563eb;
+  --amber: #f59e0b;
+  --amber-bg: #fef3c7;
+  --amber-text: #92400e;
+  --purple: #8b5cf6;
+  --purple-bg: #ede9fe;
+  --purple-text: #6d28d9;
+
+  /* Neutrals */
+  --text: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --border: #e2e8f0;
+  --divider: #f1f5f9;
+  --card-bg: #fff;
+  --page-bg: #f8fafc;
+
+  /* Typography */
+  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", monospace;
+  --fs-xs: 0.6875rem;
+  --fs-sm: 0.8125rem;
+  --fs-base: 0.9375rem;
+  --fs-lg: 1.0625rem;
+  --fs-xl: 1.25rem;
+  --fs-2xl: 1.5rem;
+  --lh-tight: 1.25;
+  --lh: 1.5;
+  --lh-loose: 1.75;
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* Spacing (4px base) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+
+  /* Radii */
+  --radius-sm: 4px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-full: 999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
+  --shadow: 0 2px 8px rgba(0,0,0,0.08);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.10);
+
+  /* Transitions */
+  --transition: 180ms ease-in-out;
+}
+
+/* ══════════════════════════════════════════════════════════
+   Reset & Base
+   ══════════════════════════════════════════════════════════ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--font);
+  color: var(--text);
+  background: var(--page-bg);
+  line-height: var(--lh);
+  min-height: 100vh;
+  padding: var(--sp-6);
+}
+button { font: inherit; cursor: pointer; border: none; background: none; }
+a { color: var(--blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ══════════════════════════════════════════════════════════
+   Layout
+   ══════════════════════════════════════════════════════════ */
+.page-header {
+  max-width: 960px;
+  margin: 0 auto var(--sp-8);
+}
+.page-header h1 {
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-bold);
+  color: var(--slate-900);
+  margin-bottom: var(--sp-1);
+}
+.page-header p {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.view-tabs {
+  display: flex;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-6);
+  max-width: 960px;
+  margin-left: auto;
+  margin-right: auto;
+  border-bottom: 2px solid var(--slate-200);
+  padding-bottom: 0;
+}
+.view-tab {
+  padding: var(--sp-3) var(--sp-5);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: all var(--transition);
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.view-tab:hover { color: var(--text-secondary); }
+.view-tab[aria-selected="true"] {
+  color: var(--blue);
+  border-bottom-color: var(--blue);
+}
+.view-tab__count {
+  font-size: 10px;
+  font-weight: var(--fw-bold);
+  background: var(--slate-100);
+  color: var(--slate-500);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  min-width: 18px;
+  text-align: center;
+}
+
+.view-panel { display: none; max-width: 960px; margin: 0 auto; }
+.view-panel.active { display: block; }
+
+/* ══════════════════════════════════════════════════════════
+   Provenance Card — the main container
+   ══════════════════════════════════════════════════════════ */
+.prov-card {
+  background: var(--card-bg);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  margin-bottom: var(--sp-6);
+}
+
+/* ── Trust Summary Bar ── */
+.trust-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-6);
+  border-bottom: 1px solid var(--border);
+  background: var(--slate-50);
+  flex-wrap: wrap;
+}
+.trust-bar__result {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.trust-bar__label {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: var(--fw-semibold);
+}
+.trust-bar__value {
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+  color: var(--slate-900);
+  line-height: var(--lh-tight);
+}
+.trust-bar__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  margin-left: auto;
+}
+.trust-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--radius-full);
+}
+.trust-indicator--fresh {
+  background: var(--green-bg);
+  color: var(--green-text);
+}
+.trust-indicator--aging {
+  background: var(--amber-bg);
+  color: var(--amber-text);
+}
+.trust-indicator--stale {
+  background: var(--red-bg);
+  color: var(--red-text);
+}
+.trust-indicator__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: currentColor;
+}
+.trust-bar__sources {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.trust-bar__explanation {
+  width: 100%;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  line-height: var(--lh);
+  margin-top: var(--sp-1);
+}
+
+/* ── View Toggle (summary / story / detail) ── */
+.prov-view-toggle {
+  display: flex;
+  gap: 0;
+  padding: 0 var(--sp-6);
+  border-bottom: 1px solid var(--border);
+}
+.prov-view-toggle__btn {
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: all var(--transition);
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+}
+.prov-view-toggle__btn:hover { color: var(--text-secondary); }
+.prov-view-toggle__btn[aria-selected="true"] {
+  color: var(--blue);
+  border-bottom-color: var(--blue);
+}
+
+/* ── Story Flow ── */
+.story-flow {
+  padding: var(--sp-6);
+}
+.story-flow__section {
+  margin-bottom: var(--sp-6);
+}
+.story-flow__section:last-child { margin-bottom: 0; }
+.story-flow__heading {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: var(--sp-3);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.story-flow__heading-line {
+  flex: 1;
+  height: 1px;
+  background: var(--slate-200);
+}
+
+/* ── Flow Cards (individual steps in the flow) ── */
+.flow-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.flow-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: box-shadow var(--transition);
+}
+.flow-card:hover {
+  box-shadow: var(--shadow-sm);
+}
+.flow-card__icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.flow-card__icon--api { background: var(--orange-bg); color: var(--orange); }
+.flow-card__icon--calc { background: var(--purple-bg); color: var(--purple); }
+.flow-card__icon--user { background: var(--blue-bg); color: var(--blue); }
+.flow-card__icon--config { background: var(--amber-bg); color: var(--amber); }
+.flow-card__icon--geocode { background: var(--green-bg); color: var(--green); }
+.flow-card__icon--db { background: var(--slate-100); color: var(--slate-500); }
+.flow-card__icon--result {
+  background: var(--slate-900);
+  color: #fff;
+  font-weight: var(--fw-bold);
+  font-size: 13px;
+}
+.flow-card__body {
+  flex: 1;
+  min-width: 0;
+}
+.flow-card__title {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--slate-800);
+  margin-bottom: 2px;
+  line-height: var(--lh-tight);
+}
+.flow-card__desc {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  line-height: var(--lh);
+}
+.flow-card__link {
+  font-size: var(--fs-xs);
+  color: var(--blue);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: var(--sp-1);
+}
+.flow-card__freshness {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.flow-card__freshness--fresh { color: var(--green); }
+.flow-card__freshness--aging { color: var(--amber-text); }
+.flow-card__freshness--stale { color: var(--red); }
+
+/* ── Flow Connector (arrow between cards) ── */
+.flow-connector {
+  display: flex;
+  justify-content: center;
+  padding: var(--sp-1) 0;
+  color: var(--slate-300);
+}
+.flow-connector svg { width: 16px; height: 16px; }
+
+/* ── Formula Explanation ── */
+.formula-explain {
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--slate-50);
+  border: 1px solid var(--slate-200);
+  border-radius: var(--radius);
+  margin: var(--sp-3) 0;
+}
+.formula-explain__title {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  color: var(--slate-600);
+  margin-bottom: var(--sp-2);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.formula-explain__text {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  line-height: var(--lh-loose);
+}
+.formula-explain__steps {
+  list-style: none;
+  margin-top: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.formula-explain__step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  line-height: var(--lh);
+}
+.formula-explain__step-num {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--slate-200);
+  color: var(--slate-600);
+  font-size: 11px;
+  font-weight: var(--fw-bold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.formula-explain__step-label {
+  font-weight: var(--fw-medium);
+  color: var(--slate-700);
+}
+.formula-explain__step-value {
+  font-family: var(--font-mono);
+  font-weight: var(--fw-semibold);
+  color: var(--slate-800);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.formula-explain__result {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 2px solid var(--slate-200);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  color: var(--slate-900);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.formula-explain__result-value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-base);
+}
+
+/* ── Shared Reference Library ── */
+.shared-refs {
+  padding: var(--sp-4) var(--sp-6);
+  background: var(--slate-50);
+  border-top: 1px solid var(--border);
+}
+.shared-refs__title {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: var(--sp-3);
+}
+.shared-refs__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--sp-3);
+}
+.shared-ref {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+}
+.shared-ref__icon {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+.shared-ref__label {
+  font-weight: var(--fw-semibold);
+  color: var(--slate-700);
+}
+.shared-ref__freshness {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ── Comparison View ── */
+.comparison-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-6);
+  padding: var(--sp-6);
+}
+@media (max-width: 768px) {
+  .comparison-layout {
+    grid-template-columns: 1fr;
+  }
+}
+.comparison-column {
+  min-width: 0;
+}
+.comparison-column__title {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  color: var(--slate-700);
+  margin-bottom: var(--sp-4);
+  padding-bottom: var(--sp-2);
+  border-bottom: 2px solid var(--slate-200);
+}
+
+/* ── Detail View (full tree, deduplicated) ── */
+.detail-view {
+  padding: var(--sp-6);
+}
+.detail-tree {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.detail-node {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  transition: background var(--transition);
+}
+.detail-node:hover { background: var(--slate-50); }
+.detail-node--indent-1 { padding-left: calc(var(--sp-3) + 20px); }
+.detail-node--indent-2 { padding-left: calc(var(--sp-3) + 40px); }
+.detail-node--indent-3 { padding-left: calc(var(--sp-3) + 60px); }
+.detail-node--indent-4 { padding-left: calc(var(--sp-3) + 80px); }
+.detail-node__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+.detail-node__label {
+  font-weight: var(--fw-semibold);
+  color: var(--slate-700);
+}
+.detail-node__desc {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+.detail-node__ref {
+  font-size: 10px;
+  color: var(--blue);
+  background: var(--blue-bg);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  margin-left: var(--sp-2);
+  white-space: nowrap;
+}
+.detail-node__freshness {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.detail-node__link {
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+}
+.detail-node__link:hover { color: var(--blue); }
+
+/* ── Reference Badge (inline shared ref) ── */
+.ref-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: var(--fw-semibold);
+  color: var(--blue);
+  background: var(--blue-bg);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ref-badge:hover { background: #bfdbfe; }
+.ref-badge__arrow { font-size: 8px; }
+
+/* ── Legend ── */
+.legend {
+  display: flex;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-6);
+  background: var(--slate-50);
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.legend__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+}
+
+/* ── Summary view ── */
+.summary-view {
+  padding: var(--sp-6);
+}
+.summary-view__narrative {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  line-height: var(--lh-loose);
+  max-width: 600px;
+}
+.summary-view__sources {
+  display: flex;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+  flex-wrap: wrap;
+}
+.summary-view__source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--slate-50);
+  border: 1px solid var(--slate-200);
+  border-radius: var(--radius-full);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  color: var(--slate-600);
+}
+.summary-view__source-chip .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+}
+
+/* ── Accessibility ── */
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* ── Section label on demo page ── */
+.demo-section {
+  max-width: 960px;
+  margin: 0 auto var(--sp-8);
+}
+.demo-section__title {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+  color: var(--slate-600);
+  margin-bottom: var(--sp-2);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--slate-200);
+}
+.demo-section__subtitle {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  margin-bottom: var(--sp-4);
+}
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  body { padding: var(--sp-4); }
+  .trust-bar { flex-direction: column; align-items: flex-start; }
+  .trust-bar__meta { margin-left: 0; }
+  .flow-card { flex-direction: column; gap: var(--sp-2); }
+  .flow-card__freshness { align-self: flex-start; }
+  .comparison-layout { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════
+     Page Header & Tab Navigation
+     ══════════════════════════════════════════════════════════ -->
+<div class="page-header">
+  <h1>Where does this number come from?</h1>
+  <p>Click any field to see how it was calculated, which data we used, and how fresh it is.</p>
+</div>
+
+<div class="view-tabs" role="tablist" aria-label="Provenance views">
+  <button class="view-tab" role="tab" aria-selected="true" data-tab="simple" id="tab-simple" aria-controls="panel-simple" tabindex="0">
+    Simple
+    <span class="view-tab__count">1</span>
+  </button>
+  <button class="view-tab" role="tab" aria-selected="false" data-tab="medium" id="tab-medium" aria-controls="panel-medium" tabindex="-1">
+    Medium
+    <span class="view-tab__count">2</span>
+  </button>
+  <button class="view-tab" role="tab" aria-selected="false" data-tab="complex" id="tab-complex" aria-controls="panel-complex" tabindex="-1">
+    Complex
+    <span class="view-tab__count">3</span>
+  </button>
+  <button class="view-tab" role="tab" aria-selected="false" data-tab="compare" id="tab-compare" aria-controls="panel-compare" tabindex="-1">
+    Compare
+    <span class="view-tab__count">2</span>
+  </button>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     Panel 1: Simple — EPC Rating
+     ══════════════════════════════════════════════════════════ -->
+<div class="view-panel active" id="panel-simple" role="tabpanel" aria-labelledby="tab-simple">
+
+  <div class="prov-card">
+    <!-- Trust Bar -->
+    <div class="trust-bar">
+      <div class="trust-bar__result">
+        <span class="trust-bar__label">Energy rating</span>
+        <span class="trust-bar__value">C (68/100)</span>
+      </div>
+      <div class="trust-bar__meta">
+        <span class="trust-indicator trust-indicator--fresh" aria-label="Data is fresh: updated yesterday">
+          <span class="trust-indicator__dot"></span>
+          Updated yesterday
+        </span>
+        <span class="trust-bar__sources">2 data sources</span>
+      </div>
+      <div class="trust-bar__explanation">
+        This is the property's Energy Performance Certificate — an official government rating
+        of how energy-efficient the home is. A "C" rating means typical energy costs.
+      </div>
+    </div>
+
+    <!-- View Toggle -->
+    <div class="prov-view-toggle" role="tablist" aria-label="Detail level">
+      <button class="prov-view-toggle__btn" role="tab" aria-selected="true" data-detail="summary" data-parent="simple" tabindex="0">Summary</button>
+      <button class="prov-view-toggle__btn" role="tab" aria-selected="false" data-detail="story" data-parent="simple" tabindex="-1">How we got this</button>
+      <button class="prov-view-toggle__btn" role="tab" aria-selected="false" data-detail="full" data-parent="simple" tabindex="-1">Full detail</button>
+    </div>
+
+    <!-- Summary View -->
+    <div class="summary-view detail-level active" data-level="summary" data-parent="simple">
+      <div class="summary-view__narrative">
+        We looked up the property's Energy Performance Certificate from the
+        <strong>gov.uk EPC Register</strong> using its address and postcode.
+        The certificate was issued when the property was last assessed.
+      </div>
+      <div class="summary-view__sources">
+        <span class="summary-view__source-chip">
+          <span class="dot" style="background: var(--orange)"></span>
+          gov.uk EPC Register
+        </span>
+        <span class="summary-view__source-chip">
+          <span class="dot" style="background: var(--blue)"></span>
+          Your property address
+        </span>
+      </div>
+    </div>
+
+    <!-- Story View -->
+    <div class="story-flow detail-level" data-level="story" data-parent="simple" style="display:none">
+      <div class="story-flow__section">
+        <div class="story-flow__heading">
+          <span>1. What we started with</span>
+          <span class="story-flow__heading-line"></span>
+        </div>
+        <div class="flow-cards">
+          <div class="flow-card">
+            <div class="flow-card__icon flow-card__icon--user" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title">Your property address</div>
+              <div class="flow-card__desc">The address you entered when you added this property to your shortlist.</div>
+            </div>
+            <span class="flow-card__freshness flow-card__freshness--fresh">29 Jul, 2:00 pm</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-connector" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+      </div>
+
+      <div class="story-flow__section">
+        <div class="story-flow__heading">
+          <span>2. Where we looked it up</span>
+          <span class="story-flow__heading-line"></span>
+        </div>
+        <div class="flow-cards">
+          <div class="flow-card">
+            <div class="flow-card__icon flow-card__icon--api" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title">gov.uk EPC Register</div>
+              <div class="flow-card__desc">Official government database of Energy Performance Certificates for UK properties.</div>
+              <a class="flow-card__link" href="https://www.epcregister.com/" target="_blank" rel="noopener">
+                epcregister.com
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </a>
+            </div>
+            <span class="flow-card__freshness flow-card__freshness--fresh">29 Jul, 2:10 pm</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-connector" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+      </div>
+
+      <div class="story-flow__section">
+        <div class="story-flow__heading">
+          <span>3. The result</span>
+          <span class="story-flow__heading-line"></span>
+        </div>
+        <div class="flow-cards">
+          <div class="flow-card" style="border-color: var(--slate-300); background: var(--slate-50);">
+            <div class="flow-card__icon flow-card__icon--result" aria-hidden="true">C</div>
+            <div class="flow-card__body">
+              <div class="flow-card__title">EPC Rating: C (68/100)</div>
+              <div class="flow-card__desc">This is the official energy efficiency rating. Ratings go from A (most efficient) to G (least efficient). A "C" is typical for properties of this age and type.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Full Detail View -->
+    <div class="detail-view detail-level" data-level="full" data-parent="simple" style="display:none">
+      <div class="detail-tree" role="tree" aria-label="EPC provenance detail">
+        <div class="detail-node" role="treeitem" aria-expanded="true">
+          <span class="detail-node__dot" style="background: var(--orange)"></span>
+          <span class="detail-node__label">EPC API</span>
+          <span class="detail-node__desc">— Energy Performance Certificate from gov.uk register</span>
+          <a class="detail-node__link" href="https://www.epcregister.com/" target="_blank" rel="noopener" title="Open source">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          </a>
+          <span class="detail-node__freshness">29 Jul 2:10 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-1" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--blue)"></span>
+          <span class="detail-node__label">postcode</span>
+          <span class="detail-node__desc">— Your entered postcode</span>
+          <span class="detail-node__ref">Your input</span>
+          <span class="detail-node__freshness">29 Jul 2:15 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-1" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--purple)"></span>
+          <span class="detail-node__label">best_address</span>
+          <span class="detail-node__desc">— Best available address</span>
+          <span class="detail-node__freshness"></span>
+        </div>
+        <div class="detail-node detail-node--indent-2" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--blue)"></span>
+          <span class="detail-node__label">user_entered_address</span>
+          <span class="detail-node__ref">Your input</span>
+          <span class="detail-node__freshness">29 Jul 2:00 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-2" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--blue)"></span>
+          <span class="detail-node__label">rightmove_address</span>
+          <span class="detail-node__desc">— From Google Sheet</span>
+          <span class="detail-node__freshness">29 Jul 2:00 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-3" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--slate-500)"></span>
+          <span class="detail-node__label">Google Sheet</span>
+          <span class="detail-node__freshness">29 Jul 2:00 pm</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="legend">
+      <span class="legend__item"><span class="legend__dot" style="background: var(--orange)"></span> API</span>
+      <span class="legend__item"><span class="legend__dot" style="background: var(--purple)"></span> Calculation</span>
+      <span class="legend__item"><span class="legend__dot" style="background: var(--blue)"></span> Your input</span>
+      <span class="legend__item"><span class="legend__dot" style="background: var(--amber)"></span> Config</span>
+      <span class="legend__item"><span class="legend__dot" style="background: var(--green)"></span> Geocoding</span>
+      <span class="legend__item"><span class="legend__dot" style="background: var(--slate-500)"></span> Database</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     Panel 2: Medium — Commute Cost
+     ══════════════════════════════════════════════════════════ -->
+<div class="view-panel" id="panel-medium" role="tabpanel" aria-labelledby="tab-medium">
+
+  <div class="prov-card">
+    <!-- Trust Bar -->
+    <div class="trust-bar">
+      <div class="trust-bar__result">
+        <span class="trust-bar__label">Monthly commute cost</span>
+        <span class="trust-bar__value">£124.80</span>
+      </div>
+      <div class="trust-bar__meta">
+        <span class="trust-indicator trust-indicator--fresh" aria-label="Data is fresh">
+          <span class="trust-indicator__dot"></span>
+          Updated yesterday
+        </span>
+        <span class="trust-bar__sources">4 data sources, 1 calculation</span>
+      </div>
+      <div class="trust-bar__explanation">
+        This is the estimated monthly cost for both Simon and Lorena to commute
+        from the property to their offices. It combines TfL route data with
+        National Rail fare lookups.
+      </div>
+    </div>
+
+    <!-- View Toggle -->
+    <div class="prov-view-toggle" role="tablist" aria-label="Detail level">
+      <button class="prov-view-toggle__btn" role="tab" aria-selected="true" data-detail="summary" data-parent="medium" tabindex="0">Summary</button>
+      <button class="prov-view-toggle__btn" role="tab" aria-selected="false" data-detail="story" data-parent="medium" tabindex="-1">How we got this</button>
+      <button class="prov-view-toggle__btn" role="tab" aria-selected="false" data-detail="full" data-parent="medium" tabindex="-1">Full detail</button>
+    </div>
+
+    <!-- Summary View -->
+    <div class="summary-view detail-level active" data-level="summary" data-parent="medium">
+      <div class="summary-view__narrative">
+        We calculated commute costs for two people — Simon (to Pimlico) and
+        Lorena (to Liverpool Street). For each, we looked up the public transport
+        route on <strong>TfL</strong> and the train fare on <strong>National Rail</strong>.
+        Both routes start from the property's location.
+      </div>
+      <div class="summary-view__sources">
+        <span class="summary-view__source-chip">
+          <span class="dot" style="background: var(--orange)"></span>
+          TfL (Transport for London)
+        </span>
+        <span class="summary-view__source-chip">
+          <span class="dot" style="background: var(--orange)"></span>
+          National Rail
+        </span>
+        <span class="summary-view__source-chip">
+          <span class="dot" style="background: var(--blue)"></span>
+          Property location
+        </span>
+        <span class="summary-view__source-chip">
+          <span class="dot" style="background: var(--amber)"></span>
+          Office addresses
+        </span>
+      </div>
+    </div>
+
+    <!-- Story View -->
+    <div class="story-flow detail-level" data-level="story" data-parent="medium" style="display:none">
+
+      <!-- Per-person breakdown -->
+      <div class="story-flow__section">
+        <div class="story-flow__heading">
+          <span>1. The property location</span>
+          <span class="story-flow__heading-line"></span>
+        </div>
+        <div class="flow-cards">
+          <div class="flow-card">
+            <div class="flow-card__icon flow-card__icon--user" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title">Property location</div>
+              <div class="flow-card__desc">
+                We used the most accurate location available — a combination of your entered address,
+                the Rightmove listing address, and a geocoding lookup to get precise coordinates.
+              </div>
+            </div>
+            <span class="flow-card__freshness flow-card__freshness--fresh">29 Jul, 2:00 pm</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-connector" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+      </div>
+
+      <!-- Simon's commute -->
+      <div class="story-flow__section">
+        <div class="story-flow__heading">
+          <span>2. Simon's commute — to Pimlico</span>
+          <span class="story-flow__heading-line"></span>
+        </div>
+        <div class="flow-cards">
+          <div class="flow-card">
+            <div class="flow-card__icon flow-card__icon--api" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title">TfL — Public transport route</div>
+              <div class="flow-card__desc">
+                Looked up the best public transport route from the property to Pimlico (Simon's office)
+                on the TfL Journey Planner API.
+              </div>
+              <a class="flow-card__link" href="https://api.tfl.gov.uk/" target="_blank" rel="noopener">
+                api.tfl.gov.uk
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </a>
+            </div>
+            <span class="flow-card__freshness flow-card__freshness--fresh">29 Jul, 2:30 pm</span>
+          </div>
+          <div class="flow-card">
+            <div class="flow-card__icon flow-card__icon--api" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title">National Rail — Train fare</div>
+              <div class="flow-card__desc">
+                Looked up the monthly rail fare for the route identified by TfL.
+              </div>
+              <a class="flow-card__link" href="https://www.nationalrail.co.uk/" target="_blank" rel="noopener">
+                nationalrail.co.uk
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </a>
+            </div>
+            <span class="flow-card__freshness flow-card__freshness--fresh">29 Jul, 3:00 pm</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-connector" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+      </div>
+
+      <!-- Lorena's commute -->
+      <div class="story-flow__section">
+        <div class="story-flow__heading">
+          <span>3. Lorena's commute — to Liverpool Street</span>
+          <span class="story-flow__heading-line"></span>
+        </div>
+        <div class="flow-cards">
+          <div class="flow-card">
+            <div class="flow-card__icon flow-card__icon--api" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title">TfL — Public transport route</div>
+              <div class="flow-card__desc">
+                Same process as Simon's commute, but looking up the route to Liverpool Street
+                (Lorena's office).
+              </div>
+              <a class="flow-card__link" href="https://api.tfl.gov.uk/" target="_blank" rel="noopener">
+                api.tfl.gov.uk
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </a>
+            </div>
+            <span class="flow-card__freshness flow-card__freshness--fresh">29 Jul, 2:30 pm</span>
+          </div>
+          <div class="flow-card">
+            <div class="flow-card__icon flow-card__icon--api" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title">National Rail — Train fare</div>
+              <div class="flow-card__desc">
+                Monthly rail fare for Lorena's route.
+              </div>
+              <a class="flow-card__link" href="https://www.nationalrail.co.uk/" target="_blank" rel="noopener">
+                nationalrail.co.uk
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </a>
+            </div>
+            <span class="flow-card__freshness flow-card__freshness--fresh">29 Jul, 3:00 pm</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-connector" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+      </div>
+
+      <!-- Final result -->
+      <div class="story-flow__section">
+        <div class="story-flow__heading">
+          <span>4. Combined total</span>
+          <span class="story-flow__heading-line"></span>
+        </div>
+        <div class="flow-cards">
+          <div class="flow-card" style="border-color: var(--slate-300); background: var(--slate-50);">
+            <div class="flow-card__icon flow-card__icon--result" aria-hidden="true">£</div>
+            <div class="flow-card__body">
+              <div class="flow-card__title">Monthly commute total: £124.80</div>
+              <div class="flow-card__desc">
+                Sum of Simon's and Lorena's monthly commute costs.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Full Detail -->
+    <div class="detail-view detail-level" data-level="full" data-parent="medium" style="display:none">
+      <div class="detail-tree" role="tree" aria-label="Commute cost detail">
+        <div class="detail-node" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--purple)"></span>
+          <span class="detail-node__label">commute_breakdown</span>
+          <span class="detail-node__freshness">29 Jul 2:30 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-1" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--orange)"></span>
+          <span class="detail-node__label">Simon/Office</span>
+          <span class="detail-node__freshness">29 Jul 2:30 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-2" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--orange)"></span>
+          <span class="detail-node__label">transit_result</span>
+          <span class="detail-node__ref">→ TfL route</span>
+          <span class="detail-node__freshness">29 Jul 2:30 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-3" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--purple)"></span>
+          <span class="detail-node__label">best_location</span>
+          <span class="detail-node__ref">shared</span>
+          <span class="detail-node__freshness"></span>
+        </div>
+        <div class="detail-node detail-node--indent-3" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--amber)"></span>
+          <span class="detail-node__label">Pimlico (Simon/Office)</span>
+          <span class="detail-node__freshness">Config</span>
+        </div>
+        <div class="detail-node detail-node--indent-2" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--orange)"></span>
+          <span class="detail-node__label">rail_fare</span>
+          <span class="detail-node__ref">→ National Rail</span>
+          <span class="detail-node__freshness">29 Jul 3:00 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-1" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--orange)"></span>
+          <span class="detail-node__label">Lorena/Office</span>
+          <span class="detail-node__freshness">29 Jul 2:30 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-2" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--orange)"></span>
+          <span class="detail-node__label">transit_result</span>
+          <span class="detail-node__ref">→ TfL route</span>
+          <span class="detail-node__freshness">29 Jul 2:30 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-3" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--purple)"></span>
+          <span class="detail-node__label">best_location</span>
+          <span class="detail-node__ref">shared</span>
+          <span class="detail-node__freshness"></span>
+        </div>
+        <div class="detail-node detail-node--indent-3" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--amber)"></span>
+          <span class="detail-node__label">Liverpool Street (Lorena/Office)</span>
+          <span class="detail-node__freshness">Config</span>
+        </div>
+        <div class="detail-node detail-node--indent-2" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--orange)"></span>
+          <span class="detail-node__label">rail_fare</span>
+          <span class="detail-node__ref">→ National Rail</span>
+          <span class="detail-node__freshness">29 Jul 3:00 pm</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <span class="legend__item"><span class="legend__dot" style="background: var(--orange)"></span> API</span>
+      <span class="legend__item"><span class="legend__dot" style="background: var(--purple)"></span> Calculation</span>
+      <span class="legend__item"><span class="legend__dot" style="background: var(--blue)"></span> Your input</span>
+      <span class="legend__item"><span class="legend__dot" style="background: var(--amber)"></span> Config</span>
+      <span class="legend__item"><span class="legend__dot" style="background: var(--green)"></span> Geocoding</span>
+      <span class="legend__item">
+        <span class="ref-badge" style="pointer-events:none">
+          shared <span class="ref-badge__arrow">↗</span>
+        </span>
+        Shown once, referenced elsewhere
+      </span>
+    </div>
+  </div>
+
+  <!-- Shared Reference Library -->
+  <div class="prov-card">
+    <div class="shared-refs">
+      <div class="shared-refs__title">Shared data sources (used by multiple calculations)</div>
+      <div class="shared-refs__grid">
+        <div class="shared-ref" tabindex="0" role="button" aria-label="Property location — used 4 times">
+          <span class="shared-ref__icon" style="background: var(--purple)"></span>
+          <span class="shared-ref__label">Property location</span>
+          <span class="shared-ref__freshness">29 Jul 2:00 pm</span>
+        </div>
+        <div class="shared-ref" tabindex="0" role="button" aria-label="Property address — used 3 times">
+          <span class="shared-ref__icon" style="background: var(--blue)"></span>
+          <span class="shared-ref__label">Property address</span>
+          <span class="shared-ref__freshness">29 Jul 2:00 pm</span>
+        </div>
+        <div class="shared-ref" tabindex="0" role="button" aria-label="Office addresses — used 2 times">
+          <span class="shared-ref__icon" style="background: var(--amber)"></span>
+          <span class="shared-ref__label">Office addresses</span>
+          <span class="shared-ref__freshness">Config</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     Panel 3: Complex — Total Monthly Housing Cost
+     ══════════════════════════════════════════════════════════ -->
+<div class="view-panel" id="panel-complex" role="tabpanel" aria-labelledby="tab-complex">
+
+  <div class="prov-card">
+    <!-- Trust Bar -->
+    <div class="trust-bar">
+      <div class="trust-bar__result">
+        <span class="trust-bar__label">Total monthly housing cost</span>
+        <span class="trust-bar__value">£2,917.15/mo</span>
+      </div>
+      <div class="trust-bar__meta">
+        <span class="trust-indicator trust-indicator--fresh" aria-label="Data is mostly fresh">
+          <span class="trust-indicator__dot"></span>
+          Most data from yesterday
+        </span>
+        <span class="trust-bar__sources">8 data sources, 6 calculations</span>
+      </div>
+      <div class="trust-bar__explanation">
+        This is your estimated total monthly housing cost. It includes the mortgage payment,
+        property maintenance fund, life insurance, commute costs, and council tax — minus
+        any rental income from a lodger.
+      </div>
+    </div>
+
+    <!-- View Toggle -->
+    <div class="prov-view-toggle" role="tablist" aria-label="Detail level">
+      <button class="prov-view-toggle__btn" role="tab" aria-selected="true" data-detail="summary" data-parent="complex" tabindex="0">Summary</button>
+      <button class="prov-view-toggle__btn" role="tab" aria-selected="false" data-detail="story" data-parent="complex" tabindex="-1">How we got this</button>
+      <button class="prov-view-toggle__btn" role="tab" aria-selected="false" data-detail="full" data-parent="complex" tabindex="-1">Full detail</button>
+    </div>
+
+    <!-- Summary View -->
+    <div class="summary-view detail-level active" data-level="summary" data-parent="complex">
+      <div class="summary-view__narrative">
+        Your total monthly cost breaks down into several parts. The biggest is the
+        <strong>mortgage payment of £2,305</strong>, calculated from the amount you need to borrow
+        (£415,000) at 4.5% interest over 25 years. On top of that, we add a property
+        maintenance fund (£305.56/mo), life insurance (£23/mo), your combined commute costs
+        (£124.80/mo), and council tax (£158.79/mo). We subtract any rental income you expect.
+      </div>
+      <div class="summary-view__sources">
+        <span class="summary-view__source-chip">
+          <span class="dot" style="background: var(--blue)"></span>
+          Rightmove listing
+        </span>
+        <span class="summary-view__source-chip">
+          <span class="dot" style="background: var(--amber)"></span>
+          Financial settings
+        </span>
+        <span class="summary-view__source-chip">
+          <span class="dot" style="background: var(--amber)"></span>
+          Household details
+        </span>
+        <span class="summary-view__source-chip">
+          <span class="dot" style="background: var(--orange)"></span>
+          TfL + National Rail
+        </span>
+        <span class="summary-view__source-chip">
+          <span class="dot" style="background: var(--orange)"></span>
+          gov.uk Council Tax
+        </span>
+        <span class="summary-view__source-chip">
+          <span class="dot" style="background: var(--blue)"></span>
+          Rental income (your estimate)
+        </span>
+      </div>
+    </div>
+
+    <!-- Story View -->
+    <div class="story-flow detail-level" data-level="story" data-parent="complex" style="display:none">
+
+      <!-- Step 1: Property price -->
+      <div class="story-flow__section">
+        <div class="story-flow__heading">
+          <span>1. What you told us</span>
+          <span class="story-flow__heading-line"></span>
+        </div>
+        <div class="flow-cards">
+          <div class="flow-card">
+            <div class="flow-card__icon flow-card__icon--user" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title">Property price from Rightmove</div>
+              <div class="flow-card__desc">The asking price shown on the Rightmove listing.</div>
+            </div>
+            <span class="flow-card__freshness flow-card__freshness--fresh">29 Jul 2:00 pm</span>
+          </div>
+          <div class="flow-card">
+            <div class="flow-card__icon flow-card__icon--user" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title">Your household details</div>
+              <div class="flow-card__desc">Names, existing home sale amounts, cash available, life insurance costs, and whether you currently own a property.</div>
+            </div>
+            <span class="flow-card__freshness flow-card__freshness--fresh">29 Jul 2:00 pm</span>
+          </div>
+          <div class="flow-card">
+            <div class="flow-card__icon flow-card__icon--config" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title">Financial settings</div>
+              <div class="flow-card__desc">Interest rate (4.5%), mortgage term (25 years), sinking fund rate (1%), and your share of the maintenance fund (two-thirds).</div>
+            </div>
+            <span class="flow-card__freshness">28 Jul 10:00 am</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-connector" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+      </div>
+
+      <!-- Step 2: How much to borrow -->
+      <div class="story-flow__section">
+        <div class="story-flow__heading">
+          <span>2. How much you need to borrow</span>
+          <span class="story-flow__heading-line"></span>
+        </div>
+
+        <!-- Formula explanation for mortgage required -->
+        <div class="formula-explain">
+          <div class="formula-explain__title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>
+            How we calculated your mortgage
+          </div>
+          <div class="formula-explain__text">
+            We start with the property price, add the costs you'll need to pay upfront
+            (stamp duty tax and renovation works), then subtract everything you already have
+            (equity from your existing homes and savings). The result is how much you need
+            to borrow from a lender.
+          </div>
+          <ol class="formula-explain__steps">
+            <li class="formula-explain__step">
+              <span class="formula-explain__step-num">1</span>
+              <span class="formula-explain__step-label">Property price</span>
+              <span class="formula-explain__step-value">£550,000</span>
+            </li>
+            <li class="formula-explain__step">
+              <span class="formula-explain__step-num">2</span>
+              <span class="formula-explain__step-label">+ Stamp duty (property purchase tax)</span>
+              <span class="formula-explain__step-value">£15,000</span>
+            </li>
+            <li class="formula-explain__step">
+              <span class="formula-explain__step-num">3</span>
+              <span class="formula-explain__step-label">+ Renovation works budget</span>
+              <span class="formula-explain__step-value">£50,000</span>
+            </li>
+            <li class="formula-explain__step">
+              <span class="formula-explain__step-num">4</span>
+              <span class="formula-explain__step-label">− Your total deposit (equity + savings)</span>
+              <span class="formula-explain__step-value">−£200,000</span>
+            </li>
+          </ol>
+          <div class="formula-explain__result">
+            <span>Amount to borrow</span>
+            <span class="formula-explain__result-value">£415,000</span>
+          </div>
+        </div>
+
+        <div class="flow-cards" style="margin-top: var(--sp-3);">
+          <div class="flow-card">
+            <div class="flow-card__icon flow-card__icon--calc" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title">Stamp duty calculated</div>
+              <div class="flow-card__desc">
+                Based on the £550,000 property price. As a non-first-time buyer,
+                the standard rate applies. This is a fixed calculation — no user input needed.
+              </div>
+            </div>
+            <span class="flow-card__freshness">29 Jul 2:20 pm</span>
+          </div>
+          <div class="flow-card">
+            <div class="flow-card__icon flow-card__icon--user" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title">Your combined deposit</div>
+              <div class="flow-card__desc">
+                Ashby: £150,000 from home sale + £30,000 cash. Simon: £0 from home sale + £20,000 cash.
+              </div>
+            </div>
+            <span class="flow-card__freshness">29 Jul 2:20 pm</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-connector" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+      </div>
+
+      <!-- Step 3: Monthly mortgage payment -->
+      <div class="story-flow__section">
+        <div class="story-flow__heading">
+          <span>3. Your monthly mortgage payment</span>
+          <span class="story-flow__heading-line"></span>
+        </div>
+
+        <div class="formula-explain">
+          <div class="formula-explain__title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>
+            How we calculated the monthly payment
+          </div>
+          <div class="formula-explain__text">
+            We took the amount you need to borrow and calculated the monthly repayment
+            at the interest rate and term in your financial settings. This is the standard
+            mortgage amortisation formula.
+          </div>
+          <ol class="formula-explain__steps">
+            <li class="formula-explain__step">
+              <span class="formula-explain__step-num">1</span>
+              <span class="formula-explain__step-label">Mortgage required</span>
+              <span class="formula-explain__step-value">£415,000</span>
+            </li>
+            <li class="formula-explain__step">
+              <span class="formula-explain__step-num">2</span>
+              <span class="formula-explain__step-label">At 4.5% interest over 25 years</span>
+              <span class="formula-explain__step-value"></span>
+            </li>
+          </ol>
+          <div class="formula-explain__result">
+            <span>Monthly mortgage payment</span>
+            <span class="formula-explain__result-value">£2,305/mo</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-connector" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+      </div>
+
+      <!-- Step 4: Other monthly costs -->
+      <div class="story-flow__section">
+        <div class="story-flow__heading">
+          <span>4. Other monthly costs</span>
+          <span class="story-flow__heading-line"></span>
+        </div>
+        <div class="flow-cards">
+          <div class="flow-card">
+            <div class="flow-card__icon flow-card__icon--calc" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title">Property maintenance fund</div>
+              <div class="flow-card__desc">
+                1% of the property price per year (£5,500/yr), divided by 12 months,
+                multiplied by your share (two-thirds). This covers ongoing repairs and improvements.
+              </div>
+            </div>
+            <span class="flow-card__freshness">29 Jul 2:25 pm</span>
+          </div>
+          <div class="flow-card">
+            <div class="flow-card__icon flow-card__icon--calc" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title">Life insurance</div>
+              <div class="flow-card__desc">
+                Combined monthly cost for both household members: Ashby (£15/mo) + Simon (£8/mo).
+              </div>
+            </div>
+            <span class="flow-card__freshness">29 Jul 2:20 pm</span>
+          </div>
+          <div class="flow-card">
+            <div class="flow-card__icon flow-card__icon--api" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title">Monthly commute cost</div>
+              <div class="flow-card__desc">
+                Calculated from TfL routes and National Rail fares (see Commute view for details).
+              </div>
+            </div>
+            <span class="flow-card__freshness flow-card__freshness--fresh">29 Jul 2:30 pm</span>
+          </div>
+          <div class="flow-card">
+            <div class="flow-card__icon flow-card__icon--api" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title">Council Tax</div>
+              <div class="flow-card__desc">
+                Looked up from the gov.uk Council Tax bands database using the property's postcode.
+              </div>
+              <a class="flow-card__link" href="https://www.gov.uk/council-tax-bands" target="_blank" rel="noopener">
+                gov.uk/council-tax-bands
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </a>
+            </div>
+            <span class="flow-card__freshness flow-card__freshness--fresh">29 Jul 2:10 pm</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-connector" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+      </div>
+
+      <!-- Step 5: Final total -->
+      <div class="story-flow__section">
+        <div class="story-flow__heading">
+          <span>5. Your total monthly cost</span>
+          <span class="story-flow__heading-line"></span>
+        </div>
+
+        <div class="formula-explain">
+          <div class="formula-explain__title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--purple)" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>
+            How we added it all up
+          </div>
+          <div class="formula-explain__text">
+            We sum all the monthly costs and subtract any rental income you expect
+            from letting out a room.
+          </div>
+          <ol class="formula-explain__steps">
+            <li class="formula-explain__step">
+              <span class="formula-explain__step-num">1</span>
+              <span class="formula-explain__step-label">Mortgage</span>
+              <span class="formula-explain__step-value">£2,305.00</span>
+            </li>
+            <li class="formula-explain__step">
+              <span class="formula-explain__step-num">2</span>
+              <span class="formula-explain__step-label">Maintenance fund (your share)</span>
+              <span class="formula-explain__step-value">£305.56</span>
+            </li>
+            <li class="formula-explain__step">
+              <span class="formula-explain__step-num">3</span>
+              <span class="formula-explain__step-label">Life insurance</span>
+              <span class="formula-explain__step-value">£23.00</span>
+            </li>
+            <li class="formula-explain__step">
+              <span class="formula-explain__step-num">4</span>
+              <span class="formula-explain__step-label">Commute costs</span>
+              <span class="formula-explain__step-value">£124.80</span>
+            </li>
+            <li class="formula-explain__step">
+              <span class="formula-explain__step-num">5</span>
+              <span class="formula-explain__step-label">Council Tax</span>
+              <span class="formula-explain__step-value">£158.79</span>
+            </li>
+            <li class="formula-explain__step">
+              <span class="formula-explain__step-num">6</span>
+              <span class="formula-explain__step-label">− Rental income</span>
+              <span class="formula-explain__step-value">−£0.00</span>
+            </li>
+          </ol>
+          <div class="formula-explain__result">
+            <span>Total monthly housing cost</span>
+            <span class="formula-explain__result-value">£2,917.15/mo</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Full Detail View -->
+    <div class="detail-view detail-level" data-level="full" data-parent="complex" style="display:none">
+      <div class="detail-tree" role="tree" aria-label="Monthly cost provenance detail">
+        <div class="detail-node" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--purple)"></span>
+          <span class="detail-node__label">total_monthly_cost</span>
+          <span class="detail-node__freshness">29 Jul 2:30 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-1" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--purple)"></span>
+          <span class="detail-node__label">monthly_mortgage</span>
+          <span class="detail-node__freshness">29 Jul 2:25 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-2" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--purple)"></span>
+          <span class="detail-node__label">mortgage_required</span>
+          <span class="detail-node__freshness">29 Jul 2:20 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-3" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--blue)"></span>
+          <span class="detail-node__label">rightmove_price</span>
+          <span class="detail-node__ref">shared</span>
+          <span class="detail-node__freshness">29 Jul 2:00 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-3" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--purple)"></span>
+          <span class="detail-node__label">stamp_duty</span>
+          <span class="detail-node__freshness">29 Jul 2:20 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-3" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--purple)"></span>
+          <span class="detail-node__label">total_works</span>
+          <span class="detail-node__freshness">29 Jul 2:20 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-3" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--purple)"></span>
+          <span class="detail-node__label">total_equity</span>
+          <span class="detail-node__freshness">29 Jul 2:20 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-3" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--amber)"></span>
+          <span class="detail-node__label">financial_settings</span>
+          <span class="detail-node__freshness">28 Jul 10:00 am</span>
+        </div>
+        <div class="detail-node detail-node--indent-1" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--purple)"></span>
+          <span class="detail-node__label">yearly_sinking_fund</span>
+          <span class="detail-node__freshness">29 Jul 2:25 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-2" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--blue)"></span>
+          <span class="detail-node__label">rightmove_price</span>
+          <span class="detail-node__ref">shared</span>
+          <span class="detail-node__freshness">29 Jul 2:00 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-1" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--purple)"></span>
+          <span class="detail-node__label">life_insurance_total</span>
+          <span class="detail-node__freshness">29 Jul 2:20 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-1" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--orange)"></span>
+          <span class="detail-node__label">commute_breakdown</span>
+          <span class="detail-node__ref">→ Commute view</span>
+          <span class="detail-node__freshness">29 Jul 2:30 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-1" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--orange)"></span>
+          <span class="detail-node__label">Council Tax</span>
+          <span class="detail-node__ref">→ gov.uk</span>
+          <span class="detail-node__freshness">29 Jul 2:10 pm</span>
+        </div>
+        <div class="detail-node detail-node--indent-1" role="treeitem">
+          <span class="detail-node__dot" style="background: var(--blue)"></span>
+          <span class="detail-node__label">rental_income</span>
+          <span class="detail-node__freshness">29 Jul 2:00 pm</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <span class="legend__item"><span class="legend__dot" style="background: var(--orange)"></span> API</span>
+      <span class="legend__item"><span class="legend__dot" style="background: var(--purple)"></span> Calculation</span>
+      <span class="legend__item"><span class="legend__dot" style="background: var(--blue)"></span> Your input</span>
+      <span class="legend__item"><span class="legend__dot" style="background: var(--amber)"></span> Config</span>
+      <span class="legend__item"><span class="legend__dot" style="background: var(--green)"></span> Geocoding</span>
+      <span class="legend__item">
+        <span class="ref-badge" style="pointer-events:none">
+          shared <span class="ref-badge__arrow">↗</span>
+        </span>
+        Shown once, referenced elsewhere
+      </span>
+    </div>
+  </div>
+
+  <!-- Shared Reference Library -->
+  <div class="prov-card">
+    <div class="shared-refs">
+      <div class="shared-refs__title">Shared data sources (used by multiple calculations)</div>
+      <div class="shared-refs__grid">
+        <div class="shared-ref" tabindex="0" role="button" aria-label="Property price from Rightmove — used 4 times">
+          <span class="shared-ref__icon" style="background: var(--blue)"></span>
+          <span class="shared-ref__label">Property price (Rightmove)</span>
+          <span class="shared-ref__freshness">29 Jul 2:00 pm</span>
+        </div>
+        <div class="shared-ref" tabindex="0" role="button" aria-label="Property location — used 4 times">
+          <span class="shared-ref__icon" style="background: var(--purple)"></span>
+          <span class="shared-ref__label">Property location</span>
+          <span class="shared-ref__freshness">29 Jul 2:00 pm</span>
+        </div>
+        <div class="shared-ref" tabindex="0" role="button" aria-label="Property address — used 3 times">
+          <span class="shared-ref__icon" style="background: var(--blue)"></span>
+          <span class="shared-ref__label">Property address</span>
+          <span class="shared-ref__freshness">29 Jul 2:00 pm</span>
+        </div>
+        <div class="shared-ref" tabindex="0" role="button" aria-label="Financial settings — used 3 times">
+          <span class="shared-ref__icon" style="background: var(--amber)"></span>
+          <span class="shared-ref__label">Financial settings</span>
+          <span class="shared-ref__freshness">28 Jul 10:00 am</span>
+        </div>
+        <div class="shared-ref" tabindex="0" role="button" aria-label="Household details — used 3 times">
+          <span class="shared-ref__icon" style="background: var(--amber)"></span>
+          <span class="shared-ref__label">Household details</span>
+          <span class="shared-ref__freshness">28 Jul 10:00 am</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     Panel 4: Comparison View
+     ══════════════════════════════════════════════════════════ -->
+<div class="view-panel" id="panel-compare" role="tabpanel" aria-labelledby="tab-compare">
+
+  <div class="prov-card">
+    <div class="trust-bar">
+      <div class="trust-bar__result">
+        <span class="trust-bar__label">Side-by-side comparison</span>
+        <span class="trust-bar__value">EPC Rating vs Monthly Commute</span>
+      </div>
+      <div class="trust-bar__meta">
+        <span class="trust-indicator trust-indicator--fresh" aria-label="Data is fresh">
+          <span class="trust-indicator__dot"></span>
+          Both updated yesterday
+        </span>
+      </div>
+      <div class="trust-bar__explanation">
+        Compare how two different values were calculated. Both use the same property
+        address and postcode, but pull from different data sources.
+      </div>
+    </div>
+
+    <div class="comparison-layout">
+      <!-- Column 1: EPC -->
+      <div class="comparison-column">
+        <div class="comparison-column__title">
+          <span style="display:inline-flex;align-items:center;gap:6px;">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;"></span>
+            EPC Rating
+          </span>
+          <span style="font-weight:400;color:var(--text-muted);font-size:var(--fs-xs);margin-left:var(--sp-2);">C (68/100)</span>
+        </div>
+        <div style="font-size:var(--fs-xs);color:var(--text-secondary);margin-bottom:var(--sp-4);line-height:var(--lh);">
+          Energy Performance Certificate from the government register. This tells you
+          how energy-efficient the home is and estimates typical energy costs.
+        </div>
+        <div class="flow-cards" style="gap:var(--sp-2);">
+          <div class="flow-card" style="padding:var(--sp-3) var(--sp-4);">
+            <div class="flow-card__icon flow-card__icon--user" style="width:28px;height:28px;font-size:12px;" aria-hidden="true">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title" style="font-size:var(--fs-xs);">Your property address</div>
+              <div class="flow-card__desc" style="font-size:11px;">Used to look up the EPC</div>
+            </div>
+            <span class="flow-card__freshness flow-card__freshness--fresh" style="font-size:10px;">29 Jul</span>
+          </div>
+          <div class="flow-card" style="padding:var(--sp-3) var(--sp-4);">
+            <div class="flow-card__icon flow-card__icon--api" style="width:28px;height:28px;font-size:12px;" aria-hidden="true">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title" style="font-size:var(--fs-xs);">gov.uk EPC Register</div>
+              <div class="flow-card__desc" style="font-size:11px;">Official government database</div>
+            </div>
+            <span class="flow-card__freshness flow-card__freshness--fresh" style="font-size:10px;">29 Jul</span>
+          </div>
+        </div>
+        <div style="margin-top:var(--sp-3);font-size:var(--fs-xs);color:var(--text-muted);">
+          <strong style="color:var(--slate-600);">Sources:</strong> 2 &nbsp;|&nbsp;
+          <strong style="color:var(--slate-600);">Calculations:</strong> 1
+        </div>
+      </div>
+
+      <!-- Divider -->
+      <div style="display:flex;align-items:flex-start;justify-content:center;padding-top:var(--sp-10);">
+        <div style="width:1px;height:100%;min-height:200px;background:var(--slate-200);position:relative;">
+          <span style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--card-bg);padding:var(--sp-1) var(--sp-2);font-size:10px;color:var(--text-muted);border:1px solid var(--slate-200);border-radius:var(--radius-full);white-space:nowrap;">vs</span>
+        </div>
+      </div>
+
+      <!-- Column 2: Commute -->
+      <div class="comparison-column">
+        <div class="comparison-column__title">
+          <span style="display:inline-flex;align-items:center;gap:6px;">
+            <span style="width:8px;height:8px;border-radius:50%;background:var(--orange);display:inline-block;"></span>
+            Monthly Commute Cost
+          </span>
+          <span style="font-weight:400;color:var(--text-muted);font-size:var(--fs-xs);margin-left:var(--sp-2);">£124.80</span>
+        </div>
+        <div style="font-size:var(--fs-xs);color:var(--text-secondary);margin-bottom:var(--sp-4);line-height:var(--lh);">
+          Combined commute costs for both household members. Uses TfL route data
+          and National Rail fares, calculated per person and summed.
+        </div>
+        <div class="flow-cards" style="gap:var(--sp-2);">
+          <div class="flow-card" style="padding:var(--sp-3) var(--sp-4);">
+            <div class="flow-card__icon flow-card__icon--user" style="width:28px;height:28px;font-size:12px;" aria-hidden="true">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title" style="font-size:var(--fs-xs);">Property location</div>
+              <div class="flow-card__desc" style="font-size:11px;">Same address as EPC lookup</div>
+            </div>
+            <span class="flow-card__freshness flow-card__freshness--fresh" style="font-size:10px;">29 Jul</span>
+          </div>
+          <div class="flow-card" style="padding:var(--sp-3) var(--sp-4);">
+            <div class="flow-card__icon flow-card__icon--api" style="width:28px;height:28px;font-size:12px;" aria-hidden="true">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title" style="font-size:var(--fs-xs);">TfL + National Rail</div>
+              <div class="flow-card__desc" style="font-size:11px;">Route + fare for each person</div>
+            </div>
+            <span class="flow-card__freshness flow-card__freshness--fresh" style="font-size:10px;">29 Jul</span>
+          </div>
+          <div class="flow-card" style="padding:var(--sp-3) var(--sp-4);">
+            <div class="flow-card__icon flow-card__icon--config" style="width:28px;height:28px;font-size:12px;" aria-hidden="true">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>
+            </div>
+            <div class="flow-card__body">
+              <div class="flow-card__title" style="font-size:var(--fs-xs);">Office addresses</div>
+              <div class="flow-card__desc" style="font-size:11px;">Pimlico + Liverpool Street</div>
+            </div>
+            <span class="flow-card__freshness" style="font-size:10px;">Config</span>
+          </div>
+        </div>
+        <div style="margin-top:var(--sp-3);font-size:var(--fs-xs);color:var(--text-muted);">
+          <strong style="color:var(--slate-600);">Sources:</strong> 4 &nbsp;|&nbsp;
+          <strong style="color:var(--slate-600);">Calculations:</strong> 1
+        </div>
+      </div>
+    </div>
+
+    <!-- Comparison Summary Table -->
+    <div style="padding:0 var(--sp-6) var(--sp-6);">
+      <table style="width:100%;border-collapse:collapse;font-size:var(--fs-xs);" aria-label="Comparison summary">
+        <thead>
+          <tr style="border-bottom:2px solid var(--slate-200);">
+            <th style="text-align:left;padding:var(--sp-2) var(--sp-3);color:var(--text-muted);font-weight:var(--fw-semibold);">Attribute</th>
+            <th style="text-align:left;padding:var(--sp-2) var(--sp-3);color:var(--text-muted);font-weight:var(--fw-semibold);">EPC Rating</th>
+            <th style="text-align:left;padding:var(--sp-2) var(--sp-3);color:var(--text-muted);font-weight:var(--fw-semibold);">Commute Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-bottom:1px solid var(--slate-100);">
+            <td style="padding:var(--sp-2) var(--sp-3);color:var(--text-secondary);">Data sources</td>
+            <td style="padding:var(--sp-2) var(--sp-3);font-weight:var(--fw-semibold);">2</td>
+            <td style="padding:var(--sp-2) var(--sp-3);font-weight:var(--fw-semibold);">4</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--slate-100);">
+            <td style="padding:var(--sp-2) var(--sp-3);color:var(--text-secondary);">Freshness</td>
+            <td style="padding:var(--sp-2) var(--sp-3);color:var(--green);">Yesterday</td>
+            <td style="padding:var(--sp-2) var(--sp-3);color:var(--green);">Yesterday</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--slate-100);">
+            <td style="padding:var(--sp-2) var(--sp-3);color:var(--text-secondary);">Has calculations</td>
+            <td style="padding:var(--sp-2) var(--sp-3);">No (direct lookup)</td>
+            <td style="padding:var(--sp-2) var(--sp-3);">Yes (per-person sum)</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--slate-100);">
+            <td style="padding:var(--sp-2) var(--sp-3);color:var(--text-secondary);">External links</td>
+            <td style="padding:var(--sp-2) var(--sp-3);"><a href="https://www.epcregister.com/" target="_blank" rel="noopener" style="font-size:var(--fs-xs);">epcregister.com</a></td>
+            <td style="padding:var(--sp-2) var(--sp-3);">
+              <a href="https://api.tfl.gov.uk/" target="_blank" rel="noopener" style="font-size:var(--fs-xs);">TfL</a>,
+              <a href="https://www.nationalrail.co.uk/" target="_blank" rel="noopener" style="font-size:var(--fs-xs);">National Rail</a>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:var(--sp-2) var(--sp-3);color:var(--text-secondary);">Shared with other fields</td>
+            <td style="padding:var(--sp-2) var(--sp-3);">Address, postcode</td>
+            <td style="padding:var(--sp-2) var(--sp-3);">Property location, address</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="legend">
+      <span class="legend__item"><span class="legend__dot" style="background: var(--orange)"></span> API</span>
+      <span class="legend__item"><span class="legend__dot" style="background: var(--purple)"></span> Calculation</span>
+      <span class="legend__item"><span class="legend__dot" style="background: var(--blue)"></span> Your input</span>
+      <span class="legend__item"><span class="legend__dot" style="background: var(--amber)"></span> Config</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     JavaScript — Tab switching & detail level toggling
+     ══════════════════════════════════════════════════════════ -->
+<script>
+(function() {
+  'use strict';
+
+  // ── Main tab switching ──
+  const tabs = document.querySelectorAll('.view-tab');
+  const panels = document.querySelectorAll('.view-panel');
+
+  function switchTab(targetTab) {
+    tabs.forEach(t => {
+      t.setAttribute('aria-selected', 'false');
+      t.setAttribute('tabindex', '-1');
+    });
+    panels.forEach(p => p.classList.remove('active'));
+
+    targetTab.setAttribute('aria-selected', 'true');
+    targetTab.setAttribute('tabindex', '0');
+    const panelId = 'panel-' + targetTab.dataset.tab;
+    document.getElementById(panelId).classList.add('active');
+  }
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => switchTab(tab));
+    tab.addEventListener('keydown', (e) => {
+      const tabsArr = Array.from(tabs);
+      const idx = tabsArr.indexOf(tab);
+      let next;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        next = tabsArr[(idx + 1) % tabsArr.length];
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        next = tabsArr[(idx - 1 + tabsArr.length) % tabsArr.length];
+      } else if (e.key === 'Home') {
+        next = tabsArr[0];
+      } else if (e.key === 'End') {
+        next = tabsArr[tabsArr.length - 1];
+      }
+      if (next) {
+        e.preventDefault();
+        switchTab(next);
+        next.focus();
+      }
+    });
+  });
+
+  // ── Detail level toggling (summary / story / full) ──
+  const detailBtns = document.querySelectorAll('.prov-view-toggle__btn');
+
+  detailBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const parent = btn.dataset.parent;
+      const level = btn.dataset.detail;
+
+      // Update button states
+      btn.closest('.prov-view-toggle').querySelectorAll('.prov-view-toggle__btn').forEach(b => {
+        b.setAttribute('aria-selected', 'false');
+        b.setAttribute('tabindex', '-1');
+      });
+      btn.setAttribute('aria-selected', 'true');
+      btn.setAttribute('tabindex', '0');
+
+      // Show/hide detail levels
+      document.querySelectorAll(`.detail-level[data-parent="${parent}"]`).forEach(el => {
+        el.style.display = el.dataset.level === level ? '' : 'none';
+        if (el.dataset.level === level) {
+          el.classList.add('active');
+        } else {
+          el.classList.remove('active');
+        }
+      });
+    });
+  });
+
+  // ── Keyboard navigation for shared references ──
+  document.querySelectorAll('.shared-ref').forEach(ref => {
+    ref.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        // In a real app, this would scroll to or highlight the referenced item
+        ref.style.outline = '2px solid var(--blue)';
+        setTimeout(() => ref.style.outline = '', 1500);
+      }
+    });
+  });
+
+})();
+</script>
+
+</body>
+</html>

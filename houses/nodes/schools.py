@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dag.attempt import Attempt, Provenance, SourceType
+from dag.attempt import Attempt, SourceType
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.geo import GeoPoint
@@ -80,14 +80,6 @@ class SecondarySchoolNode(DerivedNode[dict]):
     @property
     def provenance_source_type(self) -> SourceType:
         return SourceType.API
-
-    async def build_provenance(self):
-        return Provenance(
-            label="GIAS CSV",
-            url="https://get-information-schools.service.gov.uk/",
-            source_type=SourceType.API,
-            freshness=self._attempt.created_at,
-        )
 
 
 class SchoolLocationNode(DerivedNode[str]):

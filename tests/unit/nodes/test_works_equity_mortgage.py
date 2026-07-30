@@ -438,14 +438,14 @@ class TestMonthlyMortgagePaymentNode:
         )
 
         mr = UserInputNode[Money]("mmp1_mr", Money)
-        fin = UserInputNode[dict]("mmp1_fin", dict)
+        rate = UserInputNode("mmp1_rate", Decimal)
+        term = UserInputNode("mmp1_term", int)
         node = MonthlyMortgagePaymentNode(
-            "mmp1", mortgage_required_node=mr, financial_source=fin
+            "mmp1", mortgage_required_node=mr, mortgage_rate_node=rate, mortgage_term_node=term
         )
         mr.push(Money("0", "GBP"), "test")
-        fin.push(
-            {"mortgage_rate": 0.045, "mortgage_term_years": 30}, "test"
-        )
+        rate.push(Decimal("0.045"), "test")
+        term.push(30, "test")
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
@@ -458,14 +458,14 @@ class TestMonthlyMortgagePaymentNode:
         )
 
         mr = UserInputNode[Money]("mmp2_mr", Money)
-        fin = UserInputNode[dict]("mmp2_fin", dict)
+        rate = UserInputNode("mmp2_rate", Decimal)
+        term = UserInputNode("mmp2_term", int)
         node = MonthlyMortgagePaymentNode(
-            "mmp2", mortgage_required_node=mr, financial_source=fin
+            "mmp2", mortgage_required_node=mr, mortgage_rate_node=rate, mortgage_term_node=term
         )
         mr.push(Money("235000", "GBP"), "test")
-        fin.push(
-            {"mortgage_rate": 0.0495, "mortgage_term_years": 27}, "test"
-        )
+        rate.push(Decimal("0.0495"), "test")
+        term.push(27, "test")
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
@@ -480,9 +480,10 @@ class TestMonthlyMortgagePaymentNode:
         )
 
         mr = UserInputNode[Money]("mmp3_mr", Money)
-        fin = UserInputNode[dict]("mmp3_fin", dict)
+        rate = UserInputNode("mmp3_rate", Decimal)
+        term = UserInputNode("mmp3_term", int)
         node = MonthlyMortgagePaymentNode(
-            "mmp3", mortgage_required_node=mr, financial_source=fin
+            "mmp3", mortgage_required_node=mr, mortgage_rate_node=rate, mortgage_term_node=term
         )
         deps = node._get_active_deps()
         dep_ids = {d._id for d in deps}
@@ -516,11 +517,13 @@ class TestMonthlyMortgagePaymentNode:
             total_works_node=tw_node,
             total_equity_node=te,
         )
-        fin = UserInputNode[dict]("mmp4_fin", dict)
+        rate = UserInputNode("mmp4_rate", Decimal)
+        term = UserInputNode("mmp4_term", int)
         node = MonthlyMortgagePaymentNode(
             "mmp4",
             mortgage_required_node=mr_node,
-            financial_source=fin,
+            mortgage_rate_node=rate,
+            mortgage_term_node=term,
         )
 
         persons.push(
@@ -534,9 +537,8 @@ class TestMonthlyMortgagePaymentNode:
         price.push(Money("500000", "GBP"), "test")
         sd.push(Money("15000", "GBP"), "test")
         te.push(Money("477000", "GBP"), "test")
-        fin.push(
-            {"mortgage_rate": 0.0495, "mortgage_term_years": 27}, "test"
-        )
+        rate.push(Decimal("0.0495"), "test")
+        term.push(27, "test")
         await flush_processor()
         a = await node.attempt()
         assert a.impossible
@@ -571,7 +573,7 @@ class TestTotalMonthlyHousingCostImpossible:
             life_insurance_node=li,
             rental_income_node=ri,
             status_node=st,
-            financial_source=fin,
+
             commute_breakdown_node=cb,
             council_tax_node=ct,
         )

@@ -366,7 +366,16 @@ async def put_persons(body: list = Body()):  # noqa: B008
 
 @api_router.patch("/settings/financial")
 async def patch_financial(body: dict):
-    get_services().financial_source.push(body, "user")
+    from houses.nodes.settings_node import API_KEY_TO_NODE
+
+    svc = get_services()
+    # Push to individual nodes for provenance tracking
+    for api_key, value in body.items():
+        node_id = API_KEY_TO_NODE.get(api_key)
+        if node_id is not None and node_id in svc.setting_nodes:
+            svc.setting_nodes[node_id].push(value, "user")
+    # Also push to legacy blob for backward compat
+    svc.financial_source.push(body, "user")
     return {"status": "ok"}
 
 

@@ -4,6 +4,10 @@ The DAG (directed acyclic graph) model manages property data as a set of
 interconnected **nodes**, each with a specific **kind** that determines how
 its value is resolved.
 
+> **Library reference:** The `dag/` library that powers this model is documented
+> in [docs/dag-library.md](dag-library.md) — `Node`, `Attempt`, `Provenance`,
+> `Signal`/`Slot`, scheduler, and persistence layer.
+
 ```
 source ────► user_input ──► derived ──► display
 ```

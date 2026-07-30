@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Generic, TypeVar
+from datetime import UTC, datetime
 
 from pydantic_core import core_schema
 
@@ -98,7 +99,8 @@ class UserInputNode(Node[T], Generic[T]):
 
         if not _per.testing and "/" in node_id:
             rid = node_id.split("/")[0]
-            if not rid.isdigit():
+            # Allow known non-property prefixes (settings, global config nodes, etc.)
+            if not rid.isdigit() and rid not in ("settings",):
                 raise ValueError(
                     f"Blocked node creation: RID {rid!r} (from node_id {node_id!r}) "
                     f"contains non-digit characters. Property RIDs must be numeric.\n"
@@ -111,6 +113,7 @@ class UserInputNode(Node[T], Generic[T]):
                     f"be run via pytest with standard isolation fixtures.\n"
                 )
         self._value: T | None = None
+        self._push_timestamp: datetime | None = None
         self._source_label: str = ""
         loaded = self._load_attempt_from_db()
         if loaded is not None and loaded.succeeded:
@@ -135,6 +138,7 @@ class UserInputNode(Node[T], Generic[T]):
                 (e.g. ``"Rightmove"``, ``"User correction"``, ``"TfL API"``).
         """
         self._value = self._adapter.validate_python(value)
+        self._push_timestamp = datetime.now(UTC)
         self._source_label = source_label
 
         # Reject source labels that indicate test data leaking into the
@@ -174,7 +178,12 @@ class UserInputNode(Node[T], Generic[T]):
         return Attempt.pending()
 
     async def build_provenance(self) -> Provenance:
-        return Provenance(label=self._source_label, value=self._value, source_type=SourceType.USER)
+        return Provenance(
+            label=self._source_label,
+            value=self._value,
+            source_type=SourceType.USER,
+            freshness=self._push_timestamp,
+        )
 
     async def to_json_value(self) -> dict[str, Any]:
         """Return a JSON-safe dict without provenance."""

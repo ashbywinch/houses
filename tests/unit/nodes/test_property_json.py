@@ -300,6 +300,13 @@ class TestFinancialSettingsPropagation:
         new_financials = dict(fin1)
         new_financials["mortgage_rate"] = 0.99
         get_services().financial_source.push(new_financials, "user")
+        # Also push to individual setting nodes for the expression system
+        from houses.nodes.settings_node import API_KEY_TO_NODE
+        svc = get_services()
+        for api_key, val in new_financials.items():
+            nid = API_KEY_TO_NODE.get(api_key)
+            if nid and nid in svc.setting_nodes:
+                svc.setting_nodes[nid].push(val, "user")
 
         await flush_processor()
         await flush_processor()

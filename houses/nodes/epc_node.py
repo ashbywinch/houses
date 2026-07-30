@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dag.attempt import Attempt, Provenance, SourceType
+from dag.attempt import Attempt, SourceType
 from dag.derived_node import DerivedNode
 from houses.council_tax_info import CouncilTaxInfo
 from houses.services_provider import get_services
@@ -24,14 +24,6 @@ class EpcNode(DerivedNode[dict]):
     @property
     def provenance_source_type(self) -> SourceType:
         return SourceType.API
-
-    async def build_provenance(self):
-        return Provenance(
-            label="EPC API",
-            url="https://www.epcregister.com/",
-            source_type=SourceType.API,
-            freshness=self._attempt.created_at,
-        )
 
 
 class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
@@ -57,10 +49,4 @@ class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
     def provenance_source_type(self) -> SourceType:
         return SourceType.API
 
-    async def build_provenance(self):
-        return Provenance(
-            label="Council Tax",
-            url="https://www.gov.uk/council-tax-bands",
-            source_type=SourceType.API,
-            freshness=self._attempt.created_at,
-        )
+    # Default build_provenance() walks best_address and postcode deps.

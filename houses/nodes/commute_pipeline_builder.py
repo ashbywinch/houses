@@ -186,7 +186,8 @@ def build_commute_pipeline(prop) -> None:
             final_fuel = PetrolCostAugmentNode(
                 f"{prop.rid}/{key}/final_fuel",
                 commute_node=merge_node,
-                financial_source=prop._svc.financial_source,
+                petrol_mpg_node=prop._svc.setting_nodes.get("settings/petrol_mpg"),
+                petrol_cost_per_litre_node=prop._svc.setting_nodes.get("settings/petrol_cost_per_litre"),
             )
             prop.commute_selectors[key] = final_fuel
 

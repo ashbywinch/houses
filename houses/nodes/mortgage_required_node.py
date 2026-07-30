@@ -4,25 +4,15 @@ from decimal import Decimal
 
 from money import Money
 
-from dag.attempt import Attempt, Formula, FormulaLine
+from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
+from dag.expression import Ref
 
 _ZERO = Decimal("0")
 
 
 class MortgageRequiredNode(DerivedNode[Money]):
     """Mortgage principal = Price + StampDuty + TotalWorks - TotalEquity."""
-
-    @property
-    def provenance_formula(self) -> Formula | None:
-        if not self._attempt.succeeded or self._attempt.value_or_none() is None:
-            return None
-        lines = [
-            FormulaLine(
-                label="Mortgage Required", value=str(self._attempt.value)
-            ),
-        ]
-        return Formula(lines=lines, result=str(self._attempt.value))
 
     def __init__(
         self,
@@ -39,6 +29,10 @@ class MortgageRequiredNode(DerivedNode[Money]):
             (rightmove_price, stamp_duty, total_works_node, total_equity_node),
         )
 
+    @property
+    def expression(self):
+        return Ref(self._deps[0]) + Ref(self._deps[1]) + Ref(self._deps[2]) - Ref(self._deps[3])
+
     def compute(
         self,
         price: Attempt[Money],
@@ -46,17 +40,9 @@ class MortgageRequiredNode(DerivedNode[Money]):
         tw: Attempt[Money],
         te: Attempt[Money],
     ) -> Attempt[Money]:
-        self._assert_deps_succeeded(
-            price=price,
-            sd=sd,
-            tw=tw,
-            te=te,
-        )
-
-        p = Decimal(price.value_or_none().amount)
-        sdv = Decimal(sd.value_or_none().amount)
-        w = Decimal(tw.value_or_none().amount)
-        e = Decimal(te.value_or_none().amount)
-
-        result = max(_ZERO, p + sdv + w - e)
-        return Attempt.succeeded(Money(str(result), "GBP"))
+        result = self.expression.evaluate()
+        # Cannot borrow less than zero
+        if result.succeeded and result.value is not None:
+            if hasattr(result.value, "amount") and result.value.amount < 0:
+                return Attempt.succeeded(Money("0", "GBP"))
+        return result

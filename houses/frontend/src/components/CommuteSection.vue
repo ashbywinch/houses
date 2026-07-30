@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { commuteDuration, commuteCost, pillColour } from '../formatters/commute'
-import ProvenanceTree from './ProvenanceTree.vue'
+import ProvenanceView from './ProvenanceView.vue'
 
 const props = defineProps<{
   commutes: any
@@ -67,7 +67,7 @@ function toggleProvenance(key: string) {
           </button>
         </div>
         <div v-if="showProvenance === key && c?.provenance" class="commute-provenance-tree">
-          <ProvenanceTree :provenance="c.provenance" />
+          <ProvenanceView :provenance="c.provenance" title="Commute" />
         </div>
       </div>
     </div>
