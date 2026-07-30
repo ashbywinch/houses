@@ -7,6 +7,7 @@ Review every PR against these documents (read them before reviewing):
 2. docs/dag-library.md — DAG node rules (expression system, stable deps, provenance)
 3. docs/testing-standards.md — test conventions
 4. docs/development.md — how to run, test, and debug
+5. docs/writing-documentation.md — documentation principles (single topic per file, single source of truth, no redundancy)
 
 Key rules to enforce:
 - DerivedNode must NOT override build_provenance() (use expression system instead)
