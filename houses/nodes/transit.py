@@ -13,7 +13,23 @@ from dag.node import Node
 from houses.commute import LegMode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
-from houses.routing import CommuteRouter
+from houses.routing import CommuteRouter as _CommuteRouter
+
+
+def _infeasible_commute(label: str = "") -> Attempt[Commute]:
+    """Return a succeeded Commute that marks a route as not viable."""
+    return Attempt.succeeded(
+        Commute(
+            person=Person(name="", has_car=False),
+            label=label,
+            destination=PlaceOfInterest(label="", address=""),
+            duration=Quantity(0, "minute"),
+            daily_cost=Money("0", "GBP"),
+            mode="",
+            details=(),
+            infeasible=True,
+        )
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +146,7 @@ class WalkNode(DerivedNode[Commute]):
             return Attempt.impossible("missing location or destination")
         dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
-            return Attempt.impossible("empty destination")
+            return _infeasible_commute("empty destination")
         if self._route_fn is not None:
             return await self._route_fn(loc, dest, self._max_walk)
         from houses.services_provider import get_services
@@ -149,14 +165,14 @@ class DriveNode(DerivedNode[Commute]):
 
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
         if not self._has_car:
-            return Attempt.impossible("no car available")
+            return _infeasible_commute("no car available")
         loc = location.value_or_none()
         poi_val = poi.value_or_none()
         if loc is None or not poi_val:
             return Attempt.impossible("missing location or destination")
         dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
-            return Attempt.impossible("empty destination")
+            return _infeasible_commute("empty destination")
         if self._route_fn is not None:
             return await self._route_fn(loc, dest)
         from houses.services_provider import get_services
@@ -255,7 +271,7 @@ class TransitNode(DerivedNode[Commute]):
                 duration=Quantity(0, "minute"),
                 daily_cost=Money("0", "GBP"),
             )
-            best_val = CommuteRouter._pick_best_route(no_val or empty, with_val or empty)
+            best_val = _CommuteRouter._pick_best_route(no_val or empty, with_val or empty)
 
         val = best_val
         if val is None:

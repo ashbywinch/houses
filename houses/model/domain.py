@@ -62,6 +62,11 @@ class Commute:
 
     ``details`` replaces the old ``cost_groups`` name. Callers look here
     for both legs and costs.
+
+    When ``infeasible`` is True the Commute represents a route that is
+    not viable (e.g. walking is too far).  Accessing ``details`` on an
+    infeasible Commute raises ``ValueError`` to catch bugs where caller
+    code assumes a route exists without checking feasibility first.
     """
 
     person: Person
@@ -72,6 +77,15 @@ class Commute:
     mode: str = "transit"
     details: tuple[CostGroup, ...] = ()
     is_child: bool = False
+    infeasible: bool = False
+
+    def __getattribute__(self, name: str) -> object:
+        if name == "details" and object.__getattribute__(self, "infeasible"):
+            raise ValueError(
+                "Cannot access route details of an infeasible Commute. "
+                "Check the ``infeasible`` flag before accessing legs/costs."
+            )
+        return object.__getattribute__(self, name)
 
 
 @dataclass(frozen=True)

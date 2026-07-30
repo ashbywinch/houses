@@ -226,6 +226,27 @@ class CommuteRouter:
     # Walking — Google Routes walking mode
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _infeasible_commute(label: str = "") -> Attempt[Commute]:
+        """Return a succeeded Commute that marks a route as not viable.
+
+        Callers should check the ``infeasible`` flag before accessing route
+        details.  Duration is zero so downstream filters (``duration > 0``)
+        naturally exclude this commute.
+        """
+        return Attempt.succeeded(
+            Commute(
+                person=Person(name="", has_car=False),
+                label=label,
+                destination=PlaceOfInterest(label="", address=""),
+                duration=Quantity(0, "minute"),
+                daily_cost=Money("0", "GBP"),
+                mode="",
+                details=(),
+                infeasible=True,
+            )
+        )
+
     async def _google_route_commute(
         self,
         origin: str | GeoPoint,
@@ -237,16 +258,19 @@ class CommuteRouter:
 
         Skips the API call entirely when the straight-line distance makes
         walking infeasible (exceeds ``max_walk_minutes`` at 5 km/h).
-        Returns the commute on success, or an Attempt.impossible with
-        the reason when the API returns no route or the request fails.
+
+        Returns:
+            Attempt.succeeded(Commute) with infeasible=True when no route
+            is available (distance too far, API returned no routes).
+            Attempt.impossible for HTTP/network errors and exceptions.
         """
         if mode == "WALK" and max_walk_minutes is not None:
             max_walk_km = max_walk_minutes * 5.0 / 60.0  # 5 km/h walking pace
             if isinstance(origin, GeoPoint) and isinstance(dest, GeoPoint):
                 dist_km = origin.distance_km_to(dest)
                 if dist_km > max_walk_km:
-                    return Attempt.impossible(
-                        f"straight-line distance {dist_km:.1f} km exceeds {max_walk_km:.1f} km max walk"
+                    return self._infeasible_commute(
+                        f"straight-line distance {dist_km:.1f} km exceeds {max_walk_km:.1f} km"
                     )
 
         body = {
@@ -255,13 +279,17 @@ class CommuteRouter:
             "travelMode": mode,
         }
         mask = "routes.duration,routes.distanceMeters,routes.legs"
-        data = await self._google_routes_post(body, mask, timeout=15.0 if mode == "DRIVE" else 10.0)
+        try:
+            data = await self._google_routes_post(body, mask, timeout=15.0 if mode == "DRIVE" else 10.0)
+        except Exception:
+            return Attempt.impossible(f"Google Routes API request failed for {mode}")
+
         if data is None:
-            return Attempt.impossible("Google Routes API returned no data")
+            return self._infeasible_commute("Google Routes API returned no data")
 
         routes = data.get("routes", [])
         if not routes:
-            return Attempt.impossible("Google Routes returned no routes")
+            return self._infeasible_commute("Google Routes returned no routes")
 
         duration_sec = int(routes[0].get("duration", "0s").rstrip("s"))
         duration_min = round(duration_sec / 60)
@@ -416,7 +444,10 @@ class CommuteRouter:
         valid = [
             a
             for a in candidates
-            if a.succeeded and a.value_or_none() is not None and a.value_or_none().duration.magnitude > 0
+            if a.succeeded
+            and a.value_or_none() is not None
+            and not a.value_or_none().infeasible
+            and a.value_or_none().duration.magnitude > 0
         ]
         if not valid:
             errors = [a.error for a in candidates if a.error]

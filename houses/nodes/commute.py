@@ -171,17 +171,25 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         if (
             walk is not None
             and walk.value_or_none() is not None
+            and not walk.value_or_none().infeasible
             and walk.value_or_none().duration.magnitude <= self._max_walk
         ):
             candidates.append(walk)
 
         # 2. Transit
-        if transit.value_or_none() is not None:
+        if (
+            transit.value_or_none() is not None
+            and not transit.value_or_none().infeasible
+        ):
             best_transit = transit
             candidates.append(best_transit)
 
         # 3. Drive
-        if drive is not None and drive.value_or_none() is not None:
+        if (
+            drive is not None
+            and drive.value_or_none() is not None
+            and not drive.value_or_none().infeasible
+        ):
             candidates.append(drive)
 
         if not candidates:
