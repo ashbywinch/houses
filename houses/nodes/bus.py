@@ -238,7 +238,7 @@ class BusLegAugmentNode(DerivedNode[Commute]):
             commute,
             duration=Quantity(new_duration, "minute"),
             daily_cost=new_daily_cost,
-            details=(bus_cg,) + commute.details[1:],
+            _details=(bus_cg,) + commute.details[1:],
         )
 
         return Attempt.succeeded(new_commute)

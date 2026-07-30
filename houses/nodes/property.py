@@ -4,17 +4,22 @@ from typing import Any
 
 from money import Money
 
+from dag.node import Node
 from dag.signals import Signal, Slot
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 from houses.nodes.area import NearestTownNode, TownDescNode, TownNode, WalkabilityNode
 from houses.nodes.epc_node import CouncilTaxNode, EpcNode
+from houses.nodes.equity_total_node import EquityTotalNode
 from houses.nodes.geocode import GeocodeNode
+from houses.nodes.life_insurance_node import LifeInsuranceTotalNode
 from houses.nodes.location import BestAddressNode, BestLocationNode
 from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNode
+from houses.nodes.mortgage_required_node import MortgageRequiredNode
 from houses.nodes.schools import PrimarySchoolNode, SecondarySchoolNode
 from houses.nodes.stamp_duty_node import StampDutyNode
 from houses.nodes.total_monthly_housing_cost_node import TotalMonthlyHousingCostNode
+from houses.nodes.total_works_node import TotalWorksNode
 from houses.nodes.yearly_sinking_fund_node import YearlySinkingFundNode
 from houses.services_provider import get_services
 
@@ -59,7 +64,8 @@ class PropertyNodes:
         self.comment_status_reason = UserInputNode[str](f"{rid}/status_reason", str)
         self.comment_group_notes = UserInputNode[str](f"{rid}/group_notes", str)
         self.comment_ashby_comments = UserInputNode[str](f"{rid}/ashby_comments", str)
-        self.comment_ashby_works = UserInputNode[float](f"{rid}/ashby_works", float)
+        self.works_estimates = UserInputNode[dict](f"{rid}/works_estimates", dict)
+        self.rental_income = UserInputNode[Money](f"{rid}/rental_income", Money)
         self.comment_design_needed = UserInputNode[str](f"{rid}/design_needed", str)
         self.comment_planning_needed = UserInputNode[str](f"{rid}/planning_needed", str)
 
@@ -147,12 +153,33 @@ class PropertyNodes:
         self.stamp_duty = StampDutyNode(
             f"{rid}/stamp_duty",
             rightmove_price=self.rightmove_price,
+            status_node=self.comment_status,
+        )
+        # ── Works Estimates ───────────────────────────────────────────
+        self.total_works = TotalWorksNode(
+            f"{rid}/total_works",
+            persons_source=self._svc.persons_source,
+            works_estimates_node=self.works_estimates,
+        )
+        self.total_equity = EquityTotalNode(
+            f"{rid}/total_equity",
+            persons_source=self._svc.persons_source,
+            status_node=self.comment_status,
+        )
+        self.life_insurance_total = LifeInsuranceTotalNode(
+            f"{rid}/life_insurance_total",
+            persons_source=self._svc.persons_source,
+        )
+        self.mortgage_required = MortgageRequiredNode(
+            f"{rid}/mortgage_required",
+            rightmove_price=self.rightmove_price,
+            stamp_duty=self.stamp_duty,
+            total_works_node=self.total_works,
+            total_equity_node=self.total_equity,
         )
         self.monthly_mortgage = MonthlyMortgagePaymentNode(
             f"{rid}/monthly_mortgage",
-            rightmove_price=self.rightmove_price,
-            stamp_duty_node=self.stamp_duty,
-            persons_source=self._svc.persons_source,
+            mortgage_required_node=self.mortgage_required,
             financial_source=self._svc.financial_source,
         )
         self.yearly_sinking_fund = YearlySinkingFundNode(
@@ -164,41 +191,27 @@ class PropertyNodes:
             f"{rid}/total_monthly_cost",
             monthly_mortgage_node=self.monthly_mortgage,
             yearly_sinking_fund_node=self.yearly_sinking_fund,
+            life_insurance_node=self.life_insurance_total,
+            rental_income_node=self.rental_income,
+            status_node=self.comment_status,
             financial_source=self._svc.financial_source,
             commute_breakdown_node=self.commute_breakdown,
             council_tax_node=self.council_tax,
         )
 
         # ── Signal wiring ──────────────────────────────────────────────
-        all_nodes: list = [
-            self.rightmove_url,
-            self.rightmove_address,
-            self.rightmove_bedrooms,
-            self.rightmove_price,
-            self.rightmove_location,
-            self.precise_location,
-            self.corrected_address,
-            self.user_entered_address,
-            self.postcode,
-            self.comment_status,
-            self.comment_status_reason,
-            self.comment_group_notes,
-            self.comment_ashby_comments,
-            self.comment_ashby_works,
-            self.comment_design_needed,
-            self.comment_planning_needed,
-            # Triage state
-            self.favourite,
-            self.dismissed,
-            self.is_viewed,
-            self.user_notes,
-            self.triage_status,
-        ]
+        # Wire every Node to PropertyNodes.changed so the frontend
+        # is notified via WebSocket whenever any value changes.
+        # Automatic — no manual list to keep in sync.
         self._slots: list[Slot] = []
-        for node in all_nodes:
-            slot = Slot(self._on_node_changed)
-            self._slots.append(slot)
-            node.changed.connect(slot)
+        for attr in dir(self):
+            node = getattr(self, attr, None)
+            if isinstance(node, Node):
+                slot = Slot(self._on_node_changed)
+                self._slots.append(slot)
+                node.changed.connect(slot)
+
+
 
     def _build_commute_pipeline(self) -> None:
         from houses.nodes.commute_pipeline_builder import build_commute_pipeline
@@ -262,7 +275,7 @@ class PropertyNodes:
             monthly = round(yearly_amount / 12 * 2 / 3, 2)
             return {
                 "status": "succeeded",
-                "value": monthly,
+                "value": {"amount": str(monthly), "currency": "GBP"},
                 "provenance": {"label": "formula:monthly_sinking", "description": f"{yearly_amount}/12*2/3"},
             }
         return yearly
@@ -295,9 +308,15 @@ class PropertyNodes:
             "affordability": {
                 "stamp_duty": await self.stamp_duty.to_json(),
                 "council_tax": await self.council_tax.to_json(),
+                "works_estimates": await self.works_estimates.to_json(),
+                "total_works": await self.total_works.to_json(),
+                "total_equity": await self.total_equity.to_json(),
+                "life_insurance_total": await self.life_insurance_total.to_json(),
+                "mortgage_required": await self.mortgage_required.to_json(),
                 "monthly_mortgage": await self.monthly_mortgage.to_json(),
                 "monthly_sinking_fund": await self._monthly_sinking(),
                 "monthly_commute_cost": await self.commute_breakdown.to_json(),
+                "rental_income": await self.rental_income.to_json(),
                 "total_monthly_housing_cost": await self.total_monthly_cost.to_json(),
             },
             "area": {
@@ -316,7 +335,6 @@ class PropertyNodes:
                 "status_reason": await self.comment_status_reason.to_json(),
                 "group_notes": await self.comment_group_notes.to_json(),
                 "ashby_comments": await self.comment_ashby_comments.to_json(),
-                "ashby_works_estimate": await self.comment_ashby_works.to_json(),
                 "design_needed": await self.comment_design_needed.to_json(),
                 "planning_needed": await self.comment_planning_needed.to_json(),
             },

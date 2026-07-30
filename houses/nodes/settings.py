@@ -28,7 +28,9 @@ def make_default_persons() -> list[Person]:
             is_superuser=False,
             has_car=True,
             bus_walk_penalty=Quantity(20, "minute"),
-            deposit_equity=Money("177000", "GBP"),
+            home_sale_price=Money("550000", "GBP"),
+            outstanding_mortgage=Money("373000", "GBP"),
+            life_insurance_monthly=Money("100", "GBP"),
             places_of_interest=(
                 PlaceOfInterest(
                     label="Pimlico", address=settings.simon_destination, trips_per_week=1, weeks_per_year=46
@@ -53,12 +55,22 @@ def make_default_persons() -> list[Person]:
             is_superuser=False,
             has_car=False,
             bus_walk_penalty=Quantity(15, "minute"),
-            deposit_equity=Money("0", "GBP"),
+            life_insurance_monthly=Money("50", "GBP"),
             places_of_interest=(
                 PlaceOfInterest(
                     label="Aldgate", address=settings.lorena_destination, trips_per_week=2, weeks_per_year=46
                 ),
             ),
+        ),
+        Person(
+            name="Ashby",
+            email="",
+            is_superuser=False,
+            has_car=True,
+            bus_walk_penalty=Quantity(10, "minute"),
+            cash_contribution=Money("300000", "GBP"),
+            works_estimate_required=True,
+            places_of_interest=(),
         ),
         Person(
             name="George",
@@ -81,6 +93,7 @@ def make_default_financials() -> dict[str, Any]:
         "petrol_cost_per_litre": 1.45,
         "current_home_sale_price": 0,
         "current_home_outstanding_mortgage": 0,
+        "gross_ashby_contribution": 0,
         "mortgage_rate": 0.0495,
         "mortgage_term_years": 27,
         "sinking_fund_rate": 0.01,

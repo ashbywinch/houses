@@ -25,17 +25,26 @@ def _fake_services(monkeypatch):
     from houses.tfl_client import TflClient
     from tests.helpers import make_services
 
-    class _FakeRouter:
-        async def route(self, origin, destination, *, has_car, max_walk_minutes):
+    class _FakePlanner:
+        async def walk_route(self, origin, destination, max_walk):
             return Attempt.succeeded(
                 Commute(
                     person=Person(name="Simon", has_car=False),
-                    label="Office",
-                    destination=PlaceOfInterest(
-                        label="Office", address=destination if isinstance(destination, str) else str(destination)
-                    ),
-                    duration=Quantity(32, "minute"),
-                    daily_cost=Money("4.50", "GBP"),
+                    label="Walk",
+                    destination=PlaceOfInterest(label="Dest", address=destination),
+                    duration=Quantity(30, "minute"),
+                    daily_cost=Money("0", "GBP"),
+                ),
+            )
+
+        async def drive_route(self, origin, destination):
+            return Attempt.succeeded(
+                Commute(
+                    person=Person(name="Simon", has_car=True),
+                    label="Drive",
+                    destination=PlaceOfInterest(label="Dest", address=destination),
+                    duration=Quantity(20, "minute"),
+                    daily_cost=Money("5.50", "GBP"),
                 ),
             )
 
@@ -52,7 +61,7 @@ def _fake_services(monkeypatch):
 
     monkeypatch.setattr(TflClient, "plan", mock_plan)
 
-    token = _sp.set(make_services(commute_router=_FakeRouter()))
+    token = _sp.set(make_services(route_planner=_FakePlanner()))
     yield
     _sp.reset(token)
 
@@ -70,6 +79,8 @@ def prop():
     p.precise_location.push(GeoPoint(51.5, -0.37), "test")
     p.postcode.push("SW1V 2QQ", "test")
     p.user_entered_address.push("31 Isambard Rd, SW1V 2QQ", "test")
+    p.works_estimates.push({"Ashby": 0}, "test")
+    p.comment_status.push("", "test")
     return p
 
 
@@ -134,9 +145,15 @@ class TestDetailShape:
         af = d["affordability"]
         expected = (
             "council_tax",
+            "works_estimates",
+            "total_works",
+            "total_equity",
+            "life_insurance_total",
+            "mortgage_required",
             "monthly_mortgage",
             "monthly_sinking_fund",
             "monthly_commute_cost",
+            "rental_income",
             "total_monthly_housing_cost",
         )
         for key in expected:
@@ -153,7 +170,6 @@ class TestDetailShape:
             "status_reason",
             "group_notes",
             "ashby_comments",
-            "ashby_works_estimate",
             "design_needed",
             "planning_needed",
         )
@@ -197,7 +213,7 @@ class TestDetailShape:
         d = await prop.to_json_detail()
         sf = d["affordability"]["monthly_sinking_fund"]
         assert sf["status"] == "succeeded"
-        assert sf["value"] < 1000, f"sinking fund {sf['value']} looks like yearly, not monthly"
+        assert float(sf["value"]["amount"]) < 1000, f"sinking fund {sf['value']} looks like yearly, not monthly"
 
 
 class TestCommuteData:
@@ -278,7 +294,6 @@ class TestFinancialSettingsPropagation:
         # Read detail baseline
         d1 = await prop.to_json_detail()
         fin1 = d1["settings"]["financial"]["value"]
-        fin1["mortgage_rate"]
         old_mortgage = d1["affordability"]["monthly_mortgage"]["value"]
 
         # Push new financial settings via the shared Services instance

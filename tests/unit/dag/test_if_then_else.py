@@ -196,5 +196,4 @@ class TestIfThenElseNode:
         await flush_processor()
 
         a = await node.attempt()
-        assert a.succeeded
-        assert a.value_or_none() == "else_val"
+        assert a.impossible

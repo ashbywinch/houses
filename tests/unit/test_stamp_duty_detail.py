@@ -37,6 +37,24 @@ def _mock():
     _sp.reset(token)
 
 
+def test_constructs_with_status_node():
+    """StampDutyNode must not crash when Status is Current.
+    Regression: _get_active_deps() is called during init, instance
+    vars must be set before super().__init__()."""
+    from dag.user_input_node import UserInputNode
+    from houses.nodes.stamp_duty_node import StampDutyNode
+
+    price = UserInputNode[Money]("reg_sd_price", Money)
+    st = UserInputNode[str]("reg_sd_st", str)
+    # This must not raise AttributeError
+    node = StampDutyNode(
+        "reg_sd",
+        rightmove_price=price,
+        status_node=st,
+    )
+    assert node is not None
+
+
 @pytest.mark.asyncio
 async def test_detail_includes_stamp_duty():
     """Property detail must include stamp_duty in affordability."""
@@ -47,6 +65,7 @@ async def test_detail_includes_stamp_duty():
     prop.rightmove_bedrooms.push("3", "Rightmove")
     prop.rightmove_price.push(Money("795000", "GBP"), "Rightmove")
     prop.rightmove_location.push(GeoPoint(51.5, -0.1), "Rightmove map")
+    prop.comment_status.push("", "test")
     from dag.scheduler import flush_processor
 
     await flush_processor()

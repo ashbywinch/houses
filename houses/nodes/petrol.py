@@ -111,7 +111,7 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         new_commute = replace(
             val,
             daily_cost=new_daily_cost,
-            details=tuple(new_details),
+            _details=tuple(new_details),
         )
         return Attempt.succeeded(new_commute)
 

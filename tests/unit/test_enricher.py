@@ -43,7 +43,7 @@ def _make_commute(duration_min: int = 32, cost_gbp: str | float = "10.0") -> Com
         destination=office,
         duration=Quantity(duration_min, "minute"),
         daily_cost=Money(str(cost_gbp), "GBP"),
-        details=(CostGroup(legs=(), operator="TfL", cost=Money(str(cost_gbp), "GBP")),),
+        _details=(CostGroup(legs=(), operator="TfL", cost=Money(str(cost_gbp), "GBP")),),
     )
 
 

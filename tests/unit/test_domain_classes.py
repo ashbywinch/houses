@@ -28,19 +28,25 @@ class TestPerson:
         person = Person(
             name="Simon",
             has_car=True,
-            deposit_equity=Money(50_000, "GBP"),
+            home_sale_price=Money("500000", "GBP"),
+            outstanding_mortgage=Money("200000", "GBP"),
+            cash_contribution=Money("50000", "GBP"),
+            works_estimate_required=True,
             places_of_interest=(poi,),
         )
         assert person.name == "Simon"
         assert person.has_car is True
-        assert person.deposit_equity == Money(50_000, "GBP")
+        assert person.home_sale_price == Money("500000", "GBP")
+        assert person.outstanding_mortgage == Money("200000", "GBP")
+        assert person.cash_contribution == Money("50000", "GBP")
+        assert person.works_estimate_required is True
         assert person.places_of_interest == (poi,)
 
     def test_minimal_construction(self):
         person = Person(name="Simon", has_car=False)
         assert person.name == "Simon"
         assert person.has_car is False
-        assert person.deposit_equity is None
+        assert person.home_sale_price == Money("0", "GBP")
         assert person.places_of_interest == ()
 
 
@@ -68,7 +74,7 @@ class TestCommute:
             destination=destination,
             duration=Quantity(32, "minute"),
             daily_cost=Money("4.50", "GBP"),
-            details=(cost_group,),
+            _details=(cost_group,),
         )
         assert commute.person == person
         assert commute.label == "Office"

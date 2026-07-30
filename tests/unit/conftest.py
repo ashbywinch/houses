@@ -13,7 +13,7 @@ from dag.scheduler import flush_processor
 from houses.api_cache import set_cache_dir
 from houses.config import settings
 from houses.nodes.bus import BusRouteNode
-from tests.helpers import FakeCommuteRouter, FakeSchoolLookup, make_services
+from tests.helpers import FakeSchoolLookup, make_services
 from tests.unit.isolation_fixtures import (  # noqa: F401, F811
     _inject_test_scheduler,
     _reset_global_state,
@@ -41,7 +41,6 @@ def flush_all() -> None:
 
 def _make_mock_services():
     return make_services(
-        commute_router=FakeCommuteRouter(),
         school_lookup=FakeSchoolLookup(),
     )
 
@@ -55,15 +54,11 @@ def _mock_google_routes(monkeypatch):
     TflTransitNode calls ``TflClient.plan()`` directly.
     """
 
-    async def mock_google_routes(*_, **__):
-        return Attempt.impossible("mocked — unit test")
-
     async def mock_tfl_plan(self):
         return Attempt.impossible("mocked — unit test")
 
-    monkeypatch.setattr("houses.routing.CommuteRouter._google_route_commute", mock_google_routes)
-    monkeypatch.setattr("houses.routing.CommuteRouter.google_routes_post", None)
     monkeypatch.setattr("houses.tfl_client.TflClient.plan", mock_tfl_plan)
+    monkeypatch.setattr("houses.routing.CommuteRouter.google_routes_post", None)
 
 
 @pytest.fixture(autouse=True)

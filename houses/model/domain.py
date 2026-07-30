@@ -43,7 +43,11 @@ class Person:
     is_child: bool = False
     bus_walk_penalty: _Quantity = _Quantity(30, "minute")
     acceptable_schools: tuple[str, ...] = ("mixed",)
-    deposit_equity: Money | None = None
+    home_sale_price: Money = Money("0", "GBP")
+    outstanding_mortgage: Money = Money("0", "GBP")
+    cash_contribution: Money = Money("0", "GBP")
+    life_insurance_monthly: Money = Money("0", "GBP")
+    works_estimate_required: bool = False
     places_of_interest: tuple[PlaceOfInterest, ...] = ()
     email: str = ""
     is_superuser: bool = False
@@ -56,8 +60,13 @@ class Commute:
     Every field is produced by a DerivedNode — duration, daily_cost, and
     details are never assigned ad-hoc outside the DAG.
 
-    ``details`` replaces the old ``cost_groups`` name. Callers look here
-    for both legs and costs.
+    ``_details`` is the stored field.  ``details`` is a property that
+    guards access — it raises ``ValueError`` when the Commute is
+    infeasible, catching bugs where caller code assumes a route exists
+    without checking the ``infeasible`` flag first.
+
+    ``__repr__``, ``__eq__``, and ``__hash__`` use ``_details``
+    directly, so they never trigger the guard.
     """
 
     person: Person
@@ -66,8 +75,18 @@ class Commute:
     duration: _Quantity
     daily_cost: Money
     mode: str = "transit"
-    details: tuple[CostGroup, ...] = ()
+    _details: tuple[CostGroup, ...] = ()
     is_child: bool = False
+    infeasible: bool = False
+
+    @property
+    def details(self) -> tuple[CostGroup, ...]:
+        if self.infeasible:
+            raise ValueError(
+                "Cannot access route details of an infeasible Commute. "
+                "Check the infeasible flag before accessing legs/costs."
+            )
+        return self._details
 
 
 @dataclass(frozen=True)

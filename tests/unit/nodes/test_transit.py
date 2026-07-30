@@ -60,7 +60,7 @@ class TestWalkLegCheckNode:
             destination=PlaceOfInterest("Office", "SW1V 2QQ"),
             duration=Quantity(30, "minute"),
             daily_cost=Money("0", "GBP"),
-            details=(CostGroup(legs=(), operator="", cost=None),),  # no legs → no walk
+            _details=(CostGroup(legs=(), operator="", cost=None),),  # no legs → no walk
         )
         node = WalkLegCheckNode("wlc", transit_node=transit, max_walk=30)
         transit.push(commute, "test")

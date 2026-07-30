@@ -3,7 +3,7 @@
 
 # Variables
 PYTHON := .venv/bin/python
-UV := uv
+UV := $(shell command -v uv 2>/dev/null || echo $(HOME)/.local/bin/uv)
 RUFF := .venv/bin/ruff
 PYTEST := .venv/bin/pytest
 OMP_CONFIG_DIR ?= $(HOME)/Documents/code/omp-config
@@ -40,19 +40,24 @@ omp-config-install:
 
 LAN_IP := $(shell ip -4 route get 1 2>/dev/null | awk '{print $$7; exit}')
 
+_PORT_CHECK = if lsof -ti :$(1) >/dev/null 2>&1; then echo "${YELLOW}Port $(1) already in use — use 'make stop' first${NC}"; exit 1; fi
+
 run: setup
 	@if [ -z "$(LAN_IP)" ]; then echo "${RED}Could not detect LAN IP${NC}"; exit 1; fi
+	@$(call _PORT_CHECK,8080)
+	@$(call _PORT_CHECK,5173)
 	@echo "${YELLOW}Backend: http://$(LAN_IP):8080  Frontend: http://$(LAN_IP).sslip.io:5173${NC}"
-	@mkdir -p .logs; \
-		HOUSES_HOST=0.0.0.0 HOUSES_PUBLIC_URL=http://$(LAN_IP).sslip.io:5173 HOUSES_FRONTEND_URL=http://$(LAN_IP).sslip.io:5173 \
-		nohup sh -c 'cd houses/frontend && npm run dev' > .logs/frontend.log 2>&1 & echo $$! > .logs/frontend.pid; \
-		HOUSES_HOST=0.0.0.0 HOUSES_PUBLIC_URL=http://$(LAN_IP).sslip.io:5173 HOUSES_FRONTEND_URL=http://$(LAN_IP).sslip.io:5173 \
-		nohup uv run python -m houses > .logs/backend.log 2>&1 & echo $$! > .logs/backend.pid;
+	@mkdir -p .logs
+	@cd houses/frontend && HOUSES_HOST=0.0.0.0 HOUSES_PUBLIC_URL=http://$(LAN_IP).sslip.io:5173 HOUSES_FRONTEND_URL=http://$(LAN_IP).sslip.io:5173 \
+		nohup npm run dev > "$(CURDIR)/.logs/frontend.log" 2>&1 & echo $$! > "$(CURDIR)/.logs/frontend.pid"
+	@HOUSES_HOST=0.0.0.0 HOUSES_PUBLIC_URL=http://$(LAN_IP).sslip.io:5173 HOUSES_FRONTEND_URL=http://$(LAN_IP).sslip.io:5173 \
+		nohup $(UV) run python -m houses > .logs/backend.log 2>&1 & echo $$! > .logs/backend.pid
 
 stop:
 	@echo "Stopping dev processes..."
-	@test -f .logs/backend.pid && kill $$(cat .logs/backend.pid) 2>/dev/null && rm .logs/backend.pid || true
-	@test -f .logs/frontend.pid && kill $$(cat .logs/frontend.pid) 2>/dev/null && rm .logs/frontend.pid || true
+	@lsof -ti :8080 2>/dev/null | xargs -r kill 2>/dev/null || true
+	@lsof -ti :5173 2>/dev/null | xargs -r kill 2>/dev/null || true
+	@rm -f .logs/backend.pid .logs/frontend.pid
 	@echo "Stopped."
 
 run-prod: setup frontend-build

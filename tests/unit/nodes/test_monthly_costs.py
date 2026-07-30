@@ -10,23 +10,17 @@ from houses.council_tax_info import CouncilTaxInfo
 
 class TestMonthlyMortgagePaymentNode:
     @pytest.mark.asyncio
-    async def test_zero_when_no_price(self):
+    async def test_zero_when_no_principal(self):
         from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNode
 
-        price = UserInputNode[Money]("price_mm", Money)
-        fin = UserInputNode[dict]("fin_mm", dict)
-        sd = UserInputNode[Money]("sd_mm", Money)
-        persons = UserInputNode[list]("ps_mm", list)
+        mr = UserInputNode[Money]("mmp_old_mr", Money)
+        fin = UserInputNode[dict]("mmp_old_fin", dict)
         node = MonthlyMortgagePaymentNode(
-            "mm",
-            rightmove_price=price,
-            stamp_duty_node=sd,
-            persons_source=persons,
+            "mmp_old",
+            mortgage_required_node=mr,
             financial_source=fin,
         )
-        price.push(Money("0", "GBP"), "test")
-        sd.push(Money("0", "GBP"), "test")
-        persons.push([], "test")
+        mr.push(Money("0", "GBP"), "test")
         fin.push({}, "test")
         await flush_processor()
         a = await node.attempt()
@@ -37,20 +31,14 @@ class TestMonthlyMortgagePaymentNode:
     async def test_computes_with_valid_data(self):
         from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNode
 
-        price = UserInputNode[Money]("price_mm2", Money)
-        fin = UserInputNode[dict]("fin_mm2", dict)
-        sd = UserInputNode[Money]("sd_mm2", Money)
-        persons = UserInputNode[list]("ps_mm2", list)
+        mr = UserInputNode[Money]("mmp_old_mr2", Money)
+        fin = UserInputNode[dict]("mmp_old_fin2", dict)
         node = MonthlyMortgagePaymentNode(
-            "mm2",
-            rightmove_price=price,
-            stamp_duty_node=sd,
-            persons_source=persons,
+            "mmp_old2",
+            mortgage_required_node=mr,
             financial_source=fin,
         )
-        price.push(Money("300000", "GBP"), "test")
-        sd.push(Money("0", "GBP"), "test")
-        persons.push([], "test")
+        mr.push(Money("300000", "GBP"), "test")
         fin.push(
             {
                 "mortgage_rate": 0.045,
@@ -128,6 +116,9 @@ class TestTotalMonthlyHousingCostNode:
 
         mg = UserInputNode[Money]("mg", Money)
         sf = UserInputNode[Money]("sf", Money)
+        li = UserInputNode[Money]("li_tm", Money)
+        ri = UserInputNode[Money]("ri_tm", Money)
+        st = UserInputNode[str]("st_tm", str)
         fin = UserInputNode[dict]("fin_tm", dict)
         cb = UserInputNode[dict]("cb_tm", dict)
         ct = UserInputNode[CouncilTaxInfo]("ct_tm", CouncilTaxInfo)
@@ -135,12 +126,18 @@ class TestTotalMonthlyHousingCostNode:
             "tm",
             monthly_mortgage_node=mg,
             yearly_sinking_fund_node=sf,
+            life_insurance_node=li,
+            rental_income_node=ri,
+            status_node=st,
             financial_source=fin,
             commute_breakdown_node=cb,
             council_tax_node=ct,
         )
         mg.push(Money("0", "GBP"), "test")
         sf.push(Money("0", "GBP"), "test")
+        li.push(Money("0", "GBP"), "test")
+        ri.push(Money("0", "GBP"), "test")
+        st.push("", "test")
         fin.push({}, "test")
         cb.push({}, "test")
         ct.push(CouncilTaxInfo(), "test")
@@ -158,6 +155,9 @@ class TestTotalMonthlyHousingCostNode:
 
         mg = UserInputNode[Money]("mg2", Money)
         sf = UserInputNode[Money]("sf2", Money)
+        li = UserInputNode[Money]("li2_tm", Money)
+        ri = UserInputNode[Money]("ri2_tm", Money)
+        st = UserInputNode[str]("st2_tm", str)
         fin = UserInputNode[dict]("fin2", dict)
         cb = UserInputNode[dict]("cb2", dict)
         ct = UserInputNode[CouncilTaxInfo]("ct2", CouncilTaxInfo)
@@ -165,6 +165,9 @@ class TestTotalMonthlyHousingCostNode:
             "tm2",
             monthly_mortgage_node=mg,
             yearly_sinking_fund_node=sf,
+            life_insurance_node=li,
+            rental_income_node=ri,
+            status_node=st,
             financial_source=fin,
             commute_breakdown_node=cb,
             council_tax_node=ct,
@@ -173,6 +176,9 @@ class TestTotalMonthlyHousingCostNode:
         # Mortgage alone contributes 1000
         mg.push(Money("1000", "GBP"), "test")
         sf.push(Money("0", "GBP"), "test")
+        li.push(Money("0", "GBP"), "test")
+        ri.push(Money("0", "GBP"), "test")
+        st.push("", "test")
         fin.push({}, "test")
         cb.push({}, "test")
         ct.push(CouncilTaxInfo(), "test")

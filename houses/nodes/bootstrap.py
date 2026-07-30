@@ -30,7 +30,6 @@ COMMENT_LABELS: dict[str, str] = {
     "comment_status_reason": "Sheet",
     "comment_group_notes": "Sheet",
     "comment_ashby_comments": "Sheet",
-    "comment_ashby_works": "Sheet",
     "comment_design_needed": "Sheet",
     "comment_planning_needed": "Sheet",
 }
@@ -40,7 +39,6 @@ COMMENT_COLUMNS: dict[str, str] = {
     "comment_status_reason": "Status Reason",
     "comment_group_notes": "Group Notes / WhatsApp",
     "comment_ashby_comments": "Ashby comments",
-    "comment_ashby_works": "Ashby Works Estimate",
     "comment_design_needed": "Design Needed",
     "comment_planning_needed": "Planning Needed",
 }
@@ -176,6 +174,16 @@ def load_property_nodes_from_rows(rows: list[dict[str, Any]]) -> int:
     """Create PropertyNodes from sheet rows and push source values.
     Called on cold start (empty DB) or explicit reseed.
     """
+    from houses.sheets.reader import get_properties_view_data
+
+    # Read View tab data for works_estimates (merged by Rightmove ID)
+    view_rows = get_properties_view_data()
+    works_by_rid: dict[str, str] = {}
+    for vr in view_rows:
+        vm_id = (vr.get("Rightmove ID") or "").strip()
+        if vm_id:
+            works_by_rid[vm_id] = (vr.get("Ashby Works Estimate (£)") or "").strip()
+
     count = 0
     for row in rows:
         raw_rid = (row.get("Rightmove ID") or "").strip()
@@ -196,11 +204,33 @@ def load_property_nodes_from_rows(rows: list[dict[str, Any]]) -> int:
             "comment_status_reason": prop.comment_status_reason,
             "comment_group_notes": prop.comment_group_notes,
             "comment_ashby_comments": prop.comment_ashby_comments,
-            "comment_ashby_works": prop.comment_ashby_works,
             "comment_design_needed": prop.comment_design_needed,
             "comment_planning_needed": prop.comment_planning_needed,
         }
         bootstrap_from_row(row, source_dict)
+
+        # Push works_estimates from View tab data
+        ws_value = works_by_rid.get(raw_rid, "")
+        if ws_value:
+            try:
+                parsed = float(ws_value.replace(",", "").replace("£", ""))
+                prop.works_estimates.push(
+                    {"Ashby": parsed}, "Sheet"
+                )
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Invalid works estimate for RID %s: %s", raw_rid, ws_value
+                )
+        elif prop.works_estimates.latest_attempt().pending:
+            # Default empty dict — Ashby's missing estimate will make
+            # the chain impossible until entered via the PATCH endpoint.
+            prop.works_estimates.push({}, "default")
+
+        # Default rental_income to £0 so total_monthly_cost resolves.
+        # Only set if the node is still pending (no user value yet).
+        if prop.rental_income.latest_attempt().pending:
+            prop.rental_income.push(Money("0", "GBP"), "default")
+
         register_property(raw_rid, prop)
         count += 1
 

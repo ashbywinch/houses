@@ -144,7 +144,7 @@ async def enrich_single_rail_fare(
         ),
         duration=Quantity(int(commute.duration.magnitude), "minute") if commute.duration else Quantity(0, "minute"),
         daily_cost=total,
-        details=commute.details,
+        _details=commute.details,
         mode=commute.mode,
         is_child=commute.is_child,
     )

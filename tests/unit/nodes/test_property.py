@@ -54,6 +54,54 @@ class TestProperty:
         assert a.value_or_none() == gp
 
     @pytest.mark.asyncio
+    async def test_mortgage_change_fires_property_changed(self):
+        """When mortgage_required recomputes, PropertyNodes.changed must
+        fire so the frontend gets notified via WebSocket."""
+        from money import Money
+
+        from houses.geo import GeoPoint
+        from houses.nodes.property import PropertyNodes
+
+        prop = PropertyNodes("prop789")
+        received = []
+        prop.changed.connect(lambda: received.append("changed"))
+
+        # Seed DAG data so mortgage_required computes
+        prop.rightmove_price.push(Money("500000", "GBP"), "test")
+        prop.rightmove_address.push("1 Test St", "test")
+        prop.rightmove_bedrooms.push("3", "test")
+        prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.postcode.push("SW1V 2QQ", "test")
+        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+
+        await flush_processor()
+        await flush_processor()
+
+        # Reset the counter — we only care about changes after setup
+        received.clear()
+
+        # Push a works estimate — this should trigger the chain:
+        # works_estimates → total_works → mortgage_required → ...
+        prop.works_estimates.push({"Ashby": 20000}, "test")
+
+        # The push itself fires prop.changed once (works_estimates is wired)
+        before_flush = len(received)
+
+        # Flush the DAG so the chain processes
+        await flush_processor()
+        await flush_processor()
+
+        # After flush, mortgage_required should have recomputed.
+        # It should have fired prop.changed again so the frontend
+        # knows to re-fetch.
+        assert len(received) > before_flush, (
+            "mortgage_required recomputed but did not notify "
+            "PropertyNodes.changed — frontend never learns of update"
+        )
+
+    @pytest.mark.asyncio
     async def test_to_json_includes_location(self):
         from houses.nodes.property import PropertyNodes
 

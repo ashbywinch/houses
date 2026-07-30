@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { epcClass } from '../formatters/format'
+import { patchRentalIncome, patchWorksEstimate } from '../services/api'
+import { usePropertiesStore } from '../stores/properties'
 import ProvenanceTree from './ProvenanceTree.vue'
 
 const props = defineProps<{
   affordability: any
   epc: any
+  persons?: any
+  rid?: string
+  currentPerson?: string | null
 }>()
 
 function epcStepClass(band: string): string {
@@ -18,6 +23,87 @@ const showProvenance = ref<string | null>(null)
 function toggleProvenance(key: string) {
   showProvenance.value = showProvenance.value === key ? null : key
 }
+
+function isImpossible(val: any): boolean {
+  return val && !val.succeeded && val.error != null
+}
+
+// ── Works estimate inline editing ─────────────────────
+const editingPerson = ref<string | null>(null)
+const editValue = ref<string>('')
+const store = usePropertiesStore()
+
+function startEdit(person: string, currentValue: number | null) {
+  editingPerson.value = person
+  editValue.value = currentValue != null ? String(currentValue) : ''
+}
+
+function cancelEdit() {
+  editingPerson.value = null
+  editValue.value = ''
+}
+
+async function saveEdit(person: string) {
+  editingPerson.value = null
+  const parsed = editValue.value === '' ? null : Number(editValue.value)
+  if (isNaN(parsed as number) && editValue.value !== '') return
+  if (!props.rid) return
+  await patchWorksEstimate(props.rid, person, parsed as number | null)
+  if (props.rid) {
+    await store.loadDetail(props.rid, true)
+  }
+}
+
+function handleKeydown(e: KeyboardEvent, person: string) {
+  if (e.key === 'Enter') saveEdit(person)
+  else if (e.key === 'Escape') cancelEdit()
+}
+
+// ── Rental income inline editing ──────────────────────
+const editingRental = ref(false)
+const editRentalValue = ref<string>('')
+
+function startEditRental() {
+  const current = props.affordability?.rental_income?.value?.amount
+  editRentalValue.value = current != null ? String(current) : '0'
+  editingRental.value = true
+}
+
+function cancelEditRental() {
+  editingRental.value = false
+  editRentalValue.value = ''
+}
+
+async function saveRental() {
+  editingRental.value = false
+  const parsed = editRentalValue.value === '' ? null : Number(editRentalValue.value)
+  if (isNaN(parsed as number) && editRentalValue.value !== '') return
+  if (!props.rid) return
+  await patchRentalIncome(props.rid, parsed as number | null)
+  if (props.rid) {
+    await store.loadDetail(props.rid, true)
+  }
+}
+
+function handleRentalKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter') saveRental()
+  else if (e.key === 'Escape') cancelEditRental()
+}
+
+// ── Helpers for works display ─────────────────────────
+const worksEstimates = () =>
+  props.affordability?.works_estimates?.succeeded
+    ? (props.affordability.works_estimates.value as Record<string, number> ?? {})
+    : {}
+
+const buyerList = () =>
+  props.persons?.value
+    ? (props.persons.value as any[]).filter((p: any) => !p.is_child)
+    : []
+
+function canEdit(personName: string): boolean {
+  return props.currentPerson != null && props.currentPerson === personName
+}
 </script>
 
 <template>
@@ -25,9 +111,11 @@ function toggleProvenance(key: string) {
     <h2 class="detail-section__title">Costs</h2>
 
     <div class="costs-table">
-      <div class="costs-row">
+      <div class="costs-row" :class="{ 'costs-row--impossible': isImpossible(affordability?.monthly_mortgage) }">
         <span class="costs-label">Mortgage</span>
-        <span class="costs-value">£{{ affordability?.monthly_mortgage?.value?.amount ?? '?' }}</span>
+        <span v-if="affordability?.monthly_mortgage?.succeeded && affordability?.monthly_mortgage?.value" class="costs-value">£{{ affordability.monthly_mortgage.value.amount }}</span>
+        <span v-else-if="isImpossible(affordability?.monthly_mortgage)" class="costs-value costs-value--impossible">Impossible</span>
+        <span v-else class="costs-value">?</span>
         <button
           v-if="affordability?.monthly_mortgage?.provenance"
           class="how-btn"
@@ -67,6 +155,92 @@ function toggleProvenance(key: string) {
         <ProvenanceTree :provenance="affordability.monthly_sinking_fund.provenance" />
       </div>
 
+      <!-- Life Insurance -->
+      <div class="costs-row">
+        <span class="costs-label">Life Insurance</span>
+        <span class="costs-value">£{{ affordability?.life_insurance_total?.value?.amount ?? '?' }}</span>
+        <button
+          v-if="affordability?.life_insurance_total?.provenance"
+          class="how-btn"
+          :class="{ 'how-btn--active': showProvenance === 'life_insurance' }"
+          @click="toggleProvenance('life_insurance')"
+        >{{ showProvenance === 'life_insurance' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
+      </div>
+      <div v-if="showProvenance === 'life_insurance' && affordability?.life_insurance_total?.provenance" class="costs-provenance">
+        <ProvenanceTree :provenance="affordability.life_insurance_total.provenance" />
+      </div>
+
+      <!-- Cost of Works -->
+      <div class="costs-row" :class="{ 'costs-row--impossible': isImpossible(affordability?.total_works) }">
+        <span class="costs-label">Cost of Works</span>
+        <span v-if="affordability?.total_works?.succeeded && affordability?.total_works?.value" class="costs-value">£{{ affordability.total_works.value.amount }}</span>
+        <span v-else-if="isImpossible(affordability?.total_works)" class="costs-value costs-value--impossible">£? — required</span>
+        <span v-else class="costs-value">?</span>
+        <button
+          v-if="affordability?.total_works?.provenance"
+          class="how-btn"
+          :class="{ 'how-btn--active': showProvenance === 'total_works' }"
+          @click="toggleProvenance('total_works')"
+        >{{ showProvenance === 'total_works' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
+      </div>
+      <!-- Per-person works breakdown -->
+      <div v-if="affordability?.works_estimates?.succeeded" class="costs-subsection">
+        <div
+          v-for="p in buyerList()"
+          :key="String(p.name)"
+          class="costs-row costs-row--sub"
+        >
+          <span class="costs-label">{{ p.name }}</span>
+          <!-- Editing state (current person only) -->
+          <div v-if="editingPerson === p.name" class="costs-edit-group">
+            <span class="costs-edit-prefix">£</span>
+            <input
+              v-model="editValue"
+              type="number"
+              class="costs-edit-input"
+              autofocus
+              @keydown="handleKeydown($event, p.name as string)"
+              @blur="saveEdit(p.name as string)"
+            />
+          </div>
+          <!-- Editable value (current person) -->
+          <span
+            v-else-if="canEdit(p.name as string) && p.name in worksEstimates() && worksEstimates()[p.name as string] != null"
+            class="costs-value costs-value--editable"
+            title="Click to edit your works estimate"
+            @click="startEdit(p.name as string, worksEstimates()[p.name as string])"
+          >✎ £{{ worksEstimates()[p.name as string].toLocaleString() }}</span>
+          <span
+            v-else-if="canEdit(p.name as string) && (p as any).works_estimate_required"
+            class="costs-value costs-value--editable costs-value--required"
+            title="Click to add your works estimate"
+            @click="startEdit(p.name as string, null)"
+          >✎ £? — required</span>
+          <span
+            v-else-if="canEdit(p.name as string)"
+            class="costs-value costs-value--editable"
+            title="Click to add your works estimate"
+            @click="startEdit(p.name as string, null)"
+          >✎ £?</span>
+          <!-- Read-only value (other person) -->
+          <span
+            v-else-if="p.name in worksEstimates() && worksEstimates()[p.name as string] != null"
+            class="costs-value costs-value--readonly"
+          >£{{ worksEstimates()[p.name as string].toLocaleString() }}</span>
+          <span
+            v-else-if="(p as any).works_estimate_required"
+            class="costs-value costs-value--readonly costs-value--required"
+          >£? — required</span>
+          <span
+            v-else
+            class="costs-value costs-value--readonly"
+          >£?</span>
+        </div>
+      </div>
+      <div v-if="showProvenance === 'total_works' && affordability?.total_works?.provenance" class="costs-provenance">
+        <ProvenanceTree :provenance="affordability.total_works.provenance" />
+      </div>
+
       <div class="costs-row">
         <span class="costs-label">Commute Cost</span>
         <span class="costs-value">£{{ affordability?.monthly_commute_cost?.value?.yearly_total_gbp != null ? (parseFloat(affordability.monthly_commute_cost.value.yearly_total_gbp ?? '0') / 12).toFixed(2) : '?' }}</span>
@@ -87,9 +261,48 @@ function toggleProvenance(key: string) {
         <ProvenanceTree :provenance="affordability.monthly_commute_cost.provenance" />
       </div>
 
-      <div class="costs-row costs-row--total">
+      <!-- Rental Income (editable by current person) -->
+      <div class="costs-row">
+        <span class="costs-label">Rental Income</span>
+        <div v-if="editingRental" class="costs-edit-group">
+          <span class="costs-edit-prefix">£</span>
+          <input
+            v-model="editRentalValue"
+            type="number"
+            class="costs-edit-input"
+            autofocus
+            @keydown="handleRentalKeydown"
+            @blur="saveRental"
+          />
+        </div>
+        <span
+          v-else
+          class="costs-value"
+          :class="{ 'costs-value--editable': !!currentPerson }"
+          @click="currentPerson ? startEditRental() : null"
+        >
+          <template v-if="affordability?.rental_income?.succeeded && affordability?.rental_income?.value">
+            £{{ affordability.rental_income.value.amount }}
+          </template>
+          <template v-else>£0</template>
+        </span>
+        <button
+          v-if="affordability?.rental_income?.provenance"
+          class="how-btn"
+          :class="{ 'how-btn--active': showProvenance === 'rental_income' }"
+          @click="toggleProvenance('rental_income')"
+        >{{ showProvenance === 'rental_income' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
+      </div>
+      <div v-if="showProvenance === 'rental_income' && affordability?.rental_income?.provenance" class="costs-provenance">
+        <ProvenanceTree :provenance="affordability.rental_income.provenance" />
+      </div>
+
+      <!-- Total Monthly -->
+      <div class="costs-row costs-row--total" :class="{ 'costs-row--impossible': isImpossible(affordability?.total_monthly_housing_cost) }">
         <span class="costs-label">Total Monthly</span>
-        <span class="costs-value">£{{ affordability?.total_monthly_housing_cost?.value?.amount ?? '?' }}</span>
+        <span v-if="affordability?.total_monthly_housing_cost?.succeeded && affordability?.total_monthly_housing_cost?.value" class="costs-value">£{{ affordability.total_monthly_housing_cost.value.amount }}</span>
+        <span v-else-if="isImpossible(affordability?.total_monthly_housing_cost)" class="costs-value costs-value--impossible">Impossible</span>
+        <span v-else class="costs-value">?</span>
         <button
           v-if="affordability?.total_monthly_housing_cost?.provenance"
           class="how-btn"
@@ -139,66 +352,75 @@ function toggleProvenance(key: string) {
   justify-content: space-between;
   align-items: center;
   padding: var(--sp-2) 0;
-  border-bottom: 1px solid var(--divider);
-  font-size: var(--fs-sm);
-  gap: var(--sp-2);
+  border-bottom: 1px solid var(--border);
 }
-.costs-row:last-child { border-bottom: none; }
-.costs-row--sub { padding-left: var(--sp-4); font-size: var(--fs-xs); color: var(--text-secondary); }
-.costs-row--total {
-  font-weight: var(--fw-bold);
-  font-size: var(--fs-base);
-  border-top: 2px solid var(--blue);
-  margin-top: var(--sp-1);
-  padding-top: var(--sp-3);
-}
-.costs-row--total .costs-value { color: var(--blue); }
-.costs-label { color: var(--text-secondary); }
-.costs-value { font-weight: var(--fw-semibold); white-space: nowrap; }
-
-/* Provenance inline */
-.costs-provenance {
-  padding: var(--sp-2) var(--sp-3);
-  background: var(--slate-50);
-  border-radius: var(--radius);
-  border: 1px solid var(--slate-200);
-  margin-bottom: var(--sp-1);
-}
-
-/* "How?" button */
-.how-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 10px;
-  color: var(--slate-400);
-  background: none;
-  border: 1px solid var(--slate-200);
-  border-radius: var(--radius-sm);
-  padding: 2px 8px;
+.costs-row--sub { padding-left: var(--sp-5); border-bottom: none; }
+.costs-row--total { font-weight: var(--fw-bold); border-bottom: none; border-top: 2px solid var(--slate-200); margin-top: var(--sp-2); padding-top: var(--sp-3); }
+.costs-row--impossible { opacity: 0.5; }
+.costs-label { font-size: var(--fs-sm); color: var(--text); }
+.costs-value { font-size: var(--fs-sm); font-weight: var(--fw-semibold); margin-left: auto; margin-right: var(--sp-2); }
+.costs-value--impossible { color: var(--red); font-style: italic; }
+.costs-value--readonly { color: var(--text-secondary); }
+.costs-value--required { color: var(--red); font-style: italic; }
+.costs-value--editable {
+  color: var(--blue);
   cursor: pointer;
-  transition: all var(--transition);
-  font-family: var(--font);
-  flex-shrink: 0;
+  border-bottom: 1px dashed var(--blue);
+  padding-bottom: 1px;
 }
-.how-btn:hover { background: var(--slate-100); color: var(--slate-600); border-color: var(--slate-300); }
-.how-btn--active { background: var(--blue-bg); color: var(--blue-text); border-color: var(--blue); }
+.costs-value--editable:hover {
+  background: var(--slate-50);
+  border-radius: 2px;
+}
+.costs-subsection { display: flex; flex-direction: column; }
+.costs-provenance { background: var(--slate-50); padding: var(--sp-3) var(--sp-4); border-radius: var(--radius); margin: var(--sp-2) 0; }
+.costs-edit-group { display: flex; align-items: center; gap: 2px; margin-left: auto; margin-right: var(--sp-2); }
+.costs-edit-prefix { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text); }
+.costs-edit-input {
+  width: 100px;
+  padding: 2px 6px;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  border: 1px solid var(--blue);
+  border-radius: var(--radius);
+  outline: none;
+  text-align: right;
+}
 
-/* Stamp duty — removed per design (in provenance chain) */
+.how-btn {
+  font-size: var(--fs-xs);
+  padding: 0.25em 0.5em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.how-btn--active { background: var(--slate-100); border-color: var(--blue); color: var(--blue); }
 
-.epc-section { margin-top: var(--sp-4); }
-.epc-title { font-size: var(--fs-sm); font-weight: var(--fw-semibold); margin: 0 0 var(--sp-2); }
-.epc-scale { display: flex; gap: var(--sp-1); }
+/* EPC */
+.epc-section { margin-top: var(--sp-6); }
+.epc-title { font-size: var(--fs-sm); font-weight: var(--fw-bold); margin: 0 0 var(--sp-3); color: var(--slate-700); }
+.epc-scale { display: flex; gap: 2px; }
 .epc-step {
-  flex: 1; text-align: center; padding: var(--sp-2) var(--sp-1);
-  border-radius: var(--radius-sm); font-size: var(--fs-sm); font-weight: var(--fw-bold); color: #fff;
+  flex: 1;
+  text-align: center;
+  padding: var(--sp-2) 0;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  border-radius: 4px;
+  color: var(--slate-500);
+  background: var(--slate-100);
   position: relative;
 }
-.epc-step--a { background: #2e7d32; }
-.epc-step--bc { background: #1565c0; }
-.epc-step--d { background: var(--amber); color: #1a1a1a; }
-.epc-step--e { background: #e65100; }
-.epc-step--fg { background: #c62828; }
-.epc-step__marker { position: absolute; bottom: -16px; left: 50%; transform: translateX(-50%); font-size: var(--fs-xs); color: var(--slate-800); }
+.epc-step__marker { position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%); font-size: 12px; }
+.epc-step--a { background: var(--epc-a); color: #fff; }
+.epc-step--b { background: var(--epc-b); color: #fff; }
+.epc-step--c { background: var(--epc-c); color: #fff; }
+.epc-step--d { background: var(--epc-d); color: #1a1a1a; }
+.epc-step--e { background: var(--epc-e); color: #fff; }
+.epc-step--f { background: var(--epc-f); color: #fff; }
+.epc-step--g { background: var(--epc-g); color: #fff; }
 .epc-potential { font-size: var(--fs-sm); color: var(--text-secondary); margin-top: var(--sp-5); }
 </style>

@@ -65,12 +65,18 @@ def build_commute_pipeline(prop) -> None:
                 max_walk=int(p_info.bus_walk_penalty.magnitude),
             )
 
-            drive_node = DriveNode(
-                f"{prop.rid}/{key}/drive",
-                best_location=prop.best_location,
-                poi=poi_src,
-                has_car=p_info.has_car,
-            )
+            # Only create a DriveNode for persons who have a car.
+            # If the destination is in the congestion zone, omit drive too
+            # (handled below by checking drive_result=None).
+            if p_info.has_car:
+                drive_node = DriveNode(
+                    f"{prop.rid}/{key}/drive",
+                    best_location=prop.best_location,
+                    poi=poi_src,
+                    has_car=True,
+                )
+            else:
+                drive_node = None
             no_bus_node = TflTransitNode(
                 f"{prop.rid}/{key}/tfl_no_bus",
                 best_location=prop.best_location,
@@ -155,13 +161,18 @@ def build_commute_pipeline(prop) -> None:
                     condition_fn=_needs_rail_fare,
                     then_branch=rail_fare_node,
                 )
+            # Omit drive entirely when the destination is in the London
+            # congestion zone — no point computing a route that can't exist.
+            dest_addr = getattr(poi, "address", str(poi))
+            in_zone = bool(dest_addr) and CommuteRouter.in_congestion_zone(dest_addr)
+
             selector = CommuteSelectorNode(
                 f"{prop.rid}/{key}/commute",
                 origin=prop.best_location,
                 poi=poi_src,
                 walk_result=walk_node,
                 transit_result=bus_augment,
-                drive_result=drive_node,
+                drive_result=None if in_zone else drive_node,
                 is_child=is_child,
                 max_walk=int(p_info.bus_walk_penalty.magnitude),
             )

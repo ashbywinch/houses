@@ -157,28 +157,39 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         walk: Attempt[Commute] | None = None,
         drive: Attempt[Commute] | None = None,
     ) -> Attempt[Commute]:
-        if not origin.succeeded or not poi.succeeded:
-            return self._impossible({"origin": origin, "poi": poi})
+        self._assert_deps_succeeded(
+            origin=origin,
+            poi=poi,
+            transit=transit,
+            walk=walk,
+            drive=drive,
+        )
 
         candidates = []
 
         # 1. Walk (Google Routes) — add if within max_walk
         if (
             walk is not None
-            and walk.succeeded
             and walk.value_or_none() is not None
+            and not walk.value_or_none().infeasible
             and walk.value_or_none().duration.magnitude <= self._max_walk
         ):
             candidates.append(walk)
 
-        # 2. Transit — add if succeeded
-        best_transit: Attempt[Commute] | None = None
-        if transit.succeeded and transit.value_or_none() is not None:
+        # 2. Transit
+        if (
+            transit.value_or_none() is not None
+            and not transit.value_or_none().infeasible
+        ):
             best_transit = transit
             candidates.append(best_transit)
 
         # 3. Drive
-        if drive is not None and drive.succeeded and drive.value_or_none() is not None:
+        if (
+            drive is not None
+            and drive.value_or_none() is not None
+            and not drive.value_or_none().infeasible
+        ):
             candidates.append(drive)
 
         if not candidates:
@@ -204,7 +215,11 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         result["impossible"] = attempt.impossible
         if attempt.succeeded and attempt.value_or_none() is not None:
             try:
-                result["value"] = self._adapter.dump_python(attempt.value_or_none(), mode="json")
+                value = self._adapter.dump_python(attempt.value_or_none(), mode="json")
+                # Rename private _details field back to details for the frontend
+                if isinstance(value, dict) and "_details" in value:
+                    value["details"] = value.pop("_details")
+                result["value"] = value
             except Exception:
                 logger.exception("Failed to serialize commute value to JSON")
                 result["value"] = None
@@ -216,6 +231,8 @@ class CommuteSelectorNode(DerivedNode[Commute]):
     async def to_json_value(self) -> dict:
         result = await super().to_json_value()
         result["is_child"] = self.is_child
+        if "_details" in result:
+            result["details"] = result.pop("_details")
         return result
 
 
@@ -268,5 +285,5 @@ class MergeRailFareNode(DerivedNode[Commute]):
                     raise TypeError(f"CostGroup.cost must be Money or None, got {type(cg.cost).__name__}: {cg.cost}")
                 total += cg.cost
 
-        merged = replace(val, daily_cost=total, details=new_details)
+        merged = replace(val, daily_cost=total, _details=new_details)
         return Attempt.succeeded(merged)

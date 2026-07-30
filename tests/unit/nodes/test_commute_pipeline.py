@@ -49,7 +49,7 @@ def _pimlico_commute() -> Commute:
         duration=Quantity(17, "minute"),
         daily_cost=Money("0", "GBP"),
         mode="transit",
-        details=(
+        _details=(
             CostGroup(
                 legs=(
                     JourneyLeg(mode=LegMode.WALK, duration=Quantity(5, "minute"), end_station="Clapham Junction"),
@@ -74,7 +74,7 @@ def _maidenhead_commute() -> Commute:
         duration=Quantity(40, "minute"),
         daily_cost=Money("0", "GBP"),
         mode="transit",
-        details=(
+        _details=(
             CostGroup(
                 legs=(
                     JourneyLeg(
@@ -152,13 +152,19 @@ class _FakeRailFareRegistry:
         return self._fares.get(frozenset({origin.crs, destination.crs}))
 
 
-class _CannedRouter:
-    """Fake commute router that returns a predetermined Commute per POI postcode."""
+class _CannedPlanner:
+    """Fake route planner that returns a predetermined Commute per postcode."""
 
     def __init__(self):
         self.routes: dict[str, Commute] = {}
 
-    async def route(self, origin, destination, *, has_car, max_walk_minutes):
+    async def walk_route(self, origin, destination, max_walk):
+        commute = self.routes.get(str(destination))
+        if commute is None:
+            return Attempt.impossible(f"no canned route for {destination}")
+        return Attempt.succeeded(commute)
+
+    async def drive_route(self, origin, destination):
         commute = self.routes.get(str(destination))
         if commute is None:
             return Attempt.impossible(f"no canned route for {destination}")
@@ -175,10 +181,10 @@ def _services():
         async def estimate(self, origin, station):
             return 10
 
-    router = _CannedRouter()
-    svc = make_services(commute_router=router, drive_time_service=_FakeDriveTime())
+    planner = _CannedPlanner()
+    svc = make_services(route_planner=planner, drive_time_service=_FakeDriveTime())
     token = _sp.set(svc)
-    yield router
+    yield planner
     _sp.reset(token)
 
 
@@ -274,7 +280,7 @@ class TestFullCommutePipeline:
             rail_fare_result=rail_fare_if,
         )
 
-        get_services().commute_router.routes["SW1V 2QQ"] = _pimlico_commute()
+        get_services().route_planner.routes["SW1V 2QQ"] = _pimlico_commute()
 
         with patch("houses.tfl_client.TflClient.get_tube_leg_fare", return_value=None):
             await flush_processor()
@@ -398,7 +404,7 @@ class TestFullCommutePipeline:
             rail_fare_result=rail_fare_if,
         )
 
-        svc.commute_router.routes["RG12 8YA"] = _maidenhead_commute()
+        svc.route_planner.routes["RG12 8YA"] = _maidenhead_commute()
 
         with patch("houses.tfl_client.TflClient.get_tube_leg_fare", return_value=None):
             await flush_processor()
@@ -465,7 +471,7 @@ class TestFullCommutePipeline:
             duration=Quantity(40, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="drive",
-            details=(
+            _details=(
                 CostGroup(
                     legs=(
                         JourneyLeg(mode=LegMode.DRIVE, duration=Quantity(40, "minute"), distance=Quantity(32.0, "km")),

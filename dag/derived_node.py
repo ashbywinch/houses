@@ -178,6 +178,29 @@ class DerivedNode(Node[T], Generic[T]):
                     f"Active deps: {[d._id if d else None for d in active_deps]}"
                 )
         dep_attempts = [await dep.attempt() for dep in active_deps]
+        # Propagate impossible before checking pending — if a dep is
+        # impossible and another is pending, fail fast rather than
+        # waiting indefinitely for the pending dep to resolve.
+        impossible_deps = [a for a in dep_attempts if a.impossible]
+        if impossible_deps:
+            errors = "; ".join(a.error or "unknown" for a in impossible_deps)
+            result = Attempt.impossible(f"{self._id}: dep failed ({errors})")
+            self._attempt = result
+            self._computed_at = datetime.now(UTC)
+            # _db_created_at may be None for deps never persisted (e.g. a
+            # freshly-created node).  Storing None means the next staleness
+            # check skips this dep — the _computed_at comparison still works.
+            dep_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
+            self._retry_at = None
+            self._retry_count = 0
+            try:
+                result_dict = await self.to_json()
+            except Exception as e:
+                result_dict = await self._error_result_dict("impossible", e)
+            self._persist(result_dict, dep_timestamps)
+            self.changed.emit()
+            _get_scheduler().after_refresh(self)
+            return
         if any(a.pending for a in dep_attempts):
             return
         try:
@@ -207,6 +230,9 @@ class DerivedNode(Node[T], Generic[T]):
         self._attempt = result
         self._computed_at = datetime.now(UTC)
 
+        # _db_created_at may be None for deps never persisted (e.g. a
+        # freshly-created node).  Storing None means the next staleness
+        # check skips this dep — the _computed_at comparison still works.
         dep_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
 
         if result.pending:
@@ -288,6 +314,25 @@ class DerivedNode(Node[T], Generic[T]):
         if not self._attempt.pending:
             result["stale"] = self._is_stale()
         return result
+
+    @staticmethod
+    def _assert_deps_succeeded(**deps: Attempt) -> None:
+        """Assert all named dependencies are succeeded.
+
+        Auto-propagation in _refresh() catches impossible/pending deps
+        before compute() is ever called.  This assertion is a safety net
+        to fail fast if that contract is violated.
+        """
+        failed = {
+            name: att.status
+            for name, att in deps.items()
+            if att is not None and not att.succeeded
+        }
+        if failed:
+            raise AssertionError(
+                f"Dependencies not succeeded: {failed}. "
+                "Auto-propagation should have caught these before compute()."
+            )
 
     @abstractmethod
     def compute(self, *dep_attempts: Attempt) -> Attempt[T]: ...

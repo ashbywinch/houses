@@ -132,10 +132,16 @@ export interface PropertyDetail {
   }
   affordability: {
     council_tax: AttemptValue<Record<string, unknown>>
+    works_estimates: AttemptValue<Record<string, number>>
+    total_works: AttemptValue<MoneyValue>
+    total_equity: AttemptValue<MoneyValue>
+    life_insurance_total: AttemptValue<MoneyValue>
+    mortgage_required: AttemptValue<MoneyValue>
     monthly_mortgage: AttemptValue<MoneyValue>
     monthly_sinking_fund: AttemptValue<MoneyValue>
     monthly_commute_cost: AttemptValue<CommuteBreakdown>
     stamp_duty: AttemptValue<MoneyValue>
+    rental_income: AttemptValue<MoneyValue>
     total_monthly_housing_cost: AttemptValue<MoneyValue>
   }
   area: {
@@ -147,7 +153,6 @@ export interface PropertyDetail {
     status_reason: AttemptValue<string>
     group_notes: AttemptValue<string>
     ashby_comments: AttemptValue<string>
-    ashby_works_estimate: AttemptValue<number>
     design_needed: AttemptValue<string>
     planning_needed: AttemptValue<string>
   }

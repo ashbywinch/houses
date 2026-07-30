@@ -28,6 +28,22 @@ def get_properties_data() -> list[dict[str, str]]:
         return []
 
 
+def get_properties_view_data() -> list[dict[str, str]]:
+    """Read all properties from the View tab and return them as dicts."""
+    client = get_client()
+    if not client:
+        return []
+    try:
+        sh = client.open_by_key(settings.sheet_id)
+        ws = sh.worksheet("Properties View")
+        all_rows = ws.get_all_values()
+        headers = all_rows[0]
+        return [dict(zip(headers, row, strict=False)) for row in all_rows[1:] if row and row[0].strip()]
+    except Exception as e:
+        logger.warning("Failed to read view tab data: %s", e)
+        return []
+
+
 def resolve_tab(tab: str) -> str:
     """Validate *tab* and return ``"Properties View"`` or ``"Properties Data"``."""
     t = tab.strip().lower()

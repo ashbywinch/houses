@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 
 from fastapi import APIRouter, Body, HTTPException, Request, WebSocket
@@ -17,11 +18,31 @@ api_router = APIRouter(prefix="/api")
 
 @api_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
-    from houses.web.auth import get_session_user
+    from itsdangerous import BadSignature, SignatureExpired
 
-    # Reject unauthenticated connections — property data is sensitive
-    session = get_session_user(Request(scope=websocket.scope))
-    if not session:
+    from houses.web.auth import _SESSION_MAX_AGE, _get_serializer
+
+    # Extract session cookie from WebSocket headers — Starlette's Request
+    # requires an HTTP scope and can't be constructed from a websocket scope.
+    cookies_str = ""
+    for key, value in websocket.headers.items():
+        if key.lower() == "cookie":
+            cookies_str = value
+            break
+
+    session = None
+    for part in cookies_str.split(";"):
+        part = part.strip()
+        if part.startswith("session="):
+            cookie_val = part[len("session=") :]
+            with contextlib.suppress(BadSignature, SignatureExpired):
+                session = _get_serializer().loads(
+                    cookie_val,
+                    max_age=int(_SESSION_MAX_AGE.total_seconds()),
+                )
+            break
+
+    if not session or not session.get("email"):
         await websocket.close(code=4001)
         return
 
@@ -303,24 +324,19 @@ async def put_persons(body: list = Body()):  # noqa: B008
     if not body:
         raise HTTPException(status_code=400, detail="At least one person is required")
 
-    # Validate deposit_equity — the Money validator rejects bare numbers
-    # (int/float) but accepts {'amount': ..., 'currency': ...} dicts.
-    # We also need to CONVERT the dict to Money here because Pydantic's
-    # dataclass handling doesn't call the Money schema for Money|None
-    # union fields, so dump_python() later would fail serializing a dict.
     from money import Money as _Money
 
     from houses.model.domain import Person, PlaceOfInterest
 
-    def _validate_de(d: dict) -> dict:
-        de = d.get("deposit_equity")
-        if isinstance(de, (int, float)):
-            raise HTTPException(
-                status_code=400,
-                detail=f"deposit_equity must be a dict or null, got {type(de).__name__}: {de}",
-            )
-        if isinstance(de, dict):
-            d["deposit_equity"] = _Money(de["amount"], de.get("currency", "GBP"))
+    money_fields = {"home_sale_price", "outstanding_mortgage", "cash_contribution", "life_insurance_monthly"}
+
+    def _validate_money_fields(d: dict) -> dict:
+        for f in money_fields:
+            v = d.get(f)
+            if isinstance(v, (int, float)):
+                d[f] = _Money(str(v), "GBP")
+            elif isinstance(v, dict):
+                d[f] = _Money(v["amount"], v.get("currency", "GBP"))
         return d
 
     validated = []
@@ -328,7 +344,7 @@ async def put_persons(body: list = Body()):  # noqa: B008
         if not isinstance(p, dict):
             validated.append(p)
             continue
-        _validate_de(p)
+        _validate_money_fields(p)
         validated.append(
             Person(
                 **{
@@ -351,6 +367,85 @@ async def put_persons(body: list = Body()):  # noqa: B008
 @api_router.patch("/settings/financial")
 async def patch_financial(body: dict):
     get_services().financial_source.push(body, "user")
+    return {"status": "ok"}
+
+
+@api_router.patch("/properties/{rid}/rental-income")
+async def patch_rental_income(
+    rid: str,
+    body: dict,
+):
+    """Update the monthly rental income for a property.
+
+    Body: {"value": 1200} or {"value": null} to clear.
+    """
+    from houses.property_registry import get_property
+
+    prop = get_property(rid)
+    if prop is None:
+        raise HTTPException(status_code=404, detail="Property not found")
+
+    value = body.get("value")
+    if value is not None and not isinstance(value, (int, float)):
+        raise HTTPException(
+            status_code=400,
+            detail="value must be a number",
+        )
+
+    from money import Money as _Money
+
+    prop.rental_income.push(
+        _Money(str(value), "GBP") if value is not None else _Money("0", "GBP"),
+        "user",
+    )
+    return {"status": "ok"}
+
+
+@api_router.patch("/properties/{rid}/works-estimate")
+async def patch_works_estimate(
+    rid: str,
+    body: dict,
+):
+    """Update the works estimate for a person on this property.
+
+    Body: {"person": "Ashby", "value": 15000}
+    """
+    from houses.property_registry import get_property
+
+    prop = get_property(rid)
+    if prop is None:
+        raise HTTPException(status_code=404, detail="Property not found")
+
+    person_name = body.get("person", "")
+    if not person_name:
+        raise HTTPException(status_code=400, detail="person is required")
+
+    # Validate the person exists in the current persons configuration
+    from houses.services_provider import get_services as _get_svc
+
+    _pa = _get_svc().persons_source.latest_attempt()
+    if _pa.succeeded and _pa.value_or_none():
+        _names = {
+            getattr(p, "name", None) or (p.get("name") if isinstance(p, dict) else None)
+            for p in _pa.value_or_none()
+        }
+        if person_name not in _names:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown person: {person_name}",
+            )
+
+    value = body.get("value")
+    if value is not None and not isinstance(value, (int, float)):
+        raise HTTPException(
+            status_code=400,
+            detail="value must be a number",
+        )
+
+    current = prop.works_estimates.latest_attempt().value_or_none() or {}
+    current[person_name] = value
+    prop.works_estimates.push(current, "user")
+
     return {"status": "ok"}
 
 

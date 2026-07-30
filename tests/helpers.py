@@ -106,30 +106,30 @@ _DEFAULT_PETROL = Commute(
 )
 
 
-class FakeCommuteRouter:
-    """Returns canned commute results. Records calls for assertion."""
+class _FakeRoutePlanner:
+    """Fake route planner for tests — returns a canned commute."""
 
-    def __init__(
-        self,
-        simon: Commute | None = _DEFAULT_SIMON,
-        lorena: Commute | None = _DEFAULT_LORENA,
-        petrol: Commute | None = _DEFAULT_PETROL,
-    ):
-        self.simon = simon
-        self.lorena = lorena
-        self.petrol = petrol
-        self.calls: list[tuple[str, str]] = []
+    async def walk_route(self, origin, destination, max_walk):
+        return Attempt.succeeded(
+            Commute(
+                person=Person(name="Test", has_car=False),
+                label="Walk",
+                destination=PlaceOfInterest(label="Dest", address=destination),
+                duration=Quantity(30, "minute"),
+                daily_cost=Money("0", "GBP"),
+            )
+        )
 
-    async def route(
-        self,
-        origin: str | GeoPoint,
-        destination: str | GeoPoint,
-        *,
-        has_car: bool,
-        max_walk_minutes: int,
-    ) -> Attempt[Commute]:
-        self.calls.append(("route", str(origin)))
-        return Attempt.impossible("mocked route")
+    async def drive_route(self, origin, destination):
+        return Attempt.succeeded(
+            Commute(
+                person=Person(name="Test", has_car=True),
+                label="Drive",
+                destination=PlaceOfInterest(label="Dest", address=destination),
+                duration=Quantity(20, "minute"),
+                daily_cost=Money("5.50", "GBP"),
+            )
+        )
 
 
 class FakeSchoolLookup:
@@ -263,7 +263,7 @@ def make_services(**overrides: Any) -> Services:
     """
     base: dict[str, Any] = dict(
         geocoder=FakeGeocoder(),
-        commute_router=FakeCommuteRouter(),
+        route_planner=_FakeRoutePlanner(),
         school_lookup=FakeSchoolLookup(school=_DEFAULT_SCHOOL),
         walkability_service=FakeWalkability(walk_to_town=10, amenities="Shops, cafe"),
         town_desc_service=FakeTownDesc(),

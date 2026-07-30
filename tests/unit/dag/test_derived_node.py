@@ -110,44 +110,7 @@ class TestDerivedNode:
         a = await doubler.attempt()
         assert a.impossible is True
 
-    @pytest.mark.asyncio
-    async def test_graceful_dep_failure_does_not_cascade(self):
-        """When compute() handles an impossible dep (e.g. via value_or),
-        the framework must not short-circuit — compute() decides the outcome."""
 
-        class _FailingNode(DerivedNode[int]):
-            def __init__(self):
-                super().__init__("fail_graceful_src", int, ())
-                self._attempt = Attempt.impossible("always fails")
-
-            def compute(self):
-                return self._attempt
-
-        class _GracefulNode(DerivedNode[int]):
-            def __init__(self, node_id: str, deps):
-                super().__init__(node_id, int, deps)
-
-            def compute(self, *args):
-                val = args[0].value_or(0)
-                return Attempt.succeeded(val + 42)
-
-            async def build_provenance(self):
-                return Provenance(label="graceful")
-
-        src = _FailingNode()
-        await flush_processor()
-
-        node = _GracefulNode("graceful_test", deps=(src,))
-        await flush_processor()
-
-        a = await node.attempt()
-        assert a.succeeded is True
-        assert a.value == 42
-
-        stored = latest_node_result("graceful_test")
-        assert stored is not None
-        prov = stored.get("provenance", {})
-        assert prov.get("label") == "graceful"
 
     @pytest.mark.asyncio
     async def test_impossible_dep_crash_preserves_provenance(self):
