@@ -66,9 +66,28 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         litres_per_100km = 282.5 / mpg if mpg > 0 else 10.0
         fuel_used_litres = round_trip_km / litres_per_100km
         daily_fuel_cost = fuel_used_litres * cost_per_litre
-        daily_cost = val.daily_cost + Money(str(round(daily_fuel_cost, 2)), "GBP")
+        fuel_cost = Money(str(round(daily_fuel_cost, 2)), "GBP")
+        new_daily_cost = val.daily_cost + fuel_cost
 
-        new_commute = replace(val, daily_cost=daily_cost)
+        # Attribute fuel cost to the drive CostGroup(s) so downstream
+        # nodes (like MergeRailFareNode) that recompute total from
+        # CostGroups don't lose the fuel addition.
+        new_details = list(val.details)
+        for i, cg in enumerate(new_details):
+            has_drive = any(leg.mode == LegMode.DRIVE for leg in cg.legs)
+            if has_drive:
+                if cg.cost is None:
+                    new_cg_cost = fuel_cost
+                else:
+                    new_cg_cost = cg.cost + fuel_cost
+                new_details[i] = replace(cg, cost=new_cg_cost)
+                break
+
+        new_commute = replace(
+            val,
+            daily_cost=new_daily_cost,
+            _details=tuple(new_details),
+        )
         return Attempt.succeeded(new_commute)
 
     async def to_json(self) -> dict:

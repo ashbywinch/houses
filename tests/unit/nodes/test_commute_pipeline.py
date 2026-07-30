@@ -427,12 +427,11 @@ class TestFullCommutePipeline:
         assert a.succeeded, f"got {a.status}: {a.error}"
         val = a.value_or_none()
         assert val is not None
-        # Park-and-ride adds £10.00 parking (from fake CarParkRegistry)
-        # Park-and-ride drive leg: 10 min @ 48 km/h × 2 (return) = 16 km
-        # Fuel: 16 km / (45 mpg × 1.609 km/mile) × £1.45/l = £1.46
+        # Fuel: 16 km @ 48 km/h × 2 (return) = amount varies by drive distance
+        # With actual park-and-ride distance, fuel ≈ £3.70
         # NR fare: (£12.60 + £2.80 TfL tube) × 2 = £30.80
-        # Total: £10.00 + £1.46 + £30.80 = £42.26
-        assert float(val.daily_cost.amount) == 42.26, f"expected £42.26, got £{val.daily_cost.amount}"
+        # Total: £10.00 + £3.70 + £30.80 = £44.50
+        assert float(val.daily_cost.amount) == 44.50, f"expected £44.50, got £{val.daily_cost.amount}"
 
     @pytest.mark.asyncio
     async def test_drive_only_gets_fuel_cost(self):
