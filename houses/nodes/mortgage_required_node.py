@@ -13,8 +13,6 @@ _ZERO = Decimal("0")
 class MortgageRequiredNode(DerivedNode[Money]):
     """Mortgage principal = Price + StampDuty + TotalWorks - TotalEquity."""
 
-    propagate_impossible = True
-
     @property
     def provenance_formula(self) -> Formula | None:
         if not self._attempt.succeeded or self._attempt.value_or_none() is None:

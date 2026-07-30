@@ -38,7 +38,15 @@ def _fake_services(monkeypatch):
             )
 
         async def drive_route(self, origin, destination):
-            return Attempt.impossible("no car available")
+            return Attempt.succeeded(
+                Commute(
+                    person=Person(name="Simon", has_car=True),
+                    label="Drive",
+                    destination=PlaceOfInterest(label="Dest", address=destination),
+                    duration=Quantity(20, "minute"),
+                    daily_cost=Money("5.50", "GBP"),
+                ),
+            )
 
     async def mock_plan(self):
         return Attempt.succeeded(

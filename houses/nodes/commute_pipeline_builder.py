@@ -65,12 +65,18 @@ def build_commute_pipeline(prop) -> None:
                 max_walk=int(p_info.bus_walk_penalty.magnitude),
             )
 
-            drive_node = DriveNode(
-                f"{prop.rid}/{key}/drive",
-                best_location=prop.best_location,
-                poi=poi_src,
-                has_car=p_info.has_car,
-            )
+            # Only create a DriveNode for persons who have a car.
+            # If the destination is in the congestion zone, omit drive too
+            # (handled below by checking drive_result=None).
+            if p_info.has_car:
+                drive_node = DriveNode(
+                    f"{prop.rid}/{key}/drive",
+                    best_location=prop.best_location,
+                    poi=poi_src,
+                    has_car=True,
+                )
+            else:
+                drive_node = None
             no_bus_node = TflTransitNode(
                 f"{prop.rid}/{key}/tfl_no_bus",
                 best_location=prop.best_location,
