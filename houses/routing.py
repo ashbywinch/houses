@@ -183,7 +183,6 @@ class CommuteRouter:
         return _to_outcode(postcodes[0].postcode)
 
     @staticmethod
-    @staticmethod
     def in_congestion_zone(dest: str | GeoPoint) -> bool:
         if isinstance(dest, GeoPoint):
             return 51.5 < dest.lat < 51.52 and -0.15 < dest.lon < 0.01
