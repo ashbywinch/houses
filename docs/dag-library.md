@@ -3,12 +3,15 @@
 **For:** Developers adding or maintaining DAG nodes in `houses/nodes/`.
 
 The `dag/` library is a **reactive directed acyclic graph**: when a leaf node's value
-changes (an address is corrected, a commute threshold updated), every downstream node
-that depends on it automatically recomputes and persists its new value.
+changes, every downstream node that depends on it automatically recomputes and persists
+its new result.
 
 ```
-UserInputNode ──(changed signal)──► DerivedNode ──(changed signal)──► DerivedNode
+UserInputNode ──► DerivedNode ──► DerivedNode
 ```
+
+Each link is a signal connection — the downstream node is notified when its dependency
+changes and schedules itself for refresh.
 
 ---
 
@@ -27,12 +30,11 @@ Two concrete node types, one abstract base:
 Every node has:
 - **`node_id`** — globally unique string, typically `"{rid}/{node_name}"` (e.g. `"12345/council_tax"`).
 - **`value_type`** — the Python type `T`, used by a Pydantic `TypeAdapter` to validate and serialise values.
-- **`display_name`** — auto-generated from the node_id stem (`"council_tax"` → `"Council Tax"`).
+- **`display_name`** — auto-generated from the node_id stem.
 
 ### The three-state result: `Attempt[T]`
 
-Every node's value is an `Attempt` — not an `Optional`, not an exception, not a raw value.
-It is a discriminated union with three states:
+Every node's value is an `Attempt` — a discriminated union with three states:
 
 | State | Created via | Meaning |
 |---|---|---|
@@ -48,9 +50,10 @@ impossible upstream. If any dependency is pending, the node defers without compu
 
 Every node tracks *where its value came from* via `build_provenance()`, which walks the
 dependency tree and returns a `Provenance` dataclass. Provenance is serialised in every
-node's `to_json()` output as `{"label": "Council Tax", "sourceType": "api", "sources": {...}}`.
+node's `to_json()` output.
 
-Use provenance to trace failures: see *Tracing failures* below.
+Provenance is fully dynamic — regenerated on every `to_json()` call. There is no
+provenance migration; nothing to persist. See *Provenance auto-generation* below.
 
 ---
 
@@ -69,11 +72,7 @@ DerivedNode(...)     ──► loads last persisted value
 
 ```
 push(value)  ──► persist to SQLite
-              ──► emit .changed signal
-                    │
-                    ▼
-            DerivedNode._on_dep_changed()
-              ──► scheduler.schedule()   (node is now pending)
+              ──► emit .changed signal → downstream node scheduled
 ```
 
 ### Refresh (scheduler picks it up)
@@ -84,21 +83,156 @@ Scheduler runs node.refresh():
   2. Gathers each dep's latest Attempt
   3. Any dep impossible? → short-circuit to Attempt.impossible
   4. Any dep pending?   → defer (return, try again later)
-  5. Calls compute(*dep_attempts)   ──► may be sync or async
-       On success: persist, emit .changed (cascading), call after_refresh hook
+  5. Calls compute(*dep_attempts)
+       On success: persist, emit .changed (cascading)
        On exception:
-         Transient (TimeoutError, HTTP 429/5xx) → schedule_retry with exponential backoff
-         Permanent                              → Attempt.impossible
+         Transient → schedule_retry with exponential backoff
+         Permanent → Attempt.impossible
 ```
 
-Staleness is determined entirely by timestamps. A node is stale when a dependency's
-`_db_created_at` or `_computed_at` is newer than the node's own `_computed_at`. No
-explicit invalidation calls needed.
+Staleness is determined entirely by timestamps. No explicit invalidation calls needed.
 
 ### Serialisation
 
-- **`to_json()`** — full output with provenance tree (expensive). Use for single-node reads.
+- **`to_json()`** — full output with provenance tree. Use for single-node reads.
 - **`to_json_value()`** — lightweight, skips provenance tree. Use for bulk-list endpoints.
+
+---
+
+## Expression System
+
+Instead of writing imperative `compute()` methods, nodes can declare their calculation
+as an **expression tree**. The base class handles evaluation and provenance generation
+automatically.
+
+### Declaring an expression
+
+Set `expression` as a property that returns an `Expression` tree:
+
+```python
+from dag.expression import Ref, Literal, Add, Sub, Conditional
+from dag.derived_node import DerivedNode
+
+class MortgageRequiredNode(DerivedNode[Money]):
+    @property
+    def expression(self):
+        return (
+            Ref(self._deps[0])       # price
+            + Ref(self._deps[1])     # stamp_duty
+            + Ref(self._deps[2])     # works
+            - Ref(self._deps[3])     # equity
+        )
+
+    def compute(self, price, sd, works, equity):
+        return self.expression.evaluate()
+```
+
+Node objects can be used directly in expressions — they implement `__add__`, `__sub__`,
+`__mul__`, `__truediv__`, and `__neg__` that create the corresponding `Expression` tree:
+
+```python
+self._price_node + self._stamp_duty_node - self._equity_node
+# Creates: Sub(Add(Ref(price), Ref(stamp_duty)), Ref(equity))
+```
+
+### Expression types
+
+| Expression | Purpose |
+|---|---|
+| `Ref(node)` | Reference a dependency node — calls `latest_attempt()` |
+| `Literal(value)` | A constant |
+| `Add, Sub, Mul, Div, Negate` | Arithmetic on expression trees |
+| `PMT(principal, rate, term)` | Monthly mortgage payment formula |
+| `Conditional(pred, if_true, if_false)` | Branch based on a zero-arg predicate |
+| `TieredRate(value, tiers)` | Marginal tax/rate calculation across bands |
+| `Choose(alternatives, selector)` | Pick best from already-computed alternatives |
+| `Field(source, key)` | Extract a dict key from a node's value |
+| `Attr(source, attr)` | Extract an attribute from a node's value |
+
+### Provenance auto-generation
+
+When a node has an `expression` set, `build_provenance()` calls `expression.to_formula()`
+to generate formula lines automatically. The expression tree is walked to produce
+labelled formula lines showing every term, its value, and the final result.
+
+Nodes that use expressions **do not override `build_provenance()`**. The base class
+default walks active dependencies and calls `expression.to_formula()`.
+
+### TieredRate — marginal calculations
+
+For calculations with rate bands (stamp duty, tax tiers):
+
+```python
+TieredRate(
+    self._price_node,
+    tiers=[
+        (0, 250000, 0),
+        (250000, 925000, Decimal("0.05")),
+        (925000, 1500000, Decimal("0.10")),
+        (1500000, None, Decimal("0.12")),
+    ],
+)
+```
+
+Provenance shows every tier with its range and rate, highlighting the active one.
+
+### Choose — selection with provenance
+
+When multiple alternatives are already computed and one must be selected:
+
+```python
+Choose(
+    alternatives={
+        "walk": Ref(walk_node),
+        "transit": Ref(transit_node),
+        "drive": Ref(drive_node),
+    },
+    selector=lambda results: min(results, key=lambda k: results[k].value_or_none().duration.magnitude),
+)
+```
+
+Provenance shows every alternative with its value and a ✓/✗ marker indicating
+which was selected.
+
+### Stable dependencies by default
+
+`_get_active_deps()` should return the same set of deps in most cases. Conditional
+deps are appropriate only when excluding a dep saves meaningful work — an API call
+or expensive computation. See *When to use conditional deps* in the design rules.
+
+For trivial local computation (reading a cached value, geocoding a coordinate),
+keep deps stable and use an early-return in `compute()`:
+
+```python
+# Correct: stable deps, early-return in compute when dep isn't needed
+def __init__(self, ..., transit_result, best_location):
+    super().__init__(node_id, Commute, (transit_result, best_location))
+
+def compute(self, transit, location):
+    if transit.value_or_none().daily_cost.amount > 0:
+        return transit  # early return, NR lookup not needed
+    return await self._enrich_rail_fare(commute, location)
+```
+
+---
+
+## Settings Nodes
+
+Every financial setting has its own `UserInputNode`, created by `Services.__post_init__`
+from `SETTING_DEFAULTS` in `houses/nodes/settings_node.py`. Consumer nodes reference
+individual setting nodes directly, not a blob:
+
+```python
+class YearlySinkingFundNode(DerivedNode[Money]):
+    def __init__(self, *, rightmove_price, sinking_fund_rate_node):
+        super().__init__(node_id, Money, (rightmove_price, sinking_fund_rate_node))
+```
+
+The `SettingsNode` aggregate is available via `svc.settings_view` for API backward
+compat, but consumer code never uses it.
+
+Settings are pushed via the PATCH endpoint (`/api/settings/financial`), which pushes
+to individual nodes and lets the signal chain propagate.
 
 ---
 
@@ -114,9 +248,6 @@ purchase_price.push(Money("350000", "GBP"), source_label="rightmove_scraper")
 # Persisted + emitted .changed — downstream DerivedNodes pick it up.
 ```
 
-The constructor loads the last persisted value from SQLite automatically. Calling
-`push()` overwrites it, persists, and emits the `changed` signal.
-
 ### `DerivedNode` — computed from dependencies
 
 ```python
@@ -124,41 +255,31 @@ from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 
 class StampDutyNode(DerivedNode[Money]):
-    def __init__(self, node_id: str, price_node: UserInputNode[Money]):
-        super().__init__(node_id, Money, deps=(price_node,))
+    def __init__(self, node_id: str, *, rightmove_price, status_node=None):
+        self._status_node = status_node
+        deps = [rightmove_price]
+        if status_node is not None:
+            deps.append(status_node)
+        super().__init__(node_id, Money, tuple(deps))
 
-    def compute(self, price: Attempt[Money]) -> Attempt[Money]:
-        if not price.succeeded:
-            return Attempt.impossible("purchase price not available")
-        p = price.value_or_none()
-        if p < Money("250000", "GBP"):
-            return Attempt.succeeded(Money("0", "GBP"))
-        return Attempt.succeeded(p * Decimal("0.05"))
+    @property
+    def expression(self):
+        return Conditional(
+            predicate=lambda: (
+                self._status_node.latest_attempt().value_or_none() or ""
+            ).strip().lower() == "current",
+            if_true=Literal(Money("0", "GBP")),
+            if_false=TieredRate(self._deps[0], tiers=[
+                (0, 250000, 0),
+                (250000, 925000, Decimal("0.05")),
+                (925000, 1500000, Decimal("0.10")),
+                (1500000, None, Decimal("0.12")),
+            ]),
+        )
+
+    def compute(self, price, status=None):
+        return self.expression.evaluate()
 ```
-
-The `deps` tuple pins which nodes this depends on. `compute()` receives each dep's
-`Attempt` in the same order. It can be sync (as above) or `async`.
-
-### `IfThenElseNode` — conditional branches
-
-For nodes that activate different dependency chains based on a condition:
-
-```python
-from dag.if_then_else import IfThenElseNode
-
-commute_cost = IfThenElseNode(
-    node_id=f"{rid}/commute_cost",
-    value_type=Money | None,
-    condition_sources=(needs_rail_fare_node,),
-    condition_fn=lambda needs_rail: needs_rail.succeeded and needs_rail.value_or(False),
-    then_branch=rail_fare_node,
-    else_branch=driving_cost_node,
-)
-```
-
-The predicate receives `Attempt` values for each condition source. Only the active
-branch's dependencies are tracked for staleness. If no branch activates, returns
-`Attempt.succeeded(None)` (type must be nullable).
 
 ---
 
@@ -170,19 +291,16 @@ If `compute()` calculates something that isn't the node's named purpose, split i
 The signal chain then tracks real dependencies correctly, and downstream nodes
 can depend on just the value they need.
 
-**Signal to split:** You're adding code that reads a dep the node didn't already use,
-or returning a value conceptually independent of the node's return type.
+### Stable dependencies
+
+`_get_active_deps()` must always return the same deps tuple. If a dep is sometimes
+unnecessary, keep it in the deps and early-return in `compute()`. This keeps
+provenance transparent and prevents staleness tracking bugs.
 
 ### No side effects in compute
 
 Derived nodes must not push values into other nodes. Use a dependency chain
-instead — the signal cascade handles propagation automatically:
-
-1. School node computes → emits `changed`
-2. SchoolPostcodeNode (depends on SchoolNode) becomes stale → recomputes → emits `changed`
-3. TransitNode (depends on SchoolPostcodeNode) becomes stale → recomputes
-
-No manual `_sync_` methods needed.
+instead — the signal cascade handles propagation automatically.
 
 ### Values must be typed classes, not dicts
 
@@ -190,66 +308,56 @@ Use frozen dataclasses or Pydantic models so the value type is self-documenting
 and the TypeAdapter round-trips safely:
 
 ```python
-# ✅
 @dataclass(frozen=True)
 class CommuteResult:
     duration: Quantity
     daily_cost: Money
     mode: str
-
-# ❌ — no schema, fields can drift
-{"duration": 32, "daily_cost": 4.50}
 ```
 
 ### Service returns wrapped in Attempt
 
 When a service returns `School | None`, the node wraps it in `Attempt.succeeded(school)`
-or `Attempt.impossible("not found")`. The DAG boundary always uses `Attempt` — never
-pass raw return values between nodes.
+or `Attempt.impossible("not found")`.
 
-### Settings sources live in Services, not module-level
+### When to use conditional deps
 
-Settings nodes (`persons_source`, `financial_source`, `commute_thresholds_source`) live
-in the `Services` DI container, not as module variables. Access them through the
-container:
+Conditional deps (via `_get_active_deps()`) are appropriate when excluding a dep
+saves meaningful work — typically an API call or expensive computation. The
+`IfThenElseNode` uses this: when the condition is true, the `else` branch's entire
+computation chain is excluded from staleness tracking, avoiding unnecessary work.
 
+**Don't** use conditional deps for trivial local computation (geocoding a cached
+coordinate, reading a persisted value). Keep those deps stable — the cost is
+negligible and provenance transparency is more valuable.
+
+**Good — conditional dep saves an API call:**
 ```python
-from houses.context import get_services
-svc = get_services()
-data = await svc.persons_source.attempt()
+# IfThenElseNode: else_branch only tracked when condition is false
 ```
 
-Updating settings uses the PATCH endpoint, which pushes into the `UserInputNode` and
-lets the signal chain propagate changes to all downstream nodes:
-
-```bash
-curl -X PATCH http://localhost:8080/api/settings/persons \
-  -H 'Content-Type: application/json' \
-  -d '[...]'
+**Not worth it — conditional dep saves microseconds:**
+```python
+# RailFareNode (before fix): best_location excluded when transit has cost
+# best_location is a fast local lookup. Now always included.
 ```
 
-Never delete the database to force a recompute — use the PATCH endpoint.
+The test: would including the dep unconditionally cause an API call or expensive
+IO? If yes, conditional deps are appropriate. If it's just reading a cached value
+or doing local computation, keep it stable.
 
 ### Node versioning
 
-When `compute()` changes in a way that makes old persisted results semantically invalid
-(different inputs, new dependencies, changed algorithm), bump the node_id:
+When `compute()` changes in a way that makes old persisted results semantically invalid,
+bump the node_id:
 
 ```python
-# Before
-self.town_desc = TownDescNode(f"{rid}/town_desc", ...)
-
 # After — old persisted results under "town_desc" are ignored
 self.town_desc = TownDescNode(f"{rid}/town_desc_v2", ...)
 ```
 
-The new node_id has no persisted data, so:
-1. Node starts as `Attempt.pending()` on next reload
-2. Scheduler processes it: compute runs with current deps
-3. Result persisted under the new node_id
-4. Old results are orphaned harmlessly
-
-No DB surgery, no manual clearing. The server reloads .py changes automatically.
+The new node_id has no persisted data, so the node starts as `Attempt.pending()` and
+recomputes on next scheduler pass. Old results are orphaned harmlessly.
 
 **When NOT to bump:** cosmetic refactors, adding logging, changing error messages,
 or any change producing the same output for the same inputs.
@@ -260,8 +368,7 @@ or any change producing the same output for the same inputs.
 
 ### Tracing failures through provenance
 
-Every node's `to_json()` output includes a `provenance` dict with a `label`. When a
-node fails:
+Every node's `to_json()` output includes a `provenance` dict. When a node fails:
 
 1. Read the failed node's `node_results` — the `error` field says
    `"dep failed: X failed"` or gives the compute error directly.
@@ -273,7 +380,15 @@ destroys the evidence. Read the provenance chain instead.
 
 ### DB isolation for tests
 
-Tests replace the global DB connection with an in-memory SQLite. Because settings
-sources live in Services (not at module level), they read from the in-memory DB
+Tests replace the global DB connection with an in-memory SQLite. Settings sources
+live in `Services` (not at module level), so they read from the in-memory DB
 automatically — no stale cached data, no real DB access during test collection.
-See `tests/unit/conftest.py`.
+
+---
+
+## Datetime rules
+
+- Store and process in UTC (`datetime.now(UTC)`, never `datetime.now()`).
+- After `datetime.fromisoformat()`, check `dt.tzinfo is None` and replace with UTC.
+- Display in the user's local timezone at the presentation boundary.
+- When reading from external APIs, document the source's timezone and convert explicitly.
