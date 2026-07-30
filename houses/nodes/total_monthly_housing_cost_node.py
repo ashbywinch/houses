@@ -78,13 +78,15 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
             Money,
             (
                 monthly_mortgage_node,
-                yearly_sinking_fund_node,
-                life_insurance_node,
                 rental_income_node,
                 status_node,
                 financial_source,
                 commute_breakdown_node,
                 council_tax_node,
+                # Sinking fund and life insurance are conditionally excluded
+                # from active deps when the property is owner-occupied (Current).
+                yearly_sinking_fund_node,
+                life_insurance_node,
             ),
         )
         self._mortgage_node = monthly_mortgage_node
@@ -95,26 +97,42 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
         self._commute_node = commute_breakdown_node
         self._council_tax_node = council_tax_node
 
+    def _get_active_deps(self) -> tuple:
+        """Exclude sinking fund and life insurance when property is Current.
+
+        These costs are not part of the total for owner-occupied properties,
+        so they should not be treated as formal dependencies — if they're
+        impossible (e.g. corrupted person data), the total should still
+        compute correctly without them.
+        """
+        status_att = self._status_node.latest_attempt()
+        is_current = (
+            status_att.succeeded
+            and (status_att.value_or_none() or "").strip().lower() == "current"
+        )
+        if is_current:
+            return self._deps[:6]  # first 6 deps are unconditional
+        return self._deps  # all 8 deps
+
     def compute(
         self,
         mortgage: Attempt[Money],
-        sinking: Attempt[Money],
-        life_insurance: Attempt[Money],
         rental_income: Attempt[Money],
         status: Attempt[str],
         financial: Attempt[dict],
         commute: Attempt[dict],
         council_tax: Attempt[CouncilTaxInfo],
+        sinking: Attempt[Money] | None = None,
+        life_insurance: Attempt[Money] | None = None,
     ) -> Attempt[Money]:
         self._assert_deps_succeeded(
             mortgage=mortgage,
-            sinking=sinking,
-            life_insurance=life_insurance,
             rental_income=rental_income,
             status=status,
             financial=financial,
             commute=commute,
             council_tax=council_tax,
+            # sinking and life_insurance excluded — not formal deps when Current
         )
 
         is_current = (
