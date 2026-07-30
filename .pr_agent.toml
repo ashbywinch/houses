@@ -1,0 +1,8 @@
+[config]
+extra_instructions = """
+When reviewing PRs, check the implementation against the rules in these
+project documentation files:
+- docs/dag-library.md — DAG node rules (expression system, stable deps, provenance)
+- docs/coding-standards.md — project-wide coding rules
+- docs/testing-standards.md — test conventions
+"""
