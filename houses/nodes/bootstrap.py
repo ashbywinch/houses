@@ -221,13 +221,15 @@ def load_property_nodes_from_rows(rows: list[dict[str, Any]]) -> int:
                 logger.warning(
                     "Invalid works estimate for RID %s: %s", raw_rid, ws_value
                 )
-        else:
+        elif prop.works_estimates.latest_attempt().pending:
             # Default empty dict — Ashby's missing estimate will make
             # the chain impossible until entered via the PATCH endpoint.
             prop.works_estimates.push({}, "default")
 
-        # Default rental_income to £0 so total_monthly_cost resolves
-        prop.rental_income.push(Money("0", "GBP"), "default")
+        # Default rental_income to £0 so total_monthly_cost resolves.
+        # Only set if the node is still pending (no user value yet).
+        if prop.rental_income.latest_attempt().pending:
+            prop.rental_income.push(Money("0", "GBP"), "default")
 
         register_property(raw_rid, prop)
         count += 1
