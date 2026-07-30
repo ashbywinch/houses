@@ -32,9 +32,9 @@ class DagJSONEncoder(json.JSONEncoder):
     def default(self, o):
         if isinstance(o, Enum):
             return o.name.lower()
-        from money import Money as _M
+        from money import Money as _Money
 
-        if isinstance(o, _M):
+        if isinstance(o, _Money):
             return {"amount": str(o.amount), "currency": o.currency}
         from pint import Quantity as _Q  # noqa: N814
 
