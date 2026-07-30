@@ -19,9 +19,6 @@ class TestWorksPropagatesToMortgage:
         """Pushing a works_estimate must cause mortgage_required to
         reflect the new total in the next detail read."""
         from houses.nodes.equity_total_node import EquityTotalNode
-        from houses.nodes.monthly_mortgage_payment_node import (
-            MonthlyMortgagePaymentNode,
-        )
         from houses.nodes.mortgage_required_node import (
             MortgageRequiredNode,
         )
@@ -50,12 +47,6 @@ class TestWorksPropagatesToMortgage:
             total_works_node=tw,
             total_equity_node=te,
         )
-        mm = MonthlyMortgagePaymentNode(
-            "wpm_mm",
-            mortgage_required_node=mr,
-            financial_source=fin,
-        )
-
         # ── Seed data ──────────────────────────────────────────────
         price.push(Money("500000", "GBP"), "test")
         sd.push(Money("15000", "GBP"), "test")

@@ -249,12 +249,10 @@ class _DefaultRoutePlanner:
     """Default route planner — wraps CommuteRouter."""
 
     async def walk_route(self, origin: GeoPoint, destination: str, max_walk: int) -> Attempt[Commute]:
-        from houses.routing import CommuteRouter
 
         return await CommuteRouter()._google_route_commute(origin, destination, "WALK", max_walk)
 
     async def drive_route(self, origin: GeoPoint, destination: str) -> Attempt[Commute]:
-        from houses.routing import CommuteRouter
 
         return await CommuteRouter()._google_route_commute(origin, destination, "DRIVE")
 

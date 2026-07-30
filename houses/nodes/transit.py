@@ -237,7 +237,6 @@ class TransitNode(DerivedNode[Commute]):
         with_bus: Attempt[Commute],
         best_address: Attempt[str] = None,
     ) -> Attempt[Commute]:
-        from houses.routing import CommuteRouter
 
         if self._has_car and not no_bus.impossible:
             best_val = no_bus.value_or_none()

@@ -10,16 +10,16 @@ from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 from houses.nodes.area import NearestTownNode, TownDescNode, TownNode, WalkabilityNode
 from houses.nodes.epc_node import CouncilTaxNode, EpcNode
+from houses.nodes.equity_total_node import EquityTotalNode
 from houses.nodes.geocode import GeocodeNode
 from houses.nodes.life_insurance_node import LifeInsuranceTotalNode
 from houses.nodes.location import BestAddressNode, BestLocationNode
-from houses.nodes.equity_total_node import EquityTotalNode
 from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNode
 from houses.nodes.mortgage_required_node import MortgageRequiredNode
 from houses.nodes.schools import PrimarySchoolNode, SecondarySchoolNode
 from houses.nodes.stamp_duty_node import StampDutyNode
-from houses.nodes.total_works_node import TotalWorksNode
 from houses.nodes.total_monthly_housing_cost_node import TotalMonthlyHousingCostNode
+from houses.nodes.total_works_node import TotalWorksNode
 from houses.nodes.yearly_sinking_fund_node import YearlySinkingFundNode
 from houses.services_provider import get_services
 

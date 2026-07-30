@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 
 from fastapi import APIRouter, Body, HTTPException, Request, WebSocket
@@ -17,8 +18,9 @@ api_router = APIRouter(prefix="/api")
 
 @api_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
-    from houses.web.auth import _get_serializer, _SESSION_MAX_AGE
     from itsdangerous import BadSignature, SignatureExpired
+
+    from houses.web.auth import _SESSION_MAX_AGE, _get_serializer
 
     # Extract session cookie from WebSocket headers — Starlette's Request
     # requires an HTTP scope and can't be constructed from a websocket scope.
@@ -33,13 +35,11 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         part = part.strip()
         if part.startswith("session="):
             cookie_val = part[len("session=") :]
-            try:
+            with contextlib.suppress(BadSignature, SignatureExpired):
                 session = _get_serializer().loads(
                     cookie_val,
                     max_age=int(_SESSION_MAX_AGE.total_seconds()),
                 )
-            except (BadSignature, SignatureExpired):
-                pass
             break
 
     if not session or not session.get("email"):

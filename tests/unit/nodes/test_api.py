@@ -141,8 +141,9 @@ class TestWorksEstimateApi:
 
     def _setup(self):
         from fastapi.testclient import TestClient
-        from houses.server import app
+
         from houses.property_registry import _reset as _reset_registry
+        from houses.server import app
 
         _reset_registry()
         client = TestClient(app)

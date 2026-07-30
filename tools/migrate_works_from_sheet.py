@@ -61,8 +61,9 @@ def read_view_tab_works() -> dict[str, str]:
 
 def push_to_dag(rid: str, value: float) -> bool:
     """Push a works estimate dict to the property's DAG node."""
+    from datetime import UTC, datetime
+
     from dag.persistence import save_node_result
-    from datetime import datetime, UTC
 
     node_id = f"{rid}/works_estimates"
     result_dict = {
