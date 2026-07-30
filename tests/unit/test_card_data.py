@@ -34,16 +34,26 @@ def _mock(monkeypatch):
     from houses.services_provider import _request_services as _sp
     from houses.tfl_client import TflClient
 
-    class _CannedRouter:
-        async def route(self, origin, destination, *, has_car, max_walk_minutes):
+    class _CannedPlanner:
+        async def walk_route(self, origin, destination, max_walk):
             return Attempt.succeeded(
                 Commute(
-                    person=Person(name="Test", has_car=has_car),
-                    label="Test Commute",
+                    person=Person(name="Test", has_car=False),
+                    label="Walk",
                     destination=PlaceOfInterest(label="Dest", address=str(destination)),
                     duration=Quantity(30, "minute"),
+                    daily_cost=Money("0", "GBP"),
+                ),
+            )
+
+        async def drive_route(self, origin, destination):
+            return Attempt.succeeded(
+                Commute(
+                    person=Person(name="Test", has_car=True),
+                    label="Drive",
+                    destination=PlaceOfInterest(label="Dest", address=str(destination)),
+                    duration=Quantity(20, "minute"),
                     daily_cost=Money("5.0", "GBP"),
-                    mode="transit",
                 ),
             )
 
@@ -61,7 +71,7 @@ def _mock(monkeypatch):
 
     monkeypatch.setattr(TflClient, "plan", mock_plan)
 
-    svc = make_services(commute_router=_CannedRouter())
+    svc = make_services(route_planner=_CannedPlanner())
     token = _sp.set(svc)
     yield
     _sp.reset(token)
@@ -400,7 +410,7 @@ class TestScoring:
         await flush_processor()
         s = await prop.to_json_summary()
         score = _score_from_summary(s)
-        assert score == 15
+        assert score == 16
 
     def test_all_green_returns_max(self):
         summary = {

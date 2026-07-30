@@ -36,6 +36,8 @@ class TestCommuteSelectorNode:
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
         transit = FixedCommuteNode("transit")
         bus = FixedCommuteNode("bus")
+        walk = FixedCommuteNode("walk")
+        drive = FixedCommuteNode("drive")
         _succeeded_walk_check(False)
 
         node = CommuteSelectorNode(
@@ -43,8 +45,8 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            walk_result=_impossible_commute("walk"),
-            drive_result=_impossible_commute("drive"),
+            walk_result=walk,
+            drive_result=drive,
             max_walk=30,
         )
 
@@ -54,9 +56,13 @@ class TestCommuteSelectorNode:
 
         transit_commute = _make_commute(duration_min=32, cost_gbp=4.50)
         bus_commute = _make_commute(duration_min=55, cost_gbp=2.00)
+        walk_commute = _make_commute(duration_min=60, cost_gbp=0)
+        drive_commute = _make_commute(duration_min=45, cost_gbp=8.00)
 
         transit.push(transit_commute)
         bus.push(bus_commute)
+        walk.push(walk_commute)
+        drive.push(drive_commute)
 
         await flush_processor()
 
@@ -156,6 +162,8 @@ class TestCommuteSelectorNode:
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
         transit = FixedCommuteNode("transit")
         bus = FixedCommuteNode("bus")
+        walk = FixedCommuteNode("walk")
+        drive = FixedCommuteNode("drive")
         _succeeded_walk_check(False)
 
         node = CommuteSelectorNode(
@@ -163,8 +171,8 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            walk_result=_impossible_commute("walk"),
-            drive_result=_impossible_commute("drive"),
+            walk_result=walk,
+            drive_result=drive,
             max_walk=30,
         )
 
@@ -172,6 +180,8 @@ class TestCommuteSelectorNode:
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
         poi.push(office_poi)
         bus.push(_make_commute(duration_min=55, cost_gbp=2.00), "Bus")
+        walk.push(_make_commute(duration_min=60, cost_gbp=0), "test")
+        drive.push(_make_commute(duration_min=45, cost_gbp=8.00), "test")
         transit.push(_make_commute(duration_min=32, cost_gbp=4.50), "TfL")
 
         await flush_processor()
@@ -191,6 +201,8 @@ class TestCommuteSelectorNode:
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
         transit = FixedCommuteNode("transit")
         bus = FixedCommuteNode("bus")
+        walk = FixedCommuteNode("walk")
+        drive = FixedCommuteNode("drive")
         _succeeded_walk_check(False)
 
         node = CommuteSelectorNode(
@@ -198,8 +210,8 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            walk_result=_impossible_commute("walk"),
-            drive_result=_impossible_commute("drive"),
+            walk_result=walk,
+            drive_result=drive,
             max_walk=30,
         )
 
@@ -207,6 +219,8 @@ class TestCommuteSelectorNode:
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
         transit.push(_make_commute(duration_min=32, cost_gbp=4.50), "TfL")
         bus.push(_make_commute(duration_min=55, cost_gbp=2.00), "Bus")
+        walk.push(_make_commute(duration_min=60, cost_gbp=0), "test")
+        drive.push(_make_commute(duration_min=45, cost_gbp=8.00), "test")
 
         await flush_processor()
 
@@ -238,8 +252,6 @@ class TestCommuteSelectorNode:
             poi=poi,
             transit_result=transit,
             is_child=True,
-            walk_result=_impossible_commute("walk"),
-            drive_result=_impossible_commute("drive"),
             max_walk=30,
         )
 
@@ -864,7 +876,6 @@ async def test_walk_selected_when_fastest():
         poi=poi,
         transit_result=transit,
         walk_result=walk,
-        drive_result=_impossible_commute("drive"),
         max_walk=30,
     )
 

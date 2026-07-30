@@ -15,6 +15,8 @@ class TotalWorksNode(DerivedNode[Money]):
     with ``works_estimate_required=True`` who is missing from the dict.
     """
 
+    propagate_impossible = True
+
     @property
     def provenance_formula(self) -> Formula | None:
         if not self._attempt.succeeded or self._attempt.value_or_none() is None:
@@ -34,10 +36,6 @@ class TotalWorksNode(DerivedNode[Money]):
         persons: Attempt[list],
         works_ests: Attempt[dict],
     ) -> Attempt[Money]:
-        if works_ests.impossible:
-            return Attempt.impossible(works_ests.error)
-        if persons.impossible:
-            return Attempt.impossible(persons.error)
         ps = persons.value_or_none() or []
         buyers = [p for p in ps if not getattr(p, "is_child", False)]
         wd = (

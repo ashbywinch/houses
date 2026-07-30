@@ -16,8 +16,6 @@ from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.routing import CommuteRouter
 
 logger = logging.getLogger(__name__)
-# Module-level router for Google Routes and congestion zone lookups.
-_router = CommuteRouter()
 
 
 @dataclass(frozen=True)
@@ -117,16 +115,13 @@ class WalkLegCheckNode(DerivedNode[bool]):
 
 
 class WalkNode(DerivedNode[Commute]):
-    """Walking commute via Google Routes WALK.
+    """Walking commute — uses the route service from Services DI."""
 
-    Tries Google Routes walking mode. Returns the commute when walking
-    is feasible within max_walk minutes, or impossible otherwise.
-    """
-
-    def __init__(self, node_id: str, *, best_location, poi, max_walk: int):
+    def __init__(self, node_id: str, *, best_location, poi, max_walk: int, route_fn=None):
         super().__init__(node_id, Commute, (best_location, poi))
         self.display_name = "Walk"
         self._max_walk = max_walk
+        self._route_fn = route_fn
 
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
         loc = location.value_or_none()
@@ -136,20 +131,21 @@ class WalkNode(DerivedNode[Commute]):
         dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
             return Attempt.impossible("empty destination")
-        return await _router._google_route_commute(loc, dest, "WALK", self._max_walk)
+        if self._route_fn is not None:
+            return await self._route_fn(loc, dest, self._max_walk)
+        from houses.services_provider import get_services
+
+        return await get_services().route_planner.walk_route(loc, dest, self._max_walk)
 
 
 class DriveNode(DerivedNode[Commute]):
-    """Driving commute via Google Routes DRIVE.
+    """Driving commute — uses the route service from Services DI."""
 
-    Tries Google Routes driving mode. Skips when the destination is
-    in the London congestion zone.
-    """
-
-    def __init__(self, node_id: str, *, best_location, poi, has_car: bool):
+    def __init__(self, node_id: str, *, best_location, poi, has_car: bool, route_fn=None):
         super().__init__(node_id, Commute, (best_location, poi))
         self.display_name = "Drive"
         self._has_car = has_car
+        self._route_fn = route_fn
 
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
         if not self._has_car:
@@ -161,9 +157,11 @@ class DriveNode(DerivedNode[Commute]):
         dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
             return Attempt.impossible("empty destination")
-        if CommuteRouter._in_congestion_zone(dest):
-            return Attempt.impossible("destination in congestion zone")
-        return await _router._google_route_commute(loc, dest, "DRIVE")
+        if self._route_fn is not None:
+            return await self._route_fn(loc, dest)
+        from houses.services_provider import get_services
+
+        return await get_services().route_planner.drive_route(loc, dest)
 
 
 class TflTransitNode(DerivedNode[Commute]):

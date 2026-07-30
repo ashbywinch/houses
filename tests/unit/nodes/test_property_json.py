@@ -25,19 +25,20 @@ def _fake_services(monkeypatch):
     from houses.tfl_client import TflClient
     from tests.helpers import make_services
 
-    class _FakeRouter:
-        async def route(self, origin, destination, *, has_car, max_walk_minutes):
+    class _FakePlanner:
+        async def walk_route(self, origin, destination, max_walk):
             return Attempt.succeeded(
                 Commute(
                     person=Person(name="Simon", has_car=False),
-                    label="Office",
-                    destination=PlaceOfInterest(
-                        label="Office", address=destination if isinstance(destination, str) else str(destination)
-                    ),
-                    duration=Quantity(32, "minute"),
-                    daily_cost=Money("4.50", "GBP"),
+                    label="Walk",
+                    destination=PlaceOfInterest(label="Dest", address=destination),
+                    duration=Quantity(30, "minute"),
+                    daily_cost=Money("0", "GBP"),
                 ),
             )
+
+        async def drive_route(self, origin, destination):
+            return Attempt.impossible("no car available")
 
     async def mock_plan(self):
         return Attempt.succeeded(
@@ -52,7 +53,7 @@ def _fake_services(monkeypatch):
 
     monkeypatch.setattr(TflClient, "plan", mock_plan)
 
-    token = _sp.set(make_services(commute_router=_FakeRouter()))
+    token = _sp.set(make_services(route_planner=_FakePlanner()))
     yield
     _sp.reset(token)
 

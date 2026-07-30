@@ -115,6 +115,8 @@ class CommuteSelectorNode(DerivedNode[Commute]):
     impossible).
     """
 
+    propagate_impossible = False
+
     def __init__(
         self,
         node_id: str,

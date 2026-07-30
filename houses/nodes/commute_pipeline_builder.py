@@ -155,13 +155,18 @@ def build_commute_pipeline(prop) -> None:
                     condition_fn=_needs_rail_fare,
                     then_branch=rail_fare_node,
                 )
+            # Omit drive entirely when the destination is in the London
+            # congestion zone — no point computing a route that can't exist.
+            dest_addr = poi.address if hasattr(poi, 'address') else (poi.get('address', '') if isinstance(poi, dict) else str(poi))
+            in_zone = bool(dest_addr) and CommuteRouter._in_congestion_zone(dest_addr)
+
             selector = CommuteSelectorNode(
                 f"{prop.rid}/{key}/commute",
                 origin=prop.best_location,
                 poi=poi_src,
                 walk_result=walk_node,
                 transit_result=bus_augment,
-                drive_result=drive_node,
+                drive_result=None if in_zone else drive_node,
                 is_child=is_child,
                 max_walk=int(p_info.bus_walk_penalty.magnitude),
             )

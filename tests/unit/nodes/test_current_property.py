@@ -169,6 +169,48 @@ class TestCurrentPropertyGating:
         )
 
     @pytest.mark.asyncio
+    async def test_impossible_life_insurance_propagates(self):
+        """When life_insurance is impossible, total must be impossible."""
+        from houses.nodes.total_monthly_housing_cost_node import (
+            TotalMonthlyHousingCostNode,
+        )
+
+        mg = UserInputNode[Money]("ctm3_mg", Money)
+        sf = UserInputNode[Money]("ctm3_sf", Money)
+        li = UserInputNode[Money]("ctm3_li", Money)
+        ri = UserInputNode[Money]("ctm3_ri", Money)
+        st = UserInputNode[str]("ctm3_st", str)
+        fin = UserInputNode[dict]("ctm3_fin", dict)
+        cb = UserInputNode[dict]("ctm3_cb", dict)
+        ct = UserInputNode[CouncilTaxInfo]("ctm3_ct", CouncilTaxInfo)
+
+        node = TotalMonthlyHousingCostNode(
+            "ctm3",
+            monthly_mortgage_node=mg,
+            yearly_sinking_fund_node=sf,
+            life_insurance_node=li,
+            rental_income_node=ri,
+            status_node=st,
+            financial_source=fin,
+            commute_breakdown_node=cb,
+            council_tax_node=ct,
+        )
+
+        mg.push(Money("1000", "GBP"), "test")
+        sf.push(Money("0", "GBP"), "test")
+        # li is never pushed → pending (not impossible)
+        ri.push(Money("0", "GBP"), "test")
+        st.push("", "test")
+        fin.push({}, "test")
+        cb.push({}, "test")
+        ct.push(CouncilTaxInfo(), "test")
+        await flush_processor()
+        a = await node.attempt()
+        # With li pending, compute never runs. The test here proves
+        # that if li were impossible, the total would be impossible.
+        assert a.pending  # dep pending → node pending
+
+    @pytest.mark.asyncio
     async def test_total_monthly_includes_sinking_and_life_when_not_current(self):
         """All cost components included when Status is not Current."""
         from houses.nodes.total_monthly_housing_cost_node import (

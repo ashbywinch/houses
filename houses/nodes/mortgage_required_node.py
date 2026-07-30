@@ -11,10 +11,9 @@ _ZERO = Decimal("0")
 
 
 class MortgageRequiredNode(DerivedNode[Money]):
-    """Mortgage principal = Price + StampDuty + TotalWorks - TotalEquity.
+    """Mortgage principal = Price + StampDuty + TotalWorks - TotalEquity."""
 
-    Propagates impossible from upstream deps.
-    """
+    propagate_impossible = True
 
     @property
     def provenance_formula(self) -> Formula | None:
@@ -49,15 +48,6 @@ class MortgageRequiredNode(DerivedNode[Money]):
         tw: Attempt[Money],
         te: Attempt[Money],
     ) -> Attempt[Money]:
-        if price.impossible:
-            return Attempt.impossible(price.error)
-        if sd.impossible:
-            return Attempt.impossible(sd.error)
-        if tw.impossible:
-            return Attempt.impossible(tw.error)
-        if te.impossible:
-            return Attempt.impossible(te.error)
-
         p = (
             Decimal(price.value_or_none().amount)
             if price.succeeded and price.value_or_none()

@@ -44,17 +44,12 @@ class GeocodingService(Protocol):
     async def reverse_geocode_town(self, lat: float, lon: float) -> str | None: ...
 
 
-class CommuteRoutingService(Protocol):
-    """Generic routing from an origin to a destination."""
+class RoutePlanner(Protocol):
+    """Plan a single-mode route (walk or drive)."""
 
-    async def route(
-        self,
-        origin: str | GeoPoint,
-        destination: str | GeoPoint,
-        *,
-        has_car: bool,
-        max_walk_minutes: int,
-    ) -> Attempt[Commute]: ...
+    async def walk_route(self, origin: GeoPoint, destination: str, max_walk: int) -> Attempt[Commute]: ...
+
+    async def drive_route(self, origin: GeoPoint, destination: str) -> Attempt[Commute]: ...
 
 
 class SchoolLookupService(Protocol):
@@ -250,26 +245,18 @@ class _DefaultGeocoder:
         return await find_nearest_town_name(lat, lon)
 
 
-class _DefaultCommuteRouter:
-    """Thin wrapper around CommuteRouter."""
+class _DefaultRoutePlanner:
+    """Default route planner — wraps CommuteRouter."""
 
-    def __init__(self):
-        self._router = CommuteRouter()
+    async def walk_route(self, origin: GeoPoint, destination: str, max_walk: int) -> Attempt[Commute]:
+        from houses.routing import CommuteRouter
 
-    async def route(
-        self,
-        origin: str | GeoPoint,
-        destination: str | GeoPoint,
-        *,
-        has_car: bool,
-        max_walk_minutes: int,
-    ) -> Attempt[Commute]:
-        return await self._router.get_commute(
-            origin,
-            destination,
-            has_car=has_car,
-            max_walk_minutes=max_walk_minutes,
-        )
+        return await CommuteRouter()._google_route_commute(origin, destination, "WALK", max_walk)
+
+    async def drive_route(self, origin: GeoPoint, destination: str) -> Attempt[Commute]:
+        from houses.routing import CommuteRouter
+
+        return await CommuteRouter()._google_route_commute(origin, destination, "DRIVE")
 
 
 class _DefaultSchoolLookup:
@@ -330,7 +317,7 @@ def _default_auth_enabled() -> bool:
 class Services:
     auth_enabled: bool = dataclasses.field(default_factory=_default_auth_enabled)
     geocoder: GeocodingService = dataclasses.field(default_factory=_DefaultGeocoder)
-    commute_router: CommuteRoutingService = dataclasses.field(default_factory=_DefaultCommuteRouter)
+    route_planner: RoutePlanner = dataclasses.field(default_factory=_DefaultRoutePlanner)
     school_lookup: SchoolLookupService = dataclasses.field(default_factory=_DefaultSchoolLookup)
     walkability_service: WalkabilityService = dataclasses.field(default_factory=_DefaultWalkability)
     town_desc_service: TownDescService = dataclasses.field(default_factory=_DefaultTownDesc)
@@ -353,3 +340,9 @@ class Services:
     geo_cache: dict | None = None
     bus_fare_registry: Any | None = None
     rail_fare_registry: Any | None = None
+
+    async def tfl_plan(self, origin: str, destination: str, label: str) -> Attempt[Commute]:
+        """Plan a TfL transit route. Wraps the real client for DI."""
+        from houses.tfl_client import TflClient
+
+        return await TflClient(origin, destination, label).plan()
