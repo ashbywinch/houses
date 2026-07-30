@@ -1,5 +1,4 @@
-"""Cutover bridge — push enriched data to the new DAG's UserInputNodes,
-and migrate old ashby_works float to works_estimates dict.
+"""Cutover bridge — push enriched data to the new DAG's UserInputNodes.
 
 This module contains the glue code that pushes enrichment results to the
 new dag/ library's UserInputNodes. It runs alongside the existing
@@ -14,8 +13,6 @@ import logging
 
 from money import Money
 
-from dag.persistence import latest_node_result
-from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
 from houses.property import EnrichedProperty
@@ -68,30 +65,4 @@ def push_enriched_property(
         sources["actual_postcode"].push(enriched.actual_postcode, "Rightmove")
 
 
-def migrate_old_ashby_works_sync(property_nodes) -> None:
-    """Synchronous version — pushes old ashby_works float to works_estimates dict.
 
-    Called during PropertyNodes construction. Does not flush the DAG processor
-    (not needed for correctness — subsequent pushes will trigger recomputation).
-    """
-    rid = property_nodes.rid
-    old_key = f"{rid}/ashby_works"
-    old_result = latest_node_result(old_key)
-
-    if old_result and old_result.get("status") == "succeeded":
-        old_value = old_result.get("value")
-        if old_value is not None and isinstance(old_value, (int, float)):
-            property_nodes.works_estimates.push(
-                {"Ashby": float(old_value)}, "migration"
-            )
-            logger.info(
-                "Migrated ashby_works=%.2f for RID %s to works_estimates",
-                float(old_value),
-                rid,
-            )
-
-
-async def migrate_old_ashby_works(property_nodes) -> None:
-    """Async version — migrates and flushes the DAG processor."""
-    migrate_old_ashby_works_sync(property_nodes)
-    await flush_processor()
