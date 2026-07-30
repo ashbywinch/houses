@@ -62,11 +62,15 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
                 return commute
             round_trip_km = (total_drive_min / 60.0) * 48.0 * 2
 
-        # MPG -> litres per 100km: (100 * 4.54609) / (mpg * 1.60934) ≈ 282.5 / mpg
-        litres_per_100km = 282.5 / mpg if mpg > 0 else 10.0
-        fuel_used_litres = round_trip_km / litres_per_100km
-        daily_fuel_cost = fuel_used_litres * cost_per_litre
-        fuel_cost = Money(str(round(daily_fuel_cost, 2)), "GBP")
+        # Fuel calculation using pint for proper Imperial gallon -> litre conversion
+        # 1 imperial gallon = 4.54609 litres; US gallon is 3.78541 litres
+        fuel_volume = (Quantity(round_trip_km, "km") / Quantity(mpg, "mile / imperial_gallon")).to("liter")
+        fuel_cost_amount = round(float(fuel_volume.magnitude) * cost_per_litre, 2)
+
+        if fuel_cost_amount <= 0:
+            return commute
+
+        fuel_cost = Money(str(fuel_cost_amount), "GBP")
         new_daily_cost = val.daily_cost + fuel_cost
 
         # Attribute fuel cost to the drive CostGroup(s) so downstream

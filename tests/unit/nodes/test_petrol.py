@@ -89,13 +89,10 @@ class TestPetrolCostAugmentNode:
         assert a.succeeded, f"Expected succeeded, got {a.status}: {a.error}"
         val = a.value_or_none()
         assert val is not None
-        # Base cost 5.00 + fuel cost (48 km / (282.5/45) L/100km * 1.45 £/L)
-        litres_per_100km = 282.5 / 45
-        fuel_litres = 48 / litres_per_100km
-        fuel_cost = fuel_litres * 1.45
-        expected = round(5.00 + fuel_cost, 2)
+        # 48 km round trip, 45 MPG, £1.45/L → fuel = £4.37, total = 5.00+4.37 = £9.37
+        expected = 9.37
         assert float(val.daily_cost.amount) == expected, (
-            f"Expected daily_cost {expected}, got {val.daily_cost.amount}"
+            f"Expected daily_cost {expected}, got {float(val.daily_cost.amount)}"
         )
 
     @pytest.mark.asyncio
@@ -207,8 +204,8 @@ class TestPetrolCostAugmentNode:
         assert a.succeeded, f"Expected succeeded, got {a.status}: {a.error}"
         val = a.value_or_none()
         assert val is not None
-        litres_per_100km = 282.5 / 30
-        fuel_litres = 48 / litres_per_100km
-        fuel_cost = fuel_litres * 1.60
-        expected = round(5.00 + fuel_cost, 2)
-        assert float(val.daily_cost.amount) == expected
+        # 48 km round trip, 30 MPG, £1.60/L → fuel = £6.55, total = 5.00+6.55 = £11.55
+        expected = 12.23
+        assert float(val.daily_cost.amount) == expected, (
+            f"Expected daily_cost {expected}, got {float(val.daily_cost.amount)}"
+        )
