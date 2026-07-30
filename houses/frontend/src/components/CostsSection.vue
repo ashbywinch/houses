@@ -415,12 +415,12 @@ function canEdit(personName: string): boolean {
   position: relative;
 }
 .epc-step__marker { position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%); font-size: 12px; }
-.epc-step--a { background: var(--green); color: #fff; }
-.epc-step--b { background: var(--green-light); }
-.epc-step--c { background: var(--yellow-light); }
-.epc-step--d { background: var(--yellow); }
-.epc-step--e { background: var(--orange); color: #fff; }
-.epc-step--f { background: var(--orange-dark); color: #fff; }
-.epc-step--g { background: var(--red); color: #fff; }
+.epc-step--a { background: var(--epc-a); color: #fff; }
+.epc-step--b { background: var(--epc-b); color: #fff; }
+.epc-step--c { background: var(--epc-c); color: #fff; }
+.epc-step--d { background: var(--epc-d); color: #1a1a1a; }
+.epc-step--e { background: var(--epc-e); color: #fff; }
+.epc-step--f { background: var(--epc-f); color: #fff; }
+.epc-step--g { background: var(--epc-g); color: #fff; }
 .epc-potential { font-size: var(--fs-sm); color: var(--text-secondary); margin-top: var(--sp-5); }
 </style>

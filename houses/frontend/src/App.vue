@@ -48,6 +48,13 @@ button { font: inherit; cursor: pointer; border: none; background: none; }
   --green-bg: #dcfce7;
   --green-text: #15803d;
   --orange: #f97316;
+  --epc-a: #2e7d32;
+  --epc-b: #4caf50;
+  --epc-c: #8bc34a;
+  --epc-d: #ffeb3b;
+  --epc-e: #ff9800;
+  --epc-f: #e65100;
+  --epc-g: #c62828;
   --orange-bg: #ffedd5;
   --orange-text: #ea580c;
   --red: #dc2626;
