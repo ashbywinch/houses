@@ -44,7 +44,7 @@ describe('CostsSection rental income click', () => {
       const text = s.text()
       return text.includes('500') && s.classes().includes('costs-value--editable')
     })
-    expect(editableSpans.length).toBe(1, 'Expected exactly one editable rental income span')
+    expect(editableSpans.length).toBe(1)
     expect(editableSpans[0].attributes('class')).toContain('costs-value--editable')
     // Click it
     await editableSpans[0].trigger('click')

@@ -4,7 +4,7 @@ from money import Money
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
-from dag.expression import Attr, Conditional, Div, Field, Literal, Negate, Ref
+from dag.expression import Attr, Conditional, Div, Field, Literal, Ref
 
 
 class TotalMonthlyHousingCostNode(DerivedNode[Money]):
@@ -48,13 +48,11 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
         return (
             Ref(self._deps[0])  # mortgage
             + Conditional(
-                predicate=lambda: not (
-                    self._status_node.latest_attempt().value_or_none() or ""
-                ).strip().lower()
-                == "current",
+                predicate=lambda: (
+                    (self._status_node.latest_attempt().value_or_none() or "").strip().lower() != "current"
+                ),
                 if_true=(
-                    Div(Ref(self._sinking_node), Literal(12)) * Literal(2) / Literal(3)
-                    + Ref(self._life_insurance_node)
+                    Div(Ref(self._sinking_node), Literal(12)) * Literal(2) / Literal(3) + Ref(self._life_insurance_node)
                 ),
                 if_false=Literal(Money("0", "GBP")),
             )
@@ -65,10 +63,7 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
 
     def _get_active_deps(self):
         status_att = self._status_node.latest_attempt()
-        is_current = (
-            status_att.succeeded
-            and (status_att.value_or_none() or "").strip().lower() == "current"
-        )
+        is_current = status_att.succeeded and (status_att.value_or_none() or "").strip().lower() == "current"
         if is_current:
             return self._deps[:5]
         return self._deps
@@ -85,9 +80,7 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
     ) -> Attempt[Money]:
         total = Money("0", "GBP") + mortgage.value_or_none()
 
-        is_current = (
-            (status.value_or_none() or "").strip().lower() == "current"
-        )
+        is_current = (status.value_or_none() or "").strip().lower() == "current"
         if not is_current:
             sv = sinking.value_or_none()
             if sv:

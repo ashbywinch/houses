@@ -78,7 +78,7 @@ def _migrate_persons(conn: sqlite3.Connection) -> bool:
         if p.get("name") == "Ashby" and not p.get("email"):
             p["email"] = "emily.winch@gmail.com"
             changed = True
-            print(f"  Ashby: restored email")
+            print("  Ashby: restored email")
 
         # Ensure required fields have defaults
         for field in ("home_sale_price", "outstanding_mortgage", "cash_contribution"):
@@ -112,13 +112,11 @@ def _migrate_financial(conn: sqlite3.Connection) -> bool:
 
     Already run — this is a no-op if individual nodes already exist.
     """
-    from houses.nodes.settings_node import API_KEY_TO_NODE
+    from houses.nodes.settings_node import API_KEY_TO_NODE, SETTING_DEFAULTS
     from houses.services import _make_settings_source
-    from houses.nodes.settings_node import SETTING_DEFAULTS
 
     row = conn.execute(
-        "SELECT result_json FROM node_results WHERE node_id = 'financial' "
-        "ORDER BY id DESC LIMIT 1"
+        "SELECT result_json FROM node_results WHERE node_id = 'financial' ORDER BY id DESC LIMIT 1"
     ).fetchone()
     if row is None:
         print("  No old financial blob found.")

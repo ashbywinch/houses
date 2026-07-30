@@ -11,8 +11,9 @@ refactors the wiring, selection logic, or cost merging, these break.
 
 from __future__ import annotations
 
-import pytest
 from decimal import Decimal
+
+import pytest
 from money import Money
 from pint import Quantity
 
@@ -369,8 +370,8 @@ class TestFullCommutePipeline:
         petrol_cost = PetrolCostAugmentNode(
             "test/dad/petrol_cost",
             commute_node=park_and_ride,
-            petrol_mpg_node=svc.setting_nodes.get('settings/petrol_mpg'),
-            petrol_cost_per_litre_node=svc.setting_nodes.get('settings/petrol_cost_per_litre'),
+            petrol_mpg_node=svc.setting_nodes.get("settings/petrol_mpg"),
+            petrol_cost_per_litre_node=svc.setting_nodes.get("settings/petrol_cost_per_litre"),
         )
         # Bus is slower than transit so transit wins
         from houses.nodes.rail_fare_node import RailFareNode
@@ -520,8 +521,8 @@ class TestFullCommutePipeline:
         final_fuel = PetrolCostAugmentNode(
             "test/dr/final_fuel",
             commute_node=merge_node,
-            petrol_mpg_node=svc.setting_nodes.get('settings/petrol_mpg'),
-            petrol_cost_per_litre_node=svc.setting_nodes.get('settings/petrol_cost_per_litre'),
+            petrol_mpg_node=svc.setting_nodes.get("settings/petrol_mpg"),
+            petrol_cost_per_litre_node=svc.setting_nodes.get("settings/petrol_cost_per_litre"),
         )
 
         await flush_processor()

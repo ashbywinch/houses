@@ -80,10 +80,7 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         for i, cg in enumerate(new_details):
             has_drive = any(leg.mode == LegMode.DRIVE for leg in cg.legs)
             if has_drive:
-                if cg.cost is None:
-                    new_cg_cost = fuel_cost
-                else:
-                    new_cg_cost = cg.cost + fuel_cost
+                new_cg_cost = fuel_cost if cg.cost is None else cg.cost + fuel_cost
                 new_details[i] = replace(cg, cost=new_cg_cost)
                 break
 

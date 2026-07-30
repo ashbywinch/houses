@@ -110,8 +110,6 @@ class TestDerivedNode:
         a = await doubler.attempt()
         assert a.impossible is True
 
-
-
     @pytest.mark.asyncio
     async def test_impossible_dep_crash_preserves_provenance(self):
         """When compute() crashes from using None from an impossible dep,

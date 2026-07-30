@@ -435,8 +435,7 @@ async def patch_works_estimate(
     _pa = _get_svc().persons_source.latest_attempt()
     if _pa.succeeded and _pa.value_or_none():
         _names = {
-            getattr(p, "name", None) or (p.get("name") if isinstance(p, dict) else None)
-            for p in _pa.value_or_none()
+            getattr(p, "name", None) or (p.get("name") if isinstance(p, dict) else None) for p in _pa.value_or_none()
         }
         if person_name not in _names:
             raise HTTPException(

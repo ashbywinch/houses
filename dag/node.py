@@ -80,9 +80,7 @@ class Node(ABC, Generic[T]):
             try:
                 val = self._adapter.validate_python(stored["value"])
             except Exception as exc:
-                return Attempt.impossible(
-                    f"validation error: {exc}"
-                )
+                return Attempt.impossible(f"validation error: {exc}")
             return Attempt.succeeded(val)
         if status == "pending":
             retry_at = stored.get("retry_at")

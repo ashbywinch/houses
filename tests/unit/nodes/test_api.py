@@ -165,9 +165,7 @@ class TestWorksEstimateApi:
             f"/api/properties/{rid}/works-estimate",
             json={"person": "Ashby", "value": 15000},
         )
-        assert resp.status_code == 200, (
-            f"Expected 200, got {resp.status_code}: {resp.text[:500]}"
-        )
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text[:500]}"
         assert resp.json() == {"status": "ok"}
 
     def test_works_estimate_propagates_to_detail(self):
@@ -195,6 +193,7 @@ class TestWorksEstimateApi:
         prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
         prop.works_estimates.push({}, "test")
         from money import Money
+
         prop.rental_income.push(Money("0", "GBP"), "test")
         prop.comment_status.push("", "test")
 

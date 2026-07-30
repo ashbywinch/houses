@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from inspect import iscoroutine
 from typing import Generic, TypeVar
 
-from dag.attempt import Attempt, Formula, FormulaLine, Provenance, SourceType
+from dag.attempt import Attempt, Formula, Provenance, SourceType
 from dag.expression import Expression
 from dag.http_error import HttpError
 from dag.node import Node
@@ -99,28 +99,28 @@ class DerivedNode(Node[T], Generic[T]):
                 and self._computed_at is not None
                 and dep._persisted_at > self._computed_at
             ):
-                    logger.warning(
-                        "STALE1: %s dep=%s persisted=%s > computed=%s",
-                        self._id,
-                        dep._id,
-                        dep._persisted_at.isoformat(),
-                        self._computed_at.isoformat(),
-                    )
-                    return True
+                logger.warning(
+                    "STALE1: %s dep=%s persisted=%s > computed=%s",
+                    self._id,
+                    dep._id,
+                    dep._persisted_at.isoformat(),
+                    self._computed_at.isoformat(),
+                )
+                return True
             if (
                 isinstance(dep, DerivedNode)
                 and dep._computed_at is not None
                 and self._computed_at is not None
                 and dep._computed_at > self._computed_at
             ):
-                    logger.warning(
-                        "STALE2: %s dep=%s computed=%s > self_computed=%s",
-                        self._id,
-                        dep._id,
-                        dep._computed_at.isoformat(),
-                        self._computed_at.isoformat(),
-                    )
-                    return True
+                logger.warning(
+                    "STALE2: %s dep=%s computed=%s > self_computed=%s",
+                    self._id,
+                    dep._id,
+                    dep._computed_at.isoformat(),
+                    self._computed_at.isoformat(),
+                )
+                return True
             if self._loaded_dep_timestamps:
                 stored = self._loaded_dep_timestamps.get(dep._id, "")
                 if stored:
@@ -351,15 +351,10 @@ class DerivedNode(Node[T], Generic[T]):
         before compute() is ever called.  This assertion is a safety net
         to fail fast if that contract is violated.
         """
-        failed = {
-            name: att.status
-            for name, att in deps.items()
-            if att is not None and not att.succeeded
-        }
+        failed = {name: att.status for name, att in deps.items() if att is not None and not att.succeeded}
         if failed:
             raise AssertionError(
-                f"Dependencies not succeeded: {failed}. "
-                "Auto-propagation should have caught these before compute()."
+                f"Dependencies not succeeded: {failed}. Auto-propagation should have caught these before compute()."
             )
 
     @abstractmethod

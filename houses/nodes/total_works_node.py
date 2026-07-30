@@ -42,17 +42,12 @@ class TotalWorksNode(DerivedNode[Money]):
         missing = [
             p
             for p in buyers
-            if getattr(p, "works_estimate_required", False)
-            and (p.name not in wd or wd[p.name] is None)
+            if getattr(p, "works_estimate_required", False) and (p.name not in wd or wd[p.name] is None)
         ]
         if missing:
             names = ", ".join(p.name for p in missing)
-            return Attempt.impossible(
-                f"Works estimate required for: {names}"
-            )
+            return Attempt.impossible(f"Works estimate required for: {names}")
 
         # Filter out None values (cleared estimates)
-        total = sum(
-            Decimal(str(v)) for v in wd.values() if v is not None
-        )
+        total = sum(Decimal(str(v)) for v in wd.values() if v is not None)
         return Attempt.succeeded(Money(str(total), "GBP"))

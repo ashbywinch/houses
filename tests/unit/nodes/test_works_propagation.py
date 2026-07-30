@@ -3,8 +3,9 @@ to mortgage_required, monthly_mortgage, and total_monthly_cost."""
 
 from __future__ import annotations
 
-import pytest
 from decimal import Decimal
+
+import pytest
 from money import Money
 
 from dag.scheduler import flush_processor
@@ -35,7 +36,8 @@ class TestWorksPropagatesToMortgage:
 
         # ── Derived nodes ─────────────────────────────────────────
         te = EquityTotalNode(
-            "wpm_te", persons_source=persons,
+            "wpm_te",
+            persons_source=persons,
         )
         tw = TotalWorksNode(
             "wpm_tw",
@@ -55,12 +57,14 @@ class TestWorksPropagatesToMortgage:
         persons.push(
             [
                 Person(
-                    name="Simon", has_car=True,
+                    name="Simon",
+                    has_car=True,
                     home_sale_price=Money("550000", "GBP"),
                     outstanding_mortgage=Money("373000", "GBP"),
                 ),
                 Person(
-                    name="Ashby", has_car=True,
+                    name="Ashby",
+                    has_car=True,
                     cash_contribution=Money("300000", "GBP"),
                 ),
             ],
@@ -79,9 +83,7 @@ class TestWorksPropagatesToMortgage:
         # Equity: max(0, 550k-373k) + 300k = 177k + 300k = 477k
         # Mortgage = 500k + 15k + 0 - 477k = 38k
         baseline_mortgage = a1.value_or_none()
-        assert baseline_mortgage == Money("38000", "GBP"), (
-            f"Expected 38000, got {baseline_mortgage}"
-        )
+        assert baseline_mortgage == Money("38000", "GBP"), f"Expected 38000, got {baseline_mortgage}"
 
         # ── Update works estimate ──────────────────────────────────
         works.push({"Simon": 0, "Ashby": 20000}, "test")
@@ -94,13 +96,9 @@ class TestWorksPropagatesToMortgage:
         assert a2.succeeded
         updated_mortgage = a2.value_or_none()
         # Mortgage = 500k + 15k + 20k - 477k = 58k
-        assert updated_mortgage == Money("58000", "GBP"), (
-            f"Expected 58000, got {updated_mortgage}"
-        )
+        assert updated_mortgage == Money("58000", "GBP"), f"Expected 58000, got {updated_mortgage}"
         # Must be different from baseline
-        assert updated_mortgage != baseline_mortgage, (
-            "Mortgage did not change after works update"
-        )
+        assert updated_mortgage != baseline_mortgage, "Mortgage did not change after works update"
 
     @pytest.mark.asyncio
     async def test_monthly_mortgage_updates_with_works(self):
@@ -123,7 +121,8 @@ class TestWorksPropagatesToMortgage:
         term = UserInputNode("wpm2_term", int)
 
         te = EquityTotalNode(
-            "wpm2_te", persons_source=persons,
+            "wpm2_te",
+            persons_source=persons,
         )
         tw = TotalWorksNode(
             "wpm2_tw",
@@ -149,12 +148,14 @@ class TestWorksPropagatesToMortgage:
         persons.push(
             [
                 Person(
-                    name="Simon", has_car=True,
+                    name="Simon",
+                    has_car=True,
                     home_sale_price=Money("550000", "GBP"),
                     outstanding_mortgage=Money("373000", "GBP"),
                 ),
                 Person(
-                    name="Ashby", has_car=True,
+                    name="Ashby",
+                    has_car=True,
                     cash_contribution=Money("300000", "GBP"),
                 ),
             ],
@@ -182,6 +183,4 @@ class TestWorksPropagatesToMortgage:
         m2 = await mm.attempt()
         assert m2.succeeded
         updated_payment = m2.value_or_none().amount
-        assert updated_payment != baseline_payment, (
-            "Monthly mortgage did not change after works update"
-        )
+        assert updated_payment != baseline_payment, "Monthly mortgage did not change after works update"

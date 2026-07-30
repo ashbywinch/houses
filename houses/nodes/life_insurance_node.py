@@ -36,10 +36,6 @@ class LifeInsuranceTotalNode(DerivedNode[Money]):
         total = _ZERO
         for p in ps:
             ins = getattr(p, "life_insurance_monthly", zero)
-            amt = (
-                ins.amount
-                if isinstance(ins, Money)
-                else Decimal(str(ins))
-            )
+            amt = ins.amount if isinstance(ins, Money) else Decimal(str(ins))
             total += amt
         return Attempt.succeeded(Money(str(total), "GBP"))

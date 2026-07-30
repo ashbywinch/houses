@@ -25,9 +25,7 @@ class EquityTotalNode(DerivedNode[Money]):
         if not self._attempt.succeeded or self._attempt.value_or_none() is None:
             return None
         lines = [
-            FormulaLine(
-                label="Total Equity", value=str(self._attempt.value)
-            ),
+            FormulaLine(label="Total Equity", value=str(self._attempt.value)),
         ]
         return Formula(lines=lines, result=str(self._attempt.value))
 
@@ -54,10 +52,7 @@ class EquityTotalNode(DerivedNode[Money]):
             status=status,
         )
 
-        is_current = (
-            status is not None
-            and status.value_or_none().strip().lower() == "current"
-        )
+        is_current = status is not None and status.value_or_none().strip().lower() == "current"
 
         zero = Money("0", "GBP")
         ps = persons.value_or_none()
@@ -66,21 +61,9 @@ class EquityTotalNode(DerivedNode[Money]):
             sale = getattr(p, "home_sale_price", zero)
             mortgage = getattr(p, "outstanding_mortgage", zero)
             cash = getattr(p, "cash_contribution", zero)
-            sale_amt = (
-                sale.amount
-                if isinstance(sale, Money)
-                else Decimal(str(sale))
-            )
-            mortgage_amt = (
-                mortgage.amount
-                if isinstance(mortgage, Money)
-                else Decimal(str(mortgage))
-            )
-            cash_amt = (
-                cash.amount
-                if isinstance(cash, Money)
-                else Decimal(str(cash))
-            )
+            sale_amt = sale.amount if isinstance(sale, Money) else Decimal(str(sale))
+            mortgage_amt = mortgage.amount if isinstance(mortgage, Money) else Decimal(str(mortgage))
+            cash_amt = cash.amount if isinstance(cash, Money) else Decimal(str(cash))
             equity = max(_ZERO, sale_amt - mortgage_amt)
             # Cash contributions excluded for Current (owner-occupied) properties
             if not is_current:

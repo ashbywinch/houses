@@ -97,8 +97,7 @@ class TestProperty:
         # It should have fired prop.changed again so the frontend
         # knows to re-fetch.
         assert len(received) > before_flush, (
-            "mortgage_required recomputed but did not notify "
-            "PropertyNodes.changed — frontend never learns of update"
+            "mortgage_required recomputed but did not notify PropertyNodes.changed — frontend never learns of update"
         )
 
     @pytest.mark.asyncio

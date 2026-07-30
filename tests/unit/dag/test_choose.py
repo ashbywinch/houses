@@ -8,7 +8,7 @@ from decimal import Decimal
 from money import Money
 
 from dag.attempt import Attempt
-from dag.expression import Choose, Literal, Ref
+from dag.expression import Choose, Ref
 
 
 @dataclass
@@ -104,7 +104,7 @@ class TestChoose:
         lines = expr.to_formula_lines()
         assert len(lines) == 2
         # All alternatives should appear
-        labels = " ".join(l.label for l in lines)
+        labels = " ".join(_l.label for _l in lines)
         assert "transit" in labels
         assert "drive" in labels
 

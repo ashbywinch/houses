@@ -350,9 +350,7 @@ class Services:
         if not self.setting_nodes:
             self.setting_nodes = {}
             for node_id, (val_type, default_fn) in SETTING_DEFAULTS.items():
-                self.setting_nodes[node_id] = _make_settings_source(
-                    node_id, val_type, default_fn
-                )
+                self.setting_nodes[node_id] = _make_settings_source(node_id, val_type, default_fn)
 
     @property
     def settings_view(self):

@@ -26,10 +26,7 @@ class StampDutyNode(DerivedNode[Money]):
     @property
     def expression(self):
         return Conditional(
-            predicate=lambda: (
-                self._status_node.latest_attempt().value_or_none() or ""
-            ).strip().lower()
-            == "current",
+            predicate=lambda: (self._status_node.latest_attempt().value_or_none() or "").strip().lower() == "current",
             if_true=Literal(Money("0", "GBP")),
             if_false=TieredRate(
                 self._price_node,

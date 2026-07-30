@@ -126,9 +126,7 @@ class TestPetrolCostAugmentNode:
             petrol_cost_per_litre_node=_petrol_cost_node(Decimal("1.45")),
         )
         commute_in.push(
-            _make_commute(
-                duration_min=30, cost_gbp=5.00, mode="drive", drive_legs_minutes=[30]
-            ),
+            _make_commute(duration_min=30, cost_gbp=5.00, mode="drive", drive_legs_minutes=[30]),
             "test",
         )
         await flush_processor()

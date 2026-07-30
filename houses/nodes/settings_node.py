@@ -18,7 +18,6 @@ from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.user_input_node import UserInputNode
 
-
 # ── Node IDs ─────────────────────────────────────────────
 
 MORTGAGE_RATE = "settings/mortgage_rate"
@@ -94,7 +93,7 @@ class SettingsNode(DerivedNode[dict]):
 
     def compute(self, *dep_attempts: Attempt) -> Attempt[dict]:
         result = {}
-        for node_id, attempt in zip(self._setting_nodes.keys(), dep_attempts):
+        for node_id, attempt in zip(self._setting_nodes.keys(), dep_attempts, strict=False):
             if attempt.succeeded:
                 val = attempt.value_or_none()
                 api_key = NODE_TO_API_KEY.get(node_id)

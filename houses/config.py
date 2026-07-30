@@ -66,15 +66,9 @@ class Settings(BaseSettings):
     max_walk_to_station: Quantity = Quantity(20, "minute")
     bus_walk_penalty: Quantity = Quantity(10, "minute")
 
-    _parse_school_radius = field_validator("school_search_radius", mode="before")(
-        lambda v: _parse_quantity(v, "km")
-    )
-    _parse_max_walk = field_validator("max_walk_to_station", mode="before")(
-        lambda v: _parse_quantity(v, "minute")
-    )
-    _parse_bus_penalty = field_validator("bus_walk_penalty", mode="before")(
-        lambda v: _parse_quantity(v, "minute")
-    )
+    _parse_school_radius = field_validator("school_search_radius", mode="before")(lambda v: _parse_quantity(v, "km"))
+    _parse_max_walk = field_validator("max_walk_to_station", mode="before")(lambda v: _parse_quantity(v, "minute"))
+    _parse_bus_penalty = field_validator("bus_walk_penalty", mode="before")(lambda v: _parse_quantity(v, "minute"))
 
     simon_station_crs: str = "VIC"
     lorena_station_crs: str = "FST"

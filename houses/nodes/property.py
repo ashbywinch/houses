@@ -211,8 +211,6 @@ class PropertyNodes:
                 self._slots.append(slot)
                 node.changed.connect(slot)
 
-
-
     def _build_commute_pipeline(self) -> None:
         from houses.nodes.commute_pipeline_builder import build_commute_pipeline
 

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Generic, TypeVar
 from datetime import UTC, datetime
+from typing import Any, Generic, TypeVar
 
 from pydantic_core import core_schema
 

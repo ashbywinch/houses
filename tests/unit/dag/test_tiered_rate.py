@@ -68,7 +68,7 @@ class TestTieredRate:
         assert result.succeeded
         assert result.value == Money("27500", "GBP")
 
-    def test_stamp_duty_at_1M(self):
+    def test_stamp_duty_at_1m(self):
         """£1,000,000 — £250k at 0% + £675k at 5% + £75k at 10% = £41,250."""
         price = FakeNode(_id="price", display_name="price",
                          _attempt=Attempt.succeeded(Money("1000000", "GBP")))
@@ -83,7 +83,7 @@ class TestTieredRate:
         # 0 + 33750 + (1000000-925000)*0.10 = 33750 + 7500 = 41250
         assert result.value == Money("41250", "GBP")
 
-    def test_stamp_duty_at_2M(self):
+    def test_stamp_duty_at_2m(self):
         """£2,000,000 — hits all 4 tiers: 0 + 33750 + 57500 + 60000 = 151,250."""
         price = FakeNode(_id="price", display_name="price",
                          _attempt=Attempt.succeeded(Money("2000000", "GBP")))
@@ -117,5 +117,5 @@ class TestTieredRate:
         ])
         lines = expr.to_formula_lines()
         assert len(lines) >= 2  # price + at least one tier
-        assert any("800,000" in l.value for l in lines)
-        assert any("250,000" in l.label for l in lines)
+        assert any("800,000" in _l.value for _l in lines)
+        assert any("250,000" in _l.label for _l in lines)

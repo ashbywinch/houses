@@ -24,16 +24,16 @@ class TestCurrentPropertyGating:
         price = UserInputNode[Money]("csd_price", Money)
         st = UserInputNode[str]("csd_st", str)
         node = StampDutyNode(
-            "csd", rightmove_price=price, status_node=st,
+            "csd",
+            rightmove_price=price,
+            status_node=st,
         )
         price.push(Money("500000", "GBP"), "test")
         st.push("Current", "test")
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
-        assert a.value_or_none() == Money("0", "GBP"), (
-            f"Stamp duty should be 0 for Current, got {a.value_or_none()}"
-        )
+        assert a.value_or_none() == Money("0", "GBP"), f"Stamp duty should be 0 for Current, got {a.value_or_none()}"
 
     @pytest.mark.asyncio
     async def test_non_current_stamp_duty_is_positive(self):
@@ -43,7 +43,9 @@ class TestCurrentPropertyGating:
         price = UserInputNode[Money]("csd2_price", Money)
         st = UserInputNode[str]("csd2_st", str)
         node = StampDutyNode(
-            "csd2", rightmove_price=price, status_node=st,
+            "csd2",
+            rightmove_price=price,
+            status_node=st,
         )
         price.push(Money("500000", "GBP"), "test")
         st.push("", "test")  # empty = not Current
@@ -62,17 +64,21 @@ class TestCurrentPropertyGating:
         persons = UserInputNode[list]("ce_persons", list)
         st = UserInputNode[str]("ce_st", str)
         node = EquityTotalNode(
-            "ce", persons_source=persons, status_node=st,
+            "ce",
+            persons_source=persons,
+            status_node=st,
         )
         persons.push(
             [
                 Person(
-                    name="Simon", has_car=True,
+                    name="Simon",
+                    has_car=True,
                     home_sale_price=Money("550000", "GBP"),
                     outstanding_mortgage=Money("373000", "GBP"),
                 ),
                 Person(
-                    name="Ashby", has_car=True,
+                    name="Ashby",
+                    has_car=True,
                     cash_contribution=Money("300000", "GBP"),
                 ),
             ],
@@ -83,9 +89,7 @@ class TestCurrentPropertyGating:
         a = await node.attempt()
         assert a.succeeded
         # Equity = max(0, 550k-373k) + 0 (cash excluded) = 177k
-        assert a.value_or_none() == Money("177000", "GBP"), (
-            f"Expected 177000 (cash excluded), got {a.value_or_none()}"
-        )
+        assert a.value_or_none() == Money("177000", "GBP"), f"Expected 177000 (cash excluded), got {a.value_or_none()}"
 
     @pytest.mark.asyncio
     async def test_non_current_equity_includes_cash(self):
@@ -95,17 +99,21 @@ class TestCurrentPropertyGating:
         persons = UserInputNode[list]("ce2_persons", list)
         st = UserInputNode[str]("ce2_st", str)
         node = EquityTotalNode(
-            "ce2", persons_source=persons, status_node=st,
+            "ce2",
+            persons_source=persons,
+            status_node=st,
         )
         persons.push(
             [
                 Person(
-                    name="Simon", has_car=True,
+                    name="Simon",
+                    has_car=True,
                     home_sale_price=Money("550000", "GBP"),
                     outstanding_mortgage=Money("373000", "GBP"),
                 ),
                 Person(
-                    name="Ashby", has_car=True,
+                    name="Ashby",
+                    has_car=True,
                     cash_contribution=Money("300000", "GBP"),
                 ),
             ],
@@ -116,9 +124,7 @@ class TestCurrentPropertyGating:
         a = await node.attempt()
         assert a.succeeded
         # Equity = max(0, 550k-373k) + 300k = 477k
-        assert a.value_or_none() == Money("477000", "GBP"), (
-            f"Expected 477000 (cash included), got {a.value_or_none()}"
-        )
+        assert a.value_or_none() == Money("477000", "GBP"), f"Expected 477000 (cash included), got {a.value_or_none()}"
 
     @pytest.mark.asyncio
     async def test_total_monthly_excludes_sinking_and_life_when_current(self):
@@ -144,7 +150,6 @@ class TestCurrentPropertyGating:
             life_insurance_node=li,
             rental_income_node=ri,
             status_node=st,
-
             commute_breakdown_node=cb,
             council_tax_node=ct,
         )
@@ -164,8 +169,7 @@ class TestCurrentPropertyGating:
         #       + 0 (commute) + 0 (council) - 600 (rental)
         expected = Money("400", "GBP")
         assert a.value_or_none() == expected, (
-            f"Expected {expected} (mortgage only, minus rental), "
-            f"got {a.value_or_none()}"
+            f"Expected {expected} (mortgage only, minus rental), got {a.value_or_none()}"
         )
 
     @pytest.mark.asyncio
@@ -191,7 +195,6 @@ class TestCurrentPropertyGating:
             life_insurance_node=li,
             rental_income_node=ri,
             status_node=st,
-
             commute_breakdown_node=cb,
             council_tax_node=ct,
         )
@@ -233,7 +236,6 @@ class TestCurrentPropertyGating:
             life_insurance_node=li,
             rental_income_node=ri,
             status_node=st,
-
             commute_breakdown_node=cb,
             council_tax_node=ct,
         )
@@ -254,7 +256,7 @@ class TestCurrentPropertyGating:
         assert a.succeeded
         # Total = 1000 + 12000/12*2/3 + 150 + 1800/12 - 600
         #       = 1000 + 666.67 + 150 + 150 - 600 = 1366.67
-        expected = round(1000 + 12000/12*2/3 + 150 + 1800/12 - 600, 2)
+        expected = round(1000 + 12000 / 12 * 2 / 3 + 150 + 1800 / 12 - 600, 2)
         assert float(a.value_or_none().amount) == pytest.approx(expected, abs=0.01), (
             f"Expected ~{expected}, got {a.value_or_none()}"
         )

@@ -8,8 +8,7 @@ from decimal import Decimal
 from money import Money
 
 from dag.attempt import Attempt
-from dag.expression import Conditional, Literal, PMT, Ref, StampDutyFn
-
+from dag.expression import PMT, Conditional, Literal, Ref, StampDutyFn
 
 # ── Test helper: a minimal node-like object ──
 
@@ -214,7 +213,7 @@ class TestPMT:
         formula = expr.to_formula()
         assert formula is not None
         assert len(formula.lines) >= 3
-        assert any("price" in l.label.lower() for l in formula.lines)
+        assert any("price" in _l.label.lower() for _l in formula.lines)
         assert "415,000" in formula.lines[0].value
 
     def test_failure_propagates(self):
@@ -287,7 +286,11 @@ class TestStampDutyFn:
 class TestExpressionIntegration:
     def test_complex_expression_chain_with_operators(self):
         """Simulate mortgage_required = price + stamp_duty + works - equity"""
-        expr = _ref(Money("800000", "GBP")) + _ref(Money("27500", "GBP")) + _ref(Money("50000", "GBP")) - _ref(Money("477000", "GBP"))
+        eight = _ref(Money("800000", "GBP"))
+        twenty = _ref(Money("27500", "GBP"))
+        fifty = _ref(Money("50000", "GBP"))
+        four = _ref(Money("477000", "GBP"))
+        expr = eight + twenty + fifty - four
         result = expr.evaluate()
         assert result.succeeded
         val = result.value
@@ -295,7 +298,11 @@ class TestExpressionIntegration:
 
     def test_partial_failure_in_chain(self):
         """If works is impossible, the whole expression fails but formula still shows all terms."""
-        expr = _ref(Money("800000", "GBP")) + _ref(Money("27500", "GBP")) + _ref(Attempt.impossible("estimate required")) - _ref(Money("477000", "GBP"))
+        eight = _ref(Money("800000", "GBP"))
+        twenty = _ref(Money("27500", "GBP"))
+        imp = _ref(Attempt.impossible("estimate required"))
+        four = _ref(Money("477000", "GBP"))
+        expr = eight + twenty + imp - four
         result = expr.evaluate()
         assert result.impossible
 
@@ -303,4 +310,4 @@ class TestExpressionIntegration:
         formula = expr.to_formula()
         assert formula is not None
         # The available terms appear in formula lines
-        assert any("price" in l.label for l in formula.lines)
+        assert any("price" in _l.label for _l in formula.lines)

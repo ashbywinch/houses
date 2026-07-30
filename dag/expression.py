@@ -14,7 +14,6 @@ not a string name. No values dict, no zipping, no indirection.
 
 from __future__ import annotations
 
-import traceback
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from decimal import Decimal
@@ -241,7 +240,6 @@ class Negate(Expression):
             return Attempt.impossible(f"Cannot negate: {e}")
 
     def to_formula_lines(self) -> list[FormulaLine]:
-        attempt = Ref(self.inner).evaluate() if hasattr(self.inner, "node") else Attempt.pending()
         return [FormulaLine(label="−", value="")]
 
 
@@ -326,16 +324,10 @@ class PMT(Expression):
         if isinstance(p, Money):
             p = Decimal(str(p.amount))
         r_raw = r_result.value
-        if isinstance(r_raw, Decimal):
-            r = float(r_raw) / 12
-        else:
-            r = float(r_raw) / 12
+        r = float(r_raw) / 12
         n = int(t_result.value) * 12
 
-        if r == 0:
-            payment = p / Decimal(str(n))
-        else:
-            payment = p * Decimal(str(r * (1 + r) ** n / ((1 + r) ** n - 1)))
+        payment = p / Decimal(str(n)) if r == 0 else p * Decimal(str(r * (1 + r) ** n / ((1 + r) ** n - 1)))
 
         if isinstance(p_result.value, Money):
             payment = Money(str(round(payment, 2)), p_result.value.currency)
@@ -346,11 +338,11 @@ class PMT(Expression):
         lines: list[FormulaLine] = []
         lines.extend(self.principal.to_formula_lines())
         rate_lines = self.annual_rate.to_formula_lines()
-        for l in rate_lines:
-            lines.append(FormulaLine(label=l.label + " ÷ 12", value=l.value))
+        for rl in rate_lines:
+            lines.append(FormulaLine(label=rl.label + " ÷ 12", value=rl.value))
         term_lines = self.term_years.to_formula_lines()
-        for l in term_lines:
-            lines.append(FormulaLine(label=l.label + " × 12", value=l.value))
+        for tl in term_lines:
+            lines.append(FormulaLine(label=tl.label + " × 12", value=tl.value))
         return lines
 
 
@@ -481,10 +473,7 @@ class TieredRate(Expression):
         Returns (tax_at_this_tier, cumulative_tax_including_this_tier).
         """
         lo, hi, rate = self.tiers[tier_idx]
-        if hi is not None and price > Decimal(str(hi)):
-            effective = Decimal(str(hi))
-        else:
-            effective = price
+        effective = Decimal(str(hi)) if hi is not None and price > Decimal(str(hi)) else price
         taxable = effective - Decimal(str(lo))
         tier_tax = taxable * Decimal(str(rate))
 
@@ -502,17 +491,11 @@ class TieredRate(Expression):
         if not val_result.succeeded:
             return val_result
         raw = val_result.value
-        if hasattr(raw, "amount"):
-            price = Decimal(str(raw.amount))
-        else:
-            price = Decimal(str(raw))
+        price = Decimal(str(raw.amount)) if hasattr(raw, "amount") else Decimal(str(raw))
 
-        for i, (lo, hi, rate) in enumerate(self.tiers):
+        for i, (lo, hi, _rate) in enumerate(self.tiers):
             lo_d = Decimal(str(lo))
-            if hi is not None:
-                hi_d = Decimal(str(hi))
-            else:
-                hi_d = None
+            hi_d = Decimal(str(hi)) if hi is not None else None
 
             if price < lo_d:
                 continue
@@ -536,27 +519,19 @@ class TieredRate(Expression):
             return [FormulaLine(label="Rate calculation", value="failed")]
 
         raw = val_result.value
-        if hasattr(raw, "amount"):
-            price_d = Decimal(str(raw.amount))
-        else:
-            price_d = Decimal(str(raw))
+        price_d = Decimal(str(raw.amount)) if hasattr(raw, "amount") else Decimal(str(raw))
 
         lines: list[FormulaLine] = []
         lines.append(FormulaLine(label="Property price", value=self._format_value(raw)))
 
-        active_tier = None
         for i, (lo, hi, rate) in enumerate(self.tiers):
             lo_d = Decimal(str(lo))
-            if hi is not None:
-                hi_d = Decimal(str(hi))
-            else:
-                hi_d = None
+            hi_d = Decimal(str(hi)) if hi is not None else None
 
             if price_d < lo_d:
                 continue
             if hi_d is not None and price_d > hi_d:
                 continue
-            active_tier = i
 
             if lo_d == 0 and rate == 0:
                 lines.append(FormulaLine(label=f"First £{hi_d:,.0f} at 0%", value="£0.00"))
@@ -567,18 +542,22 @@ class TieredRate(Expression):
                     pwidth = Decimal(str(phi)) - Decimal(str(plo)) if phi is not None else Decimal("0")
                     prev_total += pwidth * Decimal(str(prate))
                     if prate > 0:
-                        lines.append(FormulaLine(
-                            label=f"  £{plo:,.0f} to £{phi:,.0f} at {float(prate)*100:.0f}%",
-                            value=self._format_value(Money(str(prev_total), "GBP")),
-                        ))
+                        lines.append(
+                            FormulaLine(
+                                label=f"  £{plo:,.0f} to £{phi:,.0f} at {float(prate) * 100:.0f}%",
+                                value=self._format_value(Money(str(prev_total), "GBP")),
+                            )
+                        )
 
                 taxable = price_d - lo_d
                 tier_tax = taxable * Decimal(str(rate))
                 pct = float(rate) * 100
-                lines.append(FormulaLine(
-                    label=f"£{lo_d:,.0f} to £{price_d:,.0f} at {pct:.0f}%",
-                    value=self._format_value(Money(str(tier_tax + prev_total), "GBP")),
-                ))
+                lines.append(
+                    FormulaLine(
+                        label=f"£{lo_d:,.0f} to £{price_d:,.0f} at {pct:.0f}%",
+                        value=self._format_value(Money(str(tier_tax + prev_total), "GBP")),
+                    )
+                )
             break
 
         return lines

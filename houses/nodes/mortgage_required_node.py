@@ -42,7 +42,12 @@ class MortgageRequiredNode(DerivedNode[Money]):
     ) -> Attempt[Money]:
         result = self.expression.evaluate()
         # Cannot borrow less than zero
-        if result.succeeded and result.value is not None:
-            if hasattr(result.value, "amount") and result.value.amount < 0:
-                return Attempt.succeeded(Money("0", "GBP"))
+        clamped = (
+            result.succeeded
+            and result.value is not None
+            and hasattr(result.value, "amount")
+            and result.value.amount < 0
+        )
+        if clamped:
+            return Attempt.succeeded(Money("0", "GBP"))
         return result

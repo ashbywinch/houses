@@ -31,6 +31,7 @@ def _infeasible_commute(label: str = "") -> Attempt[Commute]:
         )
     )
 
+
 logger = logging.getLogger(__name__)
 
 

@@ -302,6 +302,7 @@ class TestFinancialSettingsPropagation:
         get_services().financial_source.push(new_financials, "user")
         # Also push to individual setting nodes for the expression system
         from houses.nodes.settings_node import API_KEY_TO_NODE
+
         svc = get_services()
         for api_key, val in new_financials.items():
             nid = API_KEY_TO_NODE.get(api_key)
