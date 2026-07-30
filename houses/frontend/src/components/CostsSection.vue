@@ -98,7 +98,7 @@ const worksEstimates = () =>
 
 const buyerList = () =>
   props.persons?.value
-    ? (props.persons.value as Array<Record<string, unknown>>).filter((p: any) => !p.is_child)
+    ? (props.persons.value as any[]).filter((p: any) => !p.is_child)
     : []
 
 function canEdit(personName: string): boolean {

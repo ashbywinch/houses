@@ -46,9 +46,15 @@ function makeDetail(): PropertyDetailType {
     affordability: {
       stamp_duty: { succeeded: true, value: {amount: "20000", currency: "GBP"}, error: null, provenance: { label: 'test' } },
       council_tax: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
+      works_estimates: { succeeded: true, value: {}, error: null, provenance: { label: 'test' } },
+      total_works: { succeeded: true, value: {amount: "0", currency: "GBP"}, error: null, provenance: { label: 'test' } },
+      total_equity: { succeeded: true, value: {amount: "0", currency: "GBP"}, error: null, provenance: { label: 'test' } },
+      life_insurance_total: { succeeded: true, value: {amount: "0", currency: "GBP"}, error: null, provenance: { label: 'test' } },
+      mortgage_required: { succeeded: true, value: {amount: "0", currency: "GBP"}, error: null, provenance: { label: 'test' } },
       monthly_mortgage: { succeeded: true, value: {amount: "1500", currency: "GBP"}, error: null, provenance: { label: 'test' } },
       monthly_sinking_fund: { succeeded: true, value: {amount: "200", currency: "GBP"}, error: null, provenance: { label: 'test' } },
       monthly_commute_cost: { succeeded: true, value: { persons: { Simon: { daily_gbp: 12.5, yearly_gbp: 5750 } }, yearly_total_gbp: 5750, formula_explanation: 'Aggregated' }, error: null, provenance: { label: 'test' } },
+      rental_income: { succeeded: true, value: {amount: "0", currency: "GBP"}, error: null, provenance: { label: 'test' } },
       total_monthly_housing_cost: { succeeded: true, value: {amount: "1700", currency: "GBP"}, error: null, provenance: { label: 'test' } },
     },
     area: {
@@ -60,7 +66,6 @@ function makeDetail(): PropertyDetailType {
       status_reason: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
       group_notes: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
       ashby_comments: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
-      ashby_works_estimate: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
       design_needed: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
       planning_needed: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
     },
