@@ -183,7 +183,8 @@ class CommuteRouter:
         return _to_outcode(postcodes[0].postcode)
 
     @staticmethod
-    def _in_congestion_zone(dest: str | GeoPoint) -> bool:
+    @staticmethod
+    def in_congestion_zone(dest: str | GeoPoint) -> bool:
         if isinstance(dest, GeoPoint):
             return 51.5 < dest.lat < 51.52 and -0.15 < dest.lon < 0.01
         oc = CommuteRouter._extract_outcode(dest)
@@ -387,7 +388,7 @@ class CommuteRouter:
         """
 
         dest_str = dest if isinstance(dest, str) else f"{dest.lat},{dest.lon}"
-        dest_in_congestion = self._in_congestion_zone(dest)
+        dest_in_congestion = self.in_congestion_zone(dest)
 
         walk_attempt = await self._google_route_commute(origin, dest, "WALK", max_walk_minutes)
         if max_walk_minutes is not None and walk_attempt.succeeded and walk_attempt.value_or_none() is not None:

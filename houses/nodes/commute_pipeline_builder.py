@@ -164,7 +164,7 @@ def build_commute_pipeline(prop) -> None:
             # Omit drive entirely when the destination is in the London
             # congestion zone — no point computing a route that can't exist.
             dest_addr = poi.address if hasattr(poi, 'address') else (poi.get('address', '') if isinstance(poi, dict) else str(poi))
-            in_zone = bool(dest_addr) and CommuteRouter._in_congestion_zone(dest_addr)
+            in_zone = bool(dest_addr) and CommuteRouter.in_congestion_zone(dest_addr)
 
             selector = CommuteSelectorNode(
                 f"{prop.rid}/{key}/commute",

@@ -128,7 +128,7 @@ async def test_find_nearest_handles_coordinate_string(monkeypatch):
 
 
 class TestCongestionZone:
-    """_in_congestion_zone must correctly identify central London postcodes."""
+    """in_congestion_zone must correctly identify central London postcodes."""
 
     @pytest.mark.parametrize(
         "postcode,expected",
@@ -150,7 +150,7 @@ class TestCongestionZone:
     def test_congestion_zone(self, postcode, expected):
         from houses.routing import CommuteRouter
 
-        assert CommuteRouter._in_congestion_zone(postcode) == expected
+        assert CommuteRouter.in_congestion_zone(postcode) == expected
 
 
 # ── get_commute decision logic (backends mocked) ────────────────────────
@@ -273,7 +273,7 @@ class TestGetCommuteChoice:
         monkeypatch.setattr("houses.routing.CommuteRouter._tfl_transit_commute", mock_transit)
 
         monkeypatch.setattr("houses.routing.CommuteRouter._google_route_commute", mock_drive)
-        monkeypatch.setattr("houses.routing.CommuteRouter._in_congestion_zone", mock_cz)
+        monkeypatch.setattr("houses.routing.CommuteRouter.in_congestion_zone", mock_cz)
 
         from houses.routing import CommuteRouter
 
@@ -305,7 +305,7 @@ class TestGetCommuteChoice:
         monkeypatch.setattr("houses.routing.CommuteRouter._tfl_transit_commute", mock_transit)
 
         monkeypatch.setattr("houses.routing.CommuteRouter._google_route_commute", mock_drive)
-        monkeypatch.setattr("houses.routing.CommuteRouter._in_congestion_zone", mock_cz)
+        monkeypatch.setattr("houses.routing.CommuteRouter.in_congestion_zone", mock_cz)
 
         from houses.routing import CommuteRouter
 
@@ -334,7 +334,7 @@ class TestGetCommuteChoice:
 
         monkeypatch.setattr("houses.routing.CommuteRouter._google_route_commute", mock_routes)
         monkeypatch.setattr("houses.routing.CommuteRouter._tfl_transit_commute", mock_transit)
-        monkeypatch.setattr("houses.routing.CommuteRouter._in_congestion_zone", mock_cz)
+        monkeypatch.setattr("houses.routing.CommuteRouter.in_congestion_zone", mock_cz)
         router = CommuteRouter()
         result = await router.get_commute("GU21 7QF", _PIMLICO, has_car=True, max_walk_minutes=15)
         assert result.succeeded, f"Expected succeeded, got {result}"
