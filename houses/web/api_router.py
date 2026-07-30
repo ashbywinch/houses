@@ -420,6 +420,21 @@ async def patch_works_estimate(
     if not person_name:
         raise HTTPException(status_code=400, detail="person is required")
 
+    # Validate the person exists in the current persons configuration
+    from houses.services_provider import get_services as _get_svc
+
+    _pa = _get_svc().persons_source.latest_attempt()
+    if _pa.succeeded and _pa.value_or_none():
+        _names = {
+            getattr(p, "name", None) or (p.get("name") if isinstance(p, dict) else None)
+            for p in _pa.value_or_none()
+        }
+        if person_name not in _names:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown person: {person_name}",
+            )
+
     value = body.get("value")
     if value is not None and not isinstance(value, (int, float)):
         raise HTTPException(
