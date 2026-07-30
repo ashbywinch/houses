@@ -76,3 +76,8 @@ var/
 venv/
 wheels/
 node_modules/.vite/vitest/*/results.json
+tmp/
+houses/frontend/public/provenance-v3.html
+houses/frontend/test-provenance.html
+houses/frontend/test-provenance.ts
+
