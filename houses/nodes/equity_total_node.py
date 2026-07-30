@@ -61,7 +61,7 @@ class EquityTotalNode(DerivedNode[Money]):
         )
 
         zero = Money("0", "GBP")
-        ps = persons.value_or_none() or []
+        ps = persons.value_or_none()
         total = _ZERO
         for p in ps:
             sale = getattr(p, "home_sale_price", zero)

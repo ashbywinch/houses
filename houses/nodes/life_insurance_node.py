@@ -33,7 +33,7 @@ class LifeInsuranceTotalNode(DerivedNode[Money]):
         if persons.impossible:
             return Attempt.impossible(persons.error)
         zero = Money("0", "GBP")
-        ps = persons.value_or_none() or []
+        ps = persons.value_or_none()
         total = _ZERO
         for p in ps:
             ins = getattr(p, "life_insurance_monthly", zero)
