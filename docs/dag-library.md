@@ -197,11 +197,14 @@ which was selected.
 ### Stable dependencies by default
 
 `_get_active_deps()` should return the same set of deps in most cases. Conditional
-deps are appropriate only when excluding a dep saves meaningful work — an API call
-or expensive computation. See *When to use conditional deps* in the design rules.
+deps are for shortcutting — skipping computation entirely. If you want to
+calculate all alternatives and then pick one, keep deps stable.
 
 For trivial local computation (reading a cached value, geocoding a coordinate),
-keep deps stable and use an early-return in `compute()`:
+keeping the dep stable avoids unnecessary conditional complexity:
+
+```python
+# Correct: stable deps, early-return in compute when dep isn't needed
 
 ```python
 # Correct: stable deps, early-return in compute when dep isn't needed
@@ -320,33 +323,27 @@ class CommuteResult:
 When a service returns `School | None`, the node wraps it in `Attempt.succeeded(school)`
 or `Attempt.impossible("not found")`.
 
-### When to use conditional deps
+### Conditional deps shortcut work; stable deps calculate then compare
 
-Conditional deps (via `_get_active_deps()`) are appropriate when excluding a dep
-saves meaningful work — typically an API call or expensive computation. The
-`IfThenElseNode` uses this: when the condition is true, the `else` branch's entire
-computation chain is excluded from staleness tracking, avoiding unnecessary work.
+Use conditional deps (`_get_active_deps()`) when you want to **skip computation
+entirely** — the dep shouldn't compute at all. `IfThenElseNode` is the canonical
+example: when the condition is true, the `else` branch is excluded from deps, so
+its entire computation chain never runs.
 
-**Don't** use conditional deps for trivial local computation (geocoding a cached
-coordinate, reading a persisted value). Keep those deps stable — the cost is
-negligible and provenance transparency is more valuable.
+Don't use conditional deps when you want **all alternatives to compute so you
+can compare them**. `CommuteSelectorNode` keeps walk, transit, and drive as
+stable deps — they all compute independently, then `Choose` picks the best one.
 
-**Good — conditional dep saves an API call:**
+**Conditional dep — skip work entirely:**
 ```python
-# IfThenElseNode: else_branch only tracked when condition is false
+# IfThenElseNode: else branch excluded when condition is true
 ```
 
-**Not worth it — conditional dep saves microseconds:**
+**Stable dep — calculate then decide:**
 ```python
-# RailFareNode (before fix): best_location excluded when transit has cost
-# best_location is a fast local lookup. Now always included.
+# CommuteSelectorNode: walk, transit, drive all compute, Choose selects
 ```
 
-The test: would including the dep unconditionally cause an API call or expensive
-IO? If yes, conditional deps are appropriate. If it's just reading a cached value
-or doing local computation, keep it stable.
-
-### Node versioning
 
 When `compute()` changes in a way that makes old persisted results semantically invalid,
 bump the node_id:
