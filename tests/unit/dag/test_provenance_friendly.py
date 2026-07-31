@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
 from money import Money
 
 from dag.attempt import Attempt, AttemptError, Provenance
@@ -51,23 +52,29 @@ class TestUserInputNodeProvenance:
     async def _provenance_of(self, node: UserInputNode) -> Provenance:
         return await node.build_provenance()
 
-    def test_internal_labels_mapped_to_friendly(self):
-        node = UserInputNode("settings/some_setting", int)
+    def test_settings_node_label_uses_setting_name(self):
+        node = UserInputNode("settings/mortgage_rate", int)
         node.push(1, "db")
         p = asyncio.run(self._provenance_of(node))
-        assert p.label == "Your settings"
+        assert p.label == "Mortgage Rate"
 
-    def test_config_label_mapped(self):
-        node = UserInputNode("settings/some_setting", int)
+    def test_settings_node_label_config_source(self):
+        node = UserInputNode("settings/sinking_fund_rate", int)
         node.push(1, "config")
         p = asyncio.run(self._provenance_of(node))
-        assert p.label == "Your settings"
+        assert p.label == "Sinking Fund Rate"
 
-    def test_migration_label_mapped(self):
-        node = UserInputNode("settings/some_setting", int)
+    def test_settings_node_label_migration_source(self):
+        node = UserInputNode("settings/petrol_mpg", int)
         node.push(1, "migration")
         p = asyncio.run(self._provenance_of(node))
-        assert p.label == "Your settings"
+        assert p.label == "Petrol MPG"
+
+    def test_unknown_settings_stem_falls_back_to_title_case(self):
+        node = UserInputNode("settings/new_future_setting", int)
+        node.push(1, "db")
+        p = asyncio.run(self._provenance_of(node))
+        assert p.label == "New Future Setting"
 
     def test_persons_node_label(self):
         node = UserInputNode("persons", list)
@@ -182,3 +189,42 @@ class TestLoadReconstructsStructuredError:
         # No structured info to recover — error_info is the no_data fallback
         assert a.error_info is not None
         assert a.error_info.code == "no_data"
+
+
+class TestLifeInsurancePerPerson:
+    """Life insurance provenance must name each person, not a single
+    'Life Insurance Total' line (per the prototype's per-person rows)."""
+
+    @pytest.mark.asyncio
+    async def test_formula_lists_each_person(self):
+        from houses.model.domain import Person
+        from houses.nodes.life_insurance_node import LifeInsuranceTotalNode
+        from tests.helpers import make_services
+
+        svc = make_services()
+        node = LifeInsuranceTotalNode("t/li", persons_source=svc.persons_source)
+        svc.persons_source.push(
+            [
+                Person(name="Simon", has_car=True, life_insurance_monthly=Money("150", "GBP")),
+                Person(name="Lorena", has_car=False, life_insurance_monthly=Money("0", "GBP")),
+                Person(name="Ashby", has_car=True, life_insurance_monthly=Money("0", "GBP")),
+            ],
+            "test",
+        )
+        from dag.scheduler import flush_processor
+
+        await flush_processor()
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded, f"life insurance failed: {a.error}"
+        formula = node.provenance_formula
+        assert formula is not None
+        labels = [line.label for line in formula.lines]
+        assert "Simon’s life insurance" in labels, f"got: {labels}"
+        assert "Lorena’s life insurance" in labels
+        assert "Ashby’s life insurance" in labels
+        assert "Life Insurance Total" not in labels
+        # Values reflect each person
+        values = {line.label: line.value for line in formula.lines}
+        assert values["Simon’s life insurance"] == "£150.00"
+        assert values["Lorena’s life insurance"] == "£0.00"

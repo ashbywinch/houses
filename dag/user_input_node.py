@@ -10,6 +10,21 @@ from pydantic_core import core_schema
 from dag.attempt import Attempt, Provenance, SourceType
 from dag.node import Node
 
+# Friendly display names for settings nodes, keyed by the node id stem
+# (the part after "settings/"). Matches the prototype's labels.
+_SETTING_LABELS: dict[str, str] = {
+    "mortgage_rate": "Mortgage Rate",
+    "mortgage_term": "Mortgage Term (years)",
+    "sinking_fund_rate": "Sinking Fund Rate",
+    "life_insurance_monthly": "Life Insurance Monthly",
+    "working_weeks": "Working Weeks per Year",
+    "current_home_sale_price": "Current Home Sale Price",
+    "current_home_outstanding_mortgage": "Current Home Outstanding Mortgage",
+    "petrol_mpg": "Petrol MPG",
+    "petrol_cost_per_litre": "Petrol Cost per Litre",
+    "rental_income_monthly": "Rental Income Monthly",
+}
+
 # Register pydantic schemas for third-party types (Money, Quantity) so
 # TypeAdapter can handle them automatically.  This IS the correct
 # pydantic v2 approach — __get_pydantic_core_schema__ is an explicit
@@ -191,15 +206,19 @@ class UserInputNode(Node[T], Generic[T]):
     def display_label(self) -> str:
         """User-facing label for this source.
 
-        Maps internal source labels (persisted push origins) to friendly
-        display text; falls back to the raw label for user-entered
-        sources like "Rightmove" or "User correction".
+        Settings nodes get friendly per-setting names ("Mortgage Rate",
+        "Sinking Fund Rate") derived from their node id; the persons
+        node becomes "Household members". Falls back to the raw source
+        label for user-entered sources like "Rightmove".
         """
         if self._id == "persons" or self._id.endswith("/persons"):
             return "Household members"
+        if self._id.startswith("settings/"):
+            stem = self._id.split("/", 1)[1]
+            return _SETTING_LABELS.get(stem, stem.replace("_", " ").title())
         label = self._source_label or ""
         if label in ("db", "config", "migration", "settings"):
-            return "Your settings"
+            return self._id.split("/")[-1].replace("_", " ").title()
         return label or self._id
 
     def _provenance_value(self):
