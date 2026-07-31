@@ -43,7 +43,9 @@ class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
         result = await svc.council_tax_service.lookup(postcode.value_or_none() or "", address=addr)
         if result.succeeded:
             return Attempt.succeeded(result.value_or_none())
-        return Attempt.impossible("no council tax data")
+        # Propagate the real reason (e.g. ambiguous address) so the frontend
+        # can show it — not a generic "no council tax data".
+        return Attempt.impossible(result.error or "no council tax data")
 
     @property
     def provenance_source_type(self) -> SourceType:

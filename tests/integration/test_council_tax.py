@@ -300,3 +300,50 @@ class TestLookupYearlyCost:
                 result = _lookup_yearly_cost("E", "Ealing")
                 assert result is not None
                 assert result == Money("1905.44", "GBP")
+
+
+class TestCouncilTaxNodeProvenance:
+    """The node path the frontend consumes: to_json() → provenance dict.
+
+    The frontend renders provenance JSON directly; an impossible lookup
+    must surface status="impossible" + error so the UI shows the failure.
+    """
+
+    @pytest.mark.asyncio
+    async def test_impossible_lookup_emits_status_and_error_in_provenance(self):
+        from dag.scheduler import flush_processor
+        from houses.nodes.epc_node import CouncilTaxNode
+        from dag.user_input_node import UserInputNode
+
+        addr = UserInputNode("addr", str)
+        addr.push("Paddock Heights, Twyford, RG10", "test")
+        postcode = UserInputNode("pc", str)
+        postcode.push("RG10 0AP", "test")
+
+        node = CouncilTaxNode("ct/council_tax", best_address=addr, postcode_node=postcode)
+
+        with patch("uk_property_apis.voa.VOAClient") as mock_voa:
+            instance = AsyncMock()
+            mock_voa.return_value = instance
+            instance.fetch_page = AsyncMock(
+                return_value=_make_page(
+                    _make_bands(
+                        [
+                            ("D", "1 PADDOCK HEIGHTS, TWYFORD, RG10 0AP"),
+                            ("E", "2 PADDOCK HEIGHTS, TWYFORD, RG10 0AP"),
+                        ],
+                        la="Wokingham",
+                    )
+                )
+            )
+            await flush_processor()
+            await flush_processor()
+            j = await node.to_json()
+
+        assert j["status"] == "impossible"
+        assert "multiple properties" in (j.get("error") or "")
+        prov = j["provenance"]
+        assert prov["status"] == "impossible"
+        assert "multiple properties" in prov["error"]
+        assert prov["sourceType"] == "api"
+        assert prov["label"]
