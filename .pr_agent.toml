@@ -4,6 +4,7 @@ api_base = "https://opencode.ai/zen/go/v1"
 
 [config]
 model = "openai/deepseek-v4-flash"
+ai_timeout = 600 # 10 minutes; upstream default raised to 600s after issue #178 (timeouts on large PRs)
 custom_model_max_tokens = 1000000
 max_model_tokens = 1000000
 fallback_models = []
