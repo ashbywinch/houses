@@ -84,7 +84,7 @@ class TestProperty:
 
         # Push a works estimate — this should trigger the chain:
         # works_estimates → total_works → mortgage_required → ...
-        prop.works_estimates.push({"Ashby": 20000}, "test")
+        prop.works_estimates.push({"Ashby": Money("20000", "GBP")}, "test")
 
         # The push itself fires prop.changed once (works_estimates is wired)
         before_flush = len(received)

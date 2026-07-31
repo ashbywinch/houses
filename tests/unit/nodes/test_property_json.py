@@ -79,7 +79,7 @@ def prop():
     p.precise_location.push(GeoPoint(51.5, -0.37), "test")
     p.postcode.push("SW1V 2QQ", "test")
     p.user_entered_address.push("31 Isambard Rd, SW1V 2QQ", "test")
-    p.works_estimates.push({"Ashby": 0}, "test")
+    p.works_estimates.push({"Ashby": Money("0", "GBP")}, "test")
     p.comment_status.push("", "test")
     return p
 

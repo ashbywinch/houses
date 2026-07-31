@@ -91,10 +91,23 @@ function handleRentalKeydown(e: KeyboardEvent) {
 }
 
 // ── Helpers for works display ─────────────────────────
-const worksEstimates = () =>
-  props.affordability?.works_estimates?.succeeded
-    ? (props.affordability.works_estimates.value as Record<string, number> ?? {})
+// Per-person works estimates are Money-shaped ({amount, currency}) —
+// normalize to a plain number for the editing UI. This is an editor,
+// not a provenance renderer; display goes through ProvenanceView.
+const worksEstimates = (): Record<string, number> => {
+  const raw = props.affordability?.works_estimates?.succeeded
+    ? (props.affordability.works_estimates.value as Record<string, unknown> ?? {})
     : {}
+  const out: Record<string, number> = {}
+  for (const [name, v] of Object.entries(raw)) {
+    if (v == null) continue
+    if (typeof v === 'number') { out[name] = v; continue }
+    if (typeof v === 'object' && 'amount' in (v as object)) {
+      out[name] = Number((v as { amount: string }).amount)
+    }
+  }
+  return out
+}
 
 const buyerList = () =>
   props.persons?.value

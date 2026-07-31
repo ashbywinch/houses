@@ -249,6 +249,9 @@ class UserInputNode(Node[T], Generic[T]):
         - JSON-safe values pass through unchanged.
         - Money serialises as its string form ("GBP 800,000.00") — the
           existing, user-friendly provenance convention.
+        - Money nested inside dicts (e.g. per-person works estimates)
+          serialises as {"name": "GBP 20,000.00"} — the frontend formats
+          these as "Name: £20,000.00".
         - Raw structured objects (Person lists, dataclasses) stringify to
           unhelpful repr dumps in the UI — omit those and let the display
           show just the label.
@@ -266,6 +269,8 @@ class UserInputNode(Node[T], Generic[T]):
 
             if isinstance(v, _Money):
                 return str(v)
+            if isinstance(v, dict):
+                return {k: (str(val) if isinstance(val, _Money) else val) for k, val in v.items()}
             return None
 
     async def to_json_value(self) -> dict[str, Any]:

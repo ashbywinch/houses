@@ -19,6 +19,7 @@ Run once, then trigger a server reload so nodes re-load as pending:
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -41,11 +42,47 @@ def _clear_impossible(conn: sqlite3.Connection) -> int:
     return cur.rowcount
 
 
+def _migrate_works_estimates(conn: sqlite3.Connection) -> int:
+    """Convert works_estimates values from raw numbers to Money shape.
+
+    The Money rule applies to all monetary values; per-person works
+    estimates are money. Old rows stored {"Ashby": 20000} — convert to
+    {"Ashby": {"amount": "20000", "currency": "GBP"}}.
+    """
+    rows = conn.execute(
+        "SELECT id, node_id, result_json FROM node_results "
+        "WHERE node_id LIKE '%/works_estimates' "
+        "AND json_extract(result_json, '$.status') = 'succeeded'"
+    ).fetchall()
+    updated = 0
+    for row in rows:
+        data = json.loads(row["result_json"])
+        value = data.get("value") or {}
+        if not isinstance(value, dict):
+            continue
+        changed = False
+        for name, val in list(value.items()):
+            if isinstance(val, (int, float)) or (isinstance(val, str) and val.replace(".", "").replace("-", "").isdigit()):
+                value[name] = {"amount": str(val), "currency": "GBP"}
+                changed = True
+        if changed:
+            data["value"] = value
+            conn.execute(
+                "UPDATE node_results SET result_json = ? WHERE id = ?",
+                (json.dumps(data), row["id"]),
+            )
+            updated += 1
+    conn.commit()
+    return updated
+
+
 def main():
     conn = _conn()
     n = _clear_impossible(conn)
+    m = _migrate_works_estimates(conn)
     conn.close()
     print(f"Cleared {n} impossible row(s). Nodes will recompute on reload.")
+    print(f"Converted {m} works_estimates row(s) to Money.")
 
 
 if __name__ == "__main__":

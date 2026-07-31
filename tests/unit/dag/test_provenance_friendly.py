@@ -258,3 +258,56 @@ class TestPerPropertyNodeLabels:
         node.push({"Ashby": 20000, "Simon": 15000}, "sheet-migration")
         p = asyncio.run(node.build_provenance())
         assert p.to_dict()["value"] == {"Ashby": 20000, "Simon": 15000}
+
+
+class TestTotalWorksPerPerson:
+    """Total works provenance must list each person's estimate via the
+    generic formula, matching the prototype's per-person rows."""
+
+    @pytest.mark.asyncio
+    async def test_formula_lists_each_person(self):
+        from houses.model.domain import Person
+        from houses.nodes.total_works_node import TotalWorksNode
+
+        persons = UserInputNode("t/we_ps", list)
+        works = UserInputNode("t/we_ws", dict[str, Money])
+        node = TotalWorksNode("t/we", persons_source=persons, works_estimates_node=works)
+        persons.push(
+            [
+                Person(name="Ashby", has_car=True, works_estimate_required=False),
+                Person(name="Simon", has_car=True, works_estimate_required=False),
+            ],
+            "test",
+        )
+        works.push({"Ashby": Money("20000", "GBP"), "Simon": Money("5000", "GBP")}, "user")
+        from dag.scheduler import flush_processor
+
+        await flush_processor()
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded, f"total works failed: {a.error}"
+        formula = node.provenance_formula
+        assert formula is not None
+        labels = [line.label for line in formula.lines]
+        assert "Ashby’s renovation estimate" in labels, f"got: {labels}"
+        assert "Simon’s renovation estimate" in labels
+        values = {line.label: line.value for line in formula.lines}
+        assert values["Ashby’s renovation estimate"] == "£20,000.00"
+        assert values["Simon’s renovation estimate"] == "£5,000.00"
+
+    def test_typed_node_round_trips_money(self):
+        """dict[str, Money] reloads Money objects, not raw numbers."""
+        node = UserInputNode("t/we2", dict[str, Money])
+        node.push({"Ashby": Money("20000", "GBP")}, "test")
+        from dag.persistence import latest_node_result
+
+        row = latest_node_result("t/we2")
+        assert row is not None
+        assert row["value"] == {"Ashby": {"amount": "20000.00", "currency": "GBP"}}
+        n2 = UserInputNode("t/we2", dict[str, Money])
+        loaded = n2._load_attempt_from_db()
+        assert loaded is not None
+        val = loaded.value_or_none()
+        assert val is not None
+        assert isinstance(val["Ashby"], Money)
+        assert val["Ashby"] == Money("20000", "GBP")

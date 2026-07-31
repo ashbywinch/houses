@@ -64,7 +64,7 @@ class PropertyNodes:
         self.comment_status_reason = UserInputNode[str](f"{rid}/status_reason", str)
         self.comment_group_notes = UserInputNode[str](f"{rid}/group_notes", str)
         self.comment_ashby_comments = UserInputNode[str](f"{rid}/ashby_comments", str)
-        self.works_estimates = UserInputNode[dict](f"{rid}/works_estimates", dict)
+        self.works_estimates = UserInputNode[dict[str, Money]](f"{rid}/works_estimates", dict[str, Money])
         self.rental_income = UserInputNode[Money](f"{rid}/rental_income", Money)
         self.comment_design_needed = UserInputNode[str](f"{rid}/design_needed", str)
         self.comment_planning_needed = UserInputNode[str](f"{rid}/planning_needed", str)

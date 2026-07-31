@@ -448,7 +448,10 @@ async def patch_works_estimate(
         )
 
     current = prop.works_estimates.latest_attempt().value_or_none() or {}
-    current[person_name] = value
+    # Store as Money — the Money rule applies to all monetary values.
+    from money import Money
+
+    current[person_name] = Money(str(value), "GBP") if value is not None else None
     prop.works_estimates.push(current, "user")
 
     return {"status": "ok"}
