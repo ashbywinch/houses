@@ -382,11 +382,13 @@ async def _geocode_postcode(postcode: str) -> Attempt[GeoPoint]:
             return Attempt.impossible("unexpected error")
 
 
-async def find_nearest_town_name(lat: float, lon: float) -> str | None:
+async def find_nearest_town_name(lat: float, lon: float) -> Attempt[str]:
     """Reverse-geocode coordinates to the nearest UK town name via ORS Pelias.
 
-    Returns the locality or borough name, or ``None`` if the API
-    returns no result or an error.  Does NOT fall back to county.
+    Returns ``Attempt.succeeded(town)`` with the locality or borough name,
+    or ``Attempt.impossible(reason)`` when the API fails or no result is
+    found — the reason is preserved so the caller can distinguish "no
+    town here" from "API down".
     """
     rev_url = ORS_GEOCODE_URL.replace("/search", "/reverse")
     params = {"point.lat": lat, "point.lon": lon, "size": 1, "boundary.country": "GBR"}
@@ -404,15 +406,19 @@ async def find_nearest_town_name(lat: float, lon: float) -> str | None:
                 resp.raise_for_status()
                 data = resp.json()
                 set_cached("GET", rev_url, params, None, data)
-        except Exception:
-            return None
+        except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
+            raise  # transient — let DAG retry handle it
+        except Exception as e:
+            return Attempt.impossible(f"reverse geocode failed: {e}")
 
     features = data.get("features", [])
     if not features:
-        return None
+        return Attempt.impossible("no town found for coordinates")
     props = features[0].get("properties", {})
     town = props.get("locality") or props.get("borough")
-    return town
+    if not town:
+        return Attempt.impossible("no town name in geocode response")
+    return Attempt.succeeded(town)
 
 
 # ── Postcode helpers ────────────────────────────────────────────────────

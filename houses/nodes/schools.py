@@ -30,9 +30,13 @@ class PrimarySchoolNode(DerivedNode[dict]):
         )
         if attempt.pending:
             return Attempt.pending()
+        if attempt.impossible:
+            # Propagate the real reason (e.g. geocoding failed) — don't
+            # collapse it into a generic "no school found".
+            return Attempt.impossible(attempt.error or "no primary school found")
         school = attempt.value_or_none()
         if school is None:
-            return Attempt.impossible("no primary school found")
+            return Attempt.impossible("no primary school found within search radius")
         result = {
             "name": school.name,
             "ofsted": school.ofsted_rating,
@@ -63,9 +67,13 @@ class SecondarySchoolNode(DerivedNode[dict]):
         )
         if attempt.pending:
             return Attempt.pending()
+        if attempt.impossible:
+            # Propagate the real reason (e.g. geocoding failed) — don't
+            # collapse it into a generic "no school found".
+            return Attempt.impossible(attempt.error or "no secondary school found")
         school = attempt.value_or_none()
         if school is None:
-            return Attempt.impossible("no secondary school found")
+            return Attempt.impossible("no secondary school found within search radius")
         result = {
             "name": school.name,
             "ofsted": school.ofsted_rating,

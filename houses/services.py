@@ -41,7 +41,7 @@ class GeocodingService(Protocol):
 
     async def geocode_address(self, address: str) -> Attempt[GeoPoint]: ...
 
-    async def reverse_geocode_town(self, lat: float, lon: float) -> str | None: ...
+    async def reverse_geocode_town(self, lat: float, lon: float) -> Attempt[str]: ...
 
 
 class RoutePlanner(Protocol):
@@ -90,7 +90,7 @@ class WalkabilityService(Protocol):
 class TownDescService(Protocol):
     """LLM-generated description of a town or area."""
 
-    async def describe(self, town_name: str, postcode: str) -> str: ...
+    async def describe(self, town_name: str, postcode: str) -> Attempt[str]: ...
 
 
 class EPCLookupService(Protocol):
@@ -241,7 +241,7 @@ class _DefaultGeocoder:
     async def geocode_address(self, address: str) -> Attempt[GeoPoint]:
         return await _geocode_address(address)
 
-    async def reverse_geocode_town(self, lat: float, lon: float) -> str | None:
+    async def reverse_geocode_town(self, lat: float, lon: float) -> Attempt[str]:
         return await find_nearest_town_name(lat, lon)
 
 
@@ -277,7 +277,7 @@ class _DefaultWalkability:
 
 
 class _DefaultTownDesc:
-    async def describe(self, town_name: str, postcode: str) -> str:
+    async def describe(self, town_name: str, postcode: str) -> Attempt[str]:
         return await generate_town_description(town_name, postcode)
 
 

@@ -78,9 +78,11 @@ class FakeGeocoder:
         self.address_calls.append(address)
         return Attempt.succeeded(self.result) if self.result else Attempt.impossible("no result")
 
-    async def reverse_geocode_town(self, lat: float, lon: float) -> str | None:
+    async def reverse_geocode_town(self, lat: float, lon: float) -> Attempt[str]:
         self.reverse_calls.append((lat, lon))
-        return self.reverse_town
+        if self.reverse_town:
+            return Attempt.succeeded(self.reverse_town)
+        return Attempt.impossible("no town found for coordinates")
 
 
 _DEFAULT_SIMON = Commute(
@@ -176,8 +178,8 @@ class FakeWalkability:
 
 
 class FakeTownDesc:
-    async def describe(self, town_name: str, postcode: str) -> str:
-        return "A nice town."
+    async def describe(self, town_name: str, postcode: str) -> Attempt[str]:
+        return Attempt.succeeded("A nice town.")
 
 
 class FakeEPC:

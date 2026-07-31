@@ -115,7 +115,10 @@ async def _find_town_centre_by_reverse_geocode(lat: float, lng: float) -> GeoPoi
                 resp.raise_for_status()
                 data = resp.json()
                 set_cached("GET", rev_url, params, None, data)
+        except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
+            raise  # transient — let DAG retry handle it
         except Exception:
+            logger.warning("ORS reverse geocode failed for (%.4f, %.4f)", lat, lng, exc_info=True)
             return None
 
     features = data.get("features", [])
@@ -241,6 +244,8 @@ async def _nearby_amenities(lat: float, lng: float) -> str:
 
                 data = await with_cache("GET", overpass_url, params=overpass_params, fetch=_fetch_overpass)
             places = _format_overpass(data, lat, lng)
+        except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
+            raise  # transient — let DAG retry handle it
         except Exception as e:
             logger.warning("Overpass fallback failed: %s: %s", type(e).__name__, e)
 

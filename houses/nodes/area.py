@@ -36,10 +36,14 @@ class NearestTownNode(DerivedNode[str]):
         if loc is None:
             return Attempt.impossible("no location")
         svc = get_services()
-        town = await svc.geocoder.reverse_geocode_town(loc.lat, loc.lon)
-        if town:
-            return Attempt.succeeded(town)
-        return Attempt.impossible("could not determine nearest town")
+        result = await svc.geocoder.reverse_geocode_town(loc.lat, loc.lon)
+        if result.succeeded:
+            town = result.value_or_none()
+            if town:
+                return Attempt.succeeded(town)
+        # Propagate the real reason (e.g. "no town found for coordinates")
+        # so the frontend can show it.
+        return Attempt.impossible(result.error or "could not determine nearest town")
 
     @property
     def provenance_source_type(self) -> SourceType:
@@ -65,8 +69,12 @@ class TownDescNode(DerivedNode[dict]):
         if not town:
             return Attempt.impossible("no town name available from address or reverse geocode")
         svc = get_services()
-        desc = await svc.town_desc_service.describe(town, pc)
-        return Attempt.succeeded({"description": desc})
+        result = await svc.town_desc_service.describe(town, pc)
+        if result.impossible:
+            # Propagate the real reason (e.g. LLM call failed) so the
+            # frontend can show it.
+            return Attempt.impossible(result.error or "town description unavailable")
+        return Attempt.succeeded({"description": result.value_or_none() or ""})
 
     @property
     def provenance_source_type(self) -> SourceType:

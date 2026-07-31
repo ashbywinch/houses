@@ -885,3 +885,63 @@ class TestFindNearestFilters:
             "(incomplete data, cannot give definitive answer)"
         )
         assert not geocode_called, "find_nearest must NOT geocode school postcodes at query time"
+
+
+class TestSchoolErrorPropagation:
+    """School nodes must propagate the lookup's real error, not collapse
+    it into a generic 'no school found'.
+
+    Regression: find_nearest returned succeeded(None) when geocoding
+    failed, and the node returned 'no primary school found' — hiding the
+    geocode failure from the frontend.
+    """
+
+    @pytest.mark.asyncio
+    async def test_propagates_geocode_failure(self):
+        from houses.nodes.schools import PrimarySchoolNode
+        from houses.services_provider import _request_services as _sp
+        from tests.helpers import make_services
+
+        class _FailingLookup:
+            async def find_nearest(self, postcode, child_age, address="", acceptable=()):
+                return Attempt.impossible("geocode failed: postcode not found (404)")
+
+            async def school_commute(self, postcode, school):
+                return None
+
+        token = _sp.set(make_services(school_lookup=_FailingLookup()))
+        try:
+            loc = UserInputNode[GeoPoint]("loc_pe1", GeoPoint)
+            addr = UserInputNode[str]("addr_pe1", str)
+            node = PrimarySchoolNode("pe1", best_location=loc, best_address=addr)
+            loc.push(GeoPoint(51.5, -0.1), "test")
+            addr.push("10 High St, London, SW1V 2QQ", "test")
+            await flush_processor()
+            await flush_processor()
+            a = await node.attempt()
+            assert not a.succeeded
+            assert "postcode not found (404)" in a.error, f"Expected geocode reason, got: {a.error}"
+            assert "no primary school found" not in a.error
+        finally:
+            _sp.reset(token)
+
+    @pytest.mark.asyncio
+    async def test_no_school_has_sensible_message(self):
+        from houses.nodes.schools import PrimarySchoolNode
+        from houses.services_provider import _request_services as _sp
+        from tests.helpers import FakeSchoolLookup, make_services
+
+        token = _sp.set(make_services(school_lookup=FakeSchoolLookup(school=None)))
+        try:
+            loc = UserInputNode[GeoPoint]("loc_pe2", GeoPoint)
+            addr = UserInputNode[str]("addr_pe2", str)
+            node = PrimarySchoolNode("pe2", best_location=loc, best_address=addr)
+            loc.push(GeoPoint(51.5, -0.1), "test")
+            addr.push("10 High St, London, SW1V 2QQ", "test")
+            await flush_processor()
+            await flush_processor()
+            a = await node.attempt()
+            assert not a.succeeded
+            assert "no primary school found" in a.error
+        finally:
+            _sp.reset(token)
