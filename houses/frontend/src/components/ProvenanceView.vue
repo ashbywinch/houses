@@ -251,7 +251,13 @@ function formatValue(v: unknown): string {
     return v
   }
   if (typeof v === 'number') return String(v)
-  if (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0) return ''
+  if (typeof v === 'object' && !Array.isArray(v)) {
+    const entries = Object.entries(v)
+    if (entries.length === 0) return ''
+    // Plain objects (e.g. per-person estimates {Ashby: 0}) render as
+    // "Name: value" pairs — never the raw "[object Object]"
+    return entries.map(([k, val]) => `${k}: ${formatValue(val)}`).join(', ')
+  }
   return String(v)
 }
 

@@ -439,3 +439,29 @@ describe('ProvenanceView — nested calc node sources in story view', () => {
     expect(expanded).toContain('£800,000.00')
   })
 })
+
+describe('ProvenanceView — value formatting', () => {
+  it('formats plain-object values as Name: value pairs, never [object Object]', () => {
+    const worksEstimates: Provenance = {
+      label: 'Renovation estimates',
+      sourceType: 'user',
+      value: { Ashby: 20000 },
+    }
+    const w = mountView(worksEstimates, { detailLevel: 'story' })
+    expect(w.html()).not.toContain('[object Object]')
+    expect(w.text()).toContain('Ashby')
+    expect(w.text()).toContain('20000')
+  })
+
+  it('formats nested object values recursively', () => {
+    const commute: Provenance = {
+      label: 'Commute Breakdown',
+      sourceType: 'calc',
+      value: { persons: { Simon: { daily_gbp: 12.5 } } },
+    }
+    const w = mountView(commute, { detailLevel: 'story' })
+    expect(w.html()).not.toContain('[object Object]')
+    expect(w.text()).toContain('Simon')
+    expect(w.text()).toContain('12.5')
+  })
+})

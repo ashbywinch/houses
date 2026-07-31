@@ -228,3 +228,33 @@ class TestLifeInsurancePerPerson:
         values = {line.label: line.value for line in formula.lines}
         assert values["Simon’s life insurance"] == "£150.00"
         assert values["Lorena’s life insurance"] == "£0.00"
+
+
+class TestPerPropertyNodeLabels:
+    """Per-property source nodes (e.g. 87650634/status) must show a
+    friendly name, not the node id or internal source label."""
+
+    def test_status_node_label(self):
+        node = UserInputNode("87650634/status", str)
+        node.push("Current", "sheet-migration")
+        p = asyncio.run(node.build_provenance())
+        assert p.label == "Property Status"
+
+    def test_works_estimates_label(self):
+        node = UserInputNode("87650634/works_estimates", dict)
+        node.push({"Ashby": 20000}, "sheet-migration")
+        p = asyncio.run(node.build_provenance())
+        assert p.label == "Renovation estimates"
+
+    def test_unknown_stem_falls_back_to_title_case(self):
+        node = UserInputNode("87650634/some_new_node", str)
+        node.push("x", "sheet-migration")
+        p = asyncio.run(node.build_provenance())
+        assert p.label == "Some New Node"
+
+    def test_works_estimates_value_is_friendly_dict(self):
+        """Per-person estimates stay as a dict (frontend formats it),\n        never a repr dump."""
+        node = UserInputNode("87650634/works_estimates", dict)
+        node.push({"Ashby": 20000, "Simon": 15000}, "sheet-migration")
+        p = asyncio.run(node.build_provenance())
+        assert p.to_dict()["value"] == {"Ashby": 20000, "Simon": 15000}

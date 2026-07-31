@@ -25,6 +25,24 @@ _SETTING_LABELS: dict[str, str] = {
     "rental_income_monthly": "Rental Income Monthly",
 }
 
+# Friendly names for per-property source node stems (e.g. the last path
+# segment of "87650634/status").
+_NODE_STEM_LABELS: dict[str, str] = {
+    "status": "Property Status",
+    "works_estimates": "Renovation estimates",
+    "rightmove_price": "Rightmove",
+    "rightmove_address": "Address from Rightmove",
+    "rightmove_bedrooms": "Bedrooms from Rightmove",
+    "best_address": "Property address",
+    "best_location": "Property location",
+    "postcode": "Postcode",
+    "comment_status": "Property Status",
+    "comment_status_reason": "Status reason",
+    "triage_status": "Your assessment",
+    "rental_income": "Rental Income",
+    "life_insurance_total": "Life Insurance Total",
+}
+
 # Register pydantic schemas for third-party types (Money, Quantity) so
 # TypeAdapter can handle them automatically.  This IS the correct
 # pydantic v2 approach — __get_pydantic_core_schema__ is an explicit
@@ -217,8 +235,12 @@ class UserInputNode(Node[T], Generic[T]):
             stem = self._id.split("/", 1)[1]
             return _SETTING_LABELS.get(stem, stem.replace("_", " ").title())
         label = self._source_label or ""
-        if label in ("db", "config", "migration", "settings"):
-            return self._id.split("/")[-1].replace("_", " ").title()
+        if label in ("db", "config", "migration", "settings", "sheet-migration"):
+            # Per-property source nodes (e.g. "87650634/status") get a
+            # friendly name from their stem; generic settings fall back
+            # to the raw id stem.
+            stem = self._id.split("/")[-1]
+            return _NODE_STEM_LABELS.get(stem, stem.replace("_", " ").title())
         return label or self._id
 
     def _provenance_value(self):
