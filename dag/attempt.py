@@ -57,20 +57,45 @@ class AttemptError:
 
     ``causes`` carries the errors of failed dependencies, so a parent's
     error chain is traversable structurally instead of by string matching.
+
+    **User-facing vs internal:** ``message`` is the full internal chain
+    (may contain node ids and ``dep failed`` markers — for logs and
+    debugging). ``user_message`` is the friendly text safe to render in
+    the UI. Services pass friendly text as the message; framework paths
+    (dep chains, exception handlers) set ``user_message`` explicitly to
+    the leaf's reason or ``str(exc)``. Serialization emits ``error``
+    (user_message) and ``error_detail.message`` (internal).
     """
 
     code: str = "error"  # machine category: dep_failed | http_error | timeout | exception | no_data | ...
-    message: str = ""  # user-facing message (same as Attempt.error)
+    message: str = ""  # internal message (may contain node ids / dep chains)
+    user_message: str = ""  # friendly, UI-safe; defaults to message
     retryable: bool = False
     source: str = ""  # node id or service that produced the error
     exc: BaseException | None = None  # the actual exception object (in-memory only)
     traceback: str = ""
     causes: tuple["AttemptError", ...] = ()
 
+    @property
+    def display_message(self) -> str:
+        """User-facing message safe to render in the UI.
+
+        Resolution: explicit ``user_message`` if set, else the deepest
+        cause's message (leaf reason), else the internal ``message``.
+        Never contains node ids or ``dep failed`` framework markers
+        unless an explicit user_message was set to them.
+        """
+        if self.user_message:
+            return self.user_message
+        if self.causes:
+            return self.causes[0].display_message
+        return self.message
+
     def to_dict(self) -> dict:
         return {
             "code": self.code,
             "message": self.message,
+            "user_message": self.display_message,
             "retryable": self.retryable,
             "source": self.source,
             "exc_type": type(self.exc).__name__ if self.exc is not None else "",
@@ -81,12 +106,25 @@ class AttemptError:
     @classmethod
     def from_exception(cls, message: str, exc: BaseException | None, *, source: str = "") -> "AttemptError":
         """Build an AttemptError from a caught exception, deriving code,
-        retryable, and traceback from the exception's shape."""
+        retryable, and traceback from the exception's shape.
+
+        ``message`` is the internal message (may include node context);
+        ``user_message`` is the exception's own text — the friendly bit
+        safe to show the user.
+        """
         code, retryable = classify_exception(exc)
         tb = ""
         if exc is not None:
             tb = "".join(_traceback.format_exception(type(exc), exc, exc.__traceback__))
-        return cls(code=code, message=message, retryable=retryable, source=source, exc=exc, traceback=tb)
+        return cls(
+            code=code,
+            message=message,
+            user_message=str(exc) if exc is not None else message,
+            retryable=retryable,
+            source=source,
+            exc=exc,
+            traceback=tb,
+        )
 
 
 def classify_exception(exc: BaseException | None) -> tuple[str, bool]:
@@ -358,7 +396,7 @@ class Provenance:
     """
 
     label: str = ""
-    description: str = ""
+    description: str | None = None
     value: Any = None
     url: str = ""
     source_type: SourceType | None = None

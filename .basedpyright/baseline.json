@@ -34,14 +34,6 @@
                     "endColumn": 70,
                     "lineCount": 1
                 }
-            },
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 24,
-                    "endColumn": 35,
-                    "lineCount": 1
-                }
             }
         ],
         "./dag/expression.py": [

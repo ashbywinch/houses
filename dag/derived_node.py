@@ -252,16 +252,25 @@ class DerivedNode(Node[T], Generic[T]):
             _tb_str = traceback.format_exc()
             if self._is_transient_error(e):
                 if not self.schedule_retry(self._retry_delay_from(e)):
-                    result = Attempt.impossible(f"{self._id}: retry exhausted ({e})\n{_tb_str}")
+                    result = Attempt.impossible(
+                        f"{self._id}: retry exhausted ({e})",
+                        error_info=AttemptError.from_exception(str(e), e, source=self._id),
+                    )
                 else:
                     result = Attempt.pending()
             else:
                 impossible_deps = [a for a in dep_attempts if a.impossible]
                 if impossible_deps:
                     errors = "; ".join(a.error or "unknown" for a in impossible_deps)
-                    result = Attempt.impossible(f"{self._id}: dep failed ({errors})\n{_tb_str}")
+                    result = Attempt.impossible(
+                        f"{self._id}: dep failed ({errors})",
+                        error_info=AttemptError.from_exception(str(e), e, source=self._id),
+                    )
                 else:
-                    result = Attempt.impossible(f"{self._id}: {e}\n{_tb_str}")
+                    result = Attempt.impossible(
+                        f"{self._id}: {e}",
+                        error_info=AttemptError.from_exception(str(e), e, source=self._id),
+                    )
 
         # A service may catch a transient error and RETURN an impossible
         # attempt whose error_info.retryable is set (rather than raising).
@@ -328,16 +337,20 @@ class DerivedNode(Node[T], Generic[T]):
 
         description = self._attempt.error if self._attempt.impossible else None
         status = "impossible" if self._attempt.impossible else ("pending" if self._attempt.pending else "")
+        error_info = self._attempt.error_info
+        # The provenance error/description feed the UI — use the friendly
+        # user_message, never the internal node-id/dep chain.
+        user_error = error_info.display_message if error_info is not None else self._attempt.error
         return Provenance(
             label=self.display_name,
-            description=description,
+            description=user_error if self._attempt.impossible else None,
             value=self._attempt.value,
             url=self._source_url,
             source_type=self.provenance_source_type,
             freshness=self._attempt.created_at,
             formula=formula,
             status=status,
-            error=self._attempt.error if self._attempt.impossible else "",
+            error=user_error if self._attempt.impossible else "",
             sources=sources,
         )
 

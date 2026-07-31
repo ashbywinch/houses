@@ -229,7 +229,8 @@ class CommuteSelectorNode(DerivedNode[Commute]):
                 logger.exception("Failed to serialize commute value to JSON")
                 result["value"] = None
         if attempt.impossible:
-            result["error"] = attempt.error
+            info = attempt.error_info
+            result["error"] = (info.display_message if info is not None else attempt.error) or attempt.error
         result["provenance"] = (await self.build_provenance()).to_dict()
         return result
 

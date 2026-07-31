@@ -313,3 +313,48 @@ describe('ProvenanceView — cross-cutting', () => {
     expect(w.text()).toContain('used in multiple places')
   })
 })
+
+describe('ProvenanceView — user-facing vs internal error fields', () => {
+  it('renders the friendly leaf message, not the internal node-id chain', () => {
+    // Simulates the serialized provenance from a 3-level dep failure:
+    // the backend now puts the friendly message in error, and the raw
+    // chain only in error_detail.
+    const chainError: Provenance = {
+      label: 'Total Monthly Cost',
+      sourceType: 'calc',
+      status: 'impossible',
+      error: 'Works estimate required for: Ashby',
+      description: 'Works estimate required for: Ashby',
+    }
+    const w = mountView(chainError)
+    const text = w.text()
+    expect(text).toContain('Works estimate required for: Ashby')
+    expect(text).not.toContain('dep failed')
+    expect(text).not.toContain('89306649')
+    expect(text).not.toContain('mortgage_required')
+  })
+
+  it('shows Could not calculate title with the friendly reason', () => {
+    const w = mountView({
+      label: 'Council Tax',
+      sourceType: 'api',
+      status: 'impossible',
+      error: 'Ambiguous address: 2 council tax bands found for this postcode',
+    })
+    expect(w.text()).toContain('Could not calculate')
+    expect(w.text()).toContain('Ambiguous address')
+  })
+
+  it('does not render internal error_detail fields', () => {
+    const w = mountView({
+      label: 'Commute Breakdown',
+      sourceType: 'calc',
+      status: 'impossible',
+      error: 'TfL API unavailable',
+      description: 'TfL API unavailable',
+    })
+    expect(w.html()).not.toContain('error_detail')
+    expect(w.html()).not.toContain('traceback')
+    expect(w.html()).not.toContain('dep failed')
+  })
+})

@@ -121,8 +121,8 @@ class Node(ABC, Generic[T]):
         result["pending"] = attempt.pending
         result["impossible"] = attempt.impossible
         if attempt.impossible:
-            result["error"] = attempt.error
             info = attempt.error_info
+            result["error"] = (info.display_message if info is not None else attempt.error) or attempt.error
             if info is not None:
                 result["error_detail"] = info.to_dict()
         if self._source_url:
@@ -146,7 +146,8 @@ class Node(ABC, Generic[T]):
         result["pending"] = attempt.pending
         result["impossible"] = attempt.impossible
         if attempt.impossible:
-            result["error"] = attempt.error
+            info = attempt.error_info
+            result["error"] = (info.display_message if info is not None else attempt.error) or attempt.error
         if self._source_url:
             result["source_url"] = self._source_url
         return result

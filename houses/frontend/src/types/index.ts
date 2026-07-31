@@ -5,6 +5,7 @@ export interface AttemptValue<T> {
   errorDetail?: {
     code: string
     message: string
+    userMessage: string
     retryable: boolean
     source: string
     excType: string
@@ -17,6 +18,7 @@ export interface AttemptValue<T> {
 export interface AttemptErrorDetail {
   code: string
   message: string
+  userMessage: string
   retryable: boolean
   source: string
   excType: string

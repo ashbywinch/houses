@@ -68,9 +68,14 @@ status = attempt.error_info.exc.status  # the actual HttpError
 A plain `Attempt.impossible("reason")` outside an `except` gets `code="no_data"`.
 
 Serialization (in `to_json()`) emits:
-- `error` — the **user-facing** message string, safe to render in the UI.
+- `error` — the **user-facing** message, safe to render in the UI. This is
+  `AttemptError.display_message`: the explicit `user_message` if set, else the
+  deepest cause's message (the leaf reason), else the internal message. For a
+  dep-failure chain the UI therefore sees the friendly leaf text (e.g.
+  "Works estimate required for: Ashby"), never node ids or `dep failed`.
 - `error_detail` — the structured error (code, retryable, source, `exc_type`,
-  traceback, `causes` chain) for debugging. **Internal — never render in the UI.**
+  traceback, `causes` chain) for debugging. `error_detail.message` keeps the
+  full internal chain with node ids. **Internal — never render in the UI.**
 
 `classify_exception()` is the single source of truth for retryability: it maps an
 exception to `(code, retryable)` and handles `HttpError` (`.status`), httpx errors

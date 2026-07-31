@@ -84,12 +84,11 @@ class TestSerialization:
 
         j = asyncio.run(_ImpossibleNode("tb_test", a).to_json())
         assert j["status"] == "impossible"
-        assert j["error"] == "no data"
+        # User-facing error is the exception text, not the internal message
+        assert "missing-field" in j["error"]
         detail = j["error_detail"]
         assert detail["code"] == "exception"
         assert "KeyError" in detail["traceback"]
-        # error_detail must be separate from the frontend-facing error
-        assert "missing-field" not in j["error"]
         assert "missing-field" in detail["traceback"]
 
     def test_plain_error_emits_no_data_detail(self):
@@ -226,3 +225,68 @@ class TestCausesChain:
         assert len(info.causes) == 1
         assert isinstance(info.causes[0].exc, TimeoutError)
         assert info.causes[0].retryable is True
+
+
+class TestUserFacingMessages:
+    """The UI must see friendly leaf messages, never node ids or
+    'dep failed' framework markers. The internal chain stays in
+    error_detail for debugging."""
+
+    def test_leaf_service_message_is_user_facing(self):
+        # Service writes a friendly message (no exception captured)
+        a = Attempt.impossible("Works estimate required for: Ashby")
+        assert a.error_info.user_message == ""
+        assert a.error_info.display_message == "Works estimate required for: Ashby"
+
+    def test_exception_text_is_user_facing_when_captured(self):
+        try:
+            raise ValueError("no matching certificate for this address")
+        except ValueError:
+            a = Attempt.impossible("lookup failed")
+        assert a.error_info.display_message == "no matching certificate for this address"
+
+    def test_dep_chain_error_is_friendly_leaf(self):
+        from dag.attempt import AttemptError
+
+        leaf = AttemptError(code="no_data", message="Works estimate required for: Ashby")
+        mid = AttemptError(
+            code="dep_failed",
+            message="mid_node: dep failed (Works estimate required for: Ashby)",
+            causes=(leaf,),
+        )
+        root = AttemptError(
+            code="dep_failed",
+            message="root_node: dep failed (mid_node: dep failed (Works estimate required for: Ashby))",
+            user_message=mid.display_message,
+            causes=(mid,),
+        )
+        # Friendly message survives the chain
+        assert root.display_message == "Works estimate required for: Ashby"
+        # Internal chain is separate and debuggable
+        assert "dep failed" in root.message
+        assert "root_node" in root.message
+
+    def test_to_json_error_is_friendly_through_chain(self):
+        """A 3-level node chain must surface the leaf message as error,
+        with node ids only in error_detail."""
+        from dag.attempt import AttemptError
+
+        leaf_attempt = Attempt.impossible("Works estimate required for: Ashby")
+        mid_info = AttemptError(
+            code="dep_failed",
+            message="89306649/mortgage_required: dep failed (Works estimate required for: Ashby)",
+            user_message=leaf_attempt.error_info.display_message,
+            causes=(leaf_attempt.error_info,),
+        )
+        root_info = AttemptError(
+            code="dep_failed",
+            message="89306649/total_monthly_cost: dep failed (89306649/mortgage_required: dep failed (...))",
+            user_message=mid_info.display_message,
+            causes=(mid_info,),
+        )
+        j = root_info.to_dict()
+        assert j["user_message"] == "Works estimate required for: Ashby"
+        assert "dep failed" in j["message"]
+        assert "89306649" in j["message"]
+        assert "89306649" not in j["user_message"]
+        assert "dep failed" not in j["user_message"]
