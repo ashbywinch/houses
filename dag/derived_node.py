@@ -301,6 +301,7 @@ class DerivedNode(Node[T], Generic[T]):
             formula = self._build_formula_from_expression()
 
         description = self._attempt.error if self._attempt.impossible else None
+        status = "impossible" if self._attempt.impossible else ("pending" if self._attempt.pending else "")
         return Provenance(
             label=self.display_name,
             description=description,
@@ -309,6 +310,8 @@ class DerivedNode(Node[T], Generic[T]):
             source_type=self.provenance_source_type,
             freshness=self._attempt.created_at,
             formula=formula,
+            status=status,
+            error=self._attempt.error if self._attempt.impossible else "",
             sources=sources,
         )
 

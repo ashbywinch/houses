@@ -33,6 +33,10 @@ type FlatNode = {
   indent: number
   isRef: boolean
   refId: string
+  value: string
+  status: string
+  error: string
+  expressionType: string
 }
 
 function daysSince(dateStr: string): number | null {
@@ -160,6 +164,10 @@ function buildFlattenedTree(p: Provenance, refs: Map<string, Provenance>): FlatN
       indent,
       isRef,
       refId: key,
+      value: formatValue(n.value),
+      status: n.status ?? '',
+      error: n.error ?? '',
+      expressionType: n.expressionType ?? '',
     })
     if (n.sources && !(isRef && indent > 0)) {
       Object.values(n.sources).forEach(s => walk(s, indent + 1))
@@ -226,6 +234,30 @@ function getValue(p: Provenance): unknown {
   return (p as any).value
 }
 
+/** Format a node value for display: strip GBP prefix, omit empty objects/strings. */
+function formatValue(v: unknown): string {
+  if (v === null || v === undefined) return ''
+  if (typeof v === 'string') {
+    if (v.startsWith('GBP ')) return '£' + v.slice(4)
+    return v
+  }
+  if (typeof v === 'number') return String(v)
+  if (typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0) return ''
+  return String(v)
+}
+
+const EXPRESSION_LABELS: Record<string, string> = {
+  Add: 'Addition',
+  Sub: 'Subtraction',
+  Mul: 'Multiplication',
+  Div: 'Division',
+  PMT: 'PMT formula',
+  TieredRate: 'Tiered rate',
+  Conditional: 'Conditional',
+  Choose: 'Choice',
+  Negate: 'Negation',
+}
+
 // ── Computed ──
 
 const sharedRefs = computed(() => findSharedRefs(props.provenance))
@@ -275,11 +307,21 @@ const sharedRefsList = computed(() => {
 <template>
   <div class="prov-view" role="region" aria-label="Data provenance">
     <!-- ═══ Trust Bar ═══ -->
-    <div class="trust-bar">
+    <div class="trust-bar" :class="{ 'trust-bar--error': provenance.status === 'impossible' }">
+      <div v-if="provenance.status === 'impossible'" class="trust-bar__error" role="alert">
+        <span class="trust-bar__error-icon" aria-hidden="true">⚠</span>
+        <div>
+          <div class="trust-bar__error-title">Could not calculate</div>
+          <div v-if="provenance.error" class="trust-bar__error-msg">{{ provenance.error }}</div>
+        </div>
+      </div>
       <div class="trust-bar__result">
-        <span class="trust-bar__label">{{ title }}</span>
-        <span v-if="getValue(provenance) !== undefined && getValue(provenance) !== null" class="trust-bar__value">
-          {{ getValue(provenance) }}
+        <span class="trust-bar__label">
+          {{ title }}
+          <span v-if="provenance.expressionType" class="trust-bar__expr" :title="EXPRESSION_LABELS[provenance.expressionType] ?? provenance.expressionType">{{ provenance.expressionType }}</span>
+        </span>
+        <span v-if="getValue(provenance) !== undefined && getValue(provenance) !== null && provenance.status !== 'impossible'" class="trust-bar__value">
+          {{ formatValue(getValue(provenance)) }}
         </span>
       </div>
       <div class="trust-bar__meta">
@@ -329,6 +371,9 @@ const sharedRefsList = computed(() => {
 
     <!-- ═══ Summary View ═══ -->
     <div v-show="activeLevel === 'summary'" class="summary-view">
+      <div v-if="provenance.status === 'impossible'" class="summary-view__error" role="alert">
+        ⚠ {{ provenance.error || 'Could not calculate this value' }}
+      </div>
       <div class="summary-view__narrative">
         <template v-if="provenance.description">
           {{ provenance.description }}
@@ -369,6 +414,8 @@ const sharedRefsList = computed(() => {
             </div>
             <div class="flow-card__body">
               <div class="flow-card__title">{{ humanLabel(src.label) }}</div>
+              <div v-if="src.status === 'impossible'" class="flow-card__error" role="alert">⚠ {{ src.error || 'Unavailable' }}</div>
+              <div v-else-if="formatValue(src.value)" class="flow-card__value">{{ formatValue(src.value) }}</div>
               <div class="flow-card__desc">{{ src.description || `${sourceLabel(src.sourceType)} data` }}</div>
               <a
                 v-if="src.url"
@@ -407,6 +454,8 @@ const sharedRefsList = computed(() => {
             <div class="flow-card__icon flow-card__icon--api" aria-hidden="true">🌐</div>
             <div class="flow-card__body">
               <div class="flow-card__title">{{ humanLabel(src.label) }}</div>
+              <div v-if="src.status === 'impossible'" class="flow-card__error" role="alert">⚠ {{ src.error || 'Unavailable' }}</div>
+              <div v-else-if="formatValue(src.value)" class="flow-card__value">{{ formatValue(src.value) }}</div>
               <div class="flow-card__desc">{{ src.description || 'Looked up from an external data service' }}</div>
               <a
                 v-if="src.url"
@@ -445,6 +494,8 @@ const sharedRefsList = computed(() => {
             <div class="flow-card__icon flow-card__icon--calc" aria-hidden="true">🔢</div>
             <div class="flow-card__body">
               <div class="flow-card__title">{{ humanLabel(calc.label) }}</div>
+              <div v-if="calc.status === 'impossible'" class="flow-card__error" role="alert">⚠ {{ calc.error || 'Unavailable' }}</div>
+              <div v-else-if="formatValue(calc.value)" class="flow-card__value">{{ formatValue(calc.value) }}</div>
               <div class="flow-card__desc">{{ calc.description || 'A calculation based on the data above' }}</div>
             </div>
           </div>
@@ -466,6 +517,7 @@ const sharedRefsList = computed(() => {
             >
               <span class="formula-explain__step-num">{{ li + 1 }}</span>
               <span class="formula-explain__step-label">{{ line.label }}</span>
+              <span v-if="line.expression" class="formula-explain__step-expr">{{ line.expression }}</span>
               <span class="formula-explain__step-value">{{ line.value }}</span>
             </div>
           </div>
@@ -513,6 +565,9 @@ const sharedRefsList = computed(() => {
         >
           <span class="detail-node__dot" :style="{ background: SOURCE_COLORS[node.sourceType] ?? 'var(--slate-300)' }"></span>
           <span class="detail-node__label">{{ humanLabel(node.label) }}</span>
+          <span v-if="node.expressionType" class="detail-node__expr">{{ node.expressionType }}</span>
+          <span v-if="node.status === 'impossible'" class="detail-node__err" role="alert">⚠ {{ node.error || 'Unavailable' }}</span>
+          <span v-else-if="node.value" class="detail-node__value">{{ node.value }}</span>
           <span v-if="node.desc" class="detail-node__desc">— {{ node.desc }}</span>
           <span v-if="node.isRef && node.indent > 0" class="detail-node__ref">📍 Shared</span>
           <a
@@ -1038,5 +1093,93 @@ const sharedRefsList = computed(() => {
   clip: rect(0,0,0,0);
   white-space: nowrap;
   border-width: 0;
+}
+
+/* ── Error states ── */
+.trust-bar--error {
+  border-left: 3px solid var(--red-text, #b91c1c);
+}
+.trust-bar__error {
+  display: flex;
+  gap: var(--sp-2, 8px);
+  align-items: flex-start;
+  width: 100%;
+  padding: var(--sp-2, 8px) var(--sp-3, 12px);
+  background: var(--red-bg, #fee2e2);
+  border-radius: var(--radius-sm, 4px);
+  color: var(--red-text, #b91c1c);
+  font-size: var(--fs-sm, 13px);
+}
+.trust-bar__error-icon { flex-shrink: 0; }
+.trust-bar__error-title { font-weight: var(--fw-semibold, 600); }
+.trust-bar__error-msg { color: var(--red-text, #b91c1c); opacity: 0.9; }
+.trust-bar__expr {
+  display: inline-block;
+  margin-left: var(--sp-1, 4px);
+  padding: 0 var(--sp-2, 8px);
+  font-size: 10px;
+  font-weight: var(--fw-semibold, 600);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: var(--radius-full, 999px);
+  background: #f0f0ff;
+  color: #5b42b8;
+  vertical-align: middle;
+}
+
+.summary-view__error {
+  display: flex;
+  gap: var(--sp-2, 8px);
+  padding: var(--sp-2, 8px) var(--sp-3, 12px);
+  background: var(--red-bg, #fee2e2);
+  border-radius: var(--radius-sm, 4px);
+  color: var(--red-text, #b91c1c);
+  font-size: var(--fs-sm, 13px);
+  font-weight: var(--fw-medium, 500);
+  margin-bottom: var(--sp-2, 8px);
+}
+
+.flow-card__error {
+  font-size: var(--fs-xs, 12px);
+  color: var(--red-text, #b91c1c);
+  font-weight: var(--fw-medium, 500);
+  margin-top: 2px;
+}
+.flow-card__value {
+  font-size: var(--fs-md, 14px);
+  font-weight: var(--fw-semibold, 600);
+  color: var(--slate-900, #0f172a);
+  font-variant-numeric: tabular-nums;
+}
+
+.formula-explain__step-expr {
+  font-size: 9px;
+  color: #5b42b8;
+  font-weight: 400;
+  margin-right: var(--sp-1, 4px);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.detail-node__expr {
+  font-size: 10px;
+  font-weight: var(--fw-semibold, 600);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 var(--sp-1, 4px);
+  border-radius: var(--radius-full, 999px);
+  background: #f0f0ff;
+  color: #5b42b8;
+  vertical-align: middle;
+}
+.detail-node__value {
+  font-size: var(--fs-xs, 12px);
+  font-weight: var(--fw-medium, 500);
+  color: var(--slate-700, #334155);
+}
+.detail-node__err {
+  font-size: var(--fs-xs, 12px);
+  color: var(--red-text, #b91c1c);
+  font-weight: var(--fw-semibold, 600);
 }
 </style>

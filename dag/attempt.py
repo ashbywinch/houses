@@ -248,6 +248,8 @@ class Provenance:
     source_type: SourceType | None = None
     freshness: datetime | None = None
     formula: Formula | None = None
+    status: str = ""
+    error: str = ""
     sources: dict[str, Provenance] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -268,6 +270,10 @@ class Provenance:
                 result["value"] = str(self.value)
         if self.source_type is not None:
             result["sourceType"] = self.source_type.value
+        if self.status:
+            result["status"] = self.status
+        if self.error:
+            result["error"] = self.error
         if self.freshness is not None:
             result["freshness"] = self.freshness.isoformat()
         if self.formula is not None:

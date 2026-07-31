@@ -5,13 +5,28 @@ export interface AttemptValue<T> {
   provenance: Provenance
 }
 
+export interface FormulaLine {
+  label: string
+  value: string
+  expression?: string
+}
+
+export interface Formula {
+  lines: FormulaLine[]
+  result: string
+}
+
 export interface Provenance {
   label: string
   description?: string
   url?: string
   sourceType?: "api" | "calc" | "user" | "config" | "geocode" | "db"
   freshness?: string
-  formula?: { lines: Array<{ label: string; value: string }>; result: string }
+  status?: "impossible" | "pending" | "succeeded"
+  error?: string
+  expressionType?: string
+  value?: unknown
+  formula?: Formula
   sources?: Record<string, Provenance>
 }
 
