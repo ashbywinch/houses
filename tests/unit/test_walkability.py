@@ -107,6 +107,7 @@ class TestExtractTown:
             original_rev = w._find_town_centre_by_reverse_geocode
             original_extract = w._extract_town_centre
             original_dur = w._walk_duration
+            original_amen = w._nearby_amenities
 
             rev_called = False
 
@@ -121,9 +122,13 @@ class TestExtractTown:
                 rev_called = True
                 return GeoPoint(51.5, -0.1)
 
+            async def mock_amen(_lat, _lng):
+                return ""
+
             w._extract_town_centre = mock_extract
             w._walk_duration = mock_dur
             w._find_town_centre_by_reverse_geocode = mock_rev
+            w._nearby_amenities = mock_amen
             try:
                 result = await enrich_walkability(51.5, -0.1, "Some Street, Southall, UB2 4GN")
                 assert result["walk_to_town"]["value"] == 10
@@ -132,3 +137,4 @@ class TestExtractTown:
                 w._extract_town_centre = original_extract
                 w._walk_duration = original_dur
                 w._find_town_centre_by_reverse_geocode = original_rev
+                w._nearby_amenities = original_amen
