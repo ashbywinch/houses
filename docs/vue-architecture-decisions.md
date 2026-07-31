@@ -1,124 +1,21 @@
 # Vue Architecture Decisions
 
-## Context
-
-This project replaces Jinja2 server-rendered templates with a Vue 3 SPA that
-consumes the new REST API (Phase 4). The Vue app must visually replicate the
-existing design exactly while using modern tooling.
+Recorded decisions for the Vue 3 SPA replacing Jinja2 templates (Phase 4), with the reasoning. Component/file structure is discoverable in the repo — this page records the **choices and why**, so a future change doesn't silently reverse them.
 
 ## Decisions
 
-### 1. Composition API with `<script setup>`
+| # | Decision | Rationale |
+|---|----------|-----------|
+| 1 | **Composition API with `<script setup lang="ts">`** for all components | Recommended Vue 3 SFC syntax — less boilerplate, better TS inference, compile-time optimizations |
+| 2 | **Pinia** for global state | Property data, commute results, WebSocket updates shared across components/views; DevTools + typed stores + explicit mutations; no SSR concerns (browser-only SPA) |
+| 3 | **Vue Router, hash mode** | Routes `/` (list) and `/property/:rid` (detail). Hash mode avoids backend route config — backend serves the SPA at root |
+| 4 | **Vite proxies `/api` → `http://localhost:8080`** | No CORS config needed on the backend |
+| 5 | **Native WebSocket composable** (`useWebSocket`) | Connects on mount, receives property updates, updates the Pinia store — no external library needed |
+| 6 | **Native `fetch()` in `services/api.ts`** | No axios; thin wrapper is sufficient for the REST calls |
+| 7 | **Vitest + @vue/test-utils** | Unit-test composables/stores in isolation; component tests `mount()`/`shallowMount()` with mocked API responses; no e2e for the MVP |
+| 8 | **Scoped styles per `.vue` file** | Replicate the exact CSS from `docs/current-ui/app.css` and `detail.css` pixel-perfectly. No utility framework (Tailwind) or CSS-in-JS |
 
-**Choice:** Use `<script setup lang="ts">` for all components.
+## Constraints
 
-**Reason:** It is the recommended syntax for Vue 3 SFCs — less boilerplate,
-better TypeScript inference, and compile-time optimizations. Every new
-component starts with this syntax.
-
-### 2. State Management: Pinia
-
-**Choice:** Use Pinia for global application state.
-
-**Reason:** Property data, commute results, and WebSocket updates need to be
-accessible across multiple components and views. Pinia provides:
-- DevTools integration for debugging state changes
-- TypeScript support with typed stores
-- Actions for explicit mutation patterns
-- No SSR concerns (this is a browser-only SPA)
-
-### 3. Routing: Vue Router 4
-
-**Choice:** Vue Router with hash-mode for simplicity.
-
-- `/` — list page (PropertyList)
-- `/property/:rid` — detail page (PropertyDetail)
-
-Hash mode avoids backend route configuration since the backend serves the
-Vue app at the root.
-
-### 4. Vite Proxy Configuration
-
-**Choice:** Vite dev server proxies `/api` to `http://localhost:8080`.
-
-The `vite.config.ts` proxy setting forwards all `/api` requests to the FastAPI
-backend during development. No CORS configuration needed on the backend.
-
-### 5. WebSocket Integration
-
-**Choice:** A `useWebSocket` composable using the native WebSocket API.
-
-The composable:
-- Connects to `ws://localhost:8080/ws` on mount
-- Receives property update payloads
-- Updates the Pinia store on each message
-
-No external library needed — the native WebSocket API is sufficient.
-
-### 6. HTTP Client
-
-**Choice:** Native `fetch()` wrapped in an api service module.
-
-The existing codebase doesn't use axios or similar. A thin wrapper around
-`fetch()` in `services/api.ts` is sufficient for the REST calls.
-
-### 7. Component Hierarchy
-
-```
-App.vue
-├── PropertyList.vue         (route: /)
-│     └── PropertyCard.vue   (per property)
-│           ├── CommutePill.vue
-│           └── ...
-└── PropertyDetail.vue       (route: /property/:rid)
-      ├── LocationMap.vue
-      ├── CommuteList.vue
-      │     └── CommutePill.vue
-      ├── SchoolsSection.vue
-      └── InfoSection.vue
-```
-
-### 8. Testing
-
-**Choice:** Vitest + @vue/test-utils.
-
-- Unit test composables and stores in isolation
-- Component tests use `mount()` / `shallowMount()` with mocked API responses
-- No e2e tests for the MVP
-
-### 9. CSS Approach
-
-**Choice:** Scoped styles in each `.vue` file, replicating the exact CSS from
-`docs/current-ui/app.css` and `docs/current-ui/detail.css`.
-
-No utility framework (Tailwind) or CSS-in-JS. The existing stylesheets are
-extracted into component-scoped styles to match the current design pixel-
-perfectly.
-
-### 10. Project Structure
-
-```
-houses/frontend/
-├── src/
-│   ├── main.ts
-│   ├── App.vue
-│   ├── router/index.ts
-│   ├── stores/properties.ts
-│   ├── services/api.ts
-│   ├── composables/useWebSocket.ts
-│   ├── types/index.ts
-│   ├── views/
-│   │   ├── PropertyList.vue
-│   │   └── PropertyDetail.vue
-│   └── components/
-│       ├── PropertyCard.vue
-│       ├── CommutePill.vue
-│       ├── LocationMap.vue
-│       ├── SchoolsSection.vue
-│       └── InfoSection.vue
-├── index.html
-├── vite.config.ts
-├── tsconfig.json
-├── tsconfig.app.json
-└── package.json
-```
+- The Vue app must **visually replicate the existing design exactly** while using modern tooling.
+- Source CSS reference: `docs/current-ui/app.css` + `docs/current-ui/detail.css`.

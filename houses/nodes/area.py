@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dag.attempt import Attempt, Provenance, SourceType
+from dag.attempt import Attempt, SourceType
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.geo import GeoPoint
@@ -23,14 +23,6 @@ class WalkabilityNode(DerivedNode[dict]):
     def provenance_source_type(self) -> SourceType:
         return SourceType.API
 
-    async def build_provenance(self):
-        return Provenance(
-            label="walkability",
-            url="https://maps.googleapis.com/",
-            source_type=SourceType.API,
-            freshness=self._attempt.created_at,
-        )
-
 
 class NearestTownNode(DerivedNode[str]):
     """Reverse-geocode the property's location to find the nearest town name."""
@@ -44,17 +36,18 @@ class NearestTownNode(DerivedNode[str]):
         if loc is None:
             return Attempt.impossible("no location")
         svc = get_services()
-        town = await svc.geocoder.reverse_geocode_town(loc.lat, loc.lon)
-        if town:
-            return Attempt.succeeded(town)
-        return Attempt.impossible("could not determine nearest town")
+        result = await svc.geocoder.reverse_geocode_town(loc.lat, loc.lon)
+        if result.succeeded:
+            town = result.value_or_none()
+            if town:
+                return Attempt.succeeded(town)
+        # Propagate the real reason (e.g. "no town found for coordinates")
+        # so the frontend can show it.
+        return Attempt.impossible(result.error or "could not determine nearest town")
 
     @property
     def provenance_source_type(self) -> SourceType:
         return SourceType.GEOCODE
-
-    async def build_provenance(self):
-        return Provenance(label="reverse_geocode", source_type=SourceType.GEOCODE, freshness=self._attempt.created_at)
 
 
 class TownDescNode(DerivedNode[dict]):
@@ -76,15 +69,16 @@ class TownDescNode(DerivedNode[dict]):
         if not town:
             return Attempt.impossible("no town name available from address or reverse geocode")
         svc = get_services()
-        desc = await svc.town_desc_service.describe(town, pc)
-        return Attempt.succeeded({"description": desc})
+        result = await svc.town_desc_service.describe(town, pc)
+        if result.impossible:
+            # Propagate the real reason (e.g. LLM call failed) so the
+            # frontend can show it.
+            return Attempt.impossible(result.error or "town description unavailable")
+        return Attempt.succeeded({"description": result.value_or_none() or ""})
 
     @property
     def provenance_source_type(self) -> SourceType:
         return SourceType.API
-
-    async def build_provenance(self):
-        return Provenance(label="LLM", source_type=SourceType.API, freshness=self._attempt.created_at)
 
 
 class TownNode(DerivedNode[str]):
@@ -103,5 +97,4 @@ class TownNode(DerivedNode[str]):
     def provenance_source_type(self) -> SourceType:
         return SourceType.CALC
 
-    async def build_provenance(self):
-        return Provenance(label="address", source_type=SourceType.CALC, freshness=self._attempt.created_at)
+    # Default build_provenance() walks active deps and uses provenance_source_type.

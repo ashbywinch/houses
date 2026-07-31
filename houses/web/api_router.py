@@ -366,7 +366,13 @@ async def put_persons(body: list = Body()):  # noqa: B008
 
 @api_router.patch("/settings/financial")
 async def patch_financial(body: dict):
-    get_services().financial_source.push(body, "user")
+    from houses.nodes.settings_node import API_KEY_TO_NODE
+
+    svc = get_services()
+    for api_key, value in body.items():
+        node_id = API_KEY_TO_NODE.get(api_key)
+        if node_id is not None and node_id in svc.setting_nodes:
+            svc.setting_nodes[node_id].push(value, "user")
     return {"status": "ok"}
 
 
@@ -426,8 +432,7 @@ async def patch_works_estimate(
     _pa = _get_svc().persons_source.latest_attempt()
     if _pa.succeeded and _pa.value_or_none():
         _names = {
-            getattr(p, "name", None) or (p.get("name") if isinstance(p, dict) else None)
-            for p in _pa.value_or_none()
+            getattr(p, "name", None) or (p.get("name") if isinstance(p, dict) else None) for p in _pa.value_or_none()
         }
         if person_name not in _names:
             raise HTTPException(
@@ -443,7 +448,10 @@ async def patch_works_estimate(
         )
 
     current = prop.works_estimates.latest_attempt().value_or_none() or {}
-    current[person_name] = value
+    # Store as Money — the Money rule applies to all monetary values.
+    from money import Money
+
+    current[person_name] = Money(str(value), "GBP") if value is not None else None
     prop.works_estimates.push(current, "user")
 
     return {"status": "ok"}

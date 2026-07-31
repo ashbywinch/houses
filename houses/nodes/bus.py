@@ -49,11 +49,13 @@ class BusRouteNode(DerivedNode[dict]):
         }
         data = await grp(body, "routes.duration,routes.legs", timeout=15.0)
         if data is None:
-            return Attempt.impossible("Google Routes returned no data")
+            # No body is a "no bus route" answer, not a failure — the
+            # bus augment treats an empty route as pass-through.
+            return Attempt.succeeded({"bus_stops": [], "duration_minutes": 0})
 
         routes = data.get("routes", [])
         if not routes:
-            return Attempt.impossible("Google Routes returned no routes")
+            return Attempt.succeeded({"bus_stops": [], "duration_minutes": 0})
 
         leg = routes[0].get("legs", [{}])[0]
         steps = leg.get("steps", [])
@@ -78,7 +80,7 @@ class BusRouteNode(DerivedNode[dict]):
             )
 
         if not bus_stops:
-            return Attempt.impossible("No bus legs found in route")
+            return Attempt.succeeded({"bus_stops": [], "duration_minutes": 0})
 
         duration_sec = int(routes[0].get("duration", "0s").removesuffix("s"))
         return Attempt.succeeded(
@@ -154,17 +156,22 @@ class BusLegAugmentNode(DerivedNode[Commute]):
         super().__init__(node_id, Commute, (transit_input, bus_route_node, bods_fare_node))
 
     def _get_active_deps(self):
-        """Only need bus route and fare when the walk is too long."""
+        """Only need bus route and fare when the walk is too long, or when
+        TfL found no route at all (the Google Routes bus is the fallback)."""
         deps = [self._transit_input]
         transit_attempt = self._transit_input.latest_attempt()
         if transit_attempt.succeeded:
             val = transit_attempt.value_or_none()
-            if val is not None and self._walk_too_long(val):
+            if val is not None and (val.infeasible or self._walk_too_long(val)):
                 deps.append(self._bus_route_node)
                 deps.append(self._bods_fare_node)
         return tuple(deps)
 
     def _walk_too_long(self, commute: Commute) -> bool:
+        if commute.infeasible:
+            # .details raises on infeasible commutes — and an infeasible
+            # route has no walk leg to augment anyway.
+            return False
         if not commute.details:
             return False
         first_legs = commute.details[0].legs
@@ -187,10 +194,31 @@ class BusLegAugmentNode(DerivedNode[Commute]):
         if commute is None:
             return transit_attempt
 
+        if commute.infeasible:
+            # TfL has no route — fall back to a full Google Routes bus
+            # journey, using the same bus-building logic as the
+            # walk-replacement path below.
+            return self._bus_augment(commute, bus_route_attempt, bods_fare_attempt, full_trip=True)
+
         if not self._walk_too_long(commute):
             return Attempt.succeeded(commute)
+        return self._bus_augment(commute, bus_route_attempt, bods_fare_attempt, full_trip=False)
 
-        # Walk is too long — need bus route and fare
+    def _bus_augment(
+        self,
+        commute: Commute,
+        bus_route_attempt: Attempt[dict] | None,
+        bods_fare_attempt: Attempt[dict] | None,
+        *,
+        full_trip: bool,
+    ) -> Attempt[Commute]:
+        """Build the bus-augmented commute from a Google Routes bus result.
+
+        ``full_trip`` (TfL no-route fallback): the bus is the entire
+        journey — duration and details come from the route alone.
+        Otherwise the bus replaces the first (too-long) walk leg and the
+        savings-vs-walk penalty check applies, as for adult commutes.
+        """
         if not bus_route_attempt or not bus_route_attempt.succeeded:
             return Attempt.succeeded(commute)
 
@@ -219,11 +247,16 @@ class BusLegAugmentNode(DerivedNode[Commute]):
             if fare_info:
                 total_bus_cost += Money(str(fare_info["amount"]), fare_info["currency"])
 
-        walk_minutes = int(commute.details[0].legs[0].duration.magnitude)
-        penalty = int(settings.bus_walk_penalty.magnitude)
-        savings = walk_minutes - bus_time
-        if savings < penalty:
-            return Attempt.succeeded(commute)
+        if full_trip:
+            walk_minutes = 0
+            rest_details: tuple = ()
+        else:
+            walk_minutes = int(commute.details[0].legs[0].duration.magnitude)
+            rest_details = commute.details[1:]
+            penalty = int(settings.bus_walk_penalty.magnitude)
+            savings = walk_minutes - bus_time
+            if savings < penalty:
+                return Attempt.succeeded(commute)
 
         # Build the bus CostGroup
         bus_cg = CostGroup(
@@ -238,7 +271,8 @@ class BusLegAugmentNode(DerivedNode[Commute]):
             commute,
             duration=Quantity(new_duration, "minute"),
             daily_cost=new_daily_cost,
-            _details=(bus_cg,) + commute.details[1:],
+            _details=(bus_cg,) + rest_details,
+            infeasible=False if full_trip else commute.infeasible,
         )
-
+        return Attempt.succeeded(new_commute)
         return Attempt.succeeded(new_commute)

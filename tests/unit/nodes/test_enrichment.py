@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 import dag.user_input_node  # noqa: F401 — register Money/Quantity schemas
+from dag.attempt import Attempt
 from dag.user_input_node import UserInputNode
 from houses.model.domain import Commute, Person, PlaceOfInterest
 
@@ -141,11 +142,11 @@ class TestTownDescNode:
         seen_pc = None
 
         class _RecordingTownDesc:
-            async def describe(self, town_name: str, postcode: str) -> str:
+            async def describe(self, town_name: str, postcode: str) -> Attempt[str]:
                 nonlocal seen_town, seen_pc
                 seen_town = town_name
                 seen_pc = postcode
-                return "A leafy town."
+                return Attempt.succeeded("A leafy town.")
 
         token = _sp.set(make_services(town_desc_service=_RecordingTownDesc()))
         try:
@@ -178,10 +179,10 @@ class TestTownDescNode:
         seen_town = None
 
         class _RecordingTownDesc:
-            async def describe(self, town_name: str, postcode: str) -> str:
+            async def describe(self, town_name: str, postcode: str) -> Attempt[str]:
                 nonlocal seen_town
                 seen_town = town_name
-                return "A leafy town."
+                return Attempt.succeeded("A leafy town.")
 
         token = _sp.set(make_services(town_desc_service=_RecordingTownDesc()))
         try:

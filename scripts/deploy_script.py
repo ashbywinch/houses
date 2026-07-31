@@ -5,6 +5,7 @@ Usage:
     uv run python scripts/deploy_script.py --production             # production sheet
 """
 
+import contextlib
 import json
 import os
 import sys

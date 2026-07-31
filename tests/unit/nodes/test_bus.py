@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from money import Money
+from pint import Quantity
 
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
@@ -433,3 +435,132 @@ class TestBusLegAugmentNode:
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() == commute
+
+
+class TestBusLegAugmentInfeasible:
+    """An infeasible transit commute (no route) passes through the bus
+    augment untouched — no .details access on an infeasible commute."""
+
+    @pytest.mark.asyncio
+    async def test_infeasible_transit_passes_through(self):
+        from dag.attempt import Attempt
+        from dag.derived_node import DerivedNode
+        from houses.model.domain import Commute, Person, PlaceOfInterest
+        from houses.nodes.bus import BusLegAugmentNode
+
+        class _FixedCommute(DerivedNode[Commute]):
+            def __init__(self, node_id: str, commute: Commute):
+                super().__init__(node_id, Commute, ())
+                self._att = Attempt.succeeded(commute)
+
+            async def attempt(self):
+                return self._att
+
+            def latest_attempt(self):
+                return self._att
+
+            def compute(self, *dep_attempts):
+                raise AssertionError("fixed node should not compute")
+
+        infeasible = Commute(
+            person=Person(name="", has_car=False),
+            label="NoRoute",
+            destination=PlaceOfInterest(label="", address=""),
+            duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+            daily_cost=Money("0", "GBP"),
+            mode="transit",
+            _details=(),
+            infeasible=True,
+        )
+        transit = _FixedCommute("bl_ir_inf", infeasible)
+        route = UserInputNode[dict]("bl_ir_route", dict)
+        route.push({}, "test")
+        fare = UserInputNode[dict]("bl_ir_fare", dict)
+        fare.push({}, "test")
+
+        node = BusLegAugmentNode(
+            "bl_ir",
+            transit_input=transit,
+            bus_route_node=route,
+            bods_fare_node=fare,
+            max_walk=30,
+        )
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded, f"infeasible transit must pass through, got: {a.status}: {a.error}"
+        _v = a.value_or_none()
+        assert _v is not None
+        assert _v.infeasible
+
+
+class TestBusFallbackForNoTflRoute:
+    """When TfL has no route, the Google Routes bus lookup must still be
+    consumed — a 13-minute non-TfL bus is a real commute option."""
+
+    @pytest.mark.asyncio
+    async def test_infeasible_transit_with_bus_route_builds_bus_commute(self):
+        from dag.attempt import Attempt
+        from dag.derived_node import DerivedNode
+        from houses.model.domain import Commute, Person, PlaceOfInterest
+        from houses.nodes.bus import BusLegAugmentNode
+
+        class _FixedTransit(DerivedNode[Commute]):
+            def __init__(self, node_id: str, commute: Commute):
+                super().__init__(node_id, Commute, ())
+                self._att = Attempt.succeeded(commute)
+
+            async def attempt(self):
+                return self._att
+
+            def latest_attempt(self):
+                return self._att
+
+            def compute(self, *dep_attempts):
+                raise AssertionError("fixed node should not compute")
+
+        infeasible = Commute(
+            person=Person(name="George", has_car=False, is_child=True),
+            label="Secondary School",
+            destination=PlaceOfInterest(label="Secondary School", address="51.6053205,-1.2749334"),
+            duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+            daily_cost=Money("0", "GBP"),
+            mode="transit",
+            _details=(),
+            infeasible=True,
+        )
+        transit = _FixedTransit("bfn_inf", infeasible)
+
+        route = UserInputNode[dict]("bfn_route", dict)
+        route.push(
+            {
+                "bus_stops": [
+                    {
+                        "departure_name": "Tyrrells Close",
+                        "arrival_name": "Great Western Park ASDA",
+                        "departure_lat": 51.596798,
+                        "departure_lon": -1.294132,
+                        "arrival_lat": 51.604454,
+                        "arrival_lon": -1.271184,
+                    }
+                ],
+                "duration_minutes": 13,
+            },
+            "test",
+        )
+        fare = UserInputNode[dict]("bfn_fare", dict)
+        fare.push({"stop_fares": {}}, "test")
+
+        node = BusLegAugmentNode(
+            "bfn",
+            transit_input=transit,
+            bus_route_node=route,
+            bods_fare_node=fare,
+            max_walk=30,
+        )
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded, f"bus fallback should build a commute, got: {a.status}: {a.error}"
+        val = a.value_or_none()
+        assert val is not None
+        assert val.duration.magnitude == 13
+        assert not val.infeasible

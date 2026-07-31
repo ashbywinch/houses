@@ -2,12 +2,46 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 
 from pydantic_core import core_schema
 
-from dag.attempt import Attempt, Provenance, SourceType
+from dag.attempt import Attempt, Provenance, SourceType, project_value
 from dag.node import Node
+
+# Friendly display names for settings nodes, keyed by the node id stem
+# (the part after "settings/"). Matches the prototype's labels.
+_SETTING_LABELS: dict[str, str] = {
+    "mortgage_rate": "Mortgage Rate",
+    "mortgage_term": "Mortgage Term (years)",
+    "sinking_fund_rate": "Sinking Fund Rate",
+    "life_insurance_monthly": "Life Insurance Monthly",
+    "working_weeks": "Working Weeks per Year",
+    "current_home_sale_price": "Current Home Sale Price",
+    "current_home_outstanding_mortgage": "Current Home Outstanding Mortgage",
+    "petrol_mpg": "Petrol MPG",
+    "petrol_cost_per_litre": "Petrol Cost per Litre",
+    "rental_income_monthly": "Rental Income Monthly",
+}
+
+# Friendly names for per-property source node stems (e.g. the last path
+# segment of "87650634/status").
+_NODE_STEM_LABELS: dict[str, str] = {
+    "status": "Property Status",
+    "works_estimates": "Renovation estimates",
+    "rightmove_price": "Rightmove",
+    "rightmove_address": "Address from Rightmove",
+    "rightmove_bedrooms": "Bedrooms from Rightmove",
+    "best_address": "Property address",
+    "best_location": "Property location",
+    "postcode": "Postcode",
+    "comment_status": "Property Status",
+    "comment_status_reason": "Status reason",
+    "triage_status": "Your assessment",
+    "rental_income": "Rental Income",
+    "life_insurance_total": "Life Insurance Total",
+}
 
 # Register pydantic schemas for third-party types (Money, Quantity) so
 # TypeAdapter can handle them automatically.  This IS the correct
@@ -98,7 +132,8 @@ class UserInputNode(Node[T], Generic[T]):
 
         if not _per.testing and "/" in node_id:
             rid = node_id.split("/")[0]
-            if not rid.isdigit():
+            # Allow known non-property prefixes (settings, global config nodes, etc.)
+            if not rid.isdigit() and rid not in ("settings",):
                 raise ValueError(
                     f"Blocked node creation: RID {rid!r} (from node_id {node_id!r}) "
                     f"contains non-digit characters. Property RIDs must be numeric.\n"
@@ -111,6 +146,7 @@ class UserInputNode(Node[T], Generic[T]):
                     f"be run via pytest with standard isolation fixtures.\n"
                 )
         self._value: T | None = None
+        self._push_timestamp: datetime | None = None
         self._source_label: str = ""
         loaded = self._load_attempt_from_db()
         if loaded is not None and loaded.succeeded:
@@ -135,6 +171,7 @@ class UserInputNode(Node[T], Generic[T]):
                 (e.g. ``"Rightmove"``, ``"User correction"``, ``"TfL API"``).
         """
         self._value = self._adapter.validate_python(value)
+        self._push_timestamp = datetime.now(UTC)
         self._source_label = source_label
 
         # Reject source labels that indicate test data leaking into the
@@ -174,7 +211,41 @@ class UserInputNode(Node[T], Generic[T]):
         return Attempt.pending()
 
     async def build_provenance(self) -> Provenance:
-        return Provenance(label=self._source_label, value=self._value, source_type=SourceType.USER)
+        # Fall back to persistence timestamp for data that predates freshness tracking
+        freshness = self._push_timestamp or self._persisted_at
+        return Provenance(
+            label=self.display_label,
+            value=self._provenance_value(),
+            source_type=SourceType.USER,
+            freshness=freshness,
+        )
+
+    @property
+    def display_label(self) -> str:
+        """User-facing label for this source.
+
+        Settings nodes get friendly per-setting names ("Mortgage Rate",
+        "Sinking Fund Rate") derived from their node id; the persons
+        node becomes "Household members". Falls back to the raw source
+        label for user-entered sources like "Rightmove".
+        """
+        if self._id == "persons" or self._id.endswith("/persons"):
+            return "Household members"
+        if self._id.startswith("settings/"):
+            stem = self._id.split("/", 1)[1]
+            return _SETTING_LABELS.get(stem, stem.replace("_", " ").title())
+        label = self._source_label or ""
+        if label in ("db", "config", "migration", "settings", "sheet-migration", ""):
+            # Per-property source nodes (e.g. "87650634/status") get a
+            # friendly name from their stem; generic settings fall back
+            # to the raw id stem.
+            stem = self._id.split("/")[-1]
+            return _NODE_STEM_LABELS.get(stem, stem.replace("_", " ").title())
+        return label or self._id
+
+    def _provenance_value(self):
+        """JSON-safe projection of the stored value for provenance."""
+        return project_value(self._value)
 
     async def to_json_value(self) -> dict[str, Any]:
         """Return a JSON-safe dict without provenance."""

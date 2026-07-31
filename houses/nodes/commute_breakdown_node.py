@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from money import Money
 
-from dag.attempt import Attempt, Provenance, SourceType
+from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.node import Node
 
@@ -15,6 +15,20 @@ class CommuteBreakdownNode(DerivedNode[dict]):
         # persons_source is always the last dep
         super().__init__(node_id, dict, tuple(commute_selectors.values()) + (persons_source,))
         self._persons_source = persons_source
+
+    @property
+    def provenance_formula(self):
+        from dag.attempt import Formula, FormulaLine
+
+        v = self._attempt.value_or_none()
+        if not self._attempt.succeeded or v is None:
+            return None
+        lines: list[FormulaLine] = []
+        for name, pv in (v.get("persons") or {}).items():
+            lines.append(FormulaLine(label=f"{name}’s commute (yearly)", value=f"£{pv.get('yearly_gbp', '0')}"))
+        if not lines:
+            return None
+        return Formula(lines=lines, result=f"£{v.get('yearly_total_gbp', '0')}")
 
     def compute(self, *args: Attempt[dict]) -> Attempt[dict]:
         # Last arg is always persons_source, the rest are commute selectors
@@ -69,6 +83,3 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                 "formula_explanation": "Aggregated from DAG nodes",
             }
         )
-
-    async def build_provenance(self):
-        return Provenance(label="commute_breakdown", source_type=SourceType.CALC, freshness=self._attempt.created_at)

@@ -8,8 +8,8 @@ from datetime import UTC, datetime, timedelta
 from inspect import iscoroutine
 from typing import Generic, TypeVar
 
-from dag.attempt import Attempt, Formula, Provenance, SourceType
-from dag.http_error import HttpError
+from dag.attempt import Attempt, AttemptError, Formula, Provenance, SourceType, project_value
+from dag.expression import Expression
 from dag.node import Node
 from dag.scheduler import _get_scheduler
 from dag.signals import Connection, Slot
@@ -21,6 +21,27 @@ T = TypeVar("T")
 
 class DerivedNode(Node[T], Generic[T]):
     """A node whose value is computed from other nodes."""
+
+    # ── Expression system ────────────────────────────────
+    # Subclasses set ``expression`` (or override it as a ``@property``)
+    # to an ``Expression`` tree. If set, ``build_provenance`` uses it
+    # for formula generation.
+
+    _expression: Expression | None = None
+
+    @property
+    def expression(self) -> Expression | None:
+        return self._expression
+
+    def _build_formula_from_expression(self) -> Formula | None:
+        """Build a Formula from the expression tree, if one is set."""
+        expr = self.expression
+        if expr is None:
+            return None
+        try:
+            return expr.to_formula()
+        except Exception:
+            return None
 
     def __init__(self, node_id: str, value_type: type[T], deps: tuple[Node, ...], source_url: str = "") -> None:
         super().__init__(node_id, value_type, source_url)
@@ -124,17 +145,18 @@ class DerivedNode(Node[T], Generic[T]):
         return self._attempt
 
     def _is_transient_error(self, exc: Exception) -> bool:
-        """Identify retryable transient errors (TimeoutError, HttpError rate-limit/server-error, status-aware)."""
-        if isinstance(exc, asyncio.TimeoutError):
-            return True
-        if isinstance(exc, HttpError):
-            return exc.is_rate_limit() or exc.is_server_error()
-        if hasattr(exc, "status"):
-            try:
-                return int(exc.status) in (429, 502, 503, 504)
-            except (ValueError, TypeError):
-                pass
-        return False
+        """Identify retryable transient errors.
+
+        Delegates to :func:`dag.attempt.classify_exception` — the single
+        source of truth also used by AttemptError — so the DAG retry
+        decision matches what gets recorded on the Attempt. Handles
+        TimeoutError, HttpError (``.status``), httpx errors
+        (``.response.status_code``), and any status-aware exception.
+        """
+        from dag.attempt import classify_exception
+
+        _, retryable = classify_exception(exc)
+        return retryable
 
     def schedule_retry(self, delay: timedelta) -> bool:
         """Schedule a DAG-level retry at now + delay.
@@ -160,10 +182,13 @@ class DerivedNode(Node[T], Generic[T]):
         return timedelta(seconds=min(delay_sec, 300))
 
     async def _error_result_dict(self, status: str, exc: Exception) -> dict:
+        from dag.attempt import AttemptError
+
         return {
             "status": status,
             "value": None,
-            "error": f"{exc}\n{traceback.format_exc()}",
+            "error": f"{self._id}: {exc}",
+            "error_detail": AttemptError.from_exception(str(exc), exc, source=self._id).to_dict(),
             "provenance": await self._build_provenance_dict(),
         }
 
@@ -184,7 +209,20 @@ class DerivedNode(Node[T], Generic[T]):
         impossible_deps = [a for a in dep_attempts if a.impossible]
         if impossible_deps:
             errors = "; ".join(a.error or "unknown" for a in impossible_deps)
-            result = Attempt.impossible(f"{self._id}: dep failed ({errors})")
+            message = f"{self._id}: dep failed ({errors})"
+            causes = tuple(a.error_info for a in impossible_deps if a.error_info is not None)
+            if causes:
+                result = Attempt.impossible(
+                    message,
+                    error_info=AttemptError(
+                        code="dep_failed",
+                        message=message,
+                        source=self._id,
+                        causes=causes,
+                    ),
+                )
+            else:
+                result = Attempt.impossible(message)
             self._attempt = result
             self._computed_at = datetime.now(UTC)
             # _db_created_at may be None for deps never persisted (e.g. a
@@ -214,16 +252,35 @@ class DerivedNode(Node[T], Generic[T]):
             _tb_str = traceback.format_exc()
             if self._is_transient_error(e):
                 if not self.schedule_retry(self._retry_delay_from(e)):
-                    result = Attempt.impossible(f"{self._id}: retry exhausted ({e})\n{_tb_str}")
+                    result = Attempt.impossible(
+                        f"{self._id}: retry exhausted ({e})",
+                        error_info=AttemptError.from_exception(str(e), e, source=self._id),
+                    )
                 else:
                     result = Attempt.pending()
             else:
                 impossible_deps = [a for a in dep_attempts if a.impossible]
                 if impossible_deps:
                     errors = "; ".join(a.error or "unknown" for a in impossible_deps)
-                    result = Attempt.impossible(f"{self._id}: dep failed ({errors})\n{_tb_str}")
+                    result = Attempt.impossible(
+                        f"{self._id}: dep failed ({errors})",
+                        error_info=AttemptError.from_exception(str(e), e, source=self._id),
+                    )
                 else:
-                    result = Attempt.impossible(f"{self._id}: {e}\n{_tb_str}")
+                    result = Attempt.impossible(
+                        f"{self._id}: {e}",
+                        error_info=AttemptError.from_exception(str(e), e, source=self._id),
+                    )
+
+        # A service may catch a transient error and RETURN an impossible
+        # attempt whose error_info.retryable is set (rather than raising).
+        # The retry decision must not depend on which style the service
+        # used — retry either way, using the exception it recorded.
+        if result.impossible and not result.pending:
+            info = result.error_info
+            if info is not None and info.retryable and info.exc is not None:
+                if self.schedule_retry(self._retry_delay_from(info.exc)):
+                    result = Attempt.pending()
         # requests before we do sync persist work (json.dumps + SQLite).
         await asyncio.sleep(0)
 
@@ -272,15 +329,28 @@ class DerivedNode(Node[T], Generic[T]):
                     label=getattr(dep, "display_name", dep._id),
                     description=f"build_provenance failed: {e}\n{traceback.format_exc()}",
                 )
+
+        # Use expression system for formula if available
+        formula = self.provenance_formula
+        if formula is None:
+            formula = self._build_formula_from_expression()
+
         description = self._attempt.error if self._attempt.impossible else None
+        status = "impossible" if self._attempt.impossible else ("pending" if self._attempt.pending else "")
+        error_info = self._attempt.error_info
+        # The provenance error/description feed the UI — use the friendly
+        # user_message, never the internal node-id/dep chain.
+        user_error = error_info.display_message if error_info is not None else self._attempt.error
         return Provenance(
             label=self.display_name,
-            description=description,
-            value=self._attempt.value,
+            description=user_error if self._attempt.impossible else None,
+            value=project_value(self._attempt.value),
             url=self._source_url,
             source_type=self.provenance_source_type,
             freshness=self._attempt.created_at,
-            formula=self.provenance_formula,
+            formula=formula,
+            status=status,
+            error=user_error if self._attempt.impossible else "",
             sources=sources,
         )
 
@@ -323,15 +393,10 @@ class DerivedNode(Node[T], Generic[T]):
         before compute() is ever called.  This assertion is a safety net
         to fail fast if that contract is violated.
         """
-        failed = {
-            name: att.status
-            for name, att in deps.items()
-            if att is not None and not att.succeeded
-        }
+        failed = {name: att.status for name, att in deps.items() if att is not None and not att.succeeded}
         if failed:
             raise AssertionError(
-                f"Dependencies not succeeded: {failed}. "
-                "Auto-propagation should have caught these before compute()."
+                f"Dependencies not succeeded: {failed}. Auto-propagation should have caught these before compute()."
             )
 
     @abstractmethod

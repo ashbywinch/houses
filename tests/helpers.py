@@ -17,7 +17,18 @@ from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.school import School
 from houses.school_gender import SchoolGender
-from houses.services import Services
+from houses.services import (
+    CouncilTaxService,
+    EPCLookupService,
+    GeocodingService,
+    OAuthService,
+    RailFareService,
+    RoutePlanner,
+    SchoolLookupService,
+    Services,
+    TownDescService,
+    WalkabilityService,
+)
 
 # ── Individual Fake Services ──────────────────────────────────────────
 
@@ -55,7 +66,7 @@ class FixedCommuteNode(DerivedNode[Commute]):
 _DEFAULT_POINT = GeoPoint(51.5, -0.1)
 
 
-class FakeGeocoder:
+class FakeGeocoder(GeocodingService):
     """Returns a fixed GeoPoint for any geocode request, and a fixed
     town name for reverse-geocode town lookups."""
 
@@ -78,9 +89,11 @@ class FakeGeocoder:
         self.address_calls.append(address)
         return Attempt.succeeded(self.result) if self.result else Attempt.impossible("no result")
 
-    async def reverse_geocode_town(self, lat: float, lon: float) -> str | None:
+    async def reverse_geocode_town(self, lat: float, lon: float) -> Attempt[str]:
         self.reverse_calls.append((lat, lon))
-        return self.reverse_town
+        if self.reverse_town:
+            return Attempt.succeeded(self.reverse_town)
+        return Attempt.impossible("no town found for coordinates")
 
 
 _DEFAULT_SIMON = Commute(
@@ -106,7 +119,7 @@ _DEFAULT_PETROL = Commute(
 )
 
 
-class _FakeRoutePlanner:
+class _FakeRoutePlanner(RoutePlanner):
     """Fake route planner for tests — returns a canned commute."""
 
     async def walk_route(self, origin, destination, max_walk):
@@ -132,7 +145,7 @@ class _FakeRoutePlanner:
         )
 
 
-class FakeSchoolLookup:
+class FakeSchoolLookup(SchoolLookupService):
     """School lookup that returns whatever school was passed to constructor.
 
     ``FakeSchoolLookup()`` returns None (no school found).  Override with
@@ -165,7 +178,7 @@ class FakeSchoolLookup:
         )
 
 
-class FakeWalkability:
+class FakeWalkability(WalkabilityService):
     def __init__(self, walk_to_town: int = 10, amenities: str = ""):
         self.walk_to_town_minutes = walk_to_town
         self.amenities = amenities
@@ -175,22 +188,22 @@ class FakeWalkability:
         return {"walk_to_town": val, "amenities": self.amenities}
 
 
-class FakeTownDesc:
-    async def describe(self, town_name: str, postcode: str) -> str:
-        return "A nice town."
+class FakeTownDesc(TownDescService):
+    async def describe(self, town_name: str, postcode: str) -> Attempt[str]:
+        return Attempt.succeeded("A nice town.")
 
 
-class FakeEPC:
+class FakeEPC(EPCLookupService):
     def __init__(self, band: str = "C"):
         self.band = band
         self.calls: list[tuple[str, str]] = []
 
-    async def lookup(self, postcode: str, address: str = "") -> str:
+    async def lookup(self, postcode: str, address: str = "") -> Attempt[str]:
         self.calls.append((postcode, address))
-        return self.band
+        return Attempt.succeeded(self.band)
 
 
-class FakeCouncilTax:
+class FakeCouncilTax(CouncilTaxService):
     def __init__(self, result: CouncilTaxInfo | None = None):
         self.result = result or CouncilTaxInfo(band="D", yearly_cost=Money("2000", "GBP"))
 
@@ -198,7 +211,7 @@ class FakeCouncilTax:
         return Attempt.succeeded(self.result)
 
 
-class FakeRailFare:
+class FakeRailFare(RailFareService):
     async def enrich(
         self,
         enabled: set[str] | None,
@@ -210,7 +223,7 @@ class FakeRailFare:
         return None, None
 
 
-class FakeOAuthService:
+class FakeOAuthService(OAuthService):
     """Fake Google OAuth service for tests.
 
     Returns canned authorization URLs and id_info.
@@ -251,7 +264,18 @@ _DEFAULT_SCHOOL = School(
 )
 
 
-def make_services(**overrides: Any) -> Services:
+def make_services(
+    **overrides: GeocodingService
+    | RoutePlanner
+    | SchoolLookupService
+    | WalkabilityService
+    | TownDescService
+    | EPCLookupService
+    | CouncilTaxService
+    | RailFareService
+    | OAuthService
+    | Any,
+) -> Services:
     """Build a ``Services`` with all fakes, optionally overriding specific services.
 
     Default fakes return minimal data — override any service with a custom fake::
@@ -260,6 +284,10 @@ def make_services(**overrides: Any) -> Services:
             epc_service=FakeEPC(band="B"),
             commute_router=FakeCommuteRouter(simon=None),
         )
+
+    Override kwargs are typed against the service protocols, so a fake
+    whose method signatures drift from the protocol fails type-checking
+    (and is caught by basedpyright/mypy rather than at runtime).
     """
     base: dict[str, Any] = dict(
         geocoder=FakeGeocoder(),

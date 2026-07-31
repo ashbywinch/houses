@@ -2,7 +2,39 @@ export interface AttemptValue<T> {
   succeeded: boolean
   value: T | null
   error: string | null
+  errorDetail?: {
+    code: string
+    message: string
+    userMessage: string
+    retryable: boolean
+    source: string
+    excType: string
+    traceback: string
+    causes: AttemptErrorDetail[]
+  }
   provenance: Provenance
+}
+
+export interface AttemptErrorDetail {
+  code: string
+  message: string
+  userMessage: string
+  retryable: boolean
+  source: string
+  excType: string
+  traceback: string
+  causes: AttemptErrorDetail[]
+}
+
+export interface FormulaLine {
+  label: string
+  value: string
+  expression?: string
+}
+
+export interface Formula {
+  lines: FormulaLine[]
+  result: string
 }
 
 export interface Provenance {
@@ -11,7 +43,11 @@ export interface Provenance {
   url?: string
   sourceType?: "api" | "calc" | "user" | "config" | "geocode" | "db"
   freshness?: string
-  formula?: { lines: Array<{ label: string; value: string }>; result: string }
+  status?: "impossible" | "pending" | "succeeded"
+  error?: string
+  expressionType?: string
+  value?: unknown
+  formula?: Formula
   sources?: Record<string, Provenance>
 }
 

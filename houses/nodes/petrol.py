@@ -2,8 +2,7 @@
 
 Uses actual distance (``distance_km``) from drive legs when available,
 otherwise estimating from drive minutes at 48 km/h.  Reads petrol_mpg
-and petrol_cost_per_litre from the financial settings UserInputNode so
-the user can adjust values live.
+and petrol_cost_per_litre from individual setting nodes.
 """
 
 from __future__ import annotations
@@ -15,96 +14,109 @@ from pint import Quantity
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
-from houses.commute import LegMode
+from houses.commute import JourneyLeg, LegMode
 from houses.model.domain import Commute
+
+
+def _fuel_cost_for(drive_legs: list[JourneyLeg], mpg: int, cost_per_litre: float) -> Money | None:
+    """Compute the round-trip fuel cost for the given drive legs.
+
+    Uses actual ``distance_km`` when present, else estimates distance
+    from drive minutes at 48 km/h. Returns None when there is no
+    measurable distance (no fuel cost to add).
+    """
+    actual_distance = sum(leg.distance.magnitude for leg in drive_legs if leg.distance and leg.distance.magnitude > 0)
+    if actual_distance > 0:
+        round_trip_km = actual_distance * 2
+    else:
+        total_drive_min = sum(int(leg.duration.magnitude) for leg in drive_legs)
+        if total_drive_min <= 0:
+            return None
+        round_trip_km = (total_drive_min / 60.0) * 48.0 * 2
+
+    # Fuel calculation using pint for proper Imperial gallon -> litre conversion
+    # 1 imperial gallon = 4.54609 litres; US gallon is 3.78541 litres
+    fuel_volume = (Quantity(round_trip_km, "km") / Quantity(mpg, "mile / imperial_gallon")).to("liter")
+    fuel_cost_amount = round(float(fuel_volume.magnitude) * cost_per_litre, 2)
+    if fuel_cost_amount <= 0:
+        return None
+    return Money(str(fuel_cost_amount), "GBP")
 
 
 class PetrolCostAugmentNode(DerivedNode[Commute]):
     """Adds fuel cost for drive legs based on settings.
 
-    Prefers actual ``distance_km`` from each drive leg (set by the transit
-    router from Google Routes data).  Falls back to estimating distance
-    from total drive minutes at 48 km/h (for legs where the router
-    didn't provide distance, e.g. park-and-ride drive legs).
+    Prefers actual ``distance_km`` from each drive leg. Falls back to
+    estimating distance from total drive minutes at 48 km/h.
     """
 
-    def __init__(self, node_id: str, *, commute_node, financial_source):
+    def __init__(self, node_id: str, *, commute_node, petrol_mpg_node, petrol_cost_per_litre_node):
         self.commute_node = commute_node
-        self.financial_source = financial_source
-        deps = (commute_node, financial_source)
+        deps = (commute_node, petrol_mpg_node, petrol_cost_per_litre_node)
         super().__init__(node_id, Commute, deps)
+        self._mpg_node = petrol_mpg_node
+        self._cost_node = petrol_cost_per_litre_node
         self.display_name = "Petrol Cost"
 
-    def compute(self, commute: Attempt[Commute], financial: Attempt[dict] = None) -> Attempt[Commute]:
+    @property
+    def provenance_formula(self):
+        from dag.attempt import Formula, FormulaLine
+
+        commute = self._attempt.value_or_none()
+        if not self._attempt.succeeded or commute is None:
+            return None
+        lines: list[FormulaLine] = []
+        drive_legs = [leg for cg in commute.details for leg in cg.legs if leg.mode == LegMode.DRIVE]
+        if drive_legs:
+            actual = sum(leg.distance.magnitude for leg in drive_legs if leg.distance and leg.distance.magnitude > 0)
+            if actual > 0:
+                round_trip_km = actual * 2
+                lines.append(FormulaLine(label="Drive distance (round trip)", value=f"{round_trip_km:.1f} km"))
+            else:
+                total_min = sum(int(leg.duration.magnitude) for leg in drive_legs)
+                round_trip_km = (total_min / 60.0) * 48.0 * 2
+                lines.append(FormulaLine(label="Drive time → distance estimate", value=f"{round_trip_km:.1f} km"))
+            mpg = int(self._mpg_node.latest_attempt().value_or_none() or 45)
+            cost = float(self._cost_node.latest_attempt().value_or_none() or 1.45)
+            fuel = _fuel_cost_for(drive_legs, mpg, cost)
+            if fuel is not None:
+                lines.append(FormulaLine(label=f"Fuel: ÷ {mpg} mpg × £{cost}/litre", value=str(fuel)))
+        if not lines:
+            return None
+        return Formula(lines=lines, result=str(commute.daily_cost))
+
+    def compute(self, commute: Attempt[Commute], mpg_att: Attempt, cost_att: Attempt) -> Attempt[Commute]:
         if not commute.succeeded:
             return commute
         val = commute.value_or_none()
         if not val:
             return commute
 
-        # Check for drive legs (handles park-and-ride which has mixed details)
         drive_groups = [cg for cg in (val.details or ()) if any(leg.mode == LegMode.DRIVE for leg in cg.legs)]
         if not drive_groups:
-            return commute  # no drive legs to add fuel cost to
+            return commute
 
-        # Collect all drive legs
         drive_legs = [leg for cg in val.details for leg in cg.legs if leg.mode == LegMode.DRIVE]
         if not drive_legs:
             return commute
-        import logging
 
-        logger = logging.getLogger(__name__)
-        logger.debug(
-            "PETROL_DEBUG: %d drive legs, total_min=%d, distances=%s",
-            len(drive_legs),
-            sum(int(leg.duration.magnitude) for leg in drive_legs),
-            [leg.distance.magnitude if leg.distance else 0 for leg in drive_legs],
-        )
+        mpg = int(mpg_att.value_or_none() or 45)
+        cost_per_litre = float(cost_att.value_or_none() or 1.45)
 
-        # Get settings from financial source (user-editable)
-        fin = financial.value_or_none() if (financial and financial.succeeded) else {}
-        mpg = float(fin.get("petrol_mpg", 45))
-        cost_per_litre = float(fin.get("petrol_cost_per_litre", 1.45))
-
-        # Use actual distance_km when available (>0), otherwise estimate from minutes
-        actual_distance = sum(
-            leg.distance.magnitude for leg in drive_legs if leg.distance and leg.distance.magnitude > 0
-        )
-        if actual_distance > 0:
-            # Round trip — commute shows one way, costs are daily (round trip)
-            round_trip_km = actual_distance * 2
-        else:
-            total_drive_min = sum(int(leg.duration.magnitude) for leg in drive_legs)
-            if total_drive_min <= 0:
-                return commute
-            # Estimate distance: 48 km/h average speed, round trip
-            round_trip_km = (total_drive_min / 60.0) * 48.0 * 2
-
-        # Fuel calculation using pint for proper Imperial gallon -> litre conversion
-        # 1 imperial gallon = 4.54609 litres; US gallon is 3.78541 litres
-        fuel_volume = (Quantity(round_trip_km, "km") / Quantity(mpg, "mile / imperial_gallon")).to("liter")
-        fuel_cost_amount = round(float(fuel_volume.magnitude) * cost_per_litre, 2)
-
-        if fuel_cost_amount <= 0:
+        fuel_cost = _fuel_cost_for(drive_legs, mpg, cost_per_litre)
+        if fuel_cost is None:
             return commute
 
-        fuel_cost = Money(str(fuel_cost_amount), "GBP")
         new_daily_cost = val.daily_cost + fuel_cost
 
-        # Attribute fuel cost to the drive CostGroup(s)
+        # Attribute fuel cost to the drive CostGroup(s) so downstream
+        # nodes (like MergeRailFareNode) that recompute total from
+        # CostGroups don't lose the fuel addition.
         new_details = list(val.details)
-
         for i, cg in enumerate(new_details):
             has_drive = any(leg.mode == LegMode.DRIVE for leg in cg.legs)
             if has_drive:
-                if cg.cost is None:
-                    new_cg_cost = fuel_cost
-                else:
-                    if not isinstance(cg.cost, Money):
-                        raise TypeError(
-                            f"CostGroup.cost must be Money or None, got {type(cg.cost).__name__}: {cg.cost}"
-                        )
-                    new_cg_cost = cg.cost + fuel_cost
+                new_cg_cost = fuel_cost if cg.cost is None else cg.cost + fuel_cost
                 new_details[i] = replace(cg, cost=new_cg_cost)
                 break
 
@@ -126,7 +138,9 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
 
     async def to_json_value(self) -> dict:
         result = await super().to_json_value()
-        val = self._attempt.value_or_none() if self._attempt.succeeded else None
-        if val is not None:
-            result["is_child"] = val.is_child
+        attempt = await self.attempt()
+        if attempt.succeeded:
+            val = attempt.value_or_none()
+            if val is not None:
+                result["is_child"] = val.is_child
         return result

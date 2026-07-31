@@ -31,6 +31,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.25.0",
     "ruff>=0.11.0",
+    "basedpyright>=1.20.0",
     "coverage>=7.0.0",
     "httpx>=0.28.0",
 ]  # Architecture testing (ArchUnit-style rules for Python imports)
@@ -72,3 +73,13 @@ asyncio_mode = "auto"
 [tool.uv.sources]
 uk-property-apis = { git = "https://github.com/kubilay-yavuz/uk-property-intel.git", subdirectory = "packages/apis" }
 
+
+
+[tool.basedpyright]
+typeCheckingMode = "standard"
+reportMissingTypeArgument = "none"
+reportUnknownMemberType = "none"
+reportUnknownVariableType = "none"
+reportUnknownParameterType = "none"
+reportUnknownArgumentType = "none"
+reportExplicitAny = "none"

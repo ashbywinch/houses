@@ -11,6 +11,8 @@ refactors the wiring, selection logic, or cost merging, these break.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 from money import Money
 from pint import Quantity
@@ -319,13 +321,8 @@ class TestFullCommutePipeline:
         )
         get_services().rail_fare_registry = registry
         svc = get_services()
-        svc.financial_source.push(
-            {
-                "petrol_mpg": 45,
-                "petrol_cost_per_litre": 1.45,
-            },
-            "test",
-        )
+        svc.setting_nodes["settings/petrol_mpg"].push(45, "test")
+        svc.setting_nodes["settings/petrol_cost_per_litre"].push(Decimal("1.45"), "test")
         poi_src = UserInputNode[str]("poi_mh", str)
         poi_src.push("RG12 8YA", "persons_source")
         loc = UserInputNode[GeoPoint]("loc_mh", GeoPoint)
@@ -373,7 +370,8 @@ class TestFullCommutePipeline:
         petrol_cost = PetrolCostAugmentNode(
             "test/dad/petrol_cost",
             commute_node=park_and_ride,
-            financial_source=svc.financial_source,
+            petrol_mpg_node=svc.setting_nodes.get("settings/petrol_mpg"),
+            petrol_cost_per_litre_node=svc.setting_nodes.get("settings/petrol_cost_per_litre"),
         )
         # Bus is slower than transit so transit wins
         from houses.nodes.rail_fare_node import RailFareNode
@@ -431,8 +429,7 @@ class TestFullCommutePipeline:
         val = a.value_or_none()
         assert val is not None
         # Park-and-ride adds £10.00 parking (from fake CarParkRegistry)
-        # Park-and-ride drive leg: 10 min @ 48 km/h × 2 (return) = 16 km
-        # Fuel: 16 km / (45 mpg × 1.609 km/mile) × £1.45/l = £1.46
+        # Park-and-ride drive leg: fuel = ~£1.46 (pint calculation)
         # NR fare: (£12.60 + £2.80 TfL tube) × 2 = £30.80
         # Total: £10.00 + £1.46 + £30.80 = £42.26
         assert float(val.daily_cost.amount) == 42.26, f"expected £42.26, got £{val.daily_cost.amount}"
@@ -459,10 +456,8 @@ class TestFullCommutePipeline:
         pc_src = UserInputNode[str]("pc_dr", str)
         pc_src.push("RG12 8YA", "test")
 
-        svc.financial_source.push(
-            {"petrol_mpg": 45, "petrol_cost_per_litre": 1.45},
-            "test",
-        )
+        svc.setting_nodes["settings/petrol_mpg"].push(45, "test")
+        svc.setting_nodes["settings/petrol_cost_per_litre"].push(Decimal("1.45"), "test")
 
         drive = Commute(
             person=Person(name="Simon", has_car=True),
@@ -526,7 +521,8 @@ class TestFullCommutePipeline:
         final_fuel = PetrolCostAugmentNode(
             "test/dr/final_fuel",
             commute_node=merge_node,
-            financial_source=svc.financial_source,
+            petrol_mpg_node=svc.setting_nodes.get("settings/petrol_mpg"),
+            petrol_cost_per_litre_node=svc.setting_nodes.get("settings/petrol_cost_per_litre"),
         )
 
         await flush_processor()

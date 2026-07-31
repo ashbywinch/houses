@@ -17,12 +17,20 @@ class LifeInsuranceTotalNode(DerivedNode[Money]):
     def provenance_formula(self) -> Formula | None:
         if not self._attempt.succeeded or self._attempt.value_or_none() is None:
             return None
-        lines = [
-            FormulaLine(
-                label="Life Insurance Total",
-                value=str(self._attempt.value),
-            ),
-        ]
+        lines = []
+        ps = self._persons_source.latest_attempt().value_or_none() or []
+        for p in ps:
+            name = getattr(p, "name", "?")
+            ins = getattr(p, "life_insurance_monthly", None)
+            if ins is None:
+                continue
+            amt = ins.amount if isinstance(ins, Money) else Decimal(str(ins))
+            if amt == 0:
+                lines.append(FormulaLine(label=f"{name}’s life insurance", value="£0.00"))
+            else:
+                lines.append(FormulaLine(label=f"{name}’s life insurance", value=f"£{amt:,.2f}"))
+        if not lines:
+            lines.append(FormulaLine(label="Life Insurance Total", value=str(self._attempt.value)))
         return Formula(lines=lines, result=str(self._attempt.value))
 
     def __init__(self, node_id: str, *, persons_source):
@@ -36,10 +44,6 @@ class LifeInsuranceTotalNode(DerivedNode[Money]):
         total = _ZERO
         for p in ps:
             ins = getattr(p, "life_insurance_monthly", zero)
-            amt = (
-                ins.amount
-                if isinstance(ins, Money)
-                else Decimal(str(ins))
-            )
+            amt = ins.amount if isinstance(ins, Money) else Decimal(str(ins))
             total += amt
         return Attempt.succeeded(Money(str(total), "GBP"))

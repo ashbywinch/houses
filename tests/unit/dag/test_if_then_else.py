@@ -197,3 +197,4 @@ class TestIfThenElseNode:
 
         a = await node.attempt()
         assert a.impossible
+

@@ -2,6 +2,7 @@ import logging
 
 import httpx
 
+from dag.attempt import Attempt
 from houses.api_cache import cached_async_client, with_cache
 from houses.config import settings
 
@@ -18,10 +19,10 @@ def _reset():
 API_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
-async def generate_town_description(town_name: str, postcode: str) -> str:
+async def generate_town_description(town_name: str, postcode: str) -> Attempt[str]:
     key = town_name.strip().lower()
     if key in _town_cache:
-        return _town_cache[key]
+        return Attempt.succeeded(_town_cache[key])
 
     try:
         body = {
@@ -67,9 +68,9 @@ async def generate_town_description(town_name: str, postcode: str) -> str:
         raw = result["choices"][0]["message"]["content"].strip()
         description = raw.split(".")[0].strip() + "."
         _town_cache[key] = description
-        return description
+        return Attempt.succeeded(description)
     except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
         raise  # transient — let DAG retry handle it
-    except Exception:
+    except Exception as e:
         logger.warning("Failed to generate town description for %s", town_name, exc_info=True)
-        return ""
+        return Attempt.impossible(f"town description generation failed: {e}")

@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 VIEW_TAB = "Properties View"
 
+
 def read_view_tab_works() -> dict[str, str]:
     """Read Ashby Works Estimate (£) column from the View tab as fallback."""
     client = get_client()

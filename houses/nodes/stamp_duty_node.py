@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from money import Money
 
-from dag.attempt import Attempt, Formula, FormulaLine
+from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
+from dag.expression import Conditional, Literal, TieredRate
 
 
 class StampDutyNode(DerivedNode[Money]):
@@ -12,18 +15,6 @@ class StampDutyNode(DerivedNode[Money]):
     Returns £0 when Status is "Current" (owner-occupied — no purchase).
     """
 
-    @property
-    def provenance_formula(self) -> Formula | None:
-        if not self._attempt.succeeded or self._attempt.value_or_none() is None:
-            return None
-        price_att = self._price_node.latest_attempt()
-        price_val = price_att.value_or_none()
-        lines = [
-            FormulaLine(label="Property Price", value=str(price_val) if price_val else "—"),
-            FormulaLine(label="First-time buyer relief", value="N/A"),
-        ]
-        return Formula(lines=lines, result=str(self._attempt.value))
-
     def __init__(self, node_id: str, *, rightmove_price, status_node=None):
         self._price_node = rightmove_price
         self._status_node = status_node
@@ -31,6 +22,25 @@ class StampDutyNode(DerivedNode[Money]):
         if status_node is not None:
             deps.append(status_node)
         super().__init__(node_id, Money, tuple(deps))
+
+    @property
+    def expression(self):
+        return Conditional(
+            predicate=lambda: (self._status_node.latest_attempt().value_or_none() or "").strip().lower() == "current",
+            if_true=Literal(Money("0", "GBP")),
+            if_false=TieredRate(
+                self._price_node,
+                tiers=[
+                    (0, 250000, 0),
+                    (250000, 925000, Decimal("0.05")),
+                    (925000, 1500000, Decimal("0.10")),
+                    (1500000, None, Decimal("0.12")),
+                ],
+                description="Stamp Duty Land Tax: 0% up to £250k, "
+                "5% on £250k–£925k, 10% on £925k–£1.5M, 12% above £1.5M",
+            ),
+            description="Stamp Duty is a one-off government tax on property purchases.",
+        )
 
     def _get_active_deps(self):
         if self._status_node is not None:
@@ -42,16 +52,4 @@ class StampDutyNode(DerivedNode[Money]):
         price: Attempt[Money],
         status: Attempt[str] | None = None,
     ) -> Attempt[Money]:
-        self._assert_deps_succeeded(price=price, status=status)
-
-        # Current properties pay no stamp duty
-        is_current = (
-            status is not None
-            and status.value_or_none().strip().lower() == "current"
-        )
-        if is_current:
-            return Attempt.succeeded(Money("0", "GBP"))
-
-        from houses.stamp_duty import stamp_duty_land_tax
-
-        return Attempt.succeeded(stamp_duty_land_tax(price.value_or_none()))
+        return self.expression.evaluate()

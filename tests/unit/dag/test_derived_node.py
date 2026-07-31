@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import pytest
+from money import Money
+from pint import Quantity
 
 from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
@@ -109,8 +111,6 @@ class TestDerivedNode:
         await flush_processor()
         a = await doubler.attempt()
         assert a.impossible is True
-
-
 
     @pytest.mark.asyncio
     async def test_impossible_dep_crash_preserves_provenance(self):
@@ -262,3 +262,55 @@ class _AsyncDoubleNode(DerivedNode[int]):
         if val.succeeded:
             return Attempt.succeeded(val.value_or_none() * 2)
         return Attempt.impossible("dep failed")
+
+
+class TestCommuteDetailsRoundTrip:
+    """Commute details persisted under `details` (the selector's frontend
+    rename, and legacy model rows) must survive reload — never silently
+    dropped."""
+
+    @pytest.mark.asyncio
+    async def test_details_key_survives_reload(self):
+        from pydantic import TypeAdapter
+
+        from dag.persistence import save_node_result
+        from houses.commute import CostGroup, JourneyLeg, LegMode
+        from houses.model.domain import Commute, Person, PlaceOfInterest
+
+        commute = Commute(
+            person=Person(name="", has_car=False),
+            label="Aldgate",
+            destination=PlaceOfInterest(label="Aldgate", address="EC3A"),
+            duration=Quantity(156, "minute"),  # type: ignore[arg-type]
+            daily_cost=Money("100", "GBP"),
+            mode="transit",
+            _details=(
+                CostGroup(
+                    legs=(JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(42, "minute")),),  # type: ignore[arg-type]
+                    operator="TfL",
+                    cost=Money("100", "GBP"),
+                ),
+            ),
+        )
+        value_dict = TypeAdapter(Commute).dump_python(commute, mode="json")
+        # The selector's to_json renames _details → details; that is what
+        # gets persisted. Simulate exactly that shape.
+        value_dict["details"] = value_dict.pop("_details")
+        save_node_result("rt_legacy_details", {"status": "succeeded", "value": value_dict})
+
+        from houses.nodes.commute import CommuteSelectorNode
+
+        node = CommuteSelectorNode(
+            "rt_legacy_details",
+            origin=UserInputNode("rt_origin", object),
+            poi=UserInputNode("rt_poi", object),
+            transit_result=UserInputNode("rt_transit", object),
+            is_child=False,
+            max_walk=30,
+        )
+        a = node.latest_attempt()
+        assert a.succeeded, f"reload must succeed, got: {a.status}: {a.error}"
+        val = a.value_or_none()
+        assert val is not None
+        assert len(val._details) == 1, f"commute details must survive reload, got: {val._details!r}"
+        assert val._details[0].legs[0].mode == LegMode.TRAIN

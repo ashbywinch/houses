@@ -88,9 +88,15 @@ async def find_nearest(
             pass
 
     if property_coords is None:
-        property_coords = (await geocode(postcode)).value_or_none()
+        geocode_attempt = await geocode(postcode)
+        if geocode_attempt.impossible:
+            return geocode_attempt
+        property_coords = geocode_attempt.value_or_none()
     if property_coords is None and address:
-        property_coords = (await _geocode_address(address)).value_or_none()
+        addr_attempt = await _geocode_address(address)
+        if addr_attempt.impossible:
+            return addr_attempt
+        property_coords = addr_attempt.value_or_none()
     if property_coords is None:
         return _Attempt.succeeded(None)
     candidates: list[tuple[float, School]] = []

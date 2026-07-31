@@ -6,7 +6,7 @@ from typing import Generic, TypeVar
 
 from pydantic import TypeAdapter
 
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt, AttemptError, Provenance
 from dag.signals import Signal
 
 T = TypeVar("T")
@@ -62,7 +62,11 @@ class Node(ABC, Generic[T]):
         persisted = stored.get("_persisted_at", "")
         if persisted:
             try:
-                self._persisted_at = datetime.fromisoformat(persisted)
+                dt = datetime.fromisoformat(persisted)
+                # Ensure offset-aware — DB may have stored naive timestamps
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=UTC)
+                self._persisted_at = dt
             except (ValueError, TypeError):
                 self._persisted_at = None
         self._db_created_at = persisted
@@ -74,19 +78,47 @@ class Node(ABC, Generic[T]):
         status = stored.get("status", "")
         if status == "succeeded":
             try:
-                val = self._adapter.validate_python(stored["value"])
+                value = stored["value"]
+                # The selector's to_json (and legacy model rows) persist
+                # commute legs under `details` (the frontend key); the
+                # adapter reads `_details`. Map so the round-trip never
+                # silently drops them.
+                if (
+                    isinstance(value, dict)
+                    and isinstance(value.get("person"), dict)
+                    and "_details" not in value
+                    and "details" in value
+                ):
+                    value["_details"] = value.pop("details")
+                val = self._adapter.validate_python(value)
             except Exception as exc:
-                return Attempt.impossible(
-                    f"validation error: {exc}"
-                )
+                return Attempt.impossible(f"validation error: {exc}")
             return Attempt.succeeded(val)
         if status == "pending":
             retry_at = stored.get("retry_at")
             if retry_at:
-                self._retry_at = datetime.fromisoformat(retry_at)
+                dt = datetime.fromisoformat(retry_at)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=UTC)
+                self._retry_at = dt
                 self._retry_count = stored.get("retry_count", 0)
             return None
 
+        # Reconstruct the structured error from the persisted error_detail
+        # (code, causes, user_message) so display_message resolves to the
+        # friendly leaf reason across restarts — not the raw node-id/dep
+        # chain that the flat error string carries.
+        detail = stored.get("error_detail")
+        if detail and isinstance(detail, dict):
+            from dag.attempt import AttemptError
+
+            return Attempt.impossible(
+                stored.get("error", "unknown"),
+                error_info=AttemptError.from_dict(detail),
+            )
+        # Legacy rows (persisted before error_detail existed): no structured
+        # info to recover — keep the raw string; provenance fallback makes
+        # it generic-friendly when rendered.
         return Attempt.impossible(stored.get("error", "unknown"))
 
     def latest_attempt(self) -> Attempt:
@@ -116,7 +148,10 @@ class Node(ABC, Generic[T]):
         result["pending"] = attempt.pending
         result["impossible"] = attempt.impossible
         if attempt.impossible:
-            result["error"] = attempt.error
+            info = attempt.error_info
+            result["error"] = (info.display_message if info is not None else attempt.error) or attempt.error
+            if info is not None:
+                result["error_detail"] = info.to_dict()
         if self._source_url:
             result["source_url"] = self._source_url
         if not attempt.pending:
@@ -138,7 +173,8 @@ class Node(ABC, Generic[T]):
         result["pending"] = attempt.pending
         result["impossible"] = attempt.impossible
         if attempt.impossible:
-            result["error"] = attempt.error
+            info = attempt.error_info
+            result["error"] = (info.display_message if info is not None else attempt.error) or attempt.error
         if self._source_url:
             result["source_url"] = self._source_url
         return result
@@ -158,10 +194,91 @@ class Node(ABC, Generic[T]):
         parts = [self._id]
         if extra:
             parts.append(extra)
+        causes: list[AttemptError] = []
         for name, attempt in dep_attempts.items():
             if attempt is None:
                 parts.append(f"{name}: not available")
             elif not attempt.succeeded:
                 detail = attempt.error or "unknown"
                 parts.append(f"{name}: {detail}")
-        return Attempt.impossible("; ".join(parts))
+                if attempt.error_info is not None:
+                    causes.append(attempt.error_info)
+        message = "; ".join(parts)
+        if causes:
+            return Attempt.impossible(
+                message,
+                error_info=AttemptError(
+                    code="dep_failed",
+                    message=message,
+                    source=self._id,
+                    causes=tuple(causes),
+                ),
+            )
+        return Attempt.impossible(message)
+
+
+# ── Expression operators ────────────────────────────────
+# These let you use Node objects directly in expressions:
+#   self._price_node + self._stamp_duty_node - self._equity_node
+# instead of wrapping each in Ref().
+# Each method uses lazy imports to avoid circular imports.
+
+
+def _to_expr(value):
+    """Convert a plain value to an Expression if it isn't already one."""
+    from dag.expression import Expression, Literal, Ref
+
+    if isinstance(value, Expression):
+        return value
+    if isinstance(value, Node):
+        return Ref(value)
+    return Literal(value)
+
+
+def _with_ops(self, other):
+    return _to_expr(self), _to_expr(other)
+
+
+def _node_add(self, other):
+    from dag.expression import Add
+
+    a, b = _with_ops(self, other)
+    return Add(a, b)
+
+
+def _node_sub(self, other):
+    from dag.expression import Sub
+
+    a, b = _with_ops(self, other)
+    return Sub(a, b)
+
+
+def _node_neg(self):
+    from dag.expression import Negate, Ref
+
+    return Negate(Ref(self))
+
+
+def _node_mul(self, other):
+    from dag.expression import Mul
+
+    a, b = _with_ops(self, other)
+    return Mul(a, b)
+
+
+def _node_div(self, other):
+    from dag.expression import Div
+
+    a, b = _with_ops(self, other)
+    return Div(a, b)
+
+
+Node.__add__ = _node_add
+Node.__radd__ = _node_add  # same — addition is commutative
+Node.__sub__ = _node_sub
+Node.__rsub__ = lambda self, other: _to_expr(other) - _to_expr(self)
+Node.__neg__ = _node_neg
+Node.__mul__ = _node_mul
+Node.__rmul__ = _node_mul  # same — multiplication is commutative
+Node.__truediv__ = _node_div
+Node.__rtruediv__ = lambda self, other: _to_expr(other) / _to_expr(self)

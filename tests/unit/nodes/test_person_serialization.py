@@ -23,7 +23,8 @@ def test_home_sale_price_dict_succeeds():
 
     node = UserInputNode[list[Person]]("test_d", list[Person])
     p = Person(
-        name="Simon", has_car=True,
+        name="Simon",
+        has_car=True,
         home_sale_price=Money("500000", "GBP"),
     )
     node.push([p], "test")
@@ -47,8 +48,6 @@ def test_cash_contribution_float_raises():
     from houses.model.domain import Person
 
     node = UserInputNode[list[Person]]("test_f", list[Person])
-    p = Person(
-        name="Ashby", has_car=True, cash_contribution=300000.0
-    )
+    p = Person(name="Ashby", has_car=True, cash_contribution=300000.0)
     with pytest.raises((ValueError, TypeError)):
         node.push([p], "test")

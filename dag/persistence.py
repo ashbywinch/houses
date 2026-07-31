@@ -27,11 +27,15 @@ _connection_cache = threading.local()
 
 
 class DagJSONEncoder(json.JSONEncoder):
-    """Handles enums, Money, Quantity, and other non-serializable types in DAG node results."""
+    """Handles enums, Decimal, Money, Quantity, and other non-serializable types in DAG node results."""
 
     def default(self, o):
         if isinstance(o, Enum):
             return o.name.lower()
+        from decimal import Decimal as _Decimal
+
+        if isinstance(o, _Decimal):
+            return float(o)
         from money import Money as _Money
 
         if isinstance(o, _Money):
@@ -216,4 +220,4 @@ def property_rids() -> list[str]:
     rows = conn.execute(
         "SELECT DISTINCT SUBSTR(node_id, 1, INSTR(node_id, '/') - 1) AS rid FROM node_results WHERE node_id LIKE '%/%'"
     ).fetchall()
-    return sorted(set(r[0] for r in rows if r[0]))
+    return sorted(set(r[0] for r in rows if r[0] and r[0].isdigit()))

@@ -1,86 +1,37 @@
 # Testing Standards — Houses
 
-Test conventions for the property enrichment engine. Supplementary to
-`docs/coding-standards.md` — read both.
+Test conventions for the property enrichment engine. Supplementary to `docs/coding-standards.md` — read both.
 
-## Test Organization
+## Organization
 
-```
-tests/
-├── unit/                  # One function or module in isolation
-│   ├── test_attempt.py
-│   ├── test_auth.py
-│   ├── dag/
-│   │   └── test_architecture.py
-│   └── nodes/
-│       ├── test_commute.py
-│       └── test_api.py
-├── integration/           # Full pipeline with fake services
-│   └── conftest.py
-└── conftest.py            # Session-scoped fixtures
-```
+Test files mirror the module under test (`houses/nodes/area.py` → `tests/unit/nodes/test_area.py`); functions describe behaviour (`test_walk_selected_when_fastest`, `test_empty_comment_rejected`); classes group scenarios per method/state. `tests/helpers.py` holds fakes; `tests/unit/isolation_fixtures.py` holds DB isolation.
 
-### Naming
+## Deterministic tests
 
-- **Test files** mirror the module under test: `houses/nodes/area.py` →
-  `tests/unit/nodes/test_area.py`.
-- **Test functions** describe the behaviour: `test_walk_selected_when_fastest`,
-  `test_empty_comment_rejected`.
-- **Test classes** group related scenarios per method or state.
+Same result every run, any order, any machine:
 
-## Deterministic Tests
+- **No wall-clock time** — `freezegun` or pass timestamps as parameters.
+- **No external APIs** — `Services` fakes or `_kwarg` injection.
+- **No execution-order dependence** — each test sets up its own data, tears down state. Session-scoped fixtures only for genuinely stateless objects (e.g. schema definitions).
+- **Randomised data** — seeded generator.
 
-Every test must produce the same result on every run, in any order, on any
-machine.
+## No monkeypatching
 
-- No dependence on wall-clock time. Use `freezegun` or pass timestamps as
-  parameters where time matters.
-- No dependence on external APIs. Use `Services` fakes or `_kwarg`
-  injection.
-- No dependence on test execution order. Each test sets up its own data and
-  tears down state. Session-scoped fixtures are acceptable only for objects
-  that are genuinely stateless (e.g. schema definitions).
-- Randomised data must use a seeded generator.
+**Never use `monkeypatch`, `unittest.mock.patch`, or `MockTransport` in new tests.** They patch module/global state → brittle against import-path changes and refactors.
 
-## No Monkeypatching
-
-**Never use `monkeypatch`, `unittest.mock.patch`, or `MockTransport` in new
-tests.** These approaches patch module-level or global state, making tests
-brittle against import path changes and refactoring.
-
-Instead, use one of the three DI-based approaches from `docs/coding-standards.md`:
+Use one of three DI approaches (from `docs/coding-standards.md`):
 
 | Approach | When |
 |----------|------|
-| **`_kwarg` injection** | Leaf-level function needs a pre-built object (registry, HTML fixture) |
-| **`Services` container** | Full enrichment pipeline needs fake services (EPC, commute, council tax) |
+| **`_kwarg` injection** | Leaf function needs a pre-built object (registry, HTML fixture) |
+| **`Services` container** | Full pipeline needs fake services (EPC, commute, council tax) |
 | **`ContextVar`** | Per-request state needs overriding (bus fares, geo state) |
 
-If you need to patch something that isn't reachable through these DI
-approaches, refactor the code to accept a dependency rather than adding
-another patch.
+If something isn't reachable through DI, refactor the code to accept a dependency — don't add another patch.
 
-## Fakes and Helpers
+## Fakes & helpers
 
-### `tests/helpers.py`
-
-Reusable fake implementations of every service protocol. Each fake
-accepts constructor overrides for the data it returns:
-
-```python
-class FakeEPC:
-    def __init__(self, band: str = "C", potential: str = "B"):
-        self._band = band
-        self._potential = potential
-
-    async def lookup(self, postcode: str) -> EPCResult:
-        return EPCResult(band=self._band, potential_rating=self._potential)
-```
-
-### `make_services()`
-
-Build a `Services` container with all fakes at sensible defaults. Override
-individual services by keyword:
+`tests/helpers.py` provides a fake per service protocol, with constructor overrides controlling returned data; `make_services()` builds a `Services` with all fakes at sensible defaults, overridable by keyword:
 
 ```python
 from tests.helpers import make_services, FakeEPC, FakeCommuteRouter
@@ -91,53 +42,27 @@ services = make_services(
 )
 ```
 
-The defaults are chosen so that `make_services()` with no arguments
-produces a working environment for most tests.
-
-### What Each Fake Returns by Default
-
-| Fake | Default behaviour |
-|------|-------------------|
-| `FakeGeocoder` | Returns `(51.5, -0.13)` for postcode, `None` for outcode |
-| `FakeCommuteRouter` | Simon=45min, Lorena=50min, Petrol=30min |
-| `FakeEPC` | Band C, potential B |
-| `FakeCouncilTax` | Band D, £1800/yr |
-| `FakeWalkability` | Town walk 15min, amenities "shops, park" |
-| `FakeTownDesc` | Returns "A suburban area with good transport links." |
-| `FakeSchoolLookup` | Returns `None` for all lookups (no schools found) |
-| `FakeRailFare` | Passes `simon`/`lorena` fares through unchanged |
+No-arg `make_services()` = working environment for most tests. Default behaviours are visible in the fake constructors.
 
 ## Assertions
 
-- Assert the **behaviour**, not the implementation. Test the return value
-  or side effect, not which internal method was called.
-- Prefer `assert` over `self.assert*` in pytest-style tests.
-- Use `pytest.raises` for error cases. Verify the error message when it's
-  part of the contract.
-- Use `in` checks for partial string matches in error messages, not
-  hardcoded full strings.
+- Assert **behaviour**, not implementation — return value or side effect, not which internal method was called.
+- `assert` over `self.assert*`.
+- `pytest.raises` for errors; verify the message when it's part of the contract.
+- `in` checks for partial error-message matches, not hardcoded full strings.
 
-## Deterministic Fixtures
+## Deterministic fixtures
 
-Integration tests that need a real SQLite database use an in-memory
-database:
+Integration tests needing a real SQLite DB use in-memory, shared between the app and DAG connection paths — see `tests/unit/isolation_fixtures.py`.
 
-```python
-from houses.database import get_connection
-from dag.persistence import _get_db
+## Test smells to avoid
 
-# Both application and DAG layers share the same in-memory DB
-# in tests — see tests/unit/isolation_fixtures.py
-```
-
-## Test Smells to Avoid
-
-| Smell | Why it's wrong | Fix |
-|-------|----------------|-----|
-| Test calls `time.sleep()` | Flaky, slow | Use `asyncio.wait_for` or fake the delay |
-| Test reads from an environment variable | Non-hermetic | Inject the value via a parameter or fixture |
-| Test shares mutable state with other tests | Order-dependent failures | Create fresh data per test |
-| Test asserts a full JSON response string | Brittle — breaks on any formatting change | Assert on specific fields |
-| Test requires internet access | Can't run offline | Use `Services` fakes |
-| Test fakes the behaviour under test | Always passes, never catches regressions — the fake implements a fantasy version of the real code | Use real implementations for the code under test; fake only its *dependencies* (APIs, databases, services) |
-| Test asserts implementation detail instead of behaviour | Breaks on refactoring that doesn't change observable behaviour — tests become a liability, not a safety net | Assert on return values, state changes visible to callers, or side effects the caller relies on. Never assert on which private method was called or in what order |
+| Smell | Why wrong | Fix |
+|-------|-----------|-----|
+| `time.sleep()` | flaky, slow | `asyncio.wait_for` or fake the delay |
+| reads env var | non-hermetic | inject via parameter/fixture |
+| shares mutable state across tests | order-dependent failures | fresh data per test |
+| asserts full JSON response string | breaks on any formatting change | assert specific fields |
+| requires internet | can't run offline | `Services` fakes |
+| fakes the behaviour under test | always passes — fake is a fantasy of the real code | real implementation for code under test; fake only its dependencies (APIs, DBs, services) |
+| asserts implementation detail | breaks on refactors that don't change behaviour | assert return values, caller-visible state, or relied-upon side effects — never which private method was called, or in what order |

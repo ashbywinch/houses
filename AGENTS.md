@@ -76,14 +76,19 @@ make stop                       # Stop dev server + frontend
 ## Decision Tree
 
 - **Develop / test / run**: [docs/development.md](docs/development.md)
+- **Coding standards / conventions**: [docs/coding-standards.md](docs/coding-standards.md)
+- **Writing tests**: [docs/testing-standards.md](docs/testing-standards.md)
 - **Architecture overview**: [docs/architecture.md](docs/architecture.md)
 - **Add a column**: [docs/column-reference.md](docs/column-reference.md)
 - **Add an enrichment module**: [docs/adding-a-new-enrichment-module.md](docs/adding-a-new-enrichment-module.md)
-- **Add a DAG node**: [docs/dag-model.md](docs/dag-model.md)
-- **Capture / compare the frontend DOM**: Run `tools/capture_dom.py`, then compare against `docs/current-ui/`. See `docs/development.md` → *Capturing the Frontend DOM for Comparison*.
+- **Enrichment modules (index)**: [docs/enrichment-modules.md](docs/enrichment-modules.md)
+- **DAG library & adding a node**: [docs/dag-library.md](docs/dag-library.md)
+- **Capture / compare the frontend DOM**: Run `tools/capture_dom.py`, then compare against `docs/current-ui/`. See `docs/development.md` → *Capturing the Frontend DOM*.
 - **Write docs**: [docs/writing-documentation.md](docs/writing-documentation.md)
 - **Use the API**: [docs/api.md](docs/api.md)
 - **Troubleshoot batch endpoints**: [docs/troubleshooting-endpoints.md](docs/troubleshooting-endpoints.md)
+- **Users & UX requirements (provenance, filters, states)**: [docs/personas.md](docs/personas.md)
+- **Frontend architecture decisions (Vue)**: [docs/vue-architecture-decisions.md](docs/vue-architecture-decisions.md)
 
 ## Key Files
 
@@ -96,7 +101,7 @@ make stop                       # Stop dev server + frontend
 | `houses/sheets/` | gspread integration, column schema (`Row`), View tab sync (`View`), formulas |
 | `tests/helpers.py` | Reusable fakes: `FakeCommuteRouter`, `FakeEPC`, `make_services()` |
 | `houses/nodes/` | New DAG node implementations (replaces old `houses/model/` DAG) |
-| `dag/` | DAG library: `Node`, `SourceNode`, `ComputedNode`, `Attempt`, `Provenance` |
+| `dag/` | DAG library: `Node`, `DerivedNode`, `UserInputNode`, `Attempt`, `Provenance` — see [docs/dag-library.md](docs/dag-library.md) |
 | `docs/current-ui/` | Saved reference HTML from the old frontend — compare `capture_dom.py` output against this |
 | `tools/capture_dom.py` | Reusable script to capture rendered Vue frontend DOM + screenshot |
 

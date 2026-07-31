@@ -7,12 +7,25 @@ from money import Money
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
+from dag.expression import Choose, Expression, Ref
 from dag.node import Node
 from houses.commute import CostGroup, LegMode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute
 
 logger = logging.getLogger(__name__)
+
+
+def _transit_legs(commute: Commute | None) -> bool:
+    """True when the commute contains train/tube/DLR/Overground legs.
+
+    Callers must check ``infeasible`` first — the ``details`` accessor
+    raises on an infeasible commute.
+    """
+    if commute is None:
+        return False
+    _transit_modes = {LegMode.TRAIN, LegMode.TUBE, LegMode.DLR, LegMode.OVERGROUND}
+    return any(any(leg.mode in _transit_modes for leg in cg.legs) for cg in commute.details)
 
 
 def _has_unpriced_transit(commute: Commute | None) -> bool:
@@ -29,13 +42,27 @@ def _has_unpriced_transit(commute: Commute | None) -> bool:
     return any(cg.cost is None and any(leg.mode in _transit_modes for leg in cg.legs) for cg in commute.details or ())
 
 
-def _needs_rail_fare(transit: Attempt) -> bool:
-    """True when transit has no cost assigned yet and needs an NR fare."""
+def _needs_rail_fare(transit: Attempt, selected: Attempt | None = None) -> bool:
+    """True when the SELECTED commute has unpriced transit legs needing an NR fare.
+
+    ``transit`` is the transit alternative; ``selected`` is the commute the
+    selector actually chose.  When the selection is drive/walk (or still
+    pending), the fare is irrelevant — the fare node must never be
+    calculated for a route that wasn't chosen.
+    """
     if not transit.succeeded:
         return False
     val = transit.value_or_none()
-    if val is None:
+    if val is None or val.infeasible:
+        # No route — nothing to price; never touch .details on an
+        # infeasible commute (the accessor raises).
         return False
+    if selected is not None:
+        if not selected.succeeded:
+            return False
+        sel = selected.value_or_none()
+        if sel is None or sel.infeasible or not _transit_legs(sel):
+            return False
     if val.daily_cost is None or val.daily_cost.amount == 0:
         return True
     return _has_unpriced_transit(val)
@@ -113,6 +140,12 @@ class CommuteSelectorNode(DerivedNode[Commute]):
     ``walk_result`` and ``drive_result`` are optional — omit them when
     walking/driving is not applicable (the selector treats them as
     impossible).
+
+    A transit "no route" result is modelled as a *succeeded* commute with
+    ``infeasible=True`` — never as an impossible attempt — so the
+    framework runs the selector and ``_pick_best`` can fall back to
+    drive/walk.  A genuinely failed transit API call is impossible and
+    propagates as usual.
     """
 
     def __init__(
@@ -141,6 +174,19 @@ class CommuteSelectorNode(DerivedNode[Commute]):
             deps.append(drive_result)
         super().__init__(node_id, Commute, tuple(deps))
 
+        # Build expression once — cached so last_results persists across calls
+        alts: dict[str, Expression] = {}
+        if self.walk_result is not None:
+            alts["walk"] = Ref(self.walk_result)
+        alts["transit"] = Ref(self.transit_result)
+        if self.drive_result is not None:
+            alts["drive"] = Ref(self.drive_result)
+        self._expression = Choose(
+            alternatives=alts,
+            selector=self._pick_best,
+            description="Selects the fastest feasible commute mode",
+        )
+
     def _get_active_deps(self) -> tuple[Node, ...]:
         deps = [self.origin, self.poi, self.transit_result]
         if self.walk_result is not None:
@@ -148,6 +194,40 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         if self.drive_result is not None:
             deps.append(self.drive_result)
         return tuple(deps)
+
+    @property
+    def expression(self):
+        return self._expression
+
+    def _pick_best(self, results):
+        """Choose the fastest feasible commute from available results.
+
+        A walk that exceeds ``max_walk`` is a last resort: it loses to any
+        feasible alternative, but is still returned when nothing else
+        works — an over-threshold walk beats 'no route'.
+        """
+        best = None
+        best_duration = None
+        fallback_walk: tuple[float, str] | None = None
+        for name, attempt in results.items():
+            if not attempt.succeeded:
+                continue
+            val = attempt.value_or_none()
+            if val is None or val.infeasible:
+                continue
+            # Walk has a max distance limit — prefer alternatives, but
+            # keep the walk as a fallback when none exist.
+            if name == "walk" and val.duration.magnitude > self._max_walk:
+                if fallback_walk is None or val.duration.magnitude < fallback_walk[0]:
+                    fallback_walk = (val.duration.magnitude, name)
+                continue
+            d = val.duration.magnitude
+            if best is None or d < best_duration:
+                best = name
+                best_duration = d
+        if best is None and fallback_walk is not None:
+            return fallback_walk[1]
+        return best
 
     def compute(
         self,
@@ -157,51 +237,19 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         walk: Attempt[Commute] | None = None,
         drive: Attempt[Commute] | None = None,
     ) -> Attempt[Commute]:
-        self._assert_deps_succeeded(
-            origin=origin,
-            poi=poi,
-            transit=transit,
-            walk=walk,
-            drive=drive,
-        )
-
-        candidates = []
-
-        # 1. Walk (Google Routes) — add if within max_walk
-        if (
-            walk is not None
-            and walk.value_or_none() is not None
-            and not walk.value_or_none().infeasible
-            and walk.value_or_none().duration.magnitude <= self._max_walk
-        ):
-            candidates.append(walk)
-
-        # 2. Transit
-        if (
-            transit.value_or_none() is not None
-            and not transit.value_or_none().infeasible
-        ):
-            best_transit = transit
-            candidates.append(best_transit)
-
-        # 3. Drive
-        if (
-            drive is not None
-            and drive.value_or_none() is not None
-            and not drive.value_or_none().infeasible
-        ):
-            candidates.append(drive)
-
-        if not candidates:
-            return self._impossible({"walk_result": walk, "transit_result": transit, "drive_result": drive})
-
-        # Pick fastest
-        selected = min(candidates, key=lambda a: a.value_or_none().duration.magnitude)
-        val = selected.value_or_none()
-        if val is not None:
-            val = replace(val, is_child=self.is_child)
-
-        return Attempt.succeeded(val)
+        result = self.expression.evaluate()
+        if result.succeeded and result.value is not None:
+            val = replace(result.value, is_child=self.is_child)
+            return Attempt.succeeded(val)
+        # Build detailed error from all alternatives
+        errors = []
+        for name in ("walk", "transit", "drive"):
+            r = self.expression.last_results.get(name) if self.expression.last_results else None
+            if r and r.impossible:
+                errors.append(f"{name}: {r.error}")
+        if errors:
+            return Attempt.impossible("; ".join(errors))
+        return result
 
     async def to_json(self) -> dict:
         attempt = await self.attempt()
@@ -224,7 +272,8 @@ class CommuteSelectorNode(DerivedNode[Commute]):
                 logger.exception("Failed to serialize commute value to JSON")
                 result["value"] = None
         if attempt.impossible:
-            result["error"] = attempt.error
+            info = attempt.error_info
+            result["error"] = (info.display_message if info is not None else attempt.error) or attempt.error
         result["provenance"] = (await self.build_provenance()).to_dict()
         return result
 
@@ -253,10 +302,44 @@ class MergeRailFareNode(DerivedNode[Commute]):
         self._rail_fare_result = rail_fare_result
         super().__init__(node_id, Commute, (commute_result, rail_fare_result))
 
+    @property
+    def provenance_formula(self):
+        from dag.attempt import Formula, FormulaLine
+
+        val = self._attempt.value_or_none()
+        if not self._attempt.succeeded or val is None:
+            return None
+        lines: list[FormulaLine] = []
+        commute_att = self._commute_result.latest_attempt()
+        if commute_att.succeeded:
+            cv = commute_att.value_or_none()
+            if cv is not None:
+                lines.append(FormulaLine(label="Commute", value=str(cv.daily_cost)))
+        fare_att = self._rail_fare_result.latest_attempt()
+        if fare_att.succeeded:
+            rf = fare_att.value_or_none()
+            if rf is not None and rf.daily_cost is not None and rf.daily_cost.amount > 0 and _transit_legs(val):
+                lines.append(FormulaLine(label="Rail fare", value=str(rf.daily_cost)))
+        return Formula(lines=lines, result=str(val.daily_cost))
+
+    def _get_active_deps(self) -> tuple[Node, ...]:
+        """The rail-fare input is a CONDITIONAL dependency: it is only
+        activated when the selected commute uses transit legs.  A
+        drive/walk selection leaves the fare node untouched — it stays
+        pending (never calculated) and its status can't affect the merge.
+        """
+        deps: list[Node] = [self._commute_result]
+        sel = self._commute_result.latest_attempt()
+        if sel.succeeded:
+            val = sel.value_or_none()
+            if val is not None and not val.infeasible and _transit_legs(val):
+                deps.append(self._rail_fare_result)
+        return tuple(deps)
+
     def compute(
         self,
         commute: Attempt[Commute],
-        rail_fare: Attempt[Commute | None],
+        rail_fare: Attempt[Commute | None] | None = None,
     ) -> Attempt[Commute]:
         if not commute.succeeded:
             return commute
@@ -264,7 +347,9 @@ class MergeRailFareNode(DerivedNode[Commute]):
         if val is None:
             return commute
 
-        if not rail_fare.succeeded:
+        # rail_fare is None when the fare dependency was not activated
+        # (drive/walk selection) — nothing to apply.
+        if rail_fare is None or not rail_fare.succeeded:
             return Attempt.succeeded(val)
 
         rf_val = rail_fare.value_or_none()
@@ -272,8 +357,7 @@ class MergeRailFareNode(DerivedNode[Commute]):
             return Attempt.succeeded(val)
 
         # Check if the selected commute has transit legs
-        _transit_modes = {LegMode.TRAIN, LegMode.TUBE, LegMode.DLR, LegMode.OVERGROUND}
-        if not any(any(leg.mode in _transit_modes for leg in cg.legs) for cg in val.details):
+        if not _transit_legs(val):
             return Attempt.succeeded(val)
 
         # Apply the NR fare to the transit CostGroup

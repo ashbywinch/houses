@@ -214,13 +214,9 @@ def load_property_nodes_from_rows(rows: list[dict[str, Any]]) -> int:
         if ws_value:
             try:
                 parsed = float(ws_value.replace(",", "").replace("£", ""))
-                prop.works_estimates.push(
-                    {"Ashby": parsed}, "Sheet"
-                )
+                prop.works_estimates.push({"Ashby": Money(str(parsed), "GBP")}, "Sheet")
             except (ValueError, TypeError):
-                logger.warning(
-                    "Invalid works estimate for RID %s: %s", raw_rid, ws_value
-                )
+                logger.warning("Invalid works estimate for RID %s: %s", raw_rid, ws_value)
         elif prop.works_estimates.latest_attempt().pending:
             # Default empty dict — Ashby's missing estimate will make
             # the chain impossible until entered via the PATCH endpoint.

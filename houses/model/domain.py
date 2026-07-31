@@ -33,6 +33,10 @@ class PlaceOfInterest:
     trips_per_week: int = 1
     weeks_per_year: int = 46
 
+    def to_provenance_value(self) -> dict:
+        """JSON-safe projection for provenance display."""
+        return {"label": self.label, "address": self.address}
+
 
 @dataclass(frozen=True)
 class Person:
@@ -51,6 +55,19 @@ class Person:
     places_of_interest: tuple[PlaceOfInterest, ...] = ()
     email: str = ""
     is_superuser: bool = False
+
+    def to_provenance_value(self) -> dict:
+        """JSON-safe projection for provenance display.
+
+        Keeps the identity-relevant fields; money fields render through
+        their canonical string form via the generic projector.
+        """
+        return {
+            "name": self.name,
+            "has_car": self.has_car,
+            "is_child": self.is_child,
+            "places": [p.to_provenance_value() for p in self.places_of_interest],
+        }
 
 
 @dataclass(frozen=True)
@@ -78,6 +95,20 @@ class Commute:
     _details: tuple[CostGroup, ...] = ()
     is_child: bool = False
     infeasible: bool = False
+
+    def to_provenance_value(self) -> dict:
+        """JSON-safe projection for provenance display.
+
+        Duration and cost render as their canonical string forms; the
+        destination keeps its label. Full leg-by-leg details live in
+        the formula, not here.
+        """
+        return {
+            "mode": self.mode,
+            "duration": str(self.duration),
+            "daily_cost": str(self.daily_cost),
+            "destination": self.destination.label,
+        }
 
     @property
     def details(self) -> tuple[CostGroup, ...]:

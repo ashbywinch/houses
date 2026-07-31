@@ -79,7 +79,7 @@ def prop():
     p.precise_location.push(GeoPoint(51.5, -0.37), "test")
     p.postcode.push("SW1V 2QQ", "test")
     p.user_entered_address.push("31 Isambard Rd, SW1V 2QQ", "test")
-    p.works_estimates.push({"Ashby": 0}, "test")
+    p.works_estimates.push({"Ashby": Money("0", "GBP")}, "test")
     p.comment_status.push("", "test")
     return p
 
@@ -300,6 +300,14 @@ class TestFinancialSettingsPropagation:
         new_financials = dict(fin1)
         new_financials["mortgage_rate"] = 0.99
         get_services().financial_source.push(new_financials, "user")
+        # Also push to individual setting nodes for the expression system
+        from houses.nodes.settings_node import API_KEY_TO_NODE
+
+        svc = get_services()
+        for api_key, val in new_financials.items():
+            nid = API_KEY_TO_NODE.get(api_key)
+            if nid and nid in svc.setting_nodes:
+                svc.setting_nodes[nid].push(val, "user")
 
         await flush_processor()
         await flush_processor()

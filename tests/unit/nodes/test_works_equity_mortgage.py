@@ -26,14 +26,15 @@ class TestTotalWorksNode:
 
         persons = UserInputNode[list]("tw1_ps", list)
         works = UserInputNode[dict]("tw1_ws", dict)
-        node = TotalWorksNode(
-            "tw1", persons_source=persons, works_estimates_node=works
-        )
+        node = TotalWorksNode("tw1", persons_source=persons, works_estimates_node=works)
         persons.push(
-            [Person(
-                name="Ashby", has_car=True,
-                works_estimate_required=True,
-            )],
+            [
+                Person(
+                    name="Ashby",
+                    has_car=True,
+                    works_estimate_required=True,
+                )
+            ],
             "test",
         )
         # Both deps must be resolved for compute to run
@@ -50,14 +51,15 @@ class TestTotalWorksNode:
 
         persons = UserInputNode[list]("tw2_ps", list)
         works = UserInputNode[dict]("tw2_ws", dict)
-        node = TotalWorksNode(
-            "tw2", persons_source=persons, works_estimates_node=works
-        )
+        node = TotalWorksNode("tw2", persons_source=persons, works_estimates_node=works)
         persons.push(
-            [Person(
-                name="Ashby", has_car=True,
-                works_estimate_required=False,
-            )],
+            [
+                Person(
+                    name="Ashby",
+                    has_car=True,
+                    works_estimate_required=False,
+                )
+            ],
             "test",
         )
         works.push({}, "test")
@@ -73,17 +75,17 @@ class TestTotalWorksNode:
 
         persons = UserInputNode[list]("tw3_ps", list)
         works = UserInputNode[dict]("tw3_ws", dict)
-        node = TotalWorksNode(
-            "tw3", persons_source=persons, works_estimates_node=works
-        )
+        node = TotalWorksNode("tw3", persons_source=persons, works_estimates_node=works)
         persons.push(
             [
                 Person(
-                    name="Simon", has_car=True,
+                    name="Simon",
+                    has_car=True,
                     works_estimate_required=False,
                 ),
                 Person(
-                    name="Ashby", has_car=True,
+                    name="Ashby",
+                    has_car=True,
                     works_estimate_required=False,
                 ),
             ],
@@ -102,17 +104,17 @@ class TestTotalWorksNode:
 
         persons = UserInputNode[list]("tw4_ps", list)
         works = UserInputNode[dict]("tw4_ws", dict)
-        node = TotalWorksNode(
-            "tw4", persons_source=persons, works_estimates_node=works
-        )
+        node = TotalWorksNode("tw4", persons_source=persons, works_estimates_node=works)
         persons.push(
             [
                 Person(
-                    name="Simon", has_car=True,
+                    name="Simon",
+                    has_car=True,
                     works_estimate_required=True,
                 ),
                 Person(
-                    name="Ashby", has_car=True,
+                    name="Ashby",
+                    has_car=True,
                     works_estimate_required=False,
                 ),
             ],
@@ -132,14 +134,15 @@ class TestTotalWorksNode:
 
         persons = UserInputNode[list]("tw5_ps", list)
         works = UserInputNode[dict]("tw5_ws", dict)
-        node = TotalWorksNode(
-            "tw5", persons_source=persons, works_estimates_node=works
-        )
+        node = TotalWorksNode("tw5", persons_source=persons, works_estimates_node=works)
         persons.push(
-            [Person(
-                name="Ashby", has_car=True,
-                works_estimate_required=False,
-            )],
+            [
+                Person(
+                    name="Ashby",
+                    has_car=True,
+                    works_estimate_required=False,
+                )
+            ],
             "test",
         )
         works.push({"Ashby": 0}, "test")
@@ -160,10 +163,13 @@ class TestEquityTotalNode:
         persons = UserInputNode[list]("eq1_ps", list)
         node = EquityTotalNode("eq1", persons_source=persons)
         persons.push(
-            [Person(
-                name="Simon", has_car=True,
-                home_sale_price=Money("500000", "GBP"),
-            )],
+            [
+                Person(
+                    name="Simon",
+                    has_car=True,
+                    home_sale_price=Money("500000", "GBP"),
+                )
+            ],
             "test",
         )
         await flush_processor()
@@ -178,10 +184,13 @@ class TestEquityTotalNode:
         persons = UserInputNode[list]("eq2_ps", list)
         node = EquityTotalNode("eq2", persons_source=persons)
         persons.push(
-            [Person(
-                name="Ashby", has_car=True,
-                cash_contribution=Money("100000", "GBP"),
-            )],
+            [
+                Person(
+                    name="Ashby",
+                    has_car=True,
+                    cash_contribution=Money("100000", "GBP"),
+                )
+            ],
             "test",
         )
         await flush_processor()
@@ -196,11 +205,14 @@ class TestEquityTotalNode:
         persons = UserInputNode[list]("eq3_ps", list)
         node = EquityTotalNode("eq3", persons_source=persons)
         persons.push(
-            [Person(
-                name="Simon", has_car=True,
-                home_sale_price=Money("500000", "GBP"),
-                outstanding_mortgage=Money("200000", "GBP"),
-            )],
+            [
+                Person(
+                    name="Simon",
+                    has_car=True,
+                    home_sale_price=Money("500000", "GBP"),
+                    outstanding_mortgage=Money("200000", "GBP"),
+                )
+            ],
             "test",
         )
         await flush_processor()
@@ -215,11 +227,14 @@ class TestEquityTotalNode:
         persons = UserInputNode[list]("eq4_ps", list)
         node = EquityTotalNode("eq4", persons_source=persons)
         persons.push(
-            [Person(
-                name="Simon", has_car=True,
-                home_sale_price=Money("200000", "GBP"),
-                outstanding_mortgage=Money("300000", "GBP"),
-            )],
+            [
+                Person(
+                    name="Simon",
+                    has_car=True,
+                    home_sale_price=Money("200000", "GBP"),
+                    outstanding_mortgage=Money("300000", "GBP"),
+                )
+            ],
             "test",
         )
         await flush_processor()
@@ -234,11 +249,14 @@ class TestEquityTotalNode:
         persons = UserInputNode[list]("eq5_ps", list)
         node = EquityTotalNode("eq5", persons_source=persons)
         persons.push(
-            [Person(
-                name="Ashby", has_car=True,
-                home_sale_price=Money("200000", "GBP"),
-                cash_contribution=Money("50000", "GBP"),
-            )],
+            [
+                Person(
+                    name="Ashby",
+                    has_car=True,
+                    home_sale_price=Money("200000", "GBP"),
+                    cash_contribution=Money("50000", "GBP"),
+                )
+            ],
             "test",
         )
         await flush_processor()
@@ -255,12 +273,14 @@ class TestEquityTotalNode:
         persons.push(
             [
                 Person(
-                    name="Simon", has_car=True,
+                    name="Simon",
+                    has_car=True,
                     home_sale_price=Money("300000", "GBP"),
                     outstanding_mortgage=Money("100000", "GBP"),
                 ),
                 Person(
-                    name="Ashby", has_car=True,
+                    name="Ashby",
+                    has_car=True,
                     cash_contribution=Money("200000", "GBP"),
                 ),
             ],
@@ -411,10 +431,13 @@ class TestMortgageRequiredNode:
         )
 
         persons.push(
-            [Person(
-                name="Ashby", has_car=True,
-                works_estimate_required=True,
-            )],
+            [
+                Person(
+                    name="Ashby",
+                    has_car=True,
+                    works_estimate_required=True,
+                )
+            ],
             "test",
         )
         works.push({}, "test")  # empty → required person missing
@@ -438,14 +461,14 @@ class TestMonthlyMortgagePaymentNode:
         )
 
         mr = UserInputNode[Money]("mmp1_mr", Money)
-        fin = UserInputNode[dict]("mmp1_fin", dict)
+        rate = UserInputNode("mmp1_rate", Decimal)
+        term = UserInputNode("mmp1_term", int)
         node = MonthlyMortgagePaymentNode(
-            "mmp1", mortgage_required_node=mr, financial_source=fin
+            "mmp1", mortgage_required_node=mr, mortgage_rate_node=rate, mortgage_term_node=term
         )
         mr.push(Money("0", "GBP"), "test")
-        fin.push(
-            {"mortgage_rate": 0.045, "mortgage_term_years": 30}, "test"
-        )
+        rate.push(Decimal("0.045"), "test")
+        term.push(30, "test")
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
@@ -458,14 +481,14 @@ class TestMonthlyMortgagePaymentNode:
         )
 
         mr = UserInputNode[Money]("mmp2_mr", Money)
-        fin = UserInputNode[dict]("mmp2_fin", dict)
+        rate = UserInputNode("mmp2_rate", Decimal)
+        term = UserInputNode("mmp2_term", int)
         node = MonthlyMortgagePaymentNode(
-            "mmp2", mortgage_required_node=mr, financial_source=fin
+            "mmp2", mortgage_required_node=mr, mortgage_rate_node=rate, mortgage_term_node=term
         )
         mr.push(Money("235000", "GBP"), "test")
-        fin.push(
-            {"mortgage_rate": 0.0495, "mortgage_term_years": 27}, "test"
-        )
+        rate.push(Decimal("0.0495"), "test")
+        term.push(27, "test")
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
@@ -480,9 +503,10 @@ class TestMonthlyMortgagePaymentNode:
         )
 
         mr = UserInputNode[Money]("mmp3_mr", Money)
-        fin = UserInputNode[dict]("mmp3_fin", dict)
+        rate = UserInputNode("mmp3_rate", Decimal)
+        term = UserInputNode("mmp3_term", int)
         node = MonthlyMortgagePaymentNode(
-            "mmp3", mortgage_required_node=mr, financial_source=fin
+            "mmp3", mortgage_required_node=mr, mortgage_rate_node=rate, mortgage_term_node=term
         )
         deps = node._get_active_deps()
         dep_ids = {d._id for d in deps}
@@ -516,27 +540,31 @@ class TestMonthlyMortgagePaymentNode:
             total_works_node=tw_node,
             total_equity_node=te,
         )
-        fin = UserInputNode[dict]("mmp4_fin", dict)
+        rate = UserInputNode("mmp4_rate", Decimal)
+        term = UserInputNode("mmp4_term", int)
         node = MonthlyMortgagePaymentNode(
             "mmp4",
             mortgage_required_node=mr_node,
-            financial_source=fin,
+            mortgage_rate_node=rate,
+            mortgage_term_node=term,
         )
 
         persons.push(
-            [Person(
-                name="Ashby", has_car=True,
-                works_estimate_required=True,
-            )],
+            [
+                Person(
+                    name="Ashby",
+                    has_car=True,
+                    works_estimate_required=True,
+                )
+            ],
             "test",
         )
         works.push({}, "test")
         price.push(Money("500000", "GBP"), "test")
         sd.push(Money("15000", "GBP"), "test")
         te.push(Money("477000", "GBP"), "test")
-        fin.push(
-            {"mortgage_rate": 0.0495, "mortgage_term_years": 27}, "test"
-        )
+        rate.push(Decimal("0.0495"), "test")
+        term.push(27, "test")
         await flush_processor()
         a = await node.attempt()
         assert a.impossible
@@ -561,9 +589,7 @@ class TestTotalMonthlyHousingCostImpossible:
         st = UserInputNode[str]("st_ok", str)
         fin = UserInputNode[dict]("tm_ok_fin", dict)
         cb = UserInputNode[dict]("tm_ok_cb", dict)
-        ct = UserInputNode[CouncilTaxInfo](
-            "tm_ok_ct", CouncilTaxInfo
-        )
+        ct = UserInputNode[CouncilTaxInfo]("tm_ok_ct", CouncilTaxInfo)
         node = TotalMonthlyHousingCostNode(
             "tm_ok",
             monthly_mortgage_node=mg,
@@ -571,7 +597,6 @@ class TestTotalMonthlyHousingCostImpossible:
             life_insurance_node=li,
             rental_income_node=ri,
             status_node=st,
-            financial_source=fin,
             commute_breakdown_node=cb,
             council_tax_node=ct,
         )

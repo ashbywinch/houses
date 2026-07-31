@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dag.attempt import Attempt, Provenance, SourceType
+from dag.attempt import Attempt, SourceType
 from dag.derived_node import DerivedNode
 from houses.council_tax_info import CouncilTaxInfo
 from houses.services_provider import get_services
@@ -16,22 +16,19 @@ class EpcNode(DerivedNode[dict]):
         addr = address.value_or_none() or ""
         postcode_val = postcode.value_or_none() or ""
         svc = get_services()
-        band = await svc.epc_service.lookup(postcode_val, address=addr)
-        if band:
-            return Attempt.succeeded({"band": band, "potential": band})
-        return Attempt.impossible("no EPC data")
+        result = await svc.epc_service.lookup(postcode_val, address=addr)
+        if result.succeeded:
+            band = result.value_or_none()
+            if band:
+                return Attempt.succeeded({"band": band, "potential": band})
+            return Attempt.impossible("no EPC data")
+        # Propagate the real reason (e.g. ambiguous address) so the frontend
+        # can show it — not a generic "no EPC data".
+        return Attempt.impossible(result.error or "no EPC data")
 
     @property
     def provenance_source_type(self) -> SourceType:
         return SourceType.API
-
-    async def build_provenance(self):
-        return Provenance(
-            label="EPC API",
-            url="https://www.epcregister.com/",
-            source_type=SourceType.API,
-            freshness=self._attempt.created_at,
-        )
 
 
 class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
@@ -51,16 +48,12 @@ class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
         result = await svc.council_tax_service.lookup(postcode.value_or_none() or "", address=addr)
         if result.succeeded:
             return Attempt.succeeded(result.value_or_none())
-        return Attempt.impossible("no council tax data")
+        # Propagate the real reason (e.g. ambiguous address) so the frontend
+        # can show it — not a generic "no council tax data".
+        return Attempt.impossible(result.error or "no council tax data")
 
     @property
     def provenance_source_type(self) -> SourceType:
         return SourceType.API
 
-    async def build_provenance(self):
-        return Provenance(
-            label="Council Tax",
-            url="https://www.gov.uk/council-tax-bands",
-            source_type=SourceType.API,
-            freshness=self._attempt.created_at,
-        )
+    # Default build_provenance() walks best_address and postcode deps.

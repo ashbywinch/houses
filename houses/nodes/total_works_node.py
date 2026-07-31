@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from decimal import Decimal
-
 from money import Money
 
 from dag.attempt import Attempt, Formula, FormulaLine
@@ -19,9 +17,15 @@ class TotalWorksNode(DerivedNode[Money]):
     def provenance_formula(self) -> Formula | None:
         if not self._attempt.succeeded or self._attempt.value_or_none() is None:
             return None
-        lines = [
-            FormulaLine(label="Total Works", value=str(self._attempt.value)),
-        ]
+        lines = []
+        wd = self._works_estimates_node.latest_attempt().value_or_none() or {}
+        for name, val in wd.items():
+            if val is None:
+                continue
+            amt = val.amount if isinstance(val, Money) else str(val)
+            lines.append(FormulaLine(label=f"{name}’s renovation estimate", value=f"£{amt:,.2f}"))
+        if not lines:
+            lines.append(FormulaLine(label="Total Works", value=str(self._attempt.value)))
         return Formula(lines=lines, result=str(self._attempt.value))
 
     def __init__(self, node_id: str, *, persons_source, works_estimates_node):
@@ -42,17 +46,19 @@ class TotalWorksNode(DerivedNode[Money]):
         missing = [
             p
             for p in buyers
-            if getattr(p, "works_estimate_required", False)
-            and (p.name not in wd or wd[p.name] is None)
+            if getattr(p, "works_estimate_required", False) and (p.name not in wd or wd[p.name] is None)
         ]
         if missing:
             names = ", ".join(p.name for p in missing)
-            return Attempt.impossible(
-                f"Works estimate required for: {names}"
-            )
+            return Attempt.impossible(f"Works estimate required for: {names}")
 
-        # Filter out None values (cleared estimates)
-        total = sum(
-            Decimal(str(v)) for v in wd.values() if v is not None
-        )
-        return Attempt.succeeded(Money(str(total), "GBP"))
+        # Filter out None values (cleared estimates); sum as Money
+        total = Money("0", "GBP")
+        for v in wd.values():
+            if v is None:
+                continue
+            if isinstance(v, Money):
+                total += v
+            else:
+                total += Money(str(v), "GBP")
+        return Attempt.succeeded(total)

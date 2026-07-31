@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from money import Money
 from pint import Quantity
@@ -124,11 +124,12 @@ class TflClient:
 
     @staticmethod
     def _next_weekday_date_params() -> dict[str, str]:
-        """Return ``date`` and ``time`` params for the next upcoming weekday at 09:00."""
-        now = datetime.now()
-        if now.weekday() < 5 and now.hour < 9:
-            return {"date": now.strftime("%Y%m%d"), "time": "0900"}
-        target = now + timedelta(days=1)
+        """Return ``date`` and ``time`` params for the next upcoming weekday at 09:00 local time."""
+        # Work in local time since TfL API expects local dates
+        now_local = datetime.now(UTC).astimezone()
+        if now_local.weekday() < 5 and now_local.hour < 9:
+            return {"date": now_local.strftime("%Y%m%d"), "time": "0900"}
+        target = now_local + timedelta(days=1)
         while target.weekday() >= 5:
             target += timedelta(days=1)
         return {"date": target.strftime("%Y%m%d"), "time": "0900"}
@@ -274,6 +275,12 @@ class TflClient:
             set_cached("GET", url, cache_params, None, data)
             if resp.status_code == 429 or (500 <= resp.status_code < 600):
                 raise HttpError(resp.status_code, body=str(data))
+            if 400 <= resp.status_code < 500:
+                # Non-transient client error (e.g. 409 route planner
+                # unavailable) — surface the reason instead of letting
+                # _process_data reduce it to a generic "could not route".
+                reason = str(data)[:200]
+                raise HttpError(resp.status_code, body=str(data), message=reason)
             return data
 
     async def _fetch_data(self) -> dict | None:
@@ -336,7 +343,22 @@ class TflClient:
         )
         if duration_minutes is not None:
             return Attempt.succeeded(result)
-        return Attempt.impossible("could not route transit")
+        # A valid TfL response with no journey is a successful "no transit
+        # route" answer — succeeded-infeasible so the commute selector can
+        # fall back to drive/walk. Genuine API failures raise HttpError in
+        # _cached_api_call and surface as impossible with the real reason.
+        return Attempt.succeeded(
+            Commute(
+                person=Person(name="", has_car=False),
+                label=self._label,
+                destination=PlaceOfInterest(label=self._label, address=self._destination),
+                duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+                daily_cost=Money("0", "GBP"),
+                mode="transit",
+                _details=(),
+                infeasible=True,
+            )
+        )
 
     async def _geocode_fallback(self, params: dict) -> dict | None:
         """Handle TfL 300 response by geocoding the origin and retrying."""

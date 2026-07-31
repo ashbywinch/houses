@@ -107,11 +107,19 @@ class TestProvenanceToDict:
         d = parent.to_dict()
         assert d["sources"]["a"]["label"] == "child"
 
-    def test_non_json_value_stringified(self):
+    def test_non_json_value_fails_fast(self):
+        """An unprojected value must raise, not stringify into a repr dump."""
         prov = Provenance(label="test", value=object())
-        d = prov.to_dict()
-        assert isinstance(d["value"], str)
-        assert "object" in d["value"]  # verify meaningful string, not empty
+        with pytest.raises(TypeError, match="not JSON-serializable"):
+            prov.to_dict()
+
+    def test_money_value_stringified(self):
+        """Money is the one canonical value-type exception: it serialises
+        as its string form."""
+        from money import Money
+
+        prov = Provenance(label="test", value=Money("42", "GBP"))
+        assert prov.to_dict()["value"] == "GBP 42.00"
 
 
 class TestAttemptCreatedAt:

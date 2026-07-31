@@ -84,7 +84,7 @@ class TestProperty:
 
         # Push a works estimate — this should trigger the chain:
         # works_estimates → total_works → mortgage_required → ...
-        prop.works_estimates.push({"Ashby": 20000}, "test")
+        prop.works_estimates.push({"Ashby": Money("20000", "GBP")}, "test")
 
         # The push itself fires prop.changed once (works_estimates is wired)
         before_flush = len(received)
@@ -97,8 +97,7 @@ class TestProperty:
         # It should have fired prop.changed again so the frontend
         # knows to re-fetch.
         assert len(received) > before_flush, (
-            "mortgage_required recomputed but did not notify "
-            "PropertyNodes.changed — frontend never learns of update"
+            "mortgage_required recomputed but did not notify PropertyNodes.changed — frontend never learns of update"
         )
 
     @pytest.mark.asyncio

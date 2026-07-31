@@ -12,6 +12,8 @@ on ``Attempt`` objects.
 
 from __future__ import annotations
 
+import sys
+import traceback as _traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -42,6 +44,146 @@ class FormulaLine:
 class Formula:
     lines: list[FormulaLine]
     result: str
+
+
+@dataclass
+class AttemptError:
+    """Structured error attached to an impossible Attempt.
+
+    Holds the **actual exception object** in memory (``exc``) so code can
+    inspect ``.status``, ``.headers``, ``__cause__``, etc. without parsing
+    strings. ``to_dict()`` is a JSON-safe projection for persistence and
+    the API — it never includes the exception object itself.
+
+    ``causes`` carries the errors of failed dependencies, so a parent's
+    error chain is traversable structurally instead of by string matching.
+
+    **User-facing vs internal:** ``message`` is the full internal chain
+    (may contain node ids and ``dep failed`` markers — for logs and
+    debugging). ``user_message`` is the friendly text safe to render in
+    the UI. Services pass friendly text as the message; framework paths
+    (dep chains, exception handlers) set ``user_message`` explicitly to
+    the leaf's reason or ``str(exc)``. Serialization emits ``error``
+    (user_message) and ``error_detail.message`` (internal).
+    """
+
+    code: str = "error"  # machine category: dep_failed | http_error | timeout | exception | no_data | ...
+    message: str = ""  # internal message (may contain node ids / dep chains)
+    user_message: str = ""  # friendly, UI-safe; defaults to message
+    retryable: bool = False
+    source: str = ""  # node id or service that produced the error
+    exc: BaseException | None = None  # the actual exception object (in-memory only)
+    traceback: str = ""
+    causes: tuple["AttemptError", ...] = ()
+
+    @property
+    def display_message(self) -> str:
+        """User-facing message safe to render in the UI.
+
+        Resolution: explicit ``user_message`` if set, else the deepest
+        cause's message (leaf reason), else the internal ``message``.
+        Never contains node ids or ``dep failed`` framework markers
+        unless an explicit user_message was set to them.
+        """
+        if self.user_message:
+            return self.user_message
+        if self.causes:
+            return self.causes[0].display_message
+        return self.message
+
+    def to_dict(self) -> dict:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "user_message": self.display_message,
+            "retryable": self.retryable,
+            "source": self.source,
+            "exc_type": type(self.exc).__name__ if self.exc is not None else "",
+            "traceback": self.traceback,
+            "causes": [c.to_dict() for c in self.causes],
+        }
+
+    @classmethod
+    def from_exception(cls, message: str, exc: BaseException | None, *, source: str = "") -> "AttemptError":
+        """Build an AttemptError from a caught exception, deriving code,
+        retryable, and traceback from the exception's shape.
+
+        ``message`` is the internal message (may include node context);
+        ``user_message`` is the exception's own text — the friendly bit
+        safe to show the user.
+        """
+        code, retryable = classify_exception(exc)
+        tb = ""
+        if exc is not None:
+            tb = "".join(_traceback.format_exception(type(exc), exc, exc.__traceback__))
+        return cls(
+            code=code,
+            message=message,
+            user_message=str(exc) if exc is not None else message,
+            retryable=retryable,
+            source=source,
+            exc=exc,
+            traceback=tb,
+        )
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "AttemptError":
+        """Reconstruct an AttemptError from its JSON-safe projection.
+
+        Used when loading a persisted node result: the structured error
+        (code, causes, user_message) survives restarts so display_message
+        still resolves to the friendly leaf reason instead of the raw
+        node-id/dep chain. ``exc`` and ``traceback`` are not persisted
+        (exception objects and frames are in-memory only).
+        """
+        return cls(
+            code=d.get("code", "error"),
+            message=d.get("message", ""),
+            user_message=d.get("user_message", ""),
+            retryable=d.get("retryable", False),
+            source=d.get("source", ""),
+            exc=None,
+            traceback=d.get("traceback", ""),
+            causes=tuple(cls.from_dict(c) for c in d.get("causes", [])),
+        )
+
+
+def classify_exception(exc: BaseException | None) -> tuple[str, bool]:
+    """Map an exception to (code, retryable) without importing HTTP libs.
+
+    Handles ``houses.http_error.HttpError`` (``.status``), httpx errors
+    (``.response.status_code``), ``TimeoutError``, and anything else.
+    This is the single source of truth for retryability — the DAG retry
+    logic and AttemptError both use it.
+    """
+    if exc is None:
+        return "error", False
+    if isinstance(exc, TimeoutError):
+        return "timeout", True
+    status = getattr(exc, "status", None)
+    if status is None and hasattr(exc, "response"):
+        status = getattr(exc.response, "status_code", None)
+    if status is not None:
+        try:
+            code = int(status)
+        except (TypeError, ValueError):
+            code = None
+        if code is not None:
+            if code == 429 or 500 <= code < 600:
+                return "http_error", True
+            return "http_error", False
+    return "exception", False
+
+
+def _active_exception() -> BaseException | None:
+    """Return the currently-handled exception, if any.
+
+    Uses ``sys.exc_info()`` which is only populated inside an ``except``
+    block. Returns None outside one, so a plain
+    ``Attempt.impossible("reason")`` costs nothing.
+    """
+    exc_type, exc, tb = sys.exc_info()
+    return exc if (exc_type is not None and exc is not None and tb is not None) else None
 
 
 class _Status(Enum):
@@ -77,7 +219,7 @@ class _AttemptMeta(type):
 
     @property
     def impossible(cls):
-        return lambda error="": cls(_Status.IMPOSSIBLE, error=error)
+        return lambda error="", error_info=None: cls(_Status.IMPOSSIBLE, error=error, error_info=error_info)
 
     @impossible.setter
     def impossible(cls, value):
@@ -97,7 +239,7 @@ class Attempt[T](metaclass=_AttemptMeta):
     properties.  For exhaustive handling, use ``.match()``.
     """
 
-    __slots__ = ("_status", "_value", "_error", "_metadata", "_created_at")
+    __slots__ = ("_status", "_value", "_error", "_metadata", "_created_at", "_error_info")
 
     _now: Callable[[], datetime] = lambda: datetime.now(UTC)
 
@@ -108,6 +250,7 @@ class Attempt[T](metaclass=_AttemptMeta):
         error: str = "",
         metadata: dict | None = None,
         *,
+        error_info: AttemptError | None = None,
         _now: Callable[[], datetime] | None = None,
     ) -> None:
         if status is _Status.SUCCEEDED and isinstance(value, Attempt):
@@ -122,6 +265,38 @@ class Attempt[T](metaclass=_AttemptMeta):
         object.__setattr__(self, "_error", error)
         object.__setattr__(self, "_metadata", metadata or {})
         object.__setattr__(self, "_created_at", (_now or Attempt._now)())
+        # Auto-capture the active exception when constructed inside an
+        # except block (e.g. a service doing `except Exception as e:
+        # return Attempt.impossible(...)`). Keeps the traceback for
+        # debugging without putting it in the user-facing error string.
+        if error_info is None and status is _Status.IMPOSSIBLE:
+            exc = _active_exception()
+            if exc is not None:
+                error_info = AttemptError.from_exception(error, exc)
+            else:
+                # No exception captured — still give consumers a uniform
+                # structured error so they never branch on None.
+                error_info = AttemptError(code="no_data", message=error)
+        object.__setattr__(self, "_error_info", error_info)
+
+    @property
+    def error_info(self) -> AttemptError | None:
+        """Structured error (code, retryable, exception, traceback, causes).
+
+        None for succeeded/pending attempts and for impossible attempts
+        built with only a plain string message outside an except block.
+        """
+        return self._error_info
+
+    @property
+    def traceback(self) -> str:
+        """Formatted traceback of the captured exception, if any.
+
+        Empty string when the Attempt was not created inside an active
+        except block (e.g. a plain `Attempt.impossible("reason")`).
+        """
+        info = self._error_info
+        return info.traceback if info is not None else ""
 
     # ── Predicates (instance properties) ─────────────────────────
 
@@ -232,6 +407,50 @@ class Attempt[T](metaclass=_AttemptMeta):
         return hash((self._status, self._value, self._error))
 
 
+def project_value(v: Any) -> Any:
+    """Project a node value to a JSON-safe form for provenance display.
+
+    - JSON-safe values pass through unchanged.
+    - Money serialises as its string form ("GBP 800,000.00") — the
+      canonical provenance convention.
+    - dicts are projected recursively (per-person Money estimates).
+    - Objects with a ``to_provenance_value()`` method (Commute, Person,
+      GeoPoint, ...) are projected through it.
+    - Anything else raises: silently dropping or repr-dumping a value
+      would hide a missing serialization path.
+    """
+    if v is None:
+        return None
+    import json as _json
+
+    try:
+        _json.dumps(v)
+        return v
+    except (TypeError, ValueError, OverflowError):
+        pass
+    from money import Money as _Money
+
+    if isinstance(v, _Money):
+        return str(v)
+    from decimal import Decimal as _Decimal
+
+    if isinstance(v, _Decimal):
+        # Decimal settings (petrol cost, mortgage rate) are value types
+        # with a canonical float projection for display.
+        return float(v)
+    if isinstance(v, dict):
+        return {k: project_value(val) for k, val in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [project_value(item) for item in v]
+    proj = getattr(v, "to_provenance_value", None)
+    if callable(proj):
+        return project_value(proj())
+    raise TypeError(
+        f"value of type {type(v).__name__} has no provenance projection; "
+        "add to_provenance_value() to it or project it in build_provenance"
+    )
+
+
 @dataclass
 class Provenance:
     """Tracks where a value came from.
@@ -239,15 +458,20 @@ class Provenance:
     Built dynamically by walking the DAG — not stored on Attempt objects.
     Each node's ``build_provenance()`` returns a Provenance that describes
     its source label and may include sub-sources from dependency nodes.
+
+    Every ``value`` must be JSON-safe — nodes project rich domain objects
+    through ``project_value`` before attaching them.
     """
 
     label: str = ""
-    description: str = ""
+    description: str | None = None
     value: Any = None
     url: str = ""
     source_type: SourceType | None = None
     freshness: datetime | None = None
     formula: Formula | None = None
+    status: str = ""
+    error: str = ""
     sources: dict[str, Provenance] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -258,16 +482,35 @@ class Provenance:
         if self.url:
             result["url"] = self.url
         if self.value is not None:
-            # Omit the value if it's not JSON-serializable or too large
-            try:
-                import json as _json
+            # Values are projected to JSON-safe form at build time via
+            # project_value(). Anything that still fails serialization
+            # here is a contract violation — fail fast so the emitting
+            # node is fixed, never silently drop or repr-dump the value.
+            # Money is the one canonical value-type exception: it has a
+            # well-defined string form.
+            import json as _json
 
+            try:
                 _json.dumps(self.value)
-                result["value"] = self.value
             except (TypeError, ValueError, OverflowError):
-                result["value"] = str(self.value)
+                from money import Money as _Money
+
+                if isinstance(self.value, _Money):
+                    result["value"] = str(self.value)
+                else:
+                    raise TypeError(
+                        f"Provenance value of type {type(self.value).__name__} is not "
+                        "JSON-serializable; add to_provenance_value() to that type or "
+                        "project it in build_provenance"
+                    ) from None
+            else:
+                result["value"] = self.value
         if self.source_type is not None:
             result["sourceType"] = self.source_type.value
+        if self.status:
+            result["status"] = self.status
+        if self.error:
+            result["error"] = self.error
         if self.freshness is not None:
             result["freshness"] = self.freshness.isoformat()
         if self.formula is not None:
