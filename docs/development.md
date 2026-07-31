@@ -5,14 +5,12 @@
 ## Setup & Config
 
 ```bash
-make setup        # Create venv, install deps (pytest, ruff, coverage via uv)
+make setup        # Create venv, install deps
 ```
 
-Config: `pydantic-settings`, `HOUSES_` prefix.
+Config: `pydantic-settings`, `HOUSES_` prefix (see `houses/config.py` and `.env.example`).
 
 **API keys live in the shell environment** (`.zshrc`, `.bashrc`), NOT in `.env` or code. `.env` is for non-secret defaults only. Never read, log, echo, or store keys in files.
-
-All env vars can go in `.env` (non-sensitive only). Template: `.env.example`.
 
 ## Running
 
@@ -21,7 +19,7 @@ make run          # Backend (:8080) + frontend (:5173), auto-reload
 make frontend-dev  # Vite dev server only (backend must be running separately)
 ```
 
-`make run` starts FastAPI (uvicorn `--reload`) + Vite. Frontend proxies `/api/*` to :8080. Extra backend logging: `DBG=1 make run`.
+`make run` starts FastAPI (uvicorn `--reload`) + Vite; frontend proxies `/api/*` to :8080. Extra backend logging: `DBG=1 make run`.
 
 ## Testing
 
@@ -31,42 +29,18 @@ make test-integration     # Integration only
 make coverage             # Test with coverage report
 ```
 
-### Layout
-
-```
-tests/
-├── helpers.py               # Reusable fakes + make_services() factory
-├── conftest.py
-├── unit/                    # Pure functions, _kwarg injection
-│   ├── test_routing.py
-│   ├── test_enricher.py
-│   └── ...
-├── integration/             # Full pipeline with fakes or MockTransport
-│   ├── test_server.py       # HTTP endpoint tests (TestClient)
-│   └── conftest.py          # MockTransport, cache isolation
-└── e2e/                     # Real API calls (skipped by default)
-```
-
-### DI patterns
-
-See `docs/coding-standards.md` → *Dependency Injection*:
-
-| Pattern | When |
-|---------|------|
-| `Services` container | Replace an entire enrichment module |
-| `ContextVar` | Per-request state (bus fares, sheets client) |
-| `_kwarg` | Pass a specific data object to a leaf function |
+Test layout mirrors the module tree under `tests/` (`houses/nodes/area.py` → `tests/unit/nodes/test_area.py`). DI patterns and fake usage: `docs/coding-standards.md` → *Dependency Injection* and `docs/testing-standards.md`.
 
 **Markers:** no marker = unit (fast, no external); `@pytest.mark.integration` = full pipeline (excluded from `make test`).
 
 ## Lint & Format
 
 ```bash
-make lint         # ruff check houses/ tests/ + frontend CSS lint
+make lint         # ruff + frontend CSS lint + basedpyright (via make test)
 make format       # Auto-fix formatting
 ```
 
-`pyproject.toml`: line length 120, target Python 3.12.
+`pyproject.toml` holds the tool config (line length, Python target).
 
 ## Sheet Setup
 
@@ -80,14 +54,7 @@ Idempotent. Creates Properties Data + Properties View tabs. Data tab cleared onc
 
 Compare rendered Vue against saved reference HTML in `docs/current-ui/`.
 
-### Prereqs: both servers running
-
-```bash
-make run                  # backend :8080
-cd houses/frontend && npm run dev   # frontend :5173 (separate terminal)
-```
-
-### Capture
+**Prereqs:** both servers running (`make run` + `cd houses/frontend && npm run dev`).
 
 ```bash
 .venv/bin/python tools/capture_dom.py            # both pages
@@ -95,7 +62,7 @@ cd houses/frontend && npm run dev   # frontend :5173 (separate terminal)
 .venv/bin/python tools/capture_dom.py --detail-only
 ```
 
-Output → `tools/captures/<session-timestamp>/`: `dom_list.html`/`dom_detail.html` + full-page screenshots. Script reuses one browser instance, waits for both servers, reports console errors and card count.
+Output lands in `tools/captures/<session-timestamp>/`. The script reuses one browser instance, waits for both servers, reports console errors and card count.
 
 ### What to compare (vs `docs/current-ui/`)
 
@@ -112,27 +79,11 @@ Output → `tools/captures/<session-timestamp>/`: `dom_list.html`/`dom_detail.ht
 
 ## Code Knowledge Graph
 
-`code-review-graph` (MCP tool) builds a knowledge graph: functions, classes, files, relationships, community structure. Enables structural analysis, impact radius, review support, refactoring guidance.
+`code-review-graph` (MCP tool) builds a knowledge graph of the codebase; enables structural analysis, impact radius, review support, refactoring guidance.
 
-### Incremental builds only
+**Never full rebuild** — incremental updates re-parse only changed files. When using the MCP `build_or_update_graph_tool`: leave `full_rebuild` unset/false; `postprocess: "minimal"` for quick builds.
 
-**Never full rebuild.** Incremental updates re-parse only changed files (seconds).
-
-```bash
-# ✓ incremental (default)
-uvx code-review-graph build
-uvx code-review-graph postprocess
-# ✗ never
-uvx code-review-graph build --full-rebuild
-```
-
-MCP `build_or_update_graph_tool`: leave `full_rebuild` unset/false; `postprocess: "minimal"` for quick builds skipping community/flow detection.
-
-### When to build
-
-- First graph use in a session
-- After code changes (auto-detects changes)
-- Staleness check: `uvx code-review-graph status` — if "Built at commit" ≠ HEAD, rebuild
+**When to build:** first graph use in a session; after code changes; or when `uvx code-review-graph status` shows "Built at commit" ≠ HEAD.
 
 ## Bus Fare Data Pipeline
 
@@ -144,7 +95,7 @@ A code fix changes what a node computes, but existing `node_results` rows still 
 
 ### Step 1 — Find affected `node_results`
 
-Node IDs: `{rid}/{person}/{label}/{node_type}` (e.g. `88639800/Lorena/Aldgate/computed_transit`). The affected nodes = the fixed node + everything downstream.
+Node IDs: `{rid}/{person}/{label}/{node_type}` (e.g. `88639800/Lorena/Aldgate/computed_transit`). The affected nodes = the fixed node + everything downstream. Example:
 
 ```sql
 SELECT DISTINCT SUBSTR(node_id, 1, INSTR(node_id, '/') - 1) AS rid

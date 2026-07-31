@@ -4,22 +4,7 @@ Test conventions for the property enrichment engine. Supplementary to `docs/codi
 
 ## Organization
 
-```
-tests/
-├── unit/                  # One function/module in isolation
-│   ├── test_attempt.py
-│   ├── test_auth.py
-│   ├── dag/
-│   │   └── test_architecture.py
-│   └── nodes/
-│       ├── test_commute.py
-│       └── test_api.py
-├── integration/           # Full pipeline with fake services
-│   └── conftest.py
-└── conftest.py            # Session-scoped fixtures
-```
-
-**Naming:** files mirror the module under test (`houses/nodes/area.py` → `tests/unit/nodes/test_area.py`); functions describe behaviour (`test_walk_selected_when_fastest`, `test_empty_comment_rejected`); classes group scenarios per method/state.
+Test files mirror the module under test (`houses/nodes/area.py` → `tests/unit/nodes/test_area.py`); functions describe behaviour (`test_walk_selected_when_fastest`, `test_empty_comment_rejected`); classes group scenarios per method/state. `tests/helpers.py` holds fakes; `tests/unit/isolation_fixtures.py` holds DB isolation.
 
 ## Deterministic tests
 
@@ -46,23 +31,7 @@ If something isn't reachable through DI, refactor the code to accept a dependenc
 
 ## Fakes & helpers
 
-### `tests/helpers.py`
-
-Reusable fakes for every service protocol; constructor overrides control returned data:
-
-```python
-class FakeEPC:
-    def __init__(self, band: str = "C", potential: str = "B"):
-        self._band = band
-        self._potential = potential
-
-    async def lookup(self, postcode: str) -> EPCResult:
-        return EPCResult(band=self._band, potential_rating=self._potential)
-```
-
-### `make_services()`
-
-Builds a `Services` with all fakes at sensible defaults; override by keyword:
+`tests/helpers.py` provides a fake per service protocol, with constructor overrides controlling returned data; `make_services()` builds a `Services` with all fakes at sensible defaults, overridable by keyword:
 
 ```python
 from tests.helpers import make_services, FakeEPC, FakeCommuteRouter
@@ -73,20 +42,7 @@ services = make_services(
 )
 ```
 
-No-arg `make_services()` = working environment for most tests.
-
-### Default fake behaviour
-
-| Fake | Default |
-|------|---------|
-| `FakeGeocoder` | postcode → `(51.5, -0.13)`, outcode → `None` |
-| `FakeCommuteRouter` | Simon 45min, Lorena 50min, Petrol 30min |
-| `FakeEPC` | Band C, potential B |
-| `FakeCouncilTax` | Band D, £1800/yr |
-| `FakeWalkability` | Town walk 15min, amenities "shops, park" |
-| `FakeTownDesc` | "A suburban area with good transport links." |
-| `FakeSchoolLookup` | `None` for all lookups (no schools) |
-| `FakeRailFare` | passes `simon`/`lorena` fares through unchanged |
+No-arg `make_services()` = working environment for most tests. Default behaviours are visible in the fake constructors.
 
 ## Assertions
 
@@ -97,14 +53,7 @@ No-arg `make_services()` = working environment for most tests.
 
 ## Deterministic fixtures
 
-Integration tests needing a real SQLite DB use in-memory:
-
-```python
-from houses.database import get_connection
-from dag.persistence import _get_db
-
-# App + DAG layers share one in-memory DB in tests — see tests/unit/isolation_fixtures.py
-```
+Integration tests needing a real SQLite DB use in-memory, shared between the app and DAG connection paths — see `tests/unit/isolation_fixtures.py`.
 
 ## Test smells to avoid
 
