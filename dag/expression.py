@@ -283,7 +283,16 @@ class Div(Expression):
         if not right_result.succeeded:
             return Attempt.impossible(right_result.error or "right operand failed")
         try:
-            return Attempt.succeeded(left_result.value / right_result.value)
+            left_val = left_result.value
+            right_val = right_result.value
+            # Handle string values that look like money ("124.80") by converting to Money
+            if isinstance(left_val, str):
+                from money import Money as _Money
+                left_val = _Money(left_val, "GBP")
+            if isinstance(right_val, str):
+                from money import Money as _Money
+                right_val = _Money(right_val, "GBP")
+            return Attempt.succeeded(left_val / right_val)
         except (ZeroDivisionError, TypeError) as e:
             return Attempt.impossible(f"Cannot divide: {e}")
 
@@ -575,9 +584,11 @@ class Field(Expression):
         if not result.succeeded:
             return result
         val = result.value
-        if isinstance(val, dict):
-            return Attempt.succeeded(val.get(self.key))
-        return Attempt.impossible(f"Cannot extract field {self.key!r} from {type(val).__name__}")
+        if not isinstance(val, dict):
+            return Attempt.impossible(f"Cannot extract field {self.key!r} from {type(val).__name__}")
+        if self.key not in val:
+            return Attempt.impossible(f"Key {self.key!r} not found")
+        return Attempt.succeeded(val[self.key])
 
     def to_formula_lines(self):
         return [FormulaLine(label=self.key, value="")]
@@ -595,9 +606,12 @@ class Attr(Expression):
         if not result.succeeded:
             return result
         val = result.value
-        if hasattr(val, self.attr):
-            return Attempt.succeeded(getattr(val, self.attr))
-        return Attempt.impossible(f"Cannot access attr {self.attr!r} from {type(val).__name__}")
+        if not hasattr(val, self.attr):
+            return Attempt.impossible(f"Cannot access attr {self.attr!r} from {type(val).__name__}")
+        v = getattr(val, self.attr)
+        if v is None:
+            return Attempt.impossible(f"Attr {self.attr!r} is None")
+        return Attempt.succeeded(v)
 
 
 class Choose(Expression):
@@ -649,6 +663,9 @@ class Choose(Expression):
 
         if winner is None:
             return Attempt.impossible("Choose: no alternative selected")
+
+        if winner not in results:
+            return Attempt.impossible(f"Choose: selector returned unknown alternative {winner!r}")
 
         return results[winner]
 

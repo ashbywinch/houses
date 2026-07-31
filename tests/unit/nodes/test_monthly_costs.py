@@ -123,7 +123,7 @@ class TestTotalMonthlyHousingCostNode:
         ct.push(CouncilTaxInfo(yearly_cost=Money("0", "GBP")), "test")
         await flush_processor()
         a = await node.attempt()
-        assert a.succeeded
+        assert a.succeeded, f"node failed: {a.status}: {a.error}"
         assert isinstance(a.value_or_none(), Money)
         assert float(a.value_or_none().amount) == 0
 

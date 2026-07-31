@@ -52,12 +52,30 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
                     (self._status_node.latest_attempt().value_or_none() or "").strip().lower() != "current"
                 ),
                 if_true=(
-                    Div(Ref(self._sinking_node), Literal(12)) * Literal(2) / Literal(3) + Ref(self._life_insurance_node)
+                    Div(Ref(self._sinking_node), Literal(12)) * Literal(2) / Literal(3)
+                    + Ref(self._life_insurance_node)
                 ),
                 if_false=Literal(Money("0", "GBP")),
             )
-            + Div(Field(Ref(self._deps[3]), "yearly_total_gbp"), Literal(12))
-            + Div(Attr(Ref(self._deps[4]), "yearly_cost"), Literal(12))
+            + Conditional(
+                predicate=lambda: bool(
+                    self._deps[3].latest_attempt().value_or_none()
+                    and isinstance(self._deps[3].latest_attempt().value_or_none(), dict)
+                    and "yearly_total_gbp" in self._deps[3].latest_attempt().value_or_none()
+                ),
+                if_true=Div(Field(Ref(self._deps[3]), "yearly_total_gbp"), Literal(12)),
+                if_false=Literal(Money("0", "GBP")),
+            )
+            + Conditional(
+                predicate=lambda: bool(
+                    self._deps[4].latest_attempt().succeeded
+                    and self._deps[4].latest_attempt().value_or_none() is not None
+                    and hasattr(self._deps[4].latest_attempt().value_or_none(), "yearly_cost")
+                    and self._deps[4].latest_attempt().value_or_none().yearly_cost is not None
+                ),
+                if_true=Div(Attr(Ref(self._deps[4]), "yearly_cost"), Literal(12)),
+                if_false=Literal(Money("0", "GBP")),
+            )
             - Ref(self._deps[1])  # rental_income
         )
 
@@ -78,31 +96,4 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
         sinking: Attempt[Money] | None = None,
         life_insurance: Attempt[Money] | None = None,
     ) -> Attempt[Money]:
-        total = Money("0", "GBP") + mortgage.value_or_none()
-
-        is_current = (status.value_or_none() or "").strip().lower() == "current"
-        if not is_current:
-            sv = sinking.value_or_none()
-            if sv:
-                total += sv / 12 * 2 / 3
-            total += life_insurance.value_or_none()
-
-        # Commute cost (yearly -> monthly)
-        cb = commute.value_or_none() or {}
-        yt = cb.get("yearly_total_gbp", "0")
-        if isinstance(yt, Money):
-            total += yt / 12
-        else:
-            total += Money(str(yt), "GBP") / 12
-
-        # Council tax (yearly -> monthly)
-        ct = council_tax.value_or_none()
-        if ct is not None and hasattr(ct, "yearly_cost") and ct.yearly_cost is not None:
-            total += ct.yearly_cost / 12
-
-        # Rental income (subtracted)
-        ri = rental_income.value_or_none()
-        if ri and ri.amount > 0:
-            total -= ri
-
-        return Attempt.succeeded(total)
+        return self.expression.evaluate()

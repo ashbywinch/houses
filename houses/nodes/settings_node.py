@@ -93,7 +93,7 @@ class SettingsNode(DerivedNode[dict]):
 
     def compute(self, *dep_attempts: Attempt) -> Attempt[dict]:
         result = {}
-        for node_id, attempt in zip(self._setting_nodes.keys(), dep_attempts, strict=False):
+        for node_id, attempt in zip(self._setting_nodes.keys(), dep_attempts, strict=True):
             if attempt.succeeded:
                 val = attempt.value_or_none()
                 api_key = NODE_TO_API_KEY.get(node_id)

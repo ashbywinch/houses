@@ -178,11 +178,13 @@ class UserInputNode(Node[T], Generic[T]):
         return Attempt.pending()
 
     async def build_provenance(self) -> Provenance:
+        # Fall back to persistence timestamp for data that predates freshness tracking
+        freshness = self._push_timestamp or self._persisted_at
         return Provenance(
             label=self._source_label,
             value=self._value,
             source_type=SourceType.USER,
-            freshness=self._push_timestamp,
+            freshness=freshness,
         )
 
     async def to_json_value(self) -> dict[str, Any]:

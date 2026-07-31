@@ -142,6 +142,19 @@ class CommuteSelectorNode(DerivedNode[Commute]):
             deps.append(drive_result)
         super().__init__(node_id, Commute, tuple(deps))
 
+        # Build expression once — cached so last_results persists across calls
+        alts: dict[str, Expression] = {}
+        if self.walk_result is not None:
+            alts["walk"] = Ref(self.walk_result)
+        alts["transit"] = Ref(self.transit_result)
+        if self.drive_result is not None:
+            alts["drive"] = Ref(self.drive_result)
+        self._expression = Choose(
+            alternatives=alts,
+            selector=self._pick_best,
+            description="Selects the fastest feasible commute mode",
+        )
+
     def _get_active_deps(self) -> tuple[Node, ...]:
         deps = [self.origin, self.poi, self.transit_result]
         if self.walk_result is not None:
@@ -152,17 +165,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
 
     @property
     def expression(self):
-        alts: dict[str, Expression] = {}
-        if self.walk_result is not None:
-            alts["walk"] = Ref(self.walk_result)
-        alts["transit"] = Ref(self.transit_result)
-        if self.drive_result is not None:
-            alts["drive"] = Ref(self.drive_result)
-        return Choose(
-            alternatives=alts,
-            selector=self._pick_best,
-            description="Selects the fastest feasible commute mode",
-        )
+        return self._expression
 
     def _pick_best(self, results):
         """Choose the fastest feasible commute from available results."""
