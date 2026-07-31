@@ -6,6 +6,7 @@ PYTHON := .venv/bin/python
 UV := $(shell command -v uv 2>/dev/null || echo $(HOME)/.local/bin/uv)
 RUFF := .venv/bin/ruff
 PYTEST := .venv/bin/pytest
+BASEDPYRIGHT := .venv/bin/basedpyright
 OMP_CONFIG_DIR ?= $(HOME)/Documents/code/omp-config
 
 
@@ -99,7 +100,7 @@ lint: setup
 	cd houses/frontend && npm run lint:css
 
 typecheck: setup
-	@basedpyright
+	@$(BASEDPYRIGHT)
 
 .PHONY: typecheck
 
