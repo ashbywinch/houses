@@ -891,3 +891,47 @@ async def test_walk_selected_when_fastest():
     # Walk (10 min) is faster than transit (40 min), so walk should be selected
     assert val.duration.magnitude == 10, f"Expected 10 min (walk), got {val.duration}"
     assert float(val.daily_cost.amount) == 0, f"Expected £0, got £{val.daily_cost.amount}"
+
+
+class TestRailFareNodeErrorPropagation:
+    """RailFareNode.compute must propagate the transit error reason.
+
+    Regression: it returned generic "transit not succeeded", hiding the
+    real TfL error (e.g. 409) from the frontend provenance.
+    """
+
+    @pytest.mark.asyncio
+    async def test_propagates_transit_error(self):
+        from dag.user_input_node import UserInputNode
+        from houses.nodes.rail_fare_node import RailFareNode
+
+        transit = UserInputNode("rf_transit", object)
+        transit.push(_make_commute(duration_min=30, cost_gbp=5), "test")
+
+        class _FailTransit(DerivedNode[Commute]):
+            def __init__(self):
+                super().__init__("rf_fail", Commute, deps=())
+
+            def compute(self):
+                raise AssertionError("should not run")
+
+            async def attempt(self):
+                return Attempt.impossible("TfL API returned 409 Conflict: route planner unavailable")
+
+        location = UserInputNode("rf_loc", object)
+        location.push(GeoPoint(51.5, -0.1), "test")
+
+        node = RailFareNode(
+            "rf/node",
+            transit_result=_FailTransit(),
+            best_location=location,
+        )
+        # Bypass the framework's dep short-circuit — call compute directly
+        # with an impossible transit attempt, as compute() receives it when
+        # the dep check is bypassed.
+        result = await node.compute(
+            Attempt.impossible("TfL API returned 409 Conflict: route planner unavailable"),
+            Attempt.succeeded(GeoPoint(51.5, -0.1)),
+        )
+        assert result.impossible
+        assert "409" in result.error, f"Expected 409 in error, got: {result.error}"

@@ -275,6 +275,12 @@ class TflClient:
             set_cached("GET", url, cache_params, None, data)
             if resp.status_code == 429 or (500 <= resp.status_code < 600):
                 raise HttpError(resp.status_code, body=str(data))
+            if 400 <= resp.status_code < 500:
+                # Non-transient client error (e.g. 409 route planner
+                # unavailable) — surface the reason instead of letting
+                # _process_data reduce it to a generic "could not route".
+                reason = str(data)[:200]
+                raise HttpError(resp.status_code, body=str(data), message=reason)
             return data
 
     async def _fetch_data(self) -> dict | None:

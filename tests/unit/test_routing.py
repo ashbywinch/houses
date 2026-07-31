@@ -606,3 +606,69 @@ class TestAddressWaypoint:
 
         result = CommuteRouter._address_waypoint("not-a-coordinate")
         assert result == {"address": "not-a-coordinate"}
+
+
+class TestGoogleRoutesPostReturn:
+    """_google_routes_post must return the response data on cache miss.
+
+    Regression: the function called set_cached() but never returned
+    `data`, so every uncached Google Routes POST returned None and the
+    caller reported "Google Routes returned no data" even when the API
+    succeeded.
+    """
+
+    @pytest.mark.asyncio
+    async def test_returns_data_on_cache_miss(self):
+        from unittest.mock import AsyncMock, patch
+
+        from houses.routing import CommuteRouter
+
+        fake_resp = AsyncMock()
+        fake_resp.status_code = 200
+        fake_resp.json = lambda: {"routes": [{"duration": "600s"}]}
+        fake_client = AsyncMock()
+        fake_client.post = AsyncMock(return_value=fake_resp)
+
+        class _FakeCM:
+            async def __aenter__(self):
+                return fake_client
+
+            async def __aexit__(self, *a):
+                return False
+
+        with (
+            patch("houses.routing.get_cached", return_value=None),
+            patch("houses.routing.cached_async_client", return_value=_FakeCM()),
+            patch("houses.routing.settings.google_maps_api_key", "fake-key"),
+            patch("houses.routing.set_cached") as sc,
+        ):
+            result = await CommuteRouter()._google_routes_post({"x": 1}, "mask")
+
+        assert result == {"routes": [{"duration": "600s"}]}, (
+            f"Expected response data to be returned, got {result!r}"
+        )
+        sc.assert_called_once()
+
+
+class TestGoogleRouteCommuteErrorReason:
+    """_google_route_commute must preserve the API's error reason."""
+
+    @pytest.mark.asyncio
+    async def test_error_reason_included(self):
+        import httpx
+        from unittest.mock import patch
+
+        from houses.routing import CommuteRouter
+
+        async def boom(body, mask, timeout=10.0):
+            raise httpx.HTTPStatusError(
+                "400 Bad Request — LatLng cannot be specified as an Address Waypoint",
+                request=httpx.Request("POST", "http://example.com"),
+                response=httpx.Response(400, request=httpx.Request("POST", "http://example.com")),
+            )
+
+        router = CommuteRouter()
+        with patch.object(router, "_google_routes_post", side_effect=boom):
+            result = await router._google_route_commute("51.5,-0.1", "51.6,-0.2", "WALK", max_walk_minutes=30)
+        assert result.impossible
+        assert "LatLng cannot be specified" in result.error, f"Got: {result.error}"

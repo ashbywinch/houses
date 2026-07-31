@@ -96,7 +96,7 @@ class TownDescService(Protocol):
 class EPCLookupService(Protocol):
     """Energy Performance Certificate band lookup."""
 
-    async def lookup(self, postcode: str, address: str = "") -> str: ...
+    async def lookup(self, postcode: str, address: str = "") -> Attempt[str]: ...
 
 
 class CouncilTaxService(Protocol):
@@ -282,7 +282,7 @@ class _DefaultTownDesc:
 
 
 class _DefaultEPCLookup:
-    async def lookup(self, postcode: str, address: str = "") -> str:
+    async def lookup(self, postcode: str, address: str = "") -> Attempt[str]:
         return await lookup_epc(postcode, address)
 
 

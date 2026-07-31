@@ -79,24 +79,25 @@ def _normalise(text: str) -> str:
     return re.sub(r"[^A-Z0-9 ]", "", text.upper().strip())
 
 
-async def lookup_epc(postcode: str, address: str = "") -> str:
+async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
     """Look up EPC band for a property.
 
-    Returns the current energy efficiency band (A–G string) or
-    empty string if unavailable.
+    Returns ``Attempt.succeeded(band)`` with the current energy efficiency
+    band (A–G string), or ``Attempt.impossible(reason)`` when unavailable —
+    e.g. ``"address matched multiple properties"``, ``"no matching
+    certificate for this address"``, or ``"no certificates found"``.
 
     When ``address`` is provided, filters the API results to match
     the building identifier (number or name) against ``addressLine1``
-    in each certificate. Returns ``""`` when the address is ambiguous
-    (matches multiple properties), no certificate is found, or the API
-    fails — the underlying ``_match_cert`` carries the specific reason.
+    in each certificate. The specific reason from ``_match_cert`` is
+    carried in the Attempt so the frontend can show it.
     """
     if not settings.epc_bearer_token:
-        return ""
+        return Attempt.impossible("EPC lookup not configured")
 
     proceed, building_id = _should_lookup_epc(address)
     if address and not proceed:
-        return ""
+        return Attempt.impossible("address has no building identifier")
 
     pc = postcode.strip().upper()
     params = {"postcode": pc, "page_size": 50}
@@ -104,10 +105,7 @@ async def lookup_epc(postcode: str, address: str = "") -> str:
     cached = get_cached("GET", EPC_SEARCH_URL, params)
     if cached is not None:
         certs = cached.get("data", [])
-        result = _match_cert(certs, building_id)
-        if result.impossible:
-            logger.debug("EPC: %s for %s", result.error, postcode)
-        return result.value_or("")
+        return _match_cert(certs, building_id)
 
     try:
         async with cached_async_client(timeout=10.0) as client:
@@ -121,21 +119,18 @@ async def lookup_epc(postcode: str, address: str = "") -> str:
             )
             if resp.status_code != 200:
                 logger.warning("EPC API returned %d for %s", resp.status_code, postcode)
-                return ""
+                return Attempt.impossible(f"EPC API returned status {resp.status_code}")
 
             data = resp.json()
             set_cached("GET", EPC_SEARCH_URL, params, None, data)
             certs = data.get("data", [])
-            result = _match_cert(certs, building_id)
-            if result.impossible:
-                logger.debug("EPC: %s for %s", result.error, postcode)
-            return result.value_or("")
+            return _match_cert(certs, building_id)
 
     except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
         raise  # transient — let DAG retry handle it
     except Exception as e:
         logger.warning("EPC lookup failed for %s: %s", postcode, e)
-        return ""
+        return Attempt.impossible(f"EPC lookup failed: {e}")
 
 
 def _extract_building_id(first_token: str) -> str:

@@ -168,6 +168,7 @@ class CommuteRouter:
             self._raise_with_body(resp)
             data = resp.json()
             set_cached("POST", self.GOOGLE_ROUTES_URL, None, key, data)
+            return data
 
     @staticmethod
     def _extract_outcode(text: str) -> str | None:
@@ -281,8 +282,10 @@ class CommuteRouter:
         mask = "routes.duration,routes.distanceMeters,routes.legs"
         try:
             data = await self._google_routes_post(body, mask, timeout=15.0 if mode == "DRIVE" else 10.0)
-        except Exception:
-            return Attempt.impossible(f"Google Routes API request failed for {mode}")
+        except Exception as e:
+            # Keep the reason — _raise_with_body appends the response body
+            # (e.g. "400 … LatLng cannot be specified as an Address Waypoint").
+            return Attempt.impossible(f"Google Routes API request failed for {mode}: {e}")
 
         if data is None:
             return self._infeasible_commute("Google Routes API returned no data")

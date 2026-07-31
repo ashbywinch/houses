@@ -38,7 +38,9 @@ class RailFareNode(DerivedNode[Commute]):
 
     async def compute(self, transit_attempt: Attempt[Commute], location: Attempt[GeoPoint]) -> Attempt[Commute]:
         if not transit_attempt.succeeded:
-            return Attempt.impossible("transit not succeeded")
+            # Propagate the real reason (e.g. TfL 409) so the frontend can
+            # show it, not a generic "transit not succeeded".
+            return Attempt.impossible(transit_attempt.error or "transit not succeeded")
         commute = transit_attempt.value_or_none()
         if commute is None:
             return Attempt.impossible("transit value is None")

@@ -467,3 +467,45 @@ class TestPickBestJourney:
         dur, cst, rte = TflClient._pick_best_journey(None)
         assert dur is None
         assert cst is None
+
+
+class TestTflCachedApiCall4xx:
+    """TfL non-transient client errors must surface the reason.
+
+    Regression: _cached_api_call returned 4xx bodies as data, which
+    _process_data then reduced to a generic "could not route transit".
+    A 409 (route planner unavailable) should raise HttpError with the
+    reason so the DAG surfaces it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_409_raises_http_error_with_body(self):
+        from unittest.mock import AsyncMock, patch
+
+        from dag.http_error import HttpError
+        from houses.tfl_client import TflClient
+
+        fake_resp = AsyncMock()
+        fake_resp.status_code = 409
+        fake_resp.json = lambda: {"message": "route planner unavailable"}
+        fake_client = AsyncMock()
+        fake_client.get = AsyncMock(return_value=fake_resp)
+
+        class _FakeCM:
+            async def __aenter__(self):
+                return fake_client
+
+            async def __aexit__(self, *a):
+                return False
+
+        with (
+            patch("houses.tfl_client.get_cached", return_value=None),
+            patch("houses.tfl_client.cached_async_client", return_value=_FakeCM()),
+            patch("houses.tfl_client.set_cached"),
+        ):
+            try:
+                await TflClient._cached_api_call("https://api.tfl.gov.uk/x", {})
+                raise AssertionError("Expected HttpError for 409")
+            except HttpError as e:
+                assert e.status == 409
+                assert "route planner unavailable" in str(e)

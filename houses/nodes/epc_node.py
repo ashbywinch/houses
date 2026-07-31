@@ -16,10 +16,15 @@ class EpcNode(DerivedNode[dict]):
         addr = address.value_or_none() or ""
         postcode_val = postcode.value_or_none() or ""
         svc = get_services()
-        band = await svc.epc_service.lookup(postcode_val, address=addr)
-        if band:
-            return Attempt.succeeded({"band": band, "potential": band})
-        return Attempt.impossible("no EPC data")
+        result = await svc.epc_service.lookup(postcode_val, address=addr)
+        if result.succeeded:
+            band = result.value_or_none()
+            if band:
+                return Attempt.succeeded({"band": band, "potential": band})
+            return Attempt.impossible("no EPC data")
+        # Propagate the real reason (e.g. ambiguous address) so the frontend
+        # can show it — not a generic "no EPC data".
+        return Attempt.impossible(result.error or "no EPC data")
 
     @property
     def provenance_source_type(self) -> SourceType:

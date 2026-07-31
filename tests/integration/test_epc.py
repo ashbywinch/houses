@@ -141,7 +141,7 @@ def test_match_cert_ambiguous_different_addresses_returns_impossible():
 
 @pytest.mark.asyncio
 async def test_lookup_epc_with_road_name_skips():
-    """Road-name address should return empty without calling the API."""
+    """Road-name address should return impossible without calling the API."""
 
     def handler(request):
         raise AssertionError("Should not be called")
@@ -155,7 +155,7 @@ async def test_lookup_epc_with_road_name_skips():
     with patch.object(AsyncClient, "__init__", patched_init):
         band = await lookup_epc("UB9 5JH", "Nightingale Way, Denham Green, UB9 5JH")
 
-    assert band == ""
+    assert band.impossible
 
 
 @pytest.mark.asyncio
@@ -178,7 +178,8 @@ async def test_lookup_epc_with_named_building_matches(_mock_http_requests):
     )
     band = await lookup_epc("RG8 7AS", "Blue Dawes, Pangbourne on Thames, RG8 7AS")
 
-    assert band == "D"
+    assert band.succeeded
+    assert band.value_or_none() == "D"
 
 
 # ── Existing tests ──
@@ -210,36 +211,39 @@ async def test_returns_band_from_most_recent_certificate():
     with patch.object(AsyncClient, "__init__", patched_init):
         band = await lookup_epc("RG14 1AA")
 
-    assert band == "C"  # Most recent (2024)
+    assert band.succeeded
+    assert band.value_or_none() == "C"  # Most recent (2024)
 
 
 @pytest.mark.asyncio
-async def test_no_certificates_returns_empty(_mock_http_requests):
-    """No certificates should return empty string."""
+async def test_no_certificates_returns_impossible(_mock_http_requests):
+    """No certificates should return impossible with a reason."""
     _mock_http_requests.add_rule(
         lambda url: "get-energy-performance-data" in str(url),
         lambda request: Response(200, json={"data": []}),
     )
     band = await lookup_epc("SL6")
 
-    assert band == ""
+    assert band.impossible
+    assert band.error == "no certificates found"
 
 
 @pytest.mark.asyncio
-async def test_non_200_response_returns_empty(_mock_http_requests):
-    """API returning non-200 should be handled gracefully."""
+async def test_non_200_response_returns_impossible(_mock_http_requests):
+    """API returning non-200 should carry the status in the error."""
     _mock_http_requests.add_rule(
         lambda url: "get-energy-performance-data" in str(url),
         lambda request: Response(500),
     )
     band = await lookup_epc("RG14 1AA")
 
-    assert band == ""
+    assert band.impossible
+    assert "500" in band.error
 
 
 @pytest.mark.asyncio
-async def test_no_token_returns_empty():
-    """With no bearer token, returns empty without making any HTTP call."""
+async def test_no_token_returns_impossible():
+    """With no bearer token, returns impossible without making any HTTP call."""
 
     def handler(request):
         raise AssertionError("Should not be called")
@@ -254,4 +258,5 @@ async def test_no_token_returns_empty():
     with patch.object(AsyncClient, "__init__", patched_init):
         band = await lookup_epc("RG14 1AA")
 
-    assert band == ""
+    assert band.impossible
+    assert "not configured" in band.error

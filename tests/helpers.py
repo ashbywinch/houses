@@ -185,9 +185,9 @@ class FakeEPC:
         self.band = band
         self.calls: list[tuple[str, str]] = []
 
-    async def lookup(self, postcode: str, address: str = "") -> str:
+    async def lookup(self, postcode: str, address: str = "") -> Attempt[str]:
         self.calls.append((postcode, address))
-        return self.band
+        return Attempt.succeeded(self.band)
 
 
 class FakeCouncilTax:
