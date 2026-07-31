@@ -46,6 +46,93 @@ A `DerivedNode`'s `compute()` must **always** return an `Attempt`. The framework
 calls `compute()` if a dependency is impossible — it short-circuits and propagates
 impossible upstream. If any dependency is pending, the node defers without computing.
 
+#### Structured errors: `AttemptError`
+
+Every impossible `Attempt` carries a structured `AttemptError` (via `Attempt.error_info`):
+`code`, `message`, `retryable`, `source`, `causes`, and — in memory — the **actual
+exception object** (`exc`). Inspect the exception's attributes (`.status`, `.headers`,
+`retry_after`) rather than parsing the message string:
+
+```python
+# Wrong — string parsing
+if "429" in attempt.error:
+    retry = True
+
+# Right — structured
+retry = attempt.error_info.retryable
+status = attempt.error_info.exc.status  # the actual HttpError
+```
+
+`Attempt.impossible()` **auto-captures the active exception** when called inside an
+`except` block — the traceback and retryability are recorded without extra plumbing.
+A plain `Attempt.impossible("reason")` outside an `except` gets `code="no_data"`.
+
+Serialization (in `to_json()`) emits:
+- `error` — the **user-facing** message string, safe to render in the UI.
+- `error_detail` — the structured error (code, retryable, source, `exc_type`,
+  traceback, `causes` chain) for debugging. **Internal — never render in the UI.**
+
+`classify_exception()` is the single source of truth for retryability: it maps an
+exception to `(code, retryable)` and handles `HttpError` (`.status`), httpx errors
+(`.response.status_code`), `TimeoutError`, and everything else. Both `AttemptError`
+and the DAG retry machinery use it.
+
+#### Error propagation contract
+
+- **Services that call APIs return `Attempt`.** The failure reason travels in
+  `Attempt.error` (message) and `Attempt.error_info` (structured), so the frontend
+  can render it and the DAG can act on it. E.g. `epc.lookup_epc` returns
+  `Attempt[str]` — never `str | None` or `""` on failure.
+- **Services that don't call APIs throw exceptions.** Pure computation has no
+  structured result channel; a failure is exceptional and should propagate. The
+  framework catches exceptions from `compute()`, records them on the `Attempt`,
+  and retries transient ones.
+
+**Either way, the reason must not be lost.**
+
+```python
+# Wrong — API service swallows the reason into a bare value
+async def lookup(postcode: str) -> str | None:
+    try:
+        ...
+    except Exception:
+        return None  # caller can't distinguish "no data" from "API down"
+
+# Right — API service returns Attempt with the reason
+async def lookup(postcode: str) -> Attempt[str]:
+    try:
+        ...
+    except httpx.HTTPStatusError:
+        raise  # transient — let the DAG retry
+    except Exception as e:
+        return Attempt.impossible(f"lookup failed: {e}")
+```
+
+Transient HTTP errors (429, 5xx, timeouts) are **re-raised** (not caught) so the DAG's
+retry machinery schedules a retry. Permanent failures return `Attempt.impossible(reason)`.
+The retry decision is driven by `AttemptError.retryable` — a service that catches a
+transient error and returns `Attempt.impossible(...)` is retried exactly like one that
+re-raises.
+
+#### Nodes propagate, never re-literalize
+
+When a node receives a failed dependency or service `Attempt`, propagate its reason —
+don't replace it with a fresh generic string:
+
+```python
+# Wrong — invents a literal, hiding the real reason
+if not result.succeeded:
+    return Attempt.impossible("no data")
+
+# Right — propagate the actual reason
+if not result.succeeded:
+    return Attempt.impossible(result.error or "no data")
+```
+
+`Node._impossible(dep_attempts)` and the DAG's dep-failure path already build
+`code=dep_failed` errors with a `causes` chain of the failed dependencies' `error_info`
+— the chain is traversable structurally, not by string matching.
+
 ### Provenance
 
 Every node tracks *where its value came from* via `build_provenance()`, which walks the

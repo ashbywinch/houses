@@ -655,8 +655,9 @@ class TestGoogleRouteCommuteErrorReason:
 
     @pytest.mark.asyncio
     async def test_error_reason_included(self):
-        import httpx
         from unittest.mock import patch
+
+        import httpx
 
         from houses.routing import CommuteRouter
 

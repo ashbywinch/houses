@@ -195,7 +195,6 @@ class TestCausesChain:
         assert "root failure" in str(cause.exc)
 
     def test_node_impossible_propagates_causes(self):
-        from dag.attempt import AttemptError
         from dag.node import Node
 
         class _Leaf(Node[str]):

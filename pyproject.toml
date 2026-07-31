@@ -72,3 +72,13 @@ asyncio_mode = "auto"
 [tool.uv.sources]
 uk-property-apis = { git = "https://github.com/kubilay-yavuz/uk-property-intel.git", subdirectory = "packages/apis" }
 
+
+
+[tool.basedpyright]
+typeCheckingMode = "standard"
+reportMissingTypeArgument = "none"
+reportUnknownMemberType = "none"
+reportUnknownVariableType = "none"
+reportUnknownParameterType = "none"
+reportUnknownArgumentType = "none"
+reportExplicitAny = "none"

@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from dag.attempt import Attempt
+
 if TYPE_CHECKING:
     from houses.school import School
 

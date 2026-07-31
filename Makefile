@@ -78,7 +78,7 @@ frontend-build: frontend-setup
 	@cd $(FRONTEND) && $(NPM) run build
 	@echo "${GREEN}✓ Frontend build complete${NC}"
 
-test: setup lint
+test: setup lint typecheck
 	$(PYTEST) tests/unit/ -q --tb=short
 	$(PYTEST) tests/integration/ -q --tb=short
 	cd houses/frontend && npm test
@@ -97,6 +97,11 @@ coverage: setup
 lint: setup
 	@$(RUFF) check houses/ tests/
 	cd houses/frontend && npm run lint:css
+
+typecheck: setup
+	@basedpyright
+
+.PHONY: typecheck
 
 format: setup
 	@$(RUFF) check --fix houses/ tests/

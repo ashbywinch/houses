@@ -7,11 +7,10 @@ with the reason preserved.
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from dag.attempt import Attempt
 from houses.location import find_nearest_town_name
 from houses.town_desc import generate_town_description
 
@@ -101,10 +100,9 @@ class TestFindNearestTownName:
         with (
             patch("houses.location.get_cached", return_value=None),
             patch("houses.location.cached_async_client", return_value=_FakeCM()),
-            patch("houses.location.settings.ors_api_key", "key"),
+            patch("houses.location.settings.ors_api_key", "key"),pytest.raises(httpx.TimeoutException)
         ):
-            with pytest.raises(httpx.TimeoutException):
-                await find_nearest_town_name(51.5, -0.1)
+            await find_nearest_town_name(51.5, -0.1)
 
 
 class TestGenerateTownDescription:

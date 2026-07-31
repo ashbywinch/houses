@@ -82,15 +82,21 @@ class AttemptError:
     def from_exception(cls, message: str, exc: BaseException | None, *, source: str = "") -> "AttemptError":
         """Build an AttemptError from a caught exception, deriving code,
         retryable, and traceback from the exception's shape."""
-        code, retryable = _classify_exception(exc)
+        code, retryable = classify_exception(exc)
         tb = ""
         if exc is not None:
             tb = "".join(_traceback.format_exception(type(exc), exc, exc.__traceback__))
         return cls(code=code, message=message, retryable=retryable, source=source, exc=exc, traceback=tb)
 
 
-def _classify_exception(exc: BaseException | None) -> tuple[str, bool]:
-    """Map an exception to (code, retryable) without importing HTTP libs."""
+def classify_exception(exc: BaseException | None) -> tuple[str, bool]:
+    """Map an exception to (code, retryable) without importing HTTP libs.
+
+    Handles ``houses.http_error.HttpError`` (``.status``), httpx errors
+    (``.response.status_code``), ``TimeoutError``, and anything else.
+    This is the single source of truth for retryability — the DAG retry
+    logic and AttemptError both use it.
+    """
     if exc is None:
         return "error", False
     if isinstance(exc, TimeoutError):

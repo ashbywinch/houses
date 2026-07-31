@@ -182,10 +182,13 @@ class DerivedNode(Node[T], Generic[T]):
         return timedelta(seconds=min(delay_sec, 300))
 
     async def _error_result_dict(self, status: str, exc: Exception) -> dict:
+        from dag.attempt import AttemptError
+
         return {
             "status": status,
             "value": None,
-            "error": f"{exc}\n{traceback.format_exc()}",
+            "error": f"{self._id}: {exc}",
+            "error_detail": AttemptError.from_exception(str(exc), exc, source=self._id).to_dict(),
             "provenance": await self._build_provenance_dict(),
         }
 

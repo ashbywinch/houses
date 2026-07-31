@@ -312,8 +312,8 @@ class TestCouncilTaxNodeProvenance:
     @pytest.mark.asyncio
     async def test_impossible_lookup_emits_status_and_error_in_provenance(self):
         from dag.scheduler import flush_processor
-        from houses.nodes.epc_node import CouncilTaxNode
         from dag.user_input_node import UserInputNode
+        from houses.nodes.epc_node import CouncilTaxNode
 
         addr = UserInputNode("addr", str)
         addr.push("Paddock Heights, Twyford, RG10", "test")
