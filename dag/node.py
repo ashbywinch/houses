@@ -6,7 +6,7 @@ from typing import Generic, TypeVar
 
 from pydantic import TypeAdapter
 
-from dag.attempt import Attempt, Provenance
+from dag.attempt import Attempt, AttemptError, Provenance
 from dag.signals import Signal
 
 T = TypeVar("T")
@@ -122,8 +122,9 @@ class Node(ABC, Generic[T]):
         result["impossible"] = attempt.impossible
         if attempt.impossible:
             result["error"] = attempt.error
-            if attempt.traceback:
-                result["error_traceback"] = attempt.traceback
+            info = attempt.error_info
+            if info is not None:
+                result["error_detail"] = info.to_dict()
         if self._source_url:
             result["source_url"] = self._source_url
         if not attempt.pending:
@@ -165,13 +166,27 @@ class Node(ABC, Generic[T]):
         parts = [self._id]
         if extra:
             parts.append(extra)
+        causes: list[AttemptError] = []
         for name, attempt in dep_attempts.items():
             if attempt is None:
                 parts.append(f"{name}: not available")
             elif not attempt.succeeded:
                 detail = attempt.error or "unknown"
                 parts.append(f"{name}: {detail}")
-        return Attempt.impossible("; ".join(parts))
+                if attempt.error_info is not None:
+                    causes.append(attempt.error_info)
+        message = "; ".join(parts)
+        if causes:
+            return Attempt.impossible(
+                message,
+                error_info=AttemptError(
+                    code="dep_failed",
+                    message=message,
+                    source=self._id,
+                    causes=tuple(causes),
+                ),
+            )
+        return Attempt.impossible(message)
 
 
 # ── Expression operators ────────────────────────────────

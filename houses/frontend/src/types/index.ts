@@ -2,7 +2,26 @@ export interface AttemptValue<T> {
   succeeded: boolean
   value: T | null
   error: string | null
+  errorDetail?: {
+    code: string
+    message: string
+    retryable: boolean
+    source: string
+    excType: string
+    traceback: string
+    causes: AttemptErrorDetail[]
+  }
   provenance: Provenance
+}
+
+export interface AttemptErrorDetail {
+  code: string
+  message: string
+  retryable: boolean
+  source: string
+  excType: string
+  traceback: string
+  causes: AttemptErrorDetail[]
 }
 
 export interface FormulaLine {

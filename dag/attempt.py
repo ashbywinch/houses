@@ -46,17 +46,79 @@ class Formula:
     result: str
 
 
-def _capture_traceback() -> str:
-    """Format the currently-handled exception's traceback, if any.
+@dataclass
+class AttemptError:
+    """Structured error attached to an impossible Attempt.
+
+    Holds the **actual exception object** in memory (``exc``) so code can
+    inspect ``.status``, ``.headers``, ``__cause__``, etc. without parsing
+    strings. ``to_dict()`` is a JSON-safe projection for persistence and
+    the API — it never includes the exception object itself.
+
+    ``causes`` carries the errors of failed dependencies, so a parent's
+    error chain is traversable structurally instead of by string matching.
+    """
+
+    code: str = "error"  # machine category: dep_failed | http_error | timeout | exception | no_data | ...
+    message: str = ""  # user-facing message (same as Attempt.error)
+    retryable: bool = False
+    source: str = ""  # node id or service that produced the error
+    exc: BaseException | None = None  # the actual exception object (in-memory only)
+    traceback: str = ""
+    causes: tuple["AttemptError", ...] = ()
+
+    def to_dict(self) -> dict:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "retryable": self.retryable,
+            "source": self.source,
+            "exc_type": type(self.exc).__name__ if self.exc is not None else "",
+            "traceback": self.traceback,
+            "causes": [c.to_dict() for c in self.causes],
+        }
+
+    @classmethod
+    def from_exception(cls, message: str, exc: BaseException | None, *, source: str = "") -> "AttemptError":
+        """Build an AttemptError from a caught exception, deriving code,
+        retryable, and traceback from the exception's shape."""
+        code, retryable = _classify_exception(exc)
+        tb = ""
+        if exc is not None:
+            tb = "".join(_traceback.format_exception(type(exc), exc, exc.__traceback__))
+        return cls(code=code, message=message, retryable=retryable, source=source, exc=exc, traceback=tb)
+
+
+def _classify_exception(exc: BaseException | None) -> tuple[str, bool]:
+    """Map an exception to (code, retryable) without importing HTTP libs."""
+    if exc is None:
+        return "error", False
+    if isinstance(exc, TimeoutError):
+        return "timeout", True
+    status = getattr(exc, "status", None)
+    if status is None and hasattr(exc, "response"):
+        status = getattr(exc.response, "status_code", None)
+    if status is not None:
+        try:
+            code = int(status)
+        except (TypeError, ValueError):
+            code = None
+        if code is not None:
+            if code == 429 or 500 <= code < 600:
+                return "http_error", True
+            return "http_error", False
+    return "exception", False
+
+
+def _active_exception() -> BaseException | None:
+    """Return the currently-handled exception, if any.
 
     Uses ``sys.exc_info()`` which is only populated inside an ``except``
-    block. Returns an empty string outside one, so a plain
+    block. Returns None outside one, so a plain
     ``Attempt.impossible("reason")`` costs nothing.
     """
     exc_type, exc, tb = sys.exc_info()
-    if exc_type is None or exc is None or tb is None:
-        return ""
-    return "".join(_traceback.format_exception(exc_type, exc, tb))
+    return exc if (exc_type is not None and exc is not None and tb is not None) else None
 
 
 class _Status(Enum):
@@ -92,7 +154,7 @@ class _AttemptMeta(type):
 
     @property
     def impossible(cls):
-        return lambda error="": cls(_Status.IMPOSSIBLE, error=error)
+        return lambda error="", error_info=None: cls(_Status.IMPOSSIBLE, error=error, error_info=error_info)
 
     @impossible.setter
     def impossible(cls, value):
@@ -112,7 +174,7 @@ class Attempt[T](metaclass=_AttemptMeta):
     properties.  For exhaustive handling, use ``.match()``.
     """
 
-    __slots__ = ("_status", "_value", "_error", "_metadata", "_created_at", "_traceback")
+    __slots__ = ("_status", "_value", "_error", "_metadata", "_created_at", "_error_info")
 
     _now: Callable[[], datetime] = lambda: datetime.now(UTC)
 
@@ -123,6 +185,7 @@ class Attempt[T](metaclass=_AttemptMeta):
         error: str = "",
         metadata: dict | None = None,
         *,
+        error_info: AttemptError | None = None,
         _now: Callable[[], datetime] | None = None,
     ) -> None:
         if status is _Status.SUCCEEDED and isinstance(value, Attempt):
@@ -141,7 +204,24 @@ class Attempt[T](metaclass=_AttemptMeta):
         # except block (e.g. a service doing `except Exception as e:
         # return Attempt.impossible(...)`). Keeps the traceback for
         # debugging without putting it in the user-facing error string.
-        object.__setattr__(self, "_traceback", _capture_traceback())
+        if error_info is None and status is _Status.IMPOSSIBLE:
+            exc = _active_exception()
+            if exc is not None:
+                error_info = AttemptError.from_exception(error, exc)
+            else:
+                # No exception captured — still give consumers a uniform
+                # structured error so they never branch on None.
+                error_info = AttemptError(code="no_data", message=error)
+        object.__setattr__(self, "_error_info", error_info)
+
+    @property
+    def error_info(self) -> AttemptError | None:
+        """Structured error (code, retryable, exception, traceback, causes).
+
+        None for succeeded/pending attempts and for impossible attempts
+        built with only a plain string message outside an except block.
+        """
+        return self._error_info
 
     @property
     def traceback(self) -> str:
@@ -150,7 +230,8 @@ class Attempt[T](metaclass=_AttemptMeta):
         Empty string when the Attempt was not created inside an active
         except block (e.g. a plain `Attempt.impossible("reason")`).
         """
-        return self._traceback
+        info = self._error_info
+        return info.traceback if info is not None else ""
 
     # ── Predicates (instance properties) ─────────────────────────
 

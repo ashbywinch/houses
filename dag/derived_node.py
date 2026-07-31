@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from inspect import iscoroutine
 from typing import Generic, TypeVar
 
-from dag.attempt import Attempt, Formula, Provenance, SourceType
+from dag.attempt import Attempt, AttemptError, Formula, Provenance, SourceType
 from dag.expression import Expression
 from dag.http_error import HttpError
 from dag.node import Node
@@ -206,7 +206,20 @@ class DerivedNode(Node[T], Generic[T]):
         impossible_deps = [a for a in dep_attempts if a.impossible]
         if impossible_deps:
             errors = "; ".join(a.error or "unknown" for a in impossible_deps)
-            result = Attempt.impossible(f"{self._id}: dep failed ({errors})")
+            message = f"{self._id}: dep failed ({errors})"
+            causes = tuple(a.error_info for a in impossible_deps if a.error_info is not None)
+            if causes:
+                result = Attempt.impossible(
+                    message,
+                    error_info=AttemptError(
+                        code="dep_failed",
+                        message=message,
+                        source=self._id,
+                        causes=causes,
+                    ),
+                )
+            else:
+                result = Attempt.impossible(message)
             self._attempt = result
             self._computed_at = datetime.now(UTC)
             # _db_created_at may be None for deps never persisted (e.g. a
