@@ -12,6 +12,8 @@ on ``Attempt`` objects.
 
 from __future__ import annotations
 
+import sys
+import traceback as _traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -42,6 +44,19 @@ class FormulaLine:
 class Formula:
     lines: list[FormulaLine]
     result: str
+
+
+def _capture_traceback() -> str:
+    """Format the currently-handled exception's traceback, if any.
+
+    Uses ``sys.exc_info()`` which is only populated inside an ``except``
+    block. Returns an empty string outside one, so a plain
+    ``Attempt.impossible("reason")`` costs nothing.
+    """
+    exc_type, exc, tb = sys.exc_info()
+    if exc_type is None or exc is None or tb is None:
+        return ""
+    return "".join(_traceback.format_exception(exc_type, exc, tb))
 
 
 class _Status(Enum):
@@ -97,7 +112,7 @@ class Attempt[T](metaclass=_AttemptMeta):
     properties.  For exhaustive handling, use ``.match()``.
     """
 
-    __slots__ = ("_status", "_value", "_error", "_metadata", "_created_at")
+    __slots__ = ("_status", "_value", "_error", "_metadata", "_created_at", "_traceback")
 
     _now: Callable[[], datetime] = lambda: datetime.now(UTC)
 
@@ -122,6 +137,20 @@ class Attempt[T](metaclass=_AttemptMeta):
         object.__setattr__(self, "_error", error)
         object.__setattr__(self, "_metadata", metadata or {})
         object.__setattr__(self, "_created_at", (_now or Attempt._now)())
+        # Auto-capture the active exception when constructed inside an
+        # except block (e.g. a service doing `except Exception as e:
+        # return Attempt.impossible(...)`). Keeps the traceback for
+        # debugging without putting it in the user-facing error string.
+        object.__setattr__(self, "_traceback", _capture_traceback())
+
+    @property
+    def traceback(self) -> str:
+        """Formatted traceback of the captured exception, if any.
+
+        Empty string when the Attempt was not created inside an active
+        except block (e.g. a plain `Attempt.impossible("reason")`).
+        """
+        return self._traceback
 
     # ── Predicates (instance properties) ─────────────────────────
 

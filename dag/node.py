@@ -122,6 +122,8 @@ class Node(ABC, Generic[T]):
         result["impossible"] = attempt.impossible
         if attempt.impossible:
             result["error"] = attempt.error
+            if attempt.traceback:
+                result["error_traceback"] = attempt.traceback
         if self._source_url:
             result["source_url"] = self._source_url
         if not attempt.pending:
