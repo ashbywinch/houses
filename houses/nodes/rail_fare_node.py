@@ -9,6 +9,7 @@ from dag.derived_node import DerivedNode
 from houses.commute import LegMode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute
+from houses.nodes.commute import _transit_legs
 from houses.stations import Station
 
 
@@ -25,18 +26,32 @@ class RailFareNode(DerivedNode[Commute]):
     best_location (for origin station lookup).  The compute() method
     early-returns when transit already has a cost, avoiding the NR API
     call when it's not needed.
+
+    The selector is an optional third dep: when the SELECTED commute
+    doesn't use transit legs (drive/walk), the fare lookup never runs —
+    the transit commute passes through inertly so a fare for an unchosen
+    route can't fail noisily.
     """
 
     @property
     def provenance_source_type(self) -> SourceType:
         return SourceType.API
 
-    def __init__(self, node_id: str, *, transit_result, best_location):
+    def __init__(self, node_id: str, *, transit_result, best_location, selector=None):
         self.transit_result = transit_result
         self.best_location = best_location
-        super().__init__(node_id, Commute, (transit_result, best_location))
+        self.selector = selector
+        deps: tuple = (transit_result, best_location)
+        if selector is not None:
+            deps = deps + (selector,)
+        super().__init__(node_id, Commute, deps)
 
-    async def compute(self, transit_attempt: Attempt[Commute], location: Attempt[GeoPoint]) -> Attempt[Commute]:
+    async def compute(
+        self,
+        transit_attempt: Attempt[Commute],
+        location: Attempt[GeoPoint],
+        selected: Attempt[Commute] | None = None,
+    ) -> Attempt[Commute]:
         if not transit_attempt.succeeded:
             # Propagate the real reason (e.g. TfL 409) so the frontend can
             # show it, not a generic "transit not succeeded".
@@ -44,6 +59,19 @@ class RailFareNode(DerivedNode[Commute]):
         commute = transit_attempt.value_or_none()
         if commute is None:
             return Attempt.impossible("transit value is None")
+        if commute.infeasible:
+            # No route — nothing to price; never touch .details on an
+            # infeasible commute (the accessor raises).  The fare branch
+            # is gated on the selection anyway, so this result is inert.
+            return Attempt.succeeded(commute)
+
+        # The chosen commute doesn't use transit (drive/walk) — the fare
+        # for the unchosen route is not applicable.  Pass the transit
+        # commute through inertly instead of running the fare lookup.
+        if selected is not None and selected.succeeded:
+            sel = selected.value_or_none()
+            if sel is not None and not sel.infeasible and not _transit_legs(sel):
+                return Attempt.succeeded(commute)
 
         # If already has a fare, pass through — no NR lookup needed
         if commute.daily_cost.amount > 0:

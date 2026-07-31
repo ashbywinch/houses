@@ -15,6 +15,7 @@ from houses.nodes.geocode import GeocodeNode
 from houses.nodes.life_insurance_node import LifeInsuranceTotalNode
 from houses.nodes.location import BestAddressNode, BestLocationNode
 from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNode
+from houses.nodes.monthly_sinking_fund_node import MonthlySinkingFundNode
 from houses.nodes.mortgage_required_node import MortgageRequiredNode
 from houses.nodes.schools import PrimarySchoolNode, SecondarySchoolNode
 from houses.nodes.stamp_duty_node import StampDutyNode
@@ -188,6 +189,10 @@ class PropertyNodes:
             rightmove_price=self.rightmove_price,
             sinking_fund_rate_node=self._svc.setting_nodes.get("settings/sinking_fund_rate"),
         )
+        self.monthly_sinking_fund = MonthlySinkingFundNode(
+            f"{rid}/monthly_sinking_fund",
+            yearly_sinking_fund_node=self.yearly_sinking_fund,
+        )
         self.total_monthly_cost = TotalMonthlyHousingCostNode(
             f"{rid}/total_monthly_cost",
             monthly_mortgage_node=self.monthly_mortgage,
@@ -265,19 +270,6 @@ class PropertyNodes:
         }
         return result
 
-    async def _monthly_sinking(self) -> dict:
-        yearly = await self.yearly_sinking_fund.to_json()
-        if yearly.get("status") == "succeeded" and yearly.get("value") is not None:
-            yearly_val = yearly["value"]
-            yearly_amount = float(yearly_val["amount"])
-            monthly = round(yearly_amount / 12 * 2 / 3, 2)
-            return {
-                "status": "succeeded",
-                "value": {"amount": str(monthly), "currency": "GBP"},
-                "provenance": {"label": "formula:monthly_sinking", "description": f"{yearly_amount}/12*2/3"},
-            }
-        return yearly
-
     async def to_json_detail(self) -> dict[str, Any]:
         return {
             "rid": self.rid,
@@ -312,7 +304,7 @@ class PropertyNodes:
                 "life_insurance_total": await self.life_insurance_total.to_json(),
                 "mortgage_required": await self.mortgage_required.to_json(),
                 "monthly_mortgage": await self.monthly_mortgage.to_json(),
-                "monthly_sinking_fund": await self._monthly_sinking(),
+                "monthly_sinking_fund": await self.monthly_sinking_fund.to_json(),
                 "monthly_commute_cost": await self.commute_breakdown.to_json(),
                 "rental_income": await self.rental_income.to_json(),
                 "total_monthly_housing_cost": await self.total_monthly_cost.to_json(),

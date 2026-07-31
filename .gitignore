@@ -81,3 +81,7 @@ houses/frontend/public/provenance-v3.html
 houses/frontend/test-provenance.html
 houses/frontend/test-provenance.ts
 
+houses/frontend/public/provenance-v4.html
+houses/frontend/public/provenance-v5.html
+houses/frontend/public/provenance-v4-data.js
+houses/frontend/public/vue.global.js

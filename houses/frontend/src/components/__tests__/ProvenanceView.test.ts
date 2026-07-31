@@ -453,6 +453,23 @@ describe('ProvenanceView — value formatting', () => {
     expect(w.text()).toContain('20000')
   })
 
+  it('formats arrays of objects as names, never [object Object]', () => {
+    const persons: Provenance = {
+      label: 'Household members',
+      sourceType: 'user',
+      value: [
+        { name: 'Simon', has_car: true, is_child: false, places: [] },
+        { name: 'Lorena', has_car: false, is_child: false, places: [] },
+        { name: 'George', has_car: false, is_child: true, places: [] },
+      ],
+    }
+    const w = mountView(persons, { detailLevel: 'story' })
+    expect(w.html()).not.toContain('[object Object]')
+    expect(w.text()).toContain('Simon')
+    expect(w.text()).toContain('Lorena')
+    expect(w.text()).toContain('George')
+  })
+
   it('formats nested object values recursively', () => {
     const commute: Provenance = {
       label: 'Commute Breakdown',

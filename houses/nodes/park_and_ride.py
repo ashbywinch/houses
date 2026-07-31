@@ -63,6 +63,10 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         commute = transit.value_or_none()
         if commute is None:
             return transit
+        if commute.infeasible:
+            # No route — pass the infeasible commute through unchanged;
+            # .details raises on infeasible commutes, so bail before touching it.
+            return transit
 
         # Only consider commutes where the first leg is walking
         if not commute.details or not commute.details[0].legs:

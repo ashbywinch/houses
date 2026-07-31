@@ -407,6 +407,50 @@ class Attempt[T](metaclass=_AttemptMeta):
         return hash((self._status, self._value, self._error))
 
 
+def project_value(v: Any) -> Any:
+    """Project a node value to a JSON-safe form for provenance display.
+
+    - JSON-safe values pass through unchanged.
+    - Money serialises as its string form ("GBP 800,000.00") — the
+      canonical provenance convention.
+    - dicts are projected recursively (per-person Money estimates).
+    - Objects with a ``to_provenance_value()`` method (Commute, Person,
+      GeoPoint, ...) are projected through it.
+    - Anything else raises: silently dropping or repr-dumping a value
+      would hide a missing serialization path.
+    """
+    if v is None:
+        return None
+    import json as _json
+
+    try:
+        _json.dumps(v)
+        return v
+    except (TypeError, ValueError, OverflowError):
+        pass
+    from money import Money as _Money
+
+    if isinstance(v, _Money):
+        return str(v)
+    from decimal import Decimal as _Decimal
+
+    if isinstance(v, _Decimal):
+        # Decimal settings (petrol cost, mortgage rate) are value types
+        # with a canonical float projection for display.
+        return float(v)
+    if isinstance(v, dict):
+        return {k: project_value(val) for k, val in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [project_value(item) for item in v]
+    proj = getattr(v, "to_provenance_value", None)
+    if callable(proj):
+        return project_value(proj())
+    raise TypeError(
+        f"value of type {type(v).__name__} has no provenance projection; "
+        "add to_provenance_value() to it or project it in build_provenance"
+    )
+
+
 @dataclass
 class Provenance:
     """Tracks where a value came from.
@@ -414,6 +458,9 @@ class Provenance:
     Built dynamically by walking the DAG — not stored on Attempt objects.
     Each node's ``build_provenance()`` returns a Provenance that describes
     its source label and may include sub-sources from dependency nodes.
+
+    Every ``value`` must be JSON-safe — nodes project rich domain objects
+    through ``project_value`` before attaching them.
     """
 
     label: str = ""
@@ -435,14 +482,29 @@ class Provenance:
         if self.url:
             result["url"] = self.url
         if self.value is not None:
-            # Omit the value if it's not JSON-serializable or too large
-            try:
-                import json as _json
+            # Values are projected to JSON-safe form at build time via
+            # project_value(). Anything that still fails serialization
+            # here is a contract violation — fail fast so the emitting
+            # node is fixed, never silently drop or repr-dump the value.
+            # Money is the one canonical value-type exception: it has a
+            # well-defined string form.
+            import json as _json
 
+            try:
                 _json.dumps(self.value)
-                result["value"] = self.value
             except (TypeError, ValueError, OverflowError):
-                result["value"] = str(self.value)
+                from money import Money as _Money
+
+                if isinstance(self.value, _Money):
+                    result["value"] = str(self.value)
+                else:
+                    raise TypeError(
+                        f"Provenance value of type {type(self.value).__name__} is not "
+                        "JSON-serializable; add to_provenance_value() to that type or "
+                        "project it in build_provenance"
+                    ) from None
+            else:
+                result["value"] = self.value
         if self.source_type is not None:
             result["sourceType"] = self.source_type.value
         if self.status:

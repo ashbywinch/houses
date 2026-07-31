@@ -7,7 +7,7 @@ from typing import Any, Generic, TypeVar
 
 from pydantic_core import core_schema
 
-from dag.attempt import Attempt, Provenance, SourceType
+from dag.attempt import Attempt, Provenance, SourceType, project_value
 from dag.node import Node
 
 # Friendly display names for settings nodes, keyed by the node id stem
@@ -235,7 +235,7 @@ class UserInputNode(Node[T], Generic[T]):
             stem = self._id.split("/", 1)[1]
             return _SETTING_LABELS.get(stem, stem.replace("_", " ").title())
         label = self._source_label or ""
-        if label in ("db", "config", "migration", "settings", "sheet-migration"):
+        if label in ("db", "config", "migration", "settings", "sheet-migration", ""):
             # Per-property source nodes (e.g. "87650634/status") get a
             # friendly name from their stem; generic settings fall back
             # to the raw id stem.
@@ -244,34 +244,8 @@ class UserInputNode(Node[T], Generic[T]):
         return label or self._id
 
     def _provenance_value(self):
-        """Value safe to render in provenance.
-
-        - JSON-safe values pass through unchanged.
-        - Money serialises as its string form ("GBP 800,000.00") — the
-          existing, user-friendly provenance convention.
-        - Money nested inside dicts (e.g. per-person works estimates)
-          serialises as {"name": "GBP 20,000.00"} — the frontend formats
-          these as "Name: £20,000.00".
-        - Raw structured objects (Person lists, dataclasses) stringify to
-          unhelpful repr dumps in the UI — omit those and let the display
-          show just the label.
-        """
-        v = self._value
-        if v is None:
-            return None
-        import json as _json
-
-        try:
-            _json.dumps(v)
-            return v
-        except (TypeError, ValueError, OverflowError):
-            from money import Money as _Money
-
-            if isinstance(v, _Money):
-                return str(v)
-            if isinstance(v, dict):
-                return {k: (str(val) if isinstance(val, _Money) else val) for k, val in v.items()}
-            return None
+        """JSON-safe projection of the stored value for provenance."""
+        return project_value(self._value)
 
     async def to_json_value(self) -> dict[str, Any]:
         """Return a JSON-safe dict without provenance."""

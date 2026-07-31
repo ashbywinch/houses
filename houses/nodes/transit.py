@@ -201,7 +201,7 @@ class TflTransitNode(DerivedNode[Commute]):
             return Attempt.impossible("missing location or destination")
         dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
-            return Attempt.impossible("empty destination")
+            return _infeasible_commute("empty destination")
 
         origin_str = loc if isinstance(loc, str) else f"{loc.lat},{loc.lon}"
         dest_str = dest if isinstance(dest, str) else f"{dest.lat},{dest.lon}"
@@ -255,16 +255,14 @@ class TransitNode(DerivedNode[Commute]):
         best_address: Attempt[str] = None,
     ) -> Attempt[Commute]:
 
-        if self._has_car and not no_bus.impossible:
-            best_val = no_bus.value_or_none()
-        elif with_bus.impossible and no_bus.impossible:
+        no_bus_val = no_bus.value_or_none()
+        with_bus_val = with_bus.value_or_none()
+        if self._has_car and no_bus_val is not None and not no_bus_val.infeasible:
+            best_val = no_bus_val
+        elif no_bus_val is None and with_bus_val is None:
             errors = [e for e in (no_bus.error, with_bus.error) if e]
             return Attempt.impossible("; ".join(errors) if errors else "no transit route available")
         else:
-            no_val = no_bus.value_or_none()
-            with_val = with_bus.value_or_none()
-            if no_val is None and with_val is None:
-                return Attempt.impossible("no transit route available")
             empty = Commute(
                 person=Person(name="", has_car=self._has_car),
                 label="",
@@ -272,11 +270,16 @@ class TransitNode(DerivedNode[Commute]):
                 duration=Quantity(0, "minute"),
                 daily_cost=Money("0", "GBP"),
             )
-            best_val = _CommuteRouter._pick_best_route(no_val or empty, with_val or empty)
+            best_val = _CommuteRouter._pick_best_route(no_bus_val or empty, with_bus_val or empty)
 
         val = best_val
         if val is None:
             return Attempt.impossible("transit returned empty result")
+        if val.infeasible:
+            # No transit route — succeeded-infeasible so the selector can
+            # fall back to drive/walk. Never touch .details on an
+            # infeasible commute (the accessor raises).
+            return Attempt.succeeded(val)
 
         parts = self._id.split("/")
         label = parts[2] if len(parts) >= 3 else (val.destination.label or "")

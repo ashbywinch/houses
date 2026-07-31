@@ -7,8 +7,9 @@ import json
 
 import pytest
 from money import Money
+from pint import Quantity
 
-from dag.attempt import Attempt, AttemptError, Provenance
+from dag.attempt import Attempt, AttemptError, Provenance, project_value
 from dag.node import Node
 from dag.user_input_node import UserInputNode
 
@@ -88,26 +89,34 @@ class TestUserInputNodeProvenance:
         p = asyncio.run(self._provenance_of(node))
         assert p.label == "Rightmove"
 
-    def test_complex_value_omitted_not_dumped(self):
-        """Person lists must not stringify into repr dumps in provenance."""
+    def test_complex_value_projected_not_dumped(self):
+        """Person lists must not stringify into repr dumps in provenance —
+        they project through to_provenance_value() instead."""
+        from houses.model.domain import Person
+
         node = UserInputNode("persons", list)
-
-        class _Person:
-            def __init__(self, name):
-                self.name = name
-
-            def __repr__(self):
-                return f"Person(name='{self.name}', has_car=True, ...)"
-
         # Set the value directly (push() serialises through TypeAdapter,
         # which rejects non-pydantic objects) to exercise the provenance path.
-        node._value = [_Person("Simon")]
+        node._value = [Person(name="Simon", has_car=True)]
         p = asyncio.run(self._provenance_of(node))
         d = p.to_dict()
-        # Either the value is omitted entirely, or it's a friendly shape —
-        # never the raw repr with Person(name=...
         assert "Person(name=" not in json.dumps(d)
-        assert "has_car" not in json.dumps(d)
+        assert json.loads(json.dumps(d))["value"] == [
+            {"name": "Simon", "has_car": True, "is_child": False, "places": []}
+        ]
+
+    def test_opaque_value_fails_fast_not_omitted(self):
+        """A value with no projection raises instead of being silently
+        dropped or repr-dumped."""
+        node = UserInputNode("opaque", list)
+
+        class _Opaque:
+            def __repr__(self):
+                return "Opaque(secrets)"
+
+        node._value = [_Opaque()]
+        with pytest.raises(TypeError, match="no provenance projection"):
+            asyncio.run(self._provenance_of(node))
 
     def test_json_safe_value_preserved(self):
         node = UserInputNode("12345/price", Money)
@@ -311,3 +320,109 @@ class TestTotalWorksPerPerson:
         assert val is not None
         assert isinstance(val["Ashby"], Money)
         assert val["Ashby"] == Money("20000", "GBP")
+
+
+class TestValueProjection:
+    """Provenance values are projected to JSON-safe form — never repr-dumped,
+    never silently dropped, and unprojectable values fail fast."""
+
+    def test_commute_object_projected_not_dumped(self):
+        from houses.model.domain import Commute, Person, PlaceOfInterest
+
+        commute = Commute(
+            person=Person(name="", has_car=True),
+            label="Pimlico",
+            destination=PlaceOfInterest(label="Pimlico", address="SW1V 2QQ"),
+            duration=Quantity(68, "minute"),  # type: ignore[arg-type]
+            daily_cost=Money("27", "GBP"),
+        )
+        # The node path projects before constructing Provenance.
+        prov = Provenance(label="Commute", value=project_value(commute))
+        d = prov.to_dict()
+        assert "Commute(person=" not in json.dumps(d)
+        assert d["value"] == {
+            "mode": "transit",
+            "duration": "68 minute",
+            "daily_cost": "GBP 27.00",
+            "destination": "Pimlico",
+        }
+
+    def test_person_list_projected(self):
+        from houses.model.domain import Person
+
+        prov = Provenance(label="Persons", value=project_value([Person(name="Simon", has_car=True)]))
+        d = prov.to_dict()
+        assert json.loads(json.dumps(d))["value"] == [
+            {"name": "Simon", "has_car": True, "is_child": False, "places": []}
+        ]
+
+    def test_money_dict_projected(self):
+        prov = Provenance(label="Works", value=project_value({"Ashby": Money("20000", "GBP")}))
+        d = prov.to_dict()
+        assert json.loads(json.dumps(d))["value"] == {"Ashby": "GBP 20,000.00"}
+
+    def test_unprojectable_value_fails_fast(self):
+        class Opaque:
+            pass
+
+        with pytest.raises(TypeError, match="no provenance projection"):
+            project_value(Opaque())
+
+    def test_unprojected_value_rejected_at_serialization(self):
+        """A value that skips projection must not silently degrade."""
+
+        class Opaque:
+            pass
+
+        prov = Provenance(label="Bad", value=Opaque())
+        with pytest.raises(TypeError, match="not JSON-serializable"):
+            prov.to_dict()
+
+    def test_build_provenance_applies_projection(self):
+        from houses.model.domain import Commute, Person, PlaceOfInterest
+
+        commute = Commute(
+            person=Person(name="", has_car=True),
+            label="Pimlico",
+            destination=PlaceOfInterest(label="Pimlico", address="SW1V 2QQ"),
+            duration=Quantity(68, "minute"),  # type: ignore[arg-type]
+            daily_cost=Money("27", "GBP"),
+        )
+        node = UserInputNode("proj_test", Commute)
+        node._value = commute
+        p = asyncio.run(node.build_provenance())
+        assert json.loads(json.dumps(p.to_dict()))["value"]["mode"] == "transit"
+
+
+class TestEmptySourceLabel:
+    """Nodes with an empty source label must still get a friendly name,
+    not the raw node id."""
+
+    def test_works_estimates_empty_label(self):
+        node = UserInputNode("87974082/works_estimates", dict[str, Money])
+        node._value = {}
+        node._source_label = ""
+        p = asyncio.run(node.build_provenance())
+        assert p.label == "Renovation estimates"
+        assert "87974082" not in p.label
+
+
+class TestDecimalProjection:
+    """Decimal settings (petrol cost, mortgage rate) are value types with a
+    canonical JSON projection — provenance must never raise on them."""
+
+    def test_decimal_projects_to_float(self):
+        from decimal import Decimal
+
+        prov = Provenance(label="Petrol", value=project_value(Decimal("1.45")))
+        d = prov.to_dict()
+        assert json.loads(json.dumps(d))["value"] == 1.45
+
+    @pytest.mark.asyncio
+    async def test_decimal_setting_builds_provenance(self):
+        from decimal import Decimal
+
+        node = UserInputNode("settings/petrol_cost_per_litre", Decimal)
+        node._value = Decimal("1.45")
+        p = await node.build_provenance()
+        assert json.loads(json.dumps(p.to_dict()))["value"] == 1.45

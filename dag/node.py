@@ -78,7 +78,19 @@ class Node(ABC, Generic[T]):
         status = stored.get("status", "")
         if status == "succeeded":
             try:
-                val = self._adapter.validate_python(stored["value"])
+                value = stored["value"]
+                # The selector's to_json (and legacy model rows) persist
+                # commute legs under `details` (the frontend key); the
+                # adapter reads `_details`. Map so the round-trip never
+                # silently drops them.
+                if (
+                    isinstance(value, dict)
+                    and isinstance(value.get("person"), dict)
+                    and "_details" not in value
+                    and "details" in value
+                ):
+                    value["_details"] = value.pop("details")
+                val = self._adapter.validate_python(value)
             except Exception as exc:
                 return Attempt.impossible(f"validation error: {exc}")
             return Attempt.succeeded(val)

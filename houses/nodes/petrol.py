@@ -14,8 +14,33 @@ from pint import Quantity
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
-from houses.commute import LegMode
+from houses.commute import JourneyLeg, LegMode
 from houses.model.domain import Commute
+
+
+def _fuel_cost_for(drive_legs: list[JourneyLeg], mpg: int, cost_per_litre: float) -> Money | None:
+    """Compute the round-trip fuel cost for the given drive legs.
+
+    Uses actual ``distance_km`` when present, else estimates distance
+    from drive minutes at 48 km/h. Returns None when there is no
+    measurable distance (no fuel cost to add).
+    """
+    actual_distance = sum(leg.distance.magnitude for leg in drive_legs if leg.distance and leg.distance.magnitude > 0)
+    if actual_distance > 0:
+        round_trip_km = actual_distance * 2
+    else:
+        total_drive_min = sum(int(leg.duration.magnitude) for leg in drive_legs)
+        if total_drive_min <= 0:
+            return None
+        round_trip_km = (total_drive_min / 60.0) * 48.0 * 2
+
+    # Fuel calculation using pint for proper Imperial gallon -> litre conversion
+    # 1 imperial gallon = 4.54609 litres; US gallon is 3.78541 litres
+    fuel_volume = (Quantity(round_trip_km, "km") / Quantity(mpg, "mile / imperial_gallon")).to("liter")
+    fuel_cost_amount = round(float(fuel_volume.magnitude) * cost_per_litre, 2)
+    if fuel_cost_amount <= 0:
+        return None
+    return Money(str(fuel_cost_amount), "GBP")
 
 
 class PetrolCostAugmentNode(DerivedNode[Commute]):
@@ -32,6 +57,33 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         self._mpg_node = petrol_mpg_node
         self._cost_node = petrol_cost_per_litre_node
         self.display_name = "Petrol Cost"
+
+    @property
+    def provenance_formula(self):
+        from dag.attempt import Formula, FormulaLine
+
+        commute = self._attempt.value_or_none()
+        if not self._attempt.succeeded or commute is None:
+            return None
+        lines: list[FormulaLine] = []
+        drive_legs = [leg for cg in commute.details for leg in cg.legs if leg.mode == LegMode.DRIVE]
+        if drive_legs:
+            actual = sum(leg.distance.magnitude for leg in drive_legs if leg.distance and leg.distance.magnitude > 0)
+            if actual > 0:
+                round_trip_km = actual * 2
+                lines.append(FormulaLine(label="Drive distance (round trip)", value=f"{round_trip_km:.1f} km"))
+            else:
+                total_min = sum(int(leg.duration.magnitude) for leg in drive_legs)
+                round_trip_km = (total_min / 60.0) * 48.0 * 2
+                lines.append(FormulaLine(label="Drive time → distance estimate", value=f"{round_trip_km:.1f} km"))
+            mpg = int(self._mpg_node.latest_attempt().value_or_none() or 45)
+            cost = float(self._cost_node.latest_attempt().value_or_none() or 1.45)
+            fuel = _fuel_cost_for(drive_legs, mpg, cost)
+            if fuel is not None:
+                lines.append(FormulaLine(label=f"Fuel: ÷ {mpg} mpg × £{cost}/litre", value=str(fuel)))
+        if not lines:
+            return None
+        return Formula(lines=lines, result=str(commute.daily_cost))
 
     def compute(self, commute: Attempt[Commute], mpg_att: Attempt, cost_att: Attempt) -> Attempt[Commute]:
         if not commute.succeeded:
@@ -51,26 +103,10 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         mpg = int(mpg_att.value_or_none() or 45)
         cost_per_litre = float(cost_att.value_or_none() or 1.45)
 
-        actual_distance = sum(
-            leg.distance.magnitude for leg in drive_legs if leg.distance and leg.distance.magnitude > 0
-        )
-        if actual_distance > 0:
-            round_trip_km = actual_distance * 2
-        else:
-            total_drive_min = sum(int(leg.duration.magnitude) for leg in drive_legs)
-            if total_drive_min <= 0:
-                return commute
-            round_trip_km = (total_drive_min / 60.0) * 48.0 * 2
-
-        # Fuel calculation using pint for proper Imperial gallon -> litre conversion
-        # 1 imperial gallon = 4.54609 litres; US gallon is 3.78541 litres
-        fuel_volume = (Quantity(round_trip_km, "km") / Quantity(mpg, "mile / imperial_gallon")).to("liter")
-        fuel_cost_amount = round(float(fuel_volume.magnitude) * cost_per_litre, 2)
-
-        if fuel_cost_amount <= 0:
+        fuel_cost = _fuel_cost_for(drive_legs, mpg, cost_per_litre)
+        if fuel_cost is None:
             return commute
 
-        fuel_cost = Money(str(fuel_cost_amount), "GBP")
         new_daily_cost = val.daily_cost + fuel_cost
 
         # Attribute fuel cost to the drive CostGroup(s) so downstream

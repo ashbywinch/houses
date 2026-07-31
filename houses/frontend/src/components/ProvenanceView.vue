@@ -251,7 +251,20 @@ function formatValue(v: unknown): string {
     return v
   }
   if (typeof v === 'number') return String(v)
-  if (typeof v === 'object' && !Array.isArray(v)) {
+  if (Array.isArray(v)) {
+    const items = v
+      .map((item) => {
+        // Objects with a name (e.g. persons) render as just the name —
+        // never "name: Simon, has_car: true, …" noise.
+        if (item && typeof item === 'object' && !Array.isArray(item) && 'name' in item) {
+          return formatValue((item as Record<string, unknown>).name)
+        }
+        return formatValue(item)
+      })
+      .filter(Boolean)
+    return items.length > 0 ? items.join(', ') : ''
+  }
+  if (typeof v === 'object') {
     const entries = Object.entries(v)
     if (entries.length === 0) return ''
     // Plain objects (e.g. per-person estimates {Ashby: 0}) render as

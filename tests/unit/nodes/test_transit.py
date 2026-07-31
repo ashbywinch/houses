@@ -6,6 +6,7 @@ import pytest
 from money import Money
 from pint import Quantity
 
+from dag.attempt import Attempt
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.geo import GeoPoint
@@ -126,3 +127,125 @@ class TestTransitNodeJson:
             no_bus_node=no_bus,
             with_bus_node=with_bus,
         )
+
+
+class TestTransitNodeNoRoute:
+    """A transit "no route" answer is a succeeded-infeasible commute; only
+    genuine failures are impossible."""
+
+    def _infeasible(self, label: str = "NoRoute"):
+        return Commute(
+            person=Person(name="", has_car=False),
+            label=label,
+            destination=PlaceOfInterest(label=label, address="RG12 8YA"),
+            duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+            daily_cost=Money("0", "GBP"),
+            mode="transit",
+            _details=(),
+            infeasible=True,
+        )
+
+    def _feasible(self, minutes: int):
+        return Commute(
+            person=Person(name="", has_car=False),
+            label="Route",
+            destination=PlaceOfInterest(label="Route", address="SW1V 2QQ"),
+            duration=Quantity(minutes, "minute"),  # type: ignore[arg-type]
+            daily_cost=Money("5", "GBP"),
+            mode="transit",
+            _details=(),
+        )
+
+    async def _pick(self, has_car, no_bus, with_bus):
+        from typing import cast
+
+        from houses.nodes.transit import TflTransitNode, TransitNode
+
+        def _dummy(nid: str) -> TflTransitNode:
+            return cast(TflTransitNode, UserInputNode[Commute](nid, Commute))
+
+        loc = UserInputNode[GeoPoint]("nrl_loc", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("nrl_poi", PlaceOfInterest)
+        node = TransitNode(
+            "nrl", best_location=loc, poi=poi, has_car=has_car, max_walk=30,
+            no_bus_node=_dummy("nrl_nb"),
+            with_bus_node=_dummy("nrl_wb"),
+        )
+        return await node.compute(
+            Attempt.succeeded(GeoPoint(51.5, -0.1)),
+            Attempt.succeeded(PlaceOfInterest(label="X", address="SW1V 2QQ")),
+            no_bus,
+            with_bus,
+        )
+
+    @pytest.mark.asyncio
+    async def test_has_car_prefers_feasible_no_bus(self):
+        a = await self._pick(
+            True,
+            no_bus=Attempt.succeeded(self._feasible(40)),
+            with_bus=Attempt.succeeded(self._feasible(55)),
+        )
+        assert a.succeeded
+        _v = a.value_or_none()
+        assert _v is not None
+        assert _v.duration.magnitude == 40
+
+    @pytest.mark.asyncio
+    async def test_no_bus_infeasible_falls_to_with_bus(self):
+        a = await self._pick(
+            True,
+            no_bus=Attempt.succeeded(self._infeasible("no route")),
+            with_bus=Attempt.succeeded(self._feasible(55)),
+        )
+        assert a.succeeded
+        _v = a.value_or_none()
+        assert _v is not None
+        assert _v.duration.magnitude == 55
+
+    @pytest.mark.asyncio
+    async def test_both_infeasible_stays_infeasible(self):
+        a = await self._pick(
+            False,
+            no_bus=Attempt.succeeded(self._infeasible()),
+            with_bus=Attempt.succeeded(self._infeasible()),
+        )
+        assert a.succeeded
+        _v = a.value_or_none()
+        assert _v is not None
+        assert _v.infeasible
+
+    @pytest.mark.asyncio
+    async def test_both_genuinely_failed_is_impossible(self):
+        a = await self._pick(
+            False,
+            no_bus=Attempt.impossible("api down"),
+            with_bus=Attempt.impossible("api down"),
+        )
+        assert a.impossible
+
+    @pytest.mark.asyncio
+    async def test_no_bus_api_failure_does_not_mask_with_bus(self):
+        a = await self._pick(
+            False,
+            no_bus=Attempt.impossible("api down"),
+            with_bus=Attempt.succeeded(self._feasible(55)),
+        )
+        assert a.succeeded
+        _v = a.value_or_none()
+        assert _v is not None
+        assert _v.duration.magnitude == 55
+
+
+class TestTflClientNoRoute:
+    """TflClient returns succeeded-infeasible for a no-journey response."""
+
+    @pytest.mark.asyncio
+    async def test_process_data_without_journey_is_infeasible_not_impossible(self):
+        from houses.tfl_client import TflClient
+
+        client = TflClient("SW1V 2QQ", "RG12 8YA", "Bracknell", park_and_ride=True)
+        a = await client._process_data({})
+        assert a.succeeded, f"no-journey answer must be succeeded, got: {a.status}: {a.error}"
+        _v = a.value_or_none()
+        assert _v is not None
+        assert _v.infeasible

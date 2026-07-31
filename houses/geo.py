@@ -23,3 +23,7 @@ class GeoPoint:
             + math.cos(math.radians(self.lat)) * math.cos(math.radians(other.lat)) * math.sin(dlon / 2) ** 2
         )
         return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    def to_provenance_value(self) -> dict:
+        """JSON-safe projection for provenance display."""
+        return {"lat": self.lat, "lon": self.lon}

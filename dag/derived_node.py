@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from inspect import iscoroutine
 from typing import Generic, TypeVar
 
-from dag.attempt import Attempt, AttemptError, Formula, Provenance, SourceType
+from dag.attempt import Attempt, AttemptError, Formula, Provenance, SourceType, project_value
 from dag.expression import Expression
 from dag.node import Node
 from dag.scheduler import _get_scheduler
@@ -344,7 +344,7 @@ class DerivedNode(Node[T], Generic[T]):
         return Provenance(
             label=self.display_name,
             description=user_error if self._attempt.impossible else None,
-            value=self._attempt.value,
+            value=project_value(self._attempt.value),
             url=self._source_url,
             source_type=self.provenance_source_type,
             freshness=self._attempt.created_at,

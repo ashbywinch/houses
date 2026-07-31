@@ -207,3 +207,133 @@ class TestPetrolCostAugmentNode:
         assert float(val.daily_cost.amount) == expected, (
             f"Expected daily_cost {expected}, got {float(val.daily_cost.amount)}"
         )
+
+
+class TestDriveCommuteAlwaysHasCost:
+    """A drive commute with a length must always carry petrol cost.
+    A succeeded drive-mode commute with daily_cost £0.00 is a bug — the
+    drive details must survive from DriveNode to the petrol augment."""
+
+    @pytest.mark.asyncio
+    async def test_full_drive_chain_produces_petrol_cost(self):
+        """DriveNode → selector → merge → petrol augment must end with a
+        drive commute whose daily_cost > 0."""
+        from dag.attempt import Attempt
+        from dag.derived_node import DerivedNode
+        from houses.geo import GeoPoint
+        from houses.nodes.bus import BusLegAugmentNode  # noqa: F401
+        from houses.nodes.commute import CommuteSelectorNode, MergeRailFareNode
+        from houses.nodes.petrol import PetrolCostAugmentNode
+        from houses.nodes.transit import DriveNode
+
+        class _Fixed(DerivedNode[Commute]):
+            def __init__(self, node_id: str, attempt: Attempt[Commute]):
+                super().__init__(node_id, Commute, ())
+                self._att = attempt
+
+            async def attempt(self):
+                return self._att
+
+            def latest_attempt(self):
+                return self._att
+
+            def compute(self, *dep_attempts):
+                raise AssertionError("fixed node should not compute")
+
+        def _infeasible(label: str) -> Commute:
+            return Commute(
+                person=Person(name="Simon", has_car=True),
+                label=label,
+                destination=PlaceOfInterest(label=label, address="RG12 8YA"),
+                duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+                daily_cost=Money("0", "GBP"),
+                mode="transit",
+                _details=(),
+                infeasible=True,
+            )
+
+        async def _drive_route(loc, dest) -> Attempt[Commute]:
+            """A real drive route — duration 16 min, 16 km, WITH drive details."""
+            leg = JourneyLeg(
+                mode=LegMode.DRIVE,
+                duration=Quantity(16, "minute"),  # type: ignore[arg-type]
+                distance=Quantity(16.0, "km"),  # type: ignore[arg-type]
+            )
+            return Attempt.succeeded(
+                Commute(
+                    person=Person(name="Simon", has_car=True),
+                    label="Bracknell",
+                    destination=PlaceOfInterest(label="Bracknell", address=dest),
+                    duration=Quantity(16, "minute"),  # type: ignore[arg-type]
+                    daily_cost=Money("0", "GBP"),
+                    mode="drive",
+                    _details=(CostGroup(legs=(leg,), cost=Money("0", "GBP")),),
+                )
+            )
+
+        origin = UserInputNode[GeoPoint]("dcc_origin", GeoPoint)
+        origin.push(GeoPoint(51.5, -0.1), "test")
+        poi = UserInputNode[str]("dcc_poi", str)
+        poi.push("RG12 8YA", "test")
+
+        transit = _Fixed("dcc_transit", Attempt.succeeded(_infeasible("transit")))
+        walk = _Fixed("dcc_walk", Attempt.succeeded(_infeasible("walk")))
+        drive = DriveNode("dcc_drive", best_location=origin, poi=poi, has_car=True, route_fn=_drive_route)
+
+        selector = CommuteSelectorNode(
+            "dcc/commute",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            walk_result=walk,
+            drive_result=drive,
+            is_child=False,
+            max_walk=30,
+        )
+        merge = MergeRailFareNode(
+            "dcc/merge", commute_result=selector, rail_fare_result=_Fixed("dcc_fare", Attempt.succeeded(None))
+        )
+        mpg = UserInputNode("dcc_mpg", int)
+        mpg.push(45, "test")
+        litre = UserInputNode("dcc_litre", float)
+        litre.push(1.45, "test")
+        petrol = PetrolCostAugmentNode(
+            "dcc/final_fuel", commute_node=merge, petrol_mpg_node=mpg, petrol_cost_per_litre_node=litre
+        )
+
+        await flush_processor()
+
+        a = await petrol.attempt()
+        assert a.succeeded, f"drive chain should succeed, got: {a.status}: {a.error}"
+        val = a.value_or_none()
+        assert val is not None
+        assert val.mode == "drive"
+        assert val.daily_cost.amount > 0, (
+            f"a {val.duration.magnitude}-minute drive must have petrol cost, got £{val.daily_cost.amount}"
+        )
+
+
+class TestPetrolProvenanceFormula:
+    """Petrol Cost calc cards must show the fuel maths, not just a value."""
+
+    @pytest.mark.asyncio
+    async def test_formula_shows_distance_and_fuel(self):
+        from houses.nodes.petrol import PetrolCostAugmentNode
+
+        commute = _make_commute(
+            duration_min=16, cost_gbp=0.0, mode="drive", drive_legs_minutes=[16], drive_distances_km=[16.0]
+        )
+        src = UserInputNode("pf_src", Commute)
+        src.push(commute, "test")
+        mpg = _petrol_mpg_node(45)
+        cost = UserInputNode("pf_cost", float)
+        cost.push(1.45, "test")
+        node = PetrolCostAugmentNode("pf_node", commute_node=src, petrol_mpg_node=mpg, petrol_cost_per_litre_node=cost)
+        await flush_processor()
+
+        prov = await node.build_provenance()
+        assert prov.formula is not None
+        labels = [line.label for line in prov.formula.lines]
+        assert any("Drive distance" in lab for lab in labels), labels
+        assert any(lab.startswith("Fuel:") for lab in labels), labels
+        assert prov.formula.result == "GBP 2.91"

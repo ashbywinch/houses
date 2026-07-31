@@ -161,3 +161,28 @@ class TestTotalMonthlyHousingCostNode:
         # 2000 + (6000/12*2/3) + 50 + (1200/12) + (2400/12) - 0
         expected = 2000 + 333.33 + 50 + 100 + 200
         assert float(a.value_or_none().amount) == pytest.approx(expected, abs=0.01)
+
+
+class TestMonthlySinkingFundProvenance:
+    """The monthly sinking fund must be a real node: formula lines and
+    data sources, never a raw '7500.0/12*2/3' description with no sources."""
+
+    @pytest.mark.asyncio
+    async def test_provenance_has_formula_and_sources(self):
+        from houses.nodes.monthly_sinking_fund_node import MonthlySinkingFundNode
+
+        yearly = UserInputNode("msf_yearly", Money)
+        yearly.push(Money("7500.00", "GBP"), "test")
+        node = MonthlySinkingFundNode("msf_node", yearly_sinking_fund_node=yearly)
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded, f"expected succeeded, got: {a.status}: {a.error}"
+        assert a.value_or_none() == Money("416.67", "GBP")
+
+        prov = await node.build_provenance()
+        assert prov.formula is not None, "monthly sinking must expose a formula"
+        labels = [line.label for line in prov.formula.lines]
+        assert any("Yearly" in lab for lab in labels), labels
+        assert any("12" in lab for lab in labels), labels
+        assert len(prov.sources) == 1, f"sources must list yearly_sinking_fund, got: {list(prov.sources)}"

@@ -376,7 +376,8 @@ class TestMergeRailFareNode:
             person=person,
             label="Office",
             destination=office,
-            duration=Quantity(60, "minute"),
+            duration=Quantity(60, "minute"),  # type: ignore[arg-type]
+
             daily_cost=Money("10.90", "GBP"),  # parking cost only
             mode="transit",
             _details=(
@@ -420,7 +421,8 @@ class TestMergeRailFareNode:
             person=walk_commute.person,
             label=walk_commute.label,
             destination=walk_commute.destination,
-            duration=Quantity(20, "minute"),
+            duration=Quantity(20, "minute"),  # type: ignore[arg-type]
+
             daily_cost=Money("0", "GBP"),
             mode="walk",
             _details=(
@@ -519,9 +521,27 @@ def _make_commute(duration_min=32, cost_gbp=4.50):
         person=person,
         label=office.label,
         destination=office,
-        duration=Quantity(duration_min, "minute"),
+        duration=Quantity(duration_min, "minute"),  # type: ignore[arg-type]
+
         daily_cost=Money(str(cost_gbp), "GBP"),
         _details=(CostGroup(legs=(leg,), operator="TfL", cost=Money(str(cost_gbp), "GBP")),),
+    )
+
+
+def _drive_commute(duration_min=16, cost_gbp=5.0) -> Commute:
+    """A real driving commute — no transit legs, so NR fares never apply."""
+    office = PlaceOfInterest("Office", "SW1V 2QQ")
+    person = Person("Simon", True, places_of_interest=(office,))
+    leg = JourneyLeg(mode=LegMode.DRIVE, duration=Quantity(duration_min, "minute"))  # type: ignore[arg-type]
+    return Commute(
+        person=person,
+        label=office.label,
+        destination=office,
+        duration=Quantity(duration_min, "minute"),  # type: ignore[arg-type]
+
+        daily_cost=Money(str(cost_gbp), "GBP"),
+        mode="drive",
+        _details=(CostGroup(legs=(leg,), cost=Money(str(cost_gbp), "GBP")),),
     )
 
 
@@ -731,6 +751,88 @@ class TestRailFareNode:
         assert val.daily_cost.amount == 5.0  # unchanged from transit, no NR lookup
 
     @pytest.mark.asyncio
+    async def test_lookup_skipped_when_selection_is_drive(self):
+        """A drive selection means the fare for the unchosen transit route
+        is not applicable — the NR lookup must never run (no terminal
+        station error), the transit commute passes through inertly."""
+        from houses.nodes.rail_fare_node import RailFareNode
+
+        class _FixedSel(DerivedNode[Commute]):
+            def __init__(self, commute: Commute):
+                super().__init__("rf_drive_sel", Commute, ())
+                self._att = Attempt.succeeded(commute)
+
+            async def attempt(self):
+                return self._att
+
+            def latest_attempt(self):
+                return self._att
+
+            def compute(self, *dep_attempts):
+                raise AssertionError("fixed node should not compute")
+
+        # Feasible transit with unpriced train legs ending at "Reading" —
+        # the registry has no station there, so an actual lookup would
+        # fail with "terminal station not found".
+        office = PlaceOfInterest("Office", "SW1V 2QQ")
+        person = Person("Simon", True, places_of_interest=(office,))
+        leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(120, "minute"), end_station="Reading")  # type: ignore[arg-type]
+        transit_commute = Commute(
+            person=person,
+            label="Bracknell",
+            destination=office,
+            duration=Quantity(120, "minute"),  # type: ignore[arg-type]
+            daily_cost=Money("0", "GBP"),
+            _details=(CostGroup(legs=(leg,), operator="TfL", cost=None),),
+        )
+        transit = UserInputNode[Commute]("rf_dr_sel", Commute)
+        location = UserInputNode[GeoPoint]("rf_dr_sel_loc", GeoPoint)
+        transit.push(transit_commute, "TfL")
+        location.push(GeoPoint(51.5, -0.1), "test")
+
+        selected = _FixedSel(_drive_commute(duration_min=16, cost_gbp=5.0))
+        node = RailFareNode(
+            "rf_dr_sel_test", transit_result=transit, best_location=location, selector=selected
+        )
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded, f"drive selection must skip the fare lookup, got: {a.status}: {a.error}"
+        val = a.value_or_none()
+        assert val is not None
+        assert val.daily_cost.amount == 0  # transit commute passed through unpriced
+
+    @pytest.mark.asyncio
+    async def test_infeasible_transit_passes_through_without_crash(self):
+        """An infeasible (no-route) transit commute must pass through — the
+        fare node must never touch .details on an infeasible commute."""
+        from houses.nodes.rail_fare_node import RailFareNode
+
+        transit = UserInputNode[Commute]("rf_inf", Commute)
+        location = UserInputNode[GeoPoint]("rf_inf_loc", GeoPoint)
+        infeasible = Commute(
+            person=Person(name="", has_car=False),
+            label="NoRoute",
+            destination=PlaceOfInterest(label="", address=""),
+            duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+            daily_cost=Money("0", "GBP"),
+            mode="transit",
+            _details=(),
+            infeasible=True,
+        )
+        transit.push(infeasible, "TfL")
+        location.push(GeoPoint(51.5, -0.1), "test")
+
+        node = RailFareNode("rf_inf_test", transit_result=transit, best_location=location)
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded, f"infeasible transit must pass through, got: {a.status}: {a.error}"
+        val = a.value_or_none()
+        assert val is not None
+        assert val.infeasible
+
+    @pytest.mark.asyncio
     async def test_enriches_commute_with_rail_fare(self, tmp_path):
         """Commute with zero daily cost and train leg gets NR fare added (17.00 + 2.80) × 2 → 39.60."""
         from unittest.mock import patch
@@ -766,21 +868,24 @@ class TestRailFareNode:
             person=person,
             label=office.label,
             destination=office,
-            duration=Quantity(78, "minute"),
+            duration=Quantity(78, "minute"),  # type: ignore[arg-type]
+
             daily_cost=Money("0", "GBP"),
             _details=(
                 CostGroup(
                     legs=(
                         JourneyLeg(
                             mode=LegMode.BUS,
-                            duration=Quantity(10, "minute"),
+                            duration=Quantity(10, "minute"),  # type: ignore[arg-type]
+
                             start_station="",
                             end_station="",
                             line_name="",
                         ),
                         JourneyLeg(
                             mode=LegMode.TRAIN,
-                            duration=Quantity(30, "minute"),
+                            duration=Quantity(30, "minute"),  # type: ignore[arg-type]
+
                             start_station="WOK",
                             end_station="Fenchurch Street",
                             line_name="Great Western Railway",
@@ -935,3 +1040,443 @@ class TestRailFareNodeErrorPropagation:
         )
         assert result.impossible
         assert "409" in result.error, f"Expected 409 in error, got: {result.error}"
+
+
+class TestNoRouteCommuteChain:
+    """Drive-only destinations: a transit "no route" answer is a
+    succeeded-infeasible commute, never an impossible attempt — so the
+    selector falls back to drive and the rail-fare chain survives
+    without framework short-circuits or crashy .details access."""
+
+    def _infeasible_commute(self, label: str = "NoRoute") -> Commute:
+        return Commute(
+            person=Person(name="Simon", has_car=True),
+            label=label,
+            destination=PlaceOfInterest(label=label, address="RG12 8YA"),
+            duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+            daily_cost=Money("0", "GBP"),
+            mode="transit",
+            _details=(),
+            infeasible=True,
+        )
+
+    def test_needs_rail_fare_false_for_infeasible(self):
+        from houses.nodes.commute import _needs_rail_fare
+
+        assert _needs_rail_fare(Attempt.succeeded(self._infeasible_commute())) is False
+
+    @pytest.mark.asyncio
+    async def test_rail_fare_if_survives_infeasible_transit(self):
+        """Infeasible transit → _needs_rail_fare False → else branch → succeeded(None),
+        NOT a short-circuited impossible."""
+
+        class _FixedTransit(DerivedNode[Commute]):
+            def __init__(self, commute: Commute):
+                super().__init__("_rf_fixed_transit", Commute, ())
+                self._att = Attempt.succeeded(commute)
+
+            async def attempt(self):
+                return self._att
+
+            def latest_attempt(self):
+                return self._att
+
+            def compute(self, *dep_attempts):
+                raise AssertionError("fixed node should not compute")
+
+        transit = _FixedTransit(self._infeasible_commute())
+        then_branch = _impossible_commute("rail_fare")
+        node = _rail_fare_if(transit, then_branch)
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded, f"rail_fare_if should give succeeded(None), got: {a.status}: {a.error}"
+        assert a.value_or_none() is None
+
+    @pytest.mark.asyncio
+    async def test_merge_passes_drive_through_when_rail_fare_none(self):
+        """Selector picks drive; rail fare is None; merge must pass the drive
+        commute through unchanged."""
+        from houses.nodes.commute import MergeRailFareNode
+
+        drive = _drive_commute(duration_min=35, cost_gbp=5.0)
+        commute_src = FixedCommuteNode("_mrg_drive")
+        commute_src.set(drive)
+
+        class _NoneFare(DerivedNode[Commute]):
+            def __init__(self, node_id: str):
+                super().__init__(node_id, Commute, ())
+
+            async def attempt(self):
+                return Attempt.succeeded(None)
+
+            def latest_attempt(self):
+                return Attempt.succeeded(None)
+
+            def compute(self, *dep_attempts):
+                raise AssertionError("fixed node should not compute")
+
+        node = MergeRailFareNode(
+            "_mrg_no_fare", commute_result=commute_src, rail_fare_result=_NoneFare("_mrg_fare_none")
+        )
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded, f"merge should pass drive through, got: {a.status}: {a.error}"
+        val = a.value_or_none()
+        assert val is not None and val.duration.magnitude == 35
+
+    @pytest.mark.asyncio
+    async def test_full_chain_drive_only_destination(self):
+        """The user's bug: transit no-route + drive-only destination → the
+        selector picks drive and the merge/final chain keeps it."""
+        from dag.if_then_else import IfThenElseNode
+        from houses.nodes.commute import MergeRailFareNode
+        from houses.nodes.commute import _needs_rail_fare as _needs_rail_fare_fn
+
+        class _Fixed(DerivedNode[Commute]):
+            def __init__(self, node_id: str, attempt: Attempt[Commute]):
+                super().__init__(node_id, Commute, ())
+                self._att = attempt
+
+            async def attempt(self):
+                return self._att
+
+            def latest_attempt(self):
+                return self._att
+
+            def compute(self, *dep_attempts):
+                raise AssertionError("fixed node should not compute")
+
+        origin = UserInputNode[GeoPoint]("chain_origin", GeoPoint)
+        origin.push(GeoPoint(51.5, -0.1), "test")
+        poi = UserInputNode[str]("chain_poi", str)
+        poi.push("RG12 8YA", "test")
+
+        from houses.nodes.commute import CommuteSelectorNode
+
+        transit_no_route = _Fixed("chain_transit", Attempt.succeeded(self._infeasible_commute("Bracknell")))
+        walk_no_route = _Fixed("chain_walk", Attempt.succeeded(self._infeasible_commute("walk")))
+        drive = _drive_commute(duration_min=35, cost_gbp=5.0)
+        drive_src = FixedCommuteNode("chain_drive")
+        drive_src.set(drive)
+
+        selector = CommuteSelectorNode(
+            "chain/commute",
+            origin=origin,
+            poi=poi,
+            transit_result=transit_no_route,
+            walk_result=walk_no_route,
+            drive_result=drive_src,
+            is_child=False,
+            max_walk=30,
+        )
+        rail_fare_if = IfThenElseNode(
+            "chain/rail_fare_if",
+            Commute | None,  # type: ignore[arg-type]
+            condition_sources=(transit_no_route,),
+            condition_fn=_needs_rail_fare_fn,
+            then_branch=_impossible_commute("rail_fare"),
+        )
+        merge = MergeRailFareNode("chain/merge", commute_result=selector, rail_fare_result=rail_fare_if)
+        await flush_processor()
+        a = await merge.attempt()
+        assert a.succeeded, f"chain should end in drive commute, got: {a.status}: {a.error}"
+        val = a.value_or_none()
+        assert val is not None and val.duration.magnitude == 35
+
+
+class TestFareConditionalDependency:
+    """The rail-fare input of MergeRailFareNode is a CONDITIONAL dependency:
+    a drive/walk selection never activates it — the fare node stays
+    pending (never calculated) and its status can't affect the merge."""
+
+    def _transit_commute(self, duration_min: int = 120) -> Commute:
+        """A feasible transit commute with unpriced train legs (needs fare)."""
+        office = PlaceOfInterest("Office", "SW1V 2QQ")
+        person = Person("Simon", True, places_of_interest=(office,))
+        leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(duration_min, "minute"), end_station="Reading")  # type: ignore[arg-type]
+        return Commute(
+            person=person,
+            label="Bracknell",
+            destination=office,
+            duration=Quantity(duration_min, "minute"),  # type: ignore[arg-type]
+
+            daily_cost=Money("0", "GBP"),  # unpriced → needs NR fare
+            _details=(CostGroup(legs=(leg,), operator="TfL", cost=None),),
+        )
+
+    @pytest.mark.asyncio
+    async def test_drive_selection_never_activates_fare_dependency(self):
+        """Bracknell case: selector picks drive; the fare node must stay
+        PENDING — never calculated — and the merge keeps the drive commute."""
+        from dag.if_then_else import IfThenElseNode
+        from houses.nodes.commute import CommuteSelectorNode, MergeRailFareNode
+        from houses.nodes.commute import _needs_rail_fare as _needs_rail_fare_fn
+
+        class _Fixed(DerivedNode[Commute]):
+            def __init__(self, node_id: str, attempt: Attempt[Commute]):
+                super().__init__(node_id, Commute, ())
+                self._att = attempt
+
+            async def attempt(self):
+                return self._att
+
+            def latest_attempt(self):
+                return self._att
+
+            def compute(self, *dep_attempts):
+                raise AssertionError("fixed node should not compute")
+
+        origin = UserInputNode[GeoPoint]("cdd_origin", GeoPoint)
+        origin.push(GeoPoint(51.5, -0.1), "test")
+        poi = UserInputNode[str]("cdd_poi", str)
+        poi.push("RG12 8YA", "test")
+
+        transit = _Fixed("cdd_transit", Attempt.succeeded(self._transit_commute()))
+        walk = _Fixed(
+            "cdd_walk",
+            Attempt.succeeded(
+                Commute(
+                    person=Person(name="Simon", has_car=True),
+                    label="walk",
+                    destination=PlaceOfInterest(label="walk", address=""),
+                    duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+
+                    daily_cost=Money("0", "GBP"),
+                    mode="walk",
+                    _details=(),
+                    infeasible=True,
+                )
+            ),
+        )
+        drive_src = FixedCommuteNode("cdd_drive")
+        drive_src.set(_drive_commute(duration_min=16, cost_gbp=5.0))
+
+        selector = CommuteSelectorNode(
+            "cdd/commute",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            walk_result=walk,
+            drive_result=drive_src,
+            is_child=False,
+            max_walk=30,
+        )
+        class _WouldFailFare(DerivedNode[Commute]):
+            def __init__(self, node_id: str):
+                super().__init__(node_id, Commute, ())
+
+            def compute(self, *dep_attempts):
+                raise AssertionError("fare node must never be calculated for a drive selection")
+
+        fare_node = _WouldFailFare("cdd_fare_never_run")  # unique id — no persisted row
+        rail_fare_if = IfThenElseNode(
+            "cdd/rail_fare_if",
+            Commute | None,  # type: ignore[arg-type]
+            condition_sources=(transit, selector),
+            condition_fn=_needs_rail_fare_fn,
+            then_branch=fare_node,
+        )
+        merge = MergeRailFareNode("cdd/merge", commute_result=selector, rail_fare_result=rail_fare_if)
+        await flush_processor()
+
+        sel_a = await selector.attempt()
+        assert sel_a.succeeded
+        _sv = sel_a.value_or_none()
+        assert _sv is not None
+        assert _sv.mode == "drive"
+
+        # The fare branch never activated: rail_fare_if is succeeded(None)
+        # and the RailFareNode is not among its active deps — the fare
+        # lookup is never awaited for a drive selection.
+        fare_a = await rail_fare_if.attempt()
+        assert fare_a.succeeded, f"rail_fare_if should give succeeded(None), got: {fare_a.status}: {fare_a.error}"
+        assert fare_a.value_or_none() is None
+        active = rail_fare_if._get_active_deps()
+        assert fare_node not in active, "fare node must not be an active dependency for a drive selection"
+
+        a = await merge.attempt()
+        assert a.succeeded, f"merge must keep the drive commute, got: {a.status}: {a.error}"
+        _v = a.value_or_none()
+        assert _v is not None
+        assert _v.duration.magnitude == 16
+
+    @pytest.mark.asyncio
+    async def test_transit_selection_activates_fare_dependency(self):
+        """Selected commute is transit → the fare dependency activates and is
+        applied."""
+        from dag.if_then_else import IfThenElseNode
+        from houses.nodes.commute import CommuteSelectorNode, MergeRailFareNode
+        from houses.nodes.commute import _needs_rail_fare as _needs_rail_fare_fn
+
+        class _Fixed(DerivedNode[Commute]):
+            def __init__(self, node_id: str, attempt: Attempt[Commute]):
+                super().__init__(node_id, Commute, ())
+                self._att = attempt
+
+            async def attempt(self):
+                return self._att
+
+            def latest_attempt(self):
+                return self._att
+
+            def compute(self, *dep_attempts):
+                raise AssertionError("fixed node should not compute")
+
+        origin = UserInputNode[GeoPoint]("cda_origin", GeoPoint)
+        origin.push(GeoPoint(51.5, -0.1), "test")
+        poi = UserInputNode[str]("cda_poi", str)
+        poi.push("RG12 8YA", "test")
+
+        transit = _Fixed("cda_transit", Attempt.succeeded(self._transit_commute(90)))
+        walk = _Fixed(
+            "cda_walk",
+            Attempt.succeeded(
+                Commute(
+                    person=Person(name="Simon", has_car=True),
+                    label="walk",
+                    destination=PlaceOfInterest(label="walk", address=""),
+                    duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+
+                    daily_cost=Money("0", "GBP"),
+                    mode="walk",
+                    _details=(),
+                    infeasible=True,
+                )
+            ),
+        )
+        drive_src = FixedCommuteNode("cda_drive")
+        drive_src.set(_drive_commute(duration_min=300, cost_gbp=50.0))  # slow+expensive → transit wins
+
+        selector = CommuteSelectorNode(
+            "cda/commute",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            walk_result=walk,
+            drive_result=drive_src,
+            is_child=False,
+            max_walk=30,
+        )
+        # A fare node that returns a priced transit group
+        from houses.nodes.rail_fare_node import RailFareNode  # noqa: F401  (import for side effects)
+
+        class _Fare(DerivedNode[Commute]):
+            def __init__(self, node_id: str):
+                super().__init__(node_id, Commute | None, ())  # type: ignore[arg-type]
+                self._att = Attempt.pending()
+
+            async def attempt(self):
+                if self._att.pending:
+                    fare_leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(90, "minute"), end_station="Reading")  # type: ignore[arg-type]
+                    self._att = Attempt.succeeded(
+                        Commute(
+                            person=Person(name="", has_car=False),
+                            label="fare",
+                            destination=PlaceOfInterest(label="", address=""),
+                            duration=Quantity(90, "minute"),  # type: ignore[arg-type]
+
+                            daily_cost=Money("9.90", "GBP"),
+                            mode="transit",
+                            _details=(CostGroup(legs=(fare_leg,), operator="NR", cost=Money("9.90", "GBP")),),
+                        )
+                    )
+                return self._att
+
+            def latest_attempt(self):
+                return self._att
+
+            def compute(self, *dep_attempts):
+                raise AssertionError("fixed node should not compute")
+
+        rail_fare_if = IfThenElseNode(
+            "cda/rail_fare_if",
+            Commute | None,  # type: ignore[arg-type]
+            condition_sources=(transit, selector),
+            condition_fn=_needs_rail_fare_fn,
+            then_branch=_Fare("cda_fare"),
+        )
+        merge = MergeRailFareNode("cda/merge", commute_result=selector, rail_fare_result=rail_fare_if)
+        await flush_processor()
+
+        sel_a = await selector.attempt()
+        assert sel_a.succeeded
+        _sv = sel_a.value_or_none()
+        assert _sv is not None
+        assert _sv.mode == "transit"
+
+        a = await merge.attempt()
+        assert a.succeeded, f"merge should apply the fare to the transit commute, got: {a.status}: {a.error}"
+        _v = a.value_or_none()
+        assert _v is not None
+        assert _v.daily_cost == Money("9.90", "GBP")
+
+
+class TestCommuteChainProvenanceFormula:
+    """The merge and breakdown calc cards must carry formula visualisations."""
+
+    @pytest.mark.asyncio
+    async def test_merge_formula_lists_commute_and_fare(self):
+        from houses.nodes.commute import MergeRailFareNode
+
+        transit = _make_commute(duration_min=60, cost_gbp=5.0)
+        commute_src = FixedCommuteNode("mf_commute")
+        commute_src.set(transit)
+
+        class _Fare(DerivedNode[Commute]):
+            def __init__(self, node_id: str):
+                super().__init__(node_id, Commute | None, ())  # type: ignore[arg-type]
+                self._att = Attempt.pending()
+
+            async def attempt(self):
+                if self._att.pending:
+                    fare_leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(30, "minute"))  # type: ignore[arg-type]
+                    self._att = Attempt.succeeded(
+                        Commute(
+                            person=Person(name="", has_car=False),
+                            label="fare",
+                            destination=PlaceOfInterest(label="", address=""),
+                            duration=Quantity(30, "minute"),  # type: ignore[arg-type]
+                            daily_cost=Money("9.90", "GBP"),
+                            mode="transit",
+                            _details=(CostGroup(legs=(fare_leg,), operator="NR", cost=Money("9.90", "GBP")),),
+                        )
+                    )
+                return self._att
+
+            def latest_attempt(self):
+                return self._att
+
+            def compute(self, *dep_attempts):
+                raise AssertionError("fixed node should not compute")
+
+        node = MergeRailFareNode("mf_node", commute_result=commute_src, rail_fare_result=_Fare("mf_fare"))
+        await flush_processor()
+        prov = await node.build_provenance()
+        assert prov.formula is not None
+        assert [line.label for line in prov.formula.lines] == ["Commute", "Rail fare"]
+
+    @pytest.mark.asyncio
+    async def test_breakdown_formula_lists_per_person(self):
+        from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
+
+        persons_src = UserInputNode("bf_persons", list)
+        persons_src.push(
+            [
+                {
+                    "name": "Simon",
+                    "places_of_interest": [
+                        PlaceOfInterest(label="Bracknell", address="", trips_per_week=1, weeks_per_year=46)
+                    ],
+                }
+            ],
+            "test",
+        )
+        commute_src = FixedCommuteNode("bf_commute")
+        commute_src.set(_drive_commute(duration_min=16, cost_gbp=5.0))
+        node = CommuteBreakdownNode(
+            "bf_node", commute_selectors={"Simon/Bracknell": commute_src}, persons_source=persons_src
+        )
+        await flush_processor()
+        prov = await node.build_provenance()
+        assert prov.formula is not None
+        assert [line.label for line in prov.formula.lines] == ["Simon’s commute (yearly)"]

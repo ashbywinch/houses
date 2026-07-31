@@ -131,36 +131,6 @@ def build_commute_pipeline(prop) -> None:
                 max_walk=int(p_info.bus_walk_penalty.magnitude),
             )
 
-            # Create a RailFareNode for non-child commutes to apply NR fares
-            rail_fare_node = None
-            if not is_child:
-                from houses.nodes.rail_fare_node import RailFareNode
-
-                rail_fare_node = RailFareNode(
-                    f"{prop.rid}/{key}/rail_fare",
-                    transit_result=transit_node,
-                    best_location=prop.best_location,
-                )
-
-            # Wrap rail_fare in IfThenElseNode — only active when NR fare is needed
-            if is_child:
-                # Children don't get NR fares — dummy IfThenElse that always returns None
-                _dummy = UserInputNode[str](f"{prop.rid}/{key}/rail_fare_dummy", str)
-                rail_fare_result = IfThenElseNode(
-                    f"{prop.rid}/{key}/rail_fare_noop",
-                    Commute | None,
-                    condition_sources=(),
-                    condition_fn=lambda: False,
-                    then_branch=_dummy,
-                )
-            else:
-                rail_fare_result = IfThenElseNode(
-                    f"{prop.rid}/{key}/rail_fare_if",
-                    Commute | None,
-                    condition_sources=(transit_node,),
-                    condition_fn=_needs_rail_fare,
-                    then_branch=rail_fare_node,
-                )
             # Omit drive entirely when the destination is in the London
             # congestion zone — no point computing a route that can't exist.
             dest_addr = getattr(poi, "address", str(poi))
@@ -176,6 +146,42 @@ def build_commute_pipeline(prop) -> None:
                 is_child=is_child,
                 max_walk=int(p_info.bus_walk_penalty.magnitude),
             )
+
+            if is_child:
+                # Children don't get NR fares — dummy IfThenElse that always returns None
+                _dummy = UserInputNode[str](f"{prop.rid}/{key}/rail_fare_dummy", str)
+                rail_fare_result = IfThenElseNode(
+                    f"{prop.rid}/{key}/rail_fare_noop",
+                    Commute | None,
+                    condition_sources=(),
+                    condition_fn=lambda: False,
+                    then_branch=_dummy,
+                )
+            else:
+                from houses.nodes.rail_fare_node import RailFareNode
+
+                # The fare node knows the SELECTED commute: when the choice
+                # is drive/walk it passes the transit commute through
+                # without running the NR lookup, so an unchosen route's
+                # fare can't fail noisily.
+                rail_fare_node = RailFareNode(
+                    f"{prop.rid}/{key}/rail_fare",
+                    transit_result=transit_node,
+                    best_location=prop.best_location,
+                    selector=selector,
+                )
+                # The fare branch activates only when the SELECTED commute
+                # uses transit legs and needs an NR fare — gate on the
+                # selector's choice so a drive/walk selection never
+                # activates the fare node.  The merge additionally treats
+                # the fare as a conditional dependency.
+                rail_fare_result = IfThenElseNode(
+                    f"{prop.rid}/{key}/rail_fare_if",
+                    Commute | None,
+                    condition_sources=(transit_node, selector),
+                    condition_fn=_needs_rail_fare,
+                    then_branch=rail_fare_node,
+                )
 
             merge_node = MergeRailFareNode(
                 f"{prop.rid}/{key}/merge",

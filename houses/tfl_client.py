@@ -343,7 +343,22 @@ class TflClient:
         )
         if duration_minutes is not None:
             return Attempt.succeeded(result)
-        return Attempt.impossible("could not route transit")
+        # A valid TfL response with no journey is a successful "no transit
+        # route" answer — succeeded-infeasible so the commute selector can
+        # fall back to drive/walk. Genuine API failures raise HttpError in
+        # _cached_api_call and surface as impossible with the real reason.
+        return Attempt.succeeded(
+            Commute(
+                person=Person(name="", has_car=False),
+                label=self._label,
+                destination=PlaceOfInterest(label=self._label, address=self._destination),
+                duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+                daily_cost=Money("0", "GBP"),
+                mode="transit",
+                _details=(),
+                infeasible=True,
+            )
+        )
 
     async def _geocode_fallback(self, params: dict) -> dict | None:
         """Handle TfL 300 response by geocoding the origin and retrying."""
