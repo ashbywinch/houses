@@ -10,7 +10,6 @@ from typing import Generic, TypeVar
 
 from dag.attempt import Attempt, AttemptError, Formula, Provenance, SourceType
 from dag.expression import Expression
-from dag.http_error import HttpError
 from dag.node import Node
 from dag.scheduler import _get_scheduler
 from dag.signals import Connection, Slot
@@ -146,17 +145,18 @@ class DerivedNode(Node[T], Generic[T]):
         return self._attempt
 
     def _is_transient_error(self, exc: Exception) -> bool:
-        """Identify retryable transient errors (TimeoutError, HttpError rate-limit/server-error, status-aware)."""
-        if isinstance(exc, asyncio.TimeoutError):
-            return True
-        if isinstance(exc, HttpError):
-            return exc.is_rate_limit() or exc.is_server_error()
-        if hasattr(exc, "status"):
-            try:
-                return int(exc.status) in (429, 502, 503, 504)
-            except (ValueError, TypeError):
-                pass
-        return False
+        """Identify retryable transient errors.
+
+        Delegates to :func:`dag.attempt.classify_exception` — the single
+        source of truth also used by AttemptError — so the DAG retry
+        decision matches what gets recorded on the Attempt. Handles
+        TimeoutError, HttpError (``.status``), httpx errors
+        (``.response.status_code``), and any status-aware exception.
+        """
+        from dag.attempt import classify_exception
+
+        _, retryable = classify_exception(exc)
+        return retryable
 
     def schedule_retry(self, delay: timedelta) -> bool:
         """Schedule a DAG-level retry at now + delay.
@@ -259,6 +259,16 @@ class DerivedNode(Node[T], Generic[T]):
                     result = Attempt.impossible(f"{self._id}: dep failed ({errors})\n{_tb_str}")
                 else:
                     result = Attempt.impossible(f"{self._id}: {e}\n{_tb_str}")
+
+        # A service may catch a transient error and RETURN an impossible
+        # attempt whose error_info.retryable is set (rather than raising).
+        # The retry decision must not depend on which style the service
+        # used — retry either way, using the exception it recorded.
+        if result.impossible and not result.pending:
+            info = result.error_info
+            if info is not None and info.retryable and info.exc is not None:
+                if self.schedule_retry(self._retry_delay_from(info.exc)):
+                    result = Attempt.pending()
         # requests before we do sync persist work (json.dumps + SQLite).
         await asyncio.sleep(0)
 

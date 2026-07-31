@@ -433,6 +433,95 @@ except Exception as e:
     logger.debug("do_something failed (non-fatal): %s", e)
 ```
 
+### Error Propagation: Attempt for API Services, Exceptions for Pure Code
+
+The rule for carrying failures depends on whether a service makes network
+calls:
+
+- **Services that call APIs return ``Attempt``.** The failure reason
+  travels in the ``Attempt.error`` (message) and ``Attempt.error_info``
+  (structured), so the frontend can render it and the DAG can act on it.
+  E.g. ``epc.lookup_epc`` returns ``Attempt[str]`` — never ``str | None``
+  or ``""`` on failure.
+- **Services that don't call APIs throw exceptions.** Pure computation has
+  no structured result channel; a failure is exceptional and should
+  propagate. The DAG framework catches exceptions from ``compute()``,
+  records them on the ``Attempt``, and retries transient ones.
+
+**Either way, the reason must not be lost.**
+
+```python
+# Wrong — API service swallows the reason into a bare value
+async def lookup(postcode: str) -> str | None:
+    try:
+        ...
+    except Exception:
+        return None  # caller can't distinguish "no data" from "API down"
+
+# Right — API service returns Attempt with the reason
+async def lookup(postcode: str) -> Attempt[str]:
+    try:
+        ...
+    except httpx.HTTPStatusError:
+        raise  # transient — let the DAG retry
+    except Exception as e:
+        return Attempt.impossible(f"lookup failed: {e}")
+```
+
+Transient HTTP errors (429, 5xx, timeouts) are **re-raised** (not caught)
+so the DAG's retry machinery schedules a retry. Permanent failures return
+``Attempt.impossible(reason)``.
+
+### Structured Errors: Never Parse Error Strings
+
+``Attempt.error_info`` is an ``AttemptError`` with ``code``,
+``message``, ``retryable``, ``source``, ``causes``, and — in memory —
+the **actual exception object** (``exc``). Inspect the exception's
+attributes (``.status``, ``.headers``, ``retry_after``) rather than
+parsing the message string:
+
+```python
+# Wrong — string parsing
+if "429" in attempt.error:
+    retry = True
+
+# Right — structured
+retry = attempt.error_info.retryable
+status = attempt.error_info.exc.status  # the actual HttpError
+```
+
+``Attempt.impossible()`` auto-captures the active exception when called
+inside an ``except`` block — the traceback and retryability are recorded
+without any extra plumbing. Serialization emits ``error`` (message, for
+the frontend) and ``error_detail`` (structured, with ``causes`` chain)
+in ``to_json()``; the exception object itself stays in memory only.
+
+The DAG retry decision is driven by ``AttemptError.retryable`` — which
+itself comes from ``classify_exception()``, the single source of truth
+shared by ``AttemptError`` and the retry machinery. A service that
+catches a transient error and returns ``Attempt.impossible(...)`` gets
+retried exactly like one that re-raises.
+
+### Nodes Propagate, Never Re-Literalize
+
+When a node receives a failed dependency or service ``Attempt``, propagate
+its reason — don't replace it with a fresh generic string:
+
+```python
+# Wrong — invents a literal, hiding the real reason
+if not result.succeeded:
+    return Attempt.impossible("no data")
+
+# Right — propagate the actual reason
+if not result.succeeded:
+    return Attempt.impossible(result.error or "no data")
+```
+
+``Node._impossible(dep_attempts)`` and the DAG's dep-failure path already
+build ``code=dep_failed`` errors with a ``causes`` chain of the failed
+dependencies' ``error_info`` — the chain is traversable structurally,
+not by string matching.
+
 ### Cache Key Hygiene
 
 - Never include API keys in cache key parameters. Credential rotation
@@ -539,6 +628,13 @@ defaults:
 ```python
 services = make_services(epc_service=FakeEPC(band="B"))
 ```
+
+Every fake declares its service protocol as a base class (e.g.
+``class FakeEPC(EPCLookupService)``) and ``make_services`` override
+kwargs are typed against those protocols. When a service protocol
+signature changes (e.g. ``lookup`` returning ``Attempt[str]`` instead
+of ``str``), type-checking (basedpyright/mypy) flags the fake — drift
+is caught at edit time, not as a runtime failure in an unrelated test.
 
 ### Test Organization
 
