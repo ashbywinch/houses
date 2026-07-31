@@ -76,14 +76,19 @@ make stop                       # Stop dev server + frontend
 ## Decision Tree
 
 - **Develop / test / run**: [docs/development.md](docs/development.md)
+- **Coding standards / conventions**: [docs/coding-standards.md](docs/coding-standards.md)
+- **Writing tests**: [docs/testing-standards.md](docs/testing-standards.md)
 - **Architecture overview**: [docs/architecture.md](docs/architecture.md)
 - **Add a column**: [docs/column-reference.md](docs/column-reference.md)
 - **Add an enrichment module**: [docs/adding-a-new-enrichment-module.md](docs/adding-a-new-enrichment-module.md)
+- **Enrichment modules (index)**: [docs/enrichment-modules.md](docs/enrichment-modules.md)
 - **DAG library & adding a node**: [docs/dag-library.md](docs/dag-library.md)
 - **Capture / compare the frontend DOM**: Run `tools/capture_dom.py`, then compare against `docs/current-ui/`. See `docs/development.md` → *Capturing the Frontend DOM for Comparison*.
 - **Write docs**: [docs/writing-documentation.md](docs/writing-documentation.md)
 - **Use the API**: [docs/api.md](docs/api.md)
 - **Troubleshoot batch endpoints**: [docs/troubleshooting-endpoints.md](docs/troubleshooting-endpoints.md)
+- **Users & UX requirements (provenance, filters, states)**: [docs/personas.md](docs/personas.md)
+- **Frontend architecture decisions (Vue)**: [docs/vue-architecture-decisions.md](docs/vue-architecture-decisions.md)
 
 ## Key Files
 

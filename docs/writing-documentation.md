@@ -43,6 +43,35 @@ Humans AND AI agents must both navigate from AGENTS.md to find what they need.
 - [ ] Title + first paragraph make purpose clear
 - [ ] Links to related docs where readers might need them
 
+## Density & Concision
+
+Docs are read inside a limited AI context window. Every sentence costs context. Write for density: the smallest set of words that preserves every fact and decision.
+
+| Technique | Rule | ✗ Low-density | ✓ High-density |
+|---|---|---|---|
+| **Rules as explicit negatives** | State constraints as prohibitions, not preferences — "Never X" reads faster, followed more reliably | "Avoid swallowing errors silently when catching exceptions" | "**Never swallow errors.** Every `except` must log, re-raise, or handle observably. Bare `except: pass` forbidden" |
+| **Commands over prose** | Executable commands beat descriptive sentences | "To start the dev environment, use the make run command" | "`make run` # backend :8080 + frontend :5173, auto-reload" |
+| **Tables over prose** | Rule-per-row beats paragraph-per-rule; use when facts have consistent fields | prose bullets | state/meaning, layer/rule/files, fake/default tables |
+| **Canonical ✗/✓ pairs** | One right/wrong code pair teaches more than enumerating edge cases | list every failure mode | `# ✗ string parsing` / `# ✓ structured` pair |
+| **One-line contracts** | A contract that fits one line is easier to hold in context | three sentences of explanation | "`compute()` MUST return an `Attempt`" |
+| **Decision-relevant context only** | Keep only background that changes a decision; cut filler and restated motivation | "Every node's value is…" | (omitted) |
+| **Link, don't paste** | A fact lives in one place; other docs link. References one level deep | copy the column layout inline | "see column-reference.md" |
+| **Task-card structure** | For how-to sections: goal (one verb), scope (exact paths), constraints (must/never), acceptance (verifiable command) | narrative walkthrough | Goal / Scope / Constraints / Acceptance headings |
+
+### Size ceilings
+
+Always-loaded files (AGENTS.md, this doc, skill bodies) target **~150–200 lines / <32 KiB** — loaded in full every session, so bloat is paid every session. Referenced docs (pulled in only when relevant, e.g. dag-library.md) can be longer, but densify prose first; density matters less for them than for always-loaded files.
+
+### Density checklist
+
+- [ ] Every sentence carries a fact, a decision, or a constraint
+- [ ] Rules are explicit negatives ("Never X"), not vague preferences
+- [ ] Commands replace descriptions where executable
+- [ ] Tables replace paragraphs where fields are consistent
+- [ ] Code shows a canonical ✗/✓ pair, not exhaustive cases
+- [ ] No filler, no restated motivation
+- [ ] Always-loaded files within the ~150–200 line ceiling
+
 ## How to update
 
 1. Identify audience + topic.
