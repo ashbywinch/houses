@@ -21,38 +21,29 @@
 
 ## Data Flow
 
-1. **User browses** a Rightmove listing in Firefox.
-2. **Page Assist sidepanel** (BYOK LLM) extracts structured data from the page HTML: URL, address, postcode, bedrooms, price.
-3. **HTTP POST** sends the payload to `http://127.0.0.1:8080/inject-property`.
-4. **Server receives** the payload and runs enrichment in sequence:
-   - Transit commute times (TfL API) for Simon and Lorena
-   - Petrol cost (ORS driving distance) for Bracknell
-   - Nearest boys-eligible schools (GIAS CSV + postcodes.io)
-   - Walkability (Google Maps Places + ORS walking) — planned
-   - Town description (OpenRouter LLM) — planned
-   - Council tax lookup (VOA scraper + CivAccount)
-5. **Server writes** the full enriched row to the **Properties Data** tab in Google Sheets.
-6. **Properties View** tab automatically picks up the new data via live XLOOKUP formulas.
+1. User browses a Rightmove listing in Firefox.
+2. Page Assist sidepanel (BYOK LLM) extracts structured data: URL, address, postcode, bedrooms, price.
+3. HTTP POST to `http://127.0.0.1:8080/inject-property`.
+4. Server runs enrichment in sequence: transit commutes (TfL, Simon/Lorena) → petrol cost (ORS drive, Bracknell) → nearest boys-eligible schools (GIAS CSV + postcodes.io) → walkability (Google Maps Places + ORS walking, planned) → town description (OpenRouter LLM, planned) → council tax (VOA scraper + CivAccount).
+5. Server writes the full enriched row to **Properties Data** tab.
+6. **Properties View** tab picks it up via live XLOOKUP formulas.
 
 ## Sheet Architecture
 
-### Why Two Tabs?
+### Why two tabs?
 
-Google Sheets is collaborative but fragile. Writing directly to the human-facing tab would:
-- Overwrite custom formatting, cell colors, and conditional formatting
-- Clobber manual comments and WhatsApp notes
-- Create data collisions if someone edits a row simultaneously
+Google Sheets is collaborative but fragile. Writing directly to the human tab would: overwrite formatting/colors/conditional formatting; clobber manual comments and WhatsApp notes; collide on simultaneous edits.
 
-### Split-Tab Design
+### Split-tab design
 
 | Tab | Name | Access | Purpose |
 |-----|------|--------|---------|
 | 1 | **Properties View** | Manual edits only | Human dashboard — naming, comments, status, live formulas |
-| 2 | **Properties Data** | Server write-only | Flat data warehouse — all enrichment fields, one row per property |
+| 2 | **Properties Data** | Server write-only | Flat warehouse — all enrichment fields, one row per property |
 
-The primary key linking both tabs is the **Rightmove URL** (Column A in Properties Data, Column B in Properties View).
+Primary key linking tabs: **Rightmove URL** (col A in Data, col B in View).
 
-**Critical rule**: The server never writes to Properties View. The View tab pulls data from the Data tab using `XLOOKUP` formulas. See [column-reference.md](column-reference.md) for the exact formula layout.
+**Critical rule:** the server never writes to Properties View. The View tab pulls from Data via `XLOOKUP` formulas — see [column-reference.md](column-reference.md).
 
 ## Tech Stack
 
@@ -60,82 +51,29 @@ The primary key linking both tabs is the **Rightmove URL** (Column A in Properti
 |-----------|------------|-------|
 | Server framework | FastAPI + uvicorn | Async, auto-docs at /docs |
 | Data models | Pydantic v2 | Validation, serialization |
-| Configuration | pydantic-settings | Env vars with HOUSES_ prefix |
-| HTTP client | httpx | Async, used for all external APIs |
-| Sheet integration | gspread + google-auth | Service account authentication |
+| Configuration | pydantic-settings | Env vars, HOUSES_ prefix |
+| HTTP client | httpx | Async, all external APIs |
+| Sheet integration | gspread + google-auth | Service account auth |
 | Transit API | TfL Unified API (free) | Journey planning, fare extraction |
 | Driving distance | OpenRouteService (ORS) | Driving-car profile, geocoding |
-| Schools data | GIAS CSV (gov.uk) | All establishments, enriched with Ofsted |
-| Geocoding | postcodes.io (free) + ORS Pelias | Full postcodes + fallback for outcodes |
+| Schools data | GIAS CSV (gov.uk) | Enriched with Ofsted |
+| Geocoding | postcodes.io (free) + ORS Pelias | Full postcodes + outcode fallback |
 | Walkability | Google Maps Places API (New) | Nearby Search for amenities |
-| Town descriptions | OpenRouter (BYOK LLM) | LLM-generated descriptions |
+| Town descriptions | OpenRouter (BYOK LLM) | LLM-generated |
 | Council tax | VOA scraper + CivAccount | Live — scrapes public gov.uk page |
 
 ## Architectural Pattern
 
-The codebase follows a **Layered Architecture with a Domain Model core**
-(a variant of the **Hexagonal / Ports & Adapters** pattern). The diagram
-below shows the four layers and how data flows through them:
+Layered Architecture with a Domain Model core (Hexagonal / Ports & Adapters variant):
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│  PRESENTATION LAYER  (houses/web/, houses/templates/)                │
-│                                                                      │
-│  What it is:  FastAPI route handlers + Jinja2 templates.             │
-│               The "what buttons do" and "what the page looks like."  │
-│  Rules:       Never import from infrastructure.                      │
-│               Never implement business logic (priority chains,       │
-│               validation, staleness).                                │
-│               Reads resolved data from the Application Layer.        │
-│  Files:       server.py, web/router.py, web/card_data.py,            │
-│               templates/*.html, static/*                              │
-│                                                                      │
-├──────────────────────────────────────────────────────────────────────┤
-│  APPLICATION LAYER  (houses/server.py enrichment flow,               │
-│                      houses/web/card_data.py assembly)               │
-│                                                                      │
-│  What it is:  Orchestration. Decides WHEN to enrich, WHEN to         │
-│               resolve, WHAT to display. Coordinates the sequence:    │
-│               enrich → write source_values → resolve → read results. │
-│  Rules:       Calls enrichment modules (infrastructure) to get raw   │
-│               data, calls insert_source_value (domain persistence)   │
-│               to store it, calls resolve_property (domain) to        │
-│               compute derived values, reads results for display.     │
-│               Never re-implements DAG rules.                         │
-│  Files:       enrichment_runner.py, server.py, web/card_data.py,     │
-│               web/router.py (import logic)                           │
-│                                                                      │
-├──────────────────────────────────────────────────────────────────────┤
-│  DOMAIN MODEL  (houses/model/)                                       │
-│                                                                      │
-│  What it is:  The DAG. Node definitions, priority chains,            │
-│               staleness rules, resolution logic. The "what is true"  │
-│               about a property — independent of how it got there.    │
-│  Rules:       No HTTP, no API calls, no sheets, no I/O.              │
-│               Pure business logic. Persistence boundary is at         │
-│               model/persistence.py (the SQLite repository).          │
-│               External code reads derived values via resolve_property │
-│               or load_property_data — never by querying the DB       │
-│               directly.                                              │
-│  Files:       model/__init__.py, model/registry.py, houses/nodes/,    │
-│               model/resolver.py, model/persistence.py                │
-│                                                                      │
-├──────────────────────────────────────────────────────────────────────┤
-│  INFRASTRUCTURE LAYER                                                │
-│                                                                      │
-│  What it is:  Everything that talks to the outside world.            │
-│               External APIs, the Google Sheet, file I/O.             │
-│  Rules:       Implements service protocols from services.py          │
-│               (ports → adapters).                                    │
-│               Called by the Application Layer during enrichment;     │
-│               never called by the Domain Model.                      │
-│  Files:       services.py (protocols + default adapters),            │
-│               sheets/, location.py, transit_route.py,                │
-│               endpoint_client.py, council_tax.py, etc.               │
-└──────────────────────────────────────────────────────────────────────┘
-```
+| Layer | What it is | Rules | Files |
+|---|---|---|---|
+| **PRESENTATION** | FastAPI route handlers + Jinja2 templates | Never import infrastructure; never implement business logic (priority, validation, staleness); reads resolved data from Application | `server.py`, `web/router.py`, `web/card_data.py`, `templates/*`, `static/*` |
+| **APPLICATION** | Orchestration — WHEN to enrich/resolve/display | Calls enrichment (infra) for raw data → `insert_source_value` (domain) → `resolve_property` (domain) → reads results. Never re-implements DAG rules | `enrichment_runner.py`, `server.py`, `web/card_data.py`, `web/router.py` (import logic) |
+| **DOMAIN MODEL** | The DAG — nodes, priority chains, staleness, resolution. "What is true" about a property | No HTTP/API/sheets/I/O. Persistence boundary at `model/persistence.py`. External code reads via `resolve_property`/`load_property_data` — never direct DB queries | `model/__init__.py`, `model/registry.py`, `houses/nodes/`, `model/resolver.py`, `model/persistence.py` |
+| **INFRASTRUCTURE** | Everything talking to the outside world | Implements service protocols from `services.py` (ports → adapters); called by Application, never by Domain | `services.py`, `sheets/`, `location.py`, `transit_route.py`, `endpoint_client.py`, `council_tax.py`, etc. |
 
-### Data Flow
+### Data flow
 
 ```
 Browser request  →  Route handler (Presentation)
@@ -147,99 +85,62 @@ Browser request  →  Route handler (Presentation)
   →  render template  (Presentation)
 ```
 
-Every enrichment cycle follows the same pattern:
+Every enrichment cycle: Application calls enrichment module (infra) → module returns raw data → Application stores as source_value (domain) → calls `resolve_property()` → resolver checks staleness, runs compute, saves derived → Application reads resolved values → writes sheet or renders template.
 
-1. **Application layer** calls an enrichment module (infrastructure)
-2. **Enrichment module** returns raw data
-3. **Application layer** stores it as a source_value (domain persistence)
-4. **Application layer** calls `resolve_property()` (domain resolver)
-5. **Resolver** checks staleness, runs compute functions, saves derived
-6. **Application layer** reads the resolved derived values
-7. **Application layer** writes to sheet or renders template
+**The DAG knows nothing about steps 1, 2, or 7.** It receives `source_values`, produces `derived_values`.
 
-The DAG knows nothing about steps 1, 2, or 7. It receives inputs as
-`source_values` and produces outputs as `derived_values`.
+### Proposed improvements
 
-### Proposed Improvements
-
-**1. Introduce `sync_property()`.**
-A single Application-layer function that replaces the ad-hoc enrichment →
-write → resolve → display scatter:
-
-```python
-async def sync_property(rid: str, trigger_enrichment: bool = True) -> PropertyData:
-    if trigger_enrichment:
-        enriched = await _run_enrichment(rid, ...)
-        # enrichment modules write source_values internally
-    return await resolve_property(rid)
-```
-
-`get_all_cards()` calls `sync_property()` for each RID. The card
-assembler reads from the returned `PropertyData` — it never reads the
-sheet or the DB directly. This eliminates the current scatter of
-`_seed_dag_from_row` + `_enrich_from_dag` + inline `resolve_property`
-in `get_all_cards()`.
-
-**2. Move all enrichment output through the DAG.**
-Today, enrichment modules write directly to the sheet OR to
-`source_values`. Every module should write to `source_values` first,
-then a single sheet-write step reads from `derived_values`. This gives
-the DAG full version history of every recomputation.
-
-**3. Extract sheet import to a dedicated infrastructure module.**
-`_try_import_from_sheet()` lives in `router.py` today, mixing
-presentation with infrastructure. It should move to a module like
-`sheets/importer.py` that the Application layer calls. The route
-handler just delegates.
-
-**4. Split `card_data.py`.**
-- `sheets/reader.py` — raw sheet reading (already exists)
-- `web/view_models.py` — pure ViewModel assembly, no I/O, takes
-  `PropertyData` + sheet metadata and returns `CardData`
-- The DAG sync/enrichment step stays in the Application layer
-  (`get_all_cards` or a new `houses/sync.py`)
-
-**5. Register all enrichment fields as DAG nodes.**
-Today only address/location are nodes. Every future field (commute,
-schools, EPC, council tax) should have source + derived node
-declarations. This ensures consistent staleness tracking, re-computation,
-and priority across the entire property data model.
+1. **`sync_property()`** — one Application function replacing ad-hoc enrich→write→resolve→display scatter:
+   ```python
+   async def sync_property(rid: str, trigger_enrichment: bool = True) -> PropertyData:
+       if trigger_enrichment:
+           enriched = await _run_enrichment(rid, ...)  # writes source_values internally
+       return await resolve_property(rid)
+   ```
+   `get_all_cards()` calls it per RID; the card assembler reads `PropertyData` (never sheet/DB directly). Eliminates the `_seed_dag_from_row` + `_enrich_from_dag` + inline `resolve_property` scatter.
+2. **All enrichment output through the DAG** — every module writes `source_values` first; one sheet-write step reads `derived_values`. Gives full version history per recomputation.
+3. **Extract sheet import** — `_try_import_from_sheet()` lives in `router.py` (presentation+infra mix). Move to e.g. `sheets/importer.py`, called by Application; route handler delegates.
+4. **Split `card_data.py`** — `sheets/reader.py` (raw reading, exists) + `web/view_models.py` (pure ViewModel assembly, takes `PropertyData` + sheet metadata → `CardData`); DAG sync stays in Application (`get_all_cards` or new `houses/sync.py`).
+5. **Register all enrichment fields as DAG nodes** — today only address/location are nodes. Every future field (commute, schools, EPC, council tax) gets source + derived node declarations → consistent staleness, recomputation, priority.
 
 ## Key Files
 
 | File | Responsibility |
 |------|----------------|
-| `houses/server.py` | FastAPI app, `/inject-property` endpoint, startup/shutdown |
+| `houses/server.py` | FastAPI app, `/inject-property`, startup/shutdown |
 | `houses/enricher.py` | Commute computation, petrol cost, commute breakdown |
 | `houses/routing.py` | Commute decision logic — walking, TfL transit, driving |
 | `houses/transit_route.py` | TfL API wrapper, park-and-ride, parking costs |
 | `houses/location.py` | Geocoding — postcodes.io, Google Maps, ORS, Nominatim |
-| `houses/sheets/` | gspread integration, column headers (`Row` class), View tab sync (`View` class) |
-| `houses/endpoint_client.py` | Reusable API client with Retry-After + budget tracking |
+| `houses/sheets/` | gspread, column headers (`Row`), View tab sync (`View`), named ranges, formulas |
+| `houses/endpoint_client.py` | Reusable API client: Retry-After + budget tracking |
 | `houses/services.py` | Service protocols + `Services` DI container |
 | `houses/context.py` | ContextVar per-request state (bus fares, geo state, sheets) |
 | `houses/config.py` | Configuration — postcodes, API keys, constants |
-| `tests/helpers.py` | Reusable fakes: `FakeCommuteRouter`, `FakeEPC`, `make_services()` |
-| `houses/model/` | DAG node registry (`registry.py`), node declarations (`nodes.py`), resolver (`resolver.py`), persistence (`persistence.py`) |
+| `tests/helpers.py` | Fakes: `FakeCommuteRouter`, `FakeEPC`, `make_services()` |
+| `houses/model/`, `houses/nodes/` | DAG registry (`registry.py`), node declarations, resolver, persistence |
+| `houses/retry.py` | Async retry, exponential backoff + jitter |
+| `houses/walkability.py` | Google Maps Places + ORS walking (planned) |
+| `houses/town_desc.py` | LLM town descriptions (planned) |
+| `houses/council_tax.py` | Council tax lookup (VOA scraper + CivAccount) |
+| `scripts/setup_sheet.py` | Sheet tab creation, XLOOKUP formula templates |
+| `scripts/enrich_with_ofsted.py` | Ofsted merge into school CSV |
+| `Agent Briefing.txt` | **Archived** — see `docs/` |
 
-## Dependency Injection Architecture
+## Dependency Injection
 
-The codebase uses three DI patterns:
+Three DI patterns:
 
-### Services Container (`houses/services.py`)
+### Services container (`houses/services.py`)
 
-`Services` is a dataclass bundling every enrichment service with real defaults.
-`_run_enrichment` accepts an optional ``services`` parameter. In production
-``None`` → ``Services()`` with real implementations. In tests, pass fakes
-from ``tests/helpers.py``.
+`Services` dataclass bundles every enrichment service with real defaults. `_run_enrichment` accepts optional `services` — production `None` → `Services()`; tests pass fakes from `tests/helpers.py`.
 
-Protocols in ``houses/services.py`` document every module boundary: ``GeocodingService``,
-``CommuteRoutingService``, ``EPCLookupService``, ``CouncilTaxService``, etc.
-Agents read this file to understand what each module depends on.
+Protocols in `houses/services.py` document every module boundary (`GeocodingService`, `CommuteRoutingService`, `EPCLookupService`, `CouncilTaxService`, …). Agents read this file to learn what each module depends on.
 
-### ContextVar + Middleware (`houses/context.py` + `server.py` middleware)
+### ContextVar + middleware (`houses/context.py` + `server.py` middleware)
 
-Per-request state that auto-creates production defaults when unset:
+Per-request state, auto-creating production defaults when unset:
 
 | Variable | Purpose |
 |----------|---------|
@@ -247,22 +148,8 @@ Per-request state that auto-creates production defaults when unset:
 | `_request_bus_fares` | `BusJourneyRegistry` (shared across routing + transit_route) |
 | `_request_sheets_client` | Mock sheets client (set by test fixtures) |
 
-The `_geo_state` (rate-limit tracking) and `_geo_cache_var` (in-memory
-geocode cache) are also per-request via context vars, initialized by the
-same middleware.
+`_geo_state` (rate-limit tracking) and `_geo_cache_var` (in-memory geocode cache) are also per-request, initialized by the same middleware.
 
-### Local `_kwarg` Injection
+### Local `_kwarg` injection
 
-Leaf-level functions accept optional underscore-prefixed parameters
-(e.g. ``_registry``, ``_page_path``, ``_page_template``) with ``None``
-defaults that fall back to the real implementation.  Tests pass pre-built
-objects directly, avoiding monkeypatch.
-| `houses/enricher.py` | Transit commute, petrol cost, school lookup |
-| `houses/sheets/` | Service account auth, gspread integration, column schema (`Row`), View tab sync (`View`), named ranges, formulas |
-| `houses/retry.py` | Async retry with exponential backoff and jitter |
-| `houses/walkability.py` | Google Maps Places + ORS walking (planned) |
-| `houses/town_desc.py` | LLM-generated town descriptions (planned) |
-| `houses/council_tax.py` | Council tax lookup (VOA scraper + CivAccount) |
-| `scripts/setup_sheet.py` | Sheet tab creation, XLOOKUP formula templates |
-| `scripts/enrich_with_ofsted.py` | Ofsted data merge into school CSV |
-| `Agent Briefing.txt` | **Archived** — see `docs/` for current documentation |
+Leaf functions accept optional underscore-prefixed params (`_registry`, `_page_path`, `_page_template`) with `None` defaults falling back to the real implementation. Tests pass pre-built objects directly — no monkeypatch.

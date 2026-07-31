@@ -1,83 +1,15 @@
 # Coding Standards — Houses
 
-Project-specific rules that supplement the shared coding standards.
-Read both. If they conflict, this file takes precedence.
+Project-specific rules supplementing the shared coding standards. Read both. If they conflict, this file takes precedence.
 
 ## Design Principles
 
-### Separation of Concerns
-
-Every module, class, and function should have one reason to change.
-Code that deals with different concerns (HTTP vs business logic vs
-persistence) must live in different modules with a one-way dependency
-chain (see the layer diagram in the DAG section below).
-
-When you feel the urge to import from a sibling layer or mix I/O with
-computation, that's a signal to split — not a shortcut to take.
-
-### Cohesive Classes: Data and Behaviour Together
-
-Group data with the methods that operate on it. A class should own its
-invariants — don't let external code reach into a dataclass to compute
-derived values that the class could compute itself.
-
-A class full of public fields that every other module reads and manipulates
-is not a class, it's a poorly-organised dict. If the behaviour lives
-outside the data, the data should be a primitive and the behaviour should
-live in a function — but if you find yourself writing ``get_*`` accessors
-that feed into procedural code, that's a missed abstraction.
-
-### Names Communicate Intent
-
-A name's job is to tell the reader what something means and why it exists.
-Choose names that relate to the domain (``monthly_mortgage_payment``, not
-``calculate_value_3``). A name that needs a comment to explain is a failed
-name.
-
-- **Classes** are nouns in the domain language (``StampDutyNode``,
-  ``CommuteSelector``).
-- **Functions/methods** are verbs or verb phrases (``resolve_property``,
-  ``compute``, ``insert_source_value``).
-- **Variables** say what they hold, not how they're stored (``price``, not
-  ``x``; ``cost_by_operator``, not ``dict2``).
-- **Booleans** read naturally in an ``if``: ``has_school``, not
-  ``school_flag``.
-
-### Anti-Fragile Code: Correct by Construction
-
-Write code that is self-explanatory and self-evidently correct — code
-whose correctness you can verify by reading it, not by tracing every
-possible execution path.
-
-**Practices that produce anti-fragile code:**
-
-- Use types that make invalid states unrepresentable (see "Semantic Types
-  Over Primitives" below). If you can't construct a wrong value, you
-  can't ship a wrong value.
-- Prefer pure functions over stateful methods. A function that only
-  reads its arguments and returns a value is trivially correct and
-  trivially testable.
-- Make invalid control flows impossible. A function that returns ``None``
-  forces every caller to remember to check. A function that returns a
-  discriminated union (``Attempt``, ``Result``) makes the error path
-  explicit in the type system.
-- Use the type system as safety net. Don't cast or suppress warnings —
-  if the type checker flags something, fix the types.
-- Design APIs so the happy path reads naturally and the error paths are
-  explicit (not buried in exceptions or None checks).
-
-**Signs of coincidentally-correct code:**
-
-- "It works in my test because I control the environment, but I'm not sure
-  why."
-- Removing or reordering lines "happens to work" but you're not sure if
-  there's a latent bug.
-- A change in one module breaks something unrelated and far away.
-- The codebase has unwritten rules that every developer must remember
-  ("always call X before Y").
-
-Anti-fragile code replaces unwritten rules with compiler-enforced ones.
-It doesn't depend on luck, ordering, or the current state of the world.
+| Principle | Rule |
+|---|---|
+| **Separation of concerns** | One reason to change per module/class/function. HTTP vs business vs persistence live in different modules with one-way dependency chains. Urge to import from a sibling layer or mix I/O with computation = split, not shortcut. |
+| **Cohesive classes** | Data + behaviour together. A class owns its invariants; external code never reaches into a dataclass to compute derived values. Public-field classes that others manipulate = poorly-organised dict. `get_*` accessors feeding procedural code = missed abstraction. |
+| **Names communicate intent** | Domain names, not shapes: `monthly_mortgage_payment` not `calculate_value_3`. A name needing a comment = failed name. Classes = domain nouns (`StampDutyNode`); functions = verbs (`resolve_property`); variables = what they hold (`price` not `x`); booleans read in `if` (`has_school` not `school_flag`). |
+| **Anti-fragile: correct by construction** | Types make invalid states unrepresentable; pure functions preferred; error paths explicit in the type system (discriminated unions, not `None`); never cast/suppress type-checker flags; happy path reads naturally. Signs of coincidental correctness: works only in your test env, reordering "happens to work", unrelated breakage, unwritten rules ("always call X before Y"). |
 
 ## Module Structure
 
@@ -108,98 +40,55 @@ houses/
 ├── routing.py             # Transit/drive routing dispatch
 ├── retry.py               # Async retry with backoff
 └── templates/             # Jinja2 HTML templates
-    ├── base.html
-    ├── property_list.html
-    ├── property_detail.html
-    ├── _card.html
-    └── ...
 ```
 
-Each module should have one reason to change.
+Each module has one reason to change.
 
 ## Value Types
 
-### Semantic Types Over Primitives
-
-Every value's type must encode its semantics, not just its raw shape.
-A bare ``str``, ``int``, ``float``, or ``dict`` tells you nothing about
-what the value means — every function must re-discover or guess the
-encoding, and mismatches are silent.
-
-Instead, use a specific type that makes the semantics obvious and the
-encoding correct by construction:
+### Semantic types over primitives
 
 | Primitive | Semantic type | Why |
 |-----------|-------------|-----|
-| ``str`` for a point in time | ``datetime.datetime`` | Timezone-aware arithmetic, no parsing errors |
-| ``float`` for a price | ``money.Money`` | Currency is part of the value, no silent £/$ mix-ups |
-| ``int`` for a duration | ``pint.Quantity`` | Unit is part of the value, metres ≠ kilometres |
-| ``dict`` for structured data | A ``dataclass`` or ``TypedDict`` | Field names, types, and required/optional are explicit |
-| ``str`` for an enumerated value | An ``enum`` | Valid values are known at compile time |
+| `str` for a point in time | `datetime.datetime` | Timezone-aware arithmetic, no parsing errors |
+| `float` for a price | `money.Money` | Currency part of the value; no silent £/$ mix-ups |
+| `int` for a duration | `pint.Quantity` | Unit part of the value; metres ≠ kilometres |
+| `dict` for structured data | `dataclass`/`TypedDict` | Field names, types, required/optional explicit |
+| `str` for enumerated value | `enum` | Valid values known at compile time |
 
-This rule is not about ceremony — it's about eliminating entire classes
-of bugs at the type-checking step. Every time you reach for a ``dict``,
-list, or primitive, ask: "Is there a type that makes this impossible to
-misuse?"
+Before reaching for a `dict`/list/primitive: "Is there a type that makes this impossible to misuse?"
 
-### Monetary Values: `money.Money`
+### Money
 
-All monetary values must use the ``money.Money`` type (from the ``money``
-package). Never use a bare ``float`` or ``int`` for prices, costs, or
-any currency amount.
-
-``Money`` encapsulates both the numeric value and the currency, so field
-names do not repeat the currency (``price``, not ``price_gbp``).
+All monetary values use `money.Money`. Never bare `float`/`int` for prices, costs, currency amounts. `Money` encapsulates value + currency, so field names don't repeat currency (`price`, not `price_gbp`):
 
 ```python
-from money import Money
-
-# Correct
+# ✓
 price: Money = Money(650_000, "GBP")
 daily_cost: Money = Money(100.0, "GBP")
-
-# Wrong
-daily_cost: float = 100.0  # what currency?
+# ✗ what currency?
+daily_cost: float = 100.0
 ```
 
-### Durations and Distances: `pint.Quantity`
+### Durations & distances
 
-Durations and distances must use ``pint.Quantity`` with an appropriate
-unit. Never use a bare ``int`` or ``float`` for minutes, kilometres, or
-any measured quantity.
-
-This keeps unit conversions explicit and prevents silent unit mismatches
-(e.g. confusing metres and kilometres).
+Use `pint.Quantity` with a unit. Never bare `int`/`float` for minutes, kilometres, measured quantities:
 
 ```python
-from pint import Quantity as _Quantity
-
-# Correct
+# ✓
 duration: _Quantity = 32 * ureg.minutes
 distance: _Quantity = 1.5 * ureg.kilometres
-
-# Wrong
-duration: int = 32  # minutes? seconds?
+# ✗ minutes? seconds?
+duration: int = 32
 ```
 
-### Each Class in Its Own Module
+### Each class in its own module
 
-Each class should be in its own module, named after that class. The
-exception is a module that groups closely related small dataclasses —
-for example, `models.py` bundling several small models is fine because
-each is just a handful of fields with no behaviour and they share the
-same reason to change (the data schema). If a class grows non-trivial
-behaviour, extract it to its own module.
+Named after the class. Exception: a module grouping closely related small dataclasses (e.g. `models.py` with several handful-of-fields, no-behaviour models sharing one reason to change). Extract once a class grows non-trivial behaviour.
 
 ## DAG Model Is the Source of Truth
 
-**The DAG (`houses/model/`) is the single authoritative store for all
-resolved property data.** Every piece of information about a property --
-address, location, bedrooms, price, commute times, school ratings, council
-tax, EPC band, walkability -- goes through the DAG.
-
-The DAG is not just an address/location resolver. It is the universal
-data model:
+**`houses/model/` (and `houses/nodes/`) is the single authoritative store for all resolved property data.** Address, location, bedrooms, price, commutes, schools, council tax, EPC, walkability — all go through the DAG.
 
 ```mermaid
 flowchart LR
@@ -227,24 +116,13 @@ flowchart LR
     DV --> SheetWrite
 ```
 
-### What Belongs in the DAG
+### What belongs in the DAG
 
-Every enrichment module that produces a value for a property must store
-that value as a source_value node in the DAG. This includes:
+Every enrichment module producing a property value stores it as a source_value node: Rightmove scrape (address, bedrooms, price, coords), commute (Simon transit, Lorena transit, Bracknell drive), schools (names, Ofsted, walk times), council tax (band, cost), EPC (rating, potential), walkability (walk-to-town, amenities), geocoding (lat/lng).
 
-- **Rightmove scrape**: address, bedrooms, price, map coordinates
-- **Commute**: Simon transit time, Lorena transit time, Bracknell drive time
-- **Schools**: primary and secondary school names, Ofsted ratings, walk times
-- **Council tax**: band, cost
-- **EPC**: rating, potential rating
-- **Walkability**: walk-to-town time, amenities
-- **Geocoding**: lat/lng from any source
+Every display/sheet-write reads derived values. **No module re-implements a priority chain or combines raw inputs — the DAG resolver does that once.**
 
-Every display or sheet-write operation reads from the DAG's derived
-values. No module re-implements a priority chain or combines raw inputs
--- the DAG resolver does that once.
-
-### Dependency Direction
+### Dependency direction
 
 ```
 Presentation (routes, templates)
@@ -253,337 +131,161 @@ Presentation (routes, templates)
       → Infrastructure (persistence, sheets, external APIs)
 ```
 
-Each layer only depends on the layer below it. The DAG (Domain Model)
-has no knowledge of HTTP, sheets, or API clients. The Application layer
-orchestrates: it calls enrichment modules (which write source_values),
-then the DAG resolver (which computes derived values), then output
-modules (which read derived values for display or sheet write).
+Each layer depends only on the layer below. The DAG knows no HTTP/sheets/API clients. Application orchestrates: enrichment (writes source_values) → resolver (computes derived) → output (reads derived for display/sheet).
 
-### What Does NOT Go in the DAG
+### What does NOT go in the DAG
 
-- **Sheet import logic**: imports call `insert_source_value()` and
-  `resolve_property()` but do not re-implement priority chains or
-  validation. The DAG's node definitions are the single source of truth
-  for those rules.
-- **Card/display assembly**: reads the DAG's resolved values via
-  `load_property_data()` or `resolve_property()`. It never decides
-  which value is "best" -- the DAG already decided.
-- **Enrichment runners**: write source values into the DAG via
-  `insert_source_value()`, then call `resolve_property()` to trigger
-  derived computation. They do not make priority decisions.
+| Code | Does | Never does |
+|---|---|---|
+| Sheet import | calls `insert_source_value()`, `resolve_property()` | re-implements priority/validation |
+| Card/display | reads resolved values via `load_property_data()`/`resolve_property()` | decides which value is "best" |
+| Enrichment runners | write source values, call `resolve_property()` | make priority decisions |
 
-### Design for New Nodes
+### Design for new nodes
 
-When adding any new property data:
+1. Declare **source nodes** in `nodes.py` for each raw input (`rightmove_bedrooms`, `tfl_simon_duration`).
+2. Declare **derived nodes** for resolved values (`best_commute_time`).
+3. **Enrichment module** writes to source_values via `insert_source_value()`.
+4. **Templates/sheet writes** read derived_values via `load_property_data()`/`resolve_property()`.
 
-1. **Declare source nodes** in `nodes.py` for each raw input (e.g.
-   `rightmove_bedrooms`, `tfl_simon_duration`).
-2. **Declare derived nodes** for resolved values that combine or elevate
-   inputs (e.g. `best_commute_time`).
-3. **Enrichment module** writes to source_values via
-   `insert_source_value()`.
-4. **Templates and sheet writes** read from derived_values via
-   `load_property_data()` or `resolve_property()`.
+Staleness, re-computation, priority are the DAG's job. No other code knows the resolution logic.
 
-The DAG handles staleness, re-computation, and priority. No other code
-needs to know the resolution logic.
+### Rule of thumb
 
-### Rule of Thumb
-
-If two places in the codebase need the same business rule (e.g. "user
-correction overrides Rightmove data"), that rule belongs in a DAG node
-definition — NOT in both the import function and the card builder. The
-DAG resolves once; everything else reads the result.
+A business rule needed in two places (e.g. "user correction overrides Rightmove") belongs in a DAG node definition — not in both the import function and the card builder. Resolve once; everything else reads.
 
 ## Houses-Specific Practices
 
-### Datetimes: Always UTC, Always Aware, Explicit on Boundaries
+### Datetimes: UTC, aware, explicit boundaries
 
-Every datetime in the system MUST be:
+1. **Store/process UTC.** Never `datetime.now()` — always `datetime.now(UTC)`.
+2. **Display local** at the presentation boundary (template, API response). Model never stores local times.
+3. **External sources**: document the source's timezone, convert explicitly to UTC before storing.
+4. **From DB**: `fromisoformat` may return naive. After parsing, check `dt.tzinfo is None` → `dt.replace(tzinfo=UTC)`.
 
-1. **Stored and processed in UTC.** Never use naive datetimes. Always
-   construct with ``datetime.now(UTC)``, never ``datetime.now()``.
-
-2. **Displayed in the user's local timezone.** Conversion to local time
-   happens at the presentation boundary (template rendering, API response).
-   The internal model never stores local times.
-
-3. **Read from external sources with explicit timezone handling.** When
-   an external API (TfL, VOA, Google Maps) provides a time or date in
-   local time, document which timezone the source uses and convert
-   explicitly to UTC before storing.
-
-4. **Loaded from the database as timezone-aware.** ``datetime.fromisoformat``
-   may return a naive datetime if the stored string has no timezone.
-   After ``fromisoformat``, always check ``dt.tzinfo is None`` and if so
-   call ``dt.replace(tzinfo=UTC)``.
-
-### Rationale
-
-Naive datetimes are a systemic source of bugs: comparisons between
-aware and naive datetimes raise ``TypeError``, and arithmetic produces
-wrong results around DST transitions. Storing in UTC eliminates the
-ambiguity; converting at the presentation boundary keeps the model
-simple.
-
-### Validation
+Naive datetimes are a systemic bug source: aware↔naive comparisons raise `TypeError`; arithmetic is wrong across DST. UTC storage removes ambiguity; boundary conversion keeps the model simple.
 
 ```python
-from datetime import UTC, datetime
-
-# Correct
+# ✓
 now = datetime.now(UTC)
-
-# Wrong — raises TypeError when compared with UTC datetimes
+# ✗ raises TypeError vs UTC datetimes
 now = datetime.now()
-
-# Correct — parse then ensure aware
+# ✓ parse then ensure aware
 raw = db_row["created_at"]
 dt = datetime.fromisoformat(raw)
 if dt.tzinfo is None:
     dt = dt.replace(tzinfo=UTC)
-
-# Wrong — may produce offset-naive datetime
+# ✗ may produce offset-naive datetime
 self._persisted_at = datetime.fromisoformat(raw)
 ```
 
-- Never clear and regenerate the whole sheet. Manual data (listing
-  addresses, notes, status) is irreplaceable.
-- A full clear + rewrite (`ws.clear()` followed by backfill) is
-  forbidden. It destroys manual data and breaks View tab formulas.
-- Use `POST /properties?fields=...&force=true` to update specific
-  columns that need refreshing.
+### Sheet rules
 
-### Column Migrations
+**Never clear/regenerate the whole sheet.** Manual data (addresses, notes, status) is irreplaceable. `ws.clear()` + backfill is forbidden — destroys manual data, breaks View tab formulas. Use `POST /properties?fields=...&force=true` for specific columns.
 
-- Use `scripts/sheet_tool.py` for column operations: `add`, `move`, `rename`,
-  `delete`. This is the only tool for grid manipulation. Do not call
-  `insert_cols`, `deleteDimension`, `add_cols`, or `clear` directly.
-- After a column change, call `POST /sync-view-formulas` to refresh View tab
-  formulas and named ranges to match the new column positions.
-- Delete one-off migration scripts after they've been run. The git log
-  preserves the history.
-- Update `Row.HEADERS` and `Row.from_property()` in `houses/sheets/row.py` to match the
-  new column layout. Run a batch refresh to populate the new column.
+**Column migrations** — `scripts/sheet_tool.py` only (`add`, `move`, `rename`, `delete`). Never call `insert_cols`/`deleteDimension`/`add_cols`/`clear` directly. After a change: `POST /sync-view-formulas`; update `Row.HEADERS` + `Row.from_property()` in `houses/sheets/row.py`; batch refresh to populate. Delete one-off migration scripts after running (git log preserves history).
 
-### User Columns Are Never Overwritten
+**User columns never overwritten** — Rightmove URL, Address, Postcode, Bedrooms, Price, Actual Lat/Long/Postcode: server never writes them. `Row.from_property()` returns `""` for all. Rightmove ID column is the server's stable lookup key; `write_enriched_row` uses it to find rows and writes only non-empty cells.
 
-- User-provided columns (Rightmove URL, Address, Postcode, Bedrooms,
-  Price, Actual Latitude, Actual Longitude, Actual Postcode) must never
-  be written by the server. `Row.from_property()` returns `""` for all of them.
-- The Rightmove ID column is the server's stable lookup key.
-- `write_enriched_row` uses the Rightmove ID column to find existing rows.
-  It only writes non-empty cells to avoid blanking user data.
+### API keys & secrets
 
-### API Keys and Secrets
+Environment only. `.env` is for non-secret config. **Never read, log, print, echo, or store keys** in context, files, code, output, cache keys, URLs, or request bodies — headers only. Redact keys from error messages before logging.
 
-- Keys come from the environment only. The `.env` file is for non-secret
-  configuration.
-- **Never read, log, print, echo, or store API keys** in conversation
-  context, files, code, or any output. Never include them in cache keys.
-  Never pass them in URLs or request bodies — use headers only.
-- If a secret appears in an error message, redact it before logging.
+### Fail fast, don't pre-check
 
-### Fail Fast, Don't Pre-Check
+Don't pre-validate before trying — let code fail naturally. Don't pre-check API keys before the call: missing key → 403 propagates as a normal API error; the HTTP transport mock handles requests regardless of key value.
 
-- Don't check for failure before trying an operation — just let the code
-  fail naturally. The shared coding standards call this principle explicitly:
-  "Don't silence errors with fallbacks BUT don't check for failure before
-  trying, just let the code fail."
-  A function should not pre-validate API keys before making the call.
-  The HTTP transport mock handles requests in tests regardless of the key
-  value. In production, a missing key causes a 403 which propagates as a
-  regular API error.
+### No backward compatibility shims
 
-### No Backward Compatibility Shims
+**Delete dead code, don't deprecate it.** A shim compiles, passes tests, lulls readers into thinking it's real, and never gets cleaned up. Rename/remove + update every caller in the same commit. No aliases, no re-exports, no "will remove in a future version".
 
-**Delete dead code, don't deprecate it.** If a function, endpoint, or
-parameter is no longer used, remove it — don't leave a deprecated wrapper
-"in case someone depends on it." The git log preserves history.
+### Never swallow errors
 
-A backward compatibility shim is worse than dead code: it compiles, it
-passes tests, it lulls future readers into thinking it's a real code path,
-and it never gets cleaned up because nobody knows who depends on it.
-
-If you rename or remove something, update every caller in the same commit.
-No aliases, no re-exports, no "will remove in a future version" comments.
-
-### Never Swallow Errors
-
-**Don't catch an exception and silently continue.** Every ``except`` block
-must either log the error, re-raise, or handle the failure in a way the
-caller can observe. A bare ``except: pass`` or ``except Exception:`` with
-no logging is forbidden.
-
-If the error is genuinely safe to ignore, log it at ``DEBUG`` level with
-an explanation. The next developer reading the log shouldn't have to guess
-whether the silence was intentional.
+Every `except` block must log, re-raise, or handle observably. Bare `except: pass` / silent `except Exception:` forbidden. Safe-to-ignore errors log at `DEBUG` with an explanation.
 
 ```python
-# Wrong — error is invisible
+# ✗ invisible
 try:
     do_something()
 except Exception:
     pass
-
-# Right — failure is observable
+# ✓ observable
 try:
     do_something()
 except Exception as e:
     logger.debug("do_something failed (non-fatal): %s", e)
 ```
 
-For DAG-specific error rules — the `Attempt`/`AttemptError` structured error
-contract, API services returning `Attempt` vs pure code throwing, transient-error
-re-raising and retry, and "nodes propagate, never re-literalize" — see
-[dag-library.md](dag-library.md) *The three-state result: `Attempt[T]`*.
+DAG-specific error rules (`AttemptError` contract, API services return Attempt vs pure code throw, transient re-raise/retry, nodes propagate never re-literalize) → [dag-library.md](dag-library.md) *The three-state result: `Attempt[T]`*.
 
-### Cache Key Hygiene
+### Cache key hygiene
 
-- Never include API keys in cache key parameters. Credential rotation
-  should not invalidate the cache.
-- Do not cache non-OK API responses (e.g., `REQUEST_DENIED`). A temporary
-  key issue should not poison the cache permanently.
+- Never include API keys in cache key parameters (rotation shouldn't invalidate the cache).
+- Never cache non-OK API responses (`REQUEST_DENIED`) — a temporary key issue must not poison the cache.
 
-### Force Parameter Discipline
+### Force parameter discipline
 
-- `force=true` overwrites existing cells. Use only when you know the new
-  data is better than what is in the sheet.
-- `force=false` (default) only fills blank cells. This is the safe default
-  for incremental enrichment.
-- The `force` parameter must reach BOTH `_batch_stream()` and
-  `_write_backfill_cells()`. If the call chain drops it, every cell is
-  treated as "already has data" regardless of the query parameter.
+- `force=true`: overwrite existing cells. Only when new data is known better.
+- `force=false` (default): fill blank cells only. Safe default for incremental enrichment.
+- `force` must reach BOTH `_batch_stream()` and `_write_backfill_cells()`. If the call chain drops it, every cell is treated as "already has data".
 
-### Querying Properties
+### Querying properties
 
-- `GET /properties` and `GET /properties/{rid}` require a `?tab=view` or
-  `?tab=data` parameter. Without it, the endpoint returns an error.
-- The View tab has XLOOKUP formulas that reference the Data tab. After
-  writing data, call `POST /sync-view-formulas` if needed.
+`GET /properties` and `GET /properties/{rid}` REQUIRE `?tab=view` or `?tab=data` — otherwise an error. After writing data, call `POST /sync-view-formulas` if needed (View tab XLOOKUPs reference Data tab).
 
 ## Dependency Injection
 
-The shared coding standards describe three DI patterns: local `_kwarg`
-injection, `Services` composition root, and context vars. This project
-uses all three — see how each is applied here:
-
-| Pattern | Houses implementation | When to use |
-|---------|----------------------|-------------|
-| **`Services` container** | `houses/services.py` — `Services` dataclass with every enrichment service and real defaults. `_run_enrichment` accepts optional `services` param. | Replace an entire enrichment module (EPC, council tax, commute) |
-| **Context vars** | `houses/context.py` — `get_services()`, `get_bus_fare_reader()`, `get_sheets_client()`. Server middleware initialises per-request state. | Per-request singletons (bus fares, sheets client, geo state) |
+| Pattern | Houses implementation | When |
+|---------|----------------------|------|
+| **`Services` container** | `houses/services.py` — `Services` dataclass, every enrichment service with real defaults; `_run_enrichment` accepts optional `services` param | Replace an entire enrichment module (EPC, council tax, commute) |
+| **Context vars** | `houses/context.py` — `get_services()`, `get_bus_fare_reader()`, `get_sheets_client()`; middleware initialises per-request state | Per-request singletons (bus fares, sheets client, geo state) |
 | **Local `_kwarg`** | `_registry` on `_add_parking_cost`, `_page_path` on `scrape()`, etc. | Leaf-level data objects (car park data, HTML fixtures) |
 
-Reusable fakes live in `tests/helpers.py`. Use `make_services()` to build a
-`Services` with all fakes at sensible defaults, or construct a custom
-`Fake*` for individual service overrides.
+Reusable fakes in `tests/helpers.py`. `make_services()` = all fakes at sensible defaults; construct a custom `Fake*` for individual overrides.
 
 ## Testing
 
-### Three Mocking Layers
+### Three mocking layers (plus two legacy/extra)
 
-Tests run at three boundaries, from simplest to most thorough:
+| Layer | Technique | Notes |
+|---|---|---|
+| 1. Pure functions | no mocking | real inputs → assert outputs (most of `tests/unit/`) |
+| 2. Function-param injection | `_kwarg` fake | no monkeypatch, no MockTransport |
+| 3. `Services` container | fakes → `_run_enrichment` | `make_services(epc_service=FakeEPC(band="C"))` |
+| 4. `ContextVar` | set per-request state for test scope | `ctx._request_bus_fares.set(...)` in try/finally |
+| 5. MockTransport (legacy) | patches httpx transport | fine-grained HTTP control; `tests/integration/conftest.py` — migrate to DI |
 
-**1. Pure functions** — no mocking at all. Test real logic with real inputs
-and assert output values. (Most of ``tests/unit/`` works this way.)
-
-**2. Function-parameter injection** — pass a fake service or data object
-via the ``_kwarg`` pattern. No monkeypatch, no MockTransport.
-
-```python
-result = await route._add_parking_cost(data, 30.0, _registry=registry)
-```
-
-**3. ``Services`` container** — build a ``Services`` with fakes and pass
-to ``_run_enrichment``.
-
-```python
-from tests.helpers import make_services
-
-services = make_services(
-    epc_service=FakeEPC(band="C"),
-    commute_router=FakeCommuteRouter(simon=None),
-)
-result = await _run_enrichment(..., services=services)
-```
-
-**4. ``ContextVar``** — set per-request state for the test scope.
-
-```python
-import houses.context as ctx
-
-token = ctx._request_bus_fares.set(my_registry)
-try:
-    result = await get_commute(...)
-finally:
-    ctx._request_bus_fares.reset(token)
-```
-
-**5. MockTransport** (legacy) — the integration conftest patches httpx at
-the transport layer.  Works for tests that need fine-grained HTTP response
-control. Defined in ``tests/integration/conftest.py``.
-
-### Reusable Fakes
-
-``tests/helpers.py`` provides ready-made fakes for every service:
+### Reusable fakes
 
 | Fake | Overrides |
 |------|-----------|
-| ``FakeGeocoder`` | ``result``, ``postcode_override`` |
-| ``FakeCommuteRouter`` | ``simon``, ``lorena``, ``petrol`` |
-| ``FakeEPC`` | ``band`` |
-| ``FakeCouncilTax`` | ``band``, ``cost`` |
-| ``FakeWalkability`` | ``walk_to_town_minutes``, ``amenities`` |
-| ``FakeTownDesc`` | ``description`` |
-| ``FakeSchoolLookup`` | returns ``None`` for all lookups |
-| ``FakeRailFare`` | passes simon/lorena through unchanged |
+| `FakeGeocoder` | `result`, `postcode_override` |
+| `FakeCommuteRouter` | `simon`, `lorena`, `petrol` |
+| `FakeEPC` | `band` |
+| `FakeCouncilTax` | `band`, `cost` |
+| `FakeWalkability` | `walk_to_town_minutes`, `amenities` |
+| `FakeTownDesc` | `description` |
+| `FakeSchoolLookup` | returns `None` for all lookups |
+| `FakeRailFare` | passes simon/lorena through unchanged |
 
-Use ``make_services()`` for a ``Services`` with all fakes at sensible
-defaults:
+Every fake declares its service protocol as base class (`class FakeEPC(EPCLookupService)`); `make_services` override kwargs are typed against the protocols. A protocol signature change (e.g. `lookup` returning `Attempt[str]` instead of `str`) is flagged by basedpyright/mypy at edit time — drift never reaches runtime.
 
-```python
-services = make_services(epc_service=FakeEPC(band="B"))
-```
+### Test organization
 
-Every fake declares its service protocol as a base class (e.g.
-``class FakeEPC(EPCLookupService)``) and ``make_services`` override
-kwargs are typed against those protocols. When a service protocol
-signature changes (e.g. ``lookup`` returning ``Attempt[str]`` instead
-of ``str``), type-checking (basedpyright/mypy) flags the fake — drift
-is caught at edit time, not as a runtime failure in an unrelated test.
+- **Unit** (`tests/unit/`): one function/module in isolation, no API calls; `_kwarg` injection or pure functions.
+- **Integration** (`tests/integration/`): full pipeline; `Services` fakes, `ContextVar`, or MockTransport.
+- **E2E** (`@pytest.mark.e2e`): real external APIs; one consolidated suite per API; skipped by default.
 
-### Test Organization
+### MockTransport (legacy — migration only)
 
-- **Unit tests** (`tests/unit/`): Test one function or module in isolation.
-  No real API calls. Prefer ``_kwarg`` injection or pure-function tests.
-- **Integration tests** (`tests/integration/`): Test the full pipeline.
-  Can use ``Services`` fakes, ``ContextVar``, or MockTransport.
-- **E2E tests** (marked ``@pytest.mark.e2e``): Verify real external APIs.
-  **One consolidated suite per external API.** Skipped by default.
+When converting to DI: identify exercised enrichment services → create fakes via `tests/helpers.py` → pass `services=make_services(...)` to `_run_enrichment` → drop the test from `_mock_http_requests`.
 
-### MockTransport (Legacy — For Migration Only)
+### Detailed test standards
 
-The integration conftest patches ``httpx.AsyncClient`` and ``httpx.Client``
-with a ``MockTransport``. New tests should prefer ``Services`` or
-``ContextVar`` DI instead. When converting a MockTransport test to DI:
-
-1. Identify which enrichment services the test exercises.
-2. Create fakes via ``tests/helpers.py``.
-3. Pass ``services=make_services(...)`` to ``_run_enrichment``.
-4. Remove the test from ``_mock_http_requests`` dependency.
-
-### Detailed Test Standards
-
-See ``docs/testing-standards.md`` for the full reference: test file naming,
-determinism requirements, test isolation, and patterns for every scenario.
+See `docs/testing-standards.md` — naming, determinism, isolation, per-scenario patterns.
 
 ## Documentation
 
-- **Delete, don't archive.** Obsolete content is a liability. When something
-  is no longer accurate, delete it. Don't move it to an archive, don't leave
-  a deprecation notice. If it's wrong, remove it.
-- **Single source of truth**: Each piece of information lives in exactly one
-  place. Other docs link to it. They don't repeat it. If you find duplicated
-  content, pick one home and link from the other locations.
-- **Docs must match the code**: When you rename a function, module, or tab,
-  update the docs in the same commit.
+- **Delete, don't archive.** Obsolete content is a liability. Wrong = remove; no archive dirs, no deprecation notices.
+- **Single source of truth**: each fact in exactly one place; other docs link, never repeat. Duplicated content → pick one home, link the rest.
+- **Docs must match code**: rename a function/module/tab → update docs in the same commit.

@@ -1,151 +1,114 @@
 # DAG Library — `dag/`
 
-**For:** Developers adding or maintaining DAG nodes in `houses/nodes/`.
+**For:** developers adding/maintaining DAG nodes in `houses/nodes/`.
 
-The `dag/` library is a **reactive directed acyclic graph**: when a leaf node's value
-changes, every downstream node that depends on it automatically recomputes and persists
-its new result.
+Reactive directed acyclic graph: when a leaf changes, every downstream node
+recomputes and persists. Each link is a signal connection — downstream nodes
+schedule themselves when a dependency changes.
 
 ```
 UserInputNode ──► DerivedNode ──► DerivedNode
 ```
 
-Each link is a signal connection — the downstream node is notified when its dependency
-changes and schedules itself for refresh.
-
----
-
 ## Core Concepts
 
 ### Nodes
 
-Two concrete node types, one abstract base:
-
 | Type | Purpose | Set by |
 |---|---|---|
-| `UserInputNode[T]` | A leaf whose value is pushed externally | Enrichment modules, API handlers, WebSocket |
-| `DerivedNode[T]` | Computed from one or more dependency nodes | Its own `compute()` — never set externally |
-| `Node[T]` (abstract) | Shared identity, signal, serialisation, persistence | — |
+| `UserInputNode[T]` | Leaf; value pushed externally | Enrichment modules, API handlers, WebSocket |
+| `DerivedNode[T]` | Computed from dependencies | Its own `compute()` — never set externally |
+| `Node[T]` (abstract) | Identity, signal, serialisation, persistence | — |
 
-Every node has:
-- **`node_id`** — globally unique string, typically `"{rid}/{node_name}"` (e.g. `"12345/council_tax"`).
-- **`value_type`** — the Python type `T`, used by a Pydantic `TypeAdapter` to validate and serialise values.
-- **`display_name`** — auto-generated from the node_id stem.
+Every node: `node_id` (unique, `"{rid}/{node_name}"` e.g. `"12345/council_tax"`), `value_type` (Python type `T`, Pydantic TypeAdapter validates/serialises), `display_name` (from node_id stem).
 
 ### The three-state result: `Attempt[T]`
 
-Every node's value is an `Attempt` — a discriminated union with three states:
-
 | State | Created via | Meaning |
 |---|---|---|
-| `succeeded` | `Attempt.succeeded(value)` | Computation finished with a value |
-| `pending` | `Attempt.pending()` | Not yet computed, or waiting on dependencies |
-| `impossible` | `Attempt.impossible("reason")` | Computation failed irrecoverably |
+| `succeeded` | `Attempt.succeeded(value)` | Has a value |
+| `pending` | `Attempt.pending()` | Not computed / waiting on deps |
+| `impossible` | `Attempt.impossible("reason")` | Failed irrecoverably |
 
-A `DerivedNode`'s `compute()` must **always** return an `Attempt`. The framework never
-calls `compute()` if a dependency is impossible — it short-circuits and propagates
-impossible upstream. If any dependency is pending, the node defers without computing.
+`compute()` MUST return an `Attempt`. Framework short-circuits: dep impossible → propagate upstream (never call compute); dep pending → defer.
 
-#### Structured errors: `AttemptError`
+#### AttemptError — structured errors
 
-Every impossible `Attempt` carries a structured `AttemptError` (via `Attempt.error_info`):
-`code`, `message`, `retryable`, `source`, `causes`, and — in memory — the **actual
-exception object** (`exc`). Inspect the exception's attributes (`.status`, `.headers`,
-`retry_after`) rather than parsing the message string:
+`Attempt.error_info` = `AttemptError{code, message, user_message, retryable, source, causes, exc, traceback}`.
+
+**Never parse error strings. Inspect the exception:**
 
 ```python
-# Wrong — string parsing
+# ✗ string parsing
 if "429" in attempt.error:
     retry = True
-
-# Right — structured
+# ✓ structured
 retry = attempt.error_info.retryable
-status = attempt.error_info.exc.status  # the actual HttpError
+status = attempt.error_info.exc.status   # actual HttpError
 ```
 
-`Attempt.impossible()` **auto-captures the active exception** when called inside an
-`except` block — the traceback and retryability are recorded without extra plumbing.
-A plain `Attempt.impossible("reason")` outside an `except` gets `code="no_data"`.
+- `exc` — real exception object (in-memory only; never serialized).
+- Auto-captures active exception when `impossible()` is called inside `except`.
+- `Attempt.impossible("msg")` outside `except` → `code="no_data"`.
 
-Serialization (in `to_json()`) emits:
-- `error` — the **user-facing** message, safe to render in the UI. This is
-  `AttemptError.display_message`: the explicit `user_message` if set, else the
-  deepest cause's message (the leaf reason), else the internal message. For a
-  dep-failure chain the UI therefore sees the friendly leaf text (e.g.
-  "Works estimate required for: Ashby"), never node ids or `dep failed`.
-- `error_detail` — the structured error (code, retryable, source, `exc_type`,
-  traceback, `causes` chain) for debugging. `error_detail.message` keeps the
-  full internal chain with node ids. **Internal — never render in the UI.**
+**Field split (UI vs internal):**
 
-`classify_exception()` is the single source of truth for retryability: it maps an
-exception to `(code, retryable)` and handles `HttpError` (`.status`), httpx errors
-(`.response.status_code`), `TimeoutError`, and everything else. Both `AttemptError`
-and the DAG retry machinery use it.
+| Field | Content | Render in UI? |
+|---|---|---|
+| `error` | `display_message` — friendly leaf text ("Works estimate required for: Ashby") | ✅ |
+| `error_detail.message` | full internal chain, node ids, `dep failed` markers | ❌ debugging only |
+| `error_detail.traceback` | captured traceback | ❌ debugging only |
+
+`display_message` resolution: explicit `user_message` → deepest cause's message → `message`. Dep-failure chains surface the leaf reason, never ids.
+
+`classify_exception(exc) → (code, retryable)` is the ONE source of truth for retryability — used by both `AttemptError` and the DAG retry machinery. Handles `HttpError.status`, `httpx` `.response.status_code`, `TimeoutError`.
 
 #### Error propagation contract
 
-- **Services that call APIs return `Attempt`.** The failure reason travels in
-  `Attempt.error` (message) and `Attempt.error_info` (structured), so the frontend
-  can render it and the DAG can act on it. E.g. `epc.lookup_epc` returns
-  `Attempt[str]` — never `str | None` or `""` on failure.
-- **Services that don't call APIs throw exceptions.** Pure computation has no
-  structured result channel; a failure is exceptional and should propagate. The
-  framework catches exceptions from `compute()`, records them on the `Attempt`,
-  and retries transient ones.
+| Service type | Failure channel | Transient errors |
+|---|---|---|
+| Calls APIs | return `Attempt[...]` | re-raise (`httpx.HTTPStatusError`, `RequestError`, timeout) → DAG retries |
+| Pure computation | throw | n/a — framework catches, records on Attempt |
 
-**Either way, the reason must not be lost.**
+**Never lose the reason.** ✗ `return None` / `return ""` on failure (caller can't distinguish "no data" from "API down"); ✓ `Attempt.impossible(reason)`.
 
 ```python
-# Wrong — API service swallows the reason into a bare value
-async def lookup(postcode: str) -> str | None:
-    try:
-        ...
+# ✗ swallows the reason
+async def lookup(pc: str) -> str | None:
+    try: ...
     except Exception:
-        return None  # caller can't distinguish "no data" from "API down"
-
-# Right — API service returns Attempt with the reason
-async def lookup(postcode: str) -> Attempt[str]:
-    try:
-        ...
+        return None
+# ✓ propagates it
+async def lookup(pc: str) -> Attempt[str]:
+    try: ...
     except httpx.HTTPStatusError:
-        raise  # transient — let the DAG retry
+        raise                       # transient → DAG retries
     except Exception as e:
         return Attempt.impossible(f"lookup failed: {e}")
 ```
 
-Transient HTTP errors (429, 5xx, timeouts) are **re-raised** (not caught) so the DAG's
-retry machinery schedules a retry. Permanent failures return `Attempt.impossible(reason)`.
-The retry decision is driven by `AttemptError.retryable` — a service that catches a
-transient error and returns `Attempt.impossible(...)` is retried exactly like one that
-re-raises.
+Retry decision = `AttemptError.retryable`, regardless of raise-vs-return style: a service that catches a transient error and returns `impossible(...)` is retried exactly like one that re-raises.
 
-#### Nodes propagate, never re-literalize
+#### Nodes: propagate, never re-literalize
 
-When a node receives a failed dependency or service `Attempt`, propagate its reason —
-don't replace it with a fresh generic string:
+**Never** replace a failed dep/service reason with a fresh string:
 
 ```python
-# Wrong — invents a literal, hiding the real reason
+# ✗ invents a literal, hides the real reason
 if not result.succeeded:
     return Attempt.impossible("no data")
-
-# Right — propagate the actual reason
+# ✓ propagate
 if not result.succeeded:
     return Attempt.impossible(result.error or "no data")
 ```
 
-`Node._impossible(dep_attempts)` and the DAG's dep-failure path already build
-`code=dep_failed` errors with a `causes` chain of the failed dependencies' `error_info`
-— the chain is traversable structurally, not by string matching.
+`Node._impossible(deps)` and the dep-failure path build `code=dep_failed` with a `causes` chain of each failed dep's `error_info` — traverse structurally, never by string match.
 
 ### Provenance
 
-Every node tracks *where its value came from* via `build_provenance()`, which walks the
-dependency tree and returns a `Provenance` dataclass. Provenance is serialised in every
-node's `to_json()` output.
+Every node tracks *where its value came from* via `build_provenance()`, which walks the dependency tree and returns a `Provenance` dataclass, serialised in every node's `to_json()` output.
 
-Provenance is fully dynamic — regenerated on every `to_json()` call. There is no
-provenance migration; nothing to persist. See *Provenance auto-generation* below.
+Fully dynamic — regenerated on every `to_json()` call. No provenance migration; nothing to persist. See *Provenance auto-generation*.
 
 ---
 
@@ -182,7 +145,7 @@ Scheduler runs node.refresh():
          Permanent → Attempt.impossible
 ```
 
-Staleness is determined entirely by timestamps. No explicit invalidation calls needed.
+Staleness determined entirely by timestamps. No explicit invalidation calls needed.
 
 ### Serialisation
 
@@ -193,13 +156,11 @@ Staleness is determined entirely by timestamps. No explicit invalidation calls n
 
 ## Expression System
 
-Instead of writing imperative `compute()` methods, nodes can declare their calculation
-as an **expression tree**. The base class handles evaluation and provenance generation
-automatically.
+Nodes can declare their calculation as an **expression tree** instead of an imperative `compute()`. The base class handles evaluation and provenance generation automatically.
 
 ### Declaring an expression
 
-Set `expression` as a property that returns an `Expression` tree:
+Set `expression` as a property returning an `Expression` tree:
 
 ```python
 from dag.expression import Ref, Literal, Add, Sub, Conditional
@@ -219,8 +180,7 @@ class MortgageRequiredNode(DerivedNode[Money]):
         return self.expression.evaluate()
 ```
 
-Node objects can be used directly in expressions — they implement `__add__`, `__sub__`,
-`__mul__`, `__truediv__`, and `__neg__` that create the corresponding `Expression` tree:
+Node objects work directly in expressions — they implement `__add__`, `__sub__`, `__mul__`, `__truediv__`, `__neg__` that build the corresponding tree:
 
 ```python
 self._price_node + self._stamp_duty_node - self._equity_node
@@ -243,16 +203,11 @@ self._price_node + self._stamp_duty_node - self._equity_node
 
 ### Provenance auto-generation
 
-When a node has an `expression` set, `build_provenance()` calls `expression.to_formula()`
-to generate formula lines automatically. The expression tree is walked to produce
-labelled formula lines showing every term, its value, and the final result.
-
-Nodes that use expressions **do not override `build_provenance()`**. The base class
-default walks active dependencies and calls `expression.to_formula()`.
+With `expression` set, `build_provenance()` calls `expression.to_formula()` to generate labelled formula lines (every term, its value, the result). Expression-based nodes **do not override `build_provenance()`** — the base default walks active deps and calls `expression.to_formula()`.
 
 ### TieredRate — marginal calculations
 
-For calculations with rate bands (stamp duty, tax tiers):
+Rate bands (stamp duty, tax tiers):
 
 ```python
 TieredRate(
@@ -270,7 +225,7 @@ Provenance shows every tier with its range and rate, highlighting the active one
 
 ### Choose — selection with provenance
 
-When multiple alternatives are already computed and one must be selected:
+Alternatives already computed; one selected:
 
 ```python
 Choose(
@@ -283,20 +238,11 @@ Choose(
 )
 ```
 
-Provenance shows every alternative with its value and a ✓/✗ marker indicating
-which was selected.
+Provenance shows every alternative with its value and a ✓/✗ marker indicating which was selected.
 
 ### Stable dependencies by default
 
-`_get_active_deps()` should return the same set of deps in most cases. Conditional
-deps are for shortcutting — skipping computation entirely. If you want to
-calculate all alternatives and then pick one, keep deps stable.
-
-For trivial local computation (reading a cached value, geocoding a coordinate),
-keeping the dep stable avoids unnecessary conditional complexity:
-
-```python
-# Correct: stable deps, early-return in compute when dep isn't needed
+`_get_active_deps()` should return the same deps in most cases. **Conditional deps are for shortcutting — skipping computation entirely.** If you want all alternatives computed then compared, keep deps stable. For trivial local computation (reading a cached value, geocoding a coordinate), stable deps avoid unnecessary conditional complexity:
 
 ```python
 # Correct: stable deps, early-return in compute when dep isn't needed
@@ -313,9 +259,7 @@ def compute(self, transit, location):
 
 ## Settings Nodes
 
-Every financial setting has its own `UserInputNode`, created by `Services.__post_init__`
-from `SETTING_DEFAULTS` in `houses/nodes/settings_node.py`. Consumer nodes reference
-individual setting nodes directly, not a blob:
+Every financial setting has its own `UserInputNode`, created by `Services.__post_init__` from `SETTING_DEFAULTS` in `houses/nodes/settings_node.py`. Consumer nodes reference individual setting nodes directly, not a blob:
 
 ```python
 class YearlySinkingFundNode(DerivedNode[Money]):
@@ -323,11 +267,9 @@ class YearlySinkingFundNode(DerivedNode[Money]):
         super().__init__(node_id, Money, (rightmove_price, sinking_fund_rate_node))
 ```
 
-The `SettingsNode` aggregate is available via `svc.settings_view` for API backward
-compat, but consumer code never uses it.
+`SettingsNode` aggregate is available via `svc.settings_view` for API backward compat, but consumer code never uses it.
 
-Settings are pushed via the PATCH endpoint (`/api/settings/financial`), which pushes
-to individual nodes and lets the signal chain propagate.
+Settings are pushed via PATCH `/api/settings/financial`, which pushes to individual nodes and lets the signal chain propagate.
 
 ---
 
@@ -380,27 +322,14 @@ class StampDutyNode(DerivedNode[Money]):
 
 ## Design Rules
 
-### One concept per node
-
-If `compute()` calculates something that isn't the node's named purpose, split it.
-The signal chain then tracks real dependencies correctly, and downstream nodes
-can depend on just the value they need.
-
-### Stable dependencies
-
-`_get_active_deps()` must always return the same deps tuple. If a dep is sometimes
-unnecessary, keep it in the deps and early-return in `compute()`. This keeps
-provenance transparent and prevents staleness tracking bugs.
-
-### No side effects in compute
-
-Derived nodes must not push values into other nodes. Use a dependency chain
-instead — the signal cascade handles propagation automatically.
-
-### Values must be typed classes, not dicts
-
-Use frozen dataclasses or Pydantic models so the value type is self-documenting
-and the TypeAdapter round-trips safely:
+| Rule | Detail |
+|---|---|
+| **One concept per node** | If `compute()` does something beyond its named purpose, split. Signal chain then tracks real deps; downstream nodes depend on just what they need. |
+| **Stable dependencies** | `_get_active_deps()` must always return the same deps tuple. If a dep is sometimes unnecessary, keep it in deps and early-return in `compute()`. Keeps provenance transparent, prevents staleness bugs. |
+| **No side effects in compute** | Derived nodes must not push into other nodes. Use a dependency chain — the signal cascade handles propagation. |
+| **Typed values, not dicts** | Frozen dataclasses or Pydantic models so the value type is self-documenting and the TypeAdapter round-trips safely: |
+| **Service results wrapped in Attempt** | `School | None` → node wraps in `Attempt.succeeded(school)` or `Attempt.impossible("not found")` |
+| **Conditional deps skip; stable deps compare** | Conditional (`_get_active_deps()`) skips computation entirely — `IfThenElseNode` excludes the else branch so its chain never runs. Stable deps when all alternatives must compute then compare — `CommuteSelectorNode` keeps walk/transit/drive stable, `Choose` picks best. |
 
 ```python
 @dataclass(frozen=True)
@@ -410,46 +339,18 @@ class CommuteResult:
     mode: str
 ```
 
-### Service returns wrapped in Attempt
+### Bumping node_id
 
-When a service returns `School | None`, the node wraps it in `Attempt.succeeded(school)`
-or `Attempt.impossible("not found")`.
-
-### Conditional deps shortcut work; stable deps calculate then compare
-
-Use conditional deps (`_get_active_deps()`) when you want to **skip computation
-entirely** — the dep shouldn't compute at all. `IfThenElseNode` is the canonical
-example: when the condition is true, the `else` branch is excluded from deps, so
-its entire computation chain never runs.
-
-Don't use conditional deps when you want **all alternatives to compute so you
-can compare them**. `CommuteSelectorNode` keeps walk, transit, and drive as
-stable deps — they all compute independently, then `Choose` picks the best one.
-
-**Conditional dep — skip work entirely:**
-```python
-# IfThenElseNode: else branch excluded when condition is true
-```
-
-**Stable dep — calculate then decide:**
-```python
-# CommuteSelectorNode: walk, transit, drive all compute, Choose selects
-```
-
-
-When `compute()` changes in a way that makes old persisted results semantically invalid,
-bump the node_id:
+When `compute()` changes such that old persisted results are semantically invalid, bump the node_id:
 
 ```python
 # After — old persisted results under "town_desc" are ignored
 self.town_desc = TownDescNode(f"{rid}/town_desc_v2", ...)
 ```
 
-The new node_id has no persisted data, so the node starts as `Attempt.pending()` and
-recomputes on next scheduler pass. Old results are orphaned harmlessly.
+New node_id has no persisted data → starts `Attempt.pending()` and recomputes on next scheduler pass. Old results orphan harmlessly.
 
-**When NOT to bump:** cosmetic refactors, adding logging, changing error messages,
-or any change producing the same output for the same inputs.
+**When NOT to bump:** cosmetic refactors, adding logging, changing error messages, or any change producing the same output for the same inputs.
 
 ---
 
@@ -457,27 +358,23 @@ or any change producing the same output for the same inputs.
 
 ### Tracing failures through provenance
 
-Every node's `to_json()` output includes a `provenance` dict. When a node fails:
+Every node's `to_json()` includes a `provenance` dict. On failure:
 
-1. Read the failed node's `node_results` — the `error` field says
-   `"dep failed: X failed"` or gives the compute error directly.
+1. Read the failed node's `node_results` — `error` says `"dep failed: X failed"` or the compute error directly.
 2. Read the dep's `node_results` for its provenance label and error.
-3. Repeat until you reach the root cause (a source node or an API error).
+3. Repeat until the root cause (source node or API error).
 
-Do not delete DB rows, clear caches, or restart the server to investigate — that
-destroys the evidence. Read the provenance chain instead.
+**Never delete DB rows, clear caches, or restart the server to investigate** — that destroys the evidence. Read the provenance chain instead.
 
 ### DB isolation for tests
 
-Tests replace the global DB connection with an in-memory SQLite. Settings sources
-live in `Services` (not at module level), so they read from the in-memory DB
-automatically — no stale cached data, no real DB access during test collection.
+Tests replace the global DB connection with in-memory SQLite. Settings sources live in `Services` (not module level), so they read the in-memory DB automatically — no stale cached data, no real DB access during test collection.
 
 ---
 
 ## Datetime rules
 
-- Store and process in UTC (`datetime.now(UTC)`, never `datetime.now()`).
+- Store/process in UTC (`datetime.now(UTC)`, never `datetime.now()`).
 - After `datetime.fromisoformat()`, check `dt.tzinfo is None` and replace with UTC.
 - Display in the user's local timezone at the presentation boundary.
-- When reading from external APIs, document the source's timezone and convert explicitly.
+- External APIs: document the source's timezone and convert explicitly.
