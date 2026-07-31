@@ -92,6 +92,21 @@ class Node(ABC, Generic[T]):
                 self._retry_count = stored.get("retry_count", 0)
             return None
 
+        # Reconstruct the structured error from the persisted error_detail
+        # (code, causes, user_message) so display_message resolves to the
+        # friendly leaf reason across restarts — not the raw node-id/dep
+        # chain that the flat error string carries.
+        detail = stored.get("error_detail")
+        if detail and isinstance(detail, dict):
+            from dag.attempt import AttemptError
+
+            return Attempt.impossible(
+                stored.get("error", "unknown"),
+                error_info=AttemptError.from_dict(detail),
+            )
+        # Legacy rows (persisted before error_detail existed): no structured
+        # info to recover — keep the raw string; provenance fallback makes
+        # it generic-friendly when rendered.
         return Attempt.impossible(stored.get("error", "unknown"))
 
     def latest_attempt(self) -> Attempt:

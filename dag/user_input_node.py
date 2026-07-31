@@ -181,11 +181,51 @@ class UserInputNode(Node[T], Generic[T]):
         # Fall back to persistence timestamp for data that predates freshness tracking
         freshness = self._push_timestamp or self._persisted_at
         return Provenance(
-            label=self._source_label,
-            value=self._value,
+            label=self.display_label,
+            value=self._provenance_value(),
             source_type=SourceType.USER,
             freshness=freshness,
         )
+
+    @property
+    def display_label(self) -> str:
+        """User-facing label for this source.
+
+        Maps internal source labels (persisted push origins) to friendly
+        display text; falls back to the raw label for user-entered
+        sources like "Rightmove" or "User correction".
+        """
+        if self._id == "persons" or self._id.endswith("/persons"):
+            return "Household members"
+        label = self._source_label or ""
+        if label in ("db", "config", "migration", "settings"):
+            return "Your settings"
+        return label or self._id
+
+    def _provenance_value(self):
+        """Value safe to render in provenance.
+
+        - JSON-safe values pass through unchanged.
+        - Money serialises as its string form ("GBP 800,000.00") — the
+          existing, user-friendly provenance convention.
+        - Raw structured objects (Person lists, dataclasses) stringify to
+          unhelpful repr dumps in the UI — omit those and let the display
+          show just the label.
+        """
+        v = self._value
+        if v is None:
+            return None
+        import json as _json
+
+        try:
+            _json.dumps(v)
+            return v
+        except (TypeError, ValueError, OverflowError):
+            from money import Money as _Money
+
+            if isinstance(v, _Money):
+                return str(v)
+            return None
 
     async def to_json_value(self) -> dict[str, Any]:
         """Return a JSON-safe dict without provenance."""

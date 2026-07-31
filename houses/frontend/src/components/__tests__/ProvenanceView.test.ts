@@ -358,3 +358,84 @@ describe('ProvenanceView — user-facing vs internal error fields', () => {
     expect(w.html()).not.toContain('dep failed')
   })
 })
+
+describe('ProvenanceView — story view shows calc node sources', () => {
+  it('sinking-fund style calc node shows its input sources in the story view', () => {
+    // A calc node whose formula references inputs that are its own sources
+    const sinkingFund: Provenance = {
+      label: 'Yearly Sinking Fund',
+      sourceType: 'calc',
+      value: 'GBP 8,000.00',
+      formula: {
+        lines: [
+          { label: 'Property Price', value: '£800,000.00' },
+          { label: 'Sinking Fund Rate', value: '1.0%' },
+        ],
+        result: '£8,000.00/yr',
+      },
+      sources: {
+        rightmove_price: { label: 'Rightmove', value: 'GBP 800,000.00', sourceType: 'user', freshness: '2026-07-30T09:15:00+00:00' },
+        sinking_fund_rate: { label: 'Sinking Fund Rate', value: 1.0, sourceType: 'user', freshness: '2026-07-30T07:00:00+00:00' },
+      },
+    }
+    const w = mountView(sinkingFund, { detailLevel: 'story' })
+    const text = w.text()
+    // Formula shown
+    expect(text).toContain('Property Price')
+    expect(text).toContain('£800,000.00')
+    // The input sources must be visible as cards, not just formula lines
+    expect(text).toContain('Rightmove')
+    expect(text).toContain('Sinking Fund Rate')
+  })
+})
+
+describe('ProvenanceView — nested calc node sources in story view', () => {
+  it('shows the sources of a nested calc node when the calc has its own inputs', async () => {
+    // Total Cost root → sinking_fund calc → its own inputs (rightmove, rate)
+    const totalCostWithSinking: Provenance = {
+      label: 'Total Monthly Cost',
+      sourceType: 'calc',
+      value: 'GBP 2917.15',
+      formula: {
+        lines: [{ label: 'Sinking Fund (yearly) ÷ 12 × ⅔', value: '£305.56' }],
+        result: '£2,917.15/mo',
+      },
+      sources: {
+        sinking_fund: {
+          label: 'Yearly Sinking Fund',
+          sourceType: 'calc',
+          value: 'GBP 8,000.00',
+          formula: {
+            lines: [
+              { label: 'Property Price', value: '£800,000.00' },
+              { label: 'Sinking Fund Rate', value: '1.0%' },
+            ],
+            result: '£8,000.00/yr',
+          },
+          sources: {
+            rightmove_price: { label: 'Rightmove', value: 'GBP 800,000.00', sourceType: 'user' },
+            sinking_fund_rate: { label: 'Sinking Fund Rate', value: 1.0, sourceType: 'user' },
+          },
+        },
+      },
+    }
+    const w = mountView(totalCostWithSinking, { detailLevel: 'story' })
+    const text = w.text()
+    // The nested calc card is shown, with an expand affordance
+    expect(text).toContain('Yearly Sinking Fund')
+    // Before expanding: the formula and its inputs are NOT yet visible
+    expect(text).not.toContain('Property Price')
+    // Click the calc card to expand it (as a user would)
+    const calcCard = w.findAll('.flow-card__body--clickable').find(b => b.text().includes('Yearly Sinking Fund'))
+    expect(calcCard).toBeTruthy()
+    await calcCard!.trigger('click')
+    await w.vm.$nextTick()
+    const expanded = w.text()
+    // Its own formula is shown
+    expect(expanded).toContain('Property Price')
+    expect(expanded).toContain('Sinking Fund Rate')
+    // Its input sources are reachable — the Rightmove source card exists
+    expect(expanded).toContain('Rightmove')
+    expect(expanded).toContain('£800,000.00')
+  })
+})

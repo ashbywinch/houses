@@ -17,6 +17,15 @@ const emit = defineEmits<{
 
 const activeLevel = ref(props.detailLevel)
 
+// Story view: which calc cards are expanded to show their formula + sources
+const openCalcs = ref<Set<string>>(new Set())
+function toggleCalc(key: string) {
+  const next = new Set(openCalcs.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  openCalcs.value = next
+}
+
 function setLevel(level: 'summary' | 'story' | 'detail') {
   activeLevel.value = level
   emit('update:detailLevel', level)
@@ -490,13 +499,60 @@ const sharedRefsList = computed(() => {
             v-for="(calc, key) in calcNodes"
             :key="key"
             class="flow-card"
+            :class="{ 'flow-card--expandable': calc.formula || calc.sources }"
           >
             <div class="flow-card__icon flow-card__icon--calc" aria-hidden="true">🔢</div>
-            <div class="flow-card__body">
-              <div class="flow-card__title">{{ humanLabel(calc.label) }}</div>
+            <div class="flow-card__body" :class="{ 'flow-card__body--clickable': calc.formula || calc.sources }" @click="(calc.formula || calc.sources) && toggleCalc(key)">
+              <div class="flow-card__title">
+                {{ humanLabel(calc.label) }}
+                <span v-if="(calc.formula || calc.sources)" class="flow-card__expand" :class="{ 'flow-card__expand--open': openCalcs.has(key) }">▸</span>
+              </div>
               <div v-if="calc.status === 'impossible'" class="flow-card__error" role="alert">⚠ {{ calc.error || 'Unavailable' }}</div>
               <div v-else-if="formatValue(calc.value)" class="flow-card__value">{{ formatValue(calc.value) }}</div>
+              <div v-if="calc.formula" class="flow-card__formula">{{ calc.formula.result }}</div>
               <div class="flow-card__desc">{{ calc.description || 'A calculation based on the data above' }}</div>
+            </div>
+            <!-- Expanded: the calc's own formula lines + its input sources -->
+            <div v-if="openCalcs.has(key)" class="flow-card__detail">
+              <div v-if="calc.formula" class="formula-explain formula-explain--inline">
+                <div
+                  v-for="(line, li) in calc.formula.lines"
+                  :key="li"
+                  class="formula-explain__step"
+                >
+                  <span class="formula-explain__step-num">{{ li + 1 }}</span>
+                  <span class="formula-explain__step-label">{{ line.label }}</span>
+                  <span v-if="line.expression" class="formula-explain__step-expr">{{ line.expression }}</span>
+                  <span class="formula-explain__step-value">{{ line.value }}</span>
+                </div>
+                <div class="formula-explain__result">
+                  <span>Result</span>
+                  <span class="formula-explain__result-value">{{ calc.formula.result }}</span>
+                </div>
+              </div>
+              <div v-if="calc.sources" class="flow-card__sources">
+                <div
+                  v-for="(src, skey) in calc.sources"
+                  :key="skey"
+                  class="flow-card flow-card--source"
+                >
+                  <div class="flow-card__icon" :class="`flow-card__icon--${src.sourceType ?? 'unknown'}`" aria-hidden="true">
+                    {{ SOURCE_ICONS[src.sourceType ?? ''] ?? '📄' }}
+                  </div>
+                  <div class="flow-card__body">
+                    <div class="flow-card__title">{{ humanLabel(src.label) }}</div>
+                    <div v-if="src.status === 'impossible'" class="flow-card__error" role="alert">⚠ {{ src.error || 'Unavailable' }}</div>
+                    <div v-else-if="formatValue(src.value)" class="flow-card__value">{{ formatValue(src.value) }}</div>
+                    <a
+                      v-if="src.url"
+                      :href="src.url"
+                      target="_blank"
+                      class="flow-card__link"
+                      rel="noopener"
+                    >{{ extractHostname(src.url) }}</a>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -824,6 +880,34 @@ const sharedRefsList = computed(() => {
 .flow-card__icon--db { background: var(--slate-100); color: var(--slate-500); }
 .flow-card__icon--result { background: var(--slate-900); color: #fff; }
 .flow-card__body { flex: 1; min-width: 0; }
+.flow-card__body--clickable { cursor: pointer; }
+.flow-card--expandable { position: relative; }
+.flow-card__expand {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-left: var(--sp-2);
+  transition: transform 0.15s;
+}
+.flow-card__expand--open { transform: rotate(90deg); }
+.flow-card__formula {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  font-weight: var(--fw-medium);
+}
+.flow-card__detail {
+  grid-column: 1 / -1;
+  width: 100%;
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px dashed var(--border);
+}
+.flow-card--source {
+  margin-top: var(--sp-2);
+  padding: var(--sp-3);
+  background: var(--slate-50);
+}
+.formula-explain--inline { margin: 0 0 var(--sp-3); }
 .flow-card__title {
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);

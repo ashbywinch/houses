@@ -126,6 +126,27 @@ class AttemptError:
             traceback=tb,
         )
 
+    @classmethod
+    def from_dict(cls, d: dict) -> "AttemptError":
+        """Reconstruct an AttemptError from its JSON-safe projection.
+
+        Used when loading a persisted node result: the structured error
+        (code, causes, user_message) survives restarts so display_message
+        still resolves to the friendly leaf reason instead of the raw
+        node-id/dep chain. ``exc`` and ``traceback`` are not persisted
+        (exception objects and frames are in-memory only).
+        """
+        return cls(
+            code=d.get("code", "error"),
+            message=d.get("message", ""),
+            user_message=d.get("user_message", ""),
+            retryable=d.get("retryable", False),
+            source=d.get("source", ""),
+            exc=None,
+            traceback=d.get("traceback", ""),
+            causes=tuple(cls.from_dict(c) for c in d.get("causes", [])),
+        )
+
 
 def classify_exception(exc: BaseException | None) -> tuple[str, bool]:
     """Map an exception to (code, retryable) without importing HTTP libs.
