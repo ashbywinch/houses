@@ -167,9 +167,10 @@ async def login(state_file: Path) -> None:
             "HOUSES_GOOGLE_DEVICE_CLIENT_ID unset: create a 'TVs and Limited Input devices' OAuth client "
             "in Google Cloud Console (no redirect URIs needed) and add its ID to .env",
         )
-    # "TVs and Limited Input devices" clients are public — no secret. If one
-    # was configured, send it; otherwise omit it (an empty string can make
-    # Google reject the token request with invalid_client).
+    # Device-flow clients may have a client secret (some console-created
+    # clients issue one) or none. Send it only when configured — an empty
+    # client_secret in the token request can make Google reject it with
+    # invalid_client.
     client_secret = settings.device_client_secret
 
     print("Waiting for servers …")
