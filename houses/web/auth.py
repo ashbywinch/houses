@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
@@ -79,6 +80,51 @@ def _make_session_cookie(
         "impersonating": impersonating,
     }
     return _get_serializer().dumps(payload)
+
+
+def _build_session(id_info: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
+    """Return (user_payload, session_cookie_value) for verified Google id_info.
+
+    Shared by the web callback and the device-flow endpoint so both mint
+    identical sessions.
+    """
+    email = id_info.get("email", "")
+    folded_email = email.casefold()
+    name = id_info.get("name", email.split("@")[0] if email else "Unknown")
+    picture = id_info.get("picture", "")
+
+    # Look up Person by email to determine superuser status
+    is_superuser = False
+    from houses.services_provider import get_services
+
+    svc = get_services()
+    persons_attempt = svc.persons_source.latest_attempt()
+    if persons_attempt.succeeded:
+        for p in persons_attempt.value_or_none() or []:
+            if isinstance(p, dict):
+                pe = p.get("email")
+                if pe is not None and pe.casefold() == folded_email and p.get("is_superuser"):
+                    is_superuser = True
+                    break
+            elif (
+                hasattr(p, "email")
+                and p.email is not None
+                and p.email.casefold() == folded_email
+                and hasattr(p, "is_superuser")
+                and p.is_superuser
+            ):
+                is_superuser = True
+                break
+
+    cookie_value = _make_session_cookie(folded_email, name, picture, is_superuser)
+    payload = {
+        "email": folded_email,
+        "name": name,
+        "picture": picture,
+        "is_superuser": is_superuser,
+        "impersonating": None,
+    }
+    return payload, cookie_value
 
 
 def _lookup_person_by_email(email: str, persons_attempt_value: Any) -> str | None:
@@ -200,33 +246,7 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
         if not id_info.get("email_verified", False):
             return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=email_not_verified")
 
-        email = id_info.get("email", "")
-        folded_email = email.casefold()
-        name = id_info.get("name", email.split("@")[0] if email else "Unknown")
-        picture = id_info.get("picture", "")
-
-        # Look up Person by email to determine superuser status
-        is_superuser = False
-        persons_attempt = svc.persons_source.latest_attempt()
-        if persons_attempt.succeeded:
-            for p in persons_attempt.value_or_none() or []:
-                if isinstance(p, dict):
-                    pe = p.get("email")
-                    if pe is not None and pe.casefold() == folded_email and p.get("is_superuser"):
-                        is_superuser = True
-                        break
-                elif (
-                    hasattr(p, "email")
-                    and p.email is not None
-                    and p.email.casefold() == folded_email
-                    and hasattr(p, "is_superuser")
-                    and p.is_superuser
-                ):
-                    is_superuser = True
-                    break
-
-        # Create signed session cookie with casefolded email
-        cookie_value = _make_session_cookie(folded_email, name, picture, is_superuser)
+        _, cookie_value = _build_session(id_info)
 
         response = RedirectResponse(url=f"{settings.frontend_url}/")
         _set_session_cookie(response, cookie_value, _is_secure(request))
@@ -235,6 +255,46 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
     except Exception as e:
         logger.exception("OAuth callback failed")
         return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=" + quote(str(e)))
+
+
+@auth_router.post("/device")
+async def device(request: Request):
+    """Mint a session from a Google id_token obtained via OAuth device flow.
+
+    Headless-friendly login: the client (e.g. tools/capture_dom.py --login)
+    runs Google's device authorization grant, the human approves on any
+    device, and the resulting id_token is exchanged here for the same signed
+    session cookie the web callback issues. The cookie value is returned in
+    the body so non-browser clients can persist it (Playwright storageState).
+    """
+    from google.auth.transport import requests as google_requests
+    from google.oauth2 import id_token as google_id_token
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    token = (body or {}).get("id_token", "")
+    if not token:
+        return JSONResponse(status_code=400, content={"detail": "id_token required"})
+    try:
+        id_info = google_id_token.verify_oauth2_token(
+            token,
+            google_requests.Request(),
+            settings.device_client_id or settings.google_client_id,
+        )
+    except Exception as e:
+        logger.warning("Device-flow id_token verification failed: %s", e)
+        return JSONResponse(status_code=401, content={"detail": "invalid id_token"})
+    if not id_info.get("email_verified", False):
+        return JSONResponse(status_code=401, content={"detail": "email not verified"})
+
+    payload, cookie_value = _build_session(id_info)
+    response = JSONResponse(
+        content={"authenticated": True, **payload, "session_cookie": cookie_value}
+    )
+    _set_session_cookie(response, cookie_value, _is_secure(request))
+    return response
 
 
 @auth_router.get("/me")

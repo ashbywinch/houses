@@ -337,6 +337,49 @@ class TestCallback:
         assert "auth_url" in data
 
 
+class TestDevice:
+    """POST /api/auth/device — headless login via Google OAuth device flow."""
+
+    def test_rejects_missing_token(self):
+        resp = client.post("/api/auth/device", json={})
+        assert resp.status_code == 400
+
+    def test_rejects_invalid_token(self, monkeypatch):
+        from google.oauth2 import id_token as google_id_token
+
+        def _reject(token, req, audience):
+            raise ValueError("bad signature")
+
+        monkeypatch.setattr(google_id_token, "verify_oauth2_token", _reject)
+        resp = client.post("/api/auth/device", json={"id_token": "garbage"})
+        assert resp.status_code == 401
+
+    def test_mints_session_cookie(self, monkeypatch):
+        from google.oauth2 import id_token as google_id_token
+
+        monkeypatch.setattr(
+            google_id_token,
+            "verify_oauth2_token",
+            lambda token, req, audience: {
+                "email": "simon@example.com",
+                "email_verified": True,
+                "name": "Simon",
+                "picture": "",
+            },
+        )
+        resp = client.post("/api/auth/device", json={"id_token": "real-looking"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["authenticated"] is True
+        assert data["email"] == "simon@example.com"
+        assert data["session_cookie"]
+        assert resp.cookies.get("session") == data["session_cookie"]
+
+        # the minted cookie is a real session
+        me = client.get("/api/auth/me")
+        assert me.json()["authenticated"] is True
+
+
 class TestCommentAuth:
     def test_post_401_without_session(self):
         auth_token = _enable_auth()

@@ -15,11 +15,11 @@ Config: `pydantic-settings`, `HOUSES_` prefix (see `houses/config.py` and `.env.
 ## Running
 
 ```bash
-make run          # Backend (:8080) + frontend (:5173), auto-reload
+make run          # Backend (:8765) + frontend (:5173), auto-reload
 make frontend-dev  # Vite dev server only (backend must be running separately)
 ```
 
-`make run` starts FastAPI (uvicorn `--reload`) + Vite; frontend proxies `/api/*` to :8080. Extra backend logging: `DBG=1 make run`.
+`make run` starts FastAPI (uvicorn `--reload`) + Vite; frontend proxies `/api/*` to :8765. Extra backend logging: `DBG=1 make run`.
 
 ## Testing
 
@@ -56,6 +56,14 @@ Compare rendered Vue against saved reference HTML in `docs/current-ui/`.
 
 **Prereqs:** both servers running (`make run` + `cd houses/frontend && npm run dev`).
 
+The frontend is behind Google OAuth. One-time login uses Google's OAuth device flow — the script prints a code, you approve from any device (your browser's saved credentials + 2FA), and it saves the session. No browser automation, no credentials on this machine:
+
+```bash
+.venv/bin/python tools/capture_dom.py --login
+```
+
+Then capture as usual:
+
 ```bash
 .venv/bin/python tools/capture_dom.py            # both pages
 .venv/bin/python tools/capture_dom.py --list-only
@@ -63,6 +71,8 @@ Compare rendered Vue against saved reference HTML in `docs/current-ui/`.
 ```
 
 Output lands in `tools/captures/<session-timestamp>/`. The script reuses one browser instance, waits for both servers, reports console errors and card count.
+
+The session cookie lasts 30 days. On expiry the tool fails with a "Session expired or invalid" hint — re-run `--login`. `tools/.auth-state.json` holds a live session cookie: **never commit it** (gitignored).
 
 ### What to compare (vs `docs/current-ui/`)
 
@@ -133,7 +143,7 @@ Wait for "Application startup complete" in logs. Deleted nodes become pending; t
 ### Verification
 
 ```bash
-curl -s http://localhost:8080/api/properties/{rid}/detail | python3 -m json.tool
+curl -s http://localhost:8765/api/properties/{rid}/detail | python3 -m json.tool
 ```
 
 Affected field should no longer be `pending` and show the corrected value. Poll if compute takes time — the processor may be working through other properties.

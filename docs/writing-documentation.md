@@ -50,7 +50,7 @@ Docs are read inside a limited AI context window. Every sentence costs context. 
 | Technique | Rule | ✗ Low-density | ✓ High-density |
 |---|---|---|---|
 | **Rules as explicit negatives** | State constraints as prohibitions, not preferences — "Never X" reads faster, followed more reliably | "Avoid swallowing errors silently when catching exceptions" | "**Never swallow errors.** Every `except` must log, re-raise, or handle observably. Bare `except: pass` forbidden" |
-| **Commands over prose** | Executable commands beat descriptive sentences | "To start the dev environment, use the make run command" | "`make run` # backend :8080 + frontend :5173, auto-reload" |
+| **Commands over prose** | Executable commands beat descriptive sentences | "To start the dev environment, use the make run command" | "`make run` # backend :8765 + frontend :5173, auto-reload" |
 | **Tables over prose** | Rule-per-row beats paragraph-per-rule; use when facts have consistent fields | prose bullets | state/meaning, layer/rule/files, fake/default tables |
 | **Canonical ✗/✓ pairs** | One right/wrong code pair teaches more than enumerating edge cases | list every failure mode | `# ✗ string parsing` / `# ✓ structured` pair |
 | **One-line contracts** | A contract that fits one line is easier to hold in context | three sentences of explanation | "`compute()` MUST return an `Attempt`" |
