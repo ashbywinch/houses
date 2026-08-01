@@ -355,30 +355,53 @@ class TestDevice:
         assert resp2.status_code == 400
 
     def test_rejects_invalid_token(self):
+        from houses.config import settings
+
         token = _sp.set(
             make_services(oauth_service=FakeOAuthService(verify_error=ValueError("bad")))
         )
+        saved = settings.device_client_id
+        settings.device_client_id = "fake-device-client"
         try:
             resp = client.post("/api/auth/device", json={"id_token": "garbage"})
             assert resp.status_code == 401
         finally:
             _sp.reset(token)
+            settings.device_client_id = saved
 
     def test_mints_session_cookie(self):
         # autouse _fake_oauth fixture provides FakeOAuthService (id_info ashby@example.com)
-        resp = client.post("/api/auth/device", json={"id_token": "real-looking"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["authenticated"] is True
-        assert data["email"] == "ashby@example.com"
-        assert "session_cookie" not in data  # cookie lives in Set-Cookie only
-        assert resp.headers.get("cache-control") == "no-store"
-        cookie = resp.cookies.get("session")
-        assert cookie
+        from houses.config import settings
 
-        # the minted cookie is a real session
-        me = client.get("/api/auth/me")
-        assert me.json()["authenticated"] is True
+        saved = settings.device_client_id
+        settings.device_client_id = "fake-device-client"
+        try:
+            resp = client.post("/api/auth/device", json={"id_token": "real-looking"})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["authenticated"] is True
+            assert data["email"] == "ashby@example.com"
+            assert "session_cookie" not in data  # cookie lives in Set-Cookie only
+            assert resp.headers.get("cache-control") == "no-store"
+            cookie = resp.cookies.get("session")
+            assert cookie
+
+            # the minted cookie is a real session
+            me = client.get("/api/auth/me")
+            assert me.json()["authenticated"] is True
+        finally:
+            settings.device_client_id = saved
+
+    def test_503_when_device_client_not_configured(self):
+        from houses.config import settings
+
+        saved = settings.device_client_id
+        settings.device_client_id = ""
+        try:
+            resp = client.post("/api/auth/device", json={"id_token": "whatever"})
+            assert resp.status_code == 503
+        finally:
+            settings.device_client_id = saved
 
 
 class TestCommentAuth:

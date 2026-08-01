@@ -85,6 +85,8 @@ Environment only. `.env` is for non-secret config. **Never read, log, print, ech
 
 Don't pre-validate before trying — let code fail naturally. Don't pre-check API keys before the call: missing key → 403 propagates as a normal API error.
 
+Exception: interactive/CLI setup flows may pre-check configuration when the natural failure is misleading (e.g. Google's device endpoint rejects an unconfigured client with a confusing `invalid_client`). Such pre-checks must emit the two-tier messages below.
+
 ### No backward compatibility shims
 
 **Delete dead code, don't deprecate it.** A shim compiles, passes tests, lulls readers into thinking it's real, and never gets cleaned up. Rename/remove + update every caller in the same commit. No aliases, no re-exports, no "will remove in a future version".
@@ -107,6 +109,30 @@ except Exception as e:
 ```
 
 DAG-specific error rules (`AttemptError` contract, API services return Attempt vs pure code throw, transient re-raise/retry, nodes propagate never re-literalize) → [dag-library.md](dag-library.md) *The three-state result: `Attempt[T]`*.
+
+### Two-tier failure messages
+
+Every fail-fast path that can be triggered by environment, configuration, or user error emits **two** messages:
+
+1. **User message** — what happened + what to do next, in product language. No internal identifiers: env var names, config keys, class/function names, endpoints, status codes, response bodies, stack traces, or secrets. Commands the user runs (e.g. `make run`) are fine — they're the fix.
+2. **Dev log** — root cause + exact resolution, enough to fix without re-running with debug flags: the env var to set, the failing URL/status, the response body (secrets redacted), the exception.
+
+| Surface | User message goes to | Dev detail goes to |
+|---|---|---|
+| HTTP endpoint | response `detail` (concise, stable for clients) | `logger.warning(...)` with the resolving detail |
+| CLI tool | `print(..., file=sys.stderr)` | `logger.warning(...)` — stderr is the tool's diagnostic channel |
+
+```python
+# ✗ one dev-only message: no plain-language line, nothing in the log
+sys.exit("No Google OAuth device client configured — set HOUSES_GOOGLE_DEVICE_CLIENT_ID")
+
+# ✓ user line + resolving log line
+print("Google sign-in isn't set up on this machine — run the sign-in again once it's configured.", file=sys.stderr)
+logger.warning("HOUSES_GOOGLE_DEVICE_CLIENT_ID unset — create a 'TVs and Limited Input devices' OAuth client in Google Cloud Console and add its ID to .env")
+sys.exit(1)
+```
+
+CLI tools implement this as one helper (e.g. `_fail(user_message, dev_detail)` in `tools/capture_dom.py`) so no path can forget one half.
 
 ### Cache key hygiene
 

@@ -25,12 +25,14 @@ A single browser instance is reused across captures.
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import time
 from argparse import ArgumentParser
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NoReturn
 
 import httpx
 
@@ -42,6 +44,18 @@ GOOGLE_DEVICE_URL = "https://oauth2.googleapis.com/device/code"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_DEVICE_SCOPE = "openid email profile"
 AUTH_HINT = "Session expired or invalid — run 'python tools/capture_dom.py --login'"
+
+logger = logging.getLogger("capture_dom")
+
+
+def _fail(user_message: str, dev_detail: str) -> NoReturn:
+    """Fail fast with two messages (see docs/coding-standards.md, two-tier failures):
+    a plain-language line for the user and a resolving detail line for the
+    developer — stderr is this tool's diagnostic channel.
+    """
+    print(user_message, file=sys.stderr)
+    logger.warning("%s", dev_detail)
+    sys.exit(1)
 
 
 def _session_dir() -> Path:
@@ -95,7 +109,10 @@ async def wait_for_server(url: str, label: str, timeout: float = 30) -> None:
         except (httpx.ConnectError, httpx.TimeoutException):
             pass
         await asyncio.sleep(1)
-    sys.exit(f"{label} at {url} not ready after {timeout}s")
+    _fail(
+        f"The {label} isn't responding — start the app with `make run`, wait for it to be ready, then try again.",
+        f"{label} at {url} not ready after {timeout}s",
+    )
 
 
 async def get_browser():
@@ -122,6 +139,11 @@ async def _auth_state(page) -> bool | None:
         )
     except Exception as e:
         print(f"  WARNING: could not check session at {page.url}: {e}", file=sys.stderr)
+        if not page.url.startswith(FRONTEND_URL):
+            # The SPA navigated off the frontend origin (e.g. Google sign-in
+            # redirect after an expired session): the failed fetch is an
+            # unauthenticated page, not a backend outage.
+            return False
         return None
 
 
@@ -136,14 +158,17 @@ async def login(state_file: Path) -> None:
     """
     from houses.config import settings
 
-    client_id = settings.device_client_id or settings.web_client_id
-    client_secret = settings.device_client_secret or (
-        settings.web_client_secret if client_id == settings.web_client_id else ""
-    )
+    client_id = settings.device_client_id
     if not client_id:
-        sys.exit(
-            "No Google OAuth client configured — set HOUSES_GOOGLE_WEB_CLIENT_ID / HOUSES_GOOGLE_DEVICE_CLIENT_ID"
+        _fail(
+            "Google sign-in isn't set up on this machine — run the sign-in command again once it's been configured.",
+            "HOUSES_GOOGLE_DEVICE_CLIENT_ID unset: create a 'TVs and Limited Input devices' OAuth client "
+            "in Google Cloud Console (no redirect URIs needed) and add its ID to .env",
         )
+    # "TVs and Limited Input devices" clients are public — no secret. If one
+    # was configured, send it; otherwise omit it (an empty string can make
+    # Google reject the token request with invalid_client).
+    client_secret = settings.device_client_secret
 
     print("Waiting for servers …")
     await wait_for_server(BACKEND_URL + "/api/auth/me", "backend")
@@ -156,9 +181,11 @@ async def login(state_file: Path) -> None:
             data={"client_id": client_id, "scope": GOOGLE_DEVICE_SCOPE},
         )
         if r.status_code != 200:
-            sys.exit(
-                f"Google device flow setup failed ({r.status_code}): {r.text[:300]}\n"
-                "Is device flow enabled for this OAuth client in Google Cloud Console?"
+            _fail(
+                "Couldn't start Google sign-in — the sign-in app isn't allowed to use device sign-in. "
+                "Nothing you did wrong; try again once it's fixed.",
+                f"Google device flow setup failed ({r.status_code}): {r.text[:300]} — "
+                f"is device flow enabled for OAuth client {client_id}?",
             )
         info = r.json()
         device_code = info["device_code"]
@@ -186,9 +213,11 @@ async def login(state_file: Path) -> None:
             if r.status_code == 200:
                 id_token = data.get("id_token")
                 if not id_token:
-                    sys.exit(
-                        "Google returned no id_token — is the 'openid email profile' scope "
-                        "enabled for this OAuth client?"
+                    _fail(
+                        "Google finished the sign-in but didn't hand back a session — the sign-in app is "
+                        "missing a permission. Tell the developer, then try again.",
+                        f"Google returned no id_token on device flow — is the 'openid email profile' scope "
+                        f"enabled for client {client_id}?",
                     )
                 break
             err = data.get("error")
@@ -197,24 +226,46 @@ async def login(state_file: Path) -> None:
             elif err == "slow_down":
                 interval += 5
             elif err in ("access_denied", "expired_token"):
-                sys.exit(f"Google sign-in {err.replace('_', ' ')} — aborting")
+                _fail(
+                    f"Google sign-in was {err.replace('_', ' ')} — nothing was signed in. "
+                    "Try again if that was a mistake.",
+                    f"Google device flow terminated: {err}",
+                )
             else:
                 desc = data.get("error_description")
-                sys.exit(f"Google device flow error: {err} {desc or r.text[:200]}".strip())
+                _fail(
+                    "Google sign-in failed — nothing was signed in. Try again.",
+                    f"Google device flow error: {err} {desc or r.text[:200]}".strip(),
+                )
             await asyncio.sleep(interval)
         else:
-            sys.exit(f"No approval after {LOGIN_TIMEOUT_S // 60} min — aborting")
+            _fail(
+                f"No one approved the sign-in within {LOGIN_TIMEOUT_S // 60} minutes — nothing was signed in. "
+                f"Run the command again when you can approve it.",
+                f"no device-flow approval after {LOGIN_TIMEOUT_S // 60} min",
+            )
 
         # Exchange the id_token for the app's signed session cookie
         r = await client.post(BACKEND_URL + "/api/auth/device", json={"id_token": id_token})
         if r.status_code != 200:
-            sys.exit(f"Backend rejected device login ({r.status_code}): {r.text[:300]}")
+            _fail(
+                "The app refused the sign-in — check that the app is running and up to date, then try again.",
+                f"Backend rejected device login ({r.status_code}): {r.text[:300]}",
+            )
         session_cookie = r.cookies.get("session")
         if not session_cookie:
-            sys.exit("Backend set no session cookie — aborting")
+            _fail(
+                "Sign-in completed but the app didn't create a session — try again.",
+                "Backend set no session cookie on POST /api/auth/device",
+            )
 
-    state_file.write_text(json.dumps(_storage_state(session_cookie), indent=2))
-    os.chmod(state_file, 0o600)  # live session credential — owner-only
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    # Create owner-only from the start: write_text() would briefly create the
+    # file with the default umask before chmod runs. 0o600 is still masked by
+    # umask, so this can only be more restrictive, never less.
+    fd = os.open(state_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(_storage_state(session_cookie), f, indent=2)
     print(f"Session saved → {state_file} (localhost session cookie only)")
 
 
@@ -241,13 +292,17 @@ async def capture_page(url: str, output_dir: str | Path, label: str, state_file:
 
     auth = await _auth_state(page)
     if auth is None:
-        print(f"  ERROR: {page.url} — backend unreachable during session check", file=sys.stderr)
         await context.close()
-        sys.exit("Backend or frontend not responding — fix the servers, then re-run this capture.")
+        _fail(
+            "The app's server isn't responding — fix that, then re-run this capture.",
+            f"{page.url} — backend unreachable during session check",
+        )
     if not auth:
-        print(f"  ERROR: {page.url} — no authenticated session", file=sys.stderr)
         await context.close()
-        sys.exit(f"{AUTH_HINT}, then re-run this capture.")
+        _fail(
+            f"{AUTH_HINT}, then re-run this capture.",
+            f"{page.url} — no authenticated session (session cookie missing or expired)",
+        )
 
     html = await page.content()
     html_path = Path(output_dir) / f"dom_{label}.html"
@@ -302,9 +357,10 @@ async def main():
         return
 
     if not state_file.exists():
-        sys.exit(
-            f"No auth state at {state_file} — authenticated pages can't be captured.\n"
-            f"Run 'python tools/capture_dom.py --login' once to sign in, then re-run."
+        _fail(
+            "You're not signed in — run 'python tools/capture_dom.py --login' once to sign in, "
+            "then re-run this capture.",
+            f"No auth state at {state_file} — session cookie file missing or deleted",
         )
 
     out = Path(args.output) if args.output else _session_dir()

@@ -68,12 +68,13 @@ async def test_auth_state_distinguishes_unreachable_from_unauthenticated():
     cd = _load_capture_dom()
 
     class FakePage:
-        def __init__(self, result):
+        def __init__(self, result, url="http://localhost:5173/#/"):
             self._result = result
+            self._url = url
 
         @property
         def url(self):
-            return "http://localhost:5173/#/"
+            return self._url
 
         async def evaluate(self, *args):
             if isinstance(self._result, Exception):
@@ -83,3 +84,11 @@ async def test_auth_state_distinguishes_unreachable_from_unauthenticated():
     assert await cd._auth_state(FakePage(True)) is True
     assert await cd._auth_state(FakePage(False)) is False
     assert await cd._auth_state(FakePage(ConnectionError("backend down"))) is None
+    # SPA redirected off the frontend (Google sign-in): expired session,
+    # not a backend outage
+    assert (
+        await cd._auth_state(
+            FakePage(ConnectionError("fetch failed"), url="https://accounts.google.com/o/oauth2/auth")
+        )
+        is False
+    )

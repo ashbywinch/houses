@@ -200,15 +200,22 @@ class _DefaultOAuthService:
         return id_info
 
     def verify_id_token(self, token: str) -> dict:
-        """Verify a Google id_token (device flow) and return its claims."""
+        """Verify a Google id_token (device flow) and return its claims.
+
+        Bound strictly to the device-flow client: a web-flow id_token (easy
+        to leak from a browser context) must not be replayable at this
+        headless session-minting endpoint.
+        """
         from google.auth.transport import requests as google_requests
         from google.oauth2 import id_token as google_id_token
 
+        if not settings.device_client_id:
+            raise ValueError("device_client_id not configured for device-flow login")
         return dict(
             google_id_token.verify_oauth2_token(
                 token,
                 google_requests.Request(),
-                settings.device_client_id or settings.web_client_id,
+                settings.device_client_id,
             )
         )
 

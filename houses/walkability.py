@@ -310,28 +310,44 @@ async def enrich_walkability(
     lat: float,
     lng: float,
     address: str,
+    *,
+    _extract_town_centre_fn=None,
+    _walk_duration_fn=None,
+    _reverse_geocode_fn=None,
+    _nearby_amenities_fn=None,
 ) -> dict[str, Any]:
+    """Walk time to town centre + nearby amenities for a property.
+
+    The ``_*_fn`` parameters are function-param injection seams for tests
+    (docs/testing-standards.md — no monkeypatching); they default to the
+    real API-backed implementations.
+    """
+    extract_town_centre = _extract_town_centre_fn or _extract_town_centre
+    walk_duration = _walk_duration_fn or _walk_duration
+    reverse_geocode = _reverse_geocode_fn or _find_town_centre_by_reverse_geocode
+    nearby_amenities = _nearby_amenities_fn or _nearby_amenities
+
     walk_to_town_minutes: int | None = None
 
     town = _extract_town(address)
 
     if town:
-        town_centre = await _extract_town_centre(lat, lng, town)
+        town_centre = await extract_town_centre(lat, lng, town)
         if town_centre:
-            walk_to_town_minutes = await _walk_duration(lat, lng, town_centre)
+            walk_to_town_minutes = await walk_duration(lat, lng, town_centre)
 
     # If the address-based town failed or gave an implausible result, try
     # reverse-geocoding the property coordinates to find the actual nearest town.
     if walk_to_town_minutes is None or walk_to_town_minutes <= 0 or walk_to_town_minutes > 180:
-        rev_centre = await _find_town_centre_by_reverse_geocode(lat, lng)
+        rev_centre = await reverse_geocode(lat, lng)
         if rev_centre:
-            rev_minutes = await _walk_duration(lat, lng, rev_centre)
+            rev_minutes = await walk_duration(lat, lng, rev_centre)
             if rev_minutes is not None and 0 < rev_minutes <= 180:
                 walk_to_town_minutes = rev_minutes
             # If reverse geocode also failed to produce a valid time, leave
             # the original walk_to_town_minutes as-is (may be None or invalid).
 
-    amenities = await _nearby_amenities(lat, lng)
+    amenities = await nearby_amenities(lat, lng)
 
     # Sanitize walk time: ignore impossible values
     if walk_to_town_minutes is not None and (walk_to_town_minutes <= 0 or walk_to_town_minutes > 180):

@@ -53,17 +53,13 @@ class TestExtractTown:
     @pytest.mark.asyncio
     async def test_reverse_geocode_fallback(self) -> None:
         """When address-based town fails, reverse geocode should provide a fallback."""
-        # Mock the reverse geocode to avoid real API calls
-        import houses.walkability as w
+        from houses.geo import GeoPoint
         from houses.walkability import enrich_walkability
 
-        original_rev = w._find_town_centre_by_reverse_geocode
-        original_dur = w._walk_duration
-        original_amen = w._nearby_amenities
+        async def mock_centre_fails(_lat, _lng, _town):
+            return None  # address-based town resolution fails
 
         async def mock_rev(_lat, _lng):
-            from houses.geo import GeoPoint
-
             return GeoPoint(51.5, -0.1)
 
         async def mock_dur(_lat, _lng, _centre):
@@ -72,31 +68,25 @@ class TestExtractTown:
         async def mock_amen(_lat, _lng):
             return ""
 
-        w._find_town_centre_by_reverse_geocode = mock_rev
-        w._walk_duration = mock_dur
-        w._nearby_amenities = mock_amen
-        try:
-            # Address has no town to extract — should fall back to reverse geocode
-            result = await enrich_walkability(51.5, -0.1, "Some Street, SW1V 2QQ")
-            assert result["walk_to_town"]["value"] == 15, (
-                f"Expected 15 from reverse geocode fallback, got {result['walk_to_town']}"
-            )
-        finally:
-            w._find_town_centre_by_reverse_geocode = original_rev
-            w._walk_duration = original_dur
-            w._nearby_amenities = original_amen
+        result = await enrich_walkability(
+            51.5,
+            -0.1,
+            "Some Street, SW1V 2QQ",
+            _extract_town_centre_fn=mock_centre_fails,
+            _walk_duration_fn=mock_dur,
+            _reverse_geocode_fn=mock_rev,
+            _nearby_amenities_fn=mock_amen,
+        )
+        # Address branch produced no time, so the fallback supplied 15
+        assert result["walk_to_town"]["value"] == 15, (
+            f"Expected 15 from reverse geocode fallback, got {result['walk_to_town']}"
+        )
 
     @pytest.mark.asyncio
     async def test_reverse_geocode_not_needed_when_address_works(self) -> None:
         """When address-based town gives a valid walk time, don't call reverse geocode."""
-        import houses.walkability as w
         from houses.geo import GeoPoint
         from houses.walkability import enrich_walkability
-
-        original_rev = w._find_town_centre_by_reverse_geocode
-        original_extract = w._extract_town_centre
-        original_dur = w._walk_duration
-        original_amen = w._nearby_amenities
 
         rev_called = False
 
@@ -114,16 +104,14 @@ class TestExtractTown:
         async def mock_amen(_lat, _lng):
             return ""
 
-        w._extract_town_centre = mock_extract
-        w._walk_duration = mock_dur
-        w._find_town_centre_by_reverse_geocode = mock_rev
-        w._nearby_amenities = mock_amen
-        try:
-            result = await enrich_walkability(51.5, -0.1, "Some Street, Southall, UB2 4GN")
-            assert result["walk_to_town"]["value"] == 10
-            assert not rev_called, "Reverse geocode should NOT be called when address works"
-        finally:
-            w._extract_town_centre = original_extract
-            w._walk_duration = original_dur
-            w._find_town_centre_by_reverse_geocode = original_rev
-            w._nearby_amenities = original_amen
+        result = await enrich_walkability(
+            51.5,
+            -0.1,
+            "Some Street, Southall, UB2 4GN",
+            _extract_town_centre_fn=mock_extract,
+            _walk_duration_fn=mock_dur,
+            _reverse_geocode_fn=mock_rev,
+            _nearby_amenities_fn=mock_amen,
+        )
+        assert result["walk_to_town"]["value"] == 10
+        assert not rev_called, "Reverse geocode should NOT be called when address works"

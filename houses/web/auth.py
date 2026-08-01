@@ -281,6 +281,13 @@ async def device(request: Request):
 
     from houses.services_provider import get_services
 
+    if not settings.device_client_id:
+        logger.warning(
+            "Device-flow login attempted but HOUSES_GOOGLE_DEVICE_CLIENT_ID is unset — "
+            "no device OAuth client configured"
+        )
+        return JSONResponse(status_code=503, content={"detail": "device client not configured"})
+
     svc = get_services()
     try:
         id_info = svc.oauth_service.verify_id_token(token)
