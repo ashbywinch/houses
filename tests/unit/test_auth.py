@@ -344,36 +344,37 @@ class TestDevice:
         resp = client.post("/api/auth/device", json={})
         assert resp.status_code == 400
 
-    def test_rejects_invalid_token(self, monkeypatch):
-        from google.oauth2 import id_token as google_id_token
-
-        def _reject(token, req, audience):
-            raise ValueError("bad signature")
-
-        monkeypatch.setattr(google_id_token, "verify_oauth2_token", _reject)
-        resp = client.post("/api/auth/device", json={"id_token": "garbage"})
-        assert resp.status_code == 401
-
-    def test_mints_session_cookie(self, monkeypatch):
-        from google.oauth2 import id_token as google_id_token
-
-        monkeypatch.setattr(
-            google_id_token,
-            "verify_oauth2_token",
-            lambda token, req, audience: {
-                "email": "simon@example.com",
-                "email_verified": True,
-                "name": "Simon",
-                "picture": "",
-            },
+    def test_rejects_non_object_body(self):
+        resp = client.post("/api/auth/device", json=["x"])
+        assert resp.status_code == 400
+        resp2 = client.post(
+            "/api/auth/device",
+            content="{not json",
+            headers={"Content-Type": "application/json"},
         )
+        assert resp2.status_code == 400
+
+    def test_rejects_invalid_token(self):
+        token = _sp.set(
+            make_services(oauth_service=FakeOAuthService(verify_error=ValueError("bad")))
+        )
+        try:
+            resp = client.post("/api/auth/device", json={"id_token": "garbage"})
+            assert resp.status_code == 401
+        finally:
+            _sp.reset(token)
+
+    def test_mints_session_cookie(self):
+        # autouse _fake_oauth fixture provides FakeOAuthService (id_info ashby@example.com)
         resp = client.post("/api/auth/device", json={"id_token": "real-looking"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["authenticated"] is True
-        assert data["email"] == "simon@example.com"
-        assert data["session_cookie"]
-        assert resp.cookies.get("session") == data["session_cookie"]
+        assert data["email"] == "ashby@example.com"
+        assert "session_cookie" not in data  # cookie lives in Set-Cookie only
+        assert resp.headers.get("cache-control") == "no-store"
+        cookie = resp.cookies.get("session")
+        assert cookie
 
         # the minted cookie is a real session
         me = client.get("/api/auth/me")

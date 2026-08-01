@@ -137,7 +137,9 @@ async def login(state_file: Path) -> None:
     from houses.config import settings
 
     client_id = settings.device_client_id or settings.web_client_id
-    client_secret = settings.device_client_secret
+    client_secret = settings.device_client_secret or (
+        settings.web_client_secret if client_id == settings.web_client_id else ""
+    )
     if not client_id:
         sys.exit(
             "No Google OAuth client configured — set HOUSES_GOOGLE_WEB_CLIENT_ID / HOUSES_GOOGLE_DEVICE_CLIENT_ID"
@@ -171,19 +173,23 @@ async def login(state_file: Path) -> None:
 
     async with httpx.AsyncClient(timeout=30) as client:
         deadline = time.monotonic() + LOGIN_TIMEOUT_S
+        token_data = {
+            "client_id": client_id,
+            "device_code": device_code,
+            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+        }
+        if client_secret:
+            token_data["client_secret"] = client_secret
         while time.monotonic() < deadline:
-            r = await client.post(
-                GOOGLE_TOKEN_URL,
-                data={
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "device_code": device_code,
-                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-                },
-            )
+            r = await client.post(GOOGLE_TOKEN_URL, data=token_data)
             data = r.json()
             if r.status_code == 200:
                 id_token = data.get("id_token")
+                if not id_token:
+                    sys.exit(
+                        "Google returned no id_token — is the 'openid email profile' scope "
+                        "enabled for this OAuth client?"
+                    )
                 break
             err = data.get("error")
             if err == "authorization_pending":
@@ -203,9 +209,9 @@ async def login(state_file: Path) -> None:
         r = await client.post(BACKEND_URL + "/api/auth/device", json={"id_token": id_token})
         if r.status_code != 200:
             sys.exit(f"Backend rejected device login ({r.status_code}): {r.text[:300]}")
-        session_cookie = r.json().get("session_cookie")
+        session_cookie = r.cookies.get("session")
         if not session_cookie:
-            sys.exit("Backend returned no session cookie — aborting")
+            sys.exit("Backend set no session cookie — aborting")
 
     state_file.write_text(json.dumps(_storage_state(session_cookie), indent=2))
     os.chmod(state_file, 0o600)  # live session credential — owner-only

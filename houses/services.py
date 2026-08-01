@@ -80,6 +80,10 @@ class OAuthService(Protocol):
         """
         ...
 
+    def verify_id_token(self, token: str) -> dict:
+        """Verify a Google id_token (device flow) and return its claims."""
+        ...
+
 
 class WalkabilityService(Protocol):
     """Walk time to town centre and nearby amenities."""
@@ -194,6 +198,19 @@ class _DefaultOAuthService:
             settings.web_client_id,
         )
         return id_info
+
+    def verify_id_token(self, token: str) -> dict:
+        """Verify a Google id_token (device flow) and return its claims."""
+        from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token as google_id_token
+
+        return dict(
+            google_id_token.verify_oauth2_token(
+                token,
+                google_requests.Request(),
+                settings.device_client_id or settings.web_client_id,
+            )
+        )
 
 
 # Settings sources are cached by node_id so that the same UserInputNode

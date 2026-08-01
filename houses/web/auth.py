@@ -264,25 +264,26 @@ async def device(request: Request):
     Headless-friendly login: the client (e.g. tools/capture_dom.py --login)
     runs Google's device authorization grant, the human approves on any
     device, and the resulting id_token is exchanged here for the same signed
-    session cookie the web callback issues. The cookie value is returned in
-    the body so non-browser clients can persist it (Playwright storageState).
+    session cookie the web callback issues. The cookie travels only in the
+    Set-Cookie header (never in the body), so non-browser clients read it
+    from the response cookies.
     """
-    from google.auth.transport import requests as google_requests
-    from google.oauth2 import id_token as google_id_token
-
     try:
         body = await request.json()
-    except Exception:
-        body = {}
-    token = (body or {}).get("id_token", "")
+    except Exception as e:
+        logger.debug("Malformed JSON on /api/auth/device: %s", e)
+        return JSONResponse(status_code=400, content={"detail": "invalid JSON body"})
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=400, content={"detail": "JSON object required"})
+    token = body.get("id_token", "")
     if not token:
         return JSONResponse(status_code=400, content={"detail": "id_token required"})
+
+    from houses.services_provider import get_services
+
+    svc = get_services()
     try:
-        id_info = google_id_token.verify_oauth2_token(
-            token,
-            google_requests.Request(),
-            settings.device_client_id or settings.web_client_id,
-        )
+        id_info = svc.oauth_service.verify_id_token(token)
     except Exception as e:
         logger.warning("Device-flow id_token verification failed: %s", e)
         return JSONResponse(status_code=401, content={"detail": "invalid id_token"})
@@ -291,7 +292,8 @@ async def device(request: Request):
 
     payload, cookie_value = _build_session(id_info)
     response = JSONResponse(
-        content={"authenticated": True, **payload, "session_cookie": cookie_value}
+        content={"authenticated": True, **payload},
+        headers={"Cache-Control": "no-store"},
     )
     _set_session_cookie(response, cookie_value, _is_secure(request))
     return response
