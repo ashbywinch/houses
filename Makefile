@@ -1,5 +1,5 @@
 # Makefile for houses — Browser-to-Spreadsheet Ingestion Engine
-.PHONY: help setup run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e lint format clean reset-db
+.PHONY: help setup install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e lint format clean reset-db
 
 # Variables
 PYTHON := .venv/bin/python
@@ -32,10 +32,16 @@ help:
 	@echo "  ${GREEN}make coverage${NC}           Run tests with coverage report"
 	@echo "  ${GREEN}make clean${NC}              Clean up generated files"
 
-setup: frontend-setup
+setup: frontend-setup install-hooks
 	@$(UV) --version >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
 	@$(UV) sync --all-extras
 	@echo "${GREEN}✓ Setup complete${NC}"
+
+install-hooks:
+	@mkdir -p .git/hooks
+	@cp scripts/pre-commit .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
+	@echo "${GREEN}✓ Pre-commit hook installed (ruff on staged Python files)${NC}"
 
 omp-config-install:
 	$(MAKE) -C $(OMP_CONFIG_DIR) install
