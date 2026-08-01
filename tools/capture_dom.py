@@ -25,6 +25,7 @@ A single browser instance is reused across captures.
 
 import asyncio
 import json
+import os
 import sys
 import time
 from argparse import ArgumentParser
@@ -108,14 +109,20 @@ async def get_browser():
     return _browser
 
 
-async def _is_authenticated(page) -> bool:
-    """True when the page's cookies authenticate against /api/auth/me."""
+async def _auth_state(page) -> bool | None:
+    """Authentication state of the page's session.
+
+    True = authenticated, False = not authenticated, None = /api/auth/me
+    unreachable (backend/proxy down) — reported as a distinct failure so a
+    transient outage is never mislabelled as an expired session.
+    """
     try:
         return await page.evaluate(
             "fetch('/api/auth/me').then(r => r.json()).then(d => d.authenticated === true)"
         )
-    except Exception:
-        return False
+    except Exception as e:
+        print(f"  WARNING: could not check session at {page.url}: {e}", file=sys.stderr)
+        return None
 
 
 async def login(state_file: Path) -> None:
@@ -196,6 +203,7 @@ async def login(state_file: Path) -> None:
             sys.exit("Backend returned no session cookie — aborting")
 
     state_file.write_text(json.dumps(_storage_state(session_cookie), indent=2))
+    os.chmod(state_file, 0o600)  # live session credential — owner-only
     print(f"Session saved → {state_file} (localhost session cookie only)")
 
 
@@ -220,7 +228,12 @@ async def capture_page(url: str, output_dir: str | Path, label: str, state_file:
     await page.goto(url, wait_until="networkidle", timeout=30000)
     await page.wait_for_timeout(5000)
 
-    if not await _is_authenticated(page):
+    auth = await _auth_state(page)
+    if auth is None:
+        print(f"  ERROR: {page.url} — backend unreachable during session check", file=sys.stderr)
+        await context.close()
+        sys.exit("Backend or frontend not responding — fix the servers, then re-run this capture.")
+    if not auth:
         print(f"  ERROR: {page.url} — no authenticated session", file=sys.stderr)
         await context.close()
         sys.exit(f"{AUTH_HINT}, then re-run this capture.")

@@ -62,3 +62,24 @@ def test_storage_state_carries_only_localhost_session_cookie():
         }
     ]
     assert state["origins"] == []
+
+
+async def test_auth_state_distinguishes_unreachable_from_unauthenticated():
+    cd = _load_capture_dom()
+
+    class FakePage:
+        def __init__(self, result):
+            self._result = result
+
+        @property
+        def url(self):
+            return "http://localhost:5173/#/"
+
+        async def evaluate(self, *args):
+            if isinstance(self._result, Exception):
+                raise self._result
+            return self._result
+
+    assert await cd._auth_state(FakePage(True)) is True
+    assert await cd._auth_state(FakePage(False)) is False
+    assert await cd._auth_state(FakePage(ConnectionError("backend down"))) is None
