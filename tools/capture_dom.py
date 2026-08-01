@@ -179,11 +179,15 @@ async def login(state_file: Path) -> None:
     print(f"Session state will be saved to: {state_file}")
 
     async with httpx.AsyncClient(timeout=30) as client:
+        device_data = {"client_id": client_id, "scope": GOOGLE_DEVICE_SCOPE}
+        if client_secret:
+            # Confidential clients must authenticate on the device-authorization
+            # endpoint too (RFC 8628 §3.1); harmless for public clients — Google
+            # accepts the secret here (live-verified) and omitting it can make a
+            # confidential client fail with invalid_client.
+            device_data["client_secret"] = client_secret
         try:
-            r = await client.post(
-                GOOGLE_DEVICE_URL,
-                data={"client_id": client_id, "scope": GOOGLE_DEVICE_SCOPE},
-            )
+            r = await client.post(GOOGLE_DEVICE_URL, data=device_data)
         except httpx.HTTPError as e:
             _fail(
                 "Couldn't reach Google's sign-in service — check your connection and try again.",
