@@ -157,6 +157,24 @@ def _is_secure(request: Request) -> bool:
     return request.url.scheme == "https"
 
 
+def _origin_allowed(request: Request) -> bool:
+    """CSRF guard for the session-minting endpoint.
+
+    Browser requests must come from the app's own origins — without this, a
+    malicious page can cross-site POST a Google id_token (simple request,
+    no CORS preflight) and silently log the victim in as the attacker's
+    account. CLI clients (capture_dom.py, curl) send no Origin header and
+    are allowed.
+    """
+    origin = request.headers.get("origin", "").rstrip("/")
+    if not origin:
+        return True
+    return origin in {
+        settings.frontend_url.rstrip("/"),
+        settings.public_url.rstrip("/"),
+    }
+
+
 def _set_session_cookie(response, cookie_value: str, secure: bool) -> None:
     """Set the signed session cookie on the response."""
     response.set_cookie(
@@ -279,6 +297,13 @@ async def device(request: Request):
     token = body.get("id_token", "")
     if not token:
         return JSONResponse(status_code=400, content={"detail": "id_token required"})
+
+    if not _origin_allowed(request):
+        logger.warning(
+            "Device-flow login rejected: cross-origin request from %s",
+            request.headers.get("origin", "?"),
+        )
+        return JSONResponse(status_code=403, content={"detail": "cross-origin requests not allowed"})
 
     from houses.services_provider import get_services
 

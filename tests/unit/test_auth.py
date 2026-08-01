@@ -421,6 +421,38 @@ class TestDevice:
             _sp.reset(token)
             settings.device_client_id = saved
 
+    def test_rejects_cross_origin_request(self):
+        """A malicious page must not be able to mint a session for the victim."""
+        from houses.config import settings
+
+        saved = settings.device_client_id
+        settings.device_client_id = "fake-device-client"
+        try:
+            resp = client.post(
+                "/api/auth/device",
+                json={"id_token": "real-looking"},
+                headers={"Origin": "https://evil.example"},
+            )
+            assert resp.status_code == 403
+        finally:
+            settings.device_client_id = saved
+
+    def test_accepts_app_origin(self):
+        """Requests from the app's own origins (or no Origin, e.g. the CLI) pass."""
+        from houses.config import settings
+
+        saved = settings.device_client_id
+        settings.device_client_id = "fake-device-client"
+        try:
+            resp = client.post(
+                "/api/auth/device",
+                json={"id_token": "real-looking"},
+                headers={"Origin": settings.frontend_url},
+            )
+            assert resp.status_code == 200
+        finally:
+            settings.device_client_id = saved
+
 
 class TestCommentAuth:
     def test_post_401_without_session(self):
