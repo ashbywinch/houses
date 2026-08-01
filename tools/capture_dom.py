@@ -193,7 +193,8 @@ async def login(state_file: Path) -> None:
             elif err in ("access_denied", "expired_token"):
                 sys.exit(f"Google sign-in {err.replace('_', ' ')} — aborting")
             else:
-                sys.exit(f"Google device flow error: {err or r.text[:200]}")
+                desc = data.get("error_description")
+                sys.exit(f"Google device flow error: {err} {desc or r.text[:200]}".strip())
             await asyncio.sleep(interval)
         else:
             sys.exit(f"No approval after {LOGIN_TIMEOUT_S // 60} min — aborting")
