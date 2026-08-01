@@ -135,7 +135,9 @@ async def _auth_state(page) -> bool | None:
     """
     try:
         return await page.evaluate(
-            "fetch('/api/auth/me').then(r => r.json()).then(d => d.authenticated === true)"
+            "fetch('/api/auth/me')"
+            ".then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))"
+            ".then(d => d.authenticated === true)"
         )
     except Exception as e:
         print(f"  WARNING: could not check session at {page.url}: {e}", file=sys.stderr)

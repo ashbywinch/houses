@@ -39,6 +39,10 @@ setup: frontend-setup install-hooks
 
 install-hooks:
 	@mkdir -p .git/hooks
+	@if [ -f .git/hooks/pre-commit ] && ! cmp -s scripts/pre-commit .git/hooks/pre-commit; then \
+		echo "${YELLOW}An existing pre-commit hook differs — move it aside and re-run 'make install-hooks'${NC}"; \
+		exit 1; \
+	fi
 	@cp scripts/pre-commit .git/hooks/pre-commit
 	@chmod +x .git/hooks/pre-commit
 	@echo "${GREEN}✓ Pre-commit hook installed (ruff on staged Python files)${NC}"

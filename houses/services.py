@@ -208,21 +208,29 @@ class _DefaultOAuthService:
         headless session-minting endpoint.
 
         Runs in a thread: cert-fetch + verification are blocking network I/O
-        and must not stall the event loop.
+        and must not stall the event loop. Bounded by wait_for so a stuck
+        cert fetch surfaces as TransportError (→ endpoint 503) instead of
+        hanging the request forever.
         """
+        from google.auth.exceptions import TransportError
         from google.auth.transport import requests as google_requests
         from google.oauth2 import id_token as google_id_token
 
         if not settings.device_client_id:
             raise ValueError("device_client_id not configured for device-flow login")
-        return dict(
-            await asyncio.to_thread(
-                google_id_token.verify_oauth2_token,
-                token,
-                google_requests.Request(),
-                settings.device_client_id,
+        try:
+            verified = await asyncio.wait_for(
+                asyncio.to_thread(
+                    google_id_token.verify_oauth2_token,
+                    token,
+                    google_requests.Request(),
+                    settings.device_client_id,
+                ),
+                timeout=10,
             )
-        )
+        except TimeoutError:
+            raise TransportError("Google id_token verification timed out after 10s") from None
+        return dict(verified)
 
 
 # Settings sources are cached by node_id so that the same UserInputNode
