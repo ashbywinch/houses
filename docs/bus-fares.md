@@ -15,5 +15,5 @@ Bus fare data comes from **BODS** (Bus Open Data Service) NeTEx fare datasets. `
 3. Trigger a batch refresh for affected properties:
 
 ```bash
-curl -X POST "http://localhost:8080/properties?fields=simon,lorena&force=true"
+curl -X POST "http://localhost:8765/properties?fields=simon,lorena&force=true"
 ```

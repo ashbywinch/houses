@@ -9,6 +9,7 @@ specific services without monkeypatching.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 from typing import Any, Protocol
 
@@ -80,6 +81,10 @@ class OAuthService(Protocol):
         """
         ...
 
+    async def verify_id_token(self, token: str) -> dict:
+        """Verify a Google id_token (device flow) and return its claims."""
+        ...
+
 
 class WalkabilityService(Protocol):
     """Walk time to town centre and nearby amenities."""
@@ -139,8 +144,8 @@ class _DefaultOAuthService:
 
         client_config = {
             "web": {
-                "client_id": settings.google_client_id,
-                "client_secret": settings.google_client_secret,
+                "client_id": settings.web_client_id,
+                "client_secret": settings.web_client_secret,
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
                 "redirect_uris": [settings.public_url.rstrip("/") + "/api/auth/callback"],
@@ -170,8 +175,8 @@ class _DefaultOAuthService:
 
         client_config = {
             "web": {
-                "client_id": settings.google_client_id,
-                "client_secret": settings.google_client_secret,
+                "client_id": settings.web_client_id,
+                "client_secret": settings.web_client_secret,
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
                 "redirect_uris": [settings.public_url.rstrip("/") + "/api/auth/callback"],
@@ -191,9 +196,49 @@ class _DefaultOAuthService:
         id_info = id_token.verify_oauth2_token(
             flow.credentials.id_token,
             google_requests.Request(),
-            settings.google_client_id,
+            settings.web_client_id,
         )
         return id_info
+
+    async def verify_id_token(self, token: str) -> dict:
+        """Verify a Google id_token (device flow) and return its claims.
+
+        Bound strictly to the device-flow client: a web-flow id_token (easy
+        to leak from a browser context) must not be replayable at this
+        headless session-minting endpoint.
+
+        Runs in a thread: cert-fetch + verification are blocking network I/O
+        and must not stall the event loop. Bounded by wait_for so a stuck
+        cert fetch surfaces as TransportError (→ endpoint 503) instead of
+        hanging the request forever.
+        """
+        from google.auth.exceptions import TransportError
+        from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token as google_id_token
+
+        if not settings.device_client_id:
+            raise ValueError("device_client_id not configured for device-flow login")
+
+        def _verify_in_thread() -> dict:
+            # Build the cert-fetch session inside the worker thread so it is
+            # created and used in one thread — requests.Session isn't
+            # guaranteed thread-safe across thread boundaries.
+            return dict(
+                google_id_token.verify_oauth2_token(
+                    token,
+                    google_requests.Request(),
+                    settings.device_client_id,
+                )
+            )
+
+        try:
+            verified = await asyncio.wait_for(
+                asyncio.to_thread(_verify_in_thread),
+                timeout=10,
+            )
+        except TimeoutError:
+            raise TransportError("Google id_token verification timed out after 10s") from None
+        return verified
 
 
 # Settings sources are cached by node_id so that the same UserInputNode
@@ -308,7 +353,7 @@ class _DefaultRailFare:
 
 
 def _default_auth_enabled() -> bool:
-    return bool(settings.google_client_id)
+    return bool(settings.web_client_id)
 
 
 @dataclasses.dataclass

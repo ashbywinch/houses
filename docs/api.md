@@ -1,6 +1,6 @@
 # API Reference
 
-All endpoints live on port 8080 (`make run`). **The source of truth is the running server's auto-docs at `/docs`** (FastAPI generates them from `houses/web/api_router.py`). This page records the non-obvious behaviour — query-param semantics and response shapes — that the code doesn't explain by itself.
+All endpoints live on port 8765 (`make run`). **The source of truth is the running server's auto-docs at `/docs`** (FastAPI generates them from `houses/web/api_router.py`). This page records the non-obvious behaviour — query-param semantics and response shapes — that the code doesn't explain by itself.
 
 | Endpoint | What's non-obvious |
 |----------|--------------------|
@@ -27,7 +27,7 @@ Query params:
 | `force` | bool | false | `true` = overwrite existing cells; `false` = fill blanks only |
 | `no_write` | bool | false | enrich without writing to the sheet |
 
-Example — force refresh Simon/Lorena for specific rows: `curl -X POST "http://localhost:8080/properties?fields=simon,lorena&force=true&rids=88275093,173431283"`.
+Example — force refresh Simon/Lorena for specific rows: `curl -X POST "http://localhost:8765/properties?fields=simon,lorena&force=true&rids=88275093,173431283"`.
 
 ## POST /properties/compare
 

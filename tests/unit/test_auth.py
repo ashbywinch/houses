@@ -337,6 +337,123 @@ class TestCallback:
         assert "auth_url" in data
 
 
+class TestDevice:
+    """POST /api/auth/device — headless login via Google OAuth device flow."""
+
+    def test_rejects_missing_token(self):
+        resp = client.post("/api/auth/device", json={})
+        assert resp.status_code == 400
+
+    def test_rejects_non_object_body(self):
+        resp = client.post("/api/auth/device", json=["x"])
+        assert resp.status_code == 400
+        resp2 = client.post(
+            "/api/auth/device",
+            content="{not json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp2.status_code == 400
+
+    def test_rejects_invalid_token(self):
+        from houses.config import settings
+
+        token = _sp.set(
+            make_services(oauth_service=FakeOAuthService(verify_error=ValueError("bad")))
+        )
+        saved = settings.device_client_id
+        settings.device_client_id = "fake-device-client"
+        try:
+            resp = client.post("/api/auth/device", json={"id_token": "garbage"})
+            assert resp.status_code == 401
+        finally:
+            _sp.reset(token)
+            settings.device_client_id = saved
+
+    def test_mints_session_cookie(self):
+        # autouse _fake_oauth fixture provides FakeOAuthService (id_info ashby@example.com)
+        from houses.config import settings
+
+        saved = settings.device_client_id
+        settings.device_client_id = "fake-device-client"
+        try:
+            resp = client.post("/api/auth/device", json={"id_token": "real-looking"})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["authenticated"] is True
+            assert data["email"] == "ashby@example.com"
+            assert "session_cookie" not in data  # cookie lives in Set-Cookie only
+            assert resp.headers.get("cache-control") == "no-store"
+            cookie = resp.cookies.get("session")
+            assert cookie
+
+            # the minted cookie is a real session
+            me = client.get("/api/auth/me")
+            assert me.json()["authenticated"] is True
+        finally:
+            settings.device_client_id = saved
+
+    def test_503_when_device_client_not_configured(self):
+        from houses.config import settings
+
+        saved = settings.device_client_id
+        settings.device_client_id = ""
+        try:
+            resp = client.post("/api/auth/device", json={"id_token": "whatever"})
+            assert resp.status_code == 503
+        finally:
+            settings.device_client_id = saved
+
+    def test_503_when_identity_provider_unreachable(self):
+        """A transient Google transport failure is retryable 503, not a 401."""
+        from google.auth.exceptions import TransportError
+
+        from houses.config import settings
+
+        token = _sp.set(
+            make_services(oauth_service=FakeOAuthService(verify_error=TransportError("no network")))
+        )
+        saved = settings.device_client_id
+        settings.device_client_id = "fake-device-client"
+        try:
+            resp = client.post("/api/auth/device", json={"id_token": "real-looking"})
+            assert resp.status_code == 503
+        finally:
+            _sp.reset(token)
+            settings.device_client_id = saved
+
+    def test_rejects_cross_origin_request(self):
+        """A malicious page must not be able to mint a session for the victim."""
+        from houses.config import settings
+
+        saved = settings.device_client_id
+        settings.device_client_id = "fake-device-client"
+        try:
+            resp = client.post(
+                "/api/auth/device",
+                json={"id_token": "real-looking"},
+                headers={"Origin": "https://evil.example"},
+            )
+            assert resp.status_code == 403
+        finally:
+            settings.device_client_id = saved
+
+    def test_accepts_app_origin(self):
+        """Requests from the app's own origins (or no Origin, e.g. the CLI) pass."""
+        from houses.config import settings
+
+        saved = settings.device_client_id
+        settings.device_client_id = "fake-device-client"
+        try:
+            resp = client.post(
+                "/api/auth/device",
+                json={"id_token": "real-looking"},
+                headers={"Origin": settings.frontend_url},
+            )
+            assert resp.status_code == 200
+        finally:
+            settings.device_client_id = saved
+
+
 class TestCommentAuth:
     def test_post_401_without_session(self):
         auth_token = _enable_auth()

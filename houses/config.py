@@ -30,7 +30,7 @@ def _parse_quantity(v: object, default_unit: str) -> Quantity:
 
 class Settings(BaseSettings):
     host: str = "127.0.0.1"
-    port: int = 8080
+    port: int = 8765
     reload: bool = True
 
     sheet_id: str = "1CUWQfy5KnyKko2L-H7whQbOVYL_Uzr_5JSHO6HpH_2s"
@@ -49,8 +49,10 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 150
     trace: bool = Field(default=False, alias="HOUSES_TRACE")
     epc_bearer_token: str = Field(default="", alias="EPC_BEARER_TOKEN")
-    google_client_id: str = Field(default="", alias="GOOGLE_CLIENT_ID")
-    google_client_secret: str = Field(default="", alias="GOOGLE_CLIENT_SECRET")
+    web_client_id: str = Field(default="", alias="HOUSES_GOOGLE_WEB_CLIENT_ID")
+    web_client_secret: str = Field(default="", alias="HOUSES_GOOGLE_WEB_CLIENT_SECRET")
+    device_client_id: str = Field(default="", alias="HOUSES_GOOGLE_DEVICE_CLIENT_ID")
+    device_client_secret: str = Field(default="", alias="HOUSES_GOOGLE_DEVICE_CLIENT_SECRET")
     session_secret: str = Field(default="", alias="HOUSES_SESSION_SECRET")
 
     rightmove_chrome_port: int = 9222
@@ -76,7 +78,7 @@ class Settings(BaseSettings):
     sqlite_path: str = Field(default="data/houses.db", alias="HOUSES_SQLITE_PATH")
 
     frontend_url: str = Field(default="http://localhost:5173", alias="HOUSES_FRONTEND_URL")
-    public_url: str = Field(default="http://localhost:8080", alias="HOUSES_PUBLIC_URL")
+    public_url: str = Field(default="http://localhost:8765", alias="HOUSES_PUBLIC_URL")
 
     working_weeks_per_year: int = 46
     weekly_simon_trips: int = 1

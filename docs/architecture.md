@@ -4,7 +4,7 @@
 
 ## System Overview
 
-Rightmove listings → Firefox Page Assist (BYOK LLM) extracts structured data → FastAPI `POST /inject-property` (:8080) → enrichment in sequence → Google Sheets (Properties Data tab written by server; Properties View tab pulls via XLOOKUP formulas).
+Rightmove listings → Firefox Page Assist (BYOK LLM) extracts structured data → FastAPI `POST /inject-property` (:8765) → enrichment in sequence → Google Sheets (Properties Data tab written by server; Properties View tab pulls via XLOOKUP formulas).
 
 Enrichment sequence: transit commutes (TfL, Simon/Lorena) → petrol cost (ORS drive, Bracknell) → nearest boys-eligible schools (GIAS CSV + postcodes.io) → walkability (Google Maps Places + ORS walking, planned) → town description (OpenRouter LLM, planned) → council tax (VOA scraper + CivAccount).
 

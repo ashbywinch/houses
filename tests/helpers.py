@@ -229,7 +229,12 @@ class FakeOAuthService(OAuthService):
     Returns canned authorization URLs and id_info.
     """
 
-    def __init__(self, auth_url: str = "https://accounts.google.com/o/oauth2/auth?fake", id_info: dict | None = None):
+    def __init__(
+        self,
+        auth_url: str = "https://accounts.google.com/o/oauth2/auth?fake",
+        id_info: dict | None = None,
+        verify_error: Exception | None = None,
+    ):
         self.auth_url = auth_url
         self._id_info = id_info or {
             "email": "ashby@example.com",
@@ -237,11 +242,17 @@ class FakeOAuthService(OAuthService):
             "name": "Ashby",
             "picture": "",
         }
+        self._verify_error = verify_error
 
     def create_authorization_url(self, state: str) -> tuple[str, str]:
         return self.auth_url, "fake_code_verifier"
 
     def exchange_code(self, code: str, code_verifier: str, state: str) -> dict:
+        return self._id_info
+
+    async def verify_id_token(self, token: str) -> dict:
+        if self._verify_error is not None:
+            raise self._verify_error
         return self._id_info
 
 

@@ -1,0 +1,27 @@
+#!/usr/bin/env sh
+# Pre-commit hook: ruff check on staged Python files.
+#
+# Install: `make install-hooks` (copies this file to .git/hooks/pre-commit).
+# Re-run `make install-hooks` after pulling updates — this file is the
+# single source of truth; the copy in .git/hooks is not versioned.
+#
+# Fail fast: a staged file that fails ruff blocks the commit with the same
+# output as `make lint`. The hook never mutates your working tree — auto-
+# fixing is `make format` / `ruff check --fix`.
+
+set -e
+
+files=$(git diff --cached --name-only --diff-filter=ACM -- '*.py')
+if [ -z "$files" ]; then
+    exit 0
+fi
+
+if [ ! -x .venv/bin/ruff ]; then
+    echo "pre-commit: .venv/bin/ruff not found — run 'make setup' first" >&2
+    exit 1
+fi
+
+# Staged paths come from git's index (no spaces in this repo's tree);
+# word-splitting is intentional.
+# shellcheck disable=SC2086
+.venv/bin/ruff check $files
