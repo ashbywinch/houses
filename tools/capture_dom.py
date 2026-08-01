@@ -137,8 +137,9 @@ async def login(state_file: Path) -> None:
     from houses.config import settings
 
     client_id = settings.device_client_id or settings.google_client_id
+    client_secret = settings.device_client_secret
     if not client_id:
-        sys.exit("No Google OAuth client configured — set GOOGLE_CLIENT_ID / HOUSES_DEVICE_CLIENT_ID")
+        sys.exit("No Google OAuth client configured — set GOOGLE_CLIENT_ID / GOOGLE_DEVICE_CLIENT_ID")
 
     print("Waiting for servers …")
     await wait_for_server(BACKEND_URL + "/api/auth/me", "backend")
@@ -173,6 +174,7 @@ async def login(state_file: Path) -> None:
                 GOOGLE_TOKEN_URL,
                 data={
                     "client_id": client_id,
+                    "client_secret": client_secret,
                     "device_code": device_code,
                     "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
                 },
