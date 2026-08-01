@@ -176,10 +176,16 @@ async def login(state_file: Path) -> None:
     print(f"Session state will be saved to: {state_file}")
 
     async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(
-            GOOGLE_DEVICE_URL,
-            data={"client_id": client_id, "scope": GOOGLE_DEVICE_SCOPE},
-        )
+        try:
+            r = await client.post(
+                GOOGLE_DEVICE_URL,
+                data={"client_id": client_id, "scope": GOOGLE_DEVICE_SCOPE},
+            )
+        except httpx.HTTPError as e:
+            _fail(
+                "Couldn't reach Google's sign-in service — check your connection and try again.",
+                f"device-flow setup POST to {GOOGLE_DEVICE_URL} failed: {e}",
+            )
         if r.status_code != 200:
             _fail(
                 "Couldn't start Google sign-in — the sign-in app isn't allowed to use device sign-in. "
@@ -187,7 +193,13 @@ async def login(state_file: Path) -> None:
                 f"Google device flow setup failed ({r.status_code}): {r.text[:300]} — "
                 f"is device flow enabled for OAuth client {client_id}?",
             )
-        info = r.json()
+        try:
+            info = r.json()
+        except ValueError as e:
+            _fail(
+                "Couldn't start Google sign-in — the sign-in service sent an unexpected reply. Try again.",
+                f"device-flow setup response was not JSON: {e}",
+            )
         device_code = info["device_code"]
         user_code = info["user_code"]
         verification_url = info.get("verification_url", "https://www.google.com/device")
@@ -208,8 +220,16 @@ async def login(state_file: Path) -> None:
         if client_secret:
             token_data["client_secret"] = client_secret
         while time.monotonic() < deadline:
-            r = await client.post(GOOGLE_TOKEN_URL, data=token_data)
-            data = r.json()
+            try:
+                r = await client.post(GOOGLE_TOKEN_URL, data=token_data)
+                data = r.json()
+            except (httpx.HTTPError, ValueError) as e:
+                # Transient blip (network, proxy 5xx HTML body): keep polling —
+                # the deadline below bounds the retry; log so a silent loop of
+                # failures is diagnosable.
+                logger.warning("device-flow token poll failed (retrying): %s", e)
+                await asyncio.sleep(interval)
+                continue
             if r.status_code == 200:
                 id_token = data.get("id_token")
                 if not id_token:
@@ -246,8 +266,20 @@ async def login(state_file: Path) -> None:
             )
 
         # Exchange the id_token for the app's signed session cookie
-        r = await client.post(BACKEND_URL + "/api/auth/device", json={"id_token": id_token})
+        try:
+            r = await client.post(BACKEND_URL + "/api/auth/device", json={"id_token": id_token})
+        except httpx.HTTPError as e:
+            _fail(
+                "Couldn't reach the app to finish signing in — check that it's running, then try again.",
+                f"device login POST to {BACKEND_URL}/api/auth/device failed: {e}",
+            )
         if r.status_code != 200:
+            if r.status_code == 503:
+                _fail(
+                    "Couldn't complete the sign-in — the sign-in service was unreachable. "
+                    "Check your connection and try again.",
+                    f"Backend device login returned 503 (identity provider unreachable): {r.text[:300]}",
+                )
             _fail(
                 "The app refused the sign-in — check that the app is running and up to date, then try again.",
                 f"Backend rejected device login ({r.status_code}): {r.text[:300]}",

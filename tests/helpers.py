@@ -250,7 +250,7 @@ class FakeOAuthService(OAuthService):
     def exchange_code(self, code: str, code_verifier: str, state: str) -> dict:
         return self._id_info
 
-    def verify_id_token(self, token: str) -> dict:
+    async def verify_id_token(self, token: str) -> dict:
         if self._verify_error is not None:
             raise self._verify_error
         return self._id_info

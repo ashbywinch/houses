@@ -403,6 +403,24 @@ class TestDevice:
         finally:
             settings.device_client_id = saved
 
+    def test_503_when_identity_provider_unreachable(self):
+        """A transient Google transport failure is retryable 503, not a 401."""
+        from google.auth.exceptions import TransportError
+
+        from houses.config import settings
+
+        token = _sp.set(
+            make_services(oauth_service=FakeOAuthService(verify_error=TransportError("no network")))
+        )
+        saved = settings.device_client_id
+        settings.device_client_id = "fake-device-client"
+        try:
+            resp = client.post("/api/auth/device", json={"id_token": "real-looking"})
+            assert resp.status_code == 503
+        finally:
+            _sp.reset(token)
+            settings.device_client_id = saved
+
 
 class TestCommentAuth:
     def test_post_401_without_session(self):

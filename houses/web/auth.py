@@ -19,6 +19,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
+from google.auth.exceptions import TransportError
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from houses.config import settings
@@ -290,7 +291,12 @@ async def device(request: Request):
 
     svc = get_services()
     try:
-        id_info = svc.oauth_service.verify_id_token(token)
+        id_info = await svc.oauth_service.verify_id_token(token)
+    except TransportError as e:
+        logger.warning("Device-flow id_token verification failed (transport): %s", e)
+        return JSONResponse(
+            status_code=503, content={"detail": "identity provider unreachable, try again"}
+        )
     except Exception as e:
         logger.warning("Device-flow id_token verification failed: %s", e)
         return JSONResponse(status_code=401, content={"detail": "invalid id_token"})
