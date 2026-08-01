@@ -139,8 +139,8 @@ class _DefaultOAuthService:
 
         client_config = {
             "web": {
-                "client_id": settings.google_client_id,
-                "client_secret": settings.google_client_secret,
+                "client_id": settings.web_client_id,
+                "client_secret": settings.web_client_secret,
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
                 "redirect_uris": [settings.public_url.rstrip("/") + "/api/auth/callback"],
@@ -170,8 +170,8 @@ class _DefaultOAuthService:
 
         client_config = {
             "web": {
-                "client_id": settings.google_client_id,
-                "client_secret": settings.google_client_secret,
+                "client_id": settings.web_client_id,
+                "client_secret": settings.web_client_secret,
                 "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                 "token_uri": "https://oauth2.googleapis.com/token",
                 "redirect_uris": [settings.public_url.rstrip("/") + "/api/auth/callback"],
@@ -191,7 +191,7 @@ class _DefaultOAuthService:
         id_info = id_token.verify_oauth2_token(
             flow.credentials.id_token,
             google_requests.Request(),
-            settings.google_client_id,
+            settings.web_client_id,
         )
         return id_info
 
@@ -308,7 +308,7 @@ class _DefaultRailFare:
 
 
 def _default_auth_enabled() -> bool:
-    return bool(settings.google_client_id)
+    return bool(settings.web_client_id)
 
 
 @dataclasses.dataclass

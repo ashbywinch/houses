@@ -71,18 +71,16 @@ async def lifespan(_app: FastAPI):
     # httpx logs full URLs including query params — suppress to avoid
     # leaking API keys in the server log
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    if not settings.google_client_id:
+    if not settings.web_client_id:
         logger.error(
-            "GOOGLE_CLIENT_ID is not set. Set GOOGLE_CLIENT_ID in .env to configure Google OAuth authentication."
+            "HOUSES_GOOGLE_WEB_CLIENT_ID is not set. Configure Google OAuth in .env."
         )
         raise RuntimeError("Authentication not configured")
-    if not settings.google_client_secret:
-        logger.error("GOOGLE_CLIENT_ID is set but GOOGLE_CLIENT_SECRET is missing. Set GOOGLE_CLIENT_SECRET in .env.")
+    if not settings.web_client_secret:
+        logger.error("HOUSES_GOOGLE_WEB_CLIENT_SECRET is missing. Set it in .env.")
         raise RuntimeError("Google Client Secret not configured")
     if not settings.session_secret:
-        logger.error(
-            "GOOGLE_CLIENT_ID is set but HOUSES_SESSION_SECRET is empty. Set a non-empty HOUSES_SESSION_SECRET in .env."
-        )
+        logger.error("HOUSES_SESSION_SECRET is empty. Set a non-empty value in .env.")
         raise RuntimeError("Session secret not configured")
 
     init_dag_db()

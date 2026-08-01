@@ -281,7 +281,7 @@ async def device(request: Request):
         id_info = google_id_token.verify_oauth2_token(
             token,
             google_requests.Request(),
-            settings.device_client_id or settings.google_client_id,
+            settings.device_client_id or settings.web_client_id,
         )
     except Exception as e:
         logger.warning("Device-flow id_token verification failed: %s", e)

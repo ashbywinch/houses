@@ -49,10 +49,10 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 150
     trace: bool = Field(default=False, alias="HOUSES_TRACE")
     epc_bearer_token: str = Field(default="", alias="EPC_BEARER_TOKEN")
-    google_client_id: str = Field(default="", alias="GOOGLE_CLIENT_ID")
-    google_client_secret: str = Field(default="", alias="GOOGLE_CLIENT_SECRET")
-    device_client_id: str = Field(default="", alias="GOOGLE_DEVICE_CLIENT_ID")
-    device_client_secret: str = Field(default="", alias="GOOGLE_DEVICE_CLIENT_SECRET")
+    web_client_id: str = Field(default="", alias="HOUSES_GOOGLE_WEB_CLIENT_ID")
+    web_client_secret: str = Field(default="", alias="HOUSES_GOOGLE_WEB_CLIENT_SECRET")
+    device_client_id: str = Field(default="", alias="HOUSES_GOOGLE_DEVICE_CLIENT_ID")
+    device_client_secret: str = Field(default="", alias="HOUSES_GOOGLE_DEVICE_CLIENT_SECRET")
     session_secret: str = Field(default="", alias="HOUSES_SESSION_SECRET")
 
     rightmove_chrome_port: int = 9222
