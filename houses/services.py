@@ -218,19 +218,27 @@ class _DefaultOAuthService:
 
         if not settings.device_client_id:
             raise ValueError("device_client_id not configured for device-flow login")
-        try:
-            verified = await asyncio.wait_for(
-                asyncio.to_thread(
-                    google_id_token.verify_oauth2_token,
+
+        def _verify_in_thread() -> dict:
+            # Build the cert-fetch session inside the worker thread so it is
+            # created and used in one thread — requests.Session isn't
+            # guaranteed thread-safe across thread boundaries.
+            return dict(
+                google_id_token.verify_oauth2_token(
                     token,
                     google_requests.Request(),
                     settings.device_client_id,
-                ),
+                )
+            )
+
+        try:
+            verified = await asyncio.wait_for(
+                asyncio.to_thread(_verify_in_thread),
                 timeout=10,
             )
         except TimeoutError:
             raise TransportError("Google id_token verification timed out after 10s") from None
-        return dict(verified)
+        return verified
 
 
 # Settings sources are cached by node_id so that the same UserInputNode

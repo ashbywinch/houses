@@ -226,11 +226,26 @@ async def login(state_file: Path) -> None:
             try:
                 r = await client.post(GOOGLE_TOKEN_URL, data=token_data)
                 data = r.json()
-            except (httpx.HTTPError, ValueError) as e:
-                # Transient blip (network, proxy 5xx HTML body): keep polling —
-                # the deadline below bounds the retry; log so a silent loop of
-                # failures is diagnosable.
+            except httpx.HTTPError as e:
+                # Transient network blip: keep polling — the deadline below
+                # bounds the retry; log so a silent loop is diagnosable.
                 logger.warning("device-flow token poll failed (retrying): %s", e)
+                await asyncio.sleep(interval)
+                continue
+            except ValueError:
+                # Non-JSON body: a 4xx is a hard rejection (e.g. Google's
+                # invalid_client served as an HTML page) — fail fast instead
+                # of polling to the deadline and misreporting as 'no one
+                # approved'. 5xx non-JSON stays a transient retry.
+                if 400 <= r.status_code < 500:
+                    _fail(
+                        "Google sign-in failed — nothing was signed in. Try again.",
+                        f"Google device flow token exchange failed ({r.status_code}): {r.text[:200]}",
+                    )
+                logger.warning(
+                    "device-flow token poll returned non-JSON body (retrying): %s",
+                    r.text[:200],
+                )
                 await asyncio.sleep(interval)
                 continue
             if r.status_code == 200:

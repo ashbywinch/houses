@@ -11,6 +11,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 SCRIPT = Path(__file__).resolve().parents[2] / "tools" / "capture_dom.py"
 
 
@@ -64,6 +66,7 @@ def test_storage_state_carries_only_localhost_session_cookie():
     assert state["origins"] == []
 
 
+@pytest.mark.asyncio
 async def test_auth_state_distinguishes_unreachable_from_unauthenticated():
     cd = _load_capture_dom()
 
