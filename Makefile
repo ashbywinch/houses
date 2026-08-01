@@ -21,6 +21,7 @@ help:
 	@echo "  ${GREEN}make setup${NC}              Create venv and install dependencies"
 	@echo "  ${GREEN}make run-prod${NC}           Serve backend + built frontend (no Vite)"
 	@echo "  ${GREEN}make run${NC}                Start backend + frontend dev server (local + LAN)"
+	@echo "  ${GREEN}make login${NC}              Google sign-in (device flow); saves auth state for captures"
 	@echo "  ${GREEN}make test${NC}               Run unit + integration tests (fast, mocked APIs)"
 	@echo "  ${GREEN}make test-all${NC}           Run all tests including e2e (hits real APIs)"
 	@echo "  ${GREEN}make test-integration${NC}   Run only integration tests"
@@ -64,6 +65,10 @@ stop:
 run-prod: setup frontend-build
 	@echo "${YELLOW}Serving frontend build + backend on http://127.0.0.1:8765${NC}"
 	@$(UV) run python -c "import uvicorn; from houses.config import settings; from houses.server import app; from fastapi.staticfiles import StaticFiles; from pathlib import Path; build_dir = Path('houses/frontend/dist'); if build_dir.exists(): app.mount('/', StaticFiles(directory=str(build_dir), html=True), name='frontend'); uvicorn.run(app, host=settings.host, port=settings.port, reload=False)"
+
+login: setup
+	@echo "${YELLOW}Requires servers running — use 'make run' first${NC}"
+	@$(PYTHON) tools/capture_dom.py --login
 FRONTEND := houses/frontend
 NPM := npm
 
