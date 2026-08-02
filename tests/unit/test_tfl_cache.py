@@ -22,7 +22,6 @@ from houses.api_cache import CachingTransport, get_cached, set_cached
 from houses.tfl_client import TflClient
 
 URL = "https://api.tfl.gov.uk/Journey/JourneyResults/51.5,-0.1/to/SW1V 2QQ"
-ENCODED_URL = "https://api.tfl.gov.uk/Journey/JourneyResults/51.5,-0.1/to/SW1V%202QQ"
 AUTH_PARAMS = {"nationalSearch": "true", "app_key": "test-key"}
 STRIPPED_PARAMS = {"nationalSearch": "true"}
 
@@ -60,9 +59,9 @@ class _FakeInner(httpx.AsyncBaseTransport):
 
 @pytest.mark.asyncio
 async def test_transport_evicts_wrapped_error_on_hit(isolated_cache):
-    # A legacy wrapped-error entry, keyed as the transport keys (encoded URL,
-    # auth params from the query string).
-    set_cached("GET", ENCODED_URL, AUTH_PARAMS, None, {"_cached_status": 429, "_cached_body": {"error": "x"}})
+    # A legacy wrapped-error entry in the UNIFIED key space (raw URL, auth
+    # stripped) — the space the transport now reads and writes.
+    set_cached("GET", URL, STRIPPED_PARAMS, None, {"_cached_status": 429, "_cached_body": {"error": "x"}})
 
     inner = _FakeInner(httpx.Response(200, json={"journeys": [{"duration": 5}]}))
     async with httpx.AsyncClient(transport=CachingTransport(inner=inner)) as client:
@@ -72,13 +71,13 @@ async def test_transport_evicts_wrapped_error_on_hit(isolated_cache):
     assert resp.json()["journeys"][0]["duration"] == 5  # served from the inner, not the poison
     assert inner.requests  # the cached error did not short-circuit the request
     # The poison was evicted — the slot now holds the fresh success, not the 429.
-    entry = get_cached("GET", ENCODED_URL, AUTH_PARAMS, None)
+    entry = get_cached("GET", URL, STRIPPED_PARAMS, None)
     assert entry is None or "_cached_status" not in entry
 
 
 @pytest.mark.asyncio
 async def test_transport_serves_wrapped_non_error_entries(isolated_cache):
-    set_cached("GET", ENCODED_URL, AUTH_PARAMS, None, {"_cached_status": 300, "_cached_body": {"disambiguation": []}})
+    set_cached("GET", URL, STRIPPED_PARAMS, None, {"_cached_status": 300, "_cached_body": {"disambiguation": []}})
     inner = _FakeInner(httpx.Response(500, json={}))
     async with httpx.AsyncClient(transport=CachingTransport(inner=inner)) as client:
         resp = await client.get(URL, params=AUTH_PARAMS)
@@ -91,8 +90,7 @@ async def test_transport_serves_wrapped_non_error_entries(isolated_cache):
 
 @pytest.mark.asyncio
 async def test_cached_api_call_rejects_raw_error_body(isolated_cache):
-    # Poisoned entry under the STRIPPED-key/raw-URL space (old _cached_api_call
-    # writes)…
+    # Poisoned raw-ApiError entry in the unified key space.
     set_cached(
         "GET",
         URL,
@@ -100,11 +98,14 @@ async def test_cached_api_call_rejects_raw_error_body(isolated_cache):
         None,
         {"$type": "Tfl.Api.Presentation.Entities.ApiError, Tfl.Api.Presentation.Entities", "message": "boom"},
     )
-    # …and a good entry under the transport's encoded-URL/auth-keyed variant,
-    # so the post-eviction request is served from cache (no network).
-    set_cached("GET", ENCODED_URL, AUTH_PARAMS, None, {"journeys": [{"duration": 9}]})
 
-    data = await TflClient._cached_api_call(URL, AUTH_PARAMS)
+    # Post-eviction request served by a fake inner — hermetic, no network.
+    def client_factory(**kwargs):
+        return httpx.AsyncClient(
+            transport=CachingTransport(inner=_FakeInner(httpx.Response(200, json={"journeys": [{"duration": 9}]})))
+        )
+
+    data = await TflClient._cached_api_call(URL, AUTH_PARAMS, _client_factory=client_factory)
 
     assert data is not None
     assert data["journeys"][0]["duration"] == 9  # fresh data, not the error

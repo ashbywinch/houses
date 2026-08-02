@@ -339,13 +339,17 @@ class TflClient:
         return "$type" in data and "ApiError" in str(data["$type"])
 
     @staticmethod
-    async def _cached_api_call(url: str, params: dict) -> dict | None:
+    async def _cached_api_call(
+        url: str, params: dict, *, _client_factory: Callable | None = None
+    ) -> dict | None:
         """Make a cached TfL API call. Strips auth from cache keys.
         Transient errors (429, 5xx, httpx.RequestError) are re-raised for DAG retry.
         For all other statuses (including 300 disambiguation), the response body
         is cached under the original URL and returned.
         Unexpected response format errors (KeyError, IndexError, TypeError) are
-        NOT caught — they propagate so the operator knows the API format changed."""
+        NOT caught — they propagate so the operator knows the API format changed.
+        ``_client_factory`` is injectable for tests (resolved at call time so
+        monkeypatching ``cached_async_client`` keeps working)."""
         cache_params = {k: v for k, v in params.items() if k != "app_key"}
         cached = get_cached("GET", url, cache_params)
         if cached is not None:
@@ -359,7 +363,7 @@ class TflClient:
                 cached = None
             else:
                 return cached
-        async with cached_async_client(timeout=20.0) as client:
+        async with (_client_factory or cached_async_client)(timeout=20.0) as client:
             resp = await client.get(url, params=params)
             data = resp.json()
             # Cache ONLY non-error responses (2xx/3xx — the 300 disambiguation

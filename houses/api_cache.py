@@ -22,7 +22,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 
@@ -132,8 +132,15 @@ class CachingTransport(httpx.AsyncBaseTransport):
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         parsed = urlparse(str(request.url))
-        url_path = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        # Key space is UNIFIED with the callers' direct get_cached/set_cached
+        # calls: the decoded URL (httpx percent-encodes path spaces) with
+        # app_key stripped. Before this, the transport keyed the encoded URL
+        # with auth params — a parallel key space where every response was
+        # stored twice and each layer was blind to the other's entries.
+        url_path = unquote(f"{parsed.scheme}://{parsed.netloc}{parsed.path}")
         params = {k: v[0] for k, v in parse_qs(parsed.query).items()} if parsed.query else None
+        if params:
+            params = {k: v for k, v in params.items() if k != "app_key"} or None
         body = request.content.decode() if request.content else None
 
         cached = get_cached(request.method, url_path, params, body)
