@@ -138,20 +138,14 @@ class CachingTransport(httpx.AsyncBaseTransport):
             return httpx.Response(200, json=cached)
 
         response = await self._inner.handle_async_request(request)
-        # Cache ALL responses (including errors) so re-processing stale
-        # nodes doesn't make fresh API calls on every restart.
+        # Cache ONLY successful responses. Error bodies are never cached: a
+        # transient 429/5xx must not poison the route permanently, and retry
+        # loops stay genuine. (Old wrapped-error entries, if present on disk,
+        # are still read back for back-compat — see the hit path above.)
         try:
             data = response.json()
             if response.is_success:
                 set_cached(request.method, url_path, params, body, data)
-            else:
-                set_cached(
-                    request.method,
-                    url_path,
-                    params,
-                    body,
-                    {"_cached_status": response.status_code, "_cached_body": data},
-                )
         except Exception:
             pass
         return response

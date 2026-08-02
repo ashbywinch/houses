@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
+import httpx
 from money import Money
 from pint import Quantity
 
@@ -80,17 +82,24 @@ class TflClient:
         return await self._process_data(data)
 
     @staticmethod
-    async def route_duration(origin: str, destination_postcode: str, *, allow_bus: bool = True) -> int | None:
+    async def route_duration(
+        origin: str,
+        destination_postcode: str,
+        *,
+        allow_bus: bool = True,
+        fetch: Callable[[str, dict], Awaitable[dict | None]] | None = None,
+    ) -> int | None:
         """Route one origin → postcode pair and return the fastest duration in minutes.
 
         Public entry point for external tooling (``tools/commute/station_shed.py``)
         that needs durations, not Commute enrichment. Builds the same request as
         ``plan()`` (nationalSearch, arriving 09:00 weekday, disk-cached, retry with
-        backoff on transient errors). Returns ``None`` when TfL cannot route or
-        every attempt fails — never raises for a missing route.
+        backoff on transient errors and network failures). Returns ``None`` when
+        TfL cannot route or every attempt fails — never raises for a missing route.
 
         ``origin`` is any TfL origin identifier: ``"lat,lon"``, a place name, or a
-        stop id.
+        stop id. ``fetch`` is injectable for tests (default: the cached/retry
+        wrapper; error responses are never cached, so retries are genuine).
         """
         modes = ["tube", "overground", "dlr", "tram", "national-rail", "walking"]
         if allow_bus:
@@ -104,12 +113,12 @@ class TflClient:
             **TflClient._next_weekday_date_params(),
             **TflClient._tfl_auth_params(),
         }
-        data = await TflClient._cached_with_retry(url, params)
+        fetch = fetch or TflClient._cached_with_retry
+        data = await fetch(url, params)
         if data is None:
             return None
         duration, _, _ = TflClient._pick_best_journey(data)
         return duration
-
     # ── TfL helper functions ─────────────────────────────────────────
 
     @staticmethod
@@ -289,16 +298,14 @@ class TflClient:
 
     @staticmethod
     async def _cached_with_retry(url: str, params: dict, *, attempts: int = 3, base_delay: float = 1.0) -> dict | None:
-        """Cached TfL call with backoff on transient errors; None on persistent failure.
+        """Cached TfL call with backoff on transient HTTP errors and network failures.
 
-        A retry marker is added to the cache key on each attempt so a transient
-        error body cached by the first attempt does not short-circuit the retry
-        (``_cached_api_call`` caches responses regardless of status).
+        Retries are genuine: ``_cached_api_call`` never caches error responses,
+        so a failed attempt cannot short-circuit a later one via the disk cache.
         """
         for attempt in range(attempts):
-            retry_params = {**params, "_retry": str(attempt)} if attempt else params
             try:
-                return await TflClient._cached_api_call(url, retry_params)
+                return await TflClient._cached_api_call(url, params)
             except HttpError as e:
                 if e.is_rate_limit() or e.is_server_error():
                     delay = base_delay * (2**attempt)
@@ -307,6 +314,10 @@ class TflClient:
                     continue
                 logger.warning("TfL client error %s for %s — station excluded", e.status, url)
                 return None
+            except httpx.RequestError as e:
+                delay = base_delay * (2**attempt)
+                logger.warning("TfL network error for %s (%s) — retry in %.1fs", url, e.__class__.__name__, delay)
+                await asyncio.sleep(delay)
         logger.error("TfL transient errors exhausted for %s — station excluded", url)
         return None
 
@@ -325,9 +336,12 @@ class TflClient:
         async with cached_async_client(timeout=20.0) as client:
             resp = await client.get(url, params=params)
             data = resp.json()
-            # Cache response body regardless of HTTP status (including 300).
-            # The response IS from this URL, so the cache key is correct.
-            set_cached("GET", url, cache_params, None, data)
+            # Cache ONLY non-error responses (2xx/3xx — the 300 disambiguation
+            # body is a legitimate response the geocode fallback consumes).
+            # Error bodies are never cached: a transient 429/5xx must not
+            # poison the route permanently, and retries stay genuine.
+            if resp.status_code < 400:
+                set_cached("GET", url, cache_params, None, data)
             if resp.status_code == 429 or (500 <= resp.status_code < 600):
                 raise HttpError(resp.status_code, body=str(data))
             if 400 <= resp.status_code < 500:

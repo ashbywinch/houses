@@ -220,7 +220,12 @@ async def route_station_duration(
     """
     from houses.tfl_client import TflClient
 
-    fetch = fetch or TflClient.route_duration
+    if fetch is None:
+
+        async def _default_fetch(origin: str, dest: str) -> int | None:
+            return await TflClient.route_duration(origin, dest, allow_bus=allow_bus)
+
+        fetch = _default_fetch
     for origin in origin_candidates(station):
         duration = await fetch(origin, dest_postcode)
         if duration is not None:
@@ -247,7 +252,12 @@ async def _geocode_offices() -> list[Office]:
         pc = _extract_postcode(dest)
         point = (await geocode(pc)).value_or_none()
         if point is None:
-            raise RuntimeError(f"could not geocode office postcode {pc!r}")
+            logger.error(
+                "could not geocode office postcode %r (from %r) — check houses/config.py destinations", pc, dest
+            )
+            raise RuntimeError(
+                f"could not geocode office postcode {pc!r} — check the destination settings in houses/config.py"
+            )
         offices.append(Office(pc, point))
     return offices
 

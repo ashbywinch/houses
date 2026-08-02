@@ -62,23 +62,52 @@ async def test_both_fail_returns_none():
 # ── TflClient.route_duration — the public API the tool routes through ──
 
 
+class _FakeCachedFetch:
+    """Injected fetch; records (url, params) and returns canned data."""
+
+    def __init__(self, result: dict | None):
+        self.result = result
+        self.called: list[tuple[str, dict]] = []
+
+    async def __call__(self, url: str, params: dict) -> dict | None:
+        self.called.append((url, params))
+        return self.result
+
+
 @pytest.mark.asyncio
-async def test_route_duration_returns_none_on_journey_less_body(monkeypatch):
+async def test_route_duration_returns_none_on_journey_less_body():
     from houses.tfl_client import TflClient
 
-    async def fake_cached(_url, _params):
-        return {"$type": "Tfl.Api.Presentation.Entities.ApiError, Tfl.Api.Presentation.Entities"}
-
-    monkeypatch.setattr(TflClient, "_cached_with_retry", staticmethod(fake_cached))
-    assert await TflClient.route_duration(COORDS, DEST) is None
+    fetch = _FakeCachedFetch({"$type": "Tfl.Api.Presentation.Entities.ApiError, Tfl.Api.Presentation.Entities"})
+    assert await TflClient.route_duration(COORDS, DEST, fetch=fetch) is None
 
 
 @pytest.mark.asyncio
-async def test_route_duration_parses_best_journey(monkeypatch):
+async def test_route_duration_parses_best_journey():
     from houses.tfl_client import TflClient
 
-    async def fake_cached(_url, _params):
-        return {"journeys": [{"duration": 79}, {"duration": 95}]}
+    fetch = _FakeCachedFetch({"journeys": [{"duration": 79}, {"duration": 95}]})
+    assert await TflClient.route_duration(COORDS, DEST, fetch=fetch) == 79
 
-    monkeypatch.setattr(TflClient, "_cached_with_retry", staticmethod(fake_cached))
-    assert await TflClient.route_duration(COORDS, DEST) == 79
+
+@pytest.mark.asyncio
+async def test_route_duration_builds_national_search_request():
+    from houses.tfl_client import TflClient
+
+    fetch = _FakeCachedFetch({"journeys": [{"duration": 79}]})
+    await TflClient.route_duration(COORDS, DEST, fetch=fetch)
+    url, params = fetch.called[0]
+    assert url == "https://api.tfl.gov.uk/Journey/JourneyResults/52.5648,-0.237/to/SW1V 2QQ"
+    assert params["nationalSearch"] == "true"
+    assert params["timeIs"] == "arriving"
+    assert "bus" in params["mode"]
+    assert "tube" in params["mode"]
+
+
+@pytest.mark.asyncio
+async def test_route_duration_respects_allow_bus():
+    from houses.tfl_client import TflClient
+
+    fetch = _FakeCachedFetch({"journeys": [{"duration": 79}]})
+    await TflClient.route_duration(COORDS, DEST, allow_bus=False, fetch=fetch)
+    assert "bus" not in fetch.called[0][1]["mode"]
