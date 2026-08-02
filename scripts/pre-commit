@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Pre-commit hook: ruff check on staged Python files.
+# Pre-commit hook: ruff check + gitleaks on staged content.
 #
 # Install: `make install-hooks` (copies this file to .git/hooks/pre-commit).
 # Re-run `make install-hooks` after pulling updates — this file is the
@@ -8,6 +8,12 @@
 # Fail fast: a staged file that fails ruff blocks the commit with the same
 # output as `make lint`. The hook never mutates your working tree — auto-
 # fixing is `make format` / `ruff check --fix`.
+#
+# gitleaks scans the staged content (not diffs), so secrets in files marked
+# -diff / linguist-generated in .gitattributes stay caught even though no
+# diff-based reviewer can see them. If gitleaks is not installed, the check
+# is skipped with a warning — install it with `brew install gitleaks` or
+# `go install github.com/gitleaks/gitleaks/v8@latest`.
 
 set -e
 
@@ -25,3 +31,9 @@ fi
 # word-splitting is intentional.
 # shellcheck disable=SC2086
 .venv/bin/ruff check $files
+
+if command -v gitleaks >/dev/null 2>&1; then
+    gitleaks git --staged --no-banner 2>/dev/null || gitleaks protect --staged -v
+else
+    echo "pre-commit: gitleaks not installed — skipping secret scan (install for full protection)" >&2
+fi
