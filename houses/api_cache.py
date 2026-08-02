@@ -138,9 +138,21 @@ class CachingTransport(httpx.AsyncBaseTransport):
 
         cached = get_cached(request.method, url_path, params, body)
         if cached is not None:
-            if isinstance(cached, dict) and "_cached_status" in cached:
+            # Legacy poisoned entry: an error response cached before error
+            # caching stopped (this transport keys WITH auth params, so
+            # client-side eviction under a stripped key cannot reach it).
+            # Evict it here and treat as a miss — retries must be genuine.
+            if (
+                isinstance(cached, dict)
+                and isinstance(cached.get("_cached_status"), int)
+                and cached["_cached_status"] >= 400
+            ):
+                evict_cached(request.method, url_path, params, body)
+                cached = None
+            elif isinstance(cached, dict) and "_cached_status" in cached:
                 return httpx.Response(cached["_cached_status"], json=cached["_cached_body"])
-            return httpx.Response(200, json=cached)
+            else:
+                return httpx.Response(200, json=cached)
 
         response = await self._inner.handle_async_request(request)
         # Cache ONLY successful responses. Error bodies are never cached: a
