@@ -8,7 +8,7 @@ Status: implemented on `feat/rightmove-commute-monitor` (TDD, 77 commute unit te
   **907 kept** (≤132 min to Pimlico or Aldgate). The coordinate-origin routing
   404s on ~59% of stations (TfL's geo stop-finder misses non-London stations) —
   a `'<name> Rail Station'` origin fallback rescued 165 of them.
-- **Searches**: **86 non-overlapping rectangles** (8 km grid, 5 km catchment,
+- **Searches**: **85 non-overlapping rectangles** (8 km grid, 5 km catchment,
   row-merge + vertical merge) → `searches.json` + `searches.txt`.
 - **Validation green**: geometry, pairwise disjointness, URL round-trip, all 32
   positive town controls (incl. inner London), both negative controls (Exeter,

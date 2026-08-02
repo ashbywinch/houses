@@ -297,15 +297,19 @@ class TflClient:
     # ── Internal fetch / process ─────────────────────────────────────
 
     @staticmethod
-    async def _cached_with_retry(url: str, params: dict, *, attempts: int = 3, base_delay: float = 1.0) -> dict | None:
+    async def _cached_with_retry(
+        url: str, params: dict, *, attempts: int = 3, base_delay: float = 1.0, fetch=None
+    ) -> dict | None:
         """Cached TfL call with backoff on transient HTTP errors and network failures.
 
         Retries are genuine: ``_cached_api_call`` never caches error responses,
         so a failed attempt cannot short-circuit a later one via the disk cache.
+        ``fetch`` is injectable for tests (default: the cached API call).
         """
+        fetch = fetch or TflClient._cached_api_call
         for attempt in range(attempts):
             try:
-                return await TflClient._cached_api_call(url, params)
+                return await fetch(url, params)
             except HttpError as e:
                 if e.is_rate_limit() or e.is_server_error():
                     delay = base_delay * (2**attempt)
