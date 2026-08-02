@@ -30,12 +30,13 @@ DURATIONS = {
 
 
 class _CountingRouter:
-    def __init__(self):
+    def __init__(self, durations: dict[tuple[str, str], int | None] | None = None):
+        self.durations = durations if durations is not None else DURATIONS
         self.calls: list[tuple[str, str]] = []
 
     async def __call__(self, station: Station, dest: str) -> int | None:
         self.calls.append((station.crs, dest))
-        return DURATIONS.get((station.crs, dest))
+        return self.durations.get((station.crs, dest))
 
 
 @pytest.mark.asyncio
@@ -81,6 +82,30 @@ async def test_resume_when_checkpoint_complete_makes_no_calls():
     )
     assert router.calls == []
     assert resumed == full
+
+
+@pytest.mark.asyncio
+async def test_resume_reroutes_failed_stations():
+    """A record with routing_error is NOT done: a resume re-routes the station."""
+    # First run: EXD fails both destinations (not in the router's durations).
+    failed_router = _CountingRouter({k: v for k, v in DURATIONS.items() if k[0] != "EXD"})
+    first = await build_shed(
+        STATIONS, OFFICES, BBOX, 20.0, THRESHOLD, failed_router, delay_s=0
+    )
+    exd = next(r for r in first if r["crs"] == "EXD")
+    assert exd["routing_error"] == "failed"
+    assert exd["kept"] is False
+
+    # Resume: every non-failed record is done; EXD is re-routed.
+    router2 = _CountingRouter()
+    resumed = await build_shed(STATIONS, OFFICES, BBOX, 20.0, THRESHOLD, router2, delay_s=0, existing_records=first)
+    assert ("EXD", "SW1V 2QQ") in router2.calls
+    assert ("EXD", "EC3A 7LP") in router2.calls
+    # All other stations were not re-routed.
+    assert all(c[0] == "EXD" for c in router2.calls)
+    exd2 = next(r for r in resumed if r["crs"] == "EXD")
+    assert exd2["duration_pimlico"] == 150  # fresh successful route
+    assert exd2["routing_error"] is None
 
 
 @pytest.mark.asyncio

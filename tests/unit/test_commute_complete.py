@@ -42,6 +42,16 @@ def test_not_complete_when_records_replaced_stale_entry():
     assert is_complete(existing, records, 2) is False
 
 
+def test_not_complete_when_any_record_failed():
+    # Failed routes are unfinished work — a resume must re-route them, so an
+    # all-done-looking shed with a routing_error is never "already complete".
+    existing = [
+        {"crs": "X1", "lat": 51.0, "lon": -0.9, "kept": True},
+        {"crs": "X2", "lat": 52.0, "lon": 0.0, "kept": False, "routing_error": "failed"},
+    ]
+    assert is_complete(existing, existing, 2) is False
+
+
 def test_resume_allowed_matching_version():
     assert resume_allowed({"engine_version": "station-shed-v1"}, "station-shed-v1") is True
 

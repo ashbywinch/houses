@@ -118,10 +118,20 @@ def write_searches(payload: dict, out_dir: str | Path) -> None:
         except json.JSONDecodeError:
             existing = None
     if existing is not None and _same_searches(existing, payload):
+        # JSON is current — but the txt must mirror it too (it can be missing
+        # or stale from a partial write/checkout).
+        txt_path = out_dir / "searches.txt"
+        expected = _urls_text(payload)
+        if not txt_path.exists() or txt_path.read_text() != expected:
+            txt_path.write_text(expected)
         return
     path.write_text(json.dumps(payload, indent=2) + "\n")
+    (out_dir / "searches.txt").write_text(_urls_text(payload))
+
+
+def _urls_text(payload: dict) -> str:
     urls = [s["rightmove_url"] for s in payload["searches"]]
-    (out_dir / "searches.txt").write_text("\n".join(urls) + "\n")
+    return "\n".join(urls) + "\n"
 
 
 def _same_searches(existing: dict, new: dict) -> bool:

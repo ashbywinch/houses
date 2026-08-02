@@ -141,13 +141,21 @@ async def build_shed(
     for rec in existing_records or []:
         st = by_crs.get(rec["crs"])
         if st is not None and st.lat == rec["lat"] and st.lon == rec["lon"]:
-            done.add(rec["crs"])
+            # Only completed records are done. A record with a routing_error
+            # (both destinations failed) is NOT done: a resume re-routes it,
+            # so a transient TfL outage that outlasted the retry window gets
+            # another chance instead of permanently excluding the station.
+            if not rec.get("routing_error"):
+                done.add(rec["crs"])
             records.append(rec)
     order = {st.crs: i for i, st in enumerate(stations)}
     processed = 0
     for st in stations:
         if st.crs in done:
             continue
+        # Re-processing a station (routing_error record from a previous run, or
+        # moved coords) must REPLACE its old record, not duplicate it.
+        records = [r for r in records if r["crs"] != st.crs]
         if not bbox.contains(st.lat, st.lon):
             continue
         inner = any(st.distance_km_to(office.point) <= inner_radius_km for office in offices)
@@ -160,7 +168,16 @@ async def build_shed(
                 router(st, offices[0].postcode),
                 router(st, offices[1].postcode),
             )
-            records.append(_record(st, dur_p, dur_a, keep_station(False, dur_p, dur_a, threshold)))
+            routed = dur_p is not None or dur_a is not None
+            records.append(
+                _record(
+                    st,
+                    dur_p,
+                    dur_a,
+                    keep_station(False, dur_p, dur_a, threshold),
+                    routing_error=None if routed else "failed",
+                )
+            )
             if delay_s:
                 await asyncio.sleep(delay_s)
         processed += 1
@@ -171,7 +188,7 @@ async def build_shed(
     return records
 
 
-def _record(st: Station, dur_p: int | None, dur_a: int | None, kept: bool) -> dict:
+def _record(st: Station, dur_p: int | None, dur_a: int | None, kept: bool, routing_error: str | None = None) -> dict:
     return {
         "name": st.name,
         "crs": st.crs,
@@ -180,6 +197,7 @@ def _record(st: Station, dur_p: int | None, dur_a: int | None, kept: bool) -> di
         "duration_pimlico": dur_p,
         "duration_aldgate": dur_a,
         "kept": kept,
+        "routing_error": routing_error,
     }
 
 
@@ -287,8 +305,15 @@ def is_complete(existing: list[dict] | None, records: list[dict], expected: int)
     A killed batch (records < expected) must resume; a run that processed new
     stations or REPLACED a stale record (records != existing, even at equal
     length) must report its work and write the result, not "already complete".
+    A shed with any ``routing_error`` record is unfinished work — a resume must
+    re-route those stations (a transient outage gets another chance).
     """
-    return existing is not None and len(records) >= expected and records == existing
+    return (
+        existing is not None
+        and len(records) >= expected
+        and records == existing
+        and not any(r.get("routing_error") for r in records)
+    )
 
 
 def resume_allowed(prev_metadata: dict, current_version: str) -> bool:

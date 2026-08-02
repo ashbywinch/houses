@@ -14,7 +14,7 @@ from pint import Quantity
 
 from dag.attempt import Attempt
 from dag.http_error import HttpError
-from houses.api_cache import cached_async_client, get_cached, set_cached
+from houses.api_cache import cached_async_client, evict_cached, get_cached, set_cached
 from houses.car_park import CarParkRegistry
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.config import settings
@@ -322,6 +322,19 @@ class TflClient:
         return None
 
     @staticmethod
+    def _is_error_body(data: dict) -> bool:
+        """True for cached entries that are error responses, not route data.
+
+        Two legacy shapes were written before error caching stopped: the
+        transport's ``{"_cached_status": >=400, ...}`` wrapper and TfL's raw
+        ``ApiError`` JSON body. Both must be rejected on the cache hit path.
+        """
+        status = data.get("_cached_status")
+        if isinstance(status, int) and status >= 400:
+            return True
+        return "$type" in data and "ApiError" in str(data["$type"])
+
+    @staticmethod
     async def _cached_api_call(url: str, params: dict) -> dict | None:
         """Make a cached TfL API call. Strips auth from cache keys.
         Transient errors (429, 5xx, httpx.RequestError) are re-raised for DAG retry.
@@ -332,7 +345,16 @@ class TflClient:
         cache_params = {k: v for k, v in params.items() if k != "app_key"}
         cached = get_cached("GET", url, cache_params)
         if cached is not None:
-            return cached
+            if TflClient._is_error_body(cached):
+                # Poisoned entry written before error responses stopped being
+                # cached (raw ApiError JSON or a _cached_status wrapper): reject
+                # and evict so the route is re-fetched instead of serving the
+                # stale failure forever.
+                logger.warning("evicting cached error response for %s", url)
+                evict_cached("GET", url, cache_params, None)
+                cached = None
+            else:
+                return cached
         async with cached_async_client(timeout=20.0) as client:
             resp = await client.get(url, params=params)
             data = resp.json()

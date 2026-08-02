@@ -69,6 +69,11 @@ def set_cached(method: str, url: str, params: dict[str, Any] | None, body: str |
     path.write_text(json.dumps(data))
 
 
+def evict_cached(method: str, url: str, params: dict[str, Any] | None, body: str | None) -> None:
+    """Delete a cached response (e.g. a poisoned error body). No-op if absent."""
+    _cache_path(_make_key(method, url, params, body)).unlink(missing_ok=True)
+
+
 def with_cache_sync(
     method: str,
     url: str,

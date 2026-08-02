@@ -95,6 +95,22 @@ def test_write_searches_does_not_churn_identical_content(tmp_path):
     assert (tmp_path / "searches.json").read_text() != first
 
 
+def test_write_searches_regenerates_stale_txt(tmp_path):
+    from tools.commute.searches import write_searches
+
+    payload = _payload()
+    write_searches(payload, tmp_path)
+    json_first = (tmp_path / "searches.json").read_text()
+    # Simulate a partial write: the txt disappears while the JSON stays.
+    (tmp_path / "searches.txt").unlink()
+    write_searches(payload, tmp_path)
+    urls = (tmp_path / "searches.txt").read_text().splitlines()
+    assert len(urls) == 2
+    assert urls[0] == payload["searches"][0]["rightmove_url"]
+    # The JSON was not rewritten (no churn).
+    assert (tmp_path / "searches.json").read_text() == json_first
+
+
 # ── end-to-end: shed records → searches ──────────────────────────────
 
 
