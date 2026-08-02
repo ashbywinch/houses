@@ -44,13 +44,18 @@ jobs:
             echo "Manual trigger — skipping review check (no PR number)"
             exit 0
           fi
-          # All bot comments for this PR, oldest first. A failed comments API
-          # call (403/network) must NOT look like "no review posted": retry,
-          # then fail with the real cause (two-tier failure messages).
+          # All bot comments for this PR. --paginate with a per-page --jq filter
+          # concatenates page results (invalid JSON on multi-page PRs), so stream
+          # the matches and slurp them into one array with jq -s. A failed
+          # comments API call (403/network) must NOT look like "no review
+          # posted": retry, then fail with the real cause (two-tier messages).
           CMTS=""
           for attempt in 1 2 3; do
-            CMTS=$(gh api --paginate "repos/${{ github.repository }}/issues/$PR_NUM/comments" \
-              --jq '[.[] | select(.user.login == "github-actions[bot]")]' 2>/tmp/gh_api_err) && break
+            if gh api --paginate "repos/${{ github.repository }}/issues/$PR_NUM/comments" \
+              --jq '.[] | select(.user.login == "github-actions[bot]")' > /tmp/raw_comments 2>/tmp/gh_api_err; then
+              CMTS=$(jq -s '.' < /tmp/raw_comments)
+              break
+            fi
             [ "$attempt" -lt 3 ] && sleep 5
           done
           if [ -z "$CMTS" ]; then
