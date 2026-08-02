@@ -26,7 +26,7 @@ import os
 import re
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -170,13 +170,41 @@ def _record(st: Station, dur_p: int | None, dur_a: int | None, kept: bool) -> di
 # ── TfL routing adapter ──────────────────────────────────────────────
 
 
-async def route_station_duration(station: Station, dest_postcode: str, *, allow_bus: bool = True) -> int | None:
-    """Route a station (lat/lon origin) to a destination postcode; return minutes or None.
+def origin_candidates(station: Station) -> list[str]:
+    """Origin identifiers to try in order — coordinate origin first, then name.
 
-    Reuses the app's TfL plumbing: the same URL shape, auth/date params, disk cache,
-    and journey parsing as ``houses/tfl_client.py`` — with retry-with-backoff for
-    transient errors (429/5xx). A retry marker is added to the cache key so a
-    transient error body cached by the first attempt does not short-circuit the retry.
+    TfL's JourneyResults 404s on lat/lon origins for many stations (its geo
+    stop-finder fails outside London — observed for 1075 of 1819 in the shed
+    batch); routing from ``'<name> Rail Station'`` resolves them. The name form
+    can itself 300-disambiguate (e.g. "Peterborough" matches streets), which
+    counts as a failure — the coords form already failed by then.
+    """
+    candidates = [f"{station.lat},{station.lon}"]
+    name = station.name
+    if not name.lower().endswith(" rail station"):
+        name += " Rail Station"
+    candidates.append(name)
+    return candidates
+
+
+async def route_station_duration(
+    station: Station,
+    dest_postcode: str,
+    *,
+    allow_bus: bool = True,
+    fetch: Callable[[str, dict], Awaitable[dict | None]] | None = None,
+) -> int | None:
+    """Route a station to a destination postcode; return minutes or None.
+
+    Reuses the app's TfL plumbing: the same URL shape, auth/date params, disk
+    cache, and journey parsing as ``houses/tfl_client.py`` — with retry-with-
+    backoff for transient errors (429/5xx). A retry marker is added to the
+    cache key so a transient error body cached by the first attempt does not
+    short-circuit the retry.
+
+    Tries each ``origin_candidates`` origin in order — coordinate origin first,
+    then ``'<name> Rail Station'`` — and returns the first routed duration.
+    ``fetch`` is injectable for tests (default: the cached/retry wrapper).
     """
     from houses.tfl_client import TflClient
 
@@ -184,8 +212,7 @@ async def route_station_duration(station: Station, dest_postcode: str, *, allow_
     if allow_bus:
         modes.append("bus")
 
-    url = f"{TflClient.TFL_JOURNEY_URL}/{station.lat},{station.lon}/to/{dest_postcode}"
-    base_params = {
+    params = {
         "nationalSearch": "true",
         "timeIs": "arriving",
         "journeyPreference": "leasttime",
@@ -193,12 +220,14 @@ async def route_station_duration(station: Station, dest_postcode: str, *, allow_
         **TflClient._next_weekday_date_params(),
         **TflClient._tfl_auth_params(),
     }
-
-    data = await _cached_with_retry(url, base_params)
-    if data is None:
-        return None
-    duration, _, _ = TflClient._pick_best_journey(data)
-    return duration
+    fetch = fetch or _cached_with_retry
+    for origin in origin_candidates(station):
+        url = f"{TflClient.TFL_JOURNEY_URL}/{origin}/to/{dest_postcode}"
+        data = await fetch(url, params)
+        if data is not None:
+            duration, _, _ = TflClient._pick_best_journey(data)
+            return duration
+    return None
 
 
 async def _cached_with_retry(url: str, params: dict, *, attempts: int = 3, base_delay: float = 1.0) -> dict | None:
