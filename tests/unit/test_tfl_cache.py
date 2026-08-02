@@ -18,13 +18,29 @@ import httpx
 import pytest
 
 from dag.http_error import HttpError
-from houses.api_cache import CachingTransport, get_cached, set_cache_dir, set_cached
+from houses.api_cache import CachingTransport, get_cached, set_cached
 from houses.tfl_client import TflClient
 
 URL = "https://api.tfl.gov.uk/Journey/JourneyResults/51.5,-0.1/to/SW1V 2QQ"
 ENCODED_URL = "https://api.tfl.gov.uk/Journey/JourneyResults/51.5,-0.1/to/SW1V%202QQ"
 AUTH_PARAMS = {"nationalSearch": "true", "app_key": "test-key"}
 STRIPPED_PARAMS = {"nationalSearch": "true"}
+
+
+@pytest.fixture
+async def isolated_cache(tmp_path):
+    """Point the API cache at a temp dir and RESTORE the previous dir after.
+
+    set_cache_dir mutates a module global; leaking it would make full-suite
+    behaviour depend on collection order (later cache users read a deleted
+    temp dir).
+    """
+    from houses import api_cache
+
+    previous = api_cache.CACHE_DIR
+    api_cache.set_cache_dir(tmp_path)
+    yield tmp_path
+    api_cache.set_cache_dir(previous)
 
 
 class _FakeInner(httpx.AsyncBaseTransport):
@@ -43,8 +59,7 @@ class _FakeInner(httpx.AsyncBaseTransport):
 
 
 @pytest.mark.asyncio
-async def test_transport_evicts_wrapped_error_on_hit(tmp_path):
-    set_cache_dir(tmp_path)
+async def test_transport_evicts_wrapped_error_on_hit(isolated_cache):
     # A legacy wrapped-error entry, keyed as the transport keys (encoded URL,
     # auth params from the query string).
     set_cached("GET", ENCODED_URL, AUTH_PARAMS, None, {"_cached_status": 429, "_cached_body": {"error": "x"}})
@@ -62,8 +77,7 @@ async def test_transport_evicts_wrapped_error_on_hit(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_transport_serves_wrapped_non_error_entries(tmp_path):
-    set_cache_dir(tmp_path)
+async def test_transport_serves_wrapped_non_error_entries(isolated_cache):
     set_cached("GET", ENCODED_URL, AUTH_PARAMS, None, {"_cached_status": 300, "_cached_body": {"disambiguation": []}})
     inner = _FakeInner(httpx.Response(500, json={}))
     async with httpx.AsyncClient(transport=CachingTransport(inner=inner)) as client:
@@ -76,8 +90,7 @@ async def test_transport_serves_wrapped_non_error_entries(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_cached_api_call_rejects_raw_error_body(tmp_path):
-    set_cache_dir(tmp_path)
+async def test_cached_api_call_rejects_raw_error_body(isolated_cache):
     # Poisoned entry under the STRIPPED-key/raw-URL space (old _cached_api_call
     # writes)…
     set_cached(

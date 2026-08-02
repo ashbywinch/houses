@@ -392,9 +392,10 @@ async def run(argv: list[str] | None = None) -> int:
 
     offices = await _geocode_offices()
     stations = load_stations(args.csv)
-    if args.limit and out_path.exists() and not args.force:
+    if args.limit and out_path.exists():
         # A --limit run would write only the first N stations, silently
-        # truncating the existing shed. Smoke runs must use a temp --out.
+        # truncating the existing shed — --force means "re-run everything",
+        # never "keep only N". Smoke runs must use a temp --out.
         logger.warning(
             "refusing --limit run: %s already exists and would be truncated to %d stations", out_path, args.limit
         )
