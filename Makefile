@@ -107,12 +107,16 @@ e2e: test-e2e
 coverage: setup
 	@$(UV) run coverage run -m pytest tests/ -q --tb=short
 	@$(UV) run coverage report -m
+	@$(UV) run coverage xml
 	@$(UV) run coverage html
 	@echo "${GREEN}Coverage report: htmlcov/index.html${NC}"
 
 lint: setup
 	@$(RUFF) check houses/ tests/
 	cd houses/frontend && npm run lint:css
+
+lint-github: setup   # CI only: findings surface as PR annotations
+	@$(RUFF) check houses/ tests/ --output-format=github
 
 typecheck: setup
 	@$(BASEDPYRIGHT)
