@@ -21,7 +21,9 @@ set -e
 # never skip the secret scan for commits that touch no .py files (e.g. the
 # -diff-marked data/commute/*.json, which no diff-based reviewer can see).
 if command -v gitleaks >/dev/null 2>&1; then
-    gitleaks git --staged --no-banner 2>/dev/null || gitleaks protect --staged -v
+    # v8's pre-commit command is `protect --staged`; `git --staged` is invalid
+    # (the --staged flag belongs to protect) — use the documented form directly.
+    gitleaks protect --staged -v
 else
     echo "pre-commit: gitleaks not installed — skipping secret scan (install for full protection)" >&2
 fi
