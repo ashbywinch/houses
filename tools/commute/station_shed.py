@@ -142,8 +142,12 @@ async def build_shed(
         if inner:
             records.append(_record(st, None, None, True))
         else:
-            dur_p = await router(st, offices[0].postcode)
-            dur_a = await router(st, offices[1].postcode)
+            # Both destinations concurrently — the two calls share no state and
+            # TfL latency dominates; stations remain strictly sequential.
+            dur_p, dur_a = await asyncio.gather(
+                router(st, offices[0].postcode),
+                router(st, offices[1].postcode),
+            )
             records.append(_record(st, dur_p, dur_a, keep_station(False, dur_p, dur_a, threshold)))
             if delay_s:
                 await asyncio.sleep(delay_s)
