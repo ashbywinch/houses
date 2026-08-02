@@ -40,16 +40,22 @@ jobs:
           tar -xzf gitleaks.tgz gitleaks
           ./gitleaks git --no-banner -v
 
-      - name: Config-drift check (.pr_agent.toml vs pr-agent-config branch)
-        # The bot reads the branch copy; the tree copy is documentation. Two
-        # sources of truth must not drift silently — fail when they differ.
+      - name: Config-drift check (.pr_agent.toml on main vs pr-agent-config branch)
+        # The bot reads the branch copy; main's tree copy is documentation. Two
+        # sources of truth must not drift silently — but the PER-PR tree copy is
+        # expected to lag an in-flight config sync, so compare the default
+        # branch's copy (API-fetched), never the working tree.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh api "repos/${{ github.repository }}/contents/.pr_agent.toml?ref=pr-agent-config" \
-            --jq '.content' | base64 -d > /tmp/branch_copy.toml
-          if ! diff -q .pr_agent.toml /tmp/branch_copy.toml >/dev/null; then
-            echo "::error::.pr_agent.toml drifted from the pr-agent-config branch — the bot reads the branch copy; sync them"
+          gh api "repos/${{ github.repository }}/contents/.pr_agent.toml?ref=main" --jq '.content' 2>/tmp/drift_err | base64 -d > /tmp/main_copy.toml
+          gh api "repos/${{ github.repository }}/contents/.pr_agent.toml?ref=pr-agent-config" --jq '.content' 2>>/tmp/drift_err | base64 -d > /tmp/config_copy.toml
+          if ! diff -q /tmp/main_copy.toml /tmp/config_copy.toml >/dev/null; then
+            echo "::error::.pr_agent.toml on main drifted from the pr-agent-config branch — the bot reads the branch copy; sync them"
+            exit 1
+          fi
+          if [ -s /tmp/drift_err ]; then
+            echo "::error::config fetch failed: $(tail -c 400 /tmp/drift_err)"
             exit 1
           fi
 
@@ -69,11 +75,12 @@ jobs:
       - name: Post coverage comment
         # SHA for v3.0.5; same interface as v2 (recreate/path).
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88
-        # always(): when the coverage gate fails (fail_below_min) the summary
-        # step exits non-zero and every later step would be skipped — the PR
-        # then shows a red check with the reason buried in logs. The comment
-        # matters most exactly when the gate failed.
-        if: ${{ github.event_name == 'pull_request' && !cancelled() }}
+        # Runs when the coverage summary produced the file, even if the gate
+        # failed (fail_below_min). hashFiles guards the case where an EARLIER
+        # step failed and coverage never ran — the action would otherwise
+        # error on the missing file (and recreate: true may delete the last
+        # good coverage comment first).
+        if: ${{ github.event_name == 'pull_request' && !cancelled() && hashFiles('code-coverage-results.md') != '' }}
         with:
           recreate: true
           path: code-coverage-results.md
