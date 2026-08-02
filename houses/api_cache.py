@@ -120,8 +120,10 @@ class CachingTransport(httpx.AsyncBaseTransport):
     """httpx async transport that checks the disk cache before making HTTP calls.
 
     On a cache hit the stored JSON is returned with its original HTTP status.
-    On a miss the request is forwarded to ``_inner`` and the response is cached
-    before being returned (including non-2xx so re-processing doesn't hit APIs).
+    On a miss the request is forwarded to ``_inner`` and deterministic
+    responses (2xx/3xx/4xx, including 404 no-route bodies) are cached so
+    re-processing doesn't hit APIs; TRANSIENT errors (429/5xx) are never
+    cached — retries stay genuine and a cached outage body can't poison a route.
 
     Stores raw response bodies (not wrapped) so that enrichment functions
     using ``get_cached`` directly remain compatible.
@@ -145,15 +147,12 @@ class CachingTransport(httpx.AsyncBaseTransport):
 
         cached = get_cached(request.method, url_path, params, body)
         if cached is not None:
-            # Legacy poisoned entry: an error response cached before error
-            # caching stopped (this transport keys WITH auth params, so
-            # client-side eviction under a stripped key cannot reach it).
-            # Evict it here and treat as a miss — retries must be genuine.
-            if (
-                isinstance(cached, dict)
-                and isinstance(cached.get("_cached_status"), int)
-                and cached["_cached_status"] >= 400
-            ):
+            # Legacy poisoned entry: a TRANSIENT error (429/5xx) cached before
+            # the rule. Only these are evicted — deterministic no-route
+            # responses (4xx) are legitimately cached and served. Treat the
+            # eviction as a miss so retries stay genuine.
+            status = cached.get("_cached_status") if isinstance(cached, dict) else None
+            if isinstance(status, int) and (status == 429 or status >= 500):
                 evict_cached(request.method, url_path, params, body)
                 cached = None
             elif isinstance(cached, dict) and "_cached_status" in cached:
@@ -162,13 +161,13 @@ class CachingTransport(httpx.AsyncBaseTransport):
                 return httpx.Response(200, json=cached)
 
         response = await self._inner.handle_async_request(request)
-        # Cache ONLY successful responses. Error bodies are never cached: a
-        # transient 429/5xx must not poison the route permanently, and retry
-        # loops stay genuine. (Old wrapped-error entries, if present on disk,
-        # are still read back for back-compat — see the hit path above.)
+        # Cache deterministic responses: 2xx/3xx/4xx (including 404 "cannot
+        # route" bodies — re-hitting the endpoint for the same impossible
+        # request wastes calls). NEVER cache transient errors (429/5xx): a
+        # cached outage body poisons the route and makes retries non-genuine.
         try:
             data = response.json()
-            if response.is_success:
+            if response.is_success or (400 <= response.status_code < 500 and response.status_code != 429):
                 set_cached(request.method, url_path, params, body, data)
         except Exception:
             pass

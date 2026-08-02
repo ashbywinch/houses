@@ -48,7 +48,11 @@ def build_searches(
     """Turn rectangles into the searches payload (deterministic given inputs)."""
     searches = []
     for i, rect in enumerate(rects, 1):
-        poly = rect_to_polygon(rect)
+        # Round to the polyline encode precision (1e-5): grid-derived bounds
+        # carry float noise (e.g. -0.8498050000000002) that the URL encoder
+        # rounds away, so the JSON polygon must match the encoded form exactly
+        # or the round-trip validation flakes at half-step boundaries.
+        poly = [(round(lat, 5), round(lon, 5)) for lat, lon in rect_to_polygon(rect)]
         searches.append(
             {
                 "id": f"s{i:03d}",

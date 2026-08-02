@@ -99,7 +99,8 @@ class TflClient:
 
         ``origin`` is any TfL origin identifier: ``"lat,lon"``, a place name, or a
         stop id. ``fetch`` is injectable for tests (default: the cached/retry
-        wrapper; error responses are never cached, so retries are genuine).
+        wrapper; transient error responses are never cached, so retries are
+        genuine).
         """
         modes = ["tube", "overground", "dlr", "tram", "national-rail", "walking"]
         if allow_bus:
@@ -117,8 +118,33 @@ class TflClient:
         data = await fetch(url, params)
         if data is None:
             return None
+        # A 300 disambiguation means the name matched multiple places (usually
+        # streets). The exact station is among the options as a national-rail
+        # StopPoint — route from its id instead of giving up (observed:
+        # Haywards Heath, Tring, Burgess Hill all fail both origin forms).
+        station_id = TflClient._disambiguate_national_rail(data)
+        if station_id is not None:
+            url2 = f"{TflClient.TFL_JOURNEY_URL}/{station_id}/to/{destination_postcode}"
+            data2 = await fetch(url2, params)
+            if data2 is not None:
+                data = data2
         duration, _, _ = TflClient._pick_best_journey(data)
         return duration
+
+    @staticmethod
+    def _disambiguate_national_rail(data: dict) -> str | None:
+        """Extract the national-rail StopPoint id from a 300 disambiguation body.
+
+        Returns the option's ``parameterValue`` (a routable stop id) for the
+        first StopPoint whose modes include national-rail, or ``None`` when the
+        body is not a disambiguation or has no such option.
+        """
+        disamb = data.get("fromLocationDisambiguation", {})
+        for option in disamb.get("disambiguationOptions", []):
+            place = option.get("place", {})
+            if place.get("placeType") == "StopPoint" and "national-rail" in (place.get("modes") or []):
+                return option.get("parameterValue")
+        return None
     # ── TfL helper functions ─────────────────────────────────────────
 
     @staticmethod
@@ -326,17 +352,22 @@ class TflClient:
         return None
 
     @staticmethod
-    def _is_error_body(data: dict) -> bool:
-        """True for cached entries that are error responses, not route data.
+    def _is_transient_error_body(data: dict) -> bool:
+        """True for cached entries that are TRANSIENT error responses.
 
-        Two legacy shapes were written before error caching stopped: the
-        transport's ``{"_cached_status": >=400, ...}`` wrapper and TfL's raw
-        ``ApiError`` JSON body. Both must be rejected on the cache hit path.
+        Only 429/5xx must be rejected and evicted on the cache hit path — a
+        transient outage must not poison the route, and retries must be
+        genuine. Deterministic no-route responses (404, "cannot route" bodies)
+        are legitimately cached and served: re-hitting the endpoint for the
+        same impossible request wastes calls. Two legacy shapes exist: the
+        transport's ``{"_cached_status": ...}`` wrapper and TfL's raw
+        ``ApiError`` JSON (status in ``httpStatusCode``).
         """
-        status = data.get("_cached_status")
-        if isinstance(status, int) and status >= 400:
-            return True
-        return "$type" in data and "ApiError" in str(data["$type"])
+        for key in ("_cached_status", "httpStatusCode"):
+            status = data.get(key)
+            if isinstance(status, int):
+                return status == 429 or status >= 500
+        return False
 
     @staticmethod
     async def _cached_api_call(
@@ -344,8 +375,10 @@ class TflClient:
     ) -> dict | None:
         """Make a cached TfL API call. Strips auth from cache keys.
         Transient errors (429, 5xx, httpx.RequestError) are re-raised for DAG retry.
-        For all other statuses (including 300 disambiguation), the response body
-        is cached under the original URL and returned.
+        Deterministic responses (2xx/3xx/4xx, including 404 "cannot route"
+        bodies) are cached and served — re-hitting the endpoint for the same
+        impossible request wastes calls. 429/5xx are never cached, so retries
+        stay genuine.
         Unexpected response format errors (KeyError, IndexError, TypeError) are
         NOT caught — they propagate so the operator knows the API format changed.
         ``_client_factory`` is injectable for tests (resolved at call time so
@@ -353,12 +386,11 @@ class TflClient:
         cache_params = {k: v for k, v in params.items() if k != "app_key"}
         cached = get_cached("GET", url, cache_params)
         if cached is not None:
-            if TflClient._is_error_body(cached):
-                # Poisoned entry written before error responses stopped being
-                # cached (raw ApiError JSON or a _cached_status wrapper): reject
-                # and evict so the route is re-fetched instead of serving the
-                # stale failure forever.
-                logger.warning("evicting cached error response for %s", url)
+            if TflClient._is_transient_error_body(cached):
+                # Legacy poisoned entry (429/5xx cached before the rule): reject
+                # and evict so the route is re-fetched — transient errors are
+                # never served from cache.
+                logger.warning("evicting cached transient error response for %s", url)
                 evict_cached("GET", url, cache_params, None)
                 cached = None
             else:
@@ -366,17 +398,18 @@ class TflClient:
         async with (_client_factory or cached_async_client)(timeout=20.0) as client:
             resp = await client.get(url, params=params)
             data = resp.json()
-            # Cache ONLY non-error responses (2xx/3xx — the 300 disambiguation
-            # body is a legitimate response the geocode fallback consumes).
-            # Error bodies are never cached: a transient 429/5xx must not
-            # poison the route permanently, and retries stay genuine.
-            if resp.status_code < 400:
+            # Cache deterministic responses — 2xx/3xx/4xx (including 404
+            # "cannot route this station" bodies: re-hitting the endpoint for
+            # the same impossible request wastes calls). NEVER cache transient
+            # errors (429, 5xx): a cached outage body would poison the route
+            # and make retries non-genuine.
+            if resp.status_code < 500 and resp.status_code != 429:
                 set_cached("GET", url, cache_params, None, data)
             if resp.status_code == 429 or (500 <= resp.status_code < 600):
                 raise HttpError(resp.status_code, body=str(data))
             if 400 <= resp.status_code < 500:
-                # Non-transient client error (e.g. 409 route planner
-                # unavailable) — surface the reason instead of letting
+                # Non-transient client error (e.g. 404 no route, 409 route
+                # planner unavailable) — surface the reason instead of letting
                 # _process_data reduce it to a generic "could not route".
                 reason = str(data)[:200]
                 raise HttpError(resp.status_code, body=str(data), message=reason)

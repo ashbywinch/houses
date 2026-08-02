@@ -1,15 +1,10 @@
-"""Cache-semantics tests — error responses are never cached or served.
+"""Cache-semantics tests — transient errors are never cached or served.
 
-Covers the behaviours changed for the never-cache-non-OK standard:
-- the transport evicts legacy wrapped-error entries on the hit path
-- _cached_api_call rejects raw ApiError bodies on the hit path
-- _cached_with_retry retries transient errors, stops on non-transient,
-  returns None when attempts are exhausted
-
-Note: the transport keys with the percent-encoded request URL
-(``SW1V%202QQ``) while ``_cached_api_call``'s direct lookups use the raw
-space form — two key spaces; tests seed whichever space the code under test
-reads.
+Rule (refined): deterministic responses — 2xx/3xx/4xx, including 404
+"cannot route this station" bodies — ARE cached (re-hitting the endpoint for
+an impossible request wastes calls). TRANSIENT errors (429/5xx) are never
+cached, and legacy cached transient entries are evicted on the hit path so
+retries stay genuine.
 """
 
 from __future__ import annotations
@@ -54,13 +49,12 @@ class _FakeInner(httpx.AsyncBaseTransport):
         return self.response
 
 
-# ── transport: legacy wrapped-error entries ──────────────────────────
+# ── transport: legacy wrapped entries ───────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_transport_evicts_wrapped_error_on_hit(isolated_cache):
-    # A legacy wrapped-error entry in the UNIFIED key space (raw URL, auth
-    # stripped) — the space the transport now reads and writes.
+async def test_transport_evicts_wrapped_transient_error_on_hit(isolated_cache):
+    # A legacy wrapped 429 in the UNIFIED key space (raw URL, auth stripped).
     set_cached("GET", URL, STRIPPED_PARAMS, None, {"_cached_status": 429, "_cached_body": {"error": "x"}})
 
     inner = _FakeInner(httpx.Response(200, json={"journeys": [{"duration": 5}]}))
@@ -69,10 +63,28 @@ async def test_transport_evicts_wrapped_error_on_hit(isolated_cache):
 
     assert resp.status_code == 200
     assert resp.json()["journeys"][0]["duration"] == 5  # served from the inner, not the poison
-    assert inner.requests  # the cached error did not short-circuit the request
+    assert inner.requests  # the cached 429 did not short-circuit the request
     # The poison was evicted — the slot now holds the fresh success, not the 429.
     entry = get_cached("GET", URL, STRIPPED_PARAMS, None)
     assert entry is None or "_cached_status" not in entry
+
+
+@pytest.mark.asyncio
+async def test_transport_serves_wrapped_deterministic_404(isolated_cache):
+    # A deterministic no-route response (wrapped 404) IS served — re-hitting
+    # the endpoint for the same impossible request wastes calls.
+    set_cached(
+        "GET",
+        URL,
+        STRIPPED_PARAMS,
+        None,
+        {"_cached_status": 404, "_cached_body": {"$type": "ApiError", "message": "no route"}},
+    )
+    inner = _FakeInner(httpx.Response(500, json={}))
+    async with httpx.AsyncClient(transport=CachingTransport(inner=inner)) as client:
+        resp = await client.get(URL, params=AUTH_PARAMS)
+    assert resp.status_code == 404  # served from cache; the inner was never hit
+    assert not inner.requests
 
 
 @pytest.mark.asyncio
@@ -85,21 +97,21 @@ async def test_transport_serves_wrapped_non_error_entries(isolated_cache):
     assert not inner.requests
 
 
-# ── _cached_api_call: raw ApiError bodies on the hit path ────────────
+# ── _cached_api_call: hit-path semantics ─────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_cached_api_call_rejects_raw_error_body(isolated_cache):
-    # Poisoned raw-ApiError entry in the unified key space.
+async def test_cached_api_call_evicts_transient_raw_error(isolated_cache):
+    # Legacy raw 500 ApiError body in the unified key space — evicted, and the
+    # post-eviction request served by a fake inner (hermetic, no network).
     set_cached(
         "GET",
         URL,
         STRIPPED_PARAMS,
         None,
-        {"$type": "Tfl.Api.Presentation.Entities.ApiError, Tfl.Api.Presentation.Entities", "message": "boom"},
+        {"$type": "Tfl.Api.Presentation.Entities.ApiError, Tfl.Api.Presentation.Entities", "httpStatusCode": 500},
     )
 
-    # Post-eviction request served by a fake inner — hermetic, no network.
     def client_factory(**kwargs):
         return httpx.AsyncClient(
             transport=CachingTransport(inner=_FakeInner(httpx.Response(200, json={"journeys": [{"duration": 9}]})))
@@ -108,10 +120,66 @@ async def test_cached_api_call_rejects_raw_error_body(isolated_cache):
     data = await TflClient._cached_api_call(URL, AUTH_PARAMS, _client_factory=client_factory)
 
     assert data is not None
-    assert data["journeys"][0]["duration"] == 9  # fresh data, not the error
-    # The poison was evicted and replaced by the good response in the slot.
+    assert data["journeys"][0]["duration"] == 9  # fresh data, not the poison
     entry = get_cached("GET", URL, STRIPPED_PARAMS, None)
-    assert entry is None or "ApiError" not in str(entry.get("$type", ""))
+    assert entry is None or "httpStatusCode" not in entry  # transient poison gone
+
+
+@pytest.mark.asyncio
+async def test_cached_api_call_serves_deterministic_404_body(isolated_cache):
+    # A cached 404 "cannot route" body is a legit answer — served from cache,
+    # no re-hit, no eviction.
+    set_cached(
+        "GET",
+        URL,
+        STRIPPED_PARAMS,
+        None,
+        {"$type": "Tfl.Api.Presentation.Entities.ApiError, Tfl.Api.Presentation.Entities", "httpStatusCode": 404},
+    )
+    data = await TflClient._cached_api_call(URL, AUTH_PARAMS)
+    assert data is not None
+    assert data.get("httpStatusCode") == 404  # the deterministic no-route answer
+    assert get_cached("GET", URL, STRIPPED_PARAMS, None) is not None  # still cached
+
+
+@pytest.mark.asyncio
+async def test_cached_api_call_caches_404_but_not_429(isolated_cache):
+    # Write path: a live 404 is cached (deterministic); a live 429 is not
+    # (transient — the route must stay retriable). Distinct URLs so the cached
+    # 404 does not short-circuit the 429 case.
+    url_404 = f"{URL}/a"
+    url_429 = f"{URL}/b"
+
+    def client_404(**kwargs):
+        return httpx.AsyncClient(
+            transport=CachingTransport(inner=_FakeInner(httpx.Response(404, json={"message": "no route"})))
+        )
+
+    with pytest.raises(HttpError) as excinfo:
+        await TflClient._cached_api_call(url_404, AUTH_PARAMS, _client_factory=client_404)
+    assert excinfo.value.status == 404
+    assert get_cached("GET", url_404, STRIPPED_PARAMS, None) is not None  # 404 cached
+
+    def client_429(**kwargs):
+        return httpx.AsyncClient(
+            transport=CachingTransport(inner=_FakeInner(httpx.Response(429, json={"message": "slow down"})))
+        )
+
+    with pytest.raises(HttpError) as excinfo:
+        await TflClient._cached_api_call(url_429, AUTH_PARAMS, _client_factory=client_429)
+    assert excinfo.value.status == 429
+    assert get_cached("GET", url_429, STRIPPED_PARAMS, None) is None  # 429 NOT cached
+
+
+@pytest.mark.asyncio
+async def test_is_transient_error_body_classification():
+    assert TflClient._is_transient_error_body({"_cached_status": 429}) is True
+    assert TflClient._is_transient_error_body({"_cached_status": 503}) is True
+    assert TflClient._is_transient_error_body({"httpStatusCode": 500}) is True
+    assert TflClient._is_transient_error_body({"_cached_status": 404}) is False  # deterministic no-route
+    assert TflClient._is_transient_error_body({"httpStatusCode": 404}) is False
+    assert TflClient._is_transient_error_body({"_cached_status": 300}) is False
+    assert TflClient._is_transient_error_body({"journeys": []}) is False
 
 
 # ── _cached_with_retry: retry semantics ──────────────────────────────
