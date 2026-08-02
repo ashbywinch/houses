@@ -144,8 +144,13 @@ scraper input):
 ## Deliverables & tooling
 
 - `tools/commute/{station_shed,tile,searches,validate,rightmove_url}.py`
-- `data/commute/station_shed.json`, `searches.json`, `searches.txt` (all committed)
-- `tests/test_commute_searches.py`
+- `data/commute/station_shed.json`, `searches.json`, `searches.txt` — **committed,
+  but marked `-diff` + `linguist-generated` in `.gitattributes`**: git treats them
+  as binary, so no diff consumer (git diff, git log -p, the GitHub PR API, patch
+  tools, review bots) ever receives their content, and GitHub collapses them in
+  the PR view. Stored for offline reproducibility; structurally invisible to
+  every diff-based reviewer — no instruction/whitelisting involved.
+- `tests/test_commute_searches.py` → `tests/unit/test_commute_*.py` (6 files)
 - Makefile targets:
   - `make commute-shed` — one-off TfL batch. **Resumable**: re-running continues
     from the existing `station_shed.json` (completed stations are never re-routed
