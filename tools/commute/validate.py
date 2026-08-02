@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -15,6 +16,8 @@ from houses.geo import GeoPoint
 from tools.commute.rightmove_url import parse_search_url
 from tools.commute.station_shed import BBox
 from tools.commute.tile import Rect, point_to_rect_distance_km
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_SHED = Path("data/commute/station_shed.json")
 DEFAULT_SEARCHES = Path("data/commute/searches.json")
@@ -143,6 +146,13 @@ def main(argv: list[str] | None = None) -> int:
 
     shed_path, searches_path = Path(args.shed), Path(args.searches)
     if not shed_path.exists() or not searches_path.exists():
+        logger.warning(
+            "missing inputs: shed=%s exists=%s, searches=%s exists=%s",
+            shed_path,
+            shed_path.exists(),
+            searches_path,
+            searches_path.exists(),
+        )
         print(
             f"need {shed_path} and {searches_path} — run 'make commute-shed' and 'make commute-searches'",
             file=sys.stderr,
@@ -166,6 +176,9 @@ def main(argv: list[str] | None = None) -> int:
         negative=negative,
     )
     for name, kind in missing:
+        logger.warning(
+            "control station %r (%s) not found in stations.csv — check the POSITIVE/NEGATIVE_TOWNS lists", name, kind
+        )
         issues.append(f"{kind} control station {name!r} not found in stations.csv")
 
     for issue in issues:

@@ -49,11 +49,12 @@ def test_point_at_corner_diagonal():
 
 def test_rasterize_keeps_cells_within_buffer():
     cells = rasterize([(51.05, -0.95)], BUFFER_KM, GRID)
-    # Station inside cell (0,0); east/west neighbours have nearest-point
-    # distance ~3.5 km (within buffer); north/south are ~5.5 km (out).
+    # Station inside cell (0,0); the east neighbour has nearest-point distance
+    # ~3.5 km (within buffer). The west "cell" (-1) is outside the grid and is
+    # clamped away; north/south cells are ~5.5 km away (out).
     assert (0, 0) in cells
     assert (0, 1) in cells
-    assert (0, -1) in cells
+    assert (0, -1) not in cells
     assert (1, 0) not in cells
     assert (-1, 0) not in cells
 
@@ -62,6 +63,19 @@ def test_rasterize_far_station_keeps_nothing():
     cells = rasterize([(51.05, -0.5)], BUFFER_KM, GRID)
     # Station 0.3 deg east of the grid — beyond buffer + cell reach.
     assert cells == set()
+
+
+def test_rasterize_clamps_candidate_cells_to_grid_bounds():
+    # Station just inside the SW corner, within buffer of the bbox edge: the
+    # candidate window extends outside the grid. Out-of-bounds cells must never
+    # be considered (they'd clamp to degenerate zero-area rects that pass every
+    # validation check as a "line" polygon).
+    cells = rasterize([(51.02, -0.98)], BUFFER_KM, GRID)
+    assert all(0 <= r <= 3 for r, _ in cells)
+    assert all(0 <= c <= 3 for _, c in cells)
+    rects = merge_rows(cells, GRID)
+    assert rects  # the station is inside the grid — must produce coverage
+    assert all(r.lat_min < r.lat_max and r.lon_min < r.lon_max for r in rects)
 
 
 def test_rasterize_deterministic():

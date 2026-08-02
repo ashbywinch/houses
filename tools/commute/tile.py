@@ -55,15 +55,23 @@ def point_to_rect_distance_km(point: GeoPoint, rect: Rect) -> float:
 
 
 def rasterize(stations: list[tuple[float, float]], buffer_km: float, grid: Grid) -> set[tuple[int, int]]:
-    """Cells whose nearest point is within ``buffer_km`` of any station."""
+    """Cells whose nearest point is within ``buffer_km`` of any station.
+
+    Candidate windows are clamped to the grid's valid cell bounds: a station
+    near the bbox edge must never generate out-of-bounds cells (they would
+    clamp to degenerate zero-area rects and slip through validation as
+    line-shaped polygons).
+    """
+    n_rows = math.ceil((grid.bbox.lat_max - grid.bbox.lat_min) / grid.lat_deg - 1e-9)
+    n_cols = math.ceil((grid.bbox.lon_max - grid.bbox.lon_min) / grid.lon_deg - 1e-9)
     kept: set[tuple[int, int]] = set()
     for lat, lon in stations:
         dlat = buffer_km / KM_PER_DEG_LAT
         dlon = buffer_km / (KM_PER_DEG_LAT * math.cos(math.radians(lat)))
-        r0 = math.floor((lat - dlat - grid.bbox.lat_min) / grid.lat_deg)
-        r1 = math.floor((lat + dlat - grid.bbox.lat_min) / grid.lat_deg)
-        c0 = math.floor((lon - dlon - grid.bbox.lon_min) / grid.lon_deg)
-        c1 = math.floor((lon + dlon - grid.bbox.lon_min) / grid.lon_deg)
+        r0 = max(0, math.floor((lat - dlat - grid.bbox.lat_min) / grid.lat_deg))
+        r1 = min(n_rows - 1, math.floor((lat + dlat - grid.bbox.lat_min) / grid.lat_deg))
+        c0 = max(0, math.floor((lon - dlon - grid.bbox.lon_min) / grid.lon_deg))
+        c1 = min(n_cols - 1, math.floor((lon + dlon - grid.bbox.lon_min) / grid.lon_deg))
         for r in range(r0, r1 + 1):
             for c in range(c0, c1 + 1):
                 if point_to_rect_distance_km(GeoPoint(lat, lon), grid.cell_rect(r, c)) <= buffer_km:

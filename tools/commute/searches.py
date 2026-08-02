@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,6 +19,8 @@ from houses.geo import GeoPoint
 from tools.commute.rightmove_url import build_search_url
 from tools.commute.station_shed import BBox
 from tools.commute.tile import Grid, Rect, merge_rectangles, merge_rows, rasterize, rect_to_polygon
+
+logger = logging.getLogger(__name__)
 
 ENGINE_VERSION = "searches-v1"
 DEFAULT_SHED = Path("data/commute/station_shed.json")
@@ -117,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
 
     shed_path = Path(args.shed)
     if not shed_path.exists():
+        logger.warning("shed file missing at %s — searches cannot be built without it", shed_path)
         print(f"{shed_path} not found — run 'make commute-shed' first", file=sys.stderr)
         return 1
     shed = json.loads(shed_path.read_text())

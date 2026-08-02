@@ -81,3 +81,36 @@ async def test_resume_when_checkpoint_complete_makes_no_calls():
     )
     assert router.calls == []
     assert resumed == full
+
+
+@pytest.mark.asyncio
+async def test_resume_prunes_station_removed_from_input():
+    router = _CountingRouter()
+    full = await build_shed(STATIONS, OFFICES, BBOX, 20.0, THRESHOLD, router, delay_s=0)
+    # Existing records include a CRS that no longer exists in the station list.
+    stale = [{
+        "name": "Gone", "crs": "ZZZ", "lat": 52.0, "lon": 0.0,
+        "duration_pimlico": 50, "duration_aldgate": 50, "kept": True,
+    }]
+    resumed = await build_shed(
+        STATIONS, OFFICES, BBOX, 20.0, THRESHOLD, router, delay_s=0, existing_records=stale + full
+    )
+    assert all(r["crs"] != "ZZZ" for r in resumed)
+    assert resumed == full
+
+
+@pytest.mark.asyncio
+async def test_resume_reroutes_station_with_changed_coords():
+    router = _CountingRouter()
+    full = await build_shed(STATIONS, OFFICES, BBOX, 20.0, THRESHOLD, router, delay_s=0)
+    # Reading's coordinates changed in stations.csv — the old record is stale.
+    moved = [
+        Station("Reading", "RDG", 51.45, -0.96),  # different lat/lon than the original
+        *STATIONS[1:],
+    ]
+    router2 = _CountingRouter()
+    resumed = await build_shed(moved, OFFICES, BBOX, 20.0, THRESHOLD, router2, delay_s=0, existing_records=full)
+    rdg = next(r for r in resumed if r["crs"] == "RDG")
+    assert rdg["lat"] == 51.45 and rdg["lon"] == -0.96  # fresh record, new coords
+    assert ("RDG", "SW1V 2QQ") in router2.calls  # was re-routed, not skipped
+    assert len(router2.calls) == 2  # only RDG × 2 destinations

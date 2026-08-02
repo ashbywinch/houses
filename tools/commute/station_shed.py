@@ -125,12 +125,21 @@ async def build_shed(
 
     Resumable: ``existing_records`` (a previous run's output) marks stations as
     done — they are never re-routed, never re-delayed, and the final record list
-    is byte-identical to a from-scratch run. ``checkpoint(records, processed)``
+    is byte-identical to a from-scratch run. Records whose CRS is absent from
+    the current station list (station removed) or whose coords differ (station
+    moved) are pruned as stale and, if present, re-processed — a resume can
+    never silently keep outdated records. ``checkpoint(records, processed)``
     is invoked after each newly processed station so the caller can persist
     progress incrementally (a killed batch loses at most the in-flight station).
     """
-    done = {r["crs"] for r in existing_records} if existing_records else set()
-    records = list(existing_records) if existing_records else []
+    by_crs = {st.crs: st for st in stations}
+    done: set[str] = set()
+    records: list[dict] = []
+    for rec in existing_records or []:
+        st = by_crs.get(rec["crs"])
+        if st is not None and st.lat == rec["lat"] and st.lon == rec["lon"]:
+            done.add(rec["crs"])
+            records.append(rec)
     order = {st.crs: i for i, st in enumerate(stations)}
     processed = 0
     for st in stations:
@@ -291,6 +300,15 @@ def is_complete(existing: list[dict] | None, records: list[dict], expected: int)
     return existing is not None and len(records) >= expected and len(records) == len(existing)
 
 
+def resume_allowed(prev_metadata: dict, current_version: str) -> bool:
+    """A resume is only safe when the shed came from the same engine version.
+
+    After a semantic change (keep rule, threshold, record schema), mixing old
+    records with newly-routed ones would silently commit an inconsistent shed.
+    """
+    return prev_metadata.get("engine_version") == current_version
+
+
 def _write_payload(path: Path, metadata: dict, records: list[dict]) -> None:
     """Write the shed payload atomically — a kill mid-write never corrupts the file."""
     payload = {"metadata": metadata, "stations": records}
@@ -315,13 +333,24 @@ async def run(argv: list[str] | None = None) -> int:
     if out_path.exists() and not args.force:
         try:
             prev = json.loads(out_path.read_text())
+            if not resume_allowed(prev["metadata"], ENGINE_VERSION):
+                logger.warning(
+                    "shed engine mismatch: stored %r != current %r — refusing to resume %s",
+                    prev["metadata"].get("engine_version"),
+                    ENGINE_VERSION,
+                    out_path,
+                )
+                print(f"{out_path} was built by a different engine version — use --force to rebuild", file=sys.stderr)
+                return 1
             existing = prev["stations"]
             metadata = prev["metadata"]  # keep the original generated_at across resumes
             print(f"resuming from {out_path} ({len(existing or [])} stations already done)")
         except (json.JSONDecodeError, KeyError, OSError):
+            logger.warning("unreadable shed at %s — starting fresh (corrupt or truncated write?)", out_path)
             print(f"{out_path} unreadable — starting fresh", file=sys.stderr)
             existing = None
     elif out_path.exists() and args.force:
+        logger.warning("--force: wiping the existing shed at %s", out_path)
         print("--force: wiping the existing shed", file=sys.stderr)
 
     offices = await _geocode_offices()
@@ -365,6 +394,9 @@ async def run(argv: list[str] | None = None) -> int:
     elapsed = time.monotonic() - started
 
     if is_complete(existing, records, metadata.get("expected_stations", len(records))):
+        logger.warning(
+            "shed already complete (%d stations) — no stations to process; use --force to re-run", len(records)
+        )
         print(f"shed already complete ({len(records)} stations) — use --force to re-run")
         return 0
 

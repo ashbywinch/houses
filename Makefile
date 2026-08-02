@@ -148,5 +148,4 @@ commute-searches:
 
 commute-validate: commute-searches
 	@$(PYTHON) -m tools.commute.validate
-	@$(PYTEST) tests/unit/test_commute_rightmove_url.py tests/unit/test_commute_station_shed.py \
-		tests/unit/test_commute_tile.py tests/unit/test_commute_searches.py tests/unit/test_commute_validate.py -q --tb=short
+	@$(PYTEST) tests/unit/test_commute_*.py -q --tb=short
