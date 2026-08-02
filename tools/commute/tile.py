@@ -87,6 +87,30 @@ def merge_rows(cells: set[tuple[int, int]], grid: Grid) -> list[Rect]:
     return rects
 
 
+def merge_rectangles(rects: list[Rect]) -> list[Rect]:
+    """Greedy vertical merge: adjacent rects with identical lon spans combine.
+
+    Keeps coverage identical (the union of cells is unchanged) while cutting the
+    rectangle count — rows that share a column band become taller rectangles.
+    """
+    by_span: dict[tuple[float, float], list[Rect]] = {}
+    for r in rects:
+        span = (round(r.lon_min, 6), round(r.lon_max, 6))
+        by_span.setdefault(span, []).append(r)
+    merged: list[Rect] = []
+    for (lon_min, lon_max), group in by_span.items():
+        group.sort(key=lambda r: r.lat_min)
+        current = group[0]
+        for r in group[1:]:
+            if abs(r.lat_min - current.lat_max) < 1e-9:  # adjacent rows
+                current = Rect(current.lat_min, r.lat_max, lon_min, lon_max)
+            else:
+                merged.append(current)
+                current = r
+        merged.append(current)
+    return sorted(merged, key=lambda r: (r.lat_min, r.lon_min))
+
+
 def _span(row: int, c0: int, c1: int, grid: Grid) -> Rect:
     lat_min = max(grid.bbox.lat_min, grid.bbox.lat_min + row * grid.lat_deg)
     lat_max = min(grid.bbox.lat_max, grid.bbox.lat_min + (row + 1) * grid.lat_deg)

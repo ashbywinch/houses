@@ -1,6 +1,21 @@
 # Rightmove Commute Search Coverage — Phase 1 Plan
 
-Status: implemented on `feat/rightmove-commute-monitor` (TDD, 59 commute unit tests green; `make test` fully green)
+Status: implemented on `feat/rightmove-commute-monitor` (TDD, 77 commute unit tests green; `make test` fully green)
+
+## Build results (2026-08-02)
+
+- **Shed**: 1819 in-bbox stations routed (one-off TfL batch, resumable + cached);
+  **907 kept** (≤132 min to Pimlico or Aldgate). The coordinate-origin routing
+  404s on ~59% of stations (TfL's geo stop-finder misses non-London stations) —
+  a `'<name> Rail Station'` origin fallback rescued 165 of them.
+- **Searches**: **86 non-overlapping rectangles** (8 km grid, 5 km catchment,
+  row-merge + vertical merge) → `searches.json` + `searches.txt`.
+- **Validation green**: geometry, pairwise disjointness, URL round-trip, all 32
+  positive town controls (incl. inner London), both negative controls (Exeter,
+  Sheffield), rectangle count ≤ 100.
+- **Spot-checked live on rightmove.co.uk**: 3 generated URLs (Bath, Brondesbury
+  Park, Doncaster) render the drawn polygon in the right place with properties
+  inside (93/95/86 markers).
 
 ## Step-0 spike outcome (2026-08-02, verified live)
 

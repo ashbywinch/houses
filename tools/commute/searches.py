@@ -17,7 +17,7 @@ from pathlib import Path
 from houses.geo import GeoPoint
 from tools.commute.rightmove_url import build_search_url
 from tools.commute.station_shed import BBox
-from tools.commute.tile import Grid, Rect, merge_rows, rasterize, rect_to_polygon
+from tools.commute.tile import Grid, Rect, merge_rectangles, merge_rows, rasterize, rect_to_polygon
 
 ENGINE_VERSION = "searches-v1"
 DEFAULT_SHED = Path("data/commute/station_shed.json")
@@ -84,7 +84,7 @@ def shed_to_searches(
     kept = [r for r in records if r["kept"]]
     grid = Grid.from_cell_km(Rect(bbox.lat_min, bbox.lat_max, bbox.lon_min, bbox.lon_max), cell_km)
     cells = rasterize([(r["lat"], r["lon"]) for r in kept], buffer_km, grid)
-    rects = merge_rows(cells, grid)
+    rects = merge_rectangles(merge_rows(cells, grid))
     return build_searches(
         rects,
         kept,
