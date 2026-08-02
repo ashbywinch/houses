@@ -49,6 +49,16 @@ async def test_coords_success_never_tries_name():
 
 
 @pytest.mark.asyncio
+async def test_cached_error_body_falls_through_to_name():
+    # A cached error body is a dict with no journeys (TfL 404/error responses are
+    # cached by _cached_api_call) — not None. It must NOT short-circuit the loop.
+    fetch = _FakeFetch({_COORDS_URL: {"$type": "Error"}, _NAME_URL: {"journeys": [{"duration": 79}]}})
+    dur = await route_station_duration(PBO, "SW1V 2QQ", fetch=fetch)
+    assert dur == 79
+    assert fetch.called == [_COORDS_URL, _NAME_URL]
+
+
+@pytest.mark.asyncio
 async def test_coords_failure_falls_back_to_name():
     fetch = _FakeFetch({_COORDS_URL: None, _NAME_URL: {"journeys": [{"duration": 100}]}})
     dur = await route_station_duration(PBO, "SW1V 2QQ", fetch=fetch)

@@ -226,7 +226,10 @@ async def route_station_duration(
         data = await fetch(url, params)
         if data is not None:
             duration, _, _ = TflClient._pick_best_journey(data)
-            return duration
+            if duration is not None:
+                return duration
+            # Data without a journey (e.g. a cached error body) is not a route —
+            # fall through to the next origin instead of giving up.
     return None
 
 
