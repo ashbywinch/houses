@@ -31,6 +31,28 @@ jobs:
       - name: Unit tests
         run: make test
 
+      - name: Secret scan
+        # Covers files no diff-based reviewer can see (data/commute/* are
+        # -diff/linguist-generated). gitleaks reads git objects, so diff
+        # attributes don't matter. Version pinned to v8.30.1.
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz -o gitleaks.tgz
+          tar -xzf gitleaks.tgz gitleaks
+          ./gitleaks git --no-banner -v
+
+      - name: Config-drift check (.pr_agent.toml vs pr-agent-config branch)
+        # The bot reads the branch copy; the tree copy is documentation. Two
+        # sources of truth must not drift silently — fail when they differ.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api "repos/${{ github.repository }}/contents/.pr_agent.toml?ref=pr-agent-config" \
+            --jq '.content' | base64 -d > /tmp/branch_copy.toml
+          if ! diff -q .pr_agent.toml /tmp/branch_copy.toml >/dev/null; then
+            echo "::error::.pr_agent.toml drifted from the pr-agent-config branch — the bot reads the branch copy; sync them"
+            exit 1
+          fi
+
       - name: Coverage
         run: make coverage
 
