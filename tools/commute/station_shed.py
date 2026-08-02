@@ -168,6 +168,7 @@ async def build_shed(
                 router(st, offices[0].postcode),
                 router(st, offices[1].postcode),
             )
+            dur_p, dur_a = _reject_implausible(st, offices, dur_p, dur_a)
             routed = dur_p is not None or dur_a is not None
             records.append(
                 _record(
@@ -186,6 +187,26 @@ async def build_shed(
     # Stable order regardless of resume point: input station order.
     records.sort(key=lambda r: order.get(r["crs"], len(order)))
     return records
+
+
+def _reject_implausible(
+    st: Station, offices: list[Office], dur_p: int | None, dur_a: int | None
+) -> tuple[int | None, int | None]:
+    """Null out durations that are physically impossible for the distance.
+
+    TfL's name-origin fallback can resolve to the wrong place (observed:
+    Worcestershire Parkway, ~160 km out, reported 35 min — ~274 km/h). A
+    door-to-door average above ~150 km/h is not achievable on the UK network,
+    so a faster duration means the origin resolved wrongly — treat it as a
+    failed route rather than silently extending coverage to the wrong area.
+    """
+    speed_cap_kmh = 150.0
+    floors = [st.distance_km_to(office.point) / speed_cap_kmh * 60.0 for office in offices]
+    if dur_p is not None and dur_p < floors[0]:
+        dur_p = None
+    if dur_a is not None and dur_a < floors[1]:
+        dur_a = None
+    return dur_p, dur_a
 
 
 def _record(st: Station, dur_p: int | None, dur_a: int | None, kept: bool, routing_error: str | None = None) -> dict:
@@ -371,6 +392,18 @@ async def run(argv: list[str] | None = None) -> int:
 
     offices = await _geocode_offices()
     stations = load_stations(args.csv)
+    if args.limit and out_path.exists() and not args.force:
+        # A --limit run would write only the first N stations, silently
+        # truncating the existing shed. Smoke runs must use a temp --out.
+        logger.warning(
+            "refusing --limit run: %s already exists and would be truncated to %d stations", out_path, args.limit
+        )
+        print(
+            f"refusing --limit run: {out_path} already exists and would be truncated — "
+            "use --out with a temp path for smoke tests",
+            file=sys.stderr,
+        )
+        return 1
     if args.limit:
         stations = stations[: args.limit]
 

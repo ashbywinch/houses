@@ -17942,10 +17942,10 @@
       "crs": "WOP",
       "lat": 52.15622,
       "lon": -2.1597,
-      "duration_pimlico": 35,
-      "duration_aldgate": 60,
-      "kept": true,
-      "routing_error": null
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false,
+      "routing_error": "failed"
     },
     {
       "name": "Worksop",

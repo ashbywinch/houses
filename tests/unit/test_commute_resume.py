@@ -85,6 +85,39 @@ async def test_resume_when_checkpoint_complete_makes_no_calls():
 
 
 @pytest.mark.asyncio
+async def test_implausible_durations_rejected():
+    """A route faster than ~150 km/h door-to-door is not physically possible.
+
+    TfL's name-origin fallback can resolve to the wrong place (observed:
+    Worcestershire Parkway, ~160 km out, reported 35 min). Such durations must
+    be treated as failed, not kept, or coverage extends to the wrong area.
+    """
+    # 160 km straight-line from Pimlico; 35 min = ~274 km/h — impossible.
+    far = [Station("Worcestershire Parkway", "WOP", 52.14, -2.18), *STATIONS[1:]]
+    router = _CountingRouter(
+        {
+            ("WOP", "SW1V 2QQ"): 35,
+            ("WOP", "EC3A 7LP"): 60,
+            **{k: v for k, v in DURATIONS.items() if k[0] != "WOP"},
+        }
+    )
+    shed = await build_shed(far, OFFICES, BBOX, 20.0, THRESHOLD, router, delay_s=0)
+    wop = next(r for r in shed if r["crs"] == "WOP")
+    assert wop["kept"] is False
+    assert wop["routing_error"] == "failed"
+    assert wop["duration_pimlico"] is None
+
+
+@pytest.mark.asyncio
+async def test_plausible_durations_accepted():
+    """Legit fast rail (Reading, ~60 km at 55 min) must survive the floor."""
+    shed = await build_shed(STATIONS, OFFICES, BBOX, 20.0, THRESHOLD, _CountingRouter(), delay_s=0)
+    rdg = next(r for r in shed if r["crs"] == "RDG")
+    assert rdg["kept"] is True
+    assert rdg["duration_pimlico"] == 55
+
+
+@pytest.mark.asyncio
 async def test_resume_reroutes_failed_stations():
     """A record with routing_error is NOT done: a resume re-routes the station."""
     # First run: EXD fails both destinations (not in the router's durations).
