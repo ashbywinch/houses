@@ -5,10 +5,15 @@ Status: implemented on `feat/rightmove-commute-monitor` (TDD, 77 commute unit te
 ## Build results (2026-08-02)
 
 - **Shed**: 1819 in-bbox stations routed (one-off TfL batch, resumable + cached);
-  **907 kept** (≤132 min to Pimlico or Aldgate). The coordinate-origin routing
+  **1036 kept** (≤132 min to Pimlico or Aldgate). The coordinate-origin routing
   404s on ~59% of stations (TfL's geo stop-finder misses non-London stations) —
-  a `'<name> Rail Station'` origin fallback rescued 165 of them.
-- **Searches**: **85 non-overlapping rectangles** (8 km grid, 5 km catchment,
+  a `'<name> Rail Station'` origin fallback rescued 165, and a 300-disambiguation
+  resolution (route from the national-rail StopPoint id the disambiguation names)
+  rescued a further 129 (incl. Haywards Heath, Tring, Burgess Hill — short-commute
+  towns the fallback alone missed). Residual failures (85, of which 3 within 90 km)
+  are TfL-index gaps — minor/new stations (Beaulieu Park opened 2024) near the
+  coverage edge; within the plan's small-false-negative tolerance.
+- **Searches**: **96 non-overlapping rectangles** (8 km grid, 5 km catchment,
   row-merge + vertical merge) → `searches.json` + `searches.txt`.
 - **Validation green**: geometry, pairwise disjointness, URL round-trip, all 32
   positive town controls (incl. inner London), both negative controls (Exeter,
