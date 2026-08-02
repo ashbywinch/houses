@@ -1,5 +1,5 @@
 # Makefile for houses — Browser-to-Spreadsheet Ingestion Engine
-.PHONY: help setup install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e lint format clean reset-db
+.PHONY: help setup install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e lint format clean reset-db commute-shed commute-searches commute-validate
 
 # Variables
 PYTHON := .venv/bin/python
@@ -31,6 +31,9 @@ help:
 	@echo "  ${GREEN}make format${NC}             Auto-fix formatting issues"
 	@echo "  ${GREEN}make coverage${NC}           Run tests with coverage report"
 	@echo "  ${GREEN}make clean${NC}              Clean up generated files"
+	@echo "  ${GREEN}make commute-shed${NC}       One-off TfL batch → data/commute/station_shed.json (FORCE=1 to re-run)"
+	@echo "  ${GREEN}make commute-searches${NC}   Offline: build data/commute/searches.json + .txt"
+	@echo "  ${GREEN}make commute-validate${NC}   Validate searches + run commute tests"
 
 setup: frontend-setup install-hooks
 	@$(UV) --version >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -111,7 +114,7 @@ coverage: setup
 	@echo "${GREEN}Coverage report: htmlcov/index.html${NC}"
 
 lint: setup
-	@$(RUFF) check houses/ tests/
+	@$(RUFF) check houses/ tests/ tools/
 	cd houses/frontend && npm run lint:css
 
 typecheck: setup
@@ -133,3 +136,20 @@ reset-db:  # Reset DAG database but PRESERVE API cache
 	@rm -f data/houses.db
 	@echo "data/houses.db removed (API cache in data/api_cache/ left intact)"
 	@echo "${GREEN}✓ Cleaned${NC}"
+
+# ── Rightmove commute search toolchain (docs/rightmove-commute-monitor.md) ──
+
+commute-shed:
+	@if [ -f data/commute/station_shed.json ] && [ -z "$(FORCE)" ]; then \
+		echo "${YELLOW}data/commute/station_shed.json exists — use 'make commute-shed FORCE=1' to re-run the one-off TfL batch${NC}"; \
+		exit 1; \
+	fi
+	@$(PYTHON) -m tools.commute.station_shed $(if $(FORCE),--force,)
+
+commute-searches:
+	@$(PYTHON) -m tools.commute.searches
+
+commute-validate: commute-searches
+	@$(PYTHON) -m tools.commute.validate
+	@$(PYTEST) tests/unit/test_commute_rightmove_url.py tests/unit/test_commute_station_shed.py \
+		tests/unit/test_commute_tile.py tests/unit/test_commute_searches.py tests/unit/test_commute_validate.py -q --tb=short

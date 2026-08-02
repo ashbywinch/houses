@@ -1,6 +1,14 @@
 # Rightmove Commute Search Coverage — Phase 1 Plan
 
-Status: draft v3 (two review rounds complete; verdict: sound)
+Status: implemented on `feat/rightmove-commute-monitor` (TDD, 59 commute unit tests green; `make test` fully green)
+
+## Step-0 spike outcome (2026-08-02, verified live)
+
+Rightmove has **no `polygon=` URL param**. Drawn areas are encoded as
+`locationIdentifier=USERDEFINEDAREA^{"polylines":"<google-polyline>"}` — the Google
+Maps polyline algorithm (1e5 precision) over a closed lat/lon loop. Verified live:
+the URL renders the polygon on the map and returns the properties inside it
+(`tools/commute/rightmove_url.py`).
 
 ## Goal
 
@@ -37,13 +45,16 @@ Requirements:
 
 ## Approach
 
-### Step 0 — Spike: Rightmove polygon URL format
+### Step 0 — Spike: Rightmove polygon URL format ✅ done
 
-Manually draw a small polygon on rightmove.co.uk, copy the search URL, decode the
-`polygon` parameter format (order, precision, encoding). Codify it in
-`tools/commute/rightmove_url.py`. One-time, zero recurring cost. If the format turns out
-unstable, fall back to a generated HTML page with per-search map links for manual entry
-(slower, still meets coverage).
+**Outcome**: no `polygon=` param exists. Drawn areas use
+`locationIdentifier=USERDEFINEDAREA^{"polylines":"<google-polyline>"}` (see above).
+Codified in `tools/commute/rightmove_url.py` (encode/decode + search URL builder).
+The HTML fallback is unnecessary — Rightmove accepts the full URL directly.
+
+Observed during the smoke run: TfL returns 404 for some non-London coordinate
+origins (e.g. Welsh stations) — those stations are logged and excluded, an
+accepted false negative.
 
 ### Step 1 — Station shed (`tools/commute/station_shed.py`)
 
