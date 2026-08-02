@@ -133,8 +133,10 @@ async def build_shed(
     progress incrementally. Note the guarantee: a killed batch loses at most
     ``checkpoint_every - 1`` already-processed stations of progress (the caller's
     write cadence); those are re-processed on resume, but every TfL response is
-    disk-cached, so re-processing them is cache hits, never new API calls.
-    """
+    disk-cached, so re-processing COMPLETED stations is cache hits. Failed
+    records are re-routed with fresh calls — error responses are never cached,
+    by design (a transient outage must get a genuine retry, not a poisoned
+    cache replay)."""
     by_crs = {st.crs: st for st in stations}
     done: set[str] = set()
     records: list[dict] = []
