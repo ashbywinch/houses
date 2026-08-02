@@ -76,14 +76,23 @@ def test_nearest_station_name_picks_closest():
     assert nearest_station_name(rect, KEPT_STATIONS) == "Reading area"
 
 
-def test_write_searches_files(tmp_path):
+def test_write_searches_does_not_churn_identical_content(tmp_path):
+    from tools.commute.searches import _same_searches
+
     payload = _payload()
     write_searches(payload, tmp_path)
-    json_text = (tmp_path / "searches.json").read_text()
-    assert '"id": "s001"' in json_text
-    urls = (tmp_path / "searches.txt").read_text().splitlines()
-    assert len(urls) == 2
-    assert parse_search_url(urls[0]) == payload["searches"][0]["polygon"] + [payload["searches"][0]["polygon"][0]]
+    first = (tmp_path / "searches.json").read_text()
+    # Regenerate with only a new timestamp: nothing may be rewritten.
+    refreshed = _payload(generated_at="2026-08-03T09:00:00+00:00")
+    assert _same_searches(payload, refreshed) is True
+    write_searches(refreshed, tmp_path)
+    assert (tmp_path / "searches.json").read_text() == first
+    # A real change to the searches must be written.
+    changed = _payload()
+    changed["searches"][0]["polygon"][0] = (51.05, -0.95)
+    assert _same_searches(payload, changed) is False
+    write_searches(changed, tmp_path)
+    assert (tmp_path / "searches.json").read_text() != first
 
 
 # ── end-to-end: shed records → searches ──────────────────────────────

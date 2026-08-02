@@ -130,7 +130,10 @@ async def build_shed(
     moved) are pruned as stale and, if present, re-processed — a resume can
     never silently keep outdated records. ``checkpoint(records, processed)``
     is invoked after each newly processed station so the caller can persist
-    progress incrementally (a killed batch loses at most the in-flight station).
+    progress incrementally. Note the guarantee: a killed batch loses at most
+    ``checkpoint_every - 1`` already-processed stations of progress (the caller's
+    write cadence); those are re-processed on resume, but every TfL response is
+    disk-cached, so re-processing them is cache hits, never new API calls.
     """
     by_crs = {st.crs: st for st in stations}
     done: set[str] = set()
@@ -205,65 +208,23 @@ async def route_station_duration(
     dest_postcode: str,
     *,
     allow_bus: bool = True,
-    fetch: Callable[[str, dict], Awaitable[dict | None]] | None = None,
+    fetch: Callable[[str, str], Awaitable[int | None]] | None = None,
 ) -> int | None:
     """Route a station to a destination postcode; return minutes or None.
 
-    Reuses the app's TfL plumbing: the same URL shape, auth/date params, disk
-    cache, and journey parsing as ``houses/tfl_client.py`` — with retry-with-
-    backoff for transient errors (429/5xx). A retry marker is added to the
-    cache key so a transient error body cached by the first attempt does not
-    short-circuit the retry.
-
     Tries each ``origin_candidates`` origin in order — coordinate origin first,
     then ``'<name> Rail Station'`` — and returns the first routed duration.
-    ``fetch`` is injectable for tests (default: the cached/retry wrapper).
+    Routing itself is ``TflClient.route_duration`` (public API: same request
+    shape as the app's planner, disk-cached, retry-with-backoff on transient
+    errors). ``fetch`` is injectable for tests (default: the TfL client).
     """
     from houses.tfl_client import TflClient
 
-    modes = ["tube", "overground", "dlr", "tram", "national-rail", "walking"]
-    if allow_bus:
-        modes.append("bus")
-
-    params = {
-        "nationalSearch": "true",
-        "timeIs": "arriving",
-        "journeyPreference": "leasttime",
-        "mode": ",".join(modes),
-        **TflClient._next_weekday_date_params(),
-        **TflClient._tfl_auth_params(),
-    }
-    fetch = fetch or _cached_with_retry
+    fetch = fetch or TflClient.route_duration
     for origin in origin_candidates(station):
-        url = f"{TflClient.TFL_JOURNEY_URL}/{origin}/to/{dest_postcode}"
-        data = await fetch(url, params)
-        if data is not None:
-            duration, _, _ = TflClient._pick_best_journey(data)
-            if duration is not None:
-                return duration
-            # Data without a journey (e.g. a cached error body) is not a route —
-            # fall through to the next origin instead of giving up.
-    return None
-
-
-async def _cached_with_retry(url: str, params: dict, *, attempts: int = 3, base_delay: float = 1.0) -> dict | None:
-    """Cached TfL call with backoff on transient errors; None on persistent failure."""
-    from dag.http_error import HttpError
-    from houses.tfl_client import TflClient
-
-    for attempt in range(attempts):
-        retry_params = {**params, "_retry": str(attempt)} if attempt else params
-        try:
-            return await TflClient._cached_api_call(url, retry_params)
-        except HttpError as e:
-            if e.is_rate_limit() or e.is_server_error():
-                delay = base_delay * (2**attempt)
-                logger.warning("TfL transient %s for %s — retry in %.1fs", e.status, url, delay)
-                await asyncio.sleep(delay)
-                continue
-            logger.warning("TfL client error %s for %s — station excluded", e.status, url)
-            return None
-    logger.error("TfL transient errors exhausted for %s — station excluded", url)
+        duration = await fetch(origin, dest_postcode)
+        if duration is not None:
+            return duration
     return None
 
 
@@ -291,13 +252,33 @@ async def _geocode_offices() -> list[Office]:
     return offices
 
 
+def build_metadata(offices: list[Office], expected: int, generated_at: str) -> dict:
+    """Current-constants metadata for the shed payload.
+
+    ``generated_at`` is the batch start time — preserved across resumes so a
+    killed-and-resumed batch keeps its original identity. Everything else is
+    rebuilt from current constants so a resume can never silently keep
+    outdated destinations/bbox/threshold values.
+    """
+    return {
+        "threshold_min": THRESHOLD_MIN,
+        "destinations": [o.postcode for o in offices],
+        "bbox": DEFAULT_BBOX,
+        "inner_radius_km": INNER_RADIUS_KM,
+        "engine_version": ENGINE_VERSION,
+        "expected_stations": expected,
+        "generated_at": generated_at,
+    }
+
+
 def is_complete(existing: list[dict] | None, records: list[dict], expected: int) -> bool:
     """True when a resume found every expected station already done.
 
     A killed batch (records < expected) must resume; a run that processed new
-    stations (records > existing) must report its work, not "already complete".
+    stations or REPLACED a stale record (records != existing, even at equal
+    length) must report its work and write the result, not "already complete".
     """
-    return existing is not None and len(records) >= expected and len(records) == len(existing)
+    return existing is not None and len(records) >= expected and records == existing
 
 
 def resume_allowed(prev_metadata: dict, current_version: str) -> bool:
@@ -360,18 +341,10 @@ async def run(argv: list[str] | None = None) -> int:
 
     bbox = BBox(**DEFAULT_BBOX)
     expected = sum(1 for st in stations if bbox.contains(st.lat, st.lon))
-    if metadata is None:
-        metadata = {
-            "threshold_min": THRESHOLD_MIN,
-            "destinations": [o.postcode for o in offices],
-            "bbox": DEFAULT_BBOX,
-            "inner_radius_km": INNER_RADIUS_KM,
-            "engine_version": ENGINE_VERSION,
-            "expected_stations": expected,
-            "generated_at": datetime.now(UTC).isoformat(),
-        }
-    else:
-        metadata = {**metadata, "expected_stations": expected}
+    # Always rebuild from current constants; preserve only the batch-start
+    # timestamp across resumes (a resume must never keep outdated settings).
+    generated_at = metadata["generated_at"] if metadata else datetime.now(UTC).isoformat()
+    metadata = build_metadata(offices, expected, generated_at)
 
     def _checkpoint(records: list[dict], processed: int) -> None:
         if processed % args.checkpoint_every == 0:

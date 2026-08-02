@@ -7,11 +7,14 @@ import pytest
 from tools.commute.station_shed import Station, origin_candidates, route_station_duration
 
 PBO = Station("Peterborough", "PBO", 52.5648, -0.2370)
+DEST = "SW1V 2QQ"
+COORDS = "52.5648,-0.237"
+NAME = "Peterborough Rail Station"
 
 
 def test_origin_candidates_coords_first():
     # Note: str(-0.2370) == "-0.237" — float repr drops trailing zeros.
-    assert origin_candidates(PBO) == ["52.5648,-0.237", "Peterborough Rail Station"]
+    assert origin_candidates(PBO) == [COORDS, NAME]
 
 
 def test_origin_candidates_appends_suffix():
@@ -25,48 +28,57 @@ def test_origin_candidates_keeps_existing_suffix():
 
 
 class _FakeFetch:
-    """Records URLs tried; returns canned data per URL."""
+    """Records origins tried; returns canned durations per (origin, dest)."""
 
-    def __init__(self, results: dict[str, dict | None]):
+    def __init__(self, results: dict[tuple[str, str], int | None]):
         self.results = results
         self.called: list[str] = []
 
-    async def __call__(self, url: str, params: dict) -> dict | None:
-        self.called.append(url)
-        return self.results.get(url)
-
-
-_COORDS_URL = "https://api.tfl.gov.uk/Journey/JourneyResults/52.5648,-0.237/to/SW1V 2QQ"
-_NAME_URL = "https://api.tfl.gov.uk/Journey/JourneyResults/Peterborough Rail Station/to/SW1V 2QQ"
+    async def __call__(self, origin: str, dest: str) -> int | None:
+        self.called.append(origin)
+        return self.results.get((origin, dest))
 
 
 @pytest.mark.asyncio
 async def test_coords_success_never_tries_name():
-    fetch = _FakeFetch({_COORDS_URL: {"journeys": [{"duration": 77}]}})
-    dur = await route_station_duration(PBO, "SW1V 2QQ", fetch=fetch)
-    assert dur == 77
-    assert fetch.called == [_COORDS_URL]
-
-
-@pytest.mark.asyncio
-async def test_cached_error_body_falls_through_to_name():
-    # A cached error body is a dict with no journeys (TfL 404/error responses are
-    # cached by _cached_api_call) — not None. It must NOT short-circuit the loop.
-    fetch = _FakeFetch({_COORDS_URL: {"$type": "Error"}, _NAME_URL: {"journeys": [{"duration": 79}]}})
-    dur = await route_station_duration(PBO, "SW1V 2QQ", fetch=fetch)
-    assert dur == 79
-    assert fetch.called == [_COORDS_URL, _NAME_URL]
+    fetch = _FakeFetch({(COORDS, DEST): 77})
+    assert await route_station_duration(PBO, DEST, fetch=fetch) == 77
+    assert fetch.called == [COORDS]
 
 
 @pytest.mark.asyncio
 async def test_coords_failure_falls_back_to_name():
-    fetch = _FakeFetch({_COORDS_URL: None, _NAME_URL: {"journeys": [{"duration": 100}]}})
-    dur = await route_station_duration(PBO, "SW1V 2QQ", fetch=fetch)
-    assert dur == 100
-    assert fetch.called == [_COORDS_URL, _NAME_URL]
+    fetch = _FakeFetch({(COORDS, DEST): None, (NAME, DEST): 100})
+    assert await route_station_duration(PBO, DEST, fetch=fetch) == 100
+    assert fetch.called == [COORDS, NAME]
 
 
 @pytest.mark.asyncio
 async def test_both_fail_returns_none():
-    fetch = _FakeFetch({_COORDS_URL: None, _NAME_URL: None})
-    assert await route_station_duration(PBO, "SW1V 2QQ", fetch=fetch) is None
+    fetch = _FakeFetch({(COORDS, DEST): None, (NAME, DEST): None})
+    assert await route_station_duration(PBO, DEST, fetch=fetch) is None
+
+
+# ── TflClient.route_duration — the public API the tool routes through ──
+
+
+@pytest.mark.asyncio
+async def test_route_duration_returns_none_on_journey_less_body(monkeypatch):
+    from houses.tfl_client import TflClient
+
+    async def fake_cached(_url, _params):
+        return {"$type": "Tfl.Api.Presentation.Entities.ApiError, Tfl.Api.Presentation.Entities"}
+
+    monkeypatch.setattr(TflClient, "_cached_with_retry", staticmethod(fake_cached))
+    assert await TflClient.route_duration(COORDS, DEST) is None
+
+
+@pytest.mark.asyncio
+async def test_route_duration_parses_best_journey(monkeypatch):
+    from houses.tfl_client import TflClient
+
+    async def fake_cached(_url, _params):
+        return {"journeys": [{"duration": 79}, {"duration": 95}]}
+
+    monkeypatch.setattr(TflClient, "_cached_with_retry", staticmethod(fake_cached))
+    assert await TflClient.route_duration(COORDS, DEST) == 79

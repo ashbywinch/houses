@@ -101,11 +101,40 @@ def shed_to_searches(
 
 
 def write_searches(payload: dict, out_dir: str | Path) -> None:
+    """Write searches.json + .txt — but never churn an identical artifact.
+
+    ``commute-validate`` regenerates searches as part of its gate; if only
+    ``generated_at`` changed, rewriting would dirty the committed artifact on
+    every validation run. The file is written only when the searches (or any
+    metadata besides the timestamp) actually differ.
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "searches.json").write_text(json.dumps(payload, indent=2) + "\n")
+    path = out_dir / "searches.json"
+    existing: dict | None = None
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text())
+        except json.JSONDecodeError:
+            existing = None
+    if existing is not None and _same_searches(existing, payload):
+        return
+    path.write_text(json.dumps(payload, indent=2) + "\n")
     urls = [s["rightmove_url"] for s in payload["searches"]]
     (out_dir / "searches.txt").write_text("\n".join(urls) + "\n")
+
+
+def _same_searches(existing: dict, new: dict) -> bool:
+    """Byte-identical apart from ``generated_at`` (the determinism contract).
+
+    Compares JSON-serialized forms so tuple/list differences from the file
+    round-trip (polygons) don't cause false churn.
+    """
+    if json.dumps(existing.get("searches"), sort_keys=True) != json.dumps(new.get("searches"), sort_keys=True):
+        return False
+    e_meta = {k: v for k, v in existing.get("metadata", {}).items() if k != "generated_at"}
+    n_meta = {k: v for k, v in new.get("metadata", {}).items() if k != "generated_at"}
+    return json.dumps(e_meta, sort_keys=True) == json.dumps(n_meta, sort_keys=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -123,7 +152,12 @@ def main(argv: list[str] | None = None) -> int:
         logger.warning("shed file missing at %s — searches cannot be built without it", shed_path)
         print(f"{shed_path} not found — run 'make commute-shed' first", file=sys.stderr)
         return 1
-    shed = json.loads(shed_path.read_text())
+    try:
+        shed = json.loads(shed_path.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("shed at %s is unreadable (%s) — regenerate with 'make commute-shed'", shed_path, e)
+        print(f"{shed_path} is corrupt or unreadable — regenerate with 'make commute-shed'", file=sys.stderr)
+        return 1
     metadata = shed["metadata"]
     payload = shed_to_searches(
         shed["stations"],
