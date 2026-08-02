@@ -117,6 +117,7 @@ lint: setup
 
 lint-github: setup   # CI only: findings surface as PR annotations
 	@$(RUFF) check houses/ tests/ --output-format=github
+	cd houses/frontend && npm run lint:css   # keep the same coverage as `make lint`
 
 typecheck: setup
 	@$(BASEDPYRIGHT)

@@ -55,9 +55,9 @@ jobs:
           # failure and no-comments branches diagnose the CURRENT run correctly.
           THIS=$(echo "$CMTS" | jq -c --arg full "$SHA" --arg short "$SHORT_SHA" \
             '[.[] | select(.body | test("(^|[^0-9a-f])(" + $full + "|" + $short + ")([^0-9a-f]|$)"; "i"))]')
-          if echo "$THIS" | jq -e 'any(.body; test("PR Reviewer Guide|PR Code Suggestions"))' >/dev/null 2>&1; then
+          if echo "$THIS" | jq -e '[.[] | select(.body | test("PR Reviewer Guide|PR Code Suggestions"))] | length > 0' >/dev/null 2>&1; then
             echo "Review check passed"
-          elif echo "$THIS" | jq -e 'any(.body; test("failed"; "i"))' >/dev/null 2>&1; then
+          elif echo "$THIS" | jq -e '[.[] | select(.body | test("failed"; "i"))] | length > 0' >/dev/null 2>&1; then
             echo "::error::PR-Agent reported a failure:"
             echo "$THIS" | jq -r '.[].body'
             exit 1
