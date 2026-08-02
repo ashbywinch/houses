@@ -6,3 +6,4 @@ data/commute/*.json -diff
 data/commute/*.txt -diff
 data/commute/*.json linguist-generated=true
 data/commute/*.txt linguist-generated=true
+data/commute/*.html linguist-generated=true
