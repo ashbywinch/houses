@@ -45,8 +45,13 @@ jobs:
           output: both
 
       - name: Post coverage comment
+        # SHA for v3.0.5; same interface as v2 (recreate/path).
         uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88
-        if: github.event_name == 'pull_request'
+        # always(): when the coverage gate fails (fail_below_min) the summary
+        # step exits non-zero and every later step would be skipped — the PR
+        # then shows a red check with the reason buried in logs. The comment
+        # matters most exactly when the gate failed.
+        if: ${{ github.event_name == 'pull_request' && !cancelled() }}
         with:
           recreate: true
           path: code-coverage-results.md

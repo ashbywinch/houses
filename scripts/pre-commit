@@ -17,6 +17,15 @@
 
 set -e
 
+# gitleaks runs FIRST and unconditionally: the Python-only guard below must
+# never skip the secret scan for commits that touch no .py files (e.g. the
+# -diff-marked data/commute/*.json, which no diff-based reviewer can see).
+if command -v gitleaks >/dev/null 2>&1; then
+    gitleaks git --staged --no-banner 2>/dev/null || gitleaks protect --staged -v
+else
+    echo "pre-commit: gitleaks not installed — skipping secret scan (install for full protection)" >&2
+fi
+
 files=$(git diff --cached --name-only --diff-filter=ACM -- '*.py')
 if [ -z "$files" ]; then
     exit 0
@@ -31,9 +40,3 @@ fi
 # word-splitting is intentional.
 # shellcheck disable=SC2086
 .venv/bin/ruff check $files
-
-if command -v gitleaks >/dev/null 2>&1; then
-    gitleaks git --staged --no-banner 2>/dev/null || gitleaks protect --staged -v
-else
-    echo "pre-commit: gitleaks not installed — skipping secret scan (install for full protection)" >&2
-fi
