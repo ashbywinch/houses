@@ -1,0 +1,2271 @@
+{
+  "metadata": {
+    "threshold_min": 132,
+    "destinations": [
+      "SW1V 2QQ",
+      "EC3A 7LP"
+    ],
+    "bbox": {
+      "lat_min": 50.1,
+      "lat_max": 53.6,
+      "lon_min": -4.0,
+      "lon_max": 2.0
+    },
+    "inner_radius_km": 20.0,
+    "engine_version": "station-shed-v1",
+    "expected_stations": 1819,
+    "generated_at": "2026-08-02T12:15:22.592006+00:00"
+  },
+  "stations": [
+    {
+      "name": "Abbey Wood",
+      "crs": "ABW",
+      "lat": 51.490719,
+      "lon": 0.120343,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Aber",
+      "crs": "ABE",
+      "lat": 51.575363,
+      "lon": -3.23089,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Abercynon",
+      "crs": "ACY",
+      "lat": 51.64262,
+      "lon": -3.329549,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Aberdare",
+      "crs": "ABA",
+      "lat": 51.715019,
+      "lon": -3.44313,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Abergavenny",
+      "crs": "AGV",
+      "lat": 51.81665,
+      "lon": -3.009679,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Abergele & Pensarn",
+      "crs": "AGL",
+      "lat": 53.294758,
+      "lon": -3.581343,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Acle",
+      "crs": "ACL",
+      "lat": 52.634647,
+      "lon": 1.543981,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Acocks Green",
+      "crs": "ACG",
+      "lat": 52.449291,
+      "lon": -1.81898,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Acton Bridge",
+      "crs": "ACB",
+      "lat": 53.265961,
+      "lon": -2.602689,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Acton Central",
+      "crs": "ACC",
+      "lat": 51.508717,
+      "lon": -0.263601,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Acton Main Line",
+      "crs": "AML",
+      "lat": 51.516865,
+      "lon": -0.26762,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Adderley Park",
+      "crs": "ADD",
+      "lat": 52.483505,
+      "lon": -1.854184,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Addlestone",
+      "crs": "ASN",
+      "lat": 51.372414,
+      "lon": -0.48571,
+      "duration_pimlico": 68,
+      "duration_aldgate": 67,
+      "kept": true
+    },
+    {
+      "name": "Adisham",
+      "crs": "ADM",
+      "lat": 51.241352,
+      "lon": 1.199277,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Adlington (Cheshire)",
+      "crs": "ADC",
+      "lat": 53.319542,
+      "lon": -2.133571,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Adwick",
+      "crs": "AWK",
+      "lat": 53.572994,
+      "lon": -1.181465,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Aigburth",
+      "crs": "AIG",
+      "lat": 53.364614,
+      "lon": -2.927041,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Aintree",
+      "crs": "AIN",
+      "lat": 53.473995,
+      "lon": -2.956687,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Albany Park",
+      "crs": "AYP",
+      "lat": 51.435745,
+      "lon": 0.126427,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Albrighton",
+      "crs": "ALB",
+      "lat": 52.637917,
+      "lon": -2.268913,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Alderley Edge",
+      "crs": "ALD",
+      "lat": 53.303762,
+      "lon": -2.236812,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Aldermaston",
+      "crs": "AMT",
+      "lat": 51.402047,
+      "lon": -1.136972,
+      "duration_pimlico": 87,
+      "duration_aldgate": 96,
+      "kept": true
+    },
+    {
+      "name": "Aldershot",
+      "crs": "AHT",
+      "lat": 51.246151,
+      "lon": -0.760657,
+      "duration_pimlico": 81,
+      "duration_aldgate": 80,
+      "kept": true
+    },
+    {
+      "name": "Aldrington",
+      "crs": "AGT",
+      "lat": 50.836601,
+      "lon": -0.182151,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Alexandra Palace",
+      "crs": "AAP",
+      "lat": 51.598225,
+      "lon": -0.120129,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Alfreton",
+      "crs": "ALF",
+      "lat": 53.100414,
+      "lon": -1.369689,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Alresford",
+      "crs": "ALR",
+      "lat": 51.853828,
+      "lon": 0.997114,
+      "duration_pimlico": 112,
+      "duration_aldgate": 95,
+      "kept": true
+    },
+    {
+      "name": "Alsager",
+      "crs": "ASG",
+      "lat": 53.093054,
+      "lon": -2.29861,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Althorne",
+      "crs": "ALN",
+      "lat": 51.647526,
+      "lon": 0.753603,
+      "duration_pimlico": 100,
+      "duration_aldgate": 79,
+      "kept": true
+    },
+    {
+      "name": "Althorpe",
+      "crs": "ALP",
+      "lat": 53.585262,
+      "lon": -0.732558,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Alton",
+      "crs": "AON",
+      "lat": 51.151947,
+      "lon": -0.967658,
+      "duration_pimlico": 91,
+      "duration_aldgate": 101,
+      "kept": true
+    },
+    {
+      "name": "Altrincham",
+      "crs": "ALT",
+      "lat": 53.3874,
+      "lon": -2.347212,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Alvechurch",
+      "crs": "ALV",
+      "lat": 52.346607,
+      "lon": -1.967854,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Ambergate",
+      "crs": "AMB",
+      "lat": 53.060501,
+      "lon": -1.4807,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Amberley",
+      "crs": "AMY",
+      "lat": 50.896507,
+      "lon": -0.542446,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Amersham",
+      "crs": "AMR",
+      "lat": 51.67439,
+      "lon": -0.60613,
+      "duration_pimlico": 71,
+      "duration_aldgate": 72,
+      "kept": true
+    },
+    {
+      "name": "Ammanford",
+      "crs": "AMF",
+      "lat": 51.795933,
+      "lon": -3.996783,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Ancaster",
+      "crs": "ANC",
+      "lat": 52.987888,
+      "lon": -0.535596,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Andover",
+      "crs": "ADV",
+      "lat": 51.212048,
+      "lon": -1.493167,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Anerley",
+      "crs": "ANZ",
+      "lat": 51.41163,
+      "lon": -0.064348,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Angmering",
+      "crs": "ANG",
+      "lat": 50.816704,
+      "lon": -0.489559,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Appledore (Kent)",
+      "crs": "APD",
+      "lat": 51.032623,
+      "lon": 0.816826,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Appleford",
+      "crs": "APF",
+      "lat": 51.639562,
+      "lon": -1.242375,
+      "duration_pimlico": 108,
+      "duration_aldgate": 118,
+      "kept": true
+    },
+    {
+      "name": "Appley Bridge",
+      "crs": "APB",
+      "lat": 53.579029,
+      "lon": -2.718906,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Apsley",
+      "crs": "APS",
+      "lat": 51.732712,
+      "lon": -0.463568,
+      "duration_pimlico": 54,
+      "duration_aldgate": 66,
+      "kept": true
+    },
+    {
+      "name": "Ardwick",
+      "crs": "ADK",
+      "lat": 53.47134,
+      "lon": -2.213893,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Arlesey",
+      "crs": "ARL",
+      "lat": 52.025938,
+      "lon": -0.266178,
+      "duration_pimlico": 73,
+      "duration_aldgate": 72,
+      "kept": true
+    },
+    {
+      "name": "Arundel",
+      "crs": "ARU",
+      "lat": 50.848003,
+      "lon": -0.546796,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Ascot",
+      "crs": "ACT",
+      "lat": 51.406185,
+      "lon": -0.675827,
+      "duration_pimlico": 66,
+      "duration_aldgate": 93,
+      "kept": true
+    },
+    {
+      "name": "Ascott-Under-Wychwood",
+      "crs": "AUW",
+      "lat": 51.867376,
+      "lon": -1.564136,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Ash",
+      "crs": "ASH",
+      "lat": 51.249222,
+      "lon": -0.711856,
+      "duration_pimlico": 84,
+      "duration_aldgate": 82,
+      "kept": true
+    },
+    {
+      "name": "Ash Vale",
+      "crs": "AHV",
+      "lat": 51.272709,
+      "lon": -0.721247,
+      "duration_pimlico": 77,
+      "duration_aldgate": 76,
+      "kept": true
+    },
+    {
+      "name": "Ashburys",
+      "crs": "ABY",
+      "lat": 53.471761,
+      "lon": -2.194991,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Ashchurch for Tewkesbury",
+      "crs": "ASC",
+      "lat": 51.997158,
+      "lon": -2.10921,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Ashford International",
+      "crs": "AFK",
+      "lat": 51.14335294,
+      "lon": 0.875167251,
+      "duration_pimlico": 105,
+      "duration_aldgate": 106,
+      "kept": true
+    },
+    {
+      "name": "Ashford Surrey",
+      "crs": "AFS",
+      "lat": 51.436047,
+      "lon": -0.469229,
+      "duration_pimlico": 47,
+      "duration_aldgate": 74,
+      "kept": true
+    },
+    {
+      "name": "Ashley",
+      "crs": "ASY",
+      "lat": 53.355984,
+      "lon": -2.341029,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Ashley Down",
+      "crs": "ASD",
+      "lat": 51.4788,
+      "lon": -2.5767,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Ashtead",
+      "crs": "AHD",
+      "lat": 51.317822,
+      "lon": -0.308126,
+      "duration_pimlico": 59,
+      "duration_aldgate": 83,
+      "kept": true
+    },
+    {
+      "name": "Ashton-Under-Lyne",
+      "crs": "AHN",
+      "lat": 53.491264,
+      "lon": -2.093415,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Ashurst Kent",
+      "crs": "AHS",
+      "lat": 51.128601,
+      "lon": 0.152298,
+      "duration_pimlico": 87,
+      "duration_aldgate": 87,
+      "kept": true
+    },
+    {
+      "name": "Ashurst New Forest",
+      "crs": "ANF",
+      "lat": 50.888865,
+      "lon": -1.525097,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Ashwell & Morden",
+      "crs": "AWM",
+      "lat": 52.030586,
+      "lon": -0.10934,
+      "duration_pimlico": 74,
+      "duration_aldgate": 75,
+      "kept": true
+    },
+    {
+      "name": "Aslockton",
+      "crs": "ALK",
+      "lat": 52.951351,
+      "lon": -0.898541,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Aspley Guise",
+      "crs": "APG",
+      "lat": 52.020725,
+      "lon": -0.631519,
+      "duration_pimlico": 86,
+      "duration_aldgate": 96,
+      "kept": true
+    },
+    {
+      "name": "Aston",
+      "crs": "AST",
+      "lat": 52.505104,
+      "lon": -1.871788,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Atherstone",
+      "crs": "ATH",
+      "lat": 52.578949,
+      "lon": -1.552808,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Atherton",
+      "crs": "ATN",
+      "lat": 53.528817,
+      "lon": -2.478683,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Attenborough",
+      "crs": "ATB",
+      "lat": 52.906322,
+      "lon": -1.231262,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Attleborough",
+      "crs": "ATL",
+      "lat": 52.514214,
+      "lon": 1.022719,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Audley End",
+      "crs": "AUD",
+      "lat": 52.004398,
+      "lon": 0.20719,
+      "duration_pimlico": 87,
+      "duration_aldgate": 80,
+      "kept": true
+    },
+    {
+      "name": "Aughton Park",
+      "crs": "AUG",
+      "lat": 53.55447,
+      "lon": -2.895095,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Avoncliff",
+      "crs": "AVF",
+      "lat": 51.339596,
+      "lon": -2.281342,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Avonmouth",
+      "crs": "AVN",
+      "lat": 51.500194,
+      "lon": -2.699332,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Axminster",
+      "crs": "AXM",
+      "lat": 50.778976,
+      "lon": -3.005613,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Aylesbury",
+      "crs": "AYS",
+      "lat": 51.813868,
+      "lon": -0.815048,
+      "duration_pimlico": 96,
+      "duration_aldgate": 98,
+      "kept": true
+    },
+    {
+      "name": "Aylesbury Vale Parkway",
+      "crs": "AVP",
+      "lat": 51.8327,
+      "lon": -0.8623,
+      "duration_pimlico": 98,
+      "duration_aldgate": 103,
+      "kept": true
+    },
+    {
+      "name": "Aylesford",
+      "crs": "AYL",
+      "lat": 51.301384,
+      "lon": 0.465964,
+      "duration_pimlico": 91,
+      "duration_aldgate": 92,
+      "kept": true
+    },
+    {
+      "name": "Aylesham",
+      "crs": "AYH",
+      "lat": 51.227185,
+      "lon": 1.209682,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bache",
+      "crs": "BAC",
+      "lat": 53.209312,
+      "lon": -2.892386,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Baglan",
+      "crs": "BAJ",
+      "lat": 51.61549,
+      "lon": -3.811182,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bagshot",
+      "crs": "BAG",
+      "lat": 51.364964,
+      "lon": -0.688501,
+      "duration_pimlico": 74,
+      "duration_aldgate": 102,
+      "kept": true
+    },
+    {
+      "name": "Balcombe",
+      "crs": "BAB",
+      "lat": 51.05624,
+      "lon": -0.137881,
+      "duration_pimlico": 75,
+      "duration_aldgate": 74,
+      "kept": true
+    },
+    {
+      "name": "Baldock",
+      "crs": "BDK",
+      "lat": 51.993156,
+      "lon": -0.188106,
+      "duration_pimlico": 72,
+      "duration_aldgate": 73,
+      "kept": true
+    },
+    {
+      "name": "Balham",
+      "crs": "BAL",
+      "lat": 51.443169,
+      "lon": -0.152403,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Bamford",
+      "crs": "BAM",
+      "lat": 53.338985,
+      "lon": -1.689078,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Banbury",
+      "crs": "BAN",
+      "lat": 52.060925,
+      "lon": -1.327541,
+      "duration_pimlico": 106,
+      "duration_aldgate": 116,
+      "kept": true
+    },
+    {
+      "name": "Bank Hall",
+      "crs": "BAH",
+      "lat": 53.437357,
+      "lon": -2.987509,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Banstead",
+      "crs": "BAD",
+      "lat": 51.329922,
+      "lon": -0.214384,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Bargoed",
+      "crs": "BGD",
+      "lat": 51.692268,
+      "lon": -3.229717,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Barking",
+      "crs": "BKG",
+      "lat": 51.539982,
+      "lon": 0.080804,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Barking Riverside",
+      "crs": "BGV",
+      "lat": 51.519108,
+      "lon": 0.114764,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Barlaston",
+      "crs": "BRT",
+      "lat": 52.942856,
+      "lon": -2.168118,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Barming",
+      "crs": "BMG",
+      "lat": 51.284904,
+      "lon": 0.479428,
+      "duration_pimlico": 91,
+      "duration_aldgate": 99,
+      "kept": true
+    },
+    {
+      "name": "Barnehurst",
+      "crs": "BNH",
+      "lat": 51.464798,
+      "lon": 0.160885,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Barnes",
+      "crs": "BNS",
+      "lat": 51.467014,
+      "lon": -0.240711,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Barnes Bridge",
+      "crs": "BNI",
+      "lat": 51.471676,
+      "lon": -0.252051,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Barnetby",
+      "crs": "BTB",
+      "lat": 53.574219,
+      "lon": -0.409679,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Barnham",
+      "crs": "BAA",
+      "lat": 50.831135,
+      "lon": -0.639627,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Barnsley",
+      "crs": "BNY",
+      "lat": 53.553978,
+      "lon": -1.477688,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Barnt Green",
+      "crs": "BTG",
+      "lat": 52.361328,
+      "lon": -1.994098,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Barrow Upon Soar",
+      "crs": "BWS",
+      "lat": 52.750244,
+      "lon": -1.14956,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Barry",
+      "crs": "BRY",
+      "lat": 51.396729,
+      "lon": -3.285023,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Barry Docks",
+      "crs": "BYD",
+      "lat": 51.402393,
+      "lon": -3.260749,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Barry Island",
+      "crs": "BYI",
+      "lat": 51.392361,
+      "lon": -3.273405,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Basildon",
+      "crs": "BSO",
+      "lat": 51.568672,
+      "lon": 0.457309,
+      "duration_pimlico": 75,
+      "duration_aldgate": 51,
+      "kept": true
+    },
+    {
+      "name": "Basingstoke",
+      "crs": "BSK",
+      "lat": 51.26804,
+      "lon": -1.086896,
+      "duration_pimlico": 78,
+      "duration_aldgate": 77,
+      "kept": true
+    },
+    {
+      "name": "Bat & Ball",
+      "crs": "BBL",
+      "lat": 51.289703,
+      "lon": 0.194258,
+      "duration_pimlico": 72,
+      "duration_aldgate": 62,
+      "kept": true
+    },
+    {
+      "name": "Bath Spa",
+      "crs": "BTH",
+      "lat": 51.378059,
+      "lon": -2.356302,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Battersea Park",
+      "crs": "BAK",
+      "lat": 51.477272,
+      "lon": -0.148151,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Battle",
+      "crs": "BAT",
+      "lat": 50.91312,
+      "lon": 0.495169,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Battlesbridge",
+      "crs": "BLB",
+      "lat": 51.624805,
+      "lon": 0.565826,
+      "duration_pimlico": 84,
+      "duration_aldgate": 63,
+      "kept": true
+    },
+    {
+      "name": "Bayford",
+      "crs": "BAY",
+      "lat": 51.758808,
+      "lon": -0.096074,
+      "duration_pimlico": 67,
+      "duration_aldgate": 69,
+      "kept": true
+    },
+    {
+      "name": "Beaconsfield",
+      "crs": "BCF",
+      "lat": 51.611141,
+      "lon": -0.643644,
+      "duration_pimlico": 58,
+      "duration_aldgate": 70,
+      "kept": true
+    },
+    {
+      "name": "Bearley",
+      "crs": "BER",
+      "lat": 52.244252,
+      "lon": -1.750259,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bearsted",
+      "crs": "BSD",
+      "lat": 51.275589,
+      "lon": 0.57786,
+      "duration_pimlico": 94,
+      "duration_aldgate": 104,
+      "kept": true
+    },
+    {
+      "name": "Beaulieu Park",
+      "crs": "BPA",
+      "lat": 51.7574,
+      "lon": 0.5187,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Beaulieu Road",
+      "crs": "BEU",
+      "lat": 50.854206,
+      "lon": -1.505586,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bebington",
+      "crs": "BEB",
+      "lat": 53.357651,
+      "lon": -3.003659,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Beccles",
+      "crs": "BCC",
+      "lat": 52.458481,
+      "lon": 1.569547,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Beckenham Hill",
+      "crs": "BEC",
+      "lat": 51.424767,
+      "lon": -0.016497,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Beckenham Junction",
+      "crs": "BKJ",
+      "lat": 51.411446,
+      "lon": -0.027144,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Bedford",
+      "crs": "BDM",
+      "lat": 52.136175,
+      "lon": -0.47945,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bedford St Johns",
+      "crs": "BSJ",
+      "lat": 52.129299,
+      "lon": -0.467348,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bedhampton",
+      "crs": "BDH",
+      "lat": 50.853638,
+      "lon": -0.996989,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bedminster",
+      "crs": "BMT",
+      "lat": 51.440037,
+      "lon": -2.594184,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bedworth",
+      "crs": "BEH",
+      "lat": 52.479133,
+      "lon": -1.46749,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bedwyn",
+      "crs": "BDW",
+      "lat": 51.379715,
+      "lon": -1.599077,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Beeston",
+      "crs": "BEE",
+      "lat": 52.920551,
+      "lon": -1.207211,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bekesbourne",
+      "crs": "BKS",
+      "lat": 51.261051,
+      "lon": 1.136125,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Belle Vue",
+      "crs": "BLV",
+      "lat": 53.462181,
+      "lon": -2.180809,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bellingham",
+      "crs": "BGM",
+      "lat": 51.433826,
+      "lon": -0.020421,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Belmont",
+      "crs": "BLM",
+      "lat": 51.344086,
+      "lon": -0.199471,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Belper",
+      "crs": "BLP",
+      "lat": 53.024555,
+      "lon": -1.482622,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Beltring",
+      "crs": "BEG",
+      "lat": 51.204651,
+      "lon": 0.403518,
+      "duration_pimlico": 94,
+      "duration_aldgate": 85,
+      "kept": true
+    },
+    {
+      "name": "Belvedere",
+      "crs": "BVD",
+      "lat": 51.491936,
+      "lon": 0.152088,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Benfleet",
+      "crs": "BEF",
+      "lat": 51.543964,
+      "lon": 0.561273,
+      "duration_pimlico": 80,
+      "duration_aldgate": 55,
+      "kept": true
+    },
+    {
+      "name": "Bentley (Hampshire)",
+      "crs": "BTY",
+      "lat": 51.180695,
+      "lon": -0.868287,
+      "duration_pimlico": 86,
+      "duration_aldgate": 96,
+      "kept": true
+    },
+    {
+      "name": "Bentley (South Yorkshire)",
+      "crs": "BYK",
+      "lat": 53.542865,
+      "lon": -1.148788,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Berkhamsted",
+      "crs": "BKM",
+      "lat": 51.763638,
+      "lon": -0.562498,
+      "duration_pimlico": 61,
+      "duration_aldgate": 70,
+      "kept": true
+    },
+    {
+      "name": "Berkswell",
+      "crs": "BKW",
+      "lat": 52.395851,
+      "lon": -1.642845,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bermuda Park",
+      "crs": "BEP",
+      "lat": 52.5029,
+      "lon": -1.4726,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Berney Arms",
+      "crs": "BYA",
+      "lat": 52.589745,
+      "lon": 1.63043,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Berrylands",
+      "crs": "BRS",
+      "lat": 51.39838,
+      "lon": -0.282157,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Berwick (Sussex)",
+      "crs": "BRK",
+      "lat": 50.840569,
+      "lon": 0.164587,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bescot Stadium",
+      "crs": "BSC",
+      "lat": 52.562702,
+      "lon": -1.991116,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Betchworth",
+      "crs": "BTO",
+      "lat": 51.247993,
+      "lon": -0.26771,
+      "duration_pimlico": 83,
+      "duration_aldgate": 78,
+      "kept": true
+    },
+    {
+      "name": "Bethnal Green",
+      "crs": "BET",
+      "lat": 51.524406,
+      "lon": -0.059747,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Betws-Y-Coed",
+      "crs": "BYC",
+      "lat": 53.092056,
+      "lon": -3.80091,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bexhill",
+      "crs": "BEX",
+      "lat": 50.840679,
+      "lon": 0.475678,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bexley",
+      "crs": "BXY",
+      "lat": 51.440742,
+      "lon": 0.148248,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Bexleyheath",
+      "crs": "BXH",
+      "lat": 51.463493,
+      "lon": 0.133471,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Bicester North",
+      "crs": "BCS",
+      "lat": 51.903401,
+      "lon": -1.150517,
+      "duration_pimlico": 87,
+      "duration_aldgate": 98,
+      "kept": true
+    },
+    {
+      "name": "Bicester Village",
+      "crs": "BIT",
+      "lat": 51.893429,
+      "lon": -1.148393,
+      "duration_pimlico": 99,
+      "duration_aldgate": 111,
+      "kept": true
+    },
+    {
+      "name": "Bickley",
+      "crs": "BKL",
+      "lat": 51.40033,
+      "lon": 0.044272,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Bidston",
+      "crs": "BID",
+      "lat": 53.40913,
+      "lon": -3.078589,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Biggleswade",
+      "crs": "BIW",
+      "lat": 52.085068,
+      "lon": -0.260294,
+      "duration_pimlico": 68,
+      "duration_aldgate": 70,
+      "kept": true
+    },
+    {
+      "name": "Bilbrook",
+      "crs": "BBK",
+      "lat": 52.623695,
+      "lon": -2.186101,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Billericay",
+      "crs": "BIC",
+      "lat": 51.628834,
+      "lon": 0.418656,
+      "duration_pimlico": 71,
+      "duration_aldgate": 53,
+      "kept": true
+    },
+    {
+      "name": "Billingshurst",
+      "crs": "BIG",
+      "lat": 51.014938,
+      "lon": -0.450348,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bingham",
+      "crs": "BIN",
+      "lat": 52.954536,
+      "lon": -0.952044,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Birchgrove",
+      "crs": "BCG",
+      "lat": 51.521687,
+      "lon": -3.203502,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Birchington-On-Sea",
+      "crs": "BCH",
+      "lat": 51.377956,
+      "lon": 1.300781,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Birchwood",
+      "crs": "BWD",
+      "lat": 53.41193,
+      "lon": -2.52802,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Birkbeck",
+      "crs": "BIK",
+      "lat": 51.403847,
+      "lon": -0.056218,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Birkenhead Central",
+      "crs": "BKC",
+      "lat": 53.388244,
+      "lon": -3.020897,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Birkenhead Hamilton Square",
+      "crs": "BKQ",
+      "lat": 53.39469,
+      "lon": -3.01365,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Birkenhead North",
+      "crs": "BKN",
+      "lat": 53.404819,
+      "lon": -3.057425,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Birkenhead Park",
+      "crs": "BKP",
+      "lat": 53.397417,
+      "lon": -3.03927,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Birmingham International",
+      "crs": "BHI",
+      "lat": 52.450673,
+      "lon": -1.725149,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Birmingham Moor Street",
+      "crs": "BMO",
+      "lat": 52.479053,
+      "lon": -1.892483,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Birmingham New Street",
+      "crs": "BHM",
+      "lat": 52.478153,
+      "lon": -1.898375,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Birmingham Snow Hill",
+      "crs": "BSW",
+      "lat": 52.483555,
+      "lon": -1.899833,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bishops Stortford",
+      "crs": "BIS",
+      "lat": 51.866692,
+      "lon": 0.16557,
+      "duration_pimlico": 70,
+      "duration_aldgate": 62,
+      "kept": true
+    },
+    {
+      "name": "Bishopstone (Sussex)",
+      "crs": "BIP",
+      "lat": 50.78,
+      "lon": 0.0824,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bitterne",
+      "crs": "BTE",
+      "lat": 50.918343,
+      "lon": -1.378279,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Blackheath",
+      "crs": "BKH",
+      "lat": 51.465706,
+      "lon": 0.008317,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Blackhorse Road",
+      "crs": "BHO",
+      "lat": 51.586143,
+      "lon": -0.04123,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Blackrod",
+      "crs": "BLK",
+      "lat": 53.591522,
+      "lon": -2.56954,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Blackwater",
+      "crs": "BAW",
+      "lat": 51.33176,
+      "lon": -0.777023,
+      "duration_pimlico": 100,
+      "duration_aldgate": 99,
+      "kept": true
+    },
+    {
+      "name": "Blaenau Ffestiniog",
+      "crs": "BFF",
+      "lat": 52.996284,
+      "lon": -3.944449,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Blake Street",
+      "crs": "BKT",
+      "lat": 52.605054,
+      "lon": -1.844888,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Blakedown",
+      "crs": "BKD",
+      "lat": 52.406147,
+      "lon": -2.176365,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bleasby",
+      "crs": "BSB",
+      "lat": 53.041649,
+      "lon": -0.942469,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bletchley",
+      "crs": "BLY",
+      "lat": 51.995339,
+      "lon": -0.736368,
+      "duration_pimlico": 64,
+      "duration_aldgate": 74,
+      "kept": true
+    },
+    {
+      "name": "Bloxwich",
+      "crs": "BLX",
+      "lat": 52.61853,
+      "lon": -2.011783,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bloxwich North",
+      "crs": "BWN",
+      "lat": 52.625637,
+      "lon": -2.019173,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Blundellsands & Crosby",
+      "crs": "BLN",
+      "lat": 53.487675,
+      "lon": -3.039889,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Blythe Bridge",
+      "crs": "BYB",
+      "lat": 52.968124,
+      "lon": -2.066966,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bognor Regis",
+      "crs": "BOG",
+      "lat": 50.786594,
+      "lon": -0.676384,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bolton",
+      "crs": "BON",
+      "lat": 53.573983,
+      "lon": -2.425661,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bolton-On-Dearne",
+      "crs": "BTD",
+      "lat": 53.518986,
+      "lon": -1.312217,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bond Street",
+      "crs": "BDS",
+      "lat": 51.514,
+      "lon": -0.15,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Bookham",
+      "crs": "BKA",
+      "lat": 51.288334,
+      "lon": -0.385224,
+      "duration_pimlico": 71,
+      "duration_aldgate": 94,
+      "kept": true
+    },
+    {
+      "name": "Bootle New Strand",
+      "crs": "BNW",
+      "lat": 53.453357,
+      "lon": -2.994676,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bootle Oriel Road",
+      "crs": "BOT",
+      "lat": 53.446559,
+      "lon": -2.995791,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bordesley",
+      "crs": "BBS",
+      "lat": 52.471844,
+      "lon": -1.877771,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Borough Green & Wrotham",
+      "crs": "BRG",
+      "lat": 51.29295,
+      "lon": 0.306296,
+      "duration_pimlico": 79,
+      "duration_aldgate": 89,
+      "kept": true
+    },
+    {
+      "name": "Bosham",
+      "crs": "BOH",
+      "lat": 50.843262,
+      "lon": -0.846655,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Boston",
+      "crs": "BSN",
+      "lat": 52.978802,
+      "lon": -0.030949,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Botley",
+      "crs": "BOE",
+      "lat": 50.916748,
+      "lon": -1.258809,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bottesford",
+      "crs": "BTF",
+      "lat": 52.944962,
+      "lon": -0.796012,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bourne End",
+      "crs": "BNE",
+      "lat": 51.576538,
+      "lon": -0.711287,
+      "duration_pimlico": 77,
+      "duration_aldgate": 85,
+      "kept": true
+    },
+    {
+      "name": "Bournemouth",
+      "crs": "BMH",
+      "lat": 50.727478,
+      "lon": -1.863955,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bournville",
+      "crs": "BRV",
+      "lat": 52.426937,
+      "lon": -1.926434,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bow Brickhill",
+      "crs": "BWB",
+      "lat": 52.003475,
+      "lon": -0.696154,
+      "duration_pimlico": 81,
+      "duration_aldgate": 91,
+      "kept": true
+    },
+    {
+      "name": "Bowes Park",
+      "crs": "BOP",
+      "lat": 51.607216,
+      "lon": -0.119761,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Box Hill & Westhumble",
+      "crs": "BXW",
+      "lat": 51.253376,
+      "lon": -0.329128,
+      "duration_pimlico": 75,
+      "duration_aldgate": 99,
+      "kept": true
+    },
+    {
+      "name": "Bracknell",
+      "crs": "BCE",
+      "lat": 51.413319,
+      "lon": -0.751833,
+      "duration_pimlico": 73,
+      "duration_aldgate": 99,
+      "kept": true
+    },
+    {
+      "name": "Bradford-On-Avon",
+      "crs": "BOA",
+      "lat": 51.345058,
+      "lon": -2.252669,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Brading",
+      "crs": "BDN",
+      "lat": 50.678509,
+      "lon": -1.13801,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Braintree",
+      "crs": "BTR",
+      "lat": 51.874989,
+      "lon": 0.558261,
+      "duration_pimlico": 107,
+      "duration_aldgate": 85,
+      "kept": true
+    },
+    {
+      "name": "Braintree Freeport",
+      "crs": "BTP",
+      "lat": 51.869316,
+      "lon": 0.568258,
+      "duration_pimlico": 106,
+      "duration_aldgate": 84,
+      "kept": true
+    },
+    {
+      "name": "Bramhall",
+      "crs": "BML",
+      "lat": 53.359959,
+      "lon": -2.162249,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bramley (Hants)",
+      "crs": "BMY",
+      "lat": 51.32988,
+      "lon": -1.061265,
+      "duration_pimlico": 89,
+      "duration_aldgate": 93,
+      "kept": true
+    },
+    {
+      "name": "Brampton (Suffolk)",
+      "crs": "BRP",
+      "lat": 52.395397,
+      "lon": 1.543871,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Brandon",
+      "crs": "BND",
+      "lat": 52.454479,
+      "lon": 0.624116,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Branksome",
+      "crs": "BSM",
+      "lat": 50.727528,
+      "lon": -1.919211,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bredbury",
+      "crs": "BDY",
+      "lat": 53.422939,
+      "lon": -2.109823,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Brent Cross West",
+      "crs": "BCZ",
+      "lat": 51.5687,
+      "lon": -0.2269,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Brentford",
+      "crs": "BFD",
+      "lat": 51.487804,
+      "lon": -0.309048,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Brentwood",
+      "crs": "BRE",
+      "lat": 51.61322,
+      "lon": 0.30083,
+      "duration_pimlico": 89,
+      "duration_aldgate": 70,
+      "kept": true
+    },
+    {
+      "name": "Bricket Wood",
+      "crs": "BWO",
+      "lat": 51.705223,
+      "lon": -0.358846,
+      "duration_pimlico": 63,
+      "duration_aldgate": 75,
+      "kept": true
+    },
+    {
+      "name": "Bridgend",
+      "crs": "BGN",
+      "lat": 51.506481,
+      "lon": -3.576296,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bridgwater",
+      "crs": "BWT",
+      "lat": 51.128025,
+      "lon": -2.99031,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Brigg",
+      "crs": "BGG",
+      "lat": 53.549137,
+      "lon": -0.486094,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Brighton",
+      "crs": "BTN",
+      "lat": 50.829659,
+      "lon": -0.141234,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Brimsdown",
+      "crs": "BMD",
+      "lat": 51.655224,
+      "lon": -0.031022,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Brinnington",
+      "crs": "BNT",
+      "lat": 53.431881,
+      "lon": -2.134097,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bristol Parkway",
+      "crs": "BPW",
+      "lat": 51.514061,
+      "lon": -2.53461,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bristol Temple Meads",
+      "crs": "BRI",
+      "lat": 51.449093,
+      "lon": -2.581349,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Brithdir",
+      "crs": "BHD",
+      "lat": 51.710266,
+      "lon": -3.228765,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Briton Ferry",
+      "crs": "BNF",
+      "lat": 51.637852,
+      "lon": -3.8193,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Brixton",
+      "crs": "BRX",
+      "lat": 51.463245,
+      "lon": -0.114164,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Broad Green",
+      "crs": "BGE",
+      "lat": 53.40654,
+      "lon": -2.893267,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Broadbottom",
+      "crs": "BDB",
+      "lat": 53.440968,
+      "lon": -2.01653,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Broadstairs",
+      "crs": "BSR",
+      "lat": 51.360653,
+      "lon": 1.43317,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Brockenhurst",
+      "crs": "BCU",
+      "lat": 50.816708,
+      "lon": -1.574112,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Brockholes",
+      "crs": "BHS",
+      "lat": 53.597149,
+      "lon": -1.770299,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Brockley",
+      "crs": "BCY",
+      "lat": 51.464684,
+      "lon": -0.037797,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Bromborough",
+      "crs": "BOM",
+      "lat": 53.322146,
+      "lon": -2.987058,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bromborough Rake",
+      "crs": "BMR",
+      "lat": 53.329899,
+      "lon": -2.989644,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Bromley North",
+      "crs": "BMN",
+      "lat": 51.408894,
+      "lon": 0.017325,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Bromley South",
+      "crs": "BMS",
+      "lat": 51.399887,
+      "lon": 0.018374,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Bromsgrove",
+      "crs": "BMV",
+      "lat": 52.322662,
+      "lon": -2.048379,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    },
+    {
+      "name": "Brondesbury",
+      "crs": "BSY",
+      "lat": 51.545574,
+      "lon": -0.203063,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Brondesbury Park",
+      "crs": "BSP",
+      "lat": 51.540896,
+      "lon": -0.209955,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": true
+    },
+    {
+      "name": "Brookmans Park",
+      "crs": "BPK",
+      "lat": 51.720955,
+      "lon": -0.204811,
+      "duration_pimlico": 66,
+      "duration_aldgate": 65,
+      "kept": true
+    },
+    {
+      "name": "Brookwood",
+      "crs": "BKO",
+      "lat": 51.303215,
+      "lon": -0.635753,
+      "duration_pimlico": 69,
+      "duration_aldgate": 68,
+      "kept": true
+    },
+    {
+      "name": "Broome",
+      "crs": "BME",
+      "lat": 52.422745,
+      "lon": -2.88524,
+      "duration_pimlico": null,
+      "duration_aldgate": null,
+      "kept": false
+    }
+  ]
+}

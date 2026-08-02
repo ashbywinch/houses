@@ -22,9 +22,11 @@ import asyncio
 import csv
 import json
 import logging
+import os
 import re
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -112,26 +114,44 @@ async def build_shed(
     router,
     *,
     delay_s: float = 0.5,
+    existing_records: list[dict] | None = None,
+    checkpoint: Callable[[list[dict], int], None] | None = None,
 ) -> list[dict]:
     """Route stations in the box and return shed records.
 
     ``router`` is ``async (Station, postcode) -> int | None`` (duration minutes,
     or None when no route/failure). Stations outside the box are skipped; inner-zone
     stations are kept without a single router call.
+
+    Resumable: ``existing_records`` (a previous run's output) marks stations as
+    done — they are never re-routed, never re-delayed, and the final record list
+    is byte-identical to a from-scratch run. ``checkpoint(records, processed)``
+    is invoked after each newly processed station so the caller can persist
+    progress incrementally (a killed batch loses at most the in-flight station).
     """
-    records: list[dict] = []
+    done = {r["crs"] for r in existing_records} if existing_records else set()
+    records = list(existing_records) if existing_records else []
+    order = {st.crs: i for i, st in enumerate(stations)}
+    processed = 0
     for st in stations:
+        if st.crs in done:
+            continue
         if not bbox.contains(st.lat, st.lon):
             continue
         inner = any(st.distance_km_to(office.point) <= inner_radius_km for office in offices)
         if inner:
             records.append(_record(st, None, None, True))
-            continue
-        dur_p = await router(st, offices[0].postcode)
-        dur_a = await router(st, offices[1].postcode)
-        records.append(_record(st, dur_p, dur_a, keep_station(False, dur_p, dur_a, threshold)))
-        if delay_s:
-            await asyncio.sleep(delay_s)
+        else:
+            dur_p = await router(st, offices[0].postcode)
+            dur_a = await router(st, offices[1].postcode)
+            records.append(_record(st, dur_p, dur_a, keep_station(False, dur_p, dur_a, threshold)))
+            if delay_s:
+                await asyncio.sleep(delay_s)
+        processed += 1
+        if checkpoint is not None:
+            checkpoint(records, processed)
+    # Stable order regardless of resume point: input station order.
+    records.sort(key=lambda r: order.get(r["crs"], len(order)))
     return records
 
 
@@ -226,19 +246,47 @@ async def _geocode_offices() -> list[Office]:
     return offices
 
 
+def is_complete(existing: list[dict] | None, records: list[dict], expected: int) -> bool:
+    """True when a resume found every expected station already done.
+
+    A killed batch (records < expected) must resume; a run that processed new
+    stations (records > existing) must report its work, not "already complete".
+    """
+    return existing is not None and len(records) >= expected and len(records) == len(existing)
+
+
+def _write_payload(path: Path, metadata: dict, records: list[dict]) -> None:
+    """Write the shed payload atomically — a kill mid-write never corrupts the file."""
+    payload = {"metadata": metadata, "stations": records}
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, indent=2))
+    os.replace(tmp, path)
+
+
 async def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the commutable-station shed (one-off TfL batch).")
     parser.add_argument("--csv", default=str(DEFAULT_CSV))
     parser.add_argument("--out", default=str(DEFAULT_OUT))
     parser.add_argument("--limit", type=int, default=0, help="route at most N stations (smoke tests)")
-    parser.add_argument("--force", action="store_true", help="re-run even when the output file exists")
+    parser.add_argument("--force", action="store_true", help="wipe an existing shed and re-run everything")
     parser.add_argument("--delay", type=float, default=0.5, help="seconds between stations (default 0.5)")
+    parser.add_argument("--checkpoint-every", type=int, default=25, help="rewrite the output file every N stations")
     args = parser.parse_args(argv)
 
     out_path = Path(args.out)
+    metadata = None
+    existing: list[dict] | None = None
     if out_path.exists() and not args.force:
-        print(f"{out_path} already exists — use --force to re-run the one-off TfL batch", file=sys.stderr)
-        return 1
+        try:
+            prev = json.loads(out_path.read_text())
+            existing = prev["stations"]
+            metadata = prev["metadata"]  # keep the original generated_at across resumes
+            print(f"resuming from {out_path} ({len(existing or [])} stations already done)")
+        except (json.JSONDecodeError, KeyError, OSError):
+            print(f"{out_path} unreadable — starting fresh", file=sys.stderr)
+            existing = None
+    elif out_path.exists() and args.force:
+        print("--force: wiping the existing shed", file=sys.stderr)
 
     offices = await _geocode_offices()
     stations = load_stations(args.csv)
@@ -246,27 +294,48 @@ async def run(argv: list[str] | None = None) -> int:
         stations = stations[: args.limit]
 
     bbox = BBox(**DEFAULT_BBOX)
-    started = time.monotonic()
-    records = await build_shed(
-        stations, offices, bbox, INNER_RADIUS_KM, THRESHOLD_MIN, route_station_duration, delay_s=args.delay
-    )
-    elapsed = time.monotonic() - started
-
-    kept = sum(1 for r in records if r["kept"])
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "metadata": {
+    expected = sum(1 for st in stations if bbox.contains(st.lat, st.lon))
+    if metadata is None:
+        metadata = {
             "threshold_min": THRESHOLD_MIN,
             "destinations": [o.postcode for o in offices],
             "bbox": DEFAULT_BBOX,
             "inner_radius_km": INNER_RADIUS_KM,
             "engine_version": ENGINE_VERSION,
+            "expected_stations": expected,
             "generated_at": datetime.now(UTC).isoformat(),
-        },
-        "stations": records,
-    }
-    out_path.write_text(json.dumps(payload, indent=2))
-    print(f"{len(records)} stations processed ({kept} kept) in {elapsed:.0f}s → {out_path}")
+        }
+    else:
+        metadata = {**metadata, "expected_stations": expected}
+
+    def _checkpoint(records: list[dict], processed: int) -> None:
+        if processed % args.checkpoint_every == 0:
+            _write_payload(out_path, metadata, records)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    prev_count = len(existing) if existing is not None else 0
+    started = time.monotonic()
+    records = await build_shed(
+        stations,
+        offices,
+        bbox,
+        INNER_RADIUS_KM,
+        THRESHOLD_MIN,
+        route_station_duration,
+        delay_s=args.delay,
+        existing_records=existing,
+        checkpoint=_checkpoint,
+    )
+    elapsed = time.monotonic() - started
+
+    if is_complete(existing, records, metadata.get("expected_stations", len(records))):
+        print(f"shed already complete ({len(records)} stations) — use --force to re-run")
+        return 0
+
+    _write_payload(out_path, metadata, records)
+    kept = sum(1 for r in records if r["kept"])
+    new = len(records) - prev_count
+    print(f"{new} new station(s) processed ({kept} kept of {len(records)}) in {elapsed:.0f}s → {out_path}")
     return 0
 
 

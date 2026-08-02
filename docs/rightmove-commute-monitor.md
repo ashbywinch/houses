@@ -147,8 +147,11 @@ scraper input):
 - `data/commute/station_shed.json`, `searches.json`, `searches.txt` (all committed)
 - `tests/test_commute_searches.py`
 - Makefile targets:
-  - `make commute-shed` — **refuses to run when `station_shed.json` exists**; requires
-    `--force` to re-fire the one-off TfL batch (a deliberate act, not a silent re-run).
+  - `make commute-shed` — one-off TfL batch. **Resumable**: re-running continues
+    from the existing `station_shed.json` (completed stations are never re-routed
+    or re-delayed); the file is checkpointed every 25 stations with an atomic
+    write, so a killed batch loses at most the in-flight station. `FORCE=1` wipes
+    and re-runs everything. API responses are also disk-cached (`data/api_cache/`).
   - `make commute-searches` — depends only on committed inputs (stations.csv +
     station_shed.json + config); never triggers the shed. Regeneration is fully offline.
   - `make commute-validate` — runs validation + tests.

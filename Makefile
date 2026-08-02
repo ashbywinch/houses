@@ -31,7 +31,7 @@ help:
 	@echo "  ${GREEN}make format${NC}             Auto-fix formatting issues"
 	@echo "  ${GREEN}make coverage${NC}           Run tests with coverage report"
 	@echo "  ${GREEN}make clean${NC}              Clean up generated files"
-	@echo "  ${GREEN}make commute-shed${NC}       One-off TfL batch → data/commute/station_shed.json (FORCE=1 to re-run)"
+	@echo "  ${GREEN}make commute-shed${NC}       One-off TfL batch → data/commute/station_shed.json (resumes; FORCE=1 to re-run all)"
 	@echo "  ${GREEN}make commute-searches${NC}   Offline: build data/commute/searches.json + .txt"
 	@echo "  ${GREEN}make commute-validate${NC}   Validate searches + run commute tests"
 
@@ -140,11 +140,8 @@ reset-db:  # Reset DAG database but PRESERVE API cache
 # ── Rightmove commute search toolchain (docs/rightmove-commute-monitor.md) ──
 
 commute-shed:
-	@if [ -f data/commute/station_shed.json ] && [ -z "$(FORCE)" ]; then \
-		echo "${YELLOW}data/commute/station_shed.json exists — use 'make commute-shed FORCE=1' to re-run the one-off TfL batch${NC}"; \
-		exit 1; \
-	fi
 	@$(PYTHON) -m tools.commute.station_shed $(if $(FORCE),--force,)
+	@echo "${GREEN}✓ Shed up to date — 'make commute-searches' next${NC}"
 
 commute-searches:
 	@$(PYTHON) -m tools.commute.searches
