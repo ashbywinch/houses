@@ -176,7 +176,8 @@ commute-intersection:
 	@echo "${GREEN}✓ Intersection up to date — 'make commute-map' includes it${NC}"
 
 commute-serve:
-	@echo "Commute maps on your LAN — open on your phone:"
+	@echo "Commute map on your LAN — open on your phone:"
 	@echo "  http://$$($(PYTHON) -c 'import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(("8.8.8.8", 80)); print(s.getsockname()[0])'):8123/commute_map.html"
+	@echo "  (only the map is served — the other commute files stay private)"
 	@echo "  (Ctrl-C to stop)"
-	@$(PYTHON) -m http.server 8123 --bind 0.0.0.0 --directory data/commute
+	@$(PYTHON) -m tools.commute.serve
