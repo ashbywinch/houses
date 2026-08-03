@@ -26,6 +26,7 @@ import base64
 import html
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -250,12 +251,16 @@ for (const m of markers) {
 
 
 def write_map(html: str, out_path: str | Path) -> None:
-    """Write the map without churning an identical committed artifact."""
+    """Write the map without churning an identical committed artifact —
+    atomically (tmp + os.replace): a phone loading the map mid-regeneration
+    sees the old or the new file, never a truncated one."""
     out_path = Path(out_path)
     if out_path.exists() and out_path.read_text() == html:
         return
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(html)
+    tmp = out_path.with_suffix(out_path.suffix + ".tmp")
+    tmp.write_text(html)
+    os.replace(tmp, out_path)
 
 
 def _fail(user_message: str, dev_detail: str) -> int:

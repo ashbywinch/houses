@@ -37,6 +37,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 import re
 import sys
 from collections.abc import Sequence
@@ -72,6 +73,7 @@ REGION_MULTIPLIER = 1.7  # region radius (km) = threshold_min * this — covers 
 MAX_LOCATIONS_PER_REQUEST = 1000  # ORS matrix cap (incl. the destination) — probed live
 FREEFLOW_KMH = 70.0  # slack = half-cell crossing time at this speed
 MAX_VERTICES = 500
+MIN_ISLAND_CELLS = 4  # fringe speckles below this many cells are noise
 GB_BBOX = BBox(**DEFAULT_BBOX)  # sanity bound for polygon vertices
 
 _REQUEST_DELAY_S = 0.2  # polite sequential cadence between matrix calls
@@ -384,6 +386,19 @@ def config_signature(raw: dict) -> dict:
     }
 
 
+def retained_components(
+    kept: set[tuple[int, int]], min_island_cells: int = MIN_ISLAND_CELLS
+) -> list[set[tuple[int, int]]]:
+    """Components to outline: the main shed ALWAYS, plus satellites of at
+    least ``min_island_cells`` cells — the single home of the
+    'fringe speckles are noise, the destination's own shed never is' rule
+    (drive searches and the intersection both use it)."""
+    comps = _components(kept)
+    if not comps:
+        return []
+    return [c for c in comps if c is comps[0] or len(c) >= min_island_cells]
+
+
 def _components(kept: set[tuple[int, int]]) -> list[set[tuple[int, int]]]:
     """Connected components of the kept-cell set under 4-neighbourhood adjacency.
 
@@ -460,11 +475,7 @@ def raw_to_searches(
         # ids must be unique across destinations: two labels can slug to the
         # same string (e.g. "Dad" and "Dad!"), so the postcode disambiguates
         postcode_slug = re.sub(r"[^a-z0-9]+", "", dest["postcode"].lower()) or "pc"
-        comps = _components(kept)
-        # the island filter drops fringe speckles — never the destination's
-        # own shed: a small-threshold shed under min_island_cells cells must
-        # still produce a search
-        for i, comp in enumerate((c for c in comps if c is comps[0] or len(c) >= min_island_cells), 1):
+        for i, comp in enumerate(retained_components(kept, min_island_cells), 1):
             loop = _outer_loop(comp, grid)
             if loop is None:
                 continue
@@ -636,6 +647,16 @@ def _same_payload(existing: dict, new: dict) -> bool:
     return json.dumps(e_meta, sort_keys=True) == json.dumps(n_meta, sort_keys=True)
 
 
+def _atomic_write(path: Path, content: str) -> None:
+    """Write via tmp + os.replace: a concurrent reader (the map build, a
+    phone serving the map mid-regeneration) sees the OLD or the NEW file,
+    never a partial one."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(content)
+    os.replace(tmp, path)
+
+
 def write_payloads(raw: dict | None, searches: dict, out_dir: str | Path) -> None:
     """Write raw (when regenerated) + searches.json/.txt/.html without churn.
 
@@ -645,7 +666,7 @@ def write_payloads(raw: dict | None, searches: dict, out_dir: str | Path) -> Non
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     if raw is not None:
-        (out_dir / RAW_FILENAME).write_text(json.dumps(raw, indent=2) + "\n")
+        _atomic_write(out_dir / RAW_FILENAME, json.dumps(raw, indent=2) + "\n")
 
     searches_path = out_dir / SEARCHES_FILENAME
     existing: dict | None = None
@@ -659,9 +680,9 @@ def write_payloads(raw: dict | None, searches: dict, out_dir: str | Path) -> Non
         _write_if_changed(out_dir / TXT_FILENAME, _urls_text(searches))
         _write_if_changed(out_dir / MAP_FILENAME, _map_html(searches))
         return
-    searches_path.write_text(json.dumps(searches, indent=2) + "\n")
-    (out_dir / TXT_FILENAME).write_text(_urls_text(searches))
-    (out_dir / MAP_FILENAME).write_text(_map_html(searches))
+    _atomic_write(searches_path, json.dumps(searches, indent=2) + "\n")
+    _atomic_write(out_dir / TXT_FILENAME, _urls_text(searches))
+    _atomic_write(out_dir / MAP_FILENAME, _map_html(searches))
 
 
 def _write_if_changed(path: Path, content: str) -> None:

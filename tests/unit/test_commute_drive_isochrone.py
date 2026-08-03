@@ -963,6 +963,21 @@ def test_combined_map_fails_cleanly_on_malformed_payload(tmp_path):
     assert not (tmp_path / "map.html").exists()
 
 
+def test_atomic_write_leaves_no_partial(tmp_path):
+    """The artifact writer replaces via tmp + os.replace — a concurrent
+    reader sees the old or the new file, never a truncated one, and no .tmp
+    litter survives."""
+    from tools.commute.drive_isochrone import _atomic_write
+
+    out = tmp_path / "out" / "drive_searches.json"
+    out.parent.mkdir()
+    _atomic_write(out, "old")
+    assert out.read_text() == "old"
+    _atomic_write(out, "new")
+    assert out.read_text() == "new"
+    assert not list(out.parent.glob("*.tmp"))
+
+
 def test_combined_map_warns_when_drive_layers_absent(tmp_path, capsys):
     """A drive payload missing 'searches' must render the map with a
     warning — never silently produce a transit-only map that looks complete."""

@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,11 +32,11 @@ from pint import Quantity
 
 from tools.commute.drive_isochrone import (
     GB_BBOX,
-    _components,
     _outer_loop,
     grid_cell_centers,
     point_in_polygon,
     region_bbox,
+    retained_components,
 )
 from tools.commute.rightmove_url import build_search_url, parse_search_url
 from tools.commute.tile import Grid, Rect, rasterize
@@ -50,7 +51,6 @@ DEFAULT_DRIVE_SEARCHES = Path("data/commute/drive_searches.json")
 DEFAULT_OUT = Path("data/commute/intersection.json")
 DEFAULT_CELL_KM = 4.0  # same as the drive grids
 TRANSIT_BUFFER_KM = 5.0  # same catchment radius the transit shed rasterizes
-MIN_ISLAND_CELLS = 4  # drop sub-4-cell specks, same tolerance as the drive sheds
 MAX_VERTICES = 500
 
 
@@ -155,11 +155,9 @@ def build_payload(
 
     thresholds = [d["threshold_min"] for d in drive_raw["destinations"]]
     searches: list[dict] = []
-    comps = _components(kept)
-    # the island filter drops fringe speckles — never the main shed: a valid
-    # but small intersection (narrow overlap of a short-threshold drive shed
-    # with the transit buffer) must still produce a search
-    for i, comp in enumerate((c for c in comps if c is comps[0] or len(c) >= MIN_ISLAND_CELLS), 1):
+    # the island filter (main shed always kept) is the drive toolchain's
+    # rule — one implementation, shared, so tuning it can't diverge
+    for i, comp in enumerate(retained_components(kept), 1):
         loop = _outer_loop(comp, grid)
         if loop is None:
             continue
@@ -348,7 +346,9 @@ def run(argv: list[str] | None = None) -> int:
             existing = None
     if existing is None or not _same_payload(existing, payload):
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(payload, indent=2) + "\n")
+        tmp = out_path.with_suffix(out_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(payload, indent=2) + "\n")
+        os.replace(tmp, out_path)
     print(f"{len(payload['searches'])} intersection search(es) → {out_path}")
     for s in payload["searches"]:
         print(f"  {s['id']}: {s['rightmove_url']}")
