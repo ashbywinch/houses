@@ -39,7 +39,7 @@ import logging
 import math
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -100,6 +100,22 @@ def load_config(path: str | Path, default_threshold: int = DEFAULT_THRESHOLD_MIN
             DriveDestination(label=label, postcode=postcode, threshold_min=int(entry.get("threshold_min", threshold)))
         )
     return destinations
+
+
+def apply_default_threshold(
+    destinations: list[DriveDestination], config_data: dict, threshold_min: int
+) -> list[DriveDestination]:
+    """Apply a CLI default threshold to every destination that lacks an
+    explicit per-destination override in the config file — the documented
+    meaning of "override the config's default threshold".
+
+    ``load_config``'s own ``default_threshold`` cannot express this: the
+    file's top-level ``threshold_min`` would win over the CLI value.
+    """
+    overridden = {d["label"] for d in config_data.get("destinations", []) if "threshold_min" in d}
+    return [
+        replace(d, threshold_min=threshold_min) if d.label not in overridden else d for d in destinations
+    ]
 
 
 # ── geometry ─────────────────────────────────────────────────────────
@@ -641,12 +657,16 @@ async def run(argv: list[str] | None = None) -> int:
         print(f"drive searches OK ({len(payload['searches'])} search(es))")
         return 0
 
-    # --threshold-min overrides the config's DEFAULT threshold (per-destination
-    # overrides in the file still win). It must reach load_config so the kept
-    # cells, metadata, and config signature all agree — a threshold change is a
-    # real config change, so the raw payload regenerates (never a silent reuse
-    # of cells kept at the old threshold).
-    destinations = load_config(args.config, default_threshold=args.threshold_min or DEFAULT_THRESHOLD_MIN)
+    # --threshold-min overrides the config's DEFAULT threshold: applied to
+    # every destination without an explicit per-destination override, so the
+    # kept cells, metadata, and config signature all agree — a threshold
+    # change is a real config change, so the raw payload regenerates (never a
+    # silent reuse of cells kept at the old threshold).
+    config_path = Path(args.config)
+    config_data = json.loads(config_path.read_text())
+    destinations = load_config(config_path)
+    if args.threshold_min:
+        destinations = apply_default_threshold(destinations, config_data, args.threshold_min)
     threshold_min = min(d.threshold_min for d in destinations)
     region_km = args.region_km or threshold_min * REGION_MULTIPLIER
     generated_at = datetime.now(UTC).isoformat()

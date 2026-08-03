@@ -72,6 +72,31 @@ def test_load_config_default_threshold_parameter(tmp_path):
     ]
 
 
+def test_apply_default_threshold_skips_explicit_overrides(tmp_path):
+    """Regression: the CLI flag must beat the config file's TOP-LEVEL
+    threshold_min (load_config's default_threshold cannot — the file wins),
+    but per-destination overrides in the file still win."""
+    import json as _json
+
+    from tools.commute.drive_isochrone import apply_default_threshold
+
+    cfg = tmp_path / "destinations.json"
+    cfg.write_text(
+        _json.dumps(
+            {
+                "threshold_min": 90,
+                "destinations": [
+                    {"label": "Dad", "postcode": "OX7 5GZ"},
+                    {"label": "Bracknell", "postcode": "RG12 8YA", "threshold_min": 75},
+                ],
+            }
+        )
+    )
+    data = _json.loads(cfg.read_text())
+    dests = apply_default_threshold(load_config(cfg), data, 60)
+    assert [d.threshold_min for d in dests] == [60, 75]
+
+
 def test_load_config_per_destination_override_wins(tmp_path):
     cfg = tmp_path / "destinations.json"
     body = {"threshold_min": 90, "destinations": [{"label": "Dad", "postcode": "OX7 5GZ", "threshold_min": 120}]}
