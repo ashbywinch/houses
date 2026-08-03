@@ -7,5 +7,7 @@
 # linguist-generated: GitHub collapses them in the PR diff view.
 data/commute/*.json -diff
 data/commute/*.txt -diff
+data/commute/*.html -diff
 data/commute/*.json linguist-generated=true
 data/commute/*.txt linguist-generated=true
+data/commute/*.html linguist-generated=true

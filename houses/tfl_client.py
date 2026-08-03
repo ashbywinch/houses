@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 
+import httpx
 from money import Money
 from pint import Quantity
 
 from dag.attempt import Attempt
 from dag.http_error import HttpError
-from houses.api_cache import cached_async_client, get_cached, set_cached
+from houses.api_cache import cached_async_client, evict_cached, get_cached, set_cached
 from houses.car_park import CarParkRegistry
 from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.config import settings
@@ -78,6 +81,70 @@ class TflClient:
             )
         return await self._process_data(data)
 
+    @staticmethod
+    async def route_duration(
+        origin: str,
+        destination_postcode: str,
+        *,
+        allow_bus: bool = True,
+        fetch: Callable[[str, dict], Awaitable[dict | None]] | None = None,
+    ) -> int | None:
+        """Route one origin → postcode pair and return the fastest duration in minutes.
+
+        Public entry point for external tooling (``tools/commute/station_shed.py``)
+        that needs durations, not Commute enrichment. Builds the same request as
+        ``plan()`` (nationalSearch, arriving 09:00 weekday, disk-cached, retry with
+        backoff on transient errors and network failures). Returns ``None`` when
+        TfL cannot route or every attempt fails — never raises for a missing route.
+
+        ``origin`` is any TfL origin identifier: ``"lat,lon"``, a place name, or a
+        stop id. ``fetch`` is injectable for tests (default: the cached/retry
+        wrapper; transient error responses are never cached, so retries are
+        genuine).
+        """
+        modes = ["tube", "overground", "dlr", "tram", "national-rail", "walking"]
+        if allow_bus:
+            modes.append("bus")
+        url = f"{TflClient.TFL_JOURNEY_URL}/{origin}/to/{destination_postcode}"
+        params = {
+            "nationalSearch": "true",
+            "timeIs": "arriving",
+            "journeyPreference": "leasttime",
+            "mode": ",".join(modes),
+            **TflClient._next_weekday_date_params(),
+            **TflClient._tfl_auth_params(),
+        }
+        fetch = fetch or TflClient._cached_with_retry
+        data = await fetch(url, params)
+        if data is None:
+            return None
+        # A 300 disambiguation means the name matched multiple places (usually
+        # streets). The exact station is among the options as a national-rail
+        # StopPoint — route from its id instead of giving up (observed:
+        # Haywards Heath, Tring, Burgess Hill all fail both origin forms).
+        station_id = TflClient._disambiguate_national_rail(data)
+        if station_id is not None:
+            url2 = f"{TflClient.TFL_JOURNEY_URL}/{station_id}/to/{destination_postcode}"
+            data2 = await fetch(url2, params)
+            if data2 is not None:
+                data = data2
+        duration, _, _ = TflClient._pick_best_journey(data)
+        return duration
+
+    @staticmethod
+    def _disambiguate_national_rail(data: dict) -> str | None:
+        """Extract the national-rail StopPoint id from a 300 disambiguation body.
+
+        Returns the option's ``parameterValue`` (a routable stop id) for the
+        first StopPoint whose modes include national-rail, or ``None`` when the
+        body is not a disambiguation or has no such option.
+        """
+        disamb = data.get("fromLocationDisambiguation", {})
+        for option in disamb.get("disambiguationOptions", []):
+            place = option.get("place", {})
+            if place.get("placeType") == "StopPoint" and "national-rail" in (place.get("modes") or []):
+                return option.get("parameterValue")
+        return None
     # ── TfL helper functions ─────────────────────────────────────────
 
     @staticmethod
@@ -256,28 +323,110 @@ class TflClient:
     # ── Internal fetch / process ─────────────────────────────────────
 
     @staticmethod
-    async def _cached_api_call(url: str, params: dict) -> dict | None:
+    async def _cached_with_retry(
+        url: str, params: dict, *, attempts: int = 3, base_delay: float = 1.0, fetch=None
+    ) -> dict | None:
+        """Cached TfL call with backoff on transient HTTP errors and network failures.
+
+        Retries are genuine: ``_cached_api_call`` never caches error responses,
+        so a failed attempt cannot short-circuit a later one via the disk cache.
+        ``fetch`` is injectable for tests (default: the cached API call).
+        """
+        fetch = fetch or TflClient._cached_api_call
+        for attempt in range(attempts):
+            try:
+                return await fetch(url, params)
+            except HttpError as e:
+                if e.is_rate_limit() or e.is_server_error():
+                    delay = base_delay * (2**attempt)
+                    logger.warning("TfL transient %s for %s — retry in %.1fs", e.status, url, delay)
+                    await asyncio.sleep(delay)
+                    continue
+                logger.warning("TfL client error %s for %s — station excluded", e.status, url)
+                return None
+            except httpx.RequestError as e:
+                delay = base_delay * (2**attempt)
+                logger.warning("TfL network error for %s (%s) — retry in %.1fs", url, e.__class__.__name__, delay)
+                await asyncio.sleep(delay)
+        logger.error("TfL transient errors exhausted for %s — station excluded", url)
+        return None
+
+    @staticmethod
+    def _is_transient_error_body(data: dict) -> bool:
+        """True for cached entries that are TRANSIENT error responses.
+
+        Only 429/5xx must be rejected and evicted on the cache hit path — a
+        transient outage must not poison the route, and retries must be
+        genuine. Deterministic no-route responses (404, "cannot route" bodies)
+        are legitimately cached and served: re-hitting the endpoint for the
+        same impossible request wastes calls. Two legacy shapes exist: the
+        transport's ``{"_cached_status": ...}`` wrapper and TfL's raw
+        ``ApiError`` JSON (status in ``httpStatusCode``).
+        """
+        for key in ("_cached_status", "httpStatusCode"):
+            status = data.get(key)
+            if isinstance(status, int):
+                # Poison: auth failures (401/403), planner outages (409), rate
+                # limits (429) and server errors are transient — they must not
+                # be served from cache. Only genuine no-route (404) bodies are
+                # deterministic.
+                return status in (401, 403, 409, 429) or status >= 500
+        return False
+
+    @staticmethod
+    async def _cached_api_call(
+        url: str, params: dict, *, _client_factory: Callable | None = None
+    ) -> dict | None:
         """Make a cached TfL API call. Strips auth from cache keys.
         Transient errors (429, 5xx, httpx.RequestError) are re-raised for DAG retry.
-        For all other statuses (including 300 disambiguation), the response body
-        is cached under the original URL and returned.
+        Deterministic responses (2xx/3xx/4xx, including 404 "cannot route"
+        bodies) are cached and served — re-hitting the endpoint for the same
+        impossible request wastes calls. 429/5xx are never cached, so retries
+        stay genuine.
         Unexpected response format errors (KeyError, IndexError, TypeError) are
-        NOT caught — they propagate so the operator knows the API format changed."""
+        NOT caught — they propagate so the operator knows the API format changed.
+        ``_client_factory`` is injectable for tests (resolved at call time so
+        monkeypatching ``cached_async_client`` keeps working)."""
         cache_params = {k: v for k, v in params.items() if k != "app_key"}
         cached = get_cached("GET", url, cache_params)
         if cached is not None:
-            return cached
-        async with cached_async_client(timeout=20.0) as client:
+            if TflClient._is_transient_error_body(cached):
+                # Legacy poisoned entry (429/5xx cached before the rule): reject
+                # and evict so the route is re-fetched — transient errors are
+                # never served from cache.
+                logger.warning("evicting cached transient error response for %s", url)
+                evict_cached("GET", url, cache_params, None)
+                cached = None
+            elif isinstance(cached, dict) and "_cached_status" in cached and "_cached_body" in cached:
+                # Wrapped deterministic non-2xx — unwrap: callers consume the
+                # body (the status was handled when it was first received).
+                return cached["_cached_body"]
+            else:
+                return cached
+        async with (_client_factory or cached_async_client)(timeout=20.0) as client:
             resp = await client.get(url, params=params)
             data = resp.json()
-            # Cache response body regardless of HTTP status (including 300).
-            # The response IS from this URL, so the cache key is correct.
-            set_cached("GET", url, cache_params, None, data)
+            # Cache deterministic responses — 2xx/3xx/4xx (including 404
+            # "cannot route this station" bodies: re-hitting the endpoint for
+            # the same impossible request wastes calls). Non-2xx are wrapped as
+            # {"_cached_status", "_cached_body"} so the status survives cache
+            # hits. NEVER cache transient errors (429, 5xx): a cached outage
+            # body would poison the route and make retries non-genuine.
+            if resp.status_code < 300:
+                set_cached("GET", url, cache_params, None, data)
+            elif 300 <= resp.status_code < 400:
+                set_cached("GET", url, cache_params, None, {"_cached_status": resp.status_code, "_cached_body": data})
+            elif resp.status_code == 404:
+                # 404 "cannot route this station" is genuinely deterministic —
+                # re-hitting the endpoint for the same impossible request
+                # wastes calls. Every OTHER 4xx is transient-ish (401/403 key
+                # expiry, 409 planner outage) and must not poison the cache.
+                set_cached("GET", url, cache_params, None, {"_cached_status": 404, "_cached_body": data})
             if resp.status_code == 429 or (500 <= resp.status_code < 600):
                 raise HttpError(resp.status_code, body=str(data))
             if 400 <= resp.status_code < 500:
-                # Non-transient client error (e.g. 409 route planner
-                # unavailable) — surface the reason instead of letting
+                # Non-transient client error (e.g. 404 no route, 409 route
+                # planner unavailable) — surface the reason instead of letting
                 # _process_data reduce it to a generic "could not route".
                 reason = str(data)[:200]
                 raise HttpError(resp.status_code, body=str(data), message=reason)

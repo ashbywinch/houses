@@ -22,7 +22,7 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 
@@ -67,6 +67,11 @@ def set_cached(method: str, url: str, params: dict[str, Any] | None, body: str |
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path = _cache_path(_make_key(method, url, params, body))
     path.write_text(json.dumps(data))
+
+
+def evict_cached(method: str, url: str, params: dict[str, Any] | None, body: str | None) -> None:
+    """Delete a cached response (e.g. a poisoned error body). No-op if absent."""
+    _cache_path(_make_key(method, url, params, body)).unlink(missing_ok=True)
 
 
 def with_cache_sync(
@@ -115,8 +120,10 @@ class CachingTransport(httpx.AsyncBaseTransport):
     """httpx async transport that checks the disk cache before making HTTP calls.
 
     On a cache hit the stored JSON is returned with its original HTTP status.
-    On a miss the request is forwarded to ``_inner`` and the response is cached
-    before being returned (including non-2xx so re-processing doesn't hit APIs).
+    On a miss the request is forwarded to ``_inner`` and deterministic
+    responses (2xx/3xx/4xx, including 404 no-route bodies) are cached so
+    re-processing doesn't hit APIs; TRANSIENT errors (429/5xx) are never
+    cached — retries stay genuine and a cached outage body can't poison a route.
 
     Stores raw response bodies (not wrapped) so that enrichment functions
     using ``get_cached`` directly remain compatible.
@@ -127,24 +134,44 @@ class CachingTransport(httpx.AsyncBaseTransport):
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         parsed = urlparse(str(request.url))
-        url_path = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        # Key space is UNIFIED with the callers' direct get_cached/set_cached
+        # calls: the decoded URL (httpx percent-encodes path spaces) with
+        # app_key stripped. Before this, the transport keyed the encoded URL
+        # with auth params — a parallel key space where every response was
+        # stored twice and each layer was blind to the other's entries.
+        url_path = unquote(f"{parsed.scheme}://{parsed.netloc}{parsed.path}")
         params = {k: v[0] for k, v in parse_qs(parsed.query).items()} if parsed.query else None
+        if params:
+            params = {k: v for k, v in params.items() if k != "app_key"} or None
         body = request.content.decode() if request.content else None
 
         cached = get_cached(request.method, url_path, params, body)
         if cached is not None:
-            if isinstance(cached, dict) and "_cached_status" in cached:
+            status = cached.get("_cached_status") if isinstance(cached, dict) else None
+            raw_status = cached.get("httpStatusCode") if isinstance(cached, dict) else None
+            poison = status if isinstance(status, int) else raw_status if isinstance(raw_status, int) else None
+            if poison is not None and (poison in (401, 403, 409, 429) or poison >= 500):
+                # Legacy poisoned entry: auth failures, planner outages, rate
+                # limits and server errors cached before the whitelist rule.
+                # Evict so retries stay genuine.
+                evict_cached(request.method, url_path, params, body)
+                cached = None
+            elif isinstance(cached, dict) and "_cached_status" in cached:
+                # Wrapped deterministic non-2xx — serve with its REAL status
+                # (a cached 404 "no route" must not come back as HTTP 200).
                 return httpx.Response(cached["_cached_status"], json=cached["_cached_body"])
-            return httpx.Response(200, json=cached)
+            else:
+                return httpx.Response(200, json=cached)
 
         response = await self._inner.handle_async_request(request)
-        # Cache ALL responses (including errors) so re-processing stale
-        # nodes doesn't make fresh API calls on every restart.
+        # Cache only deterministic responses: 2xx raw; 3xx and 404 wrapped with
+        # their status. 401/403 (key expiry), 409 (planner outage), 429 and 5xx
+        # are transient and must never poison the cache.
         try:
             data = response.json()
             if response.is_success:
                 set_cached(request.method, url_path, params, body, data)
-            else:
+            elif 300 <= response.status_code < 400 or response.status_code == 404:
                 set_cached(
                     request.method,
                     url_path,

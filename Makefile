@@ -1,5 +1,5 @@
 # Makefile for houses — Browser-to-Spreadsheet Ingestion Engine
-.PHONY: help setup install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e lint format clean reset-db
+.PHONY: help setup install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e lint format clean reset-db commute-shed commute-searches commute-validate
 
 # Variables
 PYTHON := .venv/bin/python
@@ -31,6 +31,9 @@ help:
 	@echo "  ${GREEN}make format${NC}             Auto-fix formatting issues"
 	@echo "  ${GREEN}make coverage${NC}           Run tests with coverage report"
 	@echo "  ${GREEN}make clean${NC}              Clean up generated files"
+	@echo "  ${GREEN}make commute-shed${NC}       One-off TfL batch → data/commute/station_shed.json (resumes; FORCE=1 to re-run all)"
+	@echo "  ${GREEN}make commute-searches${NC}   Offline: build data/commute/searches.json + .txt"
+	@echo "  ${GREEN}make commute-validate${NC}   Validate searches + run commute tests"
 
 setup: frontend-setup install-hooks
 	@$(UV) --version >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -112,11 +115,11 @@ coverage: setup
 	@echo "${GREEN}Coverage report: htmlcov/index.html${NC}"
 
 lint: setup
-	@$(RUFF) check houses/ tests/
+	@$(RUFF) check houses/ tests/ tools/
 	cd houses/frontend && npm run lint:css
 
 lint-github: setup   # CI only: findings surface as PR annotations
-	@$(RUFF) check houses/ tests/ --output-format=github
+	@$(RUFF) check houses/ tests/ tools/ --output-format=github
 	cd houses/frontend && npm run lint:css   # keep the same coverage as `make lint`
 
 typecheck: setup
@@ -138,3 +141,16 @@ reset-db:  # Reset DAG database but PRESERVE API cache
 	@rm -f data/houses.db
 	@echo "data/houses.db removed (API cache in data/api_cache/ left intact)"
 	@echo "${GREEN}✓ Cleaned${NC}"
+
+# ── Rightmove commute search toolchain (docs/rightmove-commute-monitor.md) ──
+
+commute-shed:
+	@$(PYTHON) -m tools.commute.station_shed $(if $(FORCE),--force,)
+	@echo "${GREEN}✓ Shed up to date — 'make commute-searches' next${NC}"
+
+commute-searches:
+	@$(PYTHON) -m tools.commute.searches
+
+commute-validate: commute-searches
+	@$(PYTHON) -m tools.commute.validate
+	@$(PYTEST) tests/unit/test_commute_*.py -q --tb=short

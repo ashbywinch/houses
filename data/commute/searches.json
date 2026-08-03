@@ -1,0 +1,2606 @@
+{
+  "metadata": {
+    "threshold_min": 132,
+    "destinations": [
+      "SW1V 2QQ",
+      "EC3A 7LP"
+    ],
+    "generated_at": "2026-08-02T20:11:41.661061+00:00",
+    "engine_version": "searches-v1",
+    "count": 96
+  },
+  "searches": [
+    {
+      "id": "s001",
+      "name": "Bognor Regis area",
+      "polygon": [
+        [
+          50.67658,
+          -0.73313
+        ],
+        [
+          50.67658,
+          -0.61646
+        ],
+        [
+          50.74865,
+          -0.61646
+        ],
+        [
+          50.74865,
+          -0.73313
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22swhtH%60enC%3FexUmaM%3F%3FdxUlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s002",
+      "name": "Eastbourne area",
+      "polygon": [
+        [
+          50.67658,
+          -0.03309
+        ],
+        [
+          50.67658,
+          0.43361
+        ],
+        [
+          50.74865,
+          0.43361
+        ],
+        [
+          50.74865,
+          -0.03309
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22swhtHxmE%3F%7BczAmaM%3F%3FzczAlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s003",
+      "name": "Brockenhurst area",
+      "polygon": [
+        [
+          50.74865,
+          -1.66652
+        ],
+        [
+          50.74865,
+          -1.43317
+        ],
+        [
+          50.82072,
+          -1.43317
+        ],
+        [
+          50.82072,
+          -1.66652
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22azvtHvndI%3Fmql%40maM%3F%3Flql%40laM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s004",
+      "name": "Shoreham-By-Sea area",
+      "polygon": [
+        [
+          50.74865,
+          -1.19983
+        ],
+        [
+          50.74865,
+          0.66696
+        ],
+        [
+          50.82072,
+          0.66696
+        ],
+        [
+          50.82072,
+          -1.19983
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22azvtH%7CiiF%3FmrkJmaM%3F%3FlrkJlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s005",
+      "name": "Goring-By-Sea area",
+      "polygon": [
+        [
+          50.82072,
+          -1.66652
+        ],
+        [
+          50.82072,
+          0.78363
+        ],
+        [
+          50.89279,
+          0.78363
+        ],
+        [
+          50.89279,
+          -1.66652
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22o%7CduHvndI%3Fmp%7DMmaM%3F%3Flp%7DMlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s006",
+      "name": "Botley area",
+      "polygon": [
+        [
+          50.89279,
+          -1.66652
+        ],
+        [
+          50.89279,
+          -0.8498
+        ],
+        [
+          50.96486,
+          -0.8498
+        ],
+        [
+          50.96486,
+          -1.66652
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7D~ruHvndI%3Foo~CmaM%3F%3Fno~ClaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s007",
+      "name": "Pulborough area",
+      "polygon": [
+        [
+          50.89279,
+          -0.61646
+        ],
+        [
+          50.89279,
+          -0.38311
+        ],
+        [
+          50.96486,
+          -0.38311
+        ],
+        [
+          50.96486,
+          -0.61646
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7D~ruHzkwB%3Fmql%40maM%3F%3Flql%40laM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s008",
+      "name": "Plumpton area",
+      "polygon": [
+        [
+          50.89279,
+          -0.26644
+        ],
+        [
+          50.89279,
+          0.20026
+        ],
+        [
+          50.96486,
+          0.20026
+        ],
+        [
+          50.96486,
+          -0.26644
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7D~ruHf%60s%40%3F%7BczAmaM%3F%3FzczAlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s009",
+      "name": "Doleham area",
+      "polygon": [
+        [
+          50.89279,
+          0.31693
+        ],
+        [
+          50.89279,
+          0.9003
+        ],
+        [
+          50.96486,
+          0.9003
+        ],
+        [
+          50.96486,
+          0.31693
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7D~ruHy%7B%7C%40%3Fa%7DpBmaM%3F%3F%60%7DpBlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s010",
+      "name": "Romsey area",
+      "polygon": [
+        [
+          50.96486,
+          -1.89987
+        ],
+        [
+          50.96486,
+          -1.19983
+        ],
+        [
+          51.03694,
+          -1.19983
+        ],
+        [
+          51.03694,
+          -1.89987
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22kaavHdarJ%3FgvgCoaM%3F%3FfvgCnaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s011",
+      "name": "Petersfield area",
+      "polygon": [
+        [
+          50.96486,
+          -1.08315
+        ],
+        [
+          50.96486,
+          -0.73313
+        ],
+        [
+          51.03694,
+          -0.73313
+        ],
+        [
+          51.03694,
+          -1.08315
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22kaavHtprE%3FsjcAoaM%3F%3FrjcAnaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s012",
+      "name": "Buxted area",
+      "polygon": [
+        [
+          50.96486,
+          -0.61646
+        ],
+        [
+          50.96486,
+          1.01698
+        ],
+        [
+          51.03694,
+          1.01698
+        ],
+        [
+          51.03694,
+          -0.61646
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22kaavHzkwB%3F_%60~HoaM%3F%3F~_~HnaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s013",
+      "name": "Salisbury area",
+      "polygon": [
+        [
+          51.03694,
+          -1.89987
+        ],
+        [
+          51.03694,
+          -1.66652
+        ],
+        [
+          51.10901,
+          -1.66652
+        ],
+        [
+          51.10901,
+          -1.89987
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7BcovHdarJ%3Fmql%40maM%3F%3Flql%40laM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s014",
+      "name": "Winchester area",
+      "polygon": [
+        [
+          51.03694,
+          -1.54985
+        ],
+        [
+          51.03694,
+          -1.19983
+        ],
+        [
+          51.10901,
+          -1.19983
+        ],
+        [
+          51.10901,
+          -1.54985
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7BcovHpumH%3FsjcAmaM%3F%3FrjcAlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s015",
+      "name": "Faygate area",
+      "polygon": [
+        [
+          51.03694,
+          -1.08315
+        ],
+        [
+          51.03694,
+          0.55028
+        ],
+        [
+          51.10901,
+          0.55028
+        ],
+        [
+          51.10901,
+          -1.08315
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7BcovHtprE%3F%7D_~HmaM%3F%3F%7C_~HlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s016",
+      "name": "Sandling area",
+      "polygon": [
+        [
+          51.03694,
+          0.66696
+        ],
+        [
+          51.03694,
+          1.48367
+        ],
+        [
+          51.10901,
+          1.48367
+        ],
+        [
+          51.10901,
+          0.66696
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7BcovHogaC%3Fmo~CmaM%3F%3Flo~ClaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s017",
+      "name": "Ifield area",
+      "polygon": [
+        [
+          51.10901,
+          -1.89987
+        ],
+        [
+          51.10901,
+          1.48367
+        ],
+        [
+          51.18108,
+          1.48367
+        ],
+        [
+          51.18108,
+          -1.89987
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22if%7DvHdarJ%3FczsSmaM%3F%3FbzsSlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s018",
+      "name": "Westbury area",
+      "polygon": [
+        [
+          51.18108,
+          -2.36657
+        ],
+        [
+          51.18108,
+          -2.01654
+        ],
+        [
+          51.32523,
+          -2.01654
+        ],
+        [
+          51.32523,
+          -2.36657
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22whkwH%60fmM%3FujcA%7Dc%5B%3F%3FtjcA%7Cc%5B%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s019",
+      "name": "Nutfield area",
+      "polygon": [
+        [
+          51.18108,
+          -1.7832
+        ],
+        [
+          51.18108,
+          1.48367
+        ],
+        [
+          51.25315,
+          1.48367
+        ],
+        [
+          51.25315,
+          -1.7832
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22whkwH~g%7BI%3F%7D%60%7DRmaM%3F%3F%7C%60%7DRlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s020",
+      "name": "Pewsey area",
+      "polygon": [
+        [
+          51.25315,
+          -1.89987
+        ],
+        [
+          51.25315,
+          -1.66652
+        ],
+        [
+          51.32523,
+          -1.66652
+        ],
+        [
+          51.32523,
+          -1.89987
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22ekywHdarJ%3Fmql%40oaM%3F%3Flql%40naM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s021",
+      "name": "Oxted area",
+      "polygon": [
+        [
+          51.25315,
+          -1.54985
+        ],
+        [
+          51.25315,
+          1.60035
+        ],
+        [
+          51.32523,
+          1.60035
+        ],
+        [
+          51.32523,
+          -1.54985
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22ekywHpumH%3FwgfRoaM%3F%3FvgfRnaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s022",
+      "name": "Bath Spa area",
+      "polygon": [
+        [
+          51.32523,
+          -2.48324
+        ],
+        [
+          51.32523,
+          -2.24989
+        ],
+        [
+          51.3973,
+          -2.24989
+        ],
+        [
+          51.3973,
+          -2.48324
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22umgxHf_dN%3Fmql%40maM%3F%3Flql%40laM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s023",
+      "name": "Wallington area",
+      "polygon": [
+        [
+          51.32523,
+          -1.89987
+        ],
+        [
+          51.32523,
+          1.60035
+        ],
+        [
+          51.3973,
+          1.60035
+        ],
+        [
+          51.3973,
+          -1.89987
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22umgxHdarJ%3FksjTmaM%3F%3FjsjTlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s024",
+      "name": "Bath Spa area",
+      "polygon": [
+        [
+          51.3973,
+          -2.71659
+        ],
+        [
+          51.3973,
+          -2.01654
+        ],
+        [
+          51.46937,
+          -2.01654
+        ],
+        [
+          51.46937,
+          -2.71659
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22cpuxHtqqO%3FivgCmaM%3F%3FhvgClaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s025",
+      "name": "West Dulwich area",
+      "polygon": [
+        [
+          51.3973,
+          -1.66652
+        ],
+        [
+          51.3973,
+          1.48367
+        ],
+        [
+          51.46937,
+          1.48367
+        ],
+        [
+          51.46937,
+          -1.66652
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22cpuxHvndI%3FugfRmaM%3F%3FtgfRlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s026",
+      "name": "Bristol Parkway area",
+      "polygon": [
+        [
+          51.46937,
+          -2.71659
+        ],
+        [
+          51.46937,
+          -2.36657
+        ],
+        [
+          51.61351,
+          -2.36657
+        ],
+        [
+          51.61351,
+          -2.71659
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22qrcyHtqqO%3FsjcA%7Bc%5B%3F%3FrjcAzc%5B%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s027",
+      "name": "Chippenham area",
+      "polygon": [
+        [
+          51.46937,
+          -2.24989
+        ],
+        [
+          51.46937,
+          -2.01654
+        ],
+        [
+          51.54144,
+          -2.01654
+        ],
+        [
+          51.54144,
+          -2.24989
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22qrcyHxlvL%3Fmql%40maM%3F%3Flql%40laM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s028",
+      "name": "Swindon area",
+      "polygon": [
+        [
+          51.46937,
+          -1.89987
+        ],
+        [
+          51.46937,
+          -1.66652
+        ],
+        [
+          51.61351,
+          -1.66652
+        ],
+        [
+          51.61351,
+          -1.89987
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22qrcyHdarJ%3Fmql%40%7Bc%5B%3F%3Flql%40zc%5B%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s029",
+      "name": "Brondesbury Park area",
+      "polygon": [
+        [
+          51.46937,
+          -1.3165
+        ],
+        [
+          51.46937,
+          0.9003
+        ],
+        [
+          51.61351,
+          0.9003
+        ],
+        [
+          51.61351,
+          -1.3165
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22qrcyHbc%60G%3F_~oL%7Bc%5B%3F%3F~%7DoLzc%5B%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s030",
+      "name": "Newport (South Wales) area",
+      "polygon": [
+        [
+          51.54144,
+          -3.18328
+        ],
+        [
+          51.54144,
+          -2.83326
+        ],
+        [
+          51.61351,
+          -2.83326
+        ],
+        [
+          51.61351,
+          -3.18328
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22_uqyHnvlR%3FsjcAmaM%3F%3FrjcAlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s031",
+      "name": "Newport (South Wales) area",
+      "polygon": [
+        [
+          51.61351,
+          -3.06661
+        ],
+        [
+          51.61351,
+          -2.83326
+        ],
+        [
+          51.68559,
+          -2.83326
+        ],
+        [
+          51.68559,
+          -3.06661
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22mw_zHh%7DuQ%3Fmql%40oaM%3F%3Flql%40naM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s032",
+      "name": "Kemble area",
+      "polygon": [
+        [
+          51.61351,
+          -2.13322
+        ],
+        [
+          51.61351,
+          -1.89987
+        ],
+        [
+          51.68559,
+          -1.89987
+        ],
+        [
+          51.68559,
+          -2.13322
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22mw_zHrs_L%3Fmql%40oaM%3F%3Flql%40naM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s033",
+      "name": "Culham area",
+      "polygon": [
+        [
+          51.61351,
+          -1.3165
+        ],
+        [
+          51.61351,
+          -1.08315
+        ],
+        [
+          51.68559,
+          -1.08315
+        ],
+        [
+          51.68559,
+          -1.3165
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22mw_zHbc%60G%3Fmql%40oaM%3F%3Flql%40naM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s034",
+      "name": "Chingford area",
+      "polygon": [
+        [
+          51.61351,
+          -0.96648
+        ],
+        [
+          51.61351,
+          1.01698
+        ],
+        [
+          51.68559,
+          1.01698
+        ],
+        [
+          51.68559,
+          -0.96648
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22mw_zHnw%7BD%3FskbKoaM%3F%3FrkbKnaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s035",
+      "name": "Stroud area",
+      "polygon": [
+        [
+          51.68559,
+          -2.36657
+        ],
+        [
+          51.68559,
+          -1.89987
+        ],
+        [
+          51.75766,
+          -1.89987
+        ],
+        [
+          51.75766,
+          -2.36657
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7DymzH%60fmM%3F%7BczAmaM%3F%3FzczAlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s036",
+      "name": "Amersham area",
+      "polygon": [
+        [
+          51.68559,
+          -1.43317
+        ],
+        [
+          51.68559,
+          0.20026
+        ],
+        [
+          51.75766,
+          0.20026
+        ],
+        [
+          51.75766,
+          -1.43317
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7DymzHh%7CvG%3F%7D_~HmaM%3F%3F%7C_~HlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s037",
+      "name": "Hatfield Peverel area",
+      "polygon": [
+        [
+          51.68559,
+          0.31693
+        ],
+        [
+          51.68559,
+          0.9003
+        ],
+        [
+          51.75766,
+          0.9003
+        ],
+        [
+          51.75766,
+          0.31693
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7DymzHy%7B%7C%40%3Fa%7DpBmaM%3F%3F%60%7DpBlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s038",
+      "name": "Clacton-On-Sea area",
+      "polygon": [
+        [
+          51.68559,
+          1.01698
+        ],
+        [
+          51.68559,
+          1.25033
+        ],
+        [
+          51.75766,
+          1.25033
+        ],
+        [
+          51.75766,
+          1.01698
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7DymzHcseE%3Fmql%40maM%3F%3Flql%40laM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s039",
+      "name": "Stonehouse area",
+      "polygon": [
+        [
+          51.75766,
+          -2.36657
+        ],
+        [
+          51.75766,
+          -2.13322
+        ],
+        [
+          51.82973,
+          -2.13322
+        ],
+        [
+          51.82973,
+          -2.36657
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22k%7C%7BzH%60fmM%3Fmql%40maM%3F%3Flql%40laM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s040",
+      "name": "Hertford North area",
+      "polygon": [
+        [
+          51.75766,
+          -1.54985
+        ],
+        [
+          51.75766,
+          1.367
+        ],
+        [
+          51.82973,
+          1.367
+        ],
+        [
+          51.82973,
+          -1.54985
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22k%7C%7BzHpumH%3FiuxPmaM%3F%3FhuxPlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s041",
+      "name": "Knebworth area",
+      "polygon": [
+        [
+          51.82973,
+          -1.7832
+        ],
+        [
+          51.82973,
+          1.367
+        ],
+        [
+          51.9018,
+          1.367
+        ],
+        [
+          51.9018,
+          -1.7832
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22y~i%7BH~g%7BI%3FwgfRmaM%3F%3FvgfRlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s042",
+      "name": "Heyford area",
+      "polygon": [
+        [
+          51.9018,
+          -1.7832
+        ],
+        [
+          51.9018,
+          -0.96648
+        ],
+        [
+          51.97387,
+          -0.96648
+        ],
+        [
+          51.97387,
+          -1.7832
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22gax%7BH~g%7BI%3Foo~CmaM%3F%3Fno~ClaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s043",
+      "name": "Leagrave area",
+      "polygon": [
+        [
+          51.9018,
+          -0.8498
+        ],
+        [
+          51.9018,
+          -0.03309
+        ],
+        [
+          51.97387,
+          -0.03309
+        ],
+        [
+          51.97387,
+          -0.8498
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22gax%7BHf~dD%3Fmo~CmaM%3F%3Flo~ClaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s044",
+      "name": "Chappel & Wakes Colne area",
+      "polygon": [
+        [
+          51.9018,
+          0.08359
+        ],
+        [
+          51.9018,
+          1.48367
+        ],
+        [
+          51.97387,
+          1.48367
+        ],
+        [
+          51.97387,
+          0.08359
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22gax%7BHmiO%3FompGmaM%3F%3FnmpGlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s045",
+      "name": "Moreton-In-Marsh area",
+      "polygon": [
+        [
+          51.97387,
+          -1.7832
+        ],
+        [
+          51.97387,
+          -1.54985
+        ],
+        [
+          52.04595,
+          -1.54985
+        ],
+        [
+          52.04595,
+          -1.7832
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22ucf%7CH~g%7BI%3Fmql%40oaM%3F%3Flql%40naM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s046",
+      "name": "Banbury area",
+      "polygon": [
+        [
+          51.97387,
+          -1.43317
+        ],
+        [
+          51.97387,
+          -1.19983
+        ],
+        [
+          52.11802,
+          -1.19983
+        ],
+        [
+          52.11802,
+          -1.43317
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22ucf%7CHh%7CvG%3Fkql%40%7Dc%5B%3F%3Fjql%40%7Cc%5B%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s047",
+      "name": "Arlesey area",
+      "polygon": [
+        [
+          51.97387,
+          -0.96648
+        ],
+        [
+          51.97387,
+          0.31693
+        ],
+        [
+          52.11802,
+          0.31693
+        ],
+        [
+          52.11802,
+          -0.96648
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22ucf%7CHnw%7BD%3FityF%7Dc%5B%3F%3FhtyF%7Cc%5B%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s048",
+      "name": "Ipswich area",
+      "polygon": [
+        [
+          51.97387,
+          0.55028
+        ],
+        [
+          51.97387,
+          1.48367
+        ],
+        [
+          52.11802,
+          1.48367
+        ],
+        [
+          52.11802,
+          0.55028
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22ucf%7CHgnjB%3FuhuD%7Dc%5B%3F%3FthuD%7Cc%5B%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s049",
+      "name": "Shepreth area",
+      "polygon": [
+        [
+          52.11802,
+          -0.61646
+        ],
+        [
+          52.11802,
+          0.55028
+        ],
+        [
+          52.19009,
+          0.55028
+        ],
+        [
+          52.19009,
+          -0.61646
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22shb%7DHzkwB%3Fc%7BbFmaM%3F%3Fb%7BbFlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s050",
+      "name": "Melton area",
+      "polygon": [
+        [
+          52.11802,
+          0.9003
+        ],
+        [
+          52.11802,
+          1.60035
+        ],
+        [
+          52.19009,
+          1.60035
+        ],
+        [
+          52.19009,
+          0.9003
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22shb%7DH%7BynD%3FivgCmaM%3F%3FhvgClaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s051",
+      "name": "Warwick Parkway area",
+      "polygon": [
+        [
+          52.19009,
+          -1.7832
+        ],
+        [
+          52.19009,
+          -1.43317
+        ],
+        [
+          52.33423,
+          -1.43317
+        ],
+        [
+          52.33423,
+          -1.7832
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22akp%7DH~g%7BI%3FujcA%7Bc%5B%3F%3FtjcAzc%5B%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s052",
+      "name": "Northampton area",
+      "polygon": [
+        [
+          52.19009,
+          -1.19983
+        ],
+        [
+          52.19009,
+          -0.61646
+        ],
+        [
+          52.26216,
+          -0.61646
+        ],
+        [
+          52.26216,
+          -1.19983
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22akp%7DH%7CiiF%3Fa%7DpBmaM%3F%3F%60%7DpBlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s053",
+      "name": "St Neots area",
+      "polygon": [
+        [
+          52.19009,
+          -0.38311
+        ],
+        [
+          52.19009,
+          -0.14976
+        ],
+        [
+          52.26216,
+          -0.14976
+        ],
+        [
+          52.26216,
+          -0.38311
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22akp%7DHlyiA%3Fmql%40maM%3F%3Flql%40laM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s054",
+      "name": "Kennett area",
+      "polygon": [
+        [
+          52.19009,
+          -0.03309
+        ],
+        [
+          52.19009,
+          1.13365
+        ],
+        [
+          52.26216,
+          1.13365
+        ],
+        [
+          52.26216,
+          -0.03309
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22akp%7DHxmE%3Fc%7BbFmaM%3F%3Fb%7BbFlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s055",
+      "name": "Saxmundham area",
+      "polygon": [
+        [
+          52.19009,
+          1.25033
+        ],
+        [
+          52.19009,
+          1.60035
+        ],
+        [
+          52.26216,
+          1.60035
+        ],
+        [
+          52.26216,
+          1.25033
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22akp%7DHqesF%3FsjcAmaM%3F%3FrjcAlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s056",
+      "name": "Northampton area",
+      "polygon": [
+        [
+          52.26216,
+          -1.3165
+        ],
+        [
+          52.26216,
+          -0.49978
+        ],
+        [
+          52.33423,
+          -0.49978
+        ],
+        [
+          52.33423,
+          -1.3165
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22om~%7DHbc%60G%3Foo~CmaM%3F%3Fno~ClaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s057",
+      "name": "Huntingdon area",
+      "polygon": [
+        [
+          52.26216,
+          -0.38311
+        ],
+        [
+          52.26216,
+          -0.03309
+        ],
+        [
+          52.33423,
+          -0.03309
+        ],
+        [
+          52.33423,
+          -0.38311
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22om~%7DHlyiA%3FsjcAmaM%3F%3FrjcAlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s058",
+      "name": "Bury St Edmunds area",
+      "polygon": [
+        [
+          52.26216,
+          0.08359
+        ],
+        [
+          52.26216,
+          1.25033
+        ],
+        [
+          52.33423,
+          1.25033
+        ],
+        [
+          52.33423,
+          0.08359
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22om~%7DHmiO%3Fc%7BbFmaM%3F%3Fb%7BbFlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s059",
+      "name": "Canley area",
+      "polygon": [
+        [
+          52.33423,
+          -2.13322
+        ],
+        [
+          52.33423,
+          -0.96648
+        ],
+        [
+          52.40631,
+          -0.96648
+        ],
+        [
+          52.40631,
+          -2.13322
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7Dol~Hrs_L%3Fc%7BbFoaM%3F%3Fb%7BbFnaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s060",
+      "name": "Kettering area",
+      "polygon": [
+        [
+          52.33423,
+          -0.8498
+        ],
+        [
+          52.33423,
+          -0.61646
+        ],
+        [
+          52.40631,
+          -0.61646
+        ],
+        [
+          52.40631,
+          -0.8498
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7Dol~Hf~dD%3Fkql%40oaM%3F%3Fjql%40naM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s061",
+      "name": "Huntingdon area",
+      "polygon": [
+        [
+          52.33423,
+          -0.26644
+        ],
+        [
+          52.33423,
+          -0.03309
+        ],
+        [
+          52.40631,
+          -0.03309
+        ],
+        [
+          52.40631,
+          -0.26644
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7Dol~Hf%60s%40%3Fmql%40oaM%3F%3Flql%40naM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s062",
+      "name": "Ely area",
+      "polygon": [
+        [
+          52.33423,
+          0.08359
+        ],
+        [
+          52.33423,
+          0.43361
+        ],
+        [
+          52.47838,
+          0.43361
+        ],
+        [
+          52.47838,
+          0.08359
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7Dol~HmiO%3FsjcA%7Dc%5B%3F%3FrjcA%7Cc%5B%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s063",
+      "name": "Diss area",
+      "polygon": [
+        [
+          52.33423,
+          1.01698
+        ],
+        [
+          52.33423,
+          1.25032
+        ],
+        [
+          52.47838,
+          1.25032
+        ],
+        [
+          52.47838,
+          1.01698
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7Dol~HcseE%3Fkql%40%7Dc%5B%3F%3Fjql%40%7Cc%5B%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s064",
+      "name": "Rugby area",
+      "polygon": [
+        [
+          52.40631,
+          -2.13322
+        ],
+        [
+          52.40631,
+          -0.49978
+        ],
+        [
+          52.47838,
+          -0.49978
+        ],
+        [
+          52.47838,
+          -2.13322
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22mrz~Hrs_L%3F_%60~HmaM%3F%3F~_~HlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s065",
+      "name": "Hinckley area",
+      "polygon": [
+        [
+          52.47838,
+          -2.24989
+        ],
+        [
+          52.47838,
+          -0.49978
+        ],
+        [
+          52.55045,
+          -0.49978
+        ],
+        [
+          52.55045,
+          -2.24989
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7Bth_IxlvL%3FeytImaM%3F%3FdytIlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s066",
+      "name": "March area",
+      "polygon": [
+        [
+          52.47838,
+          -0.38311
+        ],
+        [
+          52.47838,
+          0.43361
+        ],
+        [
+          52.55045,
+          0.43361
+        ],
+        [
+          52.55045,
+          -0.38311
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7Bth_IlyiA%3Foo~CmaM%3F%3Fno~ClaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s067",
+      "name": "Atherstone area",
+      "polygon": [
+        [
+          52.55045,
+          -2.24989
+        ],
+        [
+          52.55045,
+          -0.96648
+        ],
+        [
+          52.62252,
+          -0.96648
+        ],
+        [
+          52.62252,
+          -2.24989
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22iwv_IxlvL%3FityFmaM%3F%3FhtyFlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s068",
+      "name": "Whittlesea area",
+      "polygon": [
+        [
+          52.55045,
+          -0.61646
+        ],
+        [
+          52.55045,
+          0.55028
+        ],
+        [
+          52.62252,
+          0.55028
+        ],
+        [
+          52.62252,
+          -0.61646
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22iwv_IzkwB%3Fc%7BbFmaM%3F%3Fb%7BbFlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s069",
+      "name": "Norwich area",
+      "polygon": [
+        [
+          52.55045,
+          1.13365
+        ],
+        [
+          52.55045,
+          1.48367
+        ],
+        [
+          52.69459,
+          1.48367
+        ],
+        [
+          52.69459,
+          1.13365
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22iwv_Iil%7CE%3FsjcA%7Bc%5B%3F%3FrjcAzc%5B%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s070",
+      "name": "Shenstone area",
+      "polygon": [
+        [
+          52.62252,
+          -2.24989
+        ],
+        [
+          52.62252,
+          -1.43317
+        ],
+        [
+          52.69459,
+          -1.43317
+        ],
+        [
+          52.69459,
+          -2.24989
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22wyd%60IxlvL%3Foo~CmaM%3F%3Fno~ClaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s071",
+      "name": "Syston area",
+      "polygon": [
+        [
+          52.62252,
+          -1.19983
+        ],
+        [
+          52.62252,
+          -0.96648
+        ],
+        [
+          52.69459,
+          -0.96648
+        ],
+        [
+          52.69459,
+          -1.19983
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22wyd%60I%7CiiF%3Fmql%40maM%3F%3Flql%40laM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s072",
+      "name": "Oakham area",
+      "polygon": [
+        [
+          52.62252,
+          -0.8498
+        ],
+        [
+          52.62252,
+          -0.38311
+        ],
+        [
+          52.69459,
+          -0.38311
+        ],
+        [
+          52.69459,
+          -0.8498
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22wyd%60If~dD%3FyczAmaM%3F%3FxczAlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s073",
+      "name": "Watlington area",
+      "polygon": [
+        [
+          52.62252,
+          0.20026
+        ],
+        [
+          52.62252,
+          0.55028
+        ],
+        [
+          52.69459,
+          0.55028
+        ],
+        [
+          52.69459,
+          0.20026
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22wyd%60Isbf%40%3FsjcAmaM%3F%3FrjcAlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s074",
+      "name": "Rugeley Trent Valley area",
+      "polygon": [
+        [
+          52.69459,
+          -2.24989
+        ],
+        [
+          52.69459,
+          -1.54985
+        ],
+        [
+          52.83874,
+          -1.54985
+        ],
+        [
+          52.83874,
+          -2.24989
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22e%7Cr%60IxlvL%3FgvgC%7Dc%5B%3F%3FfvgC%7Cc%5B%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s075",
+      "name": "Melton Mowbray area",
+      "polygon": [
+        [
+          52.69459,
+          -1.3165
+        ],
+        [
+          52.69459,
+          -0.61646
+        ],
+        [
+          52.76667,
+          -0.61646
+        ],
+        [
+          52.76667,
+          -1.3165
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22e%7Cr%60Ibc%60G%3FgvgCoaM%3F%3FfvgCnaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s076",
+      "name": "Spalding area",
+      "polygon": [
+        [
+          52.69459,
+          -0.26644
+        ],
+        [
+          52.69459,
+          -0.03309
+        ],
+        [
+          52.83874,
+          -0.03309
+        ],
+        [
+          52.83874,
+          -0.26644
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22e%7Cr%60If%60s%40%3Fmql%40%7Dc%5B%3F%3Flql%40%7Cc%5B%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s077",
+      "name": "Watlington area",
+      "polygon": [
+        [
+          52.69459,
+          0.31693
+        ],
+        [
+          52.69459,
+          0.55028
+        ],
+        [
+          52.76667,
+          0.55028
+        ],
+        [
+          52.76667,
+          0.31693
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22e%7Cr%60Iy%7B%7C%40%3Fmql%40oaM%3F%3Flql%40naM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s078",
+      "name": "Barrow Upon Soar area",
+      "polygon": [
+        [
+          52.76667,
+          -1.43317
+        ],
+        [
+          52.76667,
+          -0.73313
+        ],
+        [
+          52.83874,
+          -0.73313
+        ],
+        [
+          52.83874,
+          -1.43317
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22u~%60aIh%7CvG%3FgvgCmaM%3F%3FfvgClaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s079",
+      "name": "Stoke-On-Trent area",
+      "polygon": [
+        [
+          52.83874,
+          -2.24989
+        ],
+        [
+          52.83874,
+          -2.01654
+        ],
+        [
+          52.98288,
+          -2.01654
+        ],
+        [
+          52.98288,
+          -2.24989
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22caoaIxlvL%3Fmql%40%7Bc%5B%3F%3Flql%40zc%5B%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s080",
+      "name": "Long Eaton area",
+      "polygon": [
+        [
+          52.83874,
+          -1.7832
+        ],
+        [
+          52.83874,
+          -0.8498
+        ],
+        [
+          52.91081,
+          -0.8498
+        ],
+        [
+          52.91081,
+          -1.7832
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22caoaI~g%7BI%3FwhuDmaM%3F%3FvhuDlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s081",
+      "name": "Grantham area",
+      "polygon": [
+        [
+          52.83874,
+          -0.73313
+        ],
+        [
+          52.83874,
+          -0.49978
+        ],
+        [
+          52.91081,
+          -0.49978
+        ],
+        [
+          52.91081,
+          -0.73313
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22caoaI%60enC%3Fmql%40maM%3F%3Flql%40laM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s082",
+      "name": "Beeston area",
+      "polygon": [
+        [
+          52.91081,
+          -1.54985
+        ],
+        [
+          52.91081,
+          -0.8498
+        ],
+        [
+          52.98288,
+          -0.8498
+        ],
+        [
+          52.98288,
+          -1.54985
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22qc%7DaIpumH%3FivgCmaM%3F%3FhvgClaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s083",
+      "name": "Ancaster area",
+      "polygon": [
+        [
+          52.91081,
+          -0.73313
+        ],
+        [
+          52.91081,
+          -0.26644
+        ],
+        [
+          52.98288,
+          -0.26644
+        ],
+        [
+          52.98288,
+          -0.73313
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22qc%7DaI%60enC%3FyczAmaM%3F%3FxczAlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s084",
+      "name": "Longport area",
+      "polygon": [
+        [
+          52.98288,
+          -2.48324
+        ],
+        [
+          52.98288,
+          -2.01654
+        ],
+        [
+          53.05495,
+          -2.01654
+        ],
+        [
+          53.05495,
+          -2.48324
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22_fkbIf_dN%3F%7BczAmaM%3F%3FzczAlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s085",
+      "name": "Bingham area",
+      "polygon": [
+        [
+          52.98288,
+          -1.19983
+        ],
+        [
+          52.98288,
+          -0.73313
+        ],
+        [
+          53.05495,
+          -0.73313
+        ],
+        [
+          53.05495,
+          -1.19983
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22_fkbI%7CiiF%3F%7BczAmaM%3F%3FzczAlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s086",
+      "name": "Sleaford area",
+      "polygon": [
+        [
+          52.98288,
+          -0.61646
+        ],
+        [
+          52.98288,
+          -0.26644
+        ],
+        [
+          53.05495,
+          -0.26644
+        ],
+        [
+          53.05495,
+          -0.61646
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22_fkbIzkwB%3FsjcAmaM%3F%3FrjcAlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s087",
+      "name": "Crewe area",
+      "polygon": [
+        [
+          53.05495,
+          -2.59991
+        ],
+        [
+          53.05495,
+          -2.13322
+        ],
+        [
+          53.12703,
+          -2.13322
+        ],
+        [
+          53.12703,
+          -2.59991
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22mhybIlxzN%3FyczAoaM%3F%3FxczAnaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s088",
+      "name": "Newark Northgate area",
+      "polygon": [
+        [
+          53.05495,
+          -0.96648
+        ],
+        [
+          53.05495,
+          -0.61646
+        ],
+        [
+          53.12703,
+          -0.61646
+        ],
+        [
+          53.12703,
+          -0.96648
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22mhybInw%7BD%3FsjcAoaM%3F%3FrjcAnaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s089",
+      "name": "Alsager area",
+      "polygon": [
+        [
+          53.12703,
+          -2.48324
+        ],
+        [
+          53.12703,
+          -2.13322
+        ],
+        [
+          53.1991,
+          -2.13322
+        ],
+        [
+          53.1991,
+          -2.48324
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7DjgcIf_dN%3FsjcAmaM%3F%3FrjcAlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s090",
+      "name": "Collingham area",
+      "polygon": [
+        [
+          53.12703,
+          -0.8498
+        ],
+        [
+          53.12703,
+          -0.61646
+        ],
+        [
+          53.1991,
+          -0.61646
+        ],
+        [
+          53.1991,
+          -0.8498
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22%7DjgcIf~dD%3Fkql%40maM%3F%3Fjql%40laM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s091",
+      "name": "Macclesfield area",
+      "polygon": [
+        [
+          53.1991,
+          -2.24989
+        ],
+        [
+          53.1991,
+          -2.01654
+        ],
+        [
+          53.34324,
+          -2.01654
+        ],
+        [
+          53.34324,
+          -2.24989
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22kmucIxlvL%3Fmql%40%7Bc%5B%3F%3Flql%40zc%5B%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s092",
+      "name": "Retford area",
+      "polygon": [
+        [
+          53.1991,
+          -0.96648
+        ],
+        [
+          53.1991,
+          -0.8498
+        ],
+        [
+          53.27117,
+          -0.8498
+        ],
+        [
+          53.27117,
+          -0.96648
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22kmucInw%7BD%3FgxUmaM%3F%3FfxUlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s093",
+      "name": "Retford area",
+      "polygon": [
+        [
+          53.27117,
+          -1.08315
+        ],
+        [
+          53.27117,
+          -0.84981
+        ],
+        [
+          53.41532,
+          -0.84981
+        ],
+        [
+          53.41532,
+          -1.08315
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22yocdItprE%3Fkql%40%7Dc%5B%3F%3Fjql%40%7Cc%5B%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s094",
+      "name": "Doncaster area",
+      "polygon": [
+        [
+          53.41532,
+          -1.19983
+        ],
+        [
+          53.41532,
+          -1.08315
+        ],
+        [
+          53.48739,
+          -1.08315
+        ],
+        [
+          53.48739,
+          -1.19983
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22wt_eI%7CiiF%3FgxUmaM%3F%3FfxUlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s095",
+      "name": "Doncaster area",
+      "polygon": [
+        [
+          53.48739,
+          -1.3165
+        ],
+        [
+          53.48739,
+          -0.96648
+        ],
+        [
+          53.55946,
+          -0.96648
+        ],
+        [
+          53.55946,
+          -1.3165
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22ewmeIbc%60G%3FsjcAmaM%3F%3FrjcAlaM%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    },
+    {
+      "id": "s096",
+      "name": "Doncaster area",
+      "polygon": [
+        [
+          53.55946,
+          -1.19983
+        ],
+        [
+          53.55946,
+          -1.08315
+        ],
+        [
+          53.6,
+          -1.08315
+        ],
+        [
+          53.6,
+          -1.19983
+        ]
+      ],
+      "filters": {
+        "min_beds": 2,
+        "property_type": "houses"
+      },
+      "rightmove_url": "https://www.rightmove.co.uk/property-for-sale/map.html?searchType=MAP&locationIdentifier=USERDEFINEDAREA%5E%7B%22polylines%22%3A%22sy%7BeI%7CiiF%3FgxUk%7CF%3F%3FfxUj%7CF%3F%22%7D&insId=1&radius=0.0&minPrice=&maxPrice=&minBedrooms=2&maxBedrooms=&displayPropertyType=houses&maxDaysSinceAdded=&_includeLetAgreed=on&sortBy=6&includeSSTC=true&viewType=MAP&channel=BUY&index=0"
+    }
+  ]
+}
