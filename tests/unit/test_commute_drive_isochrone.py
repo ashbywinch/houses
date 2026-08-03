@@ -703,7 +703,7 @@ def test_combined_map_fails_cleanly_on_malformed_payload(tmp_path):
     union_path = tmp_path / "union.json"
     union_path.write_text(json.dumps({"components": []}))
     drive_path = tmp_path / "drive.json"
-    drive_path.write_text(json.dumps({"searches": [{"id": "x"}]}))  # missing keys
+    drive_path.write_text(json.dumps([1, 2, 3]))  # list-shaped: .get() raises AttributeError
 
     code = combined_main(
         [

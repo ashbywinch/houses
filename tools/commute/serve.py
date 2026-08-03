@@ -34,10 +34,13 @@ def make_handler(directory: Path) -> type[http.server.SimpleHTTPRequestHandler]:
         def __init__(self, *args, **kwargs):
             super().__init__(*args, directory=directory_str, **kwargs)
 
-        def do_GET(self) -> None:  # noqa: N802 — http.server API
+        def _map_allowed(self) -> bool:
             # ignore the query string: the map's own ?debug=1 diagnostics
             # panel is a documented flow and must not 404
-            if urlsplit(self.path).path not in ("/", "/" + MAP_REL):
+            return urlsplit(self.path).path in ("/", "/" + MAP_REL)
+
+        def _send_map(self, with_body: bool) -> None:
+            if not self._map_allowed():
                 self.send_error(404, "only the commute map is served")
                 return
             try:
@@ -49,7 +52,17 @@ def make_handler(directory: Path) -> type[http.server.SimpleHTTPRequestHandler]:
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            if with_body:
+                self.wfile.write(body)
+
+        def do_GET(self) -> None:  # noqa: N802 — http.server API
+            self._send_map(with_body=True)
+
+        def do_HEAD(self) -> None:  # noqa: N802 — http.server API
+            # the inherited SimpleHTTPRequestHandler.do_HEAD serves ANY file
+            # (confirming existence + sizes of personal-data files) — apply
+            # the same map-only check
+            self._send_map(with_body=False)
 
     return MapOnlyHandler
 

@@ -41,5 +41,16 @@ def test_serve_serves_only_the_map(tmp_path):
             with pytest.raises(urllib.error.HTTPError) as exc:
                 urllib.request.urlopen(f"http://127.0.0.1:{port}{path}")
             assert exc.value.code == 404
+
+        # HEAD must not bypass the map-only guard (the inherited handler
+        # would confirm personal-data files exist + their sizes)
+        import http.client
+
+        conn = http.client.HTTPConnection("127.0.0.1", port)
+        conn.request("HEAD", "/drive_destinations.json")
+        assert conn.getresponse().status == 404
+        conn.request("HEAD", "/commute_map.html")
+        assert conn.getresponse().status == 200
+        conn.close()
     finally:
         httpd.shutdown()

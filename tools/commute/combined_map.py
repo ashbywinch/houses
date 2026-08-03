@@ -312,7 +312,7 @@ def main(argv: list[str] | None = None) -> int:
             icons=icons,
             intersection=intersection,
         )
-    except (json.JSONDecodeError, OSError, KeyError, TypeError) as e:
+    except (json.JSONDecodeError, OSError, KeyError, TypeError, AttributeError) as e:
         return _fail(
             "The commute data or map assets are unreadable — regenerate them with 'make commute-drive'.",
             f"unreadable input for the combined map: {e}",
