@@ -756,9 +756,10 @@ def _fail(user_message: str, dev_detail: str) -> int:
     return 1
 
 
-async def run(argv: list[str] | None = None, *, geocoder=None) -> int:
-    """``geocoder`` is injectable for tests (DI): ``async (postcode) ->
-    (lat, lon)``, default ``_geocode``."""
+async def run(argv: list[str] | None = None, *, geocoder=None, ors_key: str | None = None) -> int:
+    """``geocoder`` and ``ors_key`` are injectable for tests (DI): the
+    geocoder is ``async (postcode) -> (lat, lon)`` (default ``_geocode``);
+    ``ors_key`` overrides ``settings.ors_api_key``."""
     parser = argparse.ArgumentParser(description="Build driving isochrone search URLs (one-off ORS matrix batch).")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
     parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR))
@@ -887,7 +888,8 @@ async def run(argv: list[str] | None = None, *, geocoder=None) -> int:
             )
             except (KeyError, TypeError) as e:
                 return _fail(
-                    "The saved commute map data is unreadable — regenerate it with 'make commute-drive'.",
+                    "The saved commute map data is unreadable — rebuild it from scratch with "
+                    "'make commute-drive FORCE=1'.",
                     f"unreadable raw payload {raw_path}: {e}",
                 )
             if prev_signature == expected:
@@ -910,7 +912,8 @@ async def run(argv: list[str] | None = None, *, geocoder=None) -> int:
             )
         from houses.config import settings  # noqa: PLC0415
 
-        if not settings.ors_api_key:
+        api_key = ors_key if ors_key is not None else settings.ors_api_key
+        if not api_key:
             return _fail(
                 "The commute map can't be generated without the routing API key — add it to your environment "
                 "configuration and try again.",
@@ -922,7 +925,7 @@ async def run(argv: list[str] | None = None, *, geocoder=None) -> int:
                 coords,
                 cell_km=args.cell_km * KM,
                 region_km=region_km,
-                key=settings.ors_api_key,
+                key=api_key,
                 generated_at=generated_at,
             )
         except httpx.HTTPStatusError as e:
@@ -980,7 +983,7 @@ async def run(argv: list[str] | None = None, *, geocoder=None) -> int:
         )
     except (KeyError, TypeError, ValueError) as e:
         return _fail(
-            "The saved commute map data is unreadable — regenerate it with 'make commute-drive'.",
+            "The saved commute map data is unreadable — rebuild it from scratch with 'make commute-drive FORCE=1'.",
             f"raw→searches conversion failed: {e}",
         )
     issues = validate_payload(searches)

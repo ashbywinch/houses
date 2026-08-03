@@ -306,6 +306,20 @@ def main(argv: list[str] | None = None) -> int:
             )
             logger.warning("%s has no searches — omitting the 'Where we could live' layer", intersection_path)
             intersection = None  # degrade like the corrupt-JSON path: render without the layer
+        elif isinstance(intersection, dict) and intersection.get("searches") and not all(
+            isinstance(s, dict) and "polygon" in s and "rightmove_url" in s and "name" in s
+            for s in intersection["searches"]
+        ):
+            # records missing expected keys would crash build_html — degrade
+            # to a map without the layer instead of aborting the whole build
+            print(
+                "warning: the saved all-commutes data is malformed — showing the map without it.",
+                file=sys.stderr,
+            )
+            logger.warning(
+                "%s has malformed search records — omitting the 'Where we could live' layer", intersection_path
+            )
+            intersection = None
     try:
         union = json.loads(union_path.read_text())
         drive = json.loads(drive_path.read_text())

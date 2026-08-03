@@ -254,14 +254,9 @@ async def test_changed_geocode_rejects_raw_reuse(tmp_path, capsys):
     async def _moved_geocode(postcode):  # geocoder now resolves elsewhere
         return (51.5, -2.0)
 
-    from houses.config import settings
-
-    saved_key = settings.ors_api_key
-    settings.ors_api_key = ""  # save/restore, the conftest's own isolation pattern
-    try:
-        code = await drive_run(["--config", str(cfg), "--out-dir", str(out_dir)], geocoder=_moved_geocode)
-    finally:
-        settings.ors_api_key = saved_key
+    code = await drive_run(
+        ["--config", str(cfg), "--out-dir", str(out_dir)], geocoder=_moved_geocode, ors_key=""
+    )
     assert code == 1  # no ORS key → the regenerate path fails cleanly
     assert "regenerating" in capsys.readouterr().err
 
@@ -952,6 +947,33 @@ def test_combined_map_fails_cleanly_on_malformed_payload(tmp_path):
     )
     assert code == 1
     assert not (tmp_path / "map.html").exists()
+
+
+def test_combined_map_degrades_on_malformed_intersection_records(tmp_path, capsys):
+    """Records missing expected keys (hand-edited) must drop the layer, not
+    crash the whole map build with a KeyError."""
+    import json
+
+    from tools.commute.combined_map import main as combined_main
+
+    union_path = tmp_path / "union.json"
+    union_path.write_text(json.dumps({"components": []}))
+    drive_path = tmp_path / "drive.json"
+    drive_path.write_text(json.dumps({"searches": []}))
+    intersection_path = tmp_path / "intersection.json"
+    intersection_path.write_text(json.dumps({"searches": [{"polygon": []}]}))  # missing url/name
+
+    code = combined_main(
+        [
+            "--union", str(union_path),
+            "--drive", str(drive_path),
+            "--intersection", str(intersection_path),
+            "--out", str(tmp_path / "map.html"),
+        ]
+    )
+    assert code == 0
+    assert (tmp_path / "map.html").exists()
+    assert "malformed" in capsys.readouterr().err
 
 
 def test_combined_map_degrades_on_malformed_intersection(tmp_path, capsys):
