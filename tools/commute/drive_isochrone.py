@@ -404,6 +404,9 @@ def raw_to_searches(
         durations = [c["duration_min"] for c in dest["cells"]]
         kept = kept_cells(cells, durations, dest["threshold_min"], dest["slack_min"])
         slug = re.sub(r"[^a-z0-9]+", "-", dest["label"].lower()).strip("-") or "dest"
+        # ids must be unique across destinations: two labels can slug to the
+        # same string (e.g. "Dad" and "Dad!"), so the postcode disambiguates
+        postcode_slug = re.sub(r"[^a-z0-9]+", "", dest["postcode"].lower()) or "pc"
         for i, comp in enumerate(
             (c for c in _components(kept) if len(c) >= min_island_cells), 1
         ):
@@ -414,7 +417,7 @@ def raw_to_searches(
             suffix = "" if i == 1 else f"-{i}"
             searches.append(
                 {
-                    "id": f"drive-{slug}-{dest['threshold_min']:03d}{suffix}",
+                    "id": f"drive-{slug}-{postcode_slug}-{dest['threshold_min']:03d}{suffix}",
                     "name": f"{dest['label']} — {dest['threshold_min']} min drive",
                     "polygon": poly,
                     "filters": {"min_beds": min_beds, "property_type": property_type},
@@ -449,24 +452,35 @@ def point_in_polygon(lat: float, lon: float, poly: list[tuple[float, float]]) ->
     Conservative (boundary-inclusive) matches the toolchain's over-coverage
     bias: a destination sitting exactly on the outline is never declared out.
     The on-segment check is what makes this true — plain ray casting returns
-    False for points exactly on an edge or vertex.
+    False for points exactly on an edge or vertex. The check is
+    distance-based (not an exact cross-product equality): polygon vertices
+    are rounded to 1e-5 degrees, so an exact match would never fire.
     """
+    eps = 1e-5  # degrees ≈ 1 m — smaller than the vertices' rounding
     inside = False
     n = len(poly)
     for i in range(n):
         lat1, lon1 = poly[i]
         lat2, lon2 = poly[(i + 1) % n]
-        if (
-            min(lat1, lat2) <= lat <= max(lat1, lat2)
-            and min(lon1, lon2) <= lon <= max(lon1, lon2)
-            and (lat2 - lat1) * (lon - lon1) == (lon2 - lon1) * (lat - lat1)
-        ):
-            return True  # exactly on a segment (within its bounding box)
+        if _point_segment_distance(lat, lon, lat1, lon1, lat2, lon2) <= eps:
+            return True  # within ~1 m of a segment — on the boundary
         if (lat1 > lat) != (lat2 > lat):
             x_cross = lon1 + (lat - lat1) / (lat2 - lat1) * (lon2 - lon1)
             if lon < x_cross:
                 inside = not inside
     return inside
+
+
+def _point_segment_distance(lat, lon, lat1, lon1, lat2, lon2) -> float:
+    """Perpendicular distance from a point to a segment (degrees)."""
+    import math
+
+    dx, dy = lat2 - lat1, lon2 - lon1
+    if dx == 0.0 and dy == 0.0:
+        return math.hypot(lat - lat1, lon - lon1)
+    t = ((lat - lat1) * dx + (lon - lon1) * dy) / (dx * dx + dy * dy)
+    t = max(0.0, min(1.0, t))
+    return math.hypot(lat - (lat1 + t * dx), lon - (lon1 + t * dy))
 
 
 def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list[str]:

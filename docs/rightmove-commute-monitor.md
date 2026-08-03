@@ -256,7 +256,7 @@ by the gate.
 ### Build results (2026-08-03, live)
 
 - 12 ORS matrix calls (6/destination), all cached; batch ~12 s once.
-- **2 searches**: `drive-dad-090` (186 vertices), `drive-bracknell-090` (182).
+- **2 searches**: `drive-dad-ox75gz-090` (186 vertices), `drive-bracknell-rg128ya-090` (182).
 - Sanity: Oxford/Witney inside Dad's shed, London/Southampton inside Bracknell's,
   York outside both. Destination centre inside its own polygon; URL round-trip;
   vertex cap; GB-bbox containment — all validated.

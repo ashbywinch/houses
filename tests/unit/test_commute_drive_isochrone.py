@@ -373,7 +373,7 @@ def test_raw_to_searches_schema_mirrors_searches_py():
     assert payload["metadata"]["count"] == len(payload["searches"]) == 1
     s = payload["searches"][0]
     assert set(s) >= {"id", "name", "polygon", "filters", "rightmove_url", "destination", "threshold_min"}
-    assert s["id"] == "drive-dad-090"
+    assert s["id"] == "drive-dad-ox75gz-090"
     assert s["name"] == "Dad — 90 min drive"
     assert s["filters"] == {"min_beds": 2, "property_type": "houses"}
     assert s["threshold_min"] == 90
@@ -414,8 +414,8 @@ def test_raw_to_searches_ids_unique_across_destinations_and_loops():
     )
     payload = raw_to_searches(raw, generated_at=NOW)
     ids = [s["id"] for s in payload["searches"]]
-    assert ids[0] == "drive-dad-090"
-    assert ids[-1] == "drive-bracknell-060"
+    assert ids[0] == "drive-dad-ox75gz-090"
+    assert ids[-1] == "drive-bracknell-rg128ya-060"
     assert len(ids) == len(set(ids))
 
 
@@ -494,7 +494,7 @@ def test_raw_to_searches_absorbs_hole_and_keeps_large_island():
     payload = raw_to_searches(_hole_island_payload(), generated_at=NOW)
     ids = [s["id"] for s in payload["searches"]]
     # main shed (no suffix) + 4-cell island (-2); the hole is NOT a search
-    assert ids == ["drive-dad-090", "drive-dad-090-2"]
+    assert ids == ["drive-dad-ox75gz-090", "drive-dad-ox75gz-090-2"]
     island = payload["searches"][1]
     # island polygon covers ~its 2×2 cells (0.1° × 0.16° ≈ 0.016 deg²)
     area = abs(_signed_area(island["polygon"]))
@@ -503,7 +503,7 @@ def test_raw_to_searches_absorbs_hole_and_keeps_large_island():
 
 def test_raw_to_searches_drops_small_islands_below_threshold():
     payload = raw_to_searches(_hole_island_payload(), generated_at=NOW, min_island_cells=5)
-    assert [s["id"] for s in payload["searches"]] == ["drive-dad-090"]
+    assert [s["id"] for s in payload["searches"]] == ["drive-dad-ox75gz-090"]
 
 
 # ── point-in-polygon ─────────────────────────────────────────────────
