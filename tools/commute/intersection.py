@@ -205,6 +205,14 @@ def _same_payload(existing: dict, new: dict) -> bool:
     return json.dumps(e_meta, sort_keys=True) == json.dumps(n_meta, sort_keys=True)
 
 
+def _fail(user_message: str, dev_detail: str) -> int:
+    """Two-tier fail-fast exit (docs/coding-standards.md): a plain-language
+    stderr line plus a logger.warning with the exact resolution."""
+    print(user_message, file=sys.stderr)
+    logger.warning(dev_detail)
+    return 1
+
+
 def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the all-commutes intersection search (offline).")
     parser.add_argument("--shed", default=str(DEFAULT_SHED))
@@ -220,8 +228,10 @@ def run(argv: list[str] | None = None) -> int:
     out_path = Path(args.out)
     if args.validate:
         if not out_path.exists():
-            print(f"{out_path} not found — run 'make commute-intersection' first", file=sys.stderr)
-            return 1
+            return _fail(
+                "No all-commutes data yet — run 'make commute-intersection' first.",
+                f"{out_path} not found for --validate",
+            )
         issues = validate_payload(json.loads(out_path.read_text()))
         if issues:
             for issue in issues:
@@ -236,8 +246,10 @@ def run(argv: list[str] | None = None) -> int:
         (Path(args.drive_searches), "make commute-drive"),
     ) if not Path(p).exists()]
     for path, hint in missing:
-        print(f"{path} not found — run '{hint}' first", file=sys.stderr)
-        return 1
+        return _fail(
+            f"Commute data is missing — run '{hint}' first.",
+            f"intersection input {path} not found (run '{hint}')",
+        )
 
     payload = build_payload(
         shed=json.loads(Path(args.shed).read_text()),
@@ -250,6 +262,12 @@ def run(argv: list[str] | None = None) -> int:
     )
     if not payload["searches"]:
         print("warning: no intersection — no place satisfies every commute", file=sys.stderr)
+    issues = validate_payload(payload)
+    if issues:
+        for issue in issues:
+            print(f"- {issue}", file=sys.stderr)
+        print("intersection FAIL validation — nothing written", file=sys.stderr)
+        return 1
     existing: dict | None = None
     if out_path.exists():
         try:
@@ -259,11 +277,6 @@ def run(argv: list[str] | None = None) -> int:
     if existing is None or not _same_payload(existing, payload):
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(payload, indent=2) + "\n")
-    issues = validate_payload(payload)
-    if issues:
-        for issue in issues:
-            print(f"- {issue}", file=sys.stderr)
-        return 1
     print(f"{len(payload['searches'])} intersection search(es) → {out_path}")
     for s in payload["searches"]:
         print(f"  {s['id']}: {s['rightmove_url']}")

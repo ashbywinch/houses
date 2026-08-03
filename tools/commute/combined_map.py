@@ -24,8 +24,11 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import logging
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_UNION = Path("data/commute/union.json")
 DEFAULT_DRIVE = Path("data/commute/drive_searches.json")
@@ -72,31 +75,33 @@ def build_html(
     markers_js = []
     if transit:
         layers_js.append(
-            json.dumps({"name": "Train: Pimlico & Aldgate", "color": _COLORS[0], "coords": transit, "urls": []})
+            json.dumps(
+                {
+                    "name": "Train: Pimlico & Aldgate",
+                    "color": _COLORS[0],
+                    "polygons": [{"coords": outline, "url": ""} for outline in transit],
+                }
+            )
         )
     for i, (label, searches) in enumerate(drive_by_label.items(), 1):
         color = _COLORS[i % len(_COLORS)]
-        coords = [s["polygon"] for s in searches]
-        # compact separators: the page looks popup URLs up with JS JSON.stringify
-        # (no spaces), so the keys MUST match that exact serialisation
-        urls = {json.dumps(s["polygon"], separators=(",", ":")): s["rightmove_url"] for s in searches}
-        layers_js.append(json.dumps({"name": f"Drive to {label}", "color": color, "coords": coords, "urls": urls}))
+        polygons = [{"coords": s["polygon"], "url": s["rightmove_url"]} for s in searches]
+        # each polygon carries its own url — never keyed by a serialised
+        # polygon string (Python json.dumps(52.0) != JS JSON.stringify(52.0),
+        # a whole class of silent popup-loss bugs)
+        layers_js.append(json.dumps({"name": f"Drive to {label}", "color": color, "polygons": polygons}))
         d = searches[0]["destination"]
         markers_js.append(
             json.dumps({"label": label, "lat": d["lat"], "lon": d["lon"], "url": searches[0]["rightmove_url"]})
         )
     if intersection and intersection.get("searches"):
-        coords = [s["polygon"] for s in intersection["searches"]]
-        urls = {
-            json.dumps(s["polygon"], separators=(",", ":")): s["rightmove_url"] for s in intersection["searches"]
-        }
+        polygons = [{"coords": s["polygon"], "url": s["rightmove_url"]} for s in intersection["searches"]]
         layers_js.append(
             json.dumps(
                 {
                     "name": "Where we could live",
                     "color": "#c90",
-                    "coords": coords,
-                    "urls": urls,
+                    "polygons": polygons,
                     "fillOpacity": 0.25,
                     "weight": 4,
                 }
@@ -172,21 +177,20 @@ const layers = __LAYERS__;
 const markers = __MARKERS__;
 const map = L.map('map');
 const all = [];
-for (const l of layers) { for (const coords of l.coords) { for (const p of coords) { all.push(p); } } }
+for (const l of layers) { for (const item of l.polygons) { for (const p of item.coords) { all.push(p); } } }
 if (all.length) { map.fitBounds(L.latLngBounds(all)); }
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
   {maxZoom: 18, attribution: '&copy; OpenStreetMap'}).addTo(map);
 const overlays = {};
 for (const l of layers) {
   const group = L.layerGroup();
-  for (const coords of l.coords) {
-    const poly = L.polygon(coords, {
+  for (const item of l.polygons) {
+    const poly = L.polygon(item.coords, {
       color: l.color,
       weight: l.weight || 3,
       fillOpacity: l.fillOpacity || 0.12,
     });
-    const url = l.urls[JSON.stringify(coords)];
-    if (url) { poly.bindPopup('<a href="' + url + '" target="_blank">Rightmove search</a>'); }
+    if (item.url) { poly.bindPopup('<a href="' + item.url + '" target="_blank">Rightmove search</a>'); }
     poly.addTo(group);
   }
   group.addTo(map);
@@ -216,6 +220,14 @@ def write_map(html: str, out_path: str | Path) -> None:
     out_path.write_text(html)
 
 
+def _fail(user_message: str, dev_detail: str) -> int:
+    """Two-tier fail-fast exit (docs/coding-standards.md): a plain-language
+    stderr line plus a logger.warning with the exact resolution."""
+    print(user_message, file=sys.stderr)
+    logger.warning(dev_detail)
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the combined commute isochrone map (offline).")
     parser.add_argument("--union", default=str(DEFAULT_UNION))
@@ -228,8 +240,10 @@ def main(argv: list[str] | None = None) -> int:
     union_path, drive_path = Path(args.union), Path(args.drive)
     for path, hint in ((union_path, "make commute-searches"), (drive_path, "make commute-drive")):
         if not path.exists():
-            print(f"{path} not found — run '{hint}' first", file=sys.stderr)
-            return 1
+            return _fail(
+                f"Commute data is missing — run '{hint}' first.",
+                f"combined map input {path} not found (run '{hint}')",
+            )
     vendor = Path(args.vendor)
     icons = {name: _data_uri(vendor / name) for name in _CSS_IMAGES + _JS_ICONS}
     intersection_path = Path(args.intersection)
@@ -238,7 +252,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             intersection = json.loads(intersection_path.read_text())
         except (json.JSONDecodeError, OSError):
-            print(f"warning: {intersection_path} unreadable — omitting the intersection layer", file=sys.stderr)
+            print("The saved all-commutes data is unreadable — showing the map without it.", file=sys.stderr)
+            logger.warning("%s unreadable — omitting the intersection layer", intersection_path)
     html = build_html(
         json.loads(union_path.read_text()),
         json.loads(drive_path.read_text()),

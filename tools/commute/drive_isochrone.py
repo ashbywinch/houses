@@ -595,6 +595,15 @@ def _load_raw(path: Path) -> dict | None:
         return None
 
 
+def _fail(user_message: str, dev_detail: str) -> int:
+    """Two-tier fail-fast exit (docs/coding-standards.md): a plain-language
+    stderr line the user can act on, plus a logger.warning with the exact
+    resolution — never one without the other."""
+    print(user_message, file=sys.stderr)
+    logger.warning(dev_detail)
+    return 1
+
+
 async def run(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build driving isochrone search URLs (one-off ORS matrix batch).")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
@@ -619,8 +628,10 @@ async def run(argv: list[str] | None = None) -> int:
     if args.validate:
         searches_path = out_dir / SEARCHES_FILENAME
         if not searches_path.exists():
-            print(f"{searches_path} not found — run 'make commute-drive' first", file=sys.stderr)
-            return 1
+            return _fail(
+                "No commute map data yet — run 'make commute-drive' first.",
+                f"{searches_path} not found for --validate",
+            )
         payload = json.loads(searches_path.read_text())
         issues = validate_payload(payload)
         if issues:
@@ -665,16 +676,21 @@ async def run(argv: list[str] | None = None) -> int:
                 raw = prev
                 print(f"reusing {raw_path} ({len(raw['destinations'])} destination(s), offline)")
             else:
-                print(f"config changed — regenerating {raw_path}", file=sys.stderr)
+                print("The commute settings changed — regenerating the drive map data.", file=sys.stderr)
+                logger.warning("config mismatch on %s — regenerating the raw payload", raw_path)
         else:
-            print(f"{raw_path} unreadable — regenerating", file=sys.stderr)
+            print("The saved drive map data is unreadable — regenerating it.", file=sys.stderr)
+            logger.warning("%s unreadable (corrupt or truncated write?) — regenerating", raw_path)
 
     if raw is None:
         from houses.config import settings  # noqa: PLC0415
 
         if not settings.ors_api_key:
-            print("HEIGIT_API_KEY is not set — add it to .env (free OpenRouteService key)", file=sys.stderr)
-            return 1
+            return _fail(
+                "The commute map can't be generated without the routing API key — add it to your environment "
+                "and try again.",
+                "HEIGIT_API_KEY unset — set it in .env to enable OpenRouteService drive isochrones",
+            )
         coords = [await _geocode(d.postcode) for d in destinations]
         raw = await build_raw(
             destinations,
