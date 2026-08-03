@@ -385,11 +385,16 @@ Data model changes:
 
 Per POI, the constraint area is the **union of its drawn mode areas** (any
 acceptable mode works); "where we could live" is the **intersection across
-POIs** (everyone's commutes must work):
+POIs that have at least one drawn area** (everyone's commutes must work):
 
 ```
-where_we_could_live = ⋂ over POIs p of ( ⋃ over drawn modes m of area(p, m) )
+where_we_could_live = ⋂ over POIs p with ≥1 drawn area of ( ⋃ over drawn modes m of area(p, m) )
 ```
+
+A POI with **no drawn area** — no acceptable modes, or a school POI with an
+empty address (per-property only) — **constrains nothing at region level**:
+it is excluded from the intersection, never treated as an empty set (which
+would make the all-commutes area empty for any family with children).
 
 Known approximation: the transit shed is one region for all train destinations
 (a station within threshold of ANY train destination is kept), i.e. an OR
