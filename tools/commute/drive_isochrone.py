@@ -221,21 +221,29 @@ async def fetch_matrix(body: dict, *, key: str, timeout: float = 120.0) -> dict:
     """POST one matrix request through the disk cache; retry transient errors.
 
     Errors are never cached (the cache whitelists 2xx/3xx/404), so a retry is
-    a genuine retry — same contract as the transit shed's TfL batch.
+    a genuine retry — same contract as the transit shed's TfL batch. Only
+    transient statuses (429/5xx) and network/timeout failures are retried: a
+    400/401/403 (malformed request, bad key) can never succeed on retry and
+    fails fast instead of burning a call and stalling ~2 s.
     """
     from houses.api_cache import cached_async_client
 
     headers = {"Content-Type": "application/json", "Authorization": key}
+    transient = (429, 500, 502, 503, 504)
     for attempt in (1, 2):
         try:
             async with cached_async_client(timeout=timeout) as client:
                 resp = await client.post(ORS_MATRIX_URL, json=body, headers=headers)
-                if resp.status_code in (429, 500, 502, 503, 504) and attempt == 1:
+                if resp.status_code in transient and attempt == 1:
                     await asyncio.sleep(2.0 * attempt)
                     continue
                 resp.raise_for_status()
                 return resp.json()
-        except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code not in transient or attempt == 2:
+                raise
+            await asyncio.sleep(2.0)
+        except (httpx.RequestError, httpx.TimeoutException):
             if attempt == 2:
                 raise
             await asyncio.sleep(2.0)
@@ -776,6 +784,13 @@ async def run(argv: list[str] | None = None) -> int:
     if raw_path.exists() and not args.force:
         prev = _load_raw(raw_path)
         if prev is not None:
+            try:
+                prev_signature = config_signature(prev)
+            except (KeyError, TypeError) as e:
+                return _fail(
+                    "The saved commute map data is unreadable — regenerate it with 'make commute-drive'.",
+                    f"unreadable raw payload {raw_path}: {e}",
+                )
             expected = config_signature(
                 {
                     "metadata": {
@@ -796,7 +811,7 @@ async def run(argv: list[str] | None = None) -> int:
                     }
                 }
             )
-            if config_signature(prev) == expected:
+            if prev_signature == expected:
                 raw = prev
                 print(f"reusing {raw_path} ({len(raw['destinations'])} destination(s), offline)")
             else:
@@ -866,7 +881,15 @@ async def run(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
 
-    searches = raw_to_searches(raw, min_beds=args.min_beds, property_type=args.property_type, generated_at=generated_at)
+    try:
+        searches = raw_to_searches(
+            raw, min_beds=args.min_beds, property_type=args.property_type, generated_at=generated_at
+        )
+    except (KeyError, TypeError, ValueError) as e:
+        return _fail(
+            "The saved commute map data is unreadable — regenerate it with 'make commute-drive'.",
+            f"raw→searches conversion failed: {e}",
+        )
     issues = validate_payload(searches)
     if issues:
         for issue in issues:

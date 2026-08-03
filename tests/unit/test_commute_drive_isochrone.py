@@ -282,6 +282,58 @@ async def test_validate_fails_cleanly_on_corrupt_searches(tmp_path):
     assert code == 1
 
 
+async def test_fetch_matrix_does_not_retry_non_transient(monkeypatch):
+    """A 401/400 can never succeed on retry — fail fast with one call, no
+    2s stall and no wasted request."""
+    import httpx
+
+    from tools.commute.drive_isochrone import fetch_matrix
+
+    calls = {"n": 0}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            calls["n"] += 1
+            return httpx.Response(401, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr("houses.api_cache.cached_async_client", lambda **kw: FakeClient())
+    with pytest.raises(httpx.HTTPStatusError):
+        await fetch_matrix({"locations": []}, key="k")
+    assert calls["n"] == 1
+
+
+async def test_run_fails_cleanly_on_malformed_raw_payload(tmp_path):
+    """A structurally-broken committed raw payload (valid JSON, missing
+    metadata) must exit via the two-tier message, not a KeyError traceback
+    in the offline reuse path."""
+    import json
+
+    from tools.commute.drive_isochrone import run as drive_run
+
+    cfg = tmp_path / "destinations.json"
+    cfg.write_text(
+        json.dumps(
+            {
+                "threshold_min": 90,
+                "destinations": [{"label": "Dad", "postcode": "OX7 5GZ"}],
+            }
+        )
+    )
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "drive_isochrone.json").write_text(json.dumps({"destinations": []}))  # no metadata
+
+    code = await drive_run(["--config", str(cfg), "--out-dir", str(out_dir)])
+    assert code == 1
+    assert not (out_dir / "drive_searches.json").exists()
+
+
 async def test_run_does_not_write_when_validation_fails(tmp_path):
     """Regression: run() wrote the searches BEFORE validating, so a failing
     payload (e.g. a destination whose shed vanished) left an invalid committed
