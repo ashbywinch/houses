@@ -557,7 +557,7 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
     # every destination's centre must sit inside one of its own shed's loops
     by_label: dict[str, list[dict]] = {}
     for s in searches:
-        by_label.setdefault(s.get("destination", {}).get("label"), []).append(s)
+        by_label.setdefault((s.get("destination") or {}).get("label"), []).append(s)
     for group in by_label.values():
         valid = [o for o in group if isinstance(o.get("polygon"), list) and len(o["polygon"]) >= 3]
         for s in group:
