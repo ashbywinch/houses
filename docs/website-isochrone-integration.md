@@ -159,8 +159,9 @@ Definitions:
 
 - **Per-person worst commute** of a house = max duration over that person's
   POIs, each computed with its acceptable modes (best acceptable mode per POI;
-  a person with no POIs constrains nothing). Derived client-side from the
-  existing `commutes` summaries — no new list payload field.
+  a person with no POIs constrains nothing). Computed by a **DAG node** (per
+  DAG-owned derivations) and carried in the property summary — the client
+  never derives it.
 - **Ceiling** = the person's `fine_max_minutes` (the existing "acceptable"
   band, now documented as the hard max; the isochrone region thresholds stay
   separate and looser).
@@ -191,14 +192,20 @@ weeks_per_year`). Use it to make commute load a sort key:
 - **Weekly commute minutes** per person = Σ over their POIs of
   `trips_per_week × 2 × one-way duration` (best acceptable mode per POI, from
   the same gate durations). **Household weekly time** = Σ over persons.
+  Computed by a `WeeklyCommuteTimeNode` **DerivedNode** (per DAG-owned
+  derivations): sources = the per-person commute results + settings
+  (trips/weeks); formula = Σ trips × 2 × duration; the value ships in the
+  property summary with provenance; the refresh scheduler re-runs it when a
+  commute duration, trip count, or acceptable mode changes.
 - `trips_per_week` is round trips (matches the cost model); a 0-trip POI
   contributes 0 — it is a constraint, not a load. Simon/Dad is **1 trip/week**
   (he visits weekly), so it contributes its round trip. George's school POIs
   (5 trips/week, walk duration) contribute for real — the school run is
   genuine weekly time.
-- **Failed or missing durations are never counted as zero.** A house whose
-  commutes haven't computed shows "—" and sorts LAST (treat as +∞); a house
-  with a failed commute cannot masquerade as commute-free.
+- **Failed or missing durations are never counted as zero.** The node returns
+  no value when any expected commute is failed/uncomputed; the house shows "—"
+  and sorts LAST (treat as +∞) — a house with a failed commute cannot
+  masquerade as commute-free.
 
 UX:
 
@@ -207,8 +214,7 @@ UX:
   is the single commute ordering. Ascending.
 - Cards show the household total in user language: "**8h 30m/week
   commuting**". No per-person breakdown — the family knows its own pattern.
-- Client-side over the summaries + settings (`fetchSettings` already exists);
-  derivations live in `formatters/commute.ts` with unit tests.
+- The client sorts and renders the summary value; it computes nothing.
 
 ### User language — what the UI says vs what the code says
 
@@ -327,6 +333,25 @@ Readiness of an artifact = its committed metadata's config signature matches the
 current `settings_signature` (same mechanism the toolchain already uses for its
 reuse guards). `GET /api/isochrones/status` computes this for every stage.
 
+### DAG-owned derivations
+
+**Any value that depends on DAG outputs is itself a DAG node — never a
+client-side re-derivation.** The weekly commute total, the per-person worst
+commute, and the household worst commute are all DerivedNodes (see
+[docs/dag-library.md](dag-library.md)), not TypeScript in
+`formatters/commute.ts`. Reasons:
+
+- **Provenance for free** — a node carries its formula, inputs, and timestamp
+  (personas: everyone is suspicious of calculations; the cost nodes already
+  work this way).
+- **Staleness integration** — the refresh scheduler re-runs the node when its
+  sources change (commute duration, trips/week, acceptable modes); a
+  client-side sum would silently serve whatever the summaries last held.
+- **No logic drift** — one implementation (Python), not one in Python and a
+  second in TS that can disagree.
+
+The client only sorts and renders; it never computes commute-derived values.
+
 ### Settings-derived isochrone config (kills the hard-coding)
 
 | Today (hard-coded) | Becomes |
@@ -401,14 +426,15 @@ per-destination durations) intersected exactly.
    table; map layer labels renamed to "Train: …"/"Drive to …". (Red/green:
    a test asserting no UI string contains "isochrone".)
 4. **Worst-commute auto-filter + "worst commute < X" control on the property
-   list**: per-person worst commute vs `fine_max_minutes` ceiling, hidden
-   count + peek, slider from loosest ceiling down. (Red/green: filter
-   derivation tests + list component tests first.)
-5. **Sort by weekly commute time**: `weeklyCommuteMinutes` derivation in
-   `formatters/commute.ts` (trips/week × 2 × duration, 0-trip POIs, failed
-   commutes sort last), the "Weekly commute (least first)" sort option — the
-   ONLY commute sort; the existing best-commute sort option is removed — and
-   the card total. (Red/green: formatter tests + sort component tests first.)
+   list**: a per-person worst-commute DAG node, ceiling filter vs
+   `fine_max_minutes`, hidden count + peek, slider from loosest ceiling down.
+   (Red/green: DAG node tests — max-over-POIs formula, failed-commute
+   handling — then filter + list component tests.)
+5. **Sort by weekly commute time**: `WeeklyCommuteTimeNode` (trips/week × 2 ×
+   duration, 0-trip POIs, failed commutes → no value sorts last), the
+   "Weekly commute (least first)" sort option — the ONLY commute sort; the
+   existing best-commute sort option is removed — and the card total.
+   (Red/green: DAG node tests first, then sort component tests.)
 
 ### Phase 2 — generation + map
 
@@ -463,14 +489,16 @@ per-destination durations) intersected exactly.
    WebSocket deltas, not a completion ping.
 6. **User language**: no UI string (settings page, dialogs, map labels)
    contains "isochrone", "transit", or "shed" (enforced by a test).
-7. **Commute filter**: houses whose per-person worst commute exceeds the
-   person's `fine_max_minutes` ceiling are hidden by default (with a visible
-   hidden count + peek); the main page's "worst commute < X" control narrows
-   from the loosest family ceiling down to ~10 min.
-8. **Weekly commute sort**: "Weekly commute (least first)" sorts by household
-   Σ trips_per_week × round-trip duration; 0-trip POIs contribute 0; houses
-   with uncomputed commutes sort last; cards show the total only. Weekly is
-   the only commute sort option — the old best-commute sort is removed.
+7. **Commute filter**: houses whose per-person worst commute (DAG node) exceeds
+   the person's `fine_max_minutes` ceiling are hidden by default (with a
+   visible hidden count + peek); the main page's "worst commute < X" control
+   narrows from the loosest family ceiling down to ~10 min.
+8. **Weekly commute sort**: `WeeklyCommuteTimeNode` computes household
+   Σ trips_per_week × round-trip duration with provenance; 0-trip POIs
+   contribute 0; failed/uncomputed commutes → no value, sorts last; changing
+   a trip count or commute duration refreshes the total via the scheduler.
+   "Weekly commute (least first)" is the only commute sort (best-commute
+   option removed); cards show the total only.
 9. `GET /commute/commute_map.html` renders the map with per-commute layers and
    the "Where we could live" layer.
 10. `make test` green; red/green TDD throughout (each phase lands with its red
