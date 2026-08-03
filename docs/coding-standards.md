@@ -25,7 +25,22 @@ Project-specific rules supplementing the shared coding standards. Read both. If 
 
 **All monetary values use `money.Money`; all durations/distances use `pint.Quantity`** — never bare `float`/`int`. `Money`/`Quantity` encapsulate the unit, so field names don't repeat it (`price`, not `price_gbp`).
 
+**Always turn numeric literals into quantities by multiplying by a unit constant** — never by calling the `Quantity` constructor with a literal unit string:
+
+```python
+# ✗ constructor with a literal unit
+Quantity(4.0, "km")
+
+# ✓ one-unit Quantity constant, multiplied
+KM = 1.0 * ureg.km          # one kilometre as a Quantity
+radius = 4.0 * KM           # Quantity(4.0, km)
+```
+
+The constants are **one unit expressed as a Quantity** (`1.0 * ureg.km`), not a bare `Unit`: the pint stubs type `scalar * Unit` as an unhelpful `Unit | Quantity` union, while `scalar * Quantity` is cleanly a `Quantity` — and `4.0 * KM` is 4 km either way. Define the constants once per package from a single `UnitRegistry` (`tools/commute/units.py` for the toolchain; pint forbids mixing quantities from different registries). Keep the `Quantity` constructor only for parsing string/unknown input (e.g. config values).
+
 Before reaching for a `dict`/list/primitive: "Is there a type that makes this impossible to misuse?"
+
+**Wire formats are the exception, explicitly:** serialized payloads, config files, and external-API request bodies use unit-named bare numbers by design (`threshold_min`, `cell_km`, `duration_min`) — pint has no JSON representation, and the consumers (scrapers, URLs, the map) read numbers. `Quantity` governs all in-memory computation and function signatures; conversion happens only at the (de)serialization boundary. The batch toolchain (`tools/commute/`) follows this: `Quantity` signatures internally, bare unit-named numbers in `data/commute/*.json` and the config file.
 
 ### Each class in its own module
 

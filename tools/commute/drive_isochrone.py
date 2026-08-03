@@ -39,17 +39,20 @@ import logging
 import math
 import re
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
+from pint import Quantity
 
 from tools.commute.combined_map import _js_safe_json, _user_label
 from tools.commute.rightmove_url import build_search_url, parse_search_url
 from tools.commute.station_shed import DEFAULT_BBOX, BBox
 from tools.commute.tile import Grid, Rect
 from tools.commute.union import union_outline
+from tools.commute.units import KM, KMH, MINUTE
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +80,7 @@ _REQUEST_DELAY_S = 0.2  # polite sequential cadence between matrix calls
 class DriveDestination:
     label: str
     postcode: str
-    threshold_min: int
+    threshold_min: Quantity
 
 
 def load_config(path: str | Path, default_threshold: int = DEFAULT_THRESHOLD_MIN) -> list[DriveDestination]:
@@ -87,7 +90,8 @@ def load_config(path: str | Path, default_threshold: int = DEFAULT_THRESHOLD_MIN
     "postcode": "OX7 5GZ", "threshold_min": 120}]}`` — the top-level
     ``threshold_min`` is the default for every destination; a per-destination
     value overrides it. Destinations are DATA, not code — adding a POI means
-    editing this file, nothing else.
+    editing this file, nothing else. Config values are bare minutes (the wire
+    format); thresholds become Quantities in memory.
     """
     data = json.loads(Path(path).read_text())
     threshold = int(data.get("threshold_min", default_threshold))
@@ -98,7 +102,9 @@ def load_config(path: str | Path, default_threshold: int = DEFAULT_THRESHOLD_MIN
         if not label or not postcode:
             raise ValueError(f"each destination needs 'label' and 'postcode', got {entry!r}")
         destinations.append(
-            DriveDestination(label=label, postcode=postcode, threshold_min=int(entry.get("threshold_min", threshold)))
+            DriveDestination(
+                label=label, postcode=postcode, threshold_min=int(entry.get("threshold_min", threshold)) * MINUTE
+            )
         )
     if not destinations:
         raise ValueError("drive destinations config has no destinations")
@@ -106,7 +112,7 @@ def load_config(path: str | Path, default_threshold: int = DEFAULT_THRESHOLD_MIN
 
 
 def apply_default_threshold(
-    destinations: list[DriveDestination], config_data: dict, threshold_min: int
+    destinations: list[DriveDestination], config_data: dict, threshold_min: Quantity
 ) -> list[DriveDestination]:
     """Apply a CLI default threshold to every destination that lacks an
     explicit per-destination override in the config file — the documented
@@ -124,7 +130,7 @@ def apply_default_threshold(
 # ── geometry ─────────────────────────────────────────────────────────
 
 
-def slack_minutes(cell_km: float) -> float:
+def slack_minutes(cell_km: Quantity) -> Quantity:
     """Boundary slack: the time to cross a half cell diagonal at free-flow speed.
 
     A kept cell's centre is within threshold, but a house in that cell can be
@@ -134,13 +140,14 @@ def slack_minutes(cell_km: float) -> float:
     by the per-property gate.
     """
     half_diagonal_km = cell_km * math.sqrt(2) / 2
-    return half_diagonal_km / FREEFLOW_KMH * 60.0
+    return (half_diagonal_km / (FREEFLOW_KMH * KMH)).to("minute")
 
 
-def region_bbox(lat: float, lon: float, region_km: float) -> Rect:
+def region_bbox(lat: float, lon: float, region_km: Quantity) -> Rect:
     """Destination-centred square region, ``region_km`` in every direction."""
-    lat_deg = region_km / 111.0
-    lon_deg = region_km / (111.0 * math.cos(math.radians(lat)))
+    km = region_km.to("km").magnitude
+    lat_deg = km / 111.0
+    lon_deg = km / (111.0 * math.cos(math.radians(lat)))
     return Rect(lat - lat_deg, lat + lat_deg, lon - lon_deg, lon + lon_deg)
 
 
@@ -190,23 +197,23 @@ def build_matrix_requests(
     return bodies
 
 
-def parse_durations(data: dict, count: int) -> list[float | None]:
+def parse_durations(data: dict, count: int) -> list[Quantity | None]:
     """Extract minutes from an ORS matrix response, aligned to the request order.
 
     ``durations[i][0]`` is the duration (seconds) from the i-th source to the
     destination; ``None`` means the point snapped to no road (e.g. sea) and is
-    preserved as unreachable.
+    preserved as unreachable. Returns pint minutes.
     """
     rows = data.get("durations")
     if rows is None or len(rows) != count:
         raise ValueError(
             f"matrix response has {len(rows) if rows is not None else 'no'} duration rows, expected {count}"
         )
-    out: list[float | None] = []
+    out: list[Quantity | None] = []
     for row in rows:
         if len(row) != 1:
             raise ValueError(f"unexpected duration row {row!r} (expected one destination)")
-        out.append(None if row[0] is None else row[0] / 60.0)
+        out.append(None if row[0] is None else row[0] / 60.0 * MINUTE)
     return out
 
 
@@ -236,7 +243,10 @@ async def fetch_matrix(body: dict, *, key: str, timeout: float = 120.0) -> dict:
 
 
 def kept_cells(
-    cells: list[tuple[int, int, float, float]], durations_min: list[float | None], threshold_min: int, slack: float
+    cells: list[tuple[int, int, float, float]],
+    durations_min: Sequence[Quantity | None],
+    threshold_min: Quantity,
+    slack: Quantity,
 ) -> set[tuple[int, int]]:
     """Cells whose centre drive time fits the threshold (plus boundary slack)."""
     kept: set[tuple[int, int]] = set()
@@ -253,8 +263,8 @@ async def build_raw(
     destinations: list[DriveDestination],
     coords: list[tuple[float, float]],
     *,
-    cell_km: float,
-    region_km: float,
+    cell_km: Quantity,
+    region_km: Quantity,
     key: str,
     fetch=None,
     generated_at: str,
@@ -262,16 +272,18 @@ async def build_raw(
     """Geocode-backed matrix batch → the raw isochrone payload.
 
     ``fetch`` is injectable for tests: ``async (body) -> ORS matrix response``.
+    Payload values are bare unit-named numbers (the wire format); all
+    computation above is Quantity.
     """
     if fetch is None:
         fetch = fetch_matrix
     records: list[dict] = []
     for dest, (lat, lon) in zip(destinations, coords, strict=True):
         bbox = region_bbox(lat, lon, region_km)
-        grid = Grid.from_cell_km(bbox, cell_km)
+        grid = Grid.from_cell_km(bbox, cell_km.to("km").magnitude)
         cells = grid_cell_centers(grid)
         centers = [(c_lon, c_lat) for _r, _c, c_lat, c_lon in cells]  # ORS wants [lon, lat]
-        durations: list[float | None] = []
+        durations: list[Quantity | None] = []
         for body in build_matrix_requests(lon, lat, centers):
             data = await fetch(body, key=key)
             durations.extend(parse_durations(data, len(body["sources"])))
@@ -283,9 +295,9 @@ async def build_raw(
                 "postcode": dest.postcode,
                 "lat": lat,
                 "lon": lon,
-                "threshold_min": dest.threshold_min,
-                "cell_km": cell_km,
-                "slack_min": round(slack_minutes(cell_km), 3),
+                "threshold_min": int(dest.threshold_min.to("minute").magnitude),
+                "cell_km": cell_km.to("km").magnitude,
+                "slack_min": round(slack_minutes(cell_km).to("minute").magnitude, 3),
                 "grid": {
                     "lat_min": bbox.lat_min,
                     "lat_max": bbox.lat_max,
@@ -293,7 +305,13 @@ async def build_raw(
                     "lon_max": bbox.lon_max,
                 },
                 "cells": [
-                    {"r": r, "c": c, "lat": lat_c, "lon": lon_c, "duration_min": dur}
+                    {
+                        "r": r,
+                        "c": c,
+                        "lat": lat_c,
+                        "lon": lon_c,
+                        "duration_min": None if dur is None else round(dur.to("minute").magnitude, 3),
+                    }
                     for (r, c, lat_c, lon_c), dur in zip(cells, durations, strict=True)
                 ],
             }
@@ -303,11 +321,16 @@ async def build_raw(
             "engine_version": ENGINE_VERSION,
             "profile": "driving-car",
             "speed_model": "free-flow",
-            "threshold_min": min(d.threshold_min for d in destinations),
-            "cell_km": cell_km,
-            "region_km": region_km,
+            "threshold_min": int(min(d.threshold_min for d in destinations).to("minute").magnitude),
+            "cell_km": cell_km.to("km").magnitude,
+            "region_km": region_km.to("km").magnitude,
             "destinations": [
-                {"label": d.label, "postcode": d.postcode, "threshold_min": d.threshold_min} for d in destinations
+                {
+                    "label": d.label,
+                    "postcode": d.postcode,
+                    "threshold_min": int(d.threshold_min.to("minute").magnitude),
+                }
+                for d in destinations
             ],
             "generated_at": generated_at,
             "count": len(records),
@@ -401,8 +424,10 @@ def raw_to_searches(
     for dest in raw["destinations"]:
         grid = Grid.from_cell_km(Rect(**dest["grid"]), dest["cell_km"])
         cells = [(c["r"], c["c"], c["lat"], c["lon"]) for c in dest["cells"]]
-        durations = [c["duration_min"] for c in dest["cells"]]
-        kept = kept_cells(cells, durations, dest["threshold_min"], dest["slack_min"])
+        # payload values are bare unit-named numbers (the wire format) —
+        # restore units for the Quantity computation
+        durations = [None if c["duration_min"] is None else c["duration_min"] * MINUTE for c in dest["cells"]]
+        kept = kept_cells(cells, durations, dest["threshold_min"] * MINUTE, dest["slack_min"] * MINUTE)
         slug = re.sub(r"[^a-z0-9]+", "-", dest["label"].lower()).strip("-") or "dest"
         # ids must be unique across destinations: two labels can slug to the
         # same string (e.g. "Dad" and "Dad!"), so the postcode disambiguates
@@ -514,7 +539,7 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
                 for (pl, po), (el, eo) in zip(parsed, expected, strict=True)
             ):
                 issues.append(f"{s.get('id')}: URL polygon does not round-trip to the stored polygon")
-        except (KeyError, ValueError, IndexError) as e:
+        except Exception as e:  # noqa: BLE001 — any parse failure is a URL issue
             issues.append(f"{s.get('id')}: rightmove_url unparseable ({e})")
         dest = s.get("destination", {})
         if dest.get("label"):
@@ -712,9 +737,15 @@ async def run(argv: list[str] | None = None) -> int:
             f"unreadable drive destinations config {args.config}: {e}",
         )
     if args.threshold_min:
-        destinations = apply_default_threshold(destinations, config_data, args.threshold_min)
+        destinations = apply_default_threshold(destinations, config_data, args.threshold_min * MINUTE)
     threshold_min = min(d.threshold_min for d in destinations)
-    region_km = args.region_km or threshold_min * REGION_MULTIPLIER
+    # the region must cover every destination's frontier — the MAX threshold
+    # reaches furthest (a 120-min destination needs a wider grid than a 60-min
+    # one, even when the payload's default threshold is the min)
+    if args.region_km:
+        region_km = args.region_km * KM
+    else:
+        region_km = max(d.threshold_min for d in destinations).to("hour") * (REGION_MULTIPLIER * 60.0 * KMH)
     generated_at = datetime.now(UTC).isoformat()
 
     raw_path = out_dir / RAW_FILENAME
@@ -728,11 +759,15 @@ async def run(argv: list[str] | None = None) -> int:
                         "engine_version": ENGINE_VERSION,
                         "profile": "driving-car",
                         "speed_model": "free-flow",
-                        "threshold_min": threshold_min,
+                        "threshold_min": int(threshold_min.to("minute").magnitude),
                         "cell_km": args.cell_km,
-                        "region_km": region_km,
+                        "region_km": region_km.to("km").magnitude,
                         "destinations": [
-                            {"label": d.label, "postcode": d.postcode, "threshold_min": d.threshold_min}
+                            {
+                                "label": d.label,
+                                "postcode": d.postcode,
+                                "threshold_min": int(d.threshold_min.to("minute").magnitude),
+                            }
                             for d in destinations
                         ],
                     }
@@ -767,7 +802,7 @@ async def run(argv: list[str] | None = None) -> int:
         raw = await build_raw(
             destinations,
             coords,
-            cell_km=args.cell_km,
+            cell_km=args.cell_km * KM,
             region_km=region_km,
             key=settings.ors_api_key,
             generated_at=generated_at,
@@ -777,9 +812,9 @@ async def run(argv: list[str] | None = None) -> int:
             cells = grid_cell_centers(grid)
             kept = kept_cells(
                 [(c[0], c[1], c[2], c[3]) for c in cells],
-                [c["duration_min"] for c in record["cells"]],
-                record["threshold_min"],
-                record["slack_min"],
+                [None if c["duration_min"] is None else c["duration_min"] * MINUTE for c in record["cells"]],
+                record["threshold_min"] * MINUTE,
+                record["slack_min"] * MINUTE,
             )
             rows = math.ceil((grid.bbox.lat_max - grid.bbox.lat_min) / grid.lat_deg - 1e-9)
             cols = math.ceil((grid.bbox.lon_max - grid.bbox.lon_min) / grid.lon_deg - 1e-9)

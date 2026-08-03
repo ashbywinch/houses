@@ -13,6 +13,7 @@ from tools.commute.intersection import (
 )
 from tools.commute.rightmove_url import parse_search_url
 from tools.commute.tile import Grid
+from tools.commute.units import KM
 
 NOW = "2026-08-03T09:00:00+00:00"
 
@@ -58,7 +59,7 @@ DRIVE_SEARCHES = {
 
 
 def _grid() -> Grid:
-    return common_grid(DRIVE_RAW, 4.0)
+    return common_grid(DRIVE_RAW, 4.0 * KM)
 
 
 def test_common_grid_is_the_overlap_of_drive_regions():
@@ -75,7 +76,7 @@ def test_common_grid_is_the_overlap_of_drive_regions():
 
 def test_transit_cells_use_station_buffer_predicate():
     grid = _grid()
-    kept = transit_cells([s for s in SHED["stations"] if s["kept"]], grid, 5.0)
+    kept = transit_cells([s for s in SHED["stations"] if s["kept"]], grid, 5.0 * KM)
     assert kept
     # the cell CONTAINING the Centre station is trivially within 5 km → kept
     assert (9, 10) in kept

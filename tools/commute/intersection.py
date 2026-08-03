@@ -27,6 +27,8 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pint import Quantity
+
 from tools.commute.drive_isochrone import (
     GB_BBOX,
     _components,
@@ -37,6 +39,7 @@ from tools.commute.drive_isochrone import (
 )
 from tools.commute.rightmove_url import build_search_url, parse_search_url
 from tools.commute.tile import Grid, Rect, rasterize
+from tools.commute.units import KM
 
 logger = logging.getLogger(__name__)
 
@@ -51,13 +54,19 @@ MIN_ISLAND_CELLS = 4  # drop sub-4-cell specks, same tolerance as the drive shed
 MAX_VERTICES = 500
 
 
-def common_grid(drive_raw: dict, cell_km: float = DEFAULT_CELL_KM) -> Grid:
+DEFAULT_CELL_KM_Q = DEFAULT_CELL_KM * KM
+DEFAULT_BUFFER_KM_Q = TRANSIT_BUFFER_KM * KM
+
+
+def common_grid(drive_raw: dict, cell_km: Quantity = DEFAULT_CELL_KM_Q) -> Grid:
     """One grid over the overlap of the driving regions.
 
     The intersection is a subset of every drive region, so cells outside the
     overlap can never qualify — the overlap bbox bounds the search.
+    ``cell_km`` is a pint Quantity; payload distances are bare numbers (the
+    wire format), restored to units here.
     """
-    region_km = drive_raw["metadata"]["region_km"]
+    region_km = drive_raw["metadata"]["region_km"] * KM
     boxes = [region_bbox(d["lat"], d["lon"], region_km) for d in drive_raw["destinations"]]
     if not boxes:
         raise ValueError("no drive destinations — nothing to intersect")
@@ -69,16 +78,18 @@ def common_grid(drive_raw: dict, cell_km: float = DEFAULT_CELL_KM) -> Grid:
     )
     if bbox.lat_min >= bbox.lat_max or bbox.lon_min >= bbox.lon_max:
         raise ValueError("drive regions do not overlap — the intersection is empty")
-    return Grid.from_cell_km(bbox, cell_km)
+    return Grid.from_cell_km(bbox, cell_km.to("km").magnitude)
 
 
-def transit_cells(kept_stations: list[dict], grid: Grid, buffer_km: float = TRANSIT_BUFFER_KM) -> set[tuple[int, int]]:
+def transit_cells(
+    kept_stations: list[dict], grid: Grid, buffer_km: Quantity = DEFAULT_BUFFER_KM_Q
+) -> set[tuple[int, int]]:
     """Cells whose nearest point is within ``buffer_km`` of a kept station.
 
     Exactly the predicate the transit toolchain rasterizes (``tile.rasterize``)
     — a kept cell means a house in it is within the walk/bus-to-station radius.
     """
-    return rasterize([(s["lat"], s["lon"]) for s in kept_stations], buffer_km, grid)
+    return rasterize([(s["lat"], s["lon"]) for s in kept_stations], buffer_km.to("km").magnitude, grid)
 
 
 def drive_cells(polygons: list[list[tuple[float, float]]], grid: Grid) -> set[tuple[int, int]]:
@@ -94,7 +105,7 @@ def build_payload(
     shed: dict,
     drive_raw: dict,
     drive_searches: dict,
-    cell_km: float = DEFAULT_CELL_KM,
+    cell_km: Quantity = DEFAULT_CELL_KM_Q,
     min_beds: int = 2,
     property_type: str = "houses",
     generated_at: str,
@@ -121,7 +132,7 @@ def build_payload(
                 "engine_version": ENGINE_VERSION,
                 "profile": "tfl-transit + driving-car",
                 "threshold_min": min(d["threshold_min"] for d in drive_raw["destinations"]),
-                "cell_km": cell_km,
+                "cell_km": cell_km.to("km").magnitude,
                 "transit_buffer_km": TRANSIT_BUFFER_KM,
                 "sources": ["station_shed.json", "drive_isochrone.json", "drive_searches.json"],
                 "generated_at": generated_at,
@@ -157,7 +168,7 @@ def build_payload(
             "engine_version": ENGINE_VERSION,
             "profile": "tfl-transit + driving-car",
             "threshold_min": min(thresholds),
-            "cell_km": cell_km,
+            "cell_km": cell_km.to("km").magnitude,
             "transit_buffer_km": TRANSIT_BUFFER_KM,
             "sources": ["station_shed.json", "drive_isochrone.json", "drive_searches.json"],
             "generated_at": generated_at,
@@ -193,7 +204,7 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
                 for (pl, po), (el, eo) in zip(parsed, expected, strict=True)
             ):
                 issues.append(f"{s.get('id')}: URL polygon does not round-trip to the stored polygon")
-        except (KeyError, ValueError, IndexError) as e:
+        except Exception as e:  # noqa: BLE001 — any parse failure is a URL issue
             issues.append(f"{s.get('id')}: rightmove_url unparseable ({e})")
     return issues
 
@@ -268,7 +279,7 @@ def run(argv: list[str] | None = None) -> int:
             shed=shed,
             drive_raw=drive_raw,
             drive_searches=drive_searches,
-            cell_km=args.cell_km,
+            cell_km=args.cell_km * KM,
             min_beds=args.min_beds,
             property_type=args.property_type,
             generated_at=datetime.now(UTC).isoformat(),
