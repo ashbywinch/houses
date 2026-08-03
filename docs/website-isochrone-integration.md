@@ -191,9 +191,10 @@ weeks_per_year`). Use it to make commute load a sort key:
 - **Weekly commute minutes** per person = Σ over their POIs of
   `trips_per_week × 2 × one-way duration` (best acceptable mode per POI, from
   the same gate durations). **Household weekly time** = Σ over persons.
-- `trips_per_week` is round trips (matches the cost model); a 0-trip POI (e.g.
-  Simon/Dad) contributes 0 — it is a constraint, not a load. George's school
-  POIs (5 trips/week, walk duration) contribute for real — the school run is
+- `trips_per_week` is round trips (matches the cost model); a 0-trip POI
+  contributes 0 — it is a constraint, not a load. Simon/Dad is **1 trip/week**
+  (he visits weekly), so it contributes its round trip. George's school POIs
+  (5 trips/week, walk duration) contribute for real — the school run is
   genuine weekly time.
 - **Failed or missing durations are never counted as zero.** A house whose
   commutes haven't computed shows "—" and sorts LAST (treat as +∞); a house
@@ -201,13 +202,11 @@ weeks_per_year`). Use it to make commute load a sort key:
 
 UX:
 
-- **Sort option "Weekly commute (least first)"** in the existing sort control
-  (which already has a weaker `commute` sort by best single commute — the new
-  household-total sort is the meaningful one; the old option stays until it's
-  clearly redundant). Ascending.
-- Cards show the household total in user language: "**8h 30m/week commuting**",
-  with a breakdown tooltip per person ("Simon 3h 40m · Lorena 2h 15m · George
-  1h 25m") — provenance matters (personas).
+- **Sort option "Weekly commute (least first)"** — the ONLY commute sort. The
+  existing `commute` (best-single-commute) sort option is **removed**; weekly
+  is the single commute ordering. Ascending.
+- Cards show the household total in user language: "**8h 30m/week
+  commuting**". No per-person breakdown — the family knows its own pattern.
 - Client-side over the summaries + settings (`fetchSettings` already exists);
   derivations live in `formatters/commute.ts` with unit tests.
 
@@ -392,7 +391,9 @@ per-destination durations) intersected exactly.
    set) with migration; `PATCH /api/settings/person/{name}` with server-side
    ownership; remove `PUT /api/settings/persons`; the per-property commute
    selector honours `acceptable_modes` (train-only POIs never scored by a car
-   route). (Red/green: authz matrix + selector-restriction tests first.)
+   route). Migration also fixes trip counts to reality (Simon/Dad = 1/week,
+   currently defaulted to 0). (Red/green: authz matrix + selector-restriction
+   tests first.)
 2. `SettingsView.vue` + `/settings` route + header link: family sections,
    own-vs-other rendering, child styling + school note, POI editor with mode
    checkboxes. (Red/green: component tests for own/other/child rendering first.)
@@ -405,8 +406,9 @@ per-destination durations) intersected exactly.
    derivation tests + list component tests first.)
 5. **Sort by weekly commute time**: `weeklyCommuteMinutes` derivation in
    `formatters/commute.ts` (trips/week × 2 × duration, 0-trip POIs, failed
-   commutes sort last), sort option + card display with per-person breakdown
-   tooltip. (Red/green: formatter tests + sort component tests first.)
+   commutes sort last), the "Weekly commute (least first)" sort option — the
+   ONLY commute sort; the existing best-commute sort option is removed — and
+   the card total. (Red/green: formatter tests + sort component tests first.)
 
 ### Phase 2 — generation + map
 
@@ -467,8 +469,8 @@ per-destination durations) intersected exactly.
    from the loosest family ceiling down to ~10 min.
 8. **Weekly commute sort**: "Weekly commute (least first)" sorts by household
    Σ trips_per_week × round-trip duration; 0-trip POIs contribute 0; houses
-   with uncomputed commutes sort last; cards show the total + per-person
-   breakdown.
+   with uncomputed commutes sort last; cards show the total only. Weekly is
+   the only commute sort option — the old best-commute sort is removed.
 9. `GET /commute/commute_map.html` renders the map with per-commute layers and
    the "Where we could live" layer.
 10. `make test` green; red/green TDD throughout (each phase lands with its red
