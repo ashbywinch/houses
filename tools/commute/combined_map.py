@@ -296,19 +296,21 @@ def main(argv: list[str] | None = None) -> int:
         leaflet_js = (vendor / "leaflet.js").read_text()
         leaflet_css = (vendor / "leaflet.css").read_text()
         icons = {name: _data_uri(vendor / name) for name in _CSS_IMAGES + _JS_ICONS}
-    except (json.JSONDecodeError, OSError) as e:
+        # build_html indexes the payloads unconditionally — a structurally
+        # wrong (but valid-JSON) artifact raises KeyError/TypeError here
+        html = build_html(
+            union,
+            drive,
+            leaflet_js=leaflet_js,
+            leaflet_css=leaflet_css,
+            icons=icons,
+            intersection=intersection,
+        )
+    except (json.JSONDecodeError, OSError, KeyError, TypeError) as e:
         return _fail(
             "The commute data or map assets are unreadable — regenerate them with 'make commute-drive'.",
             f"unreadable input for the combined map: {e}",
         )
-    html = build_html(
-        union,
-        drive,
-        leaflet_js=leaflet_js,
-        leaflet_css=leaflet_css,
-        icons=icons,
-        intersection=intersection,
-    )
     write_map(html, args.out)
     print(f"combined commute map → {args.out}")
     return 0

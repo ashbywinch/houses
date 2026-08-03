@@ -599,3 +599,36 @@ def test_validate_payload_catches_destination_lost():
     payload = raw_to_searches(_raw_payload(), generated_at=NOW)
     payload["searches"] = []
     assert any("Dad" in i for i in validate_payload(payload))
+
+
+def test_validate_payload_flags_malformed_polygon_without_crashing():
+    """A non-list polygon (hand-edited or partial artifact) must be flagged,
+    not crash the validator with a TypeError."""
+    payload = raw_to_searches(_raw_payload(), generated_at=NOW)
+    payload["searches"][0]["polygon"] = "not a polygon"
+    issues = validate_payload(payload)
+    assert any("malformed" in i for i in issues)
+
+
+def test_combined_map_fails_cleanly_on_malformed_payload(tmp_path):
+    """main() must exit with the two-tier message, not a KeyError traceback,
+    when a payload is valid JSON but structurally wrong."""
+    import json
+
+    from tools.commute.combined_map import main as combined_main
+
+    union_path = tmp_path / "union.json"
+    union_path.write_text(json.dumps({"components": []}))
+    drive_path = tmp_path / "drive.json"
+    drive_path.write_text(json.dumps({"searches": [{"id": "x"}]}))  # missing keys
+
+    code = combined_main(
+        [
+            "--union", str(union_path),
+            "--drive", str(drive_path),
+            "--intersection", str(tmp_path / "none.json"),
+            "--out", str(tmp_path / "map.html"),
+        ]
+    )
+    assert code == 1
+    assert not (tmp_path / "map.html").exists()

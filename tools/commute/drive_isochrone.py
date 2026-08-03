@@ -521,26 +521,32 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
         issues.append(f"metadata count {metadata.get('count')} != {len(searches)} searches")
     labels_in_searches: set[str] = set()
     for s in searches:
-        poly = s.get("polygon", [])
-        if len(poly) < 4:
-            issues.append(f"{s.get('id')}: polygon has {len(poly)} vertices (need ≥ 4)")
-        elif poly[0] == poly[-1]:
-            issues.append(f"{s.get('id')}: polygon is closed — loops must stay open (the URL builder closes them)")
-        if len(poly) > max_vertices:
-            issues.append(f"{s.get('id')}: {len(poly)} vertices exceeds the {max_vertices} cap")
-        for lat, lon in poly:
-            if not GB_BBOX.contains(lat, lon):
-                issues.append(f"{s.get('id')}: vertex ({lat}, {lon}) outside the GB bounding box")
-        try:
-            parsed = parse_search_url(s.get("rightmove_url", ""))
-            expected = poly + [poly[0]]
-            if len(parsed) != len(expected) or any(
-                abs(pl - el) > 5e-6 or abs(po - eo) > 5e-6
-                for (pl, po), (el, eo) in zip(parsed, expected, strict=True)
-            ):
-                issues.append(f"{s.get('id')}: URL polygon does not round-trip to the stored polygon")
-        except Exception as e:  # noqa: BLE001 — any parse failure is a URL issue
-            issues.append(f"{s.get('id')}: rightmove_url unparseable ({e})")
+        poly = s.get("polygon")
+        malformed = not isinstance(poly, list) or not all(
+            isinstance(p, (list, tuple)) and len(p) == 2 for p in poly
+        )
+        if malformed:
+            issues.append(f"{s.get('id')}: polygon is malformed (expected [lat, lon] pairs)")
+        else:
+            if len(poly) < 4:
+                issues.append(f"{s.get('id')}: polygon has {len(poly)} vertices (need ≥ 4)")
+            elif poly[0] == poly[-1]:
+                issues.append(f"{s.get('id')}: polygon is closed — loops must stay open (the URL builder closes them)")
+            if len(poly) > max_vertices:
+                issues.append(f"{s.get('id')}: {len(poly)} vertices exceeds the {max_vertices} cap")
+            for lat, lon in poly:
+                if not GB_BBOX.contains(lat, lon):
+                    issues.append(f"{s.get('id')}: vertex ({lat}, {lon}) outside the GB bounding box")
+            try:
+                parsed = parse_search_url(s.get("rightmove_url", ""))
+                expected = poly + [poly[0]]
+                if len(parsed) != len(expected) or any(
+                    abs(pl - el) > 5e-6 or abs(po - eo) > 5e-6
+                    for (pl, po), (el, eo) in zip(parsed, expected, strict=True)
+                ):
+                    issues.append(f"{s.get('id')}: URL polygon does not round-trip to the stored polygon")
+            except Exception as e:  # noqa: BLE001 — any parse failure is a URL issue
+                issues.append(f"{s.get('id')}: rightmove_url unparseable ({e})")
         dest = s.get("destination", {})
         if dest.get("label"):
             labels_in_searches.add(dest["label"])
@@ -552,9 +558,10 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
     for s in searches:
         by_label.setdefault(s.get("destination", {}).get("label"), []).append(s)
     for group in by_label.values():
+        valid = [o for o in group if isinstance(o.get("polygon"), list) and len(o["polygon"]) >= 3]
         for s in group:
             d = s["destination"]
-            if not any(point_in_polygon(d["lat"], d["lon"], other["polygon"]) for other in group):
+            if not any(point_in_polygon(d["lat"], d["lon"], other["polygon"]) for other in valid):
                 issues.append(f"{s.get('id')}: destination centre outside every polygon of its shed")
     return issues
 
