@@ -206,7 +206,8 @@ def write_map_html(payload: dict, searches: list[dict], out_dir: str | Path) -> 
 <script>
 const rects = __RECTS__;
 const outlines = __OUTLINES__;
-const map = L.map('map').fitBounds(L.latLngBounds(rects.flatMap(r => r.coords)));
+const map = L.map('map');
+if (rects.length) { map.fitBounds(L.latLngBounds(rects.flatMap(r => r.coords))); }
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 18}).addTo(map);
 for (const o of outlines) {
   L.polygon(o, {color: '#d33', weight: 3, fill: false}).addTo(map);

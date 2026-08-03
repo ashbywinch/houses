@@ -223,10 +223,39 @@ async def test_is_transient_error_body_classification():
     assert TflClient._is_transient_error_body({"_cached_status": 429}) is True
     assert TflClient._is_transient_error_body({"_cached_status": 503}) is True
     assert TflClient._is_transient_error_body({"httpStatusCode": 500}) is True
+    assert TflClient._is_transient_error_body({"_cached_status": 401}) is True  # key expiry
+    assert TflClient._is_transient_error_body({"_cached_status": 403}) is True
+    assert TflClient._is_transient_error_body({"_cached_status": 409}) is True  # planner outage
     assert TflClient._is_transient_error_body({"_cached_status": 404}) is False  # deterministic no-route
     assert TflClient._is_transient_error_body({"httpStatusCode": 404}) is False
     assert TflClient._is_transient_error_body({"_cached_status": 300}) is False
     assert TflClient._is_transient_error_body({"journeys": []}) is False
+
+
+@pytest.mark.asyncio
+async def test_cached_api_call_does_not_cache_409_or_401(isolated_cache):
+    # Auth failures (401/403) and planner outages (409) are transient — they
+    # must not poison the cache like a genuine 404 no-route does.
+    url_409 = f"{URL}/a"
+    url_401 = f"{URL}/b"
+
+    def client_409(**kwargs):
+        return httpx.AsyncClient(
+            transport=CachingTransport(inner=_FakeInner(httpx.Response(409, json={"message": "planner down"})))
+        )
+
+    with pytest.raises(HttpError):
+        await TflClient._cached_api_call(url_409, AUTH_PARAMS, _client_factory=client_409)
+    assert get_cached("GET", url_409, STRIPPED_PARAMS, None) is None  # 409 NOT cached
+
+    def client_401(**kwargs):
+        return httpx.AsyncClient(
+            transport=CachingTransport(inner=_FakeInner(httpx.Response(401, json={"message": "bad key"})))
+        )
+
+    with pytest.raises(HttpError):
+        await TflClient._cached_api_call(url_401, AUTH_PARAMS, _client_factory=client_401)
+    assert get_cached("GET", url_401, STRIPPED_PARAMS, None) is None  # 401 NOT cached
 
 
 # ── _cached_with_retry: retry semantics ──────────────────────────────

@@ -366,7 +366,11 @@ class TflClient:
         for key in ("_cached_status", "httpStatusCode"):
             status = data.get(key)
             if isinstance(status, int):
-                return status == 429 or status >= 500
+                # Poison: auth failures (401/403), planner outages (409), rate
+                # limits (429) and server errors are transient — they must not
+                # be served from cache. Only genuine no-route (404) bodies are
+                # deterministic.
+                return status in (401, 403, 409, 429) or status >= 500
         return False
 
     @staticmethod
@@ -410,8 +414,14 @@ class TflClient:
             # body would poison the route and make retries non-genuine.
             if resp.status_code < 300:
                 set_cached("GET", url, cache_params, None, data)
-            elif resp.status_code < 500 and resp.status_code != 429:
+            elif 300 <= resp.status_code < 400:
                 set_cached("GET", url, cache_params, None, {"_cached_status": resp.status_code, "_cached_body": data})
+            elif resp.status_code == 404:
+                # 404 "cannot route this station" is genuinely deterministic —
+                # re-hitting the endpoint for the same impossible request
+                # wastes calls. Every OTHER 4xx is transient-ish (401/403 key
+                # expiry, 409 planner outage) and must not poison the cache.
+                set_cached("GET", url, cache_params, None, {"_cached_status": 404, "_cached_body": data})
             if resp.status_code == 429 or (500 <= resp.status_code < 600):
                 raise HttpError(resp.status_code, body=str(data))
             if 400 <= resp.status_code < 500:
