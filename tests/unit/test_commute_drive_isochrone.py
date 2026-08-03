@@ -282,9 +282,9 @@ async def test_validate_fails_cleanly_on_corrupt_searches(tmp_path):
     assert code == 1
 
 
-async def test_fetch_matrix_does_not_retry_non_transient(monkeypatch):
+async def test_fetch_matrix_does_not_retry_non_transient():
     """A 401/400 can never succeed on retry — fail fast with one call, no
-    2s stall and no wasted request."""
+    2s stall and no wasted request. DI (client kwarg), not monkeypatching."""
     import httpx
 
     from tools.commute.drive_isochrone import fetch_matrix
@@ -302,9 +302,8 @@ async def test_fetch_matrix_does_not_retry_non_transient(monkeypatch):
             calls["n"] += 1
             return httpx.Response(401, request=httpx.Request("POST", url))
 
-    monkeypatch.setattr("houses.api_cache.cached_async_client", lambda **kw: FakeClient())
     with pytest.raises(httpx.HTTPStatusError):
-        await fetch_matrix({"locations": []}, key="k")
+        await fetch_matrix({"locations": []}, key="k", client=FakeClient())
     assert calls["n"] == 1
 
 

@@ -43,6 +43,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import httpx
 from pint import Quantity
@@ -217,7 +218,7 @@ def parse_durations(data: dict, count: int) -> list[Quantity | None]:
     return out
 
 
-async def fetch_matrix(body: dict, *, key: str, timeout: float = 120.0) -> dict:
+async def fetch_matrix(body: dict, *, key: str, timeout: float = 120.0, client: Any = None) -> dict:
     """POST one matrix request through the disk cache; retry transient errors.
 
     Errors are never cached (the cache whitelists 2xx/3xx/404), so a retry is
@@ -225,6 +226,10 @@ async def fetch_matrix(body: dict, *, key: str, timeout: float = 120.0) -> dict:
     transient statuses (429/5xx) and network/timeout failures are retried: a
     400/401/403 (malformed request, bad key) can never succeed on retry and
     fails fast instead of burning a call and stalling ~2 s.
+
+    ``client`` is injectable for tests (DI, not monkeypatching): an async
+    context manager exposing ``post(url, json=, headers=)``; default is the
+    disk-cached httpx client.
     """
     from houses.api_cache import cached_async_client
 
@@ -232,8 +237,9 @@ async def fetch_matrix(body: dict, *, key: str, timeout: float = 120.0) -> dict:
     transient = (429, 500, 502, 503, 504)
     for attempt in (1, 2):
         try:
-            async with cached_async_client(timeout=timeout) as client:
-                resp = await client.post(ORS_MATRIX_URL, json=body, headers=headers)
+            cm = client if client is not None else cached_async_client(timeout=timeout)
+            async with cm as http:
+                resp = await http.post(ORS_MATRIX_URL, json=body, headers=headers)
                 if resp.status_code in transient and attempt == 1:
                     await asyncio.sleep(2.0 * attempt)
                     continue
