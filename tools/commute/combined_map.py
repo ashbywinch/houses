@@ -280,11 +280,21 @@ def main(argv: list[str] | None = None) -> int:
         except (json.JSONDecodeError, OSError):
             print("The saved all-commutes data is unreadable — showing the map without it.", file=sys.stderr)
             logger.warning("%s unreadable — omitting the intersection layer", intersection_path)
+    try:
+        union = json.loads(union_path.read_text())
+        drive = json.loads(drive_path.read_text())
+        leaflet_js = (vendor / "leaflet.js").read_text()
+        leaflet_css = (vendor / "leaflet.css").read_text()
+    except (json.JSONDecodeError, OSError) as e:
+        return _fail(
+            "The commute data or map assets are unreadable — regenerate them with 'make commute-drive'.",
+            f"unreadable input for the combined map: {e}",
+        )
     html = build_html(
-        json.loads(union_path.read_text()),
-        json.loads(drive_path.read_text()),
-        leaflet_js=(vendor / "leaflet.js").read_text(),
-        leaflet_css=(vendor / "leaflet.css").read_text(),
+        union,
+        drive,
+        leaflet_js=leaflet_js,
+        leaflet_css=leaflet_css,
         icons=icons,
         intersection=intersection,
     )

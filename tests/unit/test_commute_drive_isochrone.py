@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import math
-from pathlib import Path
 
 import pytest
 
@@ -202,22 +201,67 @@ def test_drive_map_html_escapes_user_labels():
 async def test_run_does_not_write_when_validation_fails(tmp_path):
     """Regression: run() wrote the searches BEFORE validating, so a failing
     payload (e.g. a destination whose shed vanished) left an invalid committed
-    artifact on disk. Validation must gate the write."""
+    artifact on disk. Validation must gate the write.
+
+    Self-contained: a synthetic raw payload whose metadata matches the (also
+    synthetic) config, so run() takes the offline reuse path — no geocoding,
+    no API calls, no coupling to committed data.
+    """
     import json
 
     from tools.commute.drive_isochrone import run as drive_run
 
-    # reuse the committed raw payload (its metadata matches the real config,
-    # so run() takes the offline reuse path — no geocoding, no API calls)
-    raw = json.loads(Path("data/commute/drive_isochrone.json").read_text())
-    # blank Bracknell's cells: raw_to_searches then emits no Bracknell search
-    # and validate_payload reports the lost destination
-    raw["destinations"][1]["cells"] = []
+    cfg = tmp_path / "destinations.json"
+    cfg.write_text(
+        json.dumps(
+            {
+                "threshold_min": 90,
+                "destinations": [
+                    {"label": "Dad", "postcode": "OX7 5GZ"},
+                    {"label": "Bracknell", "postcode": "RG12 8YA"},
+                ],
+            }
+        )
+    )
+    grid = {"lat_min": 51.0, "lat_max": 51.2, "lon_min": -2.0, "lon_max": -1.76}
+    cells = [
+        {"r": r, "c": c, "lat": 51.0 + (r + 0.5) * 0.05, "lon": -2.0 + (c + 0.5) * 0.08, "duration_min": 10.0}
+        for r in range(2)
+        for c in range(2)
+    ]
+    raw = {
+        "metadata": {
+            "engine_version": "drive-isochrone-v1",
+            "profile": "driving-car",
+            "speed_model": "free-flow",
+            "threshold_min": 90,
+            "cell_km": 4.0,
+            "region_km": 153.0,
+            "destinations": [
+                {"label": "Dad", "postcode": "OX7 5GZ", "threshold_min": 90},
+                {"label": "Bracknell", "postcode": "RG12 8YA", "threshold_min": 90},
+            ],
+            "generated_at": NOW,
+            "count": 2,
+        },
+        "destinations": [
+            {
+                "label": "Dad", "postcode": "OX7 5GZ", "lat": 51.1, "lon": -1.88, "threshold_min": 90,
+                "cell_km": 4.0, "slack_min": 2.42, "grid": grid, "cells": cells,
+            },
+            # Bracknell's shed is EMPTY: raw_to_searches emits no Bracknell
+            # search and validate_payload reports the lost destination
+            {
+                "label": "Bracknell", "postcode": "RG12 8YA", "lat": 51.1, "lon": -1.88, "threshold_min": 90,
+                "cell_km": 4.0, "slack_min": 2.42, "grid": grid, "cells": [],
+            },
+        ],
+    }
     out_dir = tmp_path / "out"
     out_dir.mkdir()
     (out_dir / "drive_isochrone.json").write_text(json.dumps(raw))
 
-    code = await drive_run(["--out-dir", str(out_dir)])
+    code = await drive_run(["--config", str(cfg), "--out-dir", str(out_dir)])
     assert code == 1
     assert not (out_dir / "drive_searches.json").exists()
     assert not (out_dir / "drive_searches.txt").exists()

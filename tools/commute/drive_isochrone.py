@@ -584,7 +584,9 @@ def _map_html(searches: dict) -> str:
 const outlines = __OUTLINES__;
 const markers = __MARKERS__;
 const map = L.map('map');
-if (outlines.length) { map.fitBounds(L.latLngBounds(outlines.flat())); }
+const all = [];
+for (const o of outlines) { for (const p of o) { all.push(p); } }
+if (all.length) { map.fitBounds(L.latLngBounds(all)); }
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 18}).addTo(map);
 for (const o of outlines) {
   L.polygon(o, {color: '#d33', weight: 3, fillOpacity: 0.15}).addTo(map);

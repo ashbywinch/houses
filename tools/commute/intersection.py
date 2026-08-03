@@ -251,10 +251,20 @@ def run(argv: list[str] | None = None) -> int:
             f"intersection input {path} not found (run '{hint}')",
         )
 
+    try:
+        shed = json.loads(Path(args.shed).read_text())
+        drive_raw = json.loads(Path(args.drive_raw).read_text())
+        drive_searches = json.loads(Path(args.drive_searches).read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        return _fail(
+            "Commute data is unreadable — regenerate it with 'make commute-drive'.",
+            f"unreadable intersection input: {e}",
+        )
+
     payload = build_payload(
-        shed=json.loads(Path(args.shed).read_text()),
-        drive_raw=json.loads(Path(args.drive_raw).read_text()),
-        drive_searches=json.loads(Path(args.drive_searches).read_text()),
+        shed=shed,
+        drive_raw=drive_raw,
+        drive_searches=drive_searches,
         cell_km=args.cell_km,
         min_beds=args.min_beds,
         property_type=args.property_type,
