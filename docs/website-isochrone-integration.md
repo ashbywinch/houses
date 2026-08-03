@@ -95,11 +95,15 @@ Rules:
   - A POI with no acceptable mode constrains nothing at region level.
   - School POIs (empty address) stay per-property: no address → no drawn
     area, whatever the modes.
-- **The per-property gate must agree with the map area.** `acceptable_modes`
-  also restricts the app's per-property commute selector (a POI whose modes are
-  `["train"]` must never be scored by a car route). Region and gate share one
-  source of truth — otherwise a house inside "where we could live" could be
-  rejected by the gate or vice versa.
+- **The per-property gate must agree with the map area — and filter the list.**
+  `acceptable_modes` restricts the app's per-property commute selector (a POI
+  whose modes are `["train"]` must never be scored by a car route; a
+  train+car POI is scored by the better mode, matching "whichever is more
+  convenient"). The gate's per-POI durations feed the per-person **worst
+  commute**, which the property list auto-filters on (see Main-page commute
+  filter). Region, gate, and list share one source of truth — otherwise a
+  house inside "where we could live" could be rejected by the gate or shown
+  with the wrong commute.
 - **Kids are a special case.** A child has no login, so `editable_by` on the
   `Person` names the adults who may edit them (superuser always allowed). Default
   for a child: all adults. George's school POIs have empty addresses → no drawn
@@ -146,6 +150,37 @@ Affordances:
   layer — the map generator accepts the query param.
 - **Generate is superuser-only.** The rest of the family can view status and the
   map. Rationale: generation burns free-API allocation and takes the machine.
+
+### Main-page commute filter
+
+The acceptable-modes setting does real work here — it **filters the houses**.
+
+Definitions:
+
+- **Per-person worst commute** of a house = max duration over that person's
+  POIs, each computed with its acceptable modes (best acceptable mode per POI;
+  a person with no POIs constrains nothing). Derived client-side from the
+  existing `commutes` summaries — no new list payload field.
+- **Ceiling** = the person's `fine_max_minutes` (the existing "acceptable"
+  band, now documented as the hard max; the isochrone region thresholds stay
+  separate and looser).
+
+Always-on auto-filter (no user action):
+
+- A house is hidden by default if ANY person's worst commute exceeds their
+  ceiling — "pointless if anyone's doesn't work".
+- Never hide silently: the list shows "N houses hidden by commute ceilings"
+  with a peek toggle (off by default). Silent filtering would erode trust
+  (personas: everyone is suspicious of calculations).
+
+Narrowing control on the main page:
+
+- **"Worst commute under X minutes"** — slider/number input whose range goes
+  from the **loosest family ceiling** (the worst commute in anyone's settings)
+  down to a short value (~10 min). Default position = loosest ceiling (no
+  tightening beyond the auto-filter); dragging down filters the household's
+  worst commute < X.
+- The control is client-side over the summaries: instant, no round-trip.
 
 ### User language — what the UI says vs what the code says
 
@@ -335,6 +370,10 @@ per-destination durations) intersected exactly.
 3. **User-language sweep**: every new UI string checked against the naming
    table; map layer labels renamed to "Train: …"/"Drive to …". (Red/green:
    a test asserting no UI string contains "isochrone".)
+4. **Worst-commute auto-filter + "worst commute < X" control on the property
+   list**: per-person worst commute vs `fine_max_minutes` ceiling, hidden
+   count + peek, slider from loosest ceiling down. (Red/green: filter
+   derivation tests + list component tests first.)
 
 ### Phase 2 — generation + map
 
@@ -369,6 +408,7 @@ per-destination durations) intersected exactly.
 | Strict intersection (AND of every POI's constraint area) | "Where we could live" must satisfy everyone; UI shows which POIs feed it so a shrinking area is explainable; empty state handled explicitly |
 | Acceptable modes are a set (train/car/walk); ALL chosen modes are drawn; walk is the only exception | Walk ⊆ car (redundant when driving), but walk ⊄ train (a property can be walkable with no usable public transport) — so the walk area is drawn only when car is not chosen; train is always drawn when chosen, even alongside car |
 | `acceptable_modes` explicit, never inferred | The app's per-property selector is about route choice, not acceptability |
+| Always-on commute ceiling filter + optional tightening slider | Settings ceilings are the hard floor ("pointless if anyone's doesn't work"); the "worst commute < X" slider only tightens from the loosest family ceiling; hidden count + peek keeps filtering visible (trust) |
 | Runtime state in `generation.json`, artifacts stay committed | Reproducibility/reviewability of artifacts unchanged; runtime state is ephemeral |
 | **Risk: 50-min first run vs uvicorn `--reload`** | Detached runner + startup auto-respawn; the toolchain's checkpoints make resume safe |
 | **Risk: ORS free tier (500/day, non-commercial)** | Batch uses ~12 calls; regeneration only on settings change; warn in the dialog |
@@ -387,7 +427,11 @@ per-destination durations) intersected exactly.
    WebSocket deltas, not a completion ping.
 6. **User language**: no UI string (settings page, dialogs, map labels)
    contains "isochrone", "transit", or "shed" (enforced by a test).
-7. `GET /commute/commute_map.html` renders the map with per-commute layers and
+7. **Commute filter**: houses whose per-person worst commute exceeds the
+   person's `fine_max_minutes` ceiling are hidden by default (with a visible
+   hidden count + peek); the main page's "worst commute < X" control narrows
+   from the loosest family ceiling down to ~10 min.
+8. `GET /commute/commute_map.html` renders the map with per-commute layers and
    the "Where we could live" layer.
-8. `make test` green; red/green TDD throughout (each phase lands with its red
+9. `make test` green; red/green TDD throughout (each phase lands with its red
    tests written first, then green).
