@@ -815,7 +815,15 @@ async def run(argv: list[str] | None = None) -> int:
                 key=settings.ors_api_key,
                 generated_at=generated_at,
             )
-        except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException) as e:
+        except (
+            httpx.HTTPStatusError,
+            httpx.RequestError,
+            httpx.TimeoutException,
+            json.JSONDecodeError,
+            ValueError,
+        ) as e:
+            # a 200 with a malformed body (gateway HTML, truncated response)
+            # raises from resp.json()/parse_durations, not from httpx
             return _fail(
                 "The commute map service didn't respond — try again in a minute.",
                 f"ORS matrix batch failed: {e}",

@@ -249,7 +249,7 @@ def run(argv: list[str] | None = None) -> int:
             payload = json.loads(out_path.read_text())
         except (json.JSONDecodeError, OSError) as e:
             return _fail(
-                "The saved all-commutes data is unreadable — regenerate it with 'make commute-drive'.",
+                "The saved all-commutes data is unreadable — regenerate it with 'make commute-intersection'.",
                 f"unreadable {out_path} for --validate: {e}",
             )
         issues = validate_payload(payload)
