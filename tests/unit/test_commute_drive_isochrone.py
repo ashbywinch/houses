@@ -30,6 +30,12 @@ from tools.commute.units import KM, MINUTE
 NOW = "2026-08-03T09:00:00+00:00"
 
 
+async def _fake_geocode(postcode: str) -> tuple[float, float]:
+    """Fixed coords per postcode — the synthetic raws store these, so the
+    offline reuse path matches (DI, not monkeypatching)."""
+    return {"OX7 5GZ": (51.1, -1.88), "RG12 8YA": (51.1, -1.88)}.get(postcode, (51.1, -1.88))
+
+
 def _grid(
     rows: int, cols: int, lat0: float = 51.0, lon0: float = -2.0, lat_deg: float = 0.05, lon_deg: float = 0.08
 ) -> Grid:
@@ -191,6 +197,73 @@ def test_parse_durations_seconds_to_minutes_preserves_nulls():
     assert out[0] is not None and out[0].to("minute").magnitude == pytest.approx(51.5095)
     assert out[1] is None
     assert out[2] is not None and out[2].to("minute").magnitude == 0.0
+
+
+def test_config_signature_fingerprints_coordinates():
+    """The reuse guard must include the geocoded coordinates: a postcode
+    whose geocoding changed must regenerate, not silently reuse the old
+    grid centred on the old location."""
+    import json as _json
+
+    from tools.commute.drive_isochrone import config_signature
+
+    raw = _json.loads(
+        _json.dumps(
+            {
+                "metadata": {
+                    "engine_version": "drive-isochrone-v1",
+                    "profile": "driving-car",
+                    "threshold_min": 90,
+                    "cell_km": 4.0,
+                    "region_km": 153.0,
+                    "destinations": [{"label": "Dad", "postcode": "OX7 5GZ", "threshold_min": 90}],
+                },
+                "destinations": [{"label": "Dad", "postcode": "OX7 5GZ", "lat": 51.1, "lon": -1.88, "cells": []}],
+            }
+        )
+    )
+    assert config_signature(raw)["coords"] == {"Dad": (51.1, -1.88)}
+
+
+async def test_changed_geocode_rejects_raw_reuse(tmp_path, capsys):
+    """A raw built around the OLD geocoded coordinates must not be reused
+    when the postcode now geocodes elsewhere."""
+    import json as _json
+
+    from tools.commute.drive_isochrone import run as drive_run
+
+    cfg = tmp_path / "destinations.json"
+    cfg.write_text(_json.dumps({"threshold_min": 90, "destinations": [{"label": "Dad", "postcode": "OX7 5GZ"}]}))
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    raw = {
+        "metadata": {
+            "engine_version": "drive-isochrone-v1",
+            "profile": "driving-car",
+            "speed_model": "free-flow",
+            "threshold_min": 90,
+            "cell_km": 4.0,
+            "region_km": 153.0,
+            "destinations": [{"label": "Dad", "postcode": "OX7 5GZ", "threshold_min": 90}],
+        },
+        "destinations": [{"label": "Dad", "postcode": "OX7 5GZ", "lat": 51.1, "lon": -1.88, "threshold_min": 90,
+                          "cell_km": 4.0, "slack_min": 2.42, "grid": {}, "cells": []}],
+    }
+    (out_dir / "drive_isochrone.json").write_text(_json.dumps(raw))
+
+    async def _moved_geocode(postcode):  # geocoder now resolves elsewhere
+        return (51.5, -2.0)
+
+    from houses.config import settings
+
+    saved_key = settings.ors_api_key
+    settings.ors_api_key = ""  # save/restore, the conftest's own isolation pattern
+    try:
+        code = await drive_run(["--config", str(cfg), "--out-dir", str(out_dir)], geocoder=_moved_geocode)
+    finally:
+        settings.ors_api_key = saved_key
+    assert code == 1  # no ORS key → the regenerate path fails cleanly
+    assert "regenerating" in capsys.readouterr().err
 
 
 def test_parse_durations_wrong_row_count_raises():
@@ -372,7 +445,7 @@ async def test_run_fails_cleanly_on_malformed_raw_payload(tmp_path):
     out_dir.mkdir()
     (out_dir / "drive_isochrone.json").write_text(json.dumps({"destinations": []}))  # no metadata
 
-    code = await drive_run(["--config", str(cfg), "--out-dir", str(out_dir)])
+    code = await drive_run(["--config", str(cfg), "--out-dir", str(out_dir)], geocoder=_fake_geocode)
     assert code == 1
     assert not (out_dir / "drive_searches.json").exists()
 
@@ -440,7 +513,7 @@ async def test_run_does_not_write_when_validation_fails(tmp_path):
     out_dir.mkdir()
     (out_dir / "drive_isochrone.json").write_text(json.dumps(raw))
 
-    code = await drive_run(["--config", str(cfg), "--out-dir", str(out_dir)])
+    code = await drive_run(["--config", str(cfg), "--out-dir", str(out_dir)], geocoder=_fake_geocode)
     assert code == 1
     assert not (out_dir / "drive_searches.json").exists()
     assert not (out_dir / "drive_searches.txt").exists()

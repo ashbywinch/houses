@@ -365,6 +365,11 @@ def config_signature(raw: dict) -> dict:
     destinations/params) must not be reused — same guard the transit shed uses.
     """
     meta = raw["metadata"]
+    coords = {
+        rec["label"]: (rec["lat"], rec["lon"])
+        for rec in raw.get("destinations", [])
+        if isinstance(rec, dict) and "label" in rec and "lat" in rec and "lon" in rec
+    }
     return {
         "engine_version": meta["engine_version"],
         "profile": meta["profile"],
@@ -372,6 +377,10 @@ def config_signature(raw: dict) -> dict:
         "cell_km": meta["cell_km"],
         "region_km": meta["region_km"],
         "destinations": meta["destinations"],
+        # a postcode whose geocoding changed (geocoder data update, centroid
+        # vs rooftop) must regenerate — never silently reuse a grid centred on
+        # the old coordinates
+        "coords": coords,
     }
 
 
@@ -743,7 +752,9 @@ def _fail(user_message: str, dev_detail: str) -> int:
     return 1
 
 
-async def run(argv: list[str] | None = None) -> int:
+async def run(argv: list[str] | None = None, *, geocoder=None) -> int:
+    """``geocoder`` is injectable for tests (DI): ``async (postcode) ->
+    (lat, lon)``, default ``_geocode``."""
     parser = argparse.ArgumentParser(description="Build driving isochrone search URLs (one-off ORS matrix batch).")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
     parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR))
@@ -817,6 +828,16 @@ async def run(argv: list[str] | None = None) -> int:
 
     raw_path = out_dir / RAW_FILENAME
     raw: dict | None = None
+    if geocoder is None:
+        geocoder = _geocode
+    try:
+        coords = [await geocoder(d.postcode) for d in destinations]
+    except RuntimeError as e:
+        return _fail(
+            "One of the commute destinations can't be found on the map — check its postcode and try again.",
+            f"geocoding failed for a drive destination: {e}",
+        )
+
     if raw_path.exists() and not args.force:
         prev = _load_raw(raw_path)
         if prev is not None:
@@ -844,7 +865,11 @@ async def run(argv: list[str] | None = None) -> int:
                             }
                             for d in destinations
                         ],
-                    }
+                    },
+                    "destinations": [
+                        {"label": d.label, "lat": lat, "lon": lon}
+                        for d, (lat, lon) in zip(destinations, coords, strict=True)
+                    ],
                 }
             )
             if prev_signature == expected:
@@ -865,13 +890,6 @@ async def run(argv: list[str] | None = None) -> int:
                 "The commute map can't be generated without the routing API key — add it to your environment "
                 "configuration and try again.",
                 "HEIGIT_API_KEY unset — set it in .env (it populates settings.ors_api_key, the OpenRouteService key)",
-            )
-        try:
-            coords = [await _geocode(d.postcode) for d in destinations]
-        except RuntimeError as e:
-            return _fail(
-                "One of the commute destinations can't be found on the map — check its postcode and try again.",
-                f"geocoding failed for a drive destination: {e}",
             )
         try:
             raw = await build_raw(
