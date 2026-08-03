@@ -513,8 +513,13 @@ def test_point_in_polygon():
     square = [(51.0, -2.0), (51.0, -1.9), (51.1, -1.9), (51.1, -2.0)]
     assert point_in_polygon(51.05, -1.95, square)
     assert not point_in_polygon(51.2, -1.95, square)
-    # boundary counts as inside (conservative: never under-cover)
-    assert point_in_polygon(51.0, -1.95, square)
+    # boundary counts as inside (conservative: never under-cover) — plain ray
+    # casting returns False for on-edge/vertex points, so these pin the
+    # on-segment check
+    assert point_in_polygon(51.0, -1.95, square)  # south edge
+    assert point_in_polygon(51.05, -1.9, square)  # east edge
+    assert point_in_polygon(51.1, -1.95, square)  # north edge
+    assert point_in_polygon(51.0, -1.9, square)  # a vertex
 
 
 # ── validation ───────────────────────────────────────────────────────

@@ -271,7 +271,6 @@ def main(argv: list[str] | None = None) -> int:
                 f"combined map input {path} not found (run '{hint}')",
             )
     vendor = Path(args.vendor)
-    icons = {name: _data_uri(vendor / name) for name in _CSS_IMAGES + _JS_ICONS}
     intersection_path = Path(args.intersection)
     intersection = None
     if intersection_path.exists():
@@ -285,6 +284,7 @@ def main(argv: list[str] | None = None) -> int:
         drive = json.loads(drive_path.read_text())
         leaflet_js = (vendor / "leaflet.js").read_text()
         leaflet_css = (vendor / "leaflet.css").read_text()
+        icons = {name: _data_uri(vendor / name) for name in _CSS_IMAGES + _JS_ICONS}
     except (json.JSONDecodeError, OSError) as e:
         return _fail(
             "The commute data or map assets are unreadable — regenerate them with 'make commute-drive'.",

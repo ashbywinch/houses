@@ -448,12 +448,20 @@ def point_in_polygon(lat: float, lon: float, poly: list[tuple[float, float]]) ->
 
     Conservative (boundary-inclusive) matches the toolchain's over-coverage
     bias: a destination sitting exactly on the outline is never declared out.
+    The on-segment check is what makes this true — plain ray casting returns
+    False for points exactly on an edge or vertex.
     """
     inside = False
     n = len(poly)
     for i in range(n):
         lat1, lon1 = poly[i]
         lat2, lon2 = poly[(i + 1) % n]
+        if (
+            min(lat1, lat2) <= lat <= max(lat1, lat2)
+            and min(lon1, lon2) <= lon <= max(lon1, lon2)
+            and (lat2 - lat1) * (lon - lon1) == (lon2 - lon1) * (lat - lat1)
+        ):
+            return True  # exactly on a segment (within its bounding box)
         if (lat1 > lat) != (lat2 > lat):
             x_cross = lon1 + (lat - lat1) / (lat2 - lat1) * (lon2 - lon1)
             if lon < x_cross:
