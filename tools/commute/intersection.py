@@ -279,10 +279,11 @@ def run(argv: list[str] | None = None) -> int:
         (Path(args.drive_raw), "make commute-drive"),
         (Path(args.drive_searches), "make commute-drive"),
     ) if not Path(p).exists()]
-    for path, hint in missing:
+    if missing:
+        hints = list(dict.fromkeys(h for _, h in missing))
         return _fail(
-            f"Commute data is missing — run '{hint}' first.",
-            f"intersection input {path} not found (run '{hint}')",
+            f"Commute data is missing — run {' and '.join(hints)} first.",
+            f"intersection inputs not found: {', '.join(str(p) for p, _ in missing)}",
         )
 
     try:
@@ -305,7 +306,7 @@ def run(argv: list[str] | None = None) -> int:
             property_type=args.property_type,
             generated_at=datetime.now(UTC).isoformat(),
         )
-    except (ValueError, KeyError) as e:
+    except (ValueError, KeyError, TypeError) as e:
         return _fail(
             "Can't build the all-commutes area — check the car destinations and try again.",
             f"intersection build failed: {e}",

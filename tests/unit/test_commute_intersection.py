@@ -228,6 +228,27 @@ async def test_run_fails_cleanly_with_no_drive_destinations(tmp_path):
     assert not (out_dir / "intersection.json").exists()
 
 
+def test_missing_inputs_reported_in_one_pass(tmp_path, capsys):
+    """With all three inputs missing, the user gets the complete fix list in
+    one run — not one file per invocation."""
+    from tools.commute.intersection import run as intersection_run
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    code = intersection_run(
+        [
+            "--shed", str(tmp_path / "nope_shed.json"),
+            "--drive-raw", str(tmp_path / "nope_raw.json"),
+            "--drive-searches", str(tmp_path / "nope_searches.json"),
+            "--out", str(out_dir / "intersection.json"),
+        ]
+    )
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "commute-shed" in err
+    assert "commute-drive" in err
+
+
 def test_validate_fails_cleanly_on_corrupt_intersection(tmp_path):
     """--validate with a truncated intersection.json must exit with the
     two-tier message, not a JSONDecodeError traceback."""

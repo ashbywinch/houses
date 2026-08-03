@@ -276,12 +276,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     union_path, drive_path = Path(args.union), Path(args.drive)
-    for path, hint in ((union_path, "make commute-searches"), (drive_path, "make commute-drive")):
-        if not path.exists():
-            return _fail(
-                f"Commute data is missing — run '{hint}' first.",
-                f"combined map input {path} not found (run '{hint}')",
-            )
+    missing = [
+        (path, hint)
+        for path, hint in ((union_path, "make commute-searches"), (drive_path, "make commute-drive"))
+        if not path.exists()
+    ]
+    if missing:
+        hints = list(dict.fromkeys(h for _, h in missing))
+        return _fail(
+            f"Commute data is missing — run {' and '.join(hints)} first.",
+            f"combined map inputs not found: {', '.join(str(p) for p, _ in missing)}",
+        )
     vendor = Path(args.vendor)
     intersection_path = Path(args.intersection)
     intersection = None

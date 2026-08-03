@@ -243,6 +243,20 @@ async def test_run_fails_cleanly_on_bad_config(tmp_path):
     assert code == 1
 
 
+async def test_run_fails_cleanly_on_wrong_shaped_config(tmp_path):
+    """A config file that is valid JSON but the wrong shape (a list, not an
+    object) must exit via the two-tier message, not an AttributeError at
+    data.get."""
+    import json
+
+    from tools.commute.drive_isochrone import run as drive_run
+
+    cfg = tmp_path / "destinations.json"
+    cfg.write_text(json.dumps([1, 2, 3]))
+    code = await drive_run(["--config", str(cfg), "--out-dir", str(tmp_path / "out")])
+    assert code == 1
+
+
 async def test_run_fails_cleanly_on_empty_destinations_config(tmp_path):
     """An empty destinations list is accepted by the JSON shape but means
     nothing to route — exit with the two-tier message, not a min() over

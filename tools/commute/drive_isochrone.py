@@ -754,7 +754,7 @@ async def run(argv: list[str] | None = None) -> int:
         config_path = Path(args.config)
         config_data = json.loads(config_path.read_text())
         destinations = load_config(config_path)
-    except (OSError, json.JSONDecodeError, ValueError) as e:
+    except (OSError, json.JSONDecodeError, ValueError, AttributeError, TypeError) as e:
         return _fail(
             "The commute destinations settings are missing or unreadable — fix them and try again.",
             f"unreadable drive destinations config {args.config}: {e}",
@@ -837,6 +837,7 @@ async def run(argv: list[str] | None = None) -> int:
             httpx.TimeoutException,
             json.JSONDecodeError,
             ValueError,
+            TypeError,
         ) as e:
             # a 200 with a malformed body (gateway HTML, truncated response)
             # raises from resp.json()/parse_durations, not from httpx
