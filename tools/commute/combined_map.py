@@ -254,6 +254,7 @@ def write_map(html: str, out_path: str | Path) -> None:
     out_path = Path(out_path)
     if out_path.exists() and out_path.read_text() == html:
         return
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(html)
 
 

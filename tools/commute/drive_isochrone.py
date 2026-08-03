@@ -271,7 +271,8 @@ async def build_raw(
 ) -> dict:
     """Geocode-backed matrix batch → the raw isochrone payload.
 
-    ``fetch`` is injectable for tests: ``async (body) -> ORS matrix response``.
+    ``fetch`` is injectable for tests: ``async (body, *, key) -> ORS matrix
+    response`` — the same signature as the real ``fetch_matrix``.
     Payload values are bare unit-named numbers (the wire format); all
     computation above is Quantity.
     """
@@ -547,7 +548,7 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
                     issues.append(f"{s.get('id')}: URL polygon does not round-trip to the stored polygon")
             except Exception as e:  # noqa: BLE001 — any parse failure is a URL issue
                 issues.append(f"{s.get('id')}: rightmove_url unparseable ({e})")
-        dest = s.get("destination", {})
+        dest = s.get("destination") or {}
         if dest.get("label"):
             labels_in_searches.add(dest["label"])
     for label in metadata.get("destinations", []):
@@ -560,7 +561,12 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
     for group in by_label.values():
         valid = [o for o in group if isinstance(o.get("polygon"), list) and len(o["polygon"]) >= 3]
         for s in group:
-            d = s["destination"]
+            d = s.get("destination")
+            if not isinstance(d, dict) or not isinstance(d.get("lat"), (int, float)) or not isinstance(
+                d.get("lon"), (int, float)
+            ):
+                issues.append(f"{s.get('id')}: destination is malformed (expected lat/lon)")
+                continue
             if not any(point_in_polygon(d["lat"], d["lon"], other["polygon"]) for other in valid):
                 issues.append(f"{s.get('id')}: destination centre outside every polygon of its shed")
     return issues
