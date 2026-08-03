@@ -341,6 +341,21 @@ def main(argv: list[str] | None = None) -> int:
             "The commute data or map assets are unreadable — regenerate them with 'make commute-drive'.",
             f"unreadable input for the combined map: {e}",
         )
+    # a map missing the drive/union layers must not be mistaken for complete
+    if isinstance(drive, dict) and not drive.get("searches"):
+        print(
+            "warning: no drive sheds found — the map shows only the train area (run 'make commute-drive' if "
+            "unexpected)",
+            file=sys.stderr,
+        )
+        logger.warning("%s has no searches — drive layers omitted", drive_path)
+    if isinstance(union, dict) and not union.get("components"):
+        print(
+            "warning: no train area found — the map may be incomplete (run 'make commute-searches' if "
+            "unexpected)",
+            file=sys.stderr,
+        )
+        logger.warning("%s has no components — train layer omitted", union_path)
     write_map(html, args.out)
     print(f"combined commute map → {args.out}")
     return 0

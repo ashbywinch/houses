@@ -279,6 +279,20 @@ def test_validate_fails_cleanly_on_dict_shaped_intersection(tmp_path):
     assert code == 1
 
 
+def test_validate_fails_cleanly_on_missing_searches_key(tmp_path):
+    """A payload without a 'searches' key must be flagged, not crash the
+    success print with a KeyError."""
+    import json as _json
+
+    from tools.commute.intersection import run as intersection_run
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "intersection.json").write_text(_json.dumps({"metadata": {"count": 0}}))
+    code = intersection_run(["--out", str(out_dir / "intersection.json"), "--validate"])
+    assert code == 1
+
+
 def test_validate_fails_cleanly_on_null_metadata(tmp_path):
     """--validate with "metadata": null must exit with the two-tier message,
     not an AttributeError at metadata.get."""

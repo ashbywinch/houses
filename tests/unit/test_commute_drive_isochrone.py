@@ -454,6 +454,20 @@ async def test_validate_fails_cleanly_on_dict_shaped_searches(tmp_path):
     assert code == 1
 
 
+async def test_validate_fails_cleanly_on_missing_searches_key(tmp_path):
+    """A payload without a 'searches' key must be flagged, not pass
+    validation and then crash the success print with a KeyError."""
+    import json as _json
+
+    from tools.commute.drive_isochrone import run as drive_run
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "drive_searches.json").write_text(_json.dumps({"metadata": {"count": 0, "destinations": []}}))
+    code = await drive_run(["--out-dir", str(out_dir), "--validate"])
+    assert code == 1
+
+
 async def test_validate_fails_cleanly_on_null_metadata(tmp_path):
     """--validate with "metadata": null must exit with the two-tier message,
     not an AttributeError at metadata.get."""
@@ -947,6 +961,30 @@ def test_combined_map_fails_cleanly_on_malformed_payload(tmp_path):
     )
     assert code == 1
     assert not (tmp_path / "map.html").exists()
+
+
+def test_combined_map_warns_when_drive_layers_absent(tmp_path, capsys):
+    """A drive payload missing 'searches' must render the map with a
+    warning — never silently produce a transit-only map that looks complete."""
+    import json
+
+    from tools.commute.combined_map import main as combined_main
+
+    union_path = tmp_path / "union.json"
+    union_path.write_text(json.dumps({"components": []}))
+    drive_path = tmp_path / "drive.json"
+    drive_path.write_text(json.dumps({"metadata": {"count": 0}}))  # no searches key
+
+    code = combined_main(
+        [
+            "--union", str(union_path),
+            "--drive", str(drive_path),
+            "--intersection", str(tmp_path / "none.json"),
+            "--out", str(tmp_path / "map.html"),
+        ]
+    )
+    assert code == 0
+    assert "no drive sheds" in capsys.readouterr().err
 
 
 def test_combined_map_degrades_on_malformed_intersection_records(tmp_path, capsys):

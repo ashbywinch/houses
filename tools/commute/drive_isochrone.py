@@ -556,7 +556,9 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
     """
     if not isinstance(payload, dict):
         return ["payload is malformed (expected an object)"]
-    searches = payload.get("searches", [])
+    if "searches" not in payload:
+        return ["'searches' is missing"]
+    searches = payload["searches"]
     if not isinstance(searches, list):
         return ["'searches' is malformed (expected a list, got " + type(searches).__name__ + ")"]
     metadata = payload.get("metadata")
