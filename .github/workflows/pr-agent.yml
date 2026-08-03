@@ -12,15 +12,26 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - uses: actions/checkout@v4
-
+      # NO actions/checkout here — deliberate. PR-Agent fetches everything via
+      # the GitHub API (the pinned config branch, the diff, the repo context
+      # files), and the action's config loader ALSO merges a [tool.pr-agent]
+      # section from pyproject.toml found in the working tree. With a checkout
+      # of the PR head, an attacker branch could ship its own pyproject.toml
+      # overriding [openai] api_base; with no checkout there is no working-tree
+      # config to read at all.
       - uses: the-pr-agent/pr-agent@b249e568e0c0fb6c674ace55fe95d02f62f8f3b3
         id: pr-agent
         env:
           OPENAI_KEY: ${{ secrets.OPENCODE_GO_HOUSES_API_KEY }}
           OPENAI_BASE_URL: https://opencode.ai/zen/go/v1
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_AGENT_CONFIG_BRANCH: ${{ github.head_ref }}
+          # Config MUST come from a maintainer-controlled branch: a PR branch
+          # could ship its own .pr_agent.toml pointing api_base at an attacker
+          # endpoint, and the API key would be sent there as the Bearer token.
+          # (Source-verified at the pinned SHA: .pr_agent.toml is fetched via
+          # the API from this branch; 404 falls back to the default branch —
+          # never the working tree.)
+          PR_AGENT_CONFIG_BRANCH: pr-agent-config
 
       - name: Check review succeeded
         env:
@@ -33,23 +44,43 @@ jobs:
             echo "Manual trigger — skipping review check (no PR number)"
             exit 0
           fi
-          # Match bot comments that reference this commit SHA in their body.
-          # PR-Agent's persistent review includes the SHA: "Review updated until commit .../SHA"
-          # and code suggestions include: "<!-- SHA -->".
-          # This avoids race conditions from concurrent runs (unlike timestamp-based filtering).
-          THIS_RUN_CMTS=$(gh api "repos/${{ github.repository }}/issues/$PR_NUM/comments" --jq "[.[] | select(.user.login == \"github-actions[bot]\" and (.body | contains(\"$SHORT_SHA\")))]" 2>/dev/null || echo "[]")
-          echo "$THIS_RUN_CMTS" | jq -e 'length == 0' > /dev/null 2>&1 && NO_COMMENTS=true || NO_COMMENTS=false
-          if echo "$THIS_RUN_CMTS" | jq -e 'any(.[].body; test("PR Reviewer Guide|PR Code Suggestions"))' > /dev/null 2>&1; then
-            echo "Review check passed"
-          elif echo "$THIS_RUN_CMTS" | jq -e 'any(.[].body; test("failed"; "i"))' > /dev/null 2>&1; then
-            echo "::error::PR-Agent reported a failure:"
-            echo "$THIS_RUN_CMTS" | jq -r '.[].body'
+          # All bot comments for this PR. --paginate with a per-page --jq filter
+          # concatenates page results (invalid JSON on multi-page PRs), so stream
+          # the matches and slurp them into one array with jq -s. A failed
+          # comments API call (403/network) must NOT look like "no review
+          # posted": retry, then fail with the real cause (two-tier messages).
+          CMTS=""
+          for attempt in 1 2 3; do
+            if gh api --paginate "repos/${{ github.repository }}/issues/$PR_NUM/comments" \
+              --jq '.[] | select(.user.login == "github-actions[bot]")' > /tmp/raw_comments 2>/tmp/gh_api_err; then
+              CMTS=$(jq -s '.' < /tmp/raw_comments)
+              break
+            fi
+            [ "$attempt" -lt 3 ] && sleep 5
+          done
+          if [ -z "$CMTS" ]; then
+            echo "::error::comments API failed after 3 attempts: $(tail -c 500 /tmp/gh_api_err)"
             exit 1
-          elif [ "$NO_COMMENTS" = true ]; then
-            echo "::error::PR-Agent posted no comments for this commit — review was skipped or failed silently"
+          fi
+          # Scope every branch to comments from THIS run: a comment references
+          # the head commit by full OR short sha, token-bounded so an unrelated
+          # hex string (e.g. a hash containing the short sha as a substring)
+          # cannot false-positive. Stale comments from older commits — and the
+          # coverage bot's comments, which carry no sha — are excluded, so the
+          # failure and no-comments branches diagnose the CURRENT run correctly.
+          THIS=$(echo "$CMTS" | jq -c --arg full "$SHA" --arg short "$SHORT_SHA" \
+            '[.[] | select(.body | test("(^|[^0-9a-f])(" + $full + "|" + $short + ")([^0-9a-f]|$)"; "i"))]')
+          if echo "$THIS" | jq -e '[.[] | select(.body | test("PR Reviewer Guide|PR Code Suggestions"))] | length > 0' >/dev/null 2>&1; then
+            echo "Review check passed"
+          elif echo "$THIS" | jq -e '[.[] | select(.body | test("failed"; "i"))] | length > 0' >/dev/null 2>&1; then
+            echo "::error::PR-Agent reported a failure:"
+            echo "$THIS" | jq -r '.[].body'
+            exit 1
+          elif [ "$(echo "$THIS" | jq 'length' 2>/dev/null || echo 0)" = "0" ]; then
+            echo "::error::PR-Agent posted no comments for commit $SHA — review was skipped or failed silently"
             exit 1
           else
-            echo "::error::PR-Agent comment found but did not match success or failure pattern"
-            echo "$THIS_RUN_CMTS" | jq -r '.[].body'
+            echo "::error::PR-Agent comment found for this commit but matched no known pattern"
+            echo "$THIS" | jq -r '.[].body'
             exit 1
           fi

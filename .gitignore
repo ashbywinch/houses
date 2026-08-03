@@ -65,6 +65,7 @@ eggs/
 env/
 extract.zip
 htmlcov/
+coverage.xml
 lib/
 lib64/
 parts/
