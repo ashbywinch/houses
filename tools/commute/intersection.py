@@ -1,0 +1,252 @@
+"""Intersection — where EVERY commute works, i.e. where to buy a house.
+
+ANDs the toolchain's sheds on one common grid:
+
+- the **transit shed** (Pimlico & Aldgate) — the same station-catchment
+  predicate the transit toolchain rasterizes (kept stations within 5 km);
+- **every driving destination's shed** (Dad, Bracknell, …) — cell centres
+  inside the committed drive-search polygons.
+
+A house in the intersection is commutable to an office by rail AND within the
+drive threshold of every driving destination. The result is traced with the
+same `union_outline` machinery and emitted as one drawn-area Rightmove search
+(``data/commute/intersection.json``), plus a layer on the combined map.
+
+The common grid is 4 km over the overlap of the driving regions — cells
+outside any drive shed can never qualify, so the overlap bounds the search.
+Deterministic and fully offline: ``make commute-intersection`` regenerates
+from the committed payloads.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+
+from tools.commute.drive_isochrone import (
+    GB_BBOX,
+    _components,
+    _outer_loop,
+    grid_cell_centers,
+    point_in_polygon,
+    region_bbox,
+)
+from tools.commute.rightmove_url import build_search_url, parse_search_url
+from tools.commute.tile import Grid, Rect, rasterize
+
+logger = logging.getLogger(__name__)
+
+ENGINE_VERSION = "intersection-v1"
+DEFAULT_SHED = Path("data/commute/station_shed.json")
+DEFAULT_DRIVE_RAW = Path("data/commute/drive_isochrone.json")
+DEFAULT_DRIVE_SEARCHES = Path("data/commute/drive_searches.json")
+DEFAULT_OUT = Path("data/commute/intersection.json")
+DEFAULT_CELL_KM = 4.0  # same as the drive grids
+TRANSIT_BUFFER_KM = 5.0  # same catchment radius the transit shed rasterizes
+MIN_ISLAND_CELLS = 4  # drop sub-4-cell specks, same tolerance as the drive sheds
+MAX_VERTICES = 500
+
+
+def common_grid(drive_raw: dict, cell_km: float = DEFAULT_CELL_KM) -> Grid:
+    """One grid over the overlap of the driving regions.
+
+    The intersection is a subset of every drive region, so cells outside the
+    overlap can never qualify — the overlap bbox bounds the search.
+    """
+    region_km = drive_raw["metadata"]["region_km"]
+    boxes = [region_bbox(d["lat"], d["lon"], region_km) for d in drive_raw["destinations"]]
+    bbox = Rect(
+        lat_min=max(b.lat_min for b in boxes),
+        lat_max=min(b.lat_max for b in boxes),
+        lon_min=max(b.lon_min for b in boxes),
+        lon_max=min(b.lon_max for b in boxes),
+    )
+    if bbox.lat_min >= bbox.lat_max or bbox.lon_min >= bbox.lon_max:
+        raise ValueError("drive regions do not overlap — the intersection is empty")
+    return Grid.from_cell_km(bbox, cell_km)
+
+
+def transit_cells(kept_stations: list[dict], grid: Grid, buffer_km: float = TRANSIT_BUFFER_KM) -> set[tuple[int, int]]:
+    """Cells whose nearest point is within ``buffer_km`` of a kept station.
+
+    Exactly the predicate the transit toolchain rasterizes (``tile.rasterize``)
+    — a kept cell means a house in it is within the walk/bus-to-station radius.
+    """
+    return rasterize([(s["lat"], s["lon"]) for s in kept_stations], buffer_km, grid)
+
+
+def drive_cells(polygons: list[list[tuple[float, float]]], grid: Grid) -> set[tuple[int, int]]:
+    """Cells whose centre lies inside any of the destination's shed polygons."""
+    if not polygons:
+        return set()
+    cells = grid_cell_centers(grid)
+    return {(r, c) for r, c, lat, lon in cells if any(point_in_polygon(lat, lon, p) for p in polygons)}
+
+
+def build_payload(
+    *,
+    shed: dict,
+    drive_raw: dict,
+    drive_searches: dict,
+    cell_km: float = DEFAULT_CELL_KM,
+    min_beds: int = 2,
+    property_type: str = "houses",
+    generated_at: str,
+) -> dict:
+    """Transit ∩ every drive shed → the intersection payload (deterministic)."""
+    grid = common_grid(drive_raw, cell_km)
+    kept_stations = [s for s in shed["stations"] if s.get("kept")]
+    transit = transit_cells(kept_stations, grid)
+
+    by_label: dict[str, list[list[tuple[float, float]]]] = {}
+    for s in drive_searches.get("searches", []):
+        by_label.setdefault(s["destination"]["label"], []).append(s["polygon"])
+    drive_sets = [drive_cells(polys, grid) for polys in by_label.values()]
+    kept = transit
+    for ds in drive_sets:
+        kept &= ds
+
+    thresholds = [d["threshold_min"] for d in drive_raw["destinations"]]
+    searches: list[dict] = []
+    for i, comp in enumerate((c for c in _components(kept) if len(c) >= MIN_ISLAND_CELLS), 1):
+        loop = _outer_loop(comp, grid)
+        if loop is None:
+            continue
+        poly = [(round(lat, 5), round(lon, 5)) for lat, lon in loop]
+        suffix = "" if i == 1 else f"-{i}"
+        searches.append(
+            {
+                "id": f"intersection-{min(thresholds):03d}{suffix}",
+                "name": "All commutes",
+                "polygon": poly,
+                "filters": {"min_beds": min_beds, "property_type": property_type},
+                "rightmove_url": build_search_url(poly, min_beds=min_beds, property_type=property_type),
+                "threshold_min": min(thresholds),
+            }
+        )
+    return {
+        "metadata": {
+            "engine_version": ENGINE_VERSION,
+            "profile": "tfl-transit + driving-car",
+            "threshold_min": min(thresholds),
+            "cell_km": cell_km,
+            "transit_buffer_km": TRANSIT_BUFFER_KM,
+            "sources": ["station_shed.json", "drive_isochrone.json", "drive_searches.json"],
+            "generated_at": generated_at,
+            "count": len(searches),
+        },
+        "searches": searches,
+    }
+
+
+def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list[str]:
+    """Issues with the intersection payload; empty means it passes."""
+    issues: list[str] = []
+    searches = payload.get("searches", [])
+    metadata = payload.get("metadata", {})
+    if metadata.get("count") != len(searches):
+        issues.append(f"metadata count {metadata.get('count')} != {len(searches)} searches")
+    for s in searches:
+        poly = s.get("polygon", [])
+        if len(poly) < 4:
+            issues.append(f"{s.get('id')}: polygon has {len(poly)} vertices (need ≥ 4)")
+        elif poly[0] == poly[-1]:
+            issues.append(f"{s.get('id')}: polygon is closed — loops must stay open")
+        if len(poly) > max_vertices:
+            issues.append(f"{s.get('id')}: {len(poly)} vertices exceeds the {max_vertices} cap")
+        for lat, lon in poly:
+            if not GB_BBOX.contains(lat, lon):
+                issues.append(f"{s.get('id')}: vertex ({lat}, {lon}) outside the GB bounding box")
+        try:
+            parsed = parse_search_url(s.get("rightmove_url", ""))
+            expected = poly + [poly[0]]
+            if len(parsed) != len(expected) or any(
+                abs(pl - el) > 5e-6 or abs(po - eo) > 5e-6
+                for (pl, po), (el, eo) in zip(parsed, expected, strict=True)
+            ):
+                issues.append(f"{s.get('id')}: URL polygon does not round-trip to the stored polygon")
+        except (KeyError, ValueError, IndexError) as e:
+            issues.append(f"{s.get('id')}: rightmove_url unparseable ({e})")
+    return issues
+
+
+def _same_payload(existing: dict, new: dict) -> bool:
+    """Byte-identical apart from ``generated_at`` (the determinism contract)."""
+    if json.dumps(existing.get("searches"), sort_keys=True) != json.dumps(new.get("searches"), sort_keys=True):
+        return False
+    e_meta = {k: v for k, v in existing.get("metadata", {}).items() if k != "generated_at"}
+    n_meta = {k: v for k, v in new.get("metadata", {}).items() if k != "generated_at"}
+    return json.dumps(e_meta, sort_keys=True) == json.dumps(n_meta, sort_keys=True)
+
+
+def run(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Build the all-commutes intersection search (offline).")
+    parser.add_argument("--shed", default=str(DEFAULT_SHED))
+    parser.add_argument("--drive-raw", default=str(DEFAULT_DRIVE_RAW))
+    parser.add_argument("--drive-searches", default=str(DEFAULT_DRIVE_SEARCHES))
+    parser.add_argument("--out", default=str(DEFAULT_OUT))
+    parser.add_argument("--cell-km", type=float, default=DEFAULT_CELL_KM)
+    parser.add_argument("--min-beds", type=int, default=2)
+    parser.add_argument("--property-type", default="houses")
+    parser.add_argument("--validate", action="store_true", help="validate the committed intersection.json and exit")
+    args = parser.parse_args(argv)
+
+    out_path = Path(args.out)
+    if args.validate:
+        if not out_path.exists():
+            print(f"{out_path} not found — run 'make commute-intersection' first", file=sys.stderr)
+            return 1
+        issues = validate_payload(json.loads(out_path.read_text()))
+        if issues:
+            for issue in issues:
+                print(f"- {issue}", file=sys.stderr)
+            return 1
+        print(f"intersection OK ({len(json.loads(out_path.read_text())['searches'])} search(es))")
+        return 0
+
+    missing = [(p, hint) for p, hint in (
+        (Path(args.shed), "make commute-shed"),
+        (Path(args.drive_raw), "make commute-drive"),
+        (Path(args.drive_searches), "make commute-drive"),
+    ) if not Path(p).exists()]
+    for path, hint in missing:
+        print(f"{path} not found — run '{hint}' first", file=sys.stderr)
+        return 1
+
+    payload = build_payload(
+        shed=json.loads(Path(args.shed).read_text()),
+        drive_raw=json.loads(Path(args.drive_raw).read_text()),
+        drive_searches=json.loads(Path(args.drive_searches).read_text()),
+        cell_km=args.cell_km,
+        min_beds=args.min_beds,
+        property_type=args.property_type,
+        generated_at=datetime.now(UTC).isoformat(),
+    )
+    if not payload["searches"]:
+        print("warning: no intersection — no place satisfies every commute", file=sys.stderr)
+    existing: dict | None = None
+    if out_path.exists():
+        try:
+            existing = json.loads(out_path.read_text())
+        except json.JSONDecodeError:
+            existing = None
+    if existing is None or not _same_payload(existing, payload):
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(payload, indent=2) + "\n")
+    issues = validate_payload(payload)
+    if issues:
+        for issue in issues:
+            print(f"- {issue}", file=sys.stderr)
+        return 1
+    print(f"{len(payload['searches'])} intersection search(es) → {out_path}")
+    for s in payload["searches"]:
+        print(f"  {s['id']}: {s['rightmove_url']}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(run())

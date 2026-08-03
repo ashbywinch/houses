@@ -261,6 +261,27 @@ by the gate.
   `drive_isochrone.json` (raw durations, reproducibility), `drive_searches.json`
   + `.txt` (URLs), `drive_searches.html` (Leaflet map).
 
+### Where every commute works — the intersection (`tools/commute/intersection.py`)
+
+ANDs the sheds on one common 4 km grid (the overlap of the driving regions):
+
+- the **transit shed** via the same station-catchment predicate the transit
+  toolchain rasterizes (kept stations within 5 km);
+- **every driving destination's shed** via cell-centre membership of the
+  committed drive-search polygons.
+
+A house in the intersection is commutable to an office by rail AND within the
+drive threshold of every driving destination — i.e. **where to buy a house**.
+Build results (2026-08-03): 7 components — the main Thames-Valley blob
+(Oxford, Abingdon, Didcot, Newbury, Reading, Swindon inside; London and
+Witney correctly outside) plus satellite towns (Banbury, Cirencester,
+Cheltenham fringe). One drawn-area search per component; the combined map's
+gold "All commutes (where to buy)" layer.
+
+- `make commute-intersection` — offline, from committed payloads →
+  `data/commute/intersection.json` (+ `--validate`).
+- `make commute-map` now depends on it and draws the gold layer.
+
 ### Tooling
 
 - `make commute-drive` — one-off batch; reuses the committed raw payload when the

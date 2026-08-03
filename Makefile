@@ -1,5 +1,5 @@
 # Makefile for houses — Browser-to-Spreadsheet Ingestion Engine
-.PHONY: help setup install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e lint format clean reset-db commute-shed commute-searches commute-validate commute-drive commute-drive-validate commute-map commute-serve
+.PHONY: help setup install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e lint format clean reset-db commute-shed commute-searches commute-validate commute-drive commute-drive-validate commute-map commute-intersection commute-serve
 
 # Variables
 PYTHON := .venv/bin/python
@@ -37,6 +37,7 @@ help:
 	@echo "  ${GREEN}make commute-drive${NC}      One-off ORS matrix batch → data/commute/drive_searches.json (FORCE=1 to re-fetch)"
 	@echo "  ${GREEN}make commute-drive-validate${NC}  Validate drive searches + run commute tests"
 	@echo "  ${GREEN}make commute-map${NC}        Offline: combine all isochrones into one map (commute_map.html)"
+	@echo "  ${GREEN}make commute-intersection${NC}  Offline: the all-commutes shed (where to buy a house)"
 	@echo "  ${GREEN}make commute-serve${NC}      Serve the maps on your LAN (open the printed URL on your phone)"
 
 setup: frontend-setup install-hooks
@@ -167,8 +168,12 @@ commute-drive-validate:
 	@$(PYTHON) -m tools.commute.drive_isochrone --validate
 	@$(PYTEST) tests/unit/test_commute_*.py -q --tb=short
 
-commute-map:
+commute-map: commute-intersection
 	@$(PYTHON) -m tools.commute.combined_map
+
+commute-intersection:
+	@$(PYTHON) -m tools.commute.intersection
+	@echo "${GREEN}✓ Intersection up to date — 'make commute-map' includes it${NC}"
 
 commute-serve:
 	@echo "Commute maps on your LAN — open on your phone:"

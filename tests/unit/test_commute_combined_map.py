@@ -48,8 +48,16 @@ ICONS = {
 }
 
 
-def _html(*, leaflet_js: str = LEAFLET_JS, leaflet_css: str = LEAFLET_CSS, icons: dict[str, str] = ICONS) -> str:
-    return build_html(UNION, DRIVE, leaflet_js=leaflet_js, leaflet_css=leaflet_css, icons=icons)
+def _html(
+    *,
+    leaflet_js: str = LEAFLET_JS,
+    leaflet_css: str = LEAFLET_CSS,
+    icons: dict[str, str] = ICONS,
+    intersection: dict | None = None,
+) -> str:
+    return build_html(
+        UNION, DRIVE, leaflet_js=leaflet_js, leaflet_css=leaflet_css, icons=icons, intersection=intersection
+    )
 
 
 def test_build_html_embeds_all_three_isochrones():
@@ -122,6 +130,29 @@ def test_inline_scripts_are_valid_javascript(tmp_path):
 
 def test_build_html_is_deterministic():
     assert _html() == _html()
+
+
+INTERSECTION = {
+    "metadata": {"count": 1},
+    "searches": [
+        {
+            "id": "intersection-090",
+            "name": "All commutes",
+            "polygon": [[51.0, -1.1], [51.0, -1.0], [51.1, -1.0], [51.1, -1.1]],
+            "rightmove_url": "https://rm/all",
+        }
+    ],
+}
+
+
+def test_build_html_adds_intersection_layer():
+    html = _html(intersection=INTERSECTION)
+    assert "All commutes (where to buy)" in html
+    assert "https://rm/all" in html
+
+
+def test_build_html_without_intersection_has_no_layer():
+    assert "All commutes (where to buy)" not in _html()
 
 
 def test_write_map_does_not_churn_identical(tmp_path):

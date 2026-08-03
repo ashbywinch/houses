@@ -29,6 +29,7 @@ from pathlib import Path
 
 DEFAULT_UNION = Path("data/commute/union.json")
 DEFAULT_DRIVE = Path("data/commute/drive_searches.json")
+DEFAULT_INTERSECTION = Path("data/commute/intersection.json")
 DEFAULT_OUT = Path("data/commute/commute_map.html")
 VENDOR_DIR = Path("tools/commute/vendor")
 
@@ -46,10 +47,20 @@ def _data_uri(path: Path) -> str:
     return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode()
 
 
-def build_html(union: dict, drive: dict, *, leaflet_js: str, leaflet_css: str, icons: dict[str, str]) -> str:
+def build_html(
+    union: dict,
+    drive: dict,
+    *,
+    leaflet_js: str,
+    leaflet_css: str,
+    icons: dict[str, str],
+    intersection: dict | None = None,
+) -> str:
     """The combined map page — deterministic given the payloads and assets.
 
     ``icons`` maps a filename (e.g. ``marker-icon.png``) to a data URI.
+    ``intersection`` (optional) is the all-commutes payload from
+    ``intersection.py`` — its polygons get their own top layer.
     """
     transit = [c["outline"] for c in union.get("components", [])]
 
@@ -71,6 +82,21 @@ def build_html(union: dict, drive: dict, *, leaflet_js: str, leaflet_css: str, i
         d = searches[0]["destination"]
         markers_js.append(
             json.dumps({"label": label, "lat": d["lat"], "lon": d["lon"], "url": searches[0]["rightmove_url"]})
+        )
+    if intersection and intersection.get("searches"):
+        coords = [s["polygon"] for s in intersection["searches"]]
+        urls = {json.dumps(s["polygon"]): s["rightmove_url"] for s in intersection["searches"]}
+        layers_js.append(
+            json.dumps(
+                {
+                    "name": "All commutes (where to buy)",
+                    "color": "#c90",
+                    "coords": coords,
+                    "urls": urls,
+                    "fillOpacity": 0.25,
+                    "weight": 4,
+                }
+            )
         )
 
     css = leaflet_css
@@ -150,7 +176,11 @@ const overlays = {};
 for (const l of layers) {
   const group = L.layerGroup();
   for (const coords of l.coords) {
-    const poly = L.polygon(coords, {color: l.color, weight: 3, fillOpacity: 0.12});
+    const poly = L.polygon(coords, {
+      color: l.color,
+      weight: l.weight || 3,
+      fillOpacity: l.fillOpacity || 0.12,
+    });
     const url = l.urls[JSON.stringify(coords)];
     if (url) { poly.bindPopup('<a href="' + url + '" target="_blank">Rightmove search</a>'); }
     poly.addTo(group);
@@ -186,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the combined commute isochrone map (offline).")
     parser.add_argument("--union", default=str(DEFAULT_UNION))
     parser.add_argument("--drive", default=str(DEFAULT_DRIVE))
+    parser.add_argument("--intersection", default=str(DEFAULT_INTERSECTION))
     parser.add_argument("--out", default=str(DEFAULT_OUT))
     parser.add_argument("--vendor", default=str(VENDOR_DIR))
     args = parser.parse_args(argv)
@@ -197,12 +228,20 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     vendor = Path(args.vendor)
     icons = {name: _data_uri(vendor / name) for name in _CSS_IMAGES + _JS_ICONS}
+    intersection_path = Path(args.intersection)
+    intersection = None
+    if intersection_path.exists():
+        try:
+            intersection = json.loads(intersection_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            print(f"warning: {intersection_path} unreadable — omitting the intersection layer", file=sys.stderr)
     html = build_html(
         json.loads(union_path.read_text()),
         json.loads(drive_path.read_text()),
         leaflet_js=(vendor / "leaflet.js").read_text(),
         leaflet_css=(vendor / "leaflet.css").read_text(),
         icons=icons,
+        intersection=intersection,
     )
     write_map(html, args.out)
     print(f"combined commute map → {args.out}")
