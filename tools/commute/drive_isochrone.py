@@ -830,13 +830,14 @@ async def run(argv: list[str] | None = None, *, geocoder=None) -> int:
     raw: dict | None = None
     if geocoder is None:
         geocoder = _geocode
-    geocode_error: RuntimeError | None = None
+    geocode_error: Exception | None = None
     try:
         coords = [await geocoder(d.postcode) for d in destinations]
-    except RuntimeError as e:
-        # DEFER geocoding errors: a matching committed raw can still be
-        # reused offline (its stored coordinates are part of the signature);
-        # the error only matters if regeneration is actually needed
+    except (RuntimeError, httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException) as e:
+        # DEFER geocoding errors (including transient httpx failures): a
+        # matching committed raw can still be reused offline (its stored
+        # coordinates are part of the signature); the error only matters if
+        # regeneration is actually needed
         coords = None
         geocode_error = e
         logger.warning("geocoding failed (%s) — a matching raw payload can still be reused", e)
@@ -846,23 +847,18 @@ async def run(argv: list[str] | None = None, *, geocoder=None) -> int:
         if prev is not None:
             try:
                 prev_signature = config_signature(prev)
-            except (KeyError, TypeError) as e:
-                return _fail(
-                    "The saved commute map data is unreadable — regenerate it with 'make commute-drive'.",
-                    f"unreadable raw payload {raw_path}: {e}",
-                )
-            if coords is not None:
-                coords_by_label = {d.label: c for d, c in zip(destinations, coords, strict=True)}
-            else:
-                # geocoding unavailable — compare against the STORED
-                # coordinates so an unchanged raw still reuses offline
-                coords_by_label = {
-                    rec["label"]: (rec["lat"], rec["lon"])
-                    for rec in prev.get("destinations", [])
-                    if isinstance(rec, dict) and "label" in rec and "lat" in rec and "lon" in rec
-                }
-            expected = config_signature(
-                {
+                if coords is not None:
+                    coords_by_label = {d.label: c for d, c in zip(destinations, coords, strict=True)}
+                else:
+                    # geocoding unavailable — compare against the STORED
+                    # coordinates so an unchanged raw still reuses offline
+                    coords_by_label = {
+                        rec["label"]: (rec["lat"], rec["lon"])
+                        for rec in prev.get("destinations", [])
+                        if isinstance(rec, dict) and "label" in rec and "lat" in rec and "lon" in rec
+                    }
+                expected = config_signature(
+                    {
                     "metadata": {
                         "engine_version": ENGINE_VERSION,
                         "profile": "driving-car",
@@ -885,6 +881,11 @@ async def run(argv: list[str] | None = None, *, geocoder=None) -> int:
                     ],
                 }
             )
+            except (KeyError, TypeError) as e:
+                return _fail(
+                    "The saved commute map data is unreadable — regenerate it with 'make commute-drive'.",
+                    f"unreadable raw payload {raw_path}: {e}",
+                )
             if prev_signature == expected:
                 raw = prev
                 print(f"reusing {raw_path} ({len(raw['destinations'])} destination(s), offline)")

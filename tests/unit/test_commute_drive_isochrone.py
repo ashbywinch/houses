@@ -266,6 +266,49 @@ async def test_changed_geocode_rejects_raw_reuse(tmp_path, capsys):
     assert "regenerating" in capsys.readouterr().err
 
 
+async def test_transient_geocode_failure_still_reuses_matching_raw(tmp_path, capsys):
+    """A transient httpx geocoding failure (429/5xx) must also defer to the
+    offline reuse path, not crash with a raw traceback."""
+    import json as _json
+
+    import httpx
+
+    from tools.commute.drive_isochrone import run as drive_run
+
+    cfg = tmp_path / "destinations.json"
+    cfg.write_text(_json.dumps({"threshold_min": 90, "destinations": [{"label": "Dad", "postcode": "OX7 5GZ"}]}))
+    grid = {"lat_min": 51.0, "lat_max": 51.2, "lon_min": -2.0, "lon_max": -1.76}
+    cells = [
+        {"r": r, "c": c, "lat": 51.0 + (r + 0.5) * 0.05, "lon": -2.0 + (c + 0.5) * 0.08, "duration_min": 10.0}
+        for r in range(2)
+        for c in range(2)
+    ]
+    raw = {
+        "metadata": {
+            "engine_version": "drive-isochrone-v1", "profile": "driving-car", "speed_model": "free-flow",
+            "threshold_min": 90, "cell_km": 4.0, "region_km": 153.0,
+            "destinations": [{"label": "Dad", "postcode": "OX7 5GZ", "threshold_min": 90}],
+            "generated_at": NOW, "count": 1,
+        },
+        "destinations": [
+            {"label": "Dad", "postcode": "OX7 5GZ", "lat": 51.03, "lon": -1.95, "threshold_min": 90,
+             "cell_km": 4.0, "slack_min": 2.42, "grid": grid, "cells": cells}
+        ],
+    }
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "drive_isochrone.json").write_text(_json.dumps(raw))
+
+    async def _throttled_geocode(postcode):
+        raise httpx.HTTPStatusError(
+            "429", request=httpx.Request("GET", "https://geocode"), response=httpx.Response(429)
+        )
+
+    code = await drive_run(["--config", str(cfg), "--out-dir", str(out_dir)], geocoder=_throttled_geocode)
+    assert code == 0
+    assert "reusing" in capsys.readouterr().out
+
+
 async def test_geocode_failure_still_reuses_matching_raw(tmp_path, capsys):
     """A geocoding outage must not block offline reuse of a matching
     committed raw — the stored coordinates drive the signature comparison."""
