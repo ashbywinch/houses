@@ -72,13 +72,13 @@ def build_html(
     markers_js = []
     if transit:
         layers_js.append(
-            json.dumps({"name": "Transit shed (Pimlico & Aldgate)", "color": _COLORS[0], "coords": transit, "urls": []})
+            json.dumps({"name": "Train: Pimlico & Aldgate", "color": _COLORS[0], "coords": transit, "urls": []})
         )
     for i, (label, searches) in enumerate(drive_by_label.items(), 1):
         color = _COLORS[i % len(_COLORS)]
         coords = [s["polygon"] for s in searches]
         urls = {json.dumps(s["polygon"]): s["rightmove_url"] for s in searches}
-        layers_js.append(json.dumps({"name": f"{label} drive", "color": color, "coords": coords, "urls": urls}))
+        layers_js.append(json.dumps({"name": f"Drive to {label}", "color": color, "coords": coords, "urls": urls}))
         d = searches[0]["destination"]
         markers_js.append(
             json.dumps({"label": label, "lat": d["lat"], "lon": d["lon"], "url": searches[0]["rightmove_url"]})
@@ -89,7 +89,7 @@ def build_html(
         layers_js.append(
             json.dumps(
                 {
-                    "name": "All commutes (where to buy)",
+                    "name": "Where we could live",
                     "color": "#c90",
                     "coords": coords,
                     "urls": urls,
@@ -112,7 +112,7 @@ def build_html(
     html = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Commute isochrones</title>
+<title>Commute map</title>
 <style>html,body{margin:0;height:100%}#map{height:100%;background:#e8eef4}__CSS__</style></head>
 <body><div id="map"></div>
 <script>

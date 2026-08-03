@@ -70,9 +70,9 @@ def test_commute_map_renders_visible_in_phone_viewport(tmp_path):
             "Array.from(document.querySelectorAll('.leaflet-control-layers-overlays label span'))"
             ".map(e => e.textContent.trim())"
         )
-        assert any("Transit shed" in t for t in labels)
-        assert any("Dad drive" in t for t in labels)
-        assert any("Bracknell drive" in t for t in labels)
+        assert any("Train: Pimlico & Aldgate" in t for t in labels)
+        assert any("Drive to Dad" in t for t in labels)
+        assert any("Drive to Bracknell" in t for t in labels)
     finally:
         browser.close()
         pw.stop()

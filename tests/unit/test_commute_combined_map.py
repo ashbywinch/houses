@@ -62,10 +62,12 @@ def _html(
 
 def test_build_html_embeds_all_three_isochrones():
     html = _html()
-    # three named layers: transit + two drives
-    assert "Transit shed (Pimlico & Aldgate)" in html
-    assert "Dad drive" in html
-    assert "Bracknell drive" in html
+    # three named layers in user language: train + two drives
+    assert "Train: Pimlico & Aldgate" in html
+    assert "Drive to Dad" in html
+    assert "Drive to Bracknell" in html
+    # no internal jargon in any user-facing text (title, layers, popups)
+    assert "isochrone" not in html.lower()
     # every outline and polygon present as JSON
     import json as _json
 
@@ -147,12 +149,12 @@ INTERSECTION = {
 
 def test_build_html_adds_intersection_layer():
     html = _html(intersection=INTERSECTION)
-    assert "All commutes (where to buy)" in html
+    assert "Where we could live" in html
     assert "https://rm/all" in html
 
 
 def test_build_html_without_intersection_has_no_layer():
-    assert "All commutes (where to buy)" not in _html()
+    assert "Where we could live" not in _html()
 
 
 def test_write_map_does_not_churn_identical(tmp_path):
