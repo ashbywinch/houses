@@ -525,6 +525,20 @@ def test_raw_to_searches_empty_destination_produces_no_search():
     assert raw_to_searches(raw, generated_at=NOW)["searches"] == []
 
 
+def test_raw_to_searches_keeps_main_shed_below_island_threshold():
+    """The island filter drops fringe speckles — never the destination's own
+    shed: a 2-cell shed must still produce a search (a small-threshold or
+    sparse-coverage config is valid)."""
+    raw = _raw_payload()
+    kept_two = [
+        c for c in raw["destinations"][0]["cells"]
+        if (c["r"], c["c"]) in {(1, 1), (1, 2)}
+    ]
+    raw["destinations"][0]["cells"] = kept_two
+    searches = raw_to_searches(raw, generated_at=NOW, min_island_cells=4)["searches"]
+    assert [s["id"] for s in searches] == ["drive-dad-ox75gz-090"]
+
+
 # ── components / hole & island handling ─────────────────────────────
 
 

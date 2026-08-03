@@ -447,9 +447,11 @@ def raw_to_searches(
         # ids must be unique across destinations: two labels can slug to the
         # same string (e.g. "Dad" and "Dad!"), so the postcode disambiguates
         postcode_slug = re.sub(r"[^a-z0-9]+", "", dest["postcode"].lower()) or "pc"
-        for i, comp in enumerate(
-            (c for c in _components(kept) if len(c) >= min_island_cells), 1
-        ):
+        comps = _components(kept)
+        # the island filter drops fringe speckles — never the destination's
+        # own shed: a small-threshold shed under min_island_cells cells must
+        # still produce a search
+        for i, comp in enumerate((c for c in comps if c is comps[0] or len(c) >= min_island_cells), 1):
             loop = _outer_loop(comp, grid)
             if loop is None:
                 continue
@@ -513,8 +515,6 @@ def point_in_polygon(lat: float, lon: float, poly: list[tuple[float, float]]) ->
 
 def _point_segment_distance(lat, lon, lat1, lon1, lat2, lon2) -> float:
     """Perpendicular distance from a point to a segment (degrees)."""
-    import math
-
     dx, dy = lat2 - lat1, lon2 - lon1
     if dx == 0.0 and dy == 0.0:
         return math.hypot(lat - lat1, lon - lon1)
@@ -694,9 +694,14 @@ for (const m of markers) {
 async def _geocode(postcode: str) -> tuple[float, float]:
     from houses.location import geocode
 
-    point = (await geocode(postcode)).value_or_none()
+    attempt = await geocode(postcode)
+    point = attempt.value_or_none()
     if point is None:
-        raise RuntimeError(f"could not geocode postcode {postcode!r} — check data/commute/drive_destinations.json")
+        # keep the Attempt's structured reason (postcode-not-found vs
+        # API-down) so the two-tier dev log can say exactly what failed
+        raise RuntimeError(
+            f"could not geocode postcode {postcode!r}: {attempt.error or 'unknown reason'}"
+        )
     return point.lat, point.lon
 
 
