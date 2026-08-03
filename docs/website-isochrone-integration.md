@@ -182,6 +182,35 @@ Narrowing control on the main page:
   worst commute < X.
 - The control is client-side over the summaries: instant, no round-trip.
 
+### Sort by weekly commute time
+
+The settings already know how often each commute actually happens — the same
+`trips_per_week` that prices the cost (`daily_amount × trips_per_week ×
+weeks_per_year`). Use it to make commute load a sort key:
+
+- **Weekly commute minutes** per person = Σ over their POIs of
+  `trips_per_week × 2 × one-way duration` (best acceptable mode per POI, from
+  the same gate durations). **Household weekly time** = Σ over persons.
+- `trips_per_week` is round trips (matches the cost model); a 0-trip POI (e.g.
+  Simon/Dad) contributes 0 — it is a constraint, not a load. George's school
+  POIs (5 trips/week, walk duration) contribute for real — the school run is
+  genuine weekly time.
+- **Failed or missing durations are never counted as zero.** A house whose
+  commutes haven't computed shows "—" and sorts LAST (treat as +∞); a house
+  with a failed commute cannot masquerade as commute-free.
+
+UX:
+
+- **Sort option "Weekly commute (least first)"** in the existing sort control
+  (which already has a weaker `commute` sort by best single commute — the new
+  household-total sort is the meaningful one; the old option stays until it's
+  clearly redundant). Ascending.
+- Cards show the household total in user language: "**8h 30m/week commuting**",
+  with a breakdown tooltip per person ("Simon 3h 40m · Lorena 2h 15m · George
+  1h 25m") — provenance matters (personas).
+- Client-side over the summaries + settings (`fetchSettings` already exists);
+  derivations live in `formatters/commute.ts` with unit tests.
+
 ### User language — what the UI says vs what the code says
 
 **The word "isochrone" never appears in user-facing text** (UI copy, map
@@ -374,6 +403,10 @@ per-destination durations) intersected exactly.
    list**: per-person worst commute vs `fine_max_minutes` ceiling, hidden
    count + peek, slider from loosest ceiling down. (Red/green: filter
    derivation tests + list component tests first.)
+5. **Sort by weekly commute time**: `weeklyCommuteMinutes` derivation in
+   `formatters/commute.ts` (trips/week × 2 × duration, 0-trip POIs, failed
+   commutes sort last), sort option + card display with per-person breakdown
+   tooltip. (Red/green: formatter tests + sort component tests first.)
 
 ### Phase 2 — generation + map
 
@@ -409,6 +442,7 @@ per-destination durations) intersected exactly.
 | Acceptable modes are a set (train/car/walk); ALL chosen modes are drawn; walk is the only exception | Walk ⊆ car (redundant when driving), but walk ⊄ train (a property can be walkable with no usable public transport) — so the walk area is drawn only when car is not chosen; train is always drawn when chosen, even alongside car |
 | `acceptable_modes` explicit, never inferred | The app's per-property selector is about route choice, not acceptability |
 | Always-on commute ceiling filter + optional tightening slider | Settings ceilings are the hard floor ("pointless if anyone's doesn't work"); the "worst commute < X" slider only tightens from the loosest family ceiling; hidden count + peek keeps filtering visible (trust) |
+| Weekly commute sort uses settings trips/week × round-trip duration | Same data that prices the cost; 0-trip POIs contribute 0; failed/uncomputed commutes sort last, never as zero (a broken house cannot look commute-free) |
 | Runtime state in `generation.json`, artifacts stay committed | Reproducibility/reviewability of artifacts unchanged; runtime state is ephemeral |
 | **Risk: 50-min first run vs uvicorn `--reload`** | Detached runner + startup auto-respawn; the toolchain's checkpoints make resume safe |
 | **Risk: ORS free tier (500/day, non-commercial)** | Batch uses ~12 calls; regeneration only on settings change; warn in the dialog |
@@ -431,7 +465,11 @@ per-destination durations) intersected exactly.
    person's `fine_max_minutes` ceiling are hidden by default (with a visible
    hidden count + peek); the main page's "worst commute < X" control narrows
    from the loosest family ceiling down to ~10 min.
-8. `GET /commute/commute_map.html` renders the map with per-commute layers and
+8. **Weekly commute sort**: "Weekly commute (least first)" sorts by household
+   Σ trips_per_week × round-trip duration; 0-trip POIs contribute 0; houses
+   with uncomputed commutes sort last; cards show the total + per-person
+   breakdown.
+9. `GET /commute/commute_map.html` renders the map with per-commute layers and
    the "Where we could live" layer.
-9. `make test` green; red/green TDD throughout (each phase lands with its red
+10. `make test` green; red/green TDD throughout (each phase lands with its red
    tests written first, then green).
