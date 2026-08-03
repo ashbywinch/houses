@@ -78,16 +78,23 @@ Rules:
 - **Commute modes are a set, not a single pick.** A user is often happy to take
   the train OR drive, whichever is more convenient. Per POI, the user selects
   every acceptable mode (train / car / walk; car only offered when the person
-  has a car). Semantics:
-  - **Walk** is always per-property — bounded by the person's max walk time
-    (already in the app's per-property gate). It never produces a map area.
-  - **Car** acceptable → a car area is drawn for that POI.
-  - **Train** acceptable AND car NOT acceptable → a train area is drawn (it is
-    the only way — the region must be restricted to it). If the user would also
-    drive, the car area already covers it: **no train area is drawn** (unless
-    the user says they won't drive).
-  - A POI with no acceptable mode (or walk-only) constrains nothing at region
-    level.
+  has a car). Semantics — **the default is to calculate and draw ALL chosen
+  modes; walk is the only exception**:
+  - **Train** chosen → a train area is drawn. Always — even when car is also
+    chosen: the train area is NOT a subset of the car area (trains reach
+    central London where driving is congestion-zone-impossible, and can be
+    faster), so both are drawn.
+  - **Car** chosen → a car area is drawn.
+  - **Walk** chosen → a walk area is drawn **only when car is NOT chosen**.
+    Walk ⊆ car (anything walkable is trivially drivable), so the car area
+    makes the walk area redundant. But walk ⊄ train — a property can be
+    walkable with no acceptable public transport — so `{walk, train}` without
+    car DOES draw the walk area. A walk area is a small disk around the POI
+    (person's max walk time); it participates in the map and the intersection
+    like any other area.
+  - A POI with no acceptable mode constrains nothing at region level.
+  - School POIs (empty address) stay per-property: no address → no drawn
+    area, whatever the modes.
 - **The per-property gate must agree with the map area.** `acceptable_modes`
   also restricts the app's per-property commute selector (a POI whose modes are
   `["train"]` must never be scored by a car route). Region and gate share one
@@ -95,8 +102,8 @@ Rules:
   rejected by the gate or vice versa.
 - **Kids are a special case.** A child has no login, so `editable_by` on the
   `Person` names the adults who may edit them (superuser always allowed). Default
-  for a child: all adults. George's school POIs have empty addresses → mode
-  `none`, no isochrone; this is the default child state, shown as "goes to
+  for a child: all adults. George's school POIs have empty addresses → no drawn
+  area (per-property only); this is the default child state, shown as "goes to
   school near the house".
 - **A child CAN get a map area**: adding a real POI (e.g. "Other parent",
   OX postcode, car mode) includes it in the car shed and the intersection.
@@ -151,13 +158,16 @@ precise internally. Mapping:
 | isochrone / transit shed | how far each commute reaches / train area |
 | intersection (all-commutes) | where we could live |
 | acceptable modes | how they get there (train / car / walk) |
-| walk-only POI | not on the map (walks to it) |
+| walk area | walking distance (drawn only when they don't drive) |
+| walk-only POI | within walking distance (no drawn area only when they also drive) |
 | generated_at / stale | last updated / out of date |
 | generate / regenerate | update the map / update again |
 | stage names (transit-shed, drive, …) | never shown |
 
-Map layer labels (shipped with this plan): "Train: Pimlico & Aldgate",
-"Drive to Dad", "Drive to Bracknell", "Where we could live".
+Map layer labels (shipped with this plan): one layer per POI per drawn mode —
+"Train: Pimlico & Aldgate", "Drive to Dad", "Drive to Bracknell",
+"Where we could live". A POI with several modes gets one layer per mode
+(e.g. "Train to Pimlico" and "Drive to Pimlico" both drawn).
 
 ## Architecture
 
@@ -258,10 +268,11 @@ reuse guards). `GET /api/isochrones/status` computes this for every stage.
 
 | Today (hard-coded) | Becomes |
 |---|---|
-| Transit offices = `simon_destination`/`lorena_destination` in `houses/config.py` | POIs whose modes are `[train]` (train acceptable, car not) |
+| Transit offices = `simon_destination`/`lorena_destination` in `houses/config.py` | POIs whose modes include train (drawn regardless of car) |
 | `data/commute/drive_destinations.json` (hand-maintained) | **generated** from POIs whose modes include car |
+| No walk areas | POIs whose modes include walk AND not car → small disk around the POI (max walk time) |
 | Thresholds 132/90 min | new `isochrone` settings block: `{transit_min: 132, drive_min: 90}`, per-POI override |
-| Kids excluded implicitly | school POIs (empty address, walk) → no map area; a kid's real POI participates |
+| Kids excluded implicitly | school POIs (empty address, walk) → per-property only; a kid's real POI participates |
 
 Data model changes:
 
@@ -269,8 +280,10 @@ Data model changes:
   any combination) — replaces the single `isochrone_mode` idea. `None`/empty on
   read means "unset": migrated by rule (Pimlico/Aldgate → `["train"]`,
   Bracknell/Dad → `["car"]`, school → `["walk"]`), explicit thereafter. The
-  toolchain's shed inputs derive from it: train destinations = POIs with
-  `train` and not `car`; car destinations = POIs with `car`. **Never infer
+  toolchain's shed inputs derive from it: **train destinations = POIs with
+  train (drawn even when car is also chosen); car destinations = POIs with
+  car; walk areas = POIs with walk and no car** (address-bearing POIs only —
+  school POIs have no address and stay per-property). **Never infer
   acceptability at generation time** — the app's per-property selector
   (walk→transit→drive) is about picking a route, not about which modes the
   person will accept.
@@ -280,11 +293,27 @@ Data model changes:
   (destinations + threshold) instead of reading `houses/config.py` — the app's
   derived config is the new source.
 
+### Intersection semantics ("where we could live")
+
+Per POI, the constraint area is the **union of its drawn mode areas** (any
+acceptable mode works); "where we could live" is the **intersection across
+POIs** (everyone's commutes must work):
+
+```
+where_we_could_live = ⋂ over POIs p of ( ⋃ over drawn modes m of area(p, m) )
+```
+
+Known approximation: the transit shed is one region for all train destinations
+(a station within threshold of ANY train destination is kept), i.e. an OR
+inside the train family — inherited over-coverage, absorbed by the per-property
+gate. Phase 3 refinement: per-POI train areas (station_shed.json already stores
+per-destination durations) intersected exactly.
+
 ### API surface
 
 | Endpoint | Auth | Purpose |
 |---|---|---|
-| `GET /api/settings` | any | unchanged; persons now carry `editable_by_me`/`isochrone_mode` |
+| `GET /api/settings` | any | unchanged; persons now carry `editable_by_me`/`acceptable_modes` |
 | `PATCH /api/settings/person/{name}` | **own person / superuser / in `editable_by`** | replace `PUT /settings/persons` (removes the whole-list, no-authz endpoint) |
 | `GET /api/isochrones/status` | any authenticated | per-stage state + staleness + links |
 | `POST /api/isochrones/generate` | superuser | start/resume the batch; 409 while running |
@@ -338,7 +367,7 @@ Data model changes:
 | Whole-family page, read-only others | Buying together → everyone's commutes are everyone's context; ownership is per-field, enforced server-side |
 | Generate = superuser-only | Quota burn + machine load; rest of family reads status and the map |
 | Strict intersection (AND of every POI's constraint area) | "Where we could live" must satisfy everyone; UI shows which POIs feed it so a shrinking area is explainable; empty state handled explicitly |
-| Acceptable modes are a set (train/car/walk); train area only when car is excluded | The car area covers train-and-car commuters ("no train isochrone unless they won't drive"); walk is per-property only |
+| Acceptable modes are a set (train/car/walk); ALL chosen modes are drawn; walk is the only exception | Walk ⊆ car (redundant when driving), but walk ⊄ train (a property can be walkable with no usable public transport) — so the walk area is drawn only when car is not chosen; train is always drawn when chosen, even alongside car |
 | `acceptable_modes` explicit, never inferred | The app's per-property selector is about route choice, not acceptability |
 | Runtime state in `generation.json`, artifacts stay committed | Reproducibility/reviewability of artifacts unchanged; runtime state is ephemeral |
 | **Risk: 50-min first run vs uvicorn `--reload`** | Detached runner + startup auto-respawn; the toolchain's checkpoints make resume safe |
