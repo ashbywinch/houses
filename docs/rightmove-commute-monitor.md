@@ -2,6 +2,9 @@
 
 Status: implemented on `feat/rightmove-commute-monitor` (TDD, 77 commute unit tests green; `make test` fully green)
 
+Website integration (settings page, generation affordance, map view): see
+[docs/website-isochrone-integration.md](website-isochrone-integration.md).
+
 ## Build results (2026-08-02)
 
 - **Shed**: 1819 in-bbox stations routed (one-off TfL batch, resumable + cached);

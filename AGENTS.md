@@ -83,6 +83,7 @@ make stop                       # Stop dev server + frontend
 - **Add an enrichment module**: [docs/adding-a-new-enrichment-module.md](docs/adding-a-new-enrichment-module.md)
 - **Enrichment modules (index)**: [docs/enrichment-modules.md](docs/enrichment-modules.md)
 - **DAG library & adding a node**: [docs/dag-library.md](docs/dag-library.md)
+- **Isochrone website integration (settings page, generation, map)**: [docs/website-isochrone-integration.md](docs/website-isochrone-integration.md)
 - **Capture / compare the frontend DOM**: Run `tools/capture_dom.py`, then compare against `docs/current-ui/`. See `docs/development.md` → *Capturing the Frontend DOM*.
 - **Write docs**: [docs/writing-documentation.md](docs/writing-documentation.md)
 - **Use the API**: [docs/api.md](docs/api.md)
