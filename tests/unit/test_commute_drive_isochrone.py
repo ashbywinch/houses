@@ -176,6 +176,29 @@ def test_parse_durations_wrong_row_count_raises():
         parse_durations({"durations": [[1.0]]}, 2)
 
 
+def test_drive_map_html_escapes_user_labels():
+    """Regression: destination labels are user-controlled — a label with
+    </script> must not break out of the drive map's script element or inject
+    into the marker popup."""
+    from tools.commute.drive_isochrone import _map_html
+
+    evil = "</script><script>alert(1)</script>"
+    searches = {
+        "metadata": {},
+        "searches": [
+            {
+                "id": "x",
+                "polygon": [[51.0, -1.0], [51.0, -0.9], [51.1, -0.9], [51.1, -1.0]],
+                "rightmove_url": "https://rm/x",
+                "destination": {"label": evil, "lat": 51.05, "lon": -0.95},
+            }
+        ],
+    }
+    html = _map_html(searches)
+    assert "</script><script>" not in html
+    assert "\\u0026lt;script\\u0026gt;alert(1)" in html  # escaped form present
+
+
 async def test_run_does_not_write_when_validation_fails(tmp_path):
     """Regression: run() wrote the searches BEFORE validating, so a failing
     payload (e.g. a destination whose shed vanished) left an invalid committed

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import html
 import json
 import logging
 import sys
@@ -38,6 +39,22 @@ VENDOR_DIR = Path("tools/commute/vendor")
 
 # one colour per layer — transit blue, then a fixed palette for destinations
 _COLORS = ["#e33", "#3a3", "#e80", "#a3a", "#0aa"]
+
+
+def _js_safe_json(obj) -> str:
+    """JSON safe to embed inside an HTML <script> element.
+
+    json.dumps does not escape ``<``/``>``/``&``, so a user-controlled label
+    like ``</script><script>…`` would terminate the script element. Escape
+    them as unicode escapes (still valid JSON; JS decodes them back).
+    """
+    return json.dumps(obj).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
+
+def _user_label(label: str) -> str:
+    """HTML-escape user-controlled labels: they render via innerHTML in the
+    layer control and marker popups."""
+    return html.escape(label)
 
 # CSS background images in leaflet.css (layer-control toggle + default marker)
 _CSS_IMAGES = ("layers-2x.png", "layers.png", "marker-icon.png")
@@ -75,7 +92,7 @@ def build_html(
     markers_js = []
     if transit:
         layers_js.append(
-            json.dumps(
+            _js_safe_json(
                 {
                     "name": "Train: Pimlico & Aldgate",
                     "color": _COLORS[0],
@@ -89,15 +106,24 @@ def build_html(
         # each polygon carries its own url — never keyed by a serialised
         # polygon string (Python json.dumps(52.0) != JS JSON.stringify(52.0),
         # a whole class of silent popup-loss bugs)
-        layers_js.append(json.dumps({"name": f"Drive to {label}", "color": color, "polygons": polygons}))
+        layers_js.append(
+            _js_safe_json({"name": f"Drive to {_user_label(label)}", "color": color, "polygons": polygons})
+        )
         d = searches[0]["destination"]
         markers_js.append(
-            json.dumps({"label": label, "lat": d["lat"], "lon": d["lon"], "url": searches[0]["rightmove_url"]})
+            _js_safe_json(
+                {
+                    "label": _user_label(label),
+                    "lat": d["lat"],
+                    "lon": d["lon"],
+                    "url": searches[0]["rightmove_url"],
+                }
+            )
         )
     if intersection and intersection.get("searches"):
         polygons = [{"coords": s["polygon"], "url": s["rightmove_url"]} for s in intersection["searches"]]
         layers_js.append(
-            json.dumps(
+            _js_safe_json(
                 {
                     "name": "Where we could live",
                     "color": "#c90",

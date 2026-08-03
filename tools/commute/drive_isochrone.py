@@ -45,6 +45,7 @@ from pathlib import Path
 
 import httpx
 
+from tools.commute.combined_map import _js_safe_json, _user_label
 from tools.commute.rightmove_url import build_search_url, parse_search_url
 from tools.commute.station_shed import DEFAULT_BBOX, BBox
 from tools.commute.tile import Grid, Rect
@@ -565,8 +566,13 @@ def _map_html(searches: dict) -> str:
         coords = [[lat, lon] for lat, lon in s["polygon"]]
         outlines_js.append(coords)
         d = s["destination"]
+        # labels are user-controlled (settings) — HTML-escape them (they render
+        # via innerHTML) and escape <>& as unicode so no </script> can break
+        # out of the script element
         markers_js.append(
-            json.dumps({"label": d["label"], "lat": d["lat"], "lon": d["lon"], "url": s["rightmove_url"]})
+            _js_safe_json(
+                {"label": _user_label(d["label"]), "lat": d["lat"], "lon": d["lon"], "url": s["rightmove_url"]}
+            )
         )
     html = """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Drive isochrone coverage</title>

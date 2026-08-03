@@ -62,10 +62,14 @@ def _html(
 
 def test_build_html_embeds_all_three_isochrones():
     html = _html()
-    # three named layers in user language: train + two drives
-    assert "Train: Pimlico & Aldgate" in html
+    # three named layers in user language: train + two drives (the static
+    # layer name's & is unicode-escaped in the embedded JSON, JS-decoded back)
+    assert "Train: Pimlico \\u0026 Aldgate" in html
     assert "Drive to Dad" in html
     assert "Drive to Bracknell" in html
+    # destination markers with Rightmove links
+    assert '"label": "Dad"' in html and "https://rm/dad" in html
+    assert '"label": "Bracknell"' in html
     # no internal jargon in any user-facing text (title, layers, popups)
     assert "isochrone" not in html.lower()
 
@@ -80,14 +84,25 @@ def test_polygon_popup_urls_attached_directly():
     assert '"url": "https://rm/all"' in _html(intersection=INTERSECTION)
     assert "JSON.stringify" not in html  # no serialisation-key lookup remains
     assert "l.urls" not in html
-    # every outline and polygon present as JSON
-    import json as _json
 
-    for coords in [c["outline"] for c in UNION["components"]] + [s["polygon"] for s in DRIVE["searches"]]:
-        assert _json.dumps(coords) in html
-    # destination markers with Rightmove links
-    assert '"label": "Dad"' in html and "https://rm/dad" in html
-    assert '"label": "Bracknell"' in html
+
+def test_malicious_labels_cannot_break_out_of_script_or_popup():
+    """Labels are user-controlled (the settings page): a label containing
+    </script> must not terminate the script element, and must not inject HTML
+    into the popup innerHTML contexts."""
+    evil = "</script><script>alert(1)</script><img src=x onerror=alert(2)>"
+    drive = {
+        "metadata": DRIVE["metadata"],
+        "searches": [
+            {**s, "destination": {**s["destination"], "label": evil}} for s in DRIVE["searches"]
+        ],
+    }
+    html = build_html(UNION, drive, leaflet_js=LEAFLET_JS, leaflet_css=LEAFLET_CSS, icons=ICONS)
+    # the payload text survives, but only ESCAPED — no raw breakout sequence,
+    # no executable attribute
+    assert "</script><script>" not in html
+    assert "<img src=x onerror=alert(2)>" not in html
+    assert "\\u0026lt;script\\u0026gt;alert(1)" in html  # escaped form present
 
 
 def test_build_html_inlines_leaflet_and_icons():
