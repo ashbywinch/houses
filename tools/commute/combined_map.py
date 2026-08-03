@@ -98,13 +98,17 @@ def build_html(
                 {
                     "name": "Train: Pimlico & Aldgate",
                     "color": _COLORS[0],
-                    "polygons": [{"coords": outline, "url": ""} for outline in transit],
+                    "polygons": [{"coords": outline, "url": "", "name": ""} for outline in transit],
                 }
             )
         )
     for i, (label, searches) in enumerate(drive_by_label.items(), 1):
         color = _DRIVE_COLORS[(i - 1) % len(_DRIVE_COLORS)]
-        polygons = [{"coords": s["polygon"], "url": s["rightmove_url"]} for s in searches]
+        # the search NAME is user-controlled (built from the destination label)
+        # — HTML-escape it for the popup innerHTML
+        polygons = [
+            {"coords": s["polygon"], "url": s["rightmove_url"], "name": _user_label(s["name"])} for s in searches
+        ]
         # each polygon carries its own url — never keyed by a serialised
         # polygon string (Python json.dumps(52.0) != JS JSON.stringify(52.0),
         # a whole class of silent popup-loss bugs)
@@ -123,7 +127,10 @@ def build_html(
             )
         )
     if intersection and intersection.get("searches"):
-        polygons = [{"coords": s["polygon"], "url": s["rightmove_url"]} for s in intersection["searches"]]
+        polygons = [
+            {"coords": s["polygon"], "url": s["rightmove_url"], "name": _user_label(s["name"])}
+            for s in intersection["searches"]
+        ]
         layers_js.append(
             _js_safe_json(
                 {
@@ -218,7 +225,9 @@ for (const l of layers) {
       weight: l.weight || 3,
       fillOpacity: l.fillOpacity || 0.12,
     });
-    if (item.url) { poly.bindPopup('<a href="' + item.url + '" target="_blank">Rightmove search</a>'); }
+    if (item.url) {
+      poly.bindPopup('<b>' + item.name + '</b><br><a href="' + item.url + '" target="_blank">Open on Rightmove</a>');
+    }
     poly.addTo(group);
   }
   group.addTo(map);

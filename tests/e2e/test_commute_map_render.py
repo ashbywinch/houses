@@ -115,6 +115,8 @@ def test_drive_polygon_popup_links_to_rightmove(tmp_path):
         page.wait_for_selector(".leaflet-popup-content a", timeout=5000)
         href = page.get_attribute(".leaflet-popup-content a", "href")
         assert href is not None and "rightmove.co.uk" in href
+        popup_text = page.inner_text(".leaflet-popup-content")
+        assert "min drive" in popup_text  # the search name, not an unnamed link
     finally:
         browser.close()
         pw.stop()
