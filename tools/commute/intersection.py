@@ -196,7 +196,11 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
     for s in searches:
         poly = s.get("polygon")
         malformed = not isinstance(poly, list) or not all(
-            isinstance(p, (list, tuple)) and len(p) == 2 for p in poly
+            isinstance(p, (list, tuple))
+            and len(p) == 2
+            and isinstance(p[0], (int, float))
+            and isinstance(p[1], (int, float))
+            for p in poly
         )
         if malformed:
             issues.append(f"{s.get('id')}: polygon is malformed (expected [lat, lon] pairs)")

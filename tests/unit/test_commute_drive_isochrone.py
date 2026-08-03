@@ -104,6 +104,24 @@ def test_load_config_per_destination_override_wins(tmp_path):
     assert load_config(cfg) == [_dest(threshold=120)]
 
 
+def test_load_config_rejects_duplicate_labels(tmp_path):
+    """Duplicate labels collapse two destinations into one constraint in the
+    intersection (OR instead of AND) — rejected at the config layer."""
+    cfg = tmp_path / "destinations.json"
+    cfg.write_text(
+        json.dumps(
+            {
+                "destinations": [
+                    {"label": "Dad", "postcode": "OX7 5GZ"},
+                    {"label": "Dad", "postcode": "RG12 8YA"},
+                ]
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="duplicate destination labels"):
+        load_config(cfg)
+
+
 def test_load_config_rejects_missing_fields(tmp_path):
     cfg = tmp_path / "destinations.json"
     cfg.write_text(json.dumps({"destinations": [{"postcode": "OX7 5GZ"}]}))
@@ -694,6 +712,15 @@ def test_validate_payload_flags_missing_destination_without_crashing():
     the destination-centre check with a KeyError."""
     payload = raw_to_searches(_raw_payload(), generated_at=NOW)
     payload["searches"][0]["destination"] = None
+    issues = validate_payload(payload)
+    assert any("malformed" in i for i in issues)
+
+
+def test_validate_payload_flags_string_vertices_without_crashing():
+    """Vertices with quoted numbers (e.g. hand-edited "51.0") must be
+    flagged, not crash the GB-bbox check with a TypeError."""
+    payload = raw_to_searches(_raw_payload(), generated_at=NOW)
+    payload["searches"][0]["polygon"][0] = ["51.0", "-1.0"]
     issues = validate_payload(payload)
     assert any("malformed" in i for i in issues)
 

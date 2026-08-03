@@ -109,6 +109,10 @@ def load_config(path: str | Path, default_threshold: int = DEFAULT_THRESHOLD_MIN
         )
     if not destinations:
         raise ValueError("drive destinations config has no destinations")
+    labels = [d.label for d in destinations]
+    dupes = sorted({label for label in labels if labels.count(label) > 1})
+    if dupes:
+        raise ValueError(f"duplicate destination labels: {', '.join(dupes)}")
     return destinations
 
 
@@ -513,6 +517,18 @@ def point_in_polygon(lat: float, lon: float, poly: list[tuple[float, float]]) ->
     return inside
 
 
+def _polygon_is_valid(poly) -> bool:
+    """A polygon is a list of 2-element numeric [lat, lon] vertices — the
+    shape the geometry and URL checks can safely process."""
+    return isinstance(poly, list) and all(
+        isinstance(v, (list, tuple))
+        and len(v) == 2
+        and isinstance(v[0], (int, float))
+        and isinstance(v[1], (int, float))
+        for v in poly
+    )
+
+
 def _point_segment_distance(lat, lon, lat1, lon1, lat2, lon2) -> float:
     """Perpendicular distance from a point to a segment (degrees)."""
     dx, dy = lat2 - lat1, lon2 - lon1
@@ -537,9 +553,7 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
     labels_in_searches: set[str] = set()
     for s in searches:
         poly = s.get("polygon")
-        malformed = not isinstance(poly, list) or not all(
-            isinstance(p, (list, tuple)) and len(p) == 2 for p in poly
-        )
+        malformed = not _polygon_is_valid(poly)
         if malformed:
             issues.append(f"{s.get('id')}: polygon is malformed (expected [lat, lon] pairs)")
         else:
@@ -576,7 +590,7 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
         label = dest.get("label") if isinstance(dest, dict) else None
         by_label.setdefault(label, []).append(s)
     for group in by_label.values():
-        valid = [o for o in group if isinstance(o.get("polygon"), list) and len(o["polygon"]) >= 3]
+        valid = [o for o in group if _polygon_is_valid(o.get("polygon")) and len(o["polygon"]) >= 3]
         for s in group:
             d = s.get("destination")
             if not isinstance(d, dict) or not isinstance(d.get("lat"), (int, float)) or not isinstance(
