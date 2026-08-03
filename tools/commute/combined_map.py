@@ -37,8 +37,10 @@ DEFAULT_INTERSECTION = Path("data/commute/intersection.json")
 DEFAULT_OUT = Path("data/commute/commute_map.html")
 VENDOR_DIR = Path("tools/commute/vendor")
 
-# one colour per layer — transit blue, then a fixed palette for destinations
+# one colour per layer — the transit layer always takes _COLORS[0], so the
+# drive palette excludes it (a drive shed must never look like the train shed)
 _COLORS = ["#e33", "#3a3", "#e80", "#a3a", "#0aa"]
+_DRIVE_COLORS = _COLORS[1:]
 
 
 def _js_safe_json(obj) -> str:
@@ -101,7 +103,7 @@ def build_html(
             )
         )
     for i, (label, searches) in enumerate(drive_by_label.items(), 1):
-        color = _COLORS[i % len(_COLORS)]
+        color = _DRIVE_COLORS[(i - 1) % len(_DRIVE_COLORS)]
         polygons = [{"coords": s["polygon"], "url": s["rightmove_url"]} for s in searches]
         # each polygon carries its own url — never keyed by a serialised
         # polygon string (Python json.dumps(52.0) != JS JSON.stringify(52.0),

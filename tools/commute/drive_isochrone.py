@@ -613,10 +613,17 @@ def _map_html(searches: dict) -> str:
     this page is the per-destination quick view."""
     markers_js = []
     outlines_js = []
+    seen_labels: set[str] = set()
     for s in searches["searches"]:
         coords = [[lat, lon] for lat, lon in s["polygon"]]
         outlines_js.append(coords)
         d = s["destination"]
+        # one marker per destination label, not per search record: a shed
+        # that splits into components produces several records at the SAME
+        # coordinates — stacked duplicate markers open different URLs
+        if d["label"] in seen_labels:
+            continue
+        seen_labels.add(d["label"])
         # labels are user-controlled (settings) — HTML-escape them (they render
         # via innerHTML) and escape <>& as unicode so no </script> can break
         # out of the script element
@@ -799,14 +806,20 @@ async def run(argv: list[str] | None = None) -> int:
                 "One of the commute destinations can't be found on the map — check its postcode and try again.",
                 f"geocoding failed for a drive destination: {e}",
             )
-        raw = await build_raw(
-            destinations,
-            coords,
-            cell_km=args.cell_km * KM,
-            region_km=region_km,
-            key=settings.ors_api_key,
-            generated_at=generated_at,
-        )
+        try:
+            raw = await build_raw(
+                destinations,
+                coords,
+                cell_km=args.cell_km * KM,
+                region_km=region_km,
+                key=settings.ors_api_key,
+                generated_at=generated_at,
+            )
+        except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException) as e:
+            return _fail(
+                "The commute map service didn't respond — try again in a minute.",
+                f"ORS matrix batch failed: {e}",
+            )
         for record in raw["destinations"]:
             grid = Grid.from_cell_km(Rect(**record["grid"]), record["cell_km"])
             cells = grid_cell_centers(grid)

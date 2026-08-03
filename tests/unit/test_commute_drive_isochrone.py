@@ -203,6 +203,35 @@ def test_drive_map_html_escapes_user_labels():
     assert "\\u0026lt;script\\u0026gt;alert(1)" in html  # escaped form present
 
 
+def test_drive_map_html_one_marker_per_destination_label():
+    """Regression: a shed that splits into components produces one search
+    record per component at the SAME coordinates — the standalone map must
+    render one marker per destination label, not stacked duplicates."""
+    from tools.commute.drive_isochrone import _map_html
+
+    searches = {
+        "metadata": {},
+        "searches": [
+            {
+                "id": "drive-dad-ox75gz-090",
+                "polygon": [[51.0, -1.0], [51.0, -0.9], [51.1, -0.9], [51.1, -1.0]],
+                "rightmove_url": "https://rm/a",
+                "destination": {"label": "Dad", "lat": 51.05, "lon": -0.95},
+            },
+            {
+                "id": "drive-dad-ox75gz-090-2",
+                "polygon": [[52.0, -1.0], [52.0, -0.9], [52.1, -0.9], [52.1, -1.0]],
+                "rightmove_url": "https://rm/b",
+                "destination": {"label": "Dad", "lat": 51.05, "lon": -0.95},
+            },
+        ],
+    }
+    html = _map_html(searches)
+    assert html.count('"label": "Dad"') == 1
+    assert "https://rm/a" in html  # first record's URL wins
+    assert "https://rm/b" not in html
+
+
 async def test_run_fails_cleanly_on_bad_config(tmp_path):
     """A missing/corrupt destinations config must exit with the two-tier
     message, not a bare traceback."""

@@ -8,7 +8,7 @@ import subprocess
 
 import pytest
 
-from tools.commute.combined_map import build_html, write_map
+from tools.commute.combined_map import _COLORS, build_html, write_map
 
 UNION = {
     "components": [
@@ -178,6 +178,35 @@ def test_build_html_adds_intersection_layer():
     html = _html(intersection=INTERSECTION)
     assert "Where we could live" in html
     assert '"url": "https://rm/all"' in html
+
+
+def test_drive_colours_never_collide_with_transit():
+    """Regression: the drive palette must exclude the transit colour — with
+    enough destinations, modulo cycling would otherwise paint a drive shed the
+    same red as the train layer."""
+    drive = {
+        "metadata": DRIVE["metadata"],
+        "searches": [
+            {
+                **s,
+                "destination": {**s["destination"], "label": f"Dest {i}"},
+                "polygon": [
+                    [51.0 + i * 0.05, -1.0],
+                    [51.0 + i * 0.05, -0.9],
+                    [51.1 + i * 0.05, -0.9],
+                    [51.1 + i * 0.05, -1.0],
+                ],
+            }
+            for i, s in enumerate(DRIVE["searches"] * 3)
+        ],
+    }
+    html = build_html(UNION, drive, leaflet_js=LEAFLET_JS, leaflet_css=LEAFLET_CSS, icons=ICONS)
+    # extract the embedded layer JSON and check every drive layer's colour
+    import re
+
+    for layer in re.findall(r"\{[^{}]*\"name\": \"Drive to[^{}]*\}", html):
+        assert '"color": "#e33"' not in layer  # transit red
+    assert _COLORS[0] == "#e33"  # sanity: the transit colour constant
 
 
 def test_build_html_without_intersection_has_no_layer():
