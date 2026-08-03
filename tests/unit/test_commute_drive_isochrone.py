@@ -209,6 +209,31 @@ async def test_run_fails_cleanly_on_bad_config(tmp_path):
     assert code == 1
 
 
+async def test_run_fails_cleanly_on_empty_destinations_config(tmp_path):
+    """An empty destinations list is accepted by the JSON shape but means
+    nothing to route — exit with the two-tier message, not a min() over
+    empty traceback."""
+    import json
+
+    from tools.commute.drive_isochrone import run as drive_run
+
+    cfg = tmp_path / "destinations.json"
+    cfg.write_text(json.dumps({"threshold_min": 90, "destinations": []}))
+    code = await drive_run(["--config", str(cfg), "--out-dir", str(tmp_path / "out")])
+    assert code == 1
+
+
+async def test_validate_fails_cleanly_on_corrupt_searches(tmp_path):
+    """--validate with a corrupt drive_searches.json must not traceback."""
+    from tools.commute.drive_isochrone import run as drive_run
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "drive_searches.json").write_text("{ nope")
+    code = await drive_run(["--out-dir", str(out_dir), "--validate"])
+    assert code == 1
+
+
 async def test_run_does_not_write_when_validation_fails(tmp_path):
     """Regression: run() wrote the searches BEFORE validating, so a failing
     payload (e.g. a destination whose shed vanished) left an invalid committed

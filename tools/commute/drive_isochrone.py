@@ -100,6 +100,8 @@ def load_config(path: str | Path, default_threshold: int = DEFAULT_THRESHOLD_MIN
         destinations.append(
             DriveDestination(label=label, postcode=postcode, threshold_min=int(entry.get("threshold_min", threshold)))
         )
+    if not destinations:
+        raise ValueError("drive destinations config has no destinations")
     return destinations
 
 
@@ -559,7 +561,9 @@ def _urls_text(payload: dict) -> str:
 
 
 def _map_html(searches: dict) -> str:
-    """Self-contained Leaflet map: destination markers + shed outlines."""
+    """Leaflet map (Leaflet + CSS from CDN): destination markers + shed
+    outlines. The combined map (combined_map.py) is the self-contained one;
+    this page is the per-destination quick view."""
     markers_js = []
     outlines_js = []
     for s in searches["searches"]:
@@ -656,7 +660,13 @@ async def run(argv: list[str] | None = None) -> int:
                 "No commute map data yet — run 'make commute-drive' first.",
                 f"{searches_path} not found for --validate",
             )
-        payload = json.loads(searches_path.read_text())
+        try:
+            payload = json.loads(searches_path.read_text())
+        except (OSError, json.JSONDecodeError) as e:
+            return _fail(
+                "The saved commute map data is unreadable — regenerate it with 'make commute-drive'.",
+                f"unreadable {searches_path} for --validate: {e}",
+            )
         issues = validate_payload(payload)
         if issues:
             for issue in issues:
@@ -725,7 +735,13 @@ async def run(argv: list[str] | None = None) -> int:
                 "and try again.",
                 "HEIGIT_API_KEY unset — set it in .env to enable OpenRouteService drive isochrones",
             )
-        coords = [await _geocode(d.postcode) for d in destinations]
+        try:
+            coords = [await _geocode(d.postcode) for d in destinations]
+        except RuntimeError as e:
+            return _fail(
+                "One of the commute destinations can't be found on the map — check its postcode and try again.",
+                f"geocoding failed for a drive destination: {e}",
+            )
         raw = await build_raw(
             destinations,
             coords,
