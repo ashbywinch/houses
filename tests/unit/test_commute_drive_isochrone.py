@@ -54,6 +54,23 @@ def test_load_config_default_threshold_when_omitted(tmp_path):
     assert load_config(cfg) == [_dest(threshold=DEFAULT_THRESHOLD_MIN)]
 
 
+def test_load_config_default_threshold_parameter(tmp_path):
+    """The --threshold-min flag feeds this parameter; destinations without an
+    explicit override adopt it (per-destination overrides still win)."""
+    cfg = tmp_path / "destinations.json"
+    body = {
+        "destinations": [
+            {"label": "Dad", "postcode": "OX7 5GZ"},
+            {"label": "Bracknell", "postcode": "RG12 8YA", "threshold_min": 75},
+        ]
+    }
+    cfg.write_text(json.dumps(body))
+    assert load_config(cfg, default_threshold=60) == [
+        _dest(threshold=60),
+        _dest(label="Bracknell", postcode="RG12 8YA", threshold=75),
+    ]
+
+
 def test_load_config_per_destination_override_wins(tmp_path):
     cfg = tmp_path / "destinations.json"
     body = {"threshold_min": 90, "destinations": [{"label": "Dad", "postcode": "OX7 5GZ", "threshold_min": 120}]}
@@ -144,7 +161,7 @@ def test_kept_cells_threshold_boundary():
 
 def test_kept_cells_slack_absorbs_boundary_overage():
     cells = [(0, c, 51.0, -2.0 + c * 0.08) for c in range(4)]
-    durations = [90.0, 92.0, 93.0, 94.0]
+    durations: list[float | None] = [90.0, 92.0, 93.0, 94.0]
     slack = slack_minutes(4.0)  # ≈ 2.42
     assert kept_cells(cells, durations, 90, slack) == {(0, 0), (0, 1)}
     assert (0, 2) not in kept_cells(cells, durations, 90, slack)  # 93.0 > 90 + 2.42

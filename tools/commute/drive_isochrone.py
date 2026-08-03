@@ -630,8 +630,13 @@ async def run(argv: list[str] | None = None) -> int:
         print(f"drive searches OK ({len(payload['searches'])} search(es))")
         return 0
 
-    destinations = load_config(args.config)
-    threshold_min = args.threshold_min or min(d.threshold_min for d in destinations)
+    # --threshold-min overrides the config's DEFAULT threshold (per-destination
+    # overrides in the file still win). It must reach load_config so the kept
+    # cells, metadata, and config signature all agree — a threshold change is a
+    # real config change, so the raw payload regenerates (never a silent reuse
+    # of cells kept at the old threshold).
+    destinations = load_config(args.config, default_threshold=args.threshold_min or DEFAULT_THRESHOLD_MIN)
+    threshold_min = min(d.threshold_min for d in destinations)
     region_km = args.region_km or threshold_min * REGION_MULTIPLIER
     generated_at = datetime.now(UTC).isoformat()
 

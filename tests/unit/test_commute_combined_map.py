@@ -68,6 +68,20 @@ def test_build_html_embeds_all_three_isochrones():
     assert "Drive to Bracknell" in html
     # no internal jargon in any user-facing text (title, layers, popups)
     assert "isochrone" not in html.lower()
+
+
+def test_polygon_popup_url_keys_match_js_json_stringify():
+    """Regression: the page looks up popup URLs with compact JSON.stringify
+    (no spaces); the urls keys must use the same compact separators or no
+    drive/intersection polygon ever gets its Rightmove popup bound."""
+    html = _html()
+    dad = DRIVE["searches"][0]["polygon"]
+    import json as _json
+
+    compact = _json.dumps(dad, separators=(",", ":"))
+    # the urls-dict KEY is compact (JSON.stringify form) — a spaced-key
+    # implementation would never bind a popup
+    assert compact in html
     # every outline and polygon present as JSON
     import json as _json
 
@@ -151,6 +165,10 @@ def test_build_html_adds_intersection_layer():
     html = _html(intersection=INTERSECTION)
     assert "Where we could live" in html
     assert "https://rm/all" in html
+    import json as _json
+
+    poly = INTERSECTION["searches"][0]["polygon"]
+    assert _json.dumps(poly, separators=(",", ":")) in html  # compact popup key
 
 
 def test_build_html_without_intersection_has_no_layer():

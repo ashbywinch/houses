@@ -77,7 +77,9 @@ def build_html(
     for i, (label, searches) in enumerate(drive_by_label.items(), 1):
         color = _COLORS[i % len(_COLORS)]
         coords = [s["polygon"] for s in searches]
-        urls = {json.dumps(s["polygon"]): s["rightmove_url"] for s in searches}
+        # compact separators: the page looks popup URLs up with JS JSON.stringify
+        # (no spaces), so the keys MUST match that exact serialisation
+        urls = {json.dumps(s["polygon"], separators=(",", ":")): s["rightmove_url"] for s in searches}
         layers_js.append(json.dumps({"name": f"Drive to {label}", "color": color, "coords": coords, "urls": urls}))
         d = searches[0]["destination"]
         markers_js.append(
@@ -85,7 +87,9 @@ def build_html(
         )
     if intersection and intersection.get("searches"):
         coords = [s["polygon"] for s in intersection["searches"]]
-        urls = {json.dumps(s["polygon"]): s["rightmove_url"] for s in intersection["searches"]}
+        urls = {
+            json.dumps(s["polygon"], separators=(",", ":")): s["rightmove_url"] for s in intersection["searches"]
+        }
         layers_js.append(
             json.dumps(
                 {
