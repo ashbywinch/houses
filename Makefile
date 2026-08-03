@@ -1,5 +1,5 @@
 # Makefile for houses — Browser-to-Spreadsheet Ingestion Engine
-.PHONY: help setup install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e lint format clean reset-db commute-shed commute-searches commute-validate
+.PHONY: help setup install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e lint format clean reset-db commute-shed commute-searches commute-validate commute-drive commute-drive-validate commute-map
 
 # Variables
 PYTHON := .venv/bin/python
@@ -34,6 +34,9 @@ help:
 	@echo "  ${GREEN}make commute-shed${NC}       One-off TfL batch → data/commute/station_shed.json (resumes; FORCE=1 to re-run all)"
 	@echo "  ${GREEN}make commute-searches${NC}   Offline: build data/commute/searches.json + .txt"
 	@echo "  ${GREEN}make commute-validate${NC}   Validate searches + run commute tests"
+	@echo "  ${GREEN}make commute-drive${NC}      One-off ORS matrix batch → data/commute/drive_searches.json (FORCE=1 to re-fetch)"
+	@echo "  ${GREEN}make commute-drive-validate${NC}  Validate drive searches + run commute tests"
+	@echo "  ${GREEN}make commute-map${NC}        Offline: combine all isochrones into one map (commute_map.html)"
 
 setup: frontend-setup install-hooks
 	@$(UV) --version >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -154,3 +157,14 @@ commute-searches:
 commute-validate: commute-searches
 	@$(PYTHON) -m tools.commute.validate
 	@$(PYTEST) tests/unit/test_commute_*.py -q --tb=short
+
+commute-drive:
+	@$(PYTHON) -m tools.commute.drive_isochrone $(if $(FORCE),--force,)
+	@echo "${GREEN}✓ Drive isochrones up to date — 'make commute-drive-validate' to check${NC}"
+
+commute-drive-validate:
+	@$(PYTHON) -m tools.commute.drive_isochrone --validate
+	@$(PYTEST) tests/unit/test_commute_*.py -q --tb=short
+
+commute-map:
+	@$(PYTHON) -m tools.commute.combined_map

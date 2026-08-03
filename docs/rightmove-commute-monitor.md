@@ -202,6 +202,84 @@ scraper input):
 - **OTP precision isochrone** if station-heuristic coverage proves wrong in practice.
 - Per-search filter tuning (price bands, beds, property type).
 
+## Driving isochrones (phase 1b) — implemented 2026-08-03
+
+Same goal, different mode: one drawn-area Rightmove search per **driving** destination
+(Dad — Chipping Norton OX7 5GZ; Bracknell RG12 8YA), covering the places from which
+the destination is reachable by car within the threshold (**90 min / 1.5 h** for both).
+
+### Engine — ORS matrix, not the isochrone endpoint
+
+The hosted OpenRouteService API caps `/v2/isochrones` ranges at **3600 s (60 min)**
+(verified live: `range=5400` → HTTP 400, code 3004) — a 1.5 h contour is impossible
+there. `/v2/matrix` has no such cap (it routes, it does not contour), so the isochrone
+is **built by thresholding route durations**: a grid of points around each destination
+is routed to it (one matrix call per ~1000 points, ~6 calls per destination) and the
+cells whose drive time fits the threshold become the shed. Same `driving-car` profile
+as the park-and-ride node, free tier (500 matrix requests/day; the whole batch is 12),
+disk-cached (`data/api_cache/`) so re-runs are offline.
+
+**Free-flow speeds, no traffic model** — rush hour deliberately ignored (decision
+2026-08-03). The per-property gate uses Google Routes with live traffic, so the
+free-flow shed over-covers at peak (safe direction) and the gate is the accuracy
+layer. For Dad (Cotswold A-roads) free-flow ≈ reality; for Bracknell (M4/M3
+corridor) the 90-min boundary is optimistic at peak — houses near it are filtered
+by the gate.
+
+### Pipeline (`tools/commute/drive_isochrone.py`)
+
+1. **Destinations from `data/commute/drive_destinations.json`** — data, not code:
+   `{"threshold_min": 90, "destinations": [{"label": …, "postcode": …}]}` with an
+   optional per-destination `threshold_min` override. Adding a POI edits this file.
+2. **Geocode** each postcode (same `houses.location.geocode` the shed uses).
+3. **Grid** — destination-centred square, `region_km = threshold × 1.7` (90 → 153 km
+   radius, covering the free-flow frontier), 4 km cells (~5900 points).
+4. **Matrix** — chunked POSTs (≤ 999 points + destination per request, sequential,
+   polite delay, retry-once on 429/5xx), parsed to minutes per cell.
+5. **Kept cells** — centre duration ≤ threshold + slack, where slack (≈ 2.4 min for
+   4 km cells) is the half-cell diagonal crossing time: removes the systematic
+   false-negative strip at the frontier; the extra over-coverage is gate-absorbed.
+6. **Components** — 4-connected clusters of the kept-cell set. The main shed and
+   satellite pockets of ≥ 4 cells (`--min-island-cells`) each become a search;
+   **holes are absorbed** (the outer polygon already covers them, and Rightmove
+   cannot draw exclusions) and 1–2-cell frontier specks (cells on a fast road
+   beyond the boundary) are dropped — a documented small false negative, same
+   tolerance as the transit plan.
+7. **Outline + URL** — `union_outline` (existing `tile.py`/`union.py`) → vertices
+   rounded to the 1e-5 encode precision → `rightmove_url.build_search_url`.
+   Records match the `searches.py` shape (id, name, polygon, filters,
+   rightmove_url) so the phase-2 scraper consumes drive searches unchanged.
+
+### Build results (2026-08-03, live)
+
+- 12 ORS matrix calls (6/destination), all cached; batch ~12 s once.
+- **2 searches**: `drive-dad-090` (186 vertices), `drive-bracknell-090` (182).
+- Sanity: Oxford/Witney inside Dad's shed, London/Southampton inside Bracknell's,
+  York outside both. Destination centre inside its own polygon; URL round-trip;
+  vertex cap; GB-bbox containment — all validated.
+- Artifacts (committed, `-diff`/linguist-generated like the transit ones):
+  `drive_isochrone.json` (raw durations, reproducibility), `drive_searches.json`
+  + `.txt` (URLs), `drive_searches.html` (Leaflet map).
+
+### Tooling
+
+- `make commute-drive` — one-off batch; reuses the committed raw payload when the
+  config matches (fully offline); `FORCE=1` re-fetches.
+- `make commute-drive-validate` — `--validate` + the commute test suite.
+- `python -m tools.commute.drive_isochrone --help` — `--threshold-min`, `--cell-km`,
+  `--region-km`, `--min-island-cells`, `--min-beds`, `--property-type`, `--force`,
+  `--validate`.
+
+### Risks / known limitations
+
+| Risk | Mitigation |
+|---|---|
+| **Rightmove vertex cap unknown** for a ~190-vertex polygon | Same spike class as step 0: load one generated URL in the browser and confirm the polygon renders. Fallback: simplify (Visvalingam/Douglas–Peucker) or coarser cells |
+| Free-flow over-covers at rush hour (Bracknell M4/M3) | Safe direction; the Google-traffic gate filters per property |
+| Dad + Bracknell sheds overlap (M40/M4 corridor) | Expected; the phase-2 scraper dedupes by listing ID (same as overlapping transit rectangles) |
+| Frontier exceeds `--region-km` | Edge-touching kept cells warn; raise `--region-km` |
+| ORS free tier: 500 matrix req/day, non-commercial single-user | Whole batch is 12 requests, one-off; self-host Valhalla if this ever becomes commercial |
+
 ## Risks
 
 | Risk | Mitigation |
