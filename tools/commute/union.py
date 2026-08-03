@@ -58,7 +58,7 @@ def _direction(a: tuple[float, float], b: tuple[float, float]) -> tuple[int, int
     return (dlat, dlon)
 
 
-def union_outline(cells: set[tuple[int, int]], grid: Grid) -> list[tuple[float, float]]:
+def union_outline(cells: set[tuple[int, int]], grid: Grid) -> list[list[tuple[float, float]]]:
     """Trace all boundary loops (one per connected component), collinear points
     removed. Leftmost-turn rule: at each vertex pick the unused segment that
     turns left first (then straight, then right) — keeps the interior on the
