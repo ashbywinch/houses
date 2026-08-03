@@ -706,13 +706,13 @@ async def run(argv: list[str] | None = None) -> int:
                 )
 
     searches = raw_to_searches(raw, min_beds=args.min_beds, property_type=args.property_type, generated_at=generated_at)
-    write_payloads(raw, searches, out_dir)
     issues = validate_payload(searches)
     if issues:
         for issue in issues:
             print(f"- {issue}", file=sys.stderr)
-        print("drive searches FAIL validation", file=sys.stderr)
+        print("drive searches FAIL validation — nothing written", file=sys.stderr)
         return 1
+    write_payloads(raw, searches, out_dir)
     count = len(searches["searches"])
     print(f"{count} drive search(es) → {out_dir / SEARCHES_FILENAME}")
     print(f"urls → {out_dir / TXT_FILENAME}")

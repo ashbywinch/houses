@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from pathlib import Path
 
 import pytest
 
@@ -148,6 +149,30 @@ def test_parse_durations_seconds_to_minutes_preserves_nulls():
 def test_parse_durations_wrong_row_count_raises():
     with pytest.raises(ValueError):
         parse_durations({"durations": [[1.0]]}, 2)
+
+
+async def test_run_does_not_write_when_validation_fails(tmp_path):
+    """Regression: run() wrote the searches BEFORE validating, so a failing
+    payload (e.g. a destination whose shed vanished) left an invalid committed
+    artifact on disk. Validation must gate the write."""
+    import json
+
+    from tools.commute.drive_isochrone import run as drive_run
+
+    # reuse the committed raw payload (its metadata matches the real config,
+    # so run() takes the offline reuse path — no geocoding, no API calls)
+    raw = json.loads(Path("data/commute/drive_isochrone.json").read_text())
+    # blank Bracknell's cells: raw_to_searches then emits no Bracknell search
+    # and validate_payload reports the lost destination
+    raw["destinations"][1]["cells"] = []
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "drive_isochrone.json").write_text(json.dumps(raw))
+
+    code = await drive_run(["--out-dir", str(out_dir)])
+    assert code == 1
+    assert not (out_dir / "drive_searches.json").exists()
+    assert not (out_dir / "drive_searches.txt").exists()
 
 
 # ── kept cells ───────────────────────────────────────────────────────

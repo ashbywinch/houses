@@ -151,3 +151,16 @@ def test_no_intersection_yields_empty_searches():
     payload = build_payload(shed=shed, drive_raw=DRIVE_RAW, drive_searches=DRIVE_SEARCHES, generated_at=NOW)
     assert payload["searches"] == []
     assert payload["metadata"]["count"] == 0
+
+
+def test_missing_destination_shed_makes_intersection_empty():
+    """A destination with no shed (e.g. off the road network, or a low
+    threshold) makes its constraint unsatisfiable — the intersection must be
+    EMPTY, never silently dropped ("every commute works" would be a lie)."""
+    dad_only = {
+        "metadata": DRIVE_SEARCHES["metadata"],
+        "searches": [s for s in DRIVE_SEARCHES["searches"] if s["destination"]["label"] == "Dad"],
+    }
+    payload = build_payload(shed=SHED, drive_raw=DRIVE_RAW, drive_searches=dad_only, generated_at=NOW)
+    assert payload["searches"] == []
+    assert payload["metadata"]["count"] == 0

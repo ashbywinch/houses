@@ -105,6 +105,28 @@ def build_payload(
     by_label: dict[str, list[list[tuple[float, float]]]] = {}
     for s in drive_searches.get("searches", []):
         by_label.setdefault(s["destination"]["label"], []).append(s["polygon"])
+    # a destination with NO shed (no kept cell within its threshold — e.g. a
+    # newly added destination off the road network, or a low threshold) makes
+    # its constraint unsatisfiable: the intersection must be EMPTY, never
+    # silently dropped ("every commute works" would be a lie)
+    missing = [d["label"] for d in drive_raw["destinations"] if d["label"] not in by_label]
+    if missing:
+        logger.warning(
+            "destination(s) have no shed — the all-commutes intersection is empty: %s", ", ".join(missing)
+        )
+        return {
+            "metadata": {
+                "engine_version": ENGINE_VERSION,
+                "profile": "tfl-transit + driving-car",
+                "threshold_min": min(d["threshold_min"] for d in drive_raw["destinations"]),
+                "cell_km": cell_km,
+                "transit_buffer_km": TRANSIT_BUFFER_KM,
+                "sources": ["station_shed.json", "drive_isochrone.json", "drive_searches.json"],
+                "generated_at": generated_at,
+                "count": 0,
+            },
+            "searches": [],
+        }
     drive_sets = [drive_cells(polys, grid) for polys in by_label.values()]
     kept = transit
     for ds in drive_sets:
