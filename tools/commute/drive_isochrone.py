@@ -882,8 +882,18 @@ async def run(argv: list[str] | None = None) -> int:
                 key=settings.ors_api_key,
                 generated_at=generated_at,
             )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code in (401, 403):
+                # auth failures never fix themselves by retrying
+                return _fail(
+                    "The commute map service rejected the routing key — check it and try again.",
+                    f"ORS auth failed ({e.response.status_code}): {e}",
+                )
+            return _fail(
+                "The commute map service didn't respond — try again in a minute.",
+                f"ORS matrix batch failed: {e}",
+            )
         except (
-            httpx.HTTPStatusError,
             httpx.RequestError,
             httpx.TimeoutException,
             json.JSONDecodeError,

@@ -296,6 +296,15 @@ def main(argv: list[str] | None = None) -> int:
         except (json.JSONDecodeError, OSError):
             print("The saved all-commutes data is unreadable — showing the map without it.", file=sys.stderr)
             logger.warning("%s unreadable — omitting the intersection layer", intersection_path)
+        if intersection is not None and not (isinstance(intersection, dict) and intersection.get("searches")):
+            # an empty intersection is a SUPPORTED outcome, but a map without
+            # the gold layer must not be mistaken for a complete one
+            print(
+                "warning: the 'Where we could live' layer is missing — the saved all-commutes data has no "
+                "areas (run 'make commute-intersection' to check)",
+                file=sys.stderr,
+            )
+            logger.warning("%s has no searches — omitting the 'Where we could live' layer", intersection_path)
     try:
         union = json.loads(union_path.read_text())
         drive = json.loads(drive_path.read_text())

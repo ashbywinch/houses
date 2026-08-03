@@ -782,3 +782,29 @@ def test_combined_map_fails_cleanly_on_malformed_payload(tmp_path):
     )
     assert code == 1
     assert not (tmp_path / "map.html").exists()
+
+
+def test_combined_map_warns_when_intersection_layer_is_missing(tmp_path, capsys):
+    """An EMPTY (supported) intersection must not silently vanish from the
+    map — the pipeline surfaces the missing 'Where we could live' layer."""
+    import json
+
+    from tools.commute.combined_map import main as combined_main
+
+    union_path = tmp_path / "union.json"
+    union_path.write_text(json.dumps({"components": []}))
+    drive_path = tmp_path / "drive.json"
+    drive_path.write_text(json.dumps({"searches": []}))
+    intersection_path = tmp_path / "intersection.json"
+    intersection_path.write_text(json.dumps({"searches": []}))
+
+    code = combined_main(
+        [
+            "--union", str(union_path),
+            "--drive", str(drive_path),
+            "--intersection", str(intersection_path),
+            "--out", str(tmp_path / "map.html"),
+        ]
+    )
+    assert code == 0
+    assert "Where we could live" in capsys.readouterr().err
