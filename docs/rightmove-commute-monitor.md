@@ -1,6 +1,6 @@
 # Rightmove Commute Search Coverage — Phase 1 Plan
 
-Status: implemented on `feat/rightmove-commute-monitor` (TDD, 77 commute unit tests green; `make test` fully green)
+Status: implemented on `feat/rightmove-commute-monitor` (TDD, commute unit tests green; `make test` fully green).
 
 Website integration (settings page, generation affordance, map view): see
 [docs/website-isochrone-integration.md](website-isochrone-integration.md).
@@ -293,8 +293,10 @@ gold "All commutes (where to buy)" layer.
 - `make commute-map` — regenerate `commute_map.html` (transit + all drive sheds
   on one self-contained Leaflet page; Leaflet vendored + inlined so the file
   renders from any static host).
-- `make commute-serve` — serve `data/commute/` on the LAN (port 8123) and print
-  the URL to open on a phone: `http://<lan-ip>:8123/commute_map.html`.
+- `make commute-serve` — serve the commute MAP on the LAN (port 8123) and
+  print the URL to open on a phone: `http://<lan-ip>:8123/commute_map.html`.
+  Serves ONLY the map (the destination config, raw durations, and search
+  payloads stay private).
 - `python -m tools.commute.drive_isochrone --help` — `--threshold-min`, `--cell-km`,
   `--region-km`, `--min-island-cells`, `--min-beds`, `--property-type`, `--force`,
   `--validate`.

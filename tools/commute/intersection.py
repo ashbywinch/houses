@@ -155,7 +155,11 @@ def build_payload(
 
     thresholds = [d["threshold_min"] for d in drive_raw["destinations"]]
     searches: list[dict] = []
-    for i, comp in enumerate((c for c in _components(kept) if len(c) >= MIN_ISLAND_CELLS), 1):
+    comps = _components(kept)
+    # the island filter drops fringe speckles — never the main shed: a valid
+    # but small intersection (narrow overlap of a short-threshold drive shed
+    # with the transit buffer) must still produce a search
+    for i, comp in enumerate((c for c in comps if c is comps[0] or len(c) >= MIN_ISLAND_CELLS), 1):
         loop = _outer_loop(comp, grid)
         if loop is None:
             continue
@@ -334,6 +338,7 @@ def run(argv: list[str] | None = None) -> int:
         try:
             existing = json.loads(out_path.read_text())
         except json.JSONDecodeError:
+            logger.warning("%s unreadable (corrupt?) — will regenerate", out_path)
             existing = None
     if existing is None or not _same_payload(existing, payload):
         out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -147,6 +147,22 @@ def test_validate_payload_passes_and_catches():
     assert any("bounding box" in i for i in validate_payload(payload))
 
 
+def test_small_intersection_keeps_main_component():
+    """The island filter must never drop the main intersection shed: a valid
+    but tiny overlap (1-3 cells) still produces a search."""
+    import copy
+
+    # tiny drive polygons around the station → a 1-2 cell intersection
+    tiny = {"lat_min": 51.05, "lat_max": 51.15, "lon_min": -0.95, "lon_max": -0.85}
+    poly = [[tiny["lat_min"], tiny["lon_min"]], [tiny["lat_min"], tiny["lon_max"]],
+            [tiny["lat_max"], tiny["lon_max"]], [tiny["lat_max"], tiny["lon_min"]]]
+    searches = copy.deepcopy(DRIVE_SEARCHES)
+    for s in searches["searches"]:
+        s["polygon"] = poly
+    payload = build_payload(shed=SHED, drive_raw=DRIVE_RAW, drive_searches=searches, generated_at=NOW)
+    assert payload["searches"], "a tiny valid intersection must not be empty"
+
+
 def test_no_intersection_yields_empty_searches():
     shed = {"metadata": {}, "stations": [{"name": "Nowhere", "crs": "NOW", "lat": 55.0, "lon": -5.0, "kept": True}]}
     payload = build_payload(shed=shed, drive_raw=DRIVE_RAW, drive_searches=DRIVE_SEARCHES, generated_at=NOW)

@@ -638,6 +638,7 @@ def write_payloads(raw: dict | None, searches: dict, out_dir: str | Path) -> Non
         try:
             existing = json.loads(searches_path.read_text())
         except json.JSONDecodeError:
+            logger.warning("%s unreadable (corrupt?) — will rewrite", searches_path)
             existing = None
     if existing is not None and _same_payload(existing, searches):
         _write_if_changed(out_dir / TXT_FILENAME, _urls_text(searches))
@@ -729,6 +730,7 @@ def _load_raw(path: Path) -> dict | None:
     try:
         return json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
+        logger.warning("%s unreadable (corrupt or truncated write?) — will regenerate", path)
         return None
 
 
@@ -861,8 +863,8 @@ async def run(argv: list[str] | None = None) -> int:
         if not settings.ors_api_key:
             return _fail(
                 "The commute map can't be generated without the routing API key — add it to your environment "
-                "and try again.",
-                "HEIGIT_API_KEY unset — set it in .env to enable OpenRouteService drive isochrones",
+                "configuration and try again.",
+                "HEIGIT_API_KEY unset — set it in .env (it populates settings.ors_api_key, the OpenRouteService key)",
             )
         try:
             coords = [await _geocode(d.postcode) for d in destinations]
