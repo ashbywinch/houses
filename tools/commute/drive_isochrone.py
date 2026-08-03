@@ -754,6 +754,9 @@ async def run(argv: list[str] | None = None) -> int:
         help="region radius around each destination (default threshold * 1.7)",
     )
     parser.add_argument("--min-beds", type=int, default=2)
+    parser.add_argument(
+        "--min-island-cells", type=int, default=4, help="drop shed components below this many cells (default 4)"
+    )
     parser.add_argument("--property-type", default="houses")
     parser.add_argument("--force", action="store_true", help="ignore the committed raw payload and re-fetch the matrix")
     parser.add_argument("--validate", action="store_true", help="validate the committed drive_searches.json and exit")
@@ -912,7 +915,11 @@ async def run(argv: list[str] | None = None) -> int:
 
     try:
         searches = raw_to_searches(
-            raw, min_beds=args.min_beds, property_type=args.property_type, generated_at=generated_at
+            raw,
+            min_beds=args.min_beds,
+            property_type=args.property_type,
+            generated_at=generated_at,
+            min_island_cells=args.min_island_cells,
         )
     except (KeyError, TypeError, ValueError) as e:
         return _fail(
