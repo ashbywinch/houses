@@ -459,6 +459,20 @@ async def test_validate_fails_cleanly_on_dict_shaped_searches(tmp_path):
     assert code == 1
 
 
+async def test_validate_fails_cleanly_on_null_metadata(tmp_path):
+    """--validate with "metadata": null must exit with the two-tier message,
+    not an AttributeError at metadata.get."""
+    import json as _json
+
+    from tools.commute.drive_isochrone import run as drive_run
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "drive_searches.json").write_text(_json.dumps({"metadata": None, "searches": []}))
+    code = await drive_run(["--out-dir", str(out_dir), "--validate"])
+    assert code == 1
+
+
 async def test_validate_fails_cleanly_on_list_shaped_searches(tmp_path):
     """--validate with a top-level-list drive_searches.json must exit with
     the two-tier message, not an AttributeError at .get("searches")."""

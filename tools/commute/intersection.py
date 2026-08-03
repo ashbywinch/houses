@@ -197,8 +197,10 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
     searches = payload.get("searches", [])
     if not isinstance(searches, list):
         return ["'searches' is malformed (expected a list, got " + type(searches).__name__ + ")"]
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, dict):
+        return ["'metadata' is malformed (expected an object)"]
     issues: list[str] = []
-    metadata = payload.get("metadata", {})
     if metadata.get("count") != len(searches):
         issues.append(f"metadata count {metadata.get('count')} != {len(searches)} searches")
     for s in searches:
@@ -241,8 +243,10 @@ def _same_payload(existing: dict, new: dict) -> bool:
         return False
     if json.dumps(existing.get("searches"), sort_keys=True) != json.dumps(new.get("searches"), sort_keys=True):
         return False
-    e_meta = {k: v for k, v in existing.get("metadata", {}).items() if k != "generated_at"}
-    n_meta = {k: v for k, v in new.get("metadata", {}).items() if k != "generated_at"}
+    if not isinstance(existing.get("metadata"), dict) or not isinstance(new.get("metadata"), dict):
+        return False
+    e_meta = {k: v for k, v in existing["metadata"].items() if k != "generated_at"}
+    n_meta = {k: v for k, v in new["metadata"].items() if k != "generated_at"}
     return json.dumps(e_meta, sort_keys=True) == json.dumps(n_meta, sort_keys=True)
 
 

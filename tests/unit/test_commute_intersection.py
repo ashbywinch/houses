@@ -279,6 +279,20 @@ def test_validate_fails_cleanly_on_dict_shaped_intersection(tmp_path):
     assert code == 1
 
 
+def test_validate_fails_cleanly_on_null_metadata(tmp_path):
+    """--validate with "metadata": null must exit with the two-tier message,
+    not an AttributeError at metadata.get."""
+    import json as _json
+
+    from tools.commute.intersection import run as intersection_run
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "intersection.json").write_text(_json.dumps({"metadata": None, "searches": []}))
+    code = intersection_run(["--out", str(out_dir / "intersection.json"), "--validate"])
+    assert code == 1
+
+
 def test_validate_fails_cleanly_on_list_shaped_intersection(tmp_path):
     """--validate with a top-level-list intersection.json must exit with
     the two-tier message, not an AttributeError."""
