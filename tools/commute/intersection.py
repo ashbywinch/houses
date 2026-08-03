@@ -190,8 +190,10 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
     """Issues with the intersection payload; empty means it passes."""
     if not isinstance(payload, dict):
         return ["payload is malformed (expected an object)"]
-    issues: list[str] = []
     searches = payload.get("searches", [])
+    if not isinstance(searches, list):
+        return ["'searches' is malformed (expected a list, got " + type(searches).__name__ + ")"]
+    issues: list[str] = []
     metadata = payload.get("metadata", {})
     if metadata.get("count") != len(searches):
         issues.append(f"metadata count {metadata.get('count')} != {len(searches)} searches")
