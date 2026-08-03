@@ -32,6 +32,11 @@ def test_serve_serves_only_the_map(tmp_path):
         assert resp.status == 200
         assert resp.read() == b"<html>map</html>"
 
+        # the map's ?debug=1 diagnostics panel must not 404 on a query string
+        resp = urllib.request.urlopen(f"http://127.0.0.1:{port}/commute_map.html?debug=1")
+        assert resp.status == 200
+        assert resp.read() == b"<html>map</html>"
+
         for path in ("/drive_destinations.json", "/drive_isochrone.json", "/searches.json"):
             with pytest.raises(urllib.error.HTTPError) as exc:
                 urllib.request.urlopen(f"http://127.0.0.1:{port}{path}")

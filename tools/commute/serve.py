@@ -14,6 +14,7 @@ import argparse
 import http.server
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 PORT = 8123
 MAP_REL = "commute_map.html"
@@ -34,7 +35,9 @@ def make_handler(directory: Path) -> type[http.server.SimpleHTTPRequestHandler]:
             super().__init__(*args, directory=directory_str, **kwargs)
 
         def do_GET(self) -> None:  # noqa: N802 — http.server API
-            if self.path not in ("/", "/" + MAP_REL):
+            # ignore the query string: the map's own ?debug=1 diagnostics
+            # panel is a documented flow and must not 404
+            if urlsplit(self.path).path not in ("/", "/" + MAP_REL):
                 self.send_error(404, "only the commute map is served")
                 return
             try:
