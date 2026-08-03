@@ -188,6 +188,8 @@ def build_payload(
 
 def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list[str]:
     """Issues with the intersection payload; empty means it passes."""
+    if not isinstance(payload, dict):
+        return ["payload is malformed (expected an object)"]
     issues: list[str] = []
     searches = payload.get("searches", [])
     metadata = payload.get("metadata", {})
@@ -229,6 +231,8 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
 
 def _same_payload(existing: dict, new: dict) -> bool:
     """Byte-identical apart from ``generated_at`` (the determinism contract)."""
+    if not isinstance(existing, dict) or not isinstance(new, dict):
+        return False
     if json.dumps(existing.get("searches"), sort_keys=True) != json.dumps(new.get("searches"), sort_keys=True):
         return False
     e_meta = {k: v for k, v in existing.get("metadata", {}).items() if k != "generated_at"}

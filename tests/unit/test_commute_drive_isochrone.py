@@ -289,6 +289,18 @@ async def test_run_fails_cleanly_on_empty_destinations_config(tmp_path):
     assert code == 1
 
 
+async def test_validate_fails_cleanly_on_list_shaped_searches(tmp_path):
+    """--validate with a top-level-list drive_searches.json must exit with
+    the two-tier message, not an AttributeError at .get("searches")."""
+    from tools.commute.drive_isochrone import run as drive_run
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "drive_searches.json").write_text("[1, 2, 3]")
+    code = await drive_run(["--out-dir", str(out_dir), "--validate"])
+    assert code == 1
+
+
 async def test_validate_fails_cleanly_on_corrupt_searches(tmp_path):
     """--validate with a corrupt drive_searches.json must not traceback."""
     from tools.commute.drive_isochrone import run as drive_run

@@ -249,6 +249,18 @@ def test_missing_inputs_reported_in_one_pass(tmp_path, capsys):
     assert "commute-drive" in err
 
 
+def test_validate_fails_cleanly_on_list_shaped_intersection(tmp_path):
+    """--validate with a top-level-list intersection.json must exit with
+    the two-tier message, not an AttributeError."""
+    from tools.commute.intersection import run as intersection_run
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "intersection.json").write_text("[1, 2, 3]")
+    code = intersection_run(["--out", str(out_dir / "intersection.json"), "--validate"])
+    assert code == 1
+
+
 def test_validate_fails_cleanly_on_corrupt_intersection(tmp_path):
     """--validate with a truncated intersection.json must exit with the
     two-tier message, not a JSONDecodeError traceback."""
