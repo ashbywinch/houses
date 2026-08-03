@@ -619,6 +619,15 @@ def test_validate_payload_flags_missing_destination_without_crashing():
     assert any("malformed" in i for i in issues)
 
 
+def test_validate_payload_flags_non_dict_destination_without_crashing():
+    """A non-dict destination (e.g. "destination": "corrupt") must be
+    flagged, not crash the label/grouping steps with an AttributeError."""
+    payload = raw_to_searches(_raw_payload(), generated_at=NOW)
+    payload["searches"][0]["destination"] = "corrupt"
+    issues = validate_payload(payload)
+    assert any("malformed" in i for i in issues)
+
+
 def test_combined_map_fails_cleanly_on_malformed_payload(tmp_path):
     """main() must exit with the two-tier message, not a KeyError traceback,
     when a payload is valid JSON but structurally wrong."""

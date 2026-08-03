@@ -167,6 +167,26 @@ def test_missing_destination_shed_makes_intersection_empty():
     assert payload["metadata"]["count"] == 0
 
 
+def test_stale_drive_destination_raises():
+    """drive_searches containing a destination absent from the config is
+    stale committed data — ANDing it would silently narrow the intersection,
+    so build_payload must reject it."""
+    import copy
+
+    stale_searches = copy.deepcopy(DRIVE_SEARCHES)
+    stale_searches["searches"].append(
+        {
+            "id": "drive-ghost-090",
+            "polygon": [[51.5, -1.5], [51.5, -1.4], [51.6, -1.4], [51.6, -1.5]],
+            "rightmove_url": "https://rm/ghost",
+            "destination": {"label": "Ghost", "postcode": "AA1 1AA", "lat": 51.55, "lon": -1.45},
+            "threshold_min": 90,
+        }
+    )
+    with pytest.raises(ValueError, match="stale drive data"):
+        build_payload(shed=SHED, drive_raw=DRIVE_RAW, drive_searches=stale_searches, generated_at=NOW)
+
+
 def test_common_grid_rejects_no_destinations():
     """Regression: max() over an empty destination list used to crash with a
     bare ValueError on empty input."""

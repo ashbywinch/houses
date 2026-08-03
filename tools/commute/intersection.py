@@ -123,6 +123,14 @@ def build_payload(
     # its constraint unsatisfiable: the intersection must be EMPTY, never
     # silently dropped ("every commute works" would be a lie)
     missing = [d["label"] for d in drive_raw["destinations"] if d["label"] not in by_label]
+    # the reverse check: drive_searches containing a destination ABSENT from
+    # the config means stale committed data — ANDing it would silently narrow
+    # the intersection; the user must regenerate the drive data
+    stale = sorted(set(by_label) - {d["label"] for d in drive_raw["destinations"]})
+    if stale:
+        raise ValueError(
+            f"stale drive data: destination(s) {', '.join(stale)} are not in the config — run 'make commute-drive'"
+        )
     if missing:
         logger.warning(
             "destination(s) have no shed — the all-commutes intersection is empty: %s", ", ".join(missing)

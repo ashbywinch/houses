@@ -548,16 +548,19 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
                     issues.append(f"{s.get('id')}: URL polygon does not round-trip to the stored polygon")
             except Exception as e:  # noqa: BLE001 — any parse failure is a URL issue
                 issues.append(f"{s.get('id')}: rightmove_url unparseable ({e})")
-        dest = s.get("destination") or {}
-        if dest.get("label"):
-            labels_in_searches.add(dest["label"])
+        dest = s.get("destination")
+        label = dest.get("label") if isinstance(dest, dict) else None
+        if isinstance(label, str) and label:
+            labels_in_searches.add(label)
     for label in metadata.get("destinations", []):
         if label not in labels_in_searches:
             issues.append(f"destination {label!r} produced no searches")
     # every destination's centre must sit inside one of its own shed's loops
-    by_label: dict[str, list[dict]] = {}
+    by_label: dict[str | None, list[dict]] = {}
     for s in searches:
-        by_label.setdefault((s.get("destination") or {}).get("label"), []).append(s)
+        dest = s.get("destination")
+        label = dest.get("label") if isinstance(dest, dict) else None
+        by_label.setdefault(label, []).append(s)
     for group in by_label.values():
         valid = [o for o in group if isinstance(o.get("polygon"), list) and len(o["polygon"]) >= 3]
         for s in group:
