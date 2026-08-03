@@ -164,3 +164,44 @@ def test_missing_destination_shed_makes_intersection_empty():
     payload = build_payload(shed=SHED, drive_raw=DRIVE_RAW, drive_searches=dad_only, generated_at=NOW)
     assert payload["searches"] == []
     assert payload["metadata"]["count"] == 0
+
+
+def test_common_grid_rejects_no_destinations():
+    """Regression: max() over an empty destination list used to crash with a
+    bare ValueError on empty input."""
+    import copy
+
+    empty = copy.deepcopy(DRIVE_RAW)
+    empty["destinations"] = []
+    with pytest.raises(ValueError, match="no drive destinations"):
+        common_grid(empty)
+
+
+async def test_run_fails_cleanly_with_no_drive_destinations(tmp_path):
+    """run() must exit with the two-tier message, not a traceback, when the
+    drive payload has no destinations."""
+    import json
+
+    from tools.commute.intersection import run as intersection_run
+
+    shed = {"metadata": {}, "stations": [{"name": "S", "crs": "S", "lat": 51.1, "lon": -0.9, "kept": True}]}
+    drive_raw = {"metadata": {"region_km": 50.0, "threshold_min": 90}, "destinations": []}
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    shed_path = tmp_path / "shed.json"
+    shed_path.write_text(json.dumps(shed))
+    raw_path = tmp_path / "raw.json"
+    raw_path.write_text(json.dumps(drive_raw))
+    searches_path = tmp_path / "searches.json"
+    searches_path.write_text(json.dumps({"metadata": {}, "searches": []}))
+
+    code = intersection_run(
+        [
+            "--shed", str(shed_path),
+            "--drive-raw", str(raw_path),
+            "--drive-searches", str(searches_path),
+            "--out", str(out_dir / "intersection.json"),
+        ]
+    )
+    assert code == 1
+    assert not (out_dir / "intersection.json").exists()

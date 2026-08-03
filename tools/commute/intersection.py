@@ -59,6 +59,8 @@ def common_grid(drive_raw: dict, cell_km: float = DEFAULT_CELL_KM) -> Grid:
     """
     region_km = drive_raw["metadata"]["region_km"]
     boxes = [region_bbox(d["lat"], d["lon"], region_km) for d in drive_raw["destinations"]]
+    if not boxes:
+        raise ValueError("no drive destinations — nothing to intersect")
     bbox = Rect(
         lat_min=max(b.lat_min for b in boxes),
         lat_max=min(b.lat_max for b in boxes),
@@ -261,15 +263,21 @@ def run(argv: list[str] | None = None) -> int:
             f"unreadable intersection input: {e}",
         )
 
-    payload = build_payload(
-        shed=shed,
-        drive_raw=drive_raw,
-        drive_searches=drive_searches,
-        cell_km=args.cell_km,
-        min_beds=args.min_beds,
-        property_type=args.property_type,
-        generated_at=datetime.now(UTC).isoformat(),
-    )
+    try:
+        payload = build_payload(
+            shed=shed,
+            drive_raw=drive_raw,
+            drive_searches=drive_searches,
+            cell_km=args.cell_km,
+            min_beds=args.min_beds,
+            property_type=args.property_type,
+            generated_at=datetime.now(UTC).isoformat(),
+        )
+    except ValueError as e:
+        return _fail(
+            "Can't build the all-commutes area — check the car destinations and try again.",
+            f"intersection build failed: {e}",
+        )
     if not payload["searches"]:
         print("warning: no intersection — no place satisfies every commute", file=sys.stderr)
     issues = validate_payload(payload)

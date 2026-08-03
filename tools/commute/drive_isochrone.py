@@ -670,9 +670,15 @@ async def run(argv: list[str] | None = None) -> int:
     # kept cells, metadata, and config signature all agree — a threshold
     # change is a real config change, so the raw payload regenerates (never a
     # silent reuse of cells kept at the old threshold).
-    config_path = Path(args.config)
-    config_data = json.loads(config_path.read_text())
-    destinations = load_config(config_path)
+    try:
+        config_path = Path(args.config)
+        config_data = json.loads(config_path.read_text())
+        destinations = load_config(config_path)
+    except (OSError, json.JSONDecodeError, ValueError) as e:
+        return _fail(
+            "The commute destinations settings are missing or unreadable — fix them and try again.",
+            f"unreadable drive destinations config {args.config}: {e}",
+        )
     if args.threshold_min:
         destinations = apply_default_threshold(destinations, config_data, args.threshold_min)
     threshold_min = min(d.threshold_min for d in destinations)

@@ -198,6 +198,17 @@ def test_drive_map_html_escapes_user_labels():
     assert "\\u0026lt;script\\u0026gt;alert(1)" in html  # escaped form present
 
 
+async def test_run_fails_cleanly_on_bad_config(tmp_path):
+    """A missing/corrupt destinations config must exit with the two-tier
+    message, not a bare traceback."""
+    from tools.commute.drive_isochrone import run as drive_run
+
+    bad_cfg = tmp_path / "destinations.json"
+    bad_cfg.write_text("{ not json")
+    code = await drive_run(["--config", str(bad_cfg), "--out-dir", str(tmp_path / "out")])
+    assert code == 1
+
+
 async def test_run_does_not_write_when_validation_fails(tmp_path):
     """Regression: run() wrote the searches BEFORE validating, so a failing
     payload (e.g. a destination whose shed vanished) left an invalid committed
