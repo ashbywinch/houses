@@ -87,8 +87,52 @@ def build_html(union: dict, drive: dict, *, leaflet_js: str, leaflet_css: str, i
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Commute isochrones</title>
-<style>__CSS__</style></head>
+<style>html,body{margin:0;height:100%}#map{height:100%;background:#e8eef4}__CSS__</style></head>
 <body><div id="map"></div>
+<script>
+(function () {
+  // debug panel: ?debug=1 shows what the page actually sees — no console needed
+  var errors = [];
+  window.addEventListener('error', function (e) { errors.push(e.message || String(e.error)); });
+  window.addEventListener('unhandledrejection', function (e) { errors.push('rejection: ' + e.reason); });
+  if (location.search.indexOf('debug') === -1) { return; }
+  var el = document.createElement('div');
+  el.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:100000;max-height:45%;overflow:auto;' +
+    'background:rgba(0,0,0,.85);color:#fff;font:11px/1.4 monospace;padding:8px;white-space:pre-wrap;' +
+    'border-radius:6px;box-sizing:border-box';
+  var close = document.createElement('button');
+  close.textContent = 'x';
+  close.style.cssText = 'position:absolute;top:4px;right:8px;background:none;border:none;color:#fff;' +
+    'font-size:14px;cursor:pointer';
+  close.onclick = function () { el.remove(); };
+  el.appendChild(close);
+  var body = document.createElement('div');
+  el.appendChild(body);
+  document.body.appendChild(el);
+  var tileProbe = { loaded: 0, failed: 0 };
+  var probe = new Image();
+  probe.onload = function () { tileProbe.loaded = 1; refresh(); };
+  probe.onerror = function () { tileProbe.failed = 1; refresh(); };
+  probe.src = 'https://tile.openstreetmap.org/0/0/0.png';
+  function refresh() {
+    var tiles = document.querySelectorAll('img.leaflet-tile');
+    var broken = 0;
+    for (var i = 0; i < tiles.length; i++) { if (tiles[i].complete && tiles[i].naturalWidth === 0) { broken++; } }
+    body.textContent = [
+      'url: ' + location.href,
+      'ua: ' + navigator.userAgent,
+      'leaflet: ' + (typeof window.L !== 'undefined' ? 'loaded' : 'MISSING'),
+      'polygons: ' + document.querySelectorAll('.leaflet-overlay-pane path').length,
+      'markers: ' + document.querySelectorAll('.leaflet-marker-icon').length,
+      'tiles: ' + tiles.length + ' (' + broken + ' broken)',
+      'tile probe: ' + (tileProbe.loaded ? 'reachable' : tileProbe.failed ? 'FAILED' : 'pending'),
+      'errors: ' + (errors.length ? errors.join(' | ') : 'none'),
+    ].join('\\n');
+  }
+  window.addEventListener('load', function () { setTimeout(refresh, 2500); });
+  refresh();
+})();
+</script>
 <script>__LEAFLET_JS__</script>
 <script>
 L.Icon.Default.mergeOptions({
@@ -97,7 +141,8 @@ L.Icon.Default.mergeOptions({
 const layers = __LAYERS__;
 const markers = __MARKERS__;
 const map = L.map('map');
-const all = layers.flatMap(l => l.coords).flat();
+const all = [];
+for (const l of layers) { for (const coords of l.coords) { for (const p of coords) { all.push(p); } } }
 if (all.length) { map.fitBounds(L.latLngBounds(all)); }
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
   {maxZoom: 18, attribution: '&copy; OpenStreetMap'}).addTo(map);

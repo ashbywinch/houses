@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import re
+import shutil
+import subprocess
+
+import pytest
+
 from tools.commute.combined_map import build_html, write_map
 
 UNION = {
@@ -73,6 +79,45 @@ def test_build_html_inlines_leaflet_and_icons():
     # JS default icon options embedded
     assert "iconUrl: 'data:image/png;base64,CCC'" in html
     assert "iconRetinaUrl: 'data:image/png;base64,DDD'" in html
+
+
+def test_build_html_gives_the_map_a_height():
+    # regression: a #map div without an explicit height renders an invisible
+    # (blank) map — the page style must survive generation
+    html = _html()
+    assert "#map{height:100%" in html
+    assert "html,body{margin:0;height:100%}" in html
+
+
+def test_build_html_has_debug_panel_guard():
+    html = _html()
+    assert "location.search.indexOf('debug')" in html  # ?debug=1 diagnostics
+    assert "flatMap" not in html  # ES2019 methods would blank older mobile browsers
+    assert ".flat()" not in html
+    # the debug panel joins lines with a JS newline ESCAPE — a literal newline
+    # inside the string literal is a syntax error the browser silently skips
+    assert "join('\\n')" in html
+    assert "join('\n')" not in html
+
+
+def test_inline_scripts_are_valid_javascript(tmp_path):
+    """Every generated <script> body must parse as JS.
+
+    Regression for the blank-map bug: a mangled escape (a literal newline in a
+    string literal) made the debug script a syntax error, which the browser
+    silently skipped while the rest of the page still rendered. String-presence
+    tests cannot catch this — only parsing can.
+    """
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node not installed (frontend toolchain dependency)")
+    scripts = re.findall(r"<script>(.*?)</script>", _html(), re.S)
+    assert len(scripts) == 3  # debug panel, leaflet, map
+    for i, src in enumerate(scripts):
+        path = tmp_path / f"script_{i}.js"
+        path.write_text(src)
+        subprocess.run([node, "--check", str(path)], check=True, capture_output=True)
 
 
 def test_build_html_is_deterministic():
