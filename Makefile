@@ -1,5 +1,5 @@
 # Makefile for houses — Browser-to-Spreadsheet Ingestion Engine
-.PHONY: help setup install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e lint format clean reset-db commute-shed commute-searches commute-validate commute-drive commute-drive-validate commute-map
+.PHONY: help setup install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e lint format clean reset-db commute-shed commute-searches commute-validate commute-drive commute-drive-validate commute-map commute-serve
 
 # Variables
 PYTHON := .venv/bin/python
@@ -37,6 +37,7 @@ help:
 	@echo "  ${GREEN}make commute-drive${NC}      One-off ORS matrix batch → data/commute/drive_searches.json (FORCE=1 to re-fetch)"
 	@echo "  ${GREEN}make commute-drive-validate${NC}  Validate drive searches + run commute tests"
 	@echo "  ${GREEN}make commute-map${NC}        Offline: combine all isochrones into one map (commute_map.html)"
+	@echo "  ${GREEN}make commute-serve${NC}      Serve the maps on your LAN (open the printed URL on your phone)"
 
 setup: frontend-setup install-hooks
 	@$(UV) --version >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -168,3 +169,9 @@ commute-drive-validate:
 
 commute-map:
 	@$(PYTHON) -m tools.commute.combined_map
+
+commute-serve:
+	@echo "Commute maps on your LAN — open on your phone:"
+	@echo "  http://$$($(PYTHON) -c 'import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.connect(("8.8.8.8", 80)); print(s.getsockname()[0])'):8123/commute_map.html"
+	@echo "  (Ctrl-C to stop)"
+	@$(PYTHON) -m http.server 8123 --bind 0.0.0.0 --directory data/commute

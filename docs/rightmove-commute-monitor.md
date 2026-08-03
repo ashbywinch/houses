@@ -266,6 +266,11 @@ by the gate.
 - `make commute-drive` — one-off batch; reuses the committed raw payload when the
   config matches (fully offline); `FORCE=1` re-fetches.
 - `make commute-drive-validate` — `--validate` + the commute test suite.
+- `make commute-map` — regenerate `commute_map.html` (transit + all drive sheds
+  on one self-contained Leaflet page; Leaflet vendored + inlined so the file
+  renders from any static host).
+- `make commute-serve` — serve `data/commute/` on the LAN (port 8123) and print
+  the URL to open on a phone: `http://<lan-ip>:8123/commute_map.html`.
 - `python -m tools.commute.drive_isochrone --help` — `--threshold-min`, `--cell-km`,
   `--region-km`, `--min-island-cells`, `--min-beds`, `--property-type`, `--force`,
   `--validate`.
