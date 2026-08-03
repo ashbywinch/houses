@@ -303,6 +303,34 @@ def test_validate_fails_cleanly_on_corrupt_intersection(tmp_path):
     assert code == 1
 
 
+def test_run_fails_cleanly_on_list_shaped_drive_searches(tmp_path):
+    """A top-level-list drive_searches.json (truncated/hand-edited) must exit
+    with the two-tier message, not an AttributeError at list.get."""
+    import json as _json
+
+    from tools.commute.intersection import run as intersection_run
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    shed_path = tmp_path / "shed.json"
+    shed_path.write_text(_json.dumps({"metadata": {}, "stations": []}))
+    raw_path = tmp_path / "raw.json"
+    raw_path.write_text(_json.dumps({"metadata": {"region_km": 50.0}, "destinations": []}))
+    searches_path = tmp_path / "searches.json"
+    searches_path.write_text(_json.dumps([1, 2, 3]))
+
+    code = intersection_run(
+        [
+            "--shed", str(shed_path),
+            "--drive-raw", str(raw_path),
+            "--drive-searches", str(searches_path),
+            "--out", str(out_dir / "intersection.json"),
+        ]
+    )
+    assert code == 1
+    assert not (out_dir / "intersection.json").exists()
+
+
 def test_run_fails_cleanly_on_malformed_shed(tmp_path):
     """A shed file that is valid JSON but missing the 'stations' key must
     exit with the two-tier message, not a KeyError traceback."""

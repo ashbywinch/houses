@@ -320,7 +320,7 @@ def run(argv: list[str] | None = None) -> int:
             property_type=args.property_type,
             generated_at=datetime.now(UTC).isoformat(),
         )
-    except (ValueError, KeyError, TypeError) as e:
+    except (ValueError, KeyError, TypeError, AttributeError) as e:
         return _fail(
             "Can't build the all-commutes area — check the car destinations and try again.",
             f"intersection build failed: {e}",
