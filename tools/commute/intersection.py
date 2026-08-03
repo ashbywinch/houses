@@ -245,12 +245,19 @@ def run(argv: list[str] | None = None) -> int:
                 "No all-commutes data yet — run 'make commute-intersection' first.",
                 f"{out_path} not found for --validate",
             )
-        issues = validate_payload(json.loads(out_path.read_text()))
+        try:
+            payload = json.loads(out_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            return _fail(
+                "The saved all-commutes data is unreadable — regenerate it with 'make commute-drive'.",
+                f"unreadable {out_path} for --validate: {e}",
+            )
+        issues = validate_payload(payload)
         if issues:
             for issue in issues:
                 print(f"- {issue}", file=sys.stderr)
             return 1
-        print(f"intersection OK ({len(json.loads(out_path.read_text())['searches'])} search(es))")
+        print(f"intersection OK ({len(payload['searches'])} search(es))")
         return 0
 
     missing = [(p, hint) for p, hint in (
@@ -284,7 +291,7 @@ def run(argv: list[str] | None = None) -> int:
             property_type=args.property_type,
             generated_at=datetime.now(UTC).isoformat(),
         )
-    except ValueError as e:
+    except (ValueError, KeyError) as e:
         return _fail(
             "Can't build the all-commutes area — check the car destinations and try again.",
             f"intersection build failed: {e}",

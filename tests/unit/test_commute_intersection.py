@@ -206,3 +206,43 @@ async def test_run_fails_cleanly_with_no_drive_destinations(tmp_path):
     )
     assert code == 1
     assert not (out_dir / "intersection.json").exists()
+
+
+def test_validate_fails_cleanly_on_corrupt_intersection(tmp_path):
+    """--validate with a truncated intersection.json must exit with the
+    two-tier message, not a JSONDecodeError traceback."""
+    from tools.commute.intersection import run as intersection_run
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "intersection.json").write_text("{ nope")
+    code = intersection_run(["--out", str(out_dir / "intersection.json"), "--validate"])
+    assert code == 1
+
+
+def test_run_fails_cleanly_on_malformed_shed(tmp_path):
+    """A shed file that is valid JSON but missing the 'stations' key must
+    exit with the two-tier message, not a KeyError traceback."""
+    import json as _json
+
+    from tools.commute.intersection import run as intersection_run
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    shed_path = tmp_path / "shed.json"
+    shed_path.write_text(_json.dumps({"metadata": {}, "unexpected": True}))
+    raw_path = tmp_path / "raw.json"
+    raw_path.write_text(_json.dumps({"metadata": {"region_km": 50.0}, "destinations": []}))
+    searches_path = tmp_path / "searches.json"
+    searches_path.write_text(_json.dumps({"metadata": {}, "searches": []}))
+
+    code = intersection_run(
+        [
+            "--shed", str(shed_path),
+            "--drive-raw", str(raw_path),
+            "--drive-searches", str(searches_path),
+            "--out", str(out_dir / "intersection.json"),
+        ]
+    )
+    assert code == 1
+    assert not (out_dir / "intersection.json").exists()
