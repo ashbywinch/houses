@@ -830,13 +830,16 @@ async def run(argv: list[str] | None = None, *, geocoder=None) -> int:
     raw: dict | None = None
     if geocoder is None:
         geocoder = _geocode
+    geocode_error: RuntimeError | None = None
     try:
         coords = [await geocoder(d.postcode) for d in destinations]
     except RuntimeError as e:
-        return _fail(
-            "One of the commute destinations can't be found on the map — check its postcode and try again.",
-            f"geocoding failed for a drive destination: {e}",
-        )
+        # DEFER geocoding errors: a matching committed raw can still be
+        # reused offline (its stored coordinates are part of the signature);
+        # the error only matters if regeneration is actually needed
+        coords = None
+        geocode_error = e
+        logger.warning("geocoding failed (%s) — a matching raw payload can still be reused", e)
 
     if raw_path.exists() and not args.force:
         prev = _load_raw(raw_path)
@@ -848,6 +851,16 @@ async def run(argv: list[str] | None = None, *, geocoder=None) -> int:
                     "The saved commute map data is unreadable — regenerate it with 'make commute-drive'.",
                     f"unreadable raw payload {raw_path}: {e}",
                 )
+            if coords is not None:
+                coords_by_label = {d.label: c for d, c in zip(destinations, coords, strict=True)}
+            else:
+                # geocoding unavailable — compare against the STORED
+                # coordinates so an unchanged raw still reuses offline
+                coords_by_label = {
+                    rec["label"]: (rec["lat"], rec["lon"])
+                    for rec in prev.get("destinations", [])
+                    if isinstance(rec, dict) and "label" in rec and "lat" in rec and "lon" in rec
+                }
             expected = config_signature(
                 {
                     "metadata": {
@@ -867,8 +880,8 @@ async def run(argv: list[str] | None = None, *, geocoder=None) -> int:
                         ],
                     },
                     "destinations": [
-                        {"label": d.label, "lat": lat, "lon": lon}
-                        for d, (lat, lon) in zip(destinations, coords, strict=True)
+                        {"label": d.label, "lat": coords_by_label[d.label][0], "lon": coords_by_label[d.label][1]}
+                        for d in destinations
                     ],
                 }
             )
@@ -883,6 +896,13 @@ async def run(argv: list[str] | None = None, *, geocoder=None) -> int:
             logger.warning("%s unreadable (corrupt or truncated write?) — regenerating", raw_path)
 
     if raw is None:
+        if coords is None:
+            # regeneration is actually needed — the deferred geocoding error
+            # is now the real problem
+            return _fail(
+                "One of the commute destinations can't be found on the map — check its postcode and try again.",
+                f"geocoding failed for a drive destination: {geocode_error}",
+            )
         from houses.config import settings  # noqa: PLC0415
 
         if not settings.ors_api_key:

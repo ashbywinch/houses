@@ -305,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             logger.warning("%s has no searches — omitting the 'Where we could live' layer", intersection_path)
+            intersection = None  # degrade like the corrupt-JSON path: render without the layer
     try:
         union = json.loads(union_path.read_text())
         drive = json.loads(drive_path.read_text())

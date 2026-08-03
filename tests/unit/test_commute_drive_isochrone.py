@@ -266,6 +266,46 @@ async def test_changed_geocode_rejects_raw_reuse(tmp_path, capsys):
     assert "regenerating" in capsys.readouterr().err
 
 
+async def test_geocode_failure_still_reuses_matching_raw(tmp_path, capsys):
+    """A geocoding outage must not block offline reuse of a matching
+    committed raw — the stored coordinates drive the signature comparison."""
+    import json as _json
+
+    from tools.commute.drive_isochrone import run as drive_run
+
+    cfg = tmp_path / "destinations.json"
+    cfg.write_text(_json.dumps({"threshold_min": 90, "destinations": [{"label": "Dad", "postcode": "OX7 5GZ"}]}))
+    grid = {"lat_min": 51.0, "lat_max": 51.2, "lon_min": -2.0, "lon_max": -1.76}
+    cells = [
+        {"r": r, "c": c, "lat": 51.0 + (r + 0.5) * 0.05, "lon": -2.0 + (c + 0.5) * 0.08, "duration_min": 10.0}
+        for r in range(2)
+        for c in range(2)
+    ]
+    raw = {
+        "metadata": {
+            "engine_version": "drive-isochrone-v1", "profile": "driving-car", "speed_model": "free-flow",
+            "threshold_min": 90, "cell_km": 4.0, "region_km": 153.0,
+            "destinations": [{"label": "Dad", "postcode": "OX7 5GZ", "threshold_min": 90}],
+            "generated_at": NOW, "count": 1,
+        },
+        "destinations": [
+            {"label": "Dad", "postcode": "OX7 5GZ", "lat": 51.03, "lon": -1.95, "threshold_min": 90,
+             "cell_km": 4.0, "slack_min": 2.42, "grid": grid, "cells": cells}
+        ],
+    }
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    (out_dir / "drive_isochrone.json").write_text(_json.dumps(raw))
+
+    async def _down_geocode(postcode):
+        raise RuntimeError("geocoder down")
+
+    code = await drive_run(["--config", str(cfg), "--out-dir", str(out_dir)], geocoder=_down_geocode)
+    assert code == 0
+    assert "reusing" in capsys.readouterr().out
+    assert (out_dir / "drive_searches.json").exists()
+
+
 def test_parse_durations_wrong_row_count_raises():
     with pytest.raises(ValueError):
         parse_durations({"durations": [[1.0]]}, 2)
@@ -855,6 +895,32 @@ def test_combined_map_fails_cleanly_on_malformed_payload(tmp_path):
     )
     assert code == 1
     assert not (tmp_path / "map.html").exists()
+
+
+def test_combined_map_degrades_on_malformed_intersection(tmp_path, capsys):
+    """A valid-JSON-but-wrong-shape intersection (non-empty list) must
+    render the map WITHOUT the layer, not crash after promising to."""
+    import json
+
+    from tools.commute.combined_map import main as combined_main
+
+    union_path = tmp_path / "union.json"
+    union_path.write_text(json.dumps({"components": []}))
+    drive_path = tmp_path / "drive.json"
+    drive_path.write_text(json.dumps({"searches": []}))
+    intersection_path = tmp_path / "intersection.json"
+    intersection_path.write_text(json.dumps([1, 2, 3]))
+
+    code = combined_main(
+        [
+            "--union", str(union_path),
+            "--drive", str(drive_path),
+            "--intersection", str(intersection_path),
+            "--out", str(tmp_path / "map.html"),
+        ]
+    )
+    assert code == 0
+    assert (tmp_path / "map.html").exists()
 
 
 def test_combined_map_warns_when_intersection_layer_is_missing(tmp_path, capsys):
