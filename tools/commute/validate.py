@@ -61,6 +61,39 @@ def _covered(rects: list[Rect], lat: float, lon: float, radius_km: float) -> boo
     return any(point_to_rect_distance_km(point, r) <= radius_km for r in rects)
 
 
+def _point_in_rect(point: GeoPoint, rect: Rect) -> bool:
+    return rect.lat_min <= point.lat <= rect.lat_max and rect.lon_min <= point.lon <= rect.lon_max
+
+
+def uncovered_cells(
+    searches: list[dict],
+    kept_stations: list[dict],
+    bbox: BBox,
+    *,
+    cell_km: float,
+    buffer_km: float,
+) -> list[tuple[int, int]]:
+    """Kept cells not inside any search rectangle — regeneration-drift guard.
+
+    searches.json and union.json are generated from the same keep-set in one
+    run, but a stale artifact or partial regeneration would leave a
+    gate-passing house in a cell no search covers. Assert the inverse: every
+    kept cell's centre lies inside some search polygon.
+    """
+    from tools.commute.tile import Grid, Rect, rasterize
+
+    grid = Grid.from_cell_km(Rect(bbox.lat_min, bbox.lat_max, bbox.lon_min, bbox.lon_max), cell_km)
+    cells = rasterize([(r["lat"], r["lon"]) for r in kept_stations], buffer_km, grid)
+    rects = [_polygon_to_rect(s["polygon"]) for s in searches]
+    uncovered: list[tuple[int, int]] = []
+    for r, c in cells:
+        cell = grid.cell_rect(r, c)
+        centre = GeoPoint((cell.lat_min + cell.lat_max) / 2, (cell.lon_min + cell.lon_max) / 2)
+        if not any(_point_in_rect(centre, rect) for rect in rects):
+            uncovered.append((r, c))
+    return uncovered
+
+
 def validate(
     payload: dict,
     kept_stations: list[dict],
@@ -142,6 +175,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--shed", default=str(DEFAULT_SHED))
     parser.add_argument("--searches", default=str(DEFAULT_SEARCHES))
     parser.add_argument("--buffer-km", type=float, default=5.0)
+    parser.add_argument("--cell-km", type=float, default=8.0)
     args = parser.parse_args(argv)
 
     shed_path, searches_path = Path(args.shed), Path(args.searches)
@@ -180,6 +214,18 @@ def main(argv: list[str] | None = None) -> int:
             "control station %r (%s) not found in stations.csv — check the POSITIVE/NEGATIVE_TOWNS lists", name, kind
         )
         issues.append(f"{kind} control station {name!r} not found in stations.csv")
+
+    uncovered = uncovered_cells(
+        payload["searches"],
+        kept,
+        BBox(**shed["metadata"]["bbox"]),
+        cell_km=args.cell_km,
+        buffer_km=args.buffer_km,
+    )
+    for r, c in uncovered[:10]:
+        issues.append(f"kept cell ({r},{c}) is not covered by any search rectangle")
+    if len(uncovered) > 10:
+        issues.append(f"... and {len(uncovered) - 10} more uncovered cells")
 
     for issue in issues:
         print(f"  ✗ {issue}")

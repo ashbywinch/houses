@@ -147,28 +147,42 @@ class CachingTransport(httpx.AsyncBaseTransport):
 
         cached = get_cached(request.method, url_path, params, body)
         if cached is not None:
-            # Legacy poisoned entry: a TRANSIENT error (429/5xx) cached before
-            # the rule. Only these are evicted — deterministic no-route
-            # responses (4xx) are legitimately cached and served. Treat the
-            # eviction as a miss so retries stay genuine.
             status = cached.get("_cached_status") if isinstance(cached, dict) else None
             if isinstance(status, int) and (status == 429 or status >= 500):
+                # Legacy poisoned entry: a TRANSIENT error (429/5xx) cached
+                # before the rule. Evict it so retries stay genuine.
                 evict_cached(request.method, url_path, params, body)
                 cached = None
             elif isinstance(cached, dict) and "_cached_status" in cached:
+                # Wrapped deterministic non-2xx — serve with its REAL status
+                # (a cached 404 "no route" must not come back as HTTP 200).
                 return httpx.Response(cached["_cached_status"], json=cached["_cached_body"])
+            elif isinstance(cached, dict) and isinstance(cached.get("httpStatusCode"), int) and (
+                cached["httpStatusCode"] == 429 or cached["httpStatusCode"] >= 500
+            ):
+                # Raw legacy transient body — same poison, evict.
+                evict_cached(request.method, url_path, params, body)
+                cached = None
             else:
                 return httpx.Response(200, json=cached)
 
         response = await self._inner.handle_async_request(request)
-        # Cache deterministic responses: 2xx/3xx/4xx (including 404 "cannot
-        # route" bodies — re-hitting the endpoint for the same impossible
-        # request wastes calls). NEVER cache transient errors (429/5xx): a
-        # cached outage body poisons the route and makes retries non-genuine.
+        # Cache deterministic responses: 2xx raw; 3xx/4xx (including 404
+        # "cannot route" bodies) wrapped with their status so it survives
+        # cache hits. NEVER cache transient errors (429/5xx): a cached outage
+        # body poisons the route and makes retries non-genuine.
         try:
             data = response.json()
-            if response.is_success or (400 <= response.status_code < 500 and response.status_code != 429):
+            if response.is_success:
                 set_cached(request.method, url_path, params, body, data)
+            elif 300 <= response.status_code < 500 and response.status_code != 429:
+                set_cached(
+                    request.method,
+                    url_path,
+                    params,
+                    body,
+                    {"_cached_status": response.status_code, "_cached_body": data},
+                )
         except Exception:
             pass
         return response

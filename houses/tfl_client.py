@@ -393,6 +393,10 @@ class TflClient:
                 logger.warning("evicting cached transient error response for %s", url)
                 evict_cached("GET", url, cache_params, None)
                 cached = None
+            elif isinstance(cached, dict) and "_cached_status" in cached and "_cached_body" in cached:
+                # Wrapped deterministic non-2xx — unwrap: callers consume the
+                # body (the status was handled when it was first received).
+                return cached["_cached_body"]
             else:
                 return cached
         async with (_client_factory or cached_async_client)(timeout=20.0) as client:
@@ -400,11 +404,14 @@ class TflClient:
             data = resp.json()
             # Cache deterministic responses — 2xx/3xx/4xx (including 404
             # "cannot route this station" bodies: re-hitting the endpoint for
-            # the same impossible request wastes calls). NEVER cache transient
-            # errors (429, 5xx): a cached outage body would poison the route
-            # and make retries non-genuine.
-            if resp.status_code < 500 and resp.status_code != 429:
+            # the same impossible request wastes calls). Non-2xx are wrapped as
+            # {"_cached_status", "_cached_body"} so the status survives cache
+            # hits. NEVER cache transient errors (429, 5xx): a cached outage
+            # body would poison the route and make retries non-genuine.
+            if resp.status_code < 300:
                 set_cached("GET", url, cache_params, None, data)
+            elif resp.status_code < 500 and resp.status_code != 429:
+                set_cached("GET", url, cache_params, None, {"_cached_status": resp.status_code, "_cached_body": data})
             if resp.status_code == 429 or (500 <= resp.status_code < 600):
                 raise HttpError(resp.status_code, body=str(data))
             if 400 <= resp.status_code < 500:

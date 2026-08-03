@@ -124,3 +124,20 @@ def test_validate_disjointness_failure():
     payload["searches"][1]["polygon"] = payload["searches"][0]["polygon"]
     issues = validate(payload, KEPT, buffer_km=5.0, bbox=BBOX, positive=[], negative=[])
     assert any("overlap" in i for i in issues)
+
+
+def test_uncovered_cells_detects_missing_search():
+    from tools.commute.validate import uncovered_cells
+
+    payload = _payload()
+    # Removing the first search leaves its cells uncovered.
+    searches = payload["searches"][1:]
+    uncovered = uncovered_cells(searches, KEPT, BBOX, cell_km=11.1, buffer_km=5.0)
+    assert uncovered  # the dropped search's cells are flagged
+
+
+def test_uncovered_cells_empty_when_full_coverage():
+    from tools.commute.validate import uncovered_cells
+
+    payload = _payload()
+    assert uncovered_cells(payload["searches"], KEPT, BBOX, cell_km=11.1, buffer_km=5.0) == []

@@ -339,13 +339,30 @@ def is_complete(existing: list[dict] | None, records: list[dict], expected: int)
     )
 
 
-def resume_allowed(prev_metadata: dict, current_version: str) -> bool:
-    """A resume is only safe when the shed came from the same engine version.
-
-    After a semantic change (keep rule, threshold, record schema), mixing old
-    records with newly-routed ones would silently commit an inconsistent shed.
+def config_signature(offices: list[Office]) -> dict:
+    """The config identity a shed was built under — engine, destinations,
+    threshold, bbox, inner zone. If any of these change, previously-routed
+    records (routed to the OLD destinations/params) must not be resumed: they
+    would mix with new metadata claiming the new config.
     """
-    return prev_metadata.get("engine_version") == current_version
+    return {
+        "engine_version": ENGINE_VERSION,
+        "destinations": [o.postcode for o in offices],
+        "threshold_min": THRESHOLD_MIN,
+        "bbox": DEFAULT_BBOX,
+        "inner_radius_km": INNER_RADIUS_KM,
+    }
+
+
+def resume_allowed(prev_metadata: dict, current: dict) -> bool:
+    """A resume is only safe when the shed was built under the CURRENT config.
+
+    Comparing only the engine version lets a config change (destinations,
+    threshold, bbox) slip through without a version bump — the resume would
+    keep records routed to the old config while the metadata claims the new
+    one. Compare the full config identity.
+    """
+    return all(prev_metadata.get(k) == v for k, v in current.items())
 
 
 def _write_payload(path: Path, metadata: dict, records: list[dict]) -> None:
@@ -367,19 +384,24 @@ async def run(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     out_path = Path(args.out)
+    offices = await _geocode_offices()
     metadata = None
     existing: list[dict] | None = None
     if out_path.exists() and not args.force:
         try:
             prev = json.loads(out_path.read_text())
-            if not resume_allowed(prev["metadata"], ENGINE_VERSION):
+            if not resume_allowed(prev["metadata"], config_signature(offices)):
                 logger.warning(
-                    "shed engine mismatch: stored %r != current %r — refusing to resume %s",
-                    prev["metadata"].get("engine_version"),
-                    ENGINE_VERSION,
+                    "shed config mismatch: stored metadata %s != current %s — refusing to resume %s",
+                    {k: prev["metadata"].get(k) for k in config_signature(offices)},
+                    config_signature(offices),
                     out_path,
                 )
-                print(f"{out_path} was built by a different engine version — use --force to rebuild", file=sys.stderr)
+                print(
+                    f"{out_path} was built under a different config (destinations/threshold/bbox/version) — "
+                    "use --force to rebuild",
+                    file=sys.stderr,
+                )
                 return 1
             existing = prev["stations"]
             metadata = prev["metadata"]  # keep the original generated_at across resumes
@@ -392,7 +414,6 @@ async def run(argv: list[str] | None = None) -> int:
         logger.warning("--force: wiping the existing shed at %s", out_path)
         print("--force: wiping the existing shed", file=sys.stderr)
 
-    offices = await _geocode_offices()
     stations = load_stations(args.csv)
     if args.limit and out_path.exists():
         # A --limit run would write only the first N stations, silently

@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 from houses.geo import GeoPoint
-from tools.commute.station_shed import Office, build_metadata, is_complete, resume_allowed
+from tools.commute.station_shed import (
+    Office,
+    build_metadata,
+    config_signature,
+    is_complete,
+    resume_allowed,
+)
+
+SIG = config_signature([Office("SW1V 2QQ", GeoPoint(51.4904, -0.1378)), Office("EC3A 7LP", GeoPoint(51.5145, -0.0762))])
 
 
 def test_not_complete_when_existing_is_none():
@@ -52,16 +60,26 @@ def test_not_complete_when_any_record_failed():
     assert is_complete(existing, existing, 2) is False
 
 
-def test_resume_allowed_matching_version():
-    assert resume_allowed({"engine_version": "station-shed-v1"}, "station-shed-v1") is True
+def test_resume_allowed_matching_config():
+    assert resume_allowed(SIG, SIG) is True
 
 
-def test_resume_allowed_rejects_mismatched_version():
-    assert resume_allowed({"engine_version": "station-shed-v0"}, "station-shed-v1") is False
+def test_resume_allowed_rejects_engine_version_mismatch():
+    assert resume_allowed(dict(SIG, engine_version="station-shed-v0"), SIG) is False
 
 
-def test_resume_allowed_rejects_missing_version():
-    assert resume_allowed({}, "station-shed-v1") is False
+def test_resume_allowed_rejects_destination_change():
+    # Changing an office postcode without a version bump must refuse a resume
+    # (records routed to the old destination would mix with new metadata).
+    assert resume_allowed(dict(SIG, destinations=["SW1V 2QQ", "EC2A 4BX"]), SIG) is False
+
+
+def test_resume_allowed_rejects_threshold_change():
+    assert resume_allowed(dict(SIG, threshold_min=105), SIG) is False
+
+
+def test_resume_allowed_rejects_missing_config():
+    assert resume_allowed({}, SIG) is False
 
 
 def test_build_metadata_uses_current_constants_and_keeps_timestamp():

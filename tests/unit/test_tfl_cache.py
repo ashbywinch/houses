@@ -143,10 +143,22 @@ async def test_cached_api_call_serves_deterministic_404_body(isolated_cache):
 
 
 @pytest.mark.asyncio
-async def test_cached_api_call_caches_404_but_not_429(isolated_cache):
-    # Write path: a live 404 is cached (deterministic); a live 429 is not
-    # (transient — the route must stay retriable). Distinct URLs so the cached
-    # 404 does not short-circuit the 429 case.
+async def test_cached_api_call_unwraps_wrapped_entry(isolated_cache):
+    # New-format deterministic 4xx: wrapped with its status. _cached_api_call
+    # returns the BODY, not the wrapper.
+    set_cached(
+        "GET", URL, STRIPPED_PARAMS, None,
+        {"_cached_status": 404, "_cached_body": {"message": "no route"}},
+    )
+    data = await TflClient._cached_api_call(URL, AUTH_PARAMS)
+    assert data == {"message": "no route"}
+
+
+@pytest.mark.asyncio
+async def test_cached_api_call_caches_404_wrapped_but_not_429(isolated_cache):
+    # Write path: a live 404 is cached WRAPPED (status preserved); a live 429
+    # is not (transient — the route must stay retriable). Distinct URLs so the
+    # cached 404 does not short-circuit the 429 case.
     url_404 = f"{URL}/a"
     url_429 = f"{URL}/b"
 
@@ -158,7 +170,9 @@ async def test_cached_api_call_caches_404_but_not_429(isolated_cache):
     with pytest.raises(HttpError) as excinfo:
         await TflClient._cached_api_call(url_404, AUTH_PARAMS, _client_factory=client_404)
     assert excinfo.value.status == 404
-    assert get_cached("GET", url_404, STRIPPED_PARAMS, None) is not None  # 404 cached
+    entry = get_cached("GET", url_404, STRIPPED_PARAMS, None)
+    assert entry is not None
+    assert entry["_cached_status"] == 404  # wrapped, status kept
 
     def client_429(**kwargs):
         return httpx.AsyncClient(
@@ -169,6 +183,39 @@ async def test_cached_api_call_caches_404_but_not_429(isolated_cache):
         await TflClient._cached_api_call(url_429, AUTH_PARAMS, _client_factory=client_429)
     assert excinfo.value.status == 429
     assert get_cached("GET", url_429, STRIPPED_PARAMS, None) is None  # 429 NOT cached
+
+
+@pytest.mark.asyncio
+async def test_transport_writes_404_wrapped_and_preserves_status(isolated_cache):
+    # First request: 404 from the inner, cached WRAPPED. Second request: served
+    # from cache WITH the 404 status — not as a fake 200.
+    inner = _FakeInner(httpx.Response(404, json={"message": "no route"}))
+    transport = CachingTransport(inner=inner)
+    async with httpx.AsyncClient(transport=transport) as client:
+        first = await client.get(URL, params=AUTH_PARAMS)
+        second = await client.get(URL, params=AUTH_PARAMS)
+    assert first.status_code == 404 and second.status_code == 404
+    assert len(inner.requests) == 1  # the second was served from cache
+    entry = get_cached("GET", URL, STRIPPED_PARAMS, None)
+    assert entry is not None
+    assert entry["_cached_status"] == 404
+    assert entry["_cached_body"] == {"message": "no route"}
+
+
+@pytest.mark.asyncio
+async def test_transport_evicts_raw_transient_body(isolated_cache):
+    # Raw legacy 500 body (httpStatusCode) is poison — evicted, inner served.
+    set_cached(
+        "GET", URL, STRIPPED_PARAMS, None,
+        {"$type": "ApiError", "httpStatusCode": 500},
+    )
+    inner = _FakeInner(httpx.Response(200, json={"journeys": [{"duration": 5}]}))
+    async with httpx.AsyncClient(transport=CachingTransport(inner=inner)) as client:
+        resp = await client.get(URL, params=AUTH_PARAMS)
+    assert resp.status_code == 200
+    assert inner.requests  # poison did not short-circuit
+    entry = get_cached("GET", URL, STRIPPED_PARAMS, None)
+    assert entry is None or "httpStatusCode" not in entry
 
 
 @pytest.mark.asyncio
