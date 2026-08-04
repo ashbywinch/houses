@@ -342,3 +342,41 @@ describe('SettingsView — commute destination CRUD (A7)', () => {
     expect(simon.findAll('.settings-poi').length).toBe(1)
   })
 })
+
+describe('SettingsView — selling-home persists on save (B7)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('sends the selling-home toggle in the save body', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const ashby = wrapper.findAll('.settings-person').find(s => s.text().includes('Ashby'))!
+    await ashby.find('input#selling-home').setValue(true)
+    await ashby.find('button.save').trigger('click')
+    const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(name).toBe('Ashby')
+    expect(body.selling_home).toBe(true)
+  })
+})
+
+describe('SettingsView — acceptable modes keep at least one (P7)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('cannot uncheck the last remaining mode', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
+    // Pimlico has only ['train'] — unchecking it must not remove the last
+    // mode (an empty set would be reinterpreted by the server migration)
+    const train = simon.find('input[type="checkbox"][data-mode="train"]')
+    await train.setValue(false)
+    await simon.find('button.save').trigger('click')
+    const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(name).toBe('Simon')
+    const pimlico = body.places_of_interest.find((p: { label: string }) => p.label === 'Pimlico')
+    expect(pimlico.acceptable_modes).toContain('train')
+  })
+})

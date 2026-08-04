@@ -323,14 +323,20 @@ async def get_settings(request: Request):
     session_name = _session_person_name(session_user, persons)
     dumped = persons_json.get("value")
     if isinstance(dumped, list):
-        for item, person in zip(dumped, persons, strict=True):
+        # match serialized entries to Person models BY NAME — a legacy
+        # non-Person entry in the source must not crash the enrichment
+        by_name = {p.name: p for p in persons}
+        for item in dumped:
             if not isinstance(item, dict):
+                continue
+            person = by_name.get(item.get("name") or "")
+            if person is None:
                 continue
             editable_by = effective_editable_by(person, persons)
             item["editable_by"] = list(editable_by)
             item["editable_by_me"] = _can_edit_person(session_user, session_name, person, persons)
             item["selling_home"] = effective_selling_home(person)
-            for poi_item, poi in zip(item.get("places_of_interest") or (), person.places_of_interest, strict=True):
+            for poi_item, poi in zip(item.get("places_of_interest") or (), person.places_of_interest, strict=False):
                 if isinstance(poi_item, dict):
                     poi_item["acceptable_modes"] = list(effective_acceptable_modes(poi))
 
@@ -484,14 +490,23 @@ async def patch_person(name: str, body: dict, request: Request):
         )
 
     if not session_user.get("is_superuser"):
-        # privilege fields are superuser-only: editing your own record
-        # must not escalate to superuser or hijack the email link
-        body = {**body, "is_superuser": target.is_superuser, "email": target.email}
+        # identity/privilege fields are superuser-only: editing your own
+        # record must not escalate to superuser, hijack the email link,
+        # rename yourself onto another person's ownership key (name IS the
+        # authz identity), or flip is_child (which changes guardianship)
+        body = {
+            **body,
+            "name": target.name,
+            "is_child": target.is_child,
+            "is_superuser": target.is_superuser,
+            "email": target.email,
+        }
 
-    updated = [_person_from_dict(body, target) if p is target else p for p in persons]
     try:
+        updated = [_person_from_dict(body, target) if p is target else p for p in persons]
         svc.persons_source.push(updated, "user")
     except (ValueError, TypeError) as e:
+        # malformed client input is a CLIENT error (400), never a 500
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     thresholds = body.get("thresholds")

@@ -29,6 +29,34 @@ def _succeeded_walk_check(val: bool = False) -> DerivedNode:
 
 class TestCommuteSelectorNode:
     @pytest.mark.asyncio
+    async def test_excluded_modes_are_not_dependencies(self):
+        """A car-only POI must not register transit/walk as dependencies —
+        a permanently pending excluded node would stall the selector's
+        refresh forever."""
+        from houses.nodes.commute import CommuteSelectorNode
+
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = FixedCommuteNode("transit")
+        walk = FixedCommuteNode("walk")
+        drive = FixedCommuteNode("drive")
+
+        node = CommuteSelectorNode(
+            "commute_selector",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            walk_result=walk,
+            drive_result=drive,
+            max_walk=30,
+            acceptable_modes=("car",),
+        )
+        dep_ids = {d._id for d in node._get_active_deps()}
+        assert "transit" not in dep_ids
+        assert "walk" not in dep_ids
+        assert "drive" in dep_ids
+
+    @pytest.mark.asyncio
     async def test_train_only_poi_never_picks_drive(self):
         """acceptable_modes=('train',) excludes the drive alternative even
         when driving is fastest — a train-only POI is never scored by a

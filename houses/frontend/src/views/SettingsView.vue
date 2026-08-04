@@ -95,6 +95,8 @@ async function load() {
 
 function toggleMode(poi: PoiSettings, mode: string) {
   const set = new Set(poi.acceptable_modes)
+  if (set.has(mode) && set.size === 1) return  // keep at least one mode —
+  // an empty set would be reinterpreted by the migration rule on the server
   if (set.has(mode)) set.delete(mode)
   else set.add(mode)
   poi.acceptable_modes = MODE_OPTIONS.map(o => o.value).filter(m => set.has(m))
@@ -119,6 +121,7 @@ async function save(person: PersonSettings) {
     is_child: person.is_child,
     email: person.email,
     is_superuser: person.is_superuser,
+    selling_home: person.selling_home,
     places_of_interest: person.places_of_interest,
   }
   for (const f of ['home_sale_price', 'outstanding_mortgage', 'cash_contribution', 'life_insurance_monthly'] as const) {

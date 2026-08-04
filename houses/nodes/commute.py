@@ -172,10 +172,15 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         # behaviour.  An explicit set EXCLUDES the modes the person won't
         # accept: a train-only POI is never scored by a car route.
         self._acceptable_modes = tuple(acceptable_modes)
-        deps = [origin, poi, transit_result]
-        if walk_result is not None:
+        # deps mirror the alternatives: an excluded mode is not a
+        # dependency — a permanently pending excluded node must not stall
+        # the selector's refresh (same freeze the bootstrap fix addresses)
+        deps = [origin, poi]
+        if self._mode_acceptable("train"):
+            deps.append(transit_result)
+        if walk_result is not None and self._mode_acceptable("walk"):
             deps.append(walk_result)
-        if drive_result is not None:
+        if drive_result is not None and self._mode_acceptable("car"):
             deps.append(drive_result)
         super().__init__(node_id, Commute, tuple(deps))
 
@@ -198,10 +203,12 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         return not self._acceptable_modes or mode in self._acceptable_modes
 
     def _get_active_deps(self) -> tuple[Node, ...]:
-        deps = [self.origin, self.poi, self.transit_result]
-        if self.walk_result is not None:
+        deps = [self.origin, self.poi]
+        if self._mode_acceptable("train"):
+            deps.append(self.transit_result)
+        if self.walk_result is not None and self._mode_acceptable("walk"):
             deps.append(self.walk_result)
-        if self.drive_result is not None:
+        if self.drive_result is not None and self._mode_acceptable("car"):
             deps.append(self.drive_result)
         return tuple(deps)
 

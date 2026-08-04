@@ -268,6 +268,60 @@ class TestPatchPersonApi:
         assert simon["home_sale_price"] == {"amount": "550000.00", "currency": "GBP"}
 
 
+    def test_non_superuser_cannot_rename_onto_another_person(self):
+        """name is the ownership key: a non-superuser editing their own
+        record must not be able to rename it to another person's name
+        (that would grant edit rights over the other person's settings)
+        or flip is_child (which changes guardianship)."""
+        from fastapi.testclient import TestClient
+
+        from houses.model.domain import Person
+        from houses.server import app
+        from houses.web.auth import _make_session_cookie
+
+        _push_persons(
+            Person(name="Simon", has_car=True, email="simon@example.com"),
+            Person(name="Ashby", has_car=True, email="emily.winch@gmail.com"),
+        )
+        client = TestClient(app)
+        # Emily (Ashby) is NOT a superuser
+        client.cookies.set(
+            "session",
+            _make_session_cookie(email="emily.winch@gmail.com", name="Emily", picture="", is_superuser=False),
+        )
+        resp = client.patch(
+            "/api/settings/person/Ashby",
+            json={"name": "Simon", "has_car": True, "is_child": True},
+        )
+        assert resp.status_code == 200, resp.text[:300]
+        value = client.get("/api/settings").json()["persons"]["value"]
+        ashby = next(p for p in value if p["email"] == "emily.winch@gmail.com")
+        assert ashby["name"] == "Ashby", "rename escalation: record now has another person's name"
+        assert ashby["is_child"] is False, "is_child escalation"
+
+    def test_malformed_patch_body_returns_400_not_500(self):
+        """An unknown field or malformed POI in the body is a CLIENT error
+        (400 with detail), never a 500."""
+        client = self._setup()
+        resp = client.patch(
+            "/api/settings/person/Simon",
+            json={"name": "Simon", "has_car": True, "bogus_field": 1},
+        )
+        assert resp.status_code == 400, f"expected 400, got {resp.status_code}: {resp.text[:200]}"
+
+    def test_get_settings_tolerates_legacy_dict_person_entries(self):
+        """A non-Person entry in the settings source (legacy/db-persisted
+        dict) must not make GET /settings crash — match by name, don't
+        zip-strict."""
+        client = self._setup()
+        # inject a plain dict alongside the Person records
+        from houses.services_provider import get_services
+
+        node = get_services().persons_source
+        node.push([*list(node.latest_attempt().value_or_none() or []), {"name": "Legacy", "has_car": True}], "user")  # type: ignore[arg-type]
+        resp = client.get("/api/settings")
+        assert resp.status_code == 200, resp.text[:200]
+
     def test_partial_patch_preserves_unmentioned_fields(self):
         """A partial PATCH body must MERGE into the existing person —
         never reset unmentioned fields to defaults.  Replace semantics
@@ -458,8 +512,7 @@ class TestSettingsPropagationApi:
 
         client = self._setup()
         rid = self._seed_property()
-        flush_all()
-        flush_all()  # two-level DAG wave (mortgage → monthly housing cost)
+        flush_all()  # one drain cascades the whole wave (see coding-standards)
 
         baseline = client.get(f"/api/properties/{rid}/detail").json()
         baseline_mortgage = baseline["affordability"]["mortgage_required"]
@@ -591,8 +644,7 @@ class TestWorksEstimateApi:
         # Two flushes needed: first processes TotalWorksNode/EquityTotalNode,
         # second processes MortgageRequiredNode → MonthlyMortgagePaymentNode
         # → TotalMonthlyHousingCostNode (two-level DAG wave).
-        flush_all()
-        flush_all()
+        flush_all()  # one drain cascades the whole wave (see coding-standards)
 
         # Get baseline detail
         resp = client.get(f"/api/properties/{rid}/detail")

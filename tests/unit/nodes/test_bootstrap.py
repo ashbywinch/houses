@@ -324,8 +324,7 @@ class TestSeedInputDefaults:
 
         from tests.unit.conftest import flush_all
 
-        flush_all()
-        flush_all()
+        flush_all()  # one drain cascades the whole wave (see coding-standards)
 
         client = TestClient(app)
         client.cookies.set(
