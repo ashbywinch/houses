@@ -246,6 +246,26 @@ class TestPatchPersonApi:
         thresholds = client.get("/api/settings").json()["commute_thresholds"]["value"]["Simon"]
         assert thresholds == {"good_max_minutes": 25, "fine_max_minutes": 40}
 
+    def test_patch_accepts_bus_walk_penalty_and_money_round_trip(self):
+        """GET /settings serializes bus_walk_penalty as {value, unit} and
+        money as {amount, currency} — PATCH must accept the same shapes
+        back instead of crashing or dropping them."""
+        client = self._setup()
+        resp = client.patch(
+            "/api/settings/person/Simon",
+            json={
+                "name": "Simon",
+                "has_car": True,
+                "bus_walk_penalty": {"value": 20, "unit": "minute"},
+                "home_sale_price": {"amount": "550000", "currency": "GBP"},
+            },
+        )
+        assert resp.status_code == 200, resp.text[:300]
+        simon = self._person(client, "Simon")
+        assert simon["bus_walk_penalty"] == {"value": 20, "unit": "minute"}
+        assert simon["home_sale_price"] == {"amount": "550000.00", "currency": "GBP"}
+
+
     def test_own_patch_cannot_escalate_to_superuser(self):
         """A non-superuser editing their own record must not be able to
         grant themselves is_superuser or hijack the email link."""

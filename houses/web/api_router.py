@@ -362,6 +362,7 @@ _PERSON_MONEY_FIELDS = {"home_sale_price", "outstanding_mortgage", "cash_contrib
 def _person_from_dict(d: dict) -> Person:
     """Build a Person from an API dict, normalising money + tuple fields."""
     from money import Money as _Money
+    from pint import Quantity as _Quantity
 
     def _money(v):
         if isinstance(v, (int, float)):
@@ -374,6 +375,12 @@ def _person_from_dict(d: dict) -> Person:
     for f in _PERSON_MONEY_FIELDS:
         if f in cleaned:
             cleaned[f] = _money(cleaned[f])
+    if isinstance(cleaned.get("bus_walk_penalty"), dict):
+        # GET /settings serializes the Quantity as {value, unit} — accept
+        # the same shape back on PATCH
+        cleaned["bus_walk_penalty"] = _Quantity(
+            cleaned["bus_walk_penalty"]["value"], cleaned["bus_walk_penalty"]["unit"]
+        )
     if "editable_by" in cleaned and cleaned["editable_by"] is not None:
         cleaned["editable_by"] = tuple(cleaned["editable_by"])
     pois = cleaned.get("places_of_interest")
