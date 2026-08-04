@@ -361,15 +361,6 @@ function canEdit(personName: string): boolean {
   text-align: right;
 }
 
-  font-size: var(--fs-xs);
-  padding: 0.25em 0.5em;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--card-bg);
-  color: var(--text-secondary);
-  cursor: pointer;
-  white-space: nowrap;
-}
 
 /* EPC */
 .epc-section { margin-top: var(--sp-6); }
