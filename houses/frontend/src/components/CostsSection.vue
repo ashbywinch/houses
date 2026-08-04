@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import ProvenanceToggle from './ProvenanceToggle.vue'
 import { epcClass } from '../formatters/format'
 import { patchRentalIncome, patchWorksEstimate } from '../services/api'
 import { usePropertiesStore } from '../stores/properties'
-import ProvenanceView from './ProvenanceView.vue'
 
 const props = defineProps<{
   affordability: any
@@ -19,10 +19,6 @@ function epcStepClass(band: string): string {
 }
 
 // ── Provenance toggle state (one at a time) ────────────
-const showProvenance = ref<string | null>(null)
-function toggleProvenance(key: string) {
-  showProvenance.value = showProvenance.value === key ? null : key
-}
 
 function isImpossible(val: any): boolean {
   return val && !val.succeeded && val.error != null
@@ -141,16 +137,13 @@ function canEdit(personName: string): boolean {
         <span v-if="affordability?.monthly_mortgage?.succeeded && affordability?.monthly_mortgage?.value" class="costs-value">£{{ affordability.monthly_mortgage.value.amount }}</span>
         <span v-else-if="isImpossible(affordability?.monthly_mortgage)" class="costs-value costs-value--impossible">Can't calculate</span>
         <span v-else class="costs-value">?</span>
-        <button
-          v-if="affordability?.monthly_mortgage?.provenance"
-          class="how-btn"
-          :class="{ 'how-btn--active': showProvenance === 'mortgage' }"
-          @click="toggleProvenance('mortgage')"
-        >{{ showProvenance === 'mortgage' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
-      </div>
-      <div v-if="showProvenance === 'mortgage' && affordability?.monthly_mortgage?.provenance" class="costs-provenance">
-        <ProvenanceView :provenance="affordability.monthly_mortgage.provenance" title="Monthly mortgage" />
-      </div>
+              </div>
+      <ProvenanceToggle
+        v-if="affordability?.monthly_mortgage?.provenance"
+        :provenance="affordability?.monthly_mortgage?.provenance"
+        title="Monthly mortgage"
+        hint="The deposit reduces the mortgage — raise the deposit in Settings."
+      />
       <p v-if="depositDominates" class="costs-note">
         The deposit covers most of the price — the remaining balance is a mortgage on the new home.
       </p>
@@ -158,16 +151,8 @@ function canEdit(personName: string): boolean {
       <div class="costs-row">
         <span class="costs-label">Council Tax</span>
         <span class="costs-value">{{ affordability?.council_tax?.value?.band ?? '?' }} · £{{ affordability?.council_tax?.value?.yearly_cost?.amount ?? '?' }}/yr</span>
-        <button
-          v-if="affordability?.council_tax?.provenance"
-          class="how-btn"
-          :class="{ 'how-btn--active': showProvenance === 'council_tax' }"
-          @click="toggleProvenance('council_tax')"
-        >{{ showProvenance === 'council_tax' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
-      </div>
-      <div v-if="showProvenance === 'council_tax' && affordability?.council_tax?.provenance" class="costs-provenance">
-        <ProvenanceView :provenance="affordability.council_tax.provenance" title="Council Tax" />
-      </div>
+              </div>
+      <ProvenanceToggle v-if="affordability?.council_tax?.provenance" :provenance="affordability?.council_tax?.provenance" title="Council Tax" />
       <p v-if="!affordability?.council_tax?.succeeded" class="costs-note">
         Couldn't look up Council Tax — the address above may not be exact. Edit the address to retry.
       </p>
@@ -175,31 +160,15 @@ function canEdit(personName: string): boolean {
       <div class="costs-row">
         <span class="costs-label">Sinking Fund</span>
         <span class="costs-value">£{{ affordability?.monthly_sinking_fund?.value?.amount ?? '?' }}</span>
-        <button
-          v-if="affordability?.monthly_sinking_fund?.provenance"
-          class="how-btn"
-          :class="{ 'how-btn--active': showProvenance === 'sinking_fund' }"
-          @click="toggleProvenance('sinking_fund')"
-        >{{ showProvenance === 'sinking_fund' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
-      </div>
-      <div v-if="showProvenance === 'sinking_fund' && affordability?.monthly_sinking_fund?.provenance" class="costs-provenance">
-        <ProvenanceView :provenance="affordability.monthly_sinking_fund.provenance" title="Sinking fund" />
-      </div>
+              </div>
+      <ProvenanceToggle v-if="affordability?.monthly_sinking_fund?.provenance" :provenance="affordability?.monthly_sinking_fund?.provenance" title="Sinking fund" />
 
       <!-- Life Insurance -->
       <div class="costs-row">
         <span class="costs-label">Life Insurance</span>
         <span class="costs-value">£{{ affordability?.life_insurance_total?.value?.amount ?? '?' }}</span>
-        <button
-          v-if="affordability?.life_insurance_total?.provenance"
-          class="how-btn"
-          :class="{ 'how-btn--active': showProvenance === 'life_insurance' }"
-          @click="toggleProvenance('life_insurance')"
-        >{{ showProvenance === 'life_insurance' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
-      </div>
-      <div v-if="showProvenance === 'life_insurance' && affordability?.life_insurance_total?.provenance" class="costs-provenance">
-        <ProvenanceView :provenance="affordability.life_insurance_total.provenance" title="Life insurance" />
-      </div>
+              </div>
+      <ProvenanceToggle v-if="affordability?.life_insurance_total?.provenance" :provenance="affordability?.life_insurance_total?.provenance" title="Life insurance" />
 
       <!-- Cost of Works -->
       <div class="costs-row" :class="{ 'costs-row--impossible': isImpossible(affordability?.total_works) }">
@@ -207,12 +176,6 @@ function canEdit(personName: string): boolean {
         <span v-if="affordability?.total_works?.succeeded && affordability?.total_works?.value" class="costs-value">£{{ affordability.total_works.value.amount }}</span>
         <span v-else-if="isImpossible(affordability?.total_works)" class="costs-value costs-value--impossible">£? — required</span>
         <span v-else class="costs-value">?</span>
-        <button
-          v-if="affordability?.total_works?.provenance"
-          class="how-btn"
-          :class="{ 'how-btn--active': showProvenance === 'total_works' }"
-          @click="toggleProvenance('total_works')"
-        >{{ showProvenance === 'total_works' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
       </div>
       <!-- Per-person works breakdown -->
       <div v-if="affordability?.works_estimates?.succeeded" class="costs-subsection">
@@ -268,19 +231,11 @@ function canEdit(personName: string): boolean {
           >£?</span>
         </div>
       </div>
-      <div v-if="showProvenance === 'total_works' && affordability?.total_works?.provenance" class="costs-provenance">
-        <ProvenanceView :provenance="affordability.total_works.provenance" title="Cost of works" />
-      </div>
+      <ProvenanceToggle v-if="affordability?.total_works?.provenance" :provenance="affordability?.total_works?.provenance" title="Cost of works" />
 
       <div class="costs-row">
         <span class="costs-label">Commute Cost</span>
         <span class="costs-value">£{{ affordability?.monthly_commute_cost?.value?.yearly_total_gbp != null ? (parseFloat(affordability.monthly_commute_cost.value.yearly_total_gbp ?? '0') / 12).toFixed(2) : '?' }}</span>
-        <button
-          v-if="affordability?.monthly_commute_cost?.provenance"
-          class="how-btn"
-          :class="{ 'how-btn--active': showProvenance === 'commute_cost' }"
-          @click="toggleProvenance('commute_cost')"
-        >{{ showProvenance === 'commute_cost' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
       </div>
       <div v-if="affordability?.monthly_commute_cost?.succeeded && affordability?.monthly_commute_cost?.value?.persons" class="costs-subsection">
         <div v-for="(cost, name) in affordability.monthly_commute_cost.value.persons" :key="name" class="costs-row costs-row--sub">
@@ -288,9 +243,7 @@ function canEdit(personName: string): boolean {
           <span class="costs-value">£{{ (parseFloat(cost.yearly_gbp ?? '0') / 12).toFixed(2) }}/mo</span>
         </div>
       </div>
-      <div v-if="showProvenance === 'commute_cost' && affordability?.monthly_commute_cost?.provenance" class="costs-provenance">
-        <ProvenanceView :provenance="affordability.monthly_commute_cost.provenance" title="Monthly commute cost" />
-      </div>
+      <ProvenanceToggle v-if="affordability?.monthly_commute_cost?.provenance" :provenance="affordability?.monthly_commute_cost?.provenance" title="Monthly commute cost" />
 
       <!-- Rental Income (editable by current person) -->
       <div class="costs-row">
@@ -317,16 +270,8 @@ function canEdit(personName: string): boolean {
           </template>
           <template v-else>£0</template>
         </span>
-        <button
-          v-if="affordability?.rental_income?.provenance"
-          class="how-btn"
-          :class="{ 'how-btn--active': showProvenance === 'rental_income' }"
-          @click="toggleProvenance('rental_income')"
-        >{{ showProvenance === 'rental_income' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
-      </div>
-      <div v-if="showProvenance === 'rental_income' && affordability?.rental_income?.provenance" class="costs-provenance">
-        <ProvenanceView :provenance="affordability.rental_income.provenance" title="Rental income" />
-      </div>
+              </div>
+      <ProvenanceToggle v-if="affordability?.rental_income?.provenance" :provenance="affordability?.rental_income?.provenance" title="Rental income" />
 
       <!-- Total Monthly -->
       <div class="costs-row costs-row--total" :class="{ 'costs-row--impossible': isImpossible(affordability?.total_monthly_housing_cost) }">
@@ -334,16 +279,8 @@ function canEdit(personName: string): boolean {
         <span v-if="affordability?.total_monthly_housing_cost?.succeeded && affordability?.total_monthly_housing_cost?.value" class="costs-value">£{{ affordability.total_monthly_housing_cost.value.amount }}</span>
         <span v-else-if="isImpossible(affordability?.total_monthly_housing_cost)" class="costs-value costs-value--impossible">Can't calculate</span>
         <span v-else class="costs-value">?</span>
-        <button
-          v-if="affordability?.total_monthly_housing_cost?.provenance"
-          class="how-btn"
-          :class="{ 'how-btn--active': showProvenance === 'total' }"
-          @click="toggleProvenance('total')"
-        >{{ showProvenance === 'total' ? 'ⓘ hide' : 'ⓘ how?' }}</button>
-      </div>
-      <div v-if="showProvenance === 'total' && affordability?.total_monthly_housing_cost?.provenance" class="costs-provenance">
-        <ProvenanceView :provenance="affordability.total_monthly_housing_cost.provenance" title="Total monthly housing cost" />
-      </div>
+              </div>
+      <ProvenanceToggle v-if="affordability?.total_monthly_housing_cost?.provenance" :provenance="affordability?.total_monthly_housing_cost?.provenance" title="Total monthly housing cost" />
     </div>
 
     <!-- EPC scale -->
@@ -423,7 +360,6 @@ function canEdit(personName: string): boolean {
   text-align: right;
 }
 
-.how-btn {
   font-size: var(--fs-xs);
   padding: 0.25em 0.5em;
   border: 1px solid var(--border);
@@ -433,7 +369,6 @@ function canEdit(personName: string): boolean {
   cursor: pointer;
   white-space: nowrap;
 }
-.how-btn--active { background: var(--slate-100); border-color: var(--blue); color: var(--blue); }
 
 /* EPC */
 .epc-section { margin-top: var(--sp-6); }

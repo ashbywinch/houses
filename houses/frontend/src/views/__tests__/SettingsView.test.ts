@@ -110,6 +110,18 @@ function makeSettings() {
         Lorena: { amount: '0.00', currency: 'GBP' },
         George: { amount: '0.00', currency: 'GBP' },
       },
+      provenance: {
+        label: 'Household Deposit',
+        value: '£477,000.00',
+        sourceType: 'calc' as const,
+        formula: {
+          lines: [
+            { label: 'Simon', value: '£550,000.00 sale − £373,000.00 mortgage + £0.00 cash = £177,000.00' },
+            { label: 'Ashby', value: '£0 home + £300,000.00 cash = £300,000.00' },
+          ],
+          result: '£477,000.00',
+        },
+      },
     },
   }
 }
@@ -280,5 +292,22 @@ describe('SettingsView — selling-home toggle (P7, B7)', () => {
     expect(ashby.text()).not.toContain('Mortgage remaining on current home')
     expect(ashby.text()).toContain('Cash available for the deposit')
     expect(ashby.text()).toContain('Deposit is cash')
+  })
+})
+
+describe('SettingsView — deposit provenance through the standard toggle (P8)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('reveals the per-person deposit calculation via the standard component', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const toggle = wrapper.find('.settings-deposit .provenance-toggle__trigger')
+    expect(toggle.exists()).toBe(true)
+    expect(toggle.text()).toContain('How is this calculated?')
+    await toggle.trigger('click')
+    expect(wrapper.text()).toContain('£0 home + £300,000.00 cash')
+    expect(wrapper.text()).toContain('£550,000.00 sale')
   })
 })

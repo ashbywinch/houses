@@ -142,10 +142,11 @@ describe('CostsSection rental income', () => {
     expect(api.patchRentalIncome).toHaveBeenCalledWith('test123', 800)
   })
 
-  it('shows rental income provenance button when provenance exists', () => {
+  it('shows the standard provenance toggle when provenance exists', () => {
     const wrapper = mountCosts()
-    const howBtn = wrapper.find('.how-btn')
-    expect(howBtn.exists()).toBe(true)
+    const trigger = wrapper.find('.provenance-toggle__trigger')
+    expect(trigger.exists()).toBe(true)
+    expect(trigger.text()).toContain('How is this calculated?')
   })
 })
 

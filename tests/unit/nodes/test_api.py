@@ -435,6 +435,19 @@ class TestSettingsPropagationApi:
         assert hd["persons"]["Simon"] == {"amount": "177000.00", "currency": "GBP"}
         assert hd["persons"]["Ashby"] == {"amount": "300000.00", "currency": "GBP"}
 
+    def test_household_deposit_carries_provenance(self):
+        """The deposit total ships a Provenance-shaped block — per-person
+        formula lines (toggle-OFF persons show cash-only) — rendered by the
+        standard ProvenanceView, never a bespoke widget (P8)."""
+        client = self._setup()
+        hd = client.get("/api/settings").json()["household_deposit"]
+        prov = hd["provenance"]
+        assert prov["label"] == "Household Deposit"
+        lines = {line["label"]: line["value"] for line in prov["formula"]["lines"]}
+        assert "£550,000.00 sale − £373,000.00 mortgage + £0.00 cash = £177,000.00" in lines.values()
+        assert lines["Ashby"] == "£0 home + £300,000.00 cash = £300,000.00"
+        assert prov["formula"]["result"] == "£477,000.00"
+
     def test_settings_change_updates_property_totals(self):
         """PATCH a person's cash contribution → mortgage_required drops by
         exactly the delta and the list total follows — automatically, via

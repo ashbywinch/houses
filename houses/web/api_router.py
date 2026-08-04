@@ -337,15 +337,32 @@ async def get_settings(request: Request):
     # The family deposit as ONE number (P4: the household is the unit, not
     # four person records): per person, sale proceeds − remaining mortgage +
     # extra money; plus the household total.  Computed server-side from the
-    # settings inputs — the client never derives money from parts.
+    # settings inputs — the client never derives money from parts.  The
+    # toggle gate matches EquityTotalNode: a person not selling a home
+    # contributes cash only (P7).
+    from decimal import Decimal as _Decimal
+
     from money import Money as _Money
 
     deposit_persons: dict[str, dict] = {}
     deposit_total = _Money("0", "GBP")
+    deposit_lines: list[dict] = []
     for person in persons:
-        value = person.home_sale_price - person.outstanding_mortgage + person.cash_contribution
-        deposit_persons[person.name] = {"amount": f"{value.amount:.2f}", "currency": "GBP"}
-        deposit_total = deposit_total + value
+        sale = person.home_sale_price.amount
+        mortgage = person.outstanding_mortgage.amount
+        cash = person.cash_contribution.amount
+        if effective_selling_home(person):
+            value = max(_Decimal("0"), sale - mortgage) + cash
+            line = (
+                f"£{sale:,.2f} sale − £{mortgage:,.2f} mortgage + £{cash:,.2f} cash "
+                f"= £{value:,.2f}"
+            )
+        else:
+            value = cash
+            line = f"£0 home + £{cash:,.2f} cash = £{value:,.2f}"
+        deposit_persons[person.name] = {"amount": f"{value:.2f}", "currency": "GBP"}
+        deposit_total = deposit_total + _Money(str(value), "GBP")
+        deposit_lines.append({"label": person.name, "value": line})
 
     return {
         "persons": persons_json,
@@ -354,6 +371,12 @@ async def get_settings(request: Request):
         "household_deposit": {
             "total": {"amount": f"{deposit_total.amount:.2f}", "currency": "GBP"},
             "persons": deposit_persons,
+            "provenance": {
+                "label": "Household Deposit",
+                "value": f"£{deposit_total.amount:,.2f}",
+                "sourceType": "calc",
+                "formula": {"lines": deposit_lines, "result": f"£{deposit_total.amount:,.2f}"},
+            },
         },
     }
 

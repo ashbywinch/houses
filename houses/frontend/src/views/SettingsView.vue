@@ -2,7 +2,9 @@
 import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import Header from '../components/Header.vue'
+import ProvenanceToggle from '../components/ProvenanceToggle.vue'
 import * as api from '../services/api'
+import type { Provenance } from '../types'
 
 interface PoiSettings {
   label: string
@@ -41,6 +43,7 @@ interface Thresholds {
 interface HouseholdDeposit {
   total: MoneyValue
   persons: Record<string, MoneyValue>
+  provenance?: Provenance
 }
 
 const route = useRoute()
@@ -181,6 +184,11 @@ const depositRows = computed(() => {
               <span>{{ pounds(row.amount) }}</span>
             </li>
           </ul>
+          <ProvenanceToggle
+            v-if="deposit.provenance"
+            :provenance="deposit.provenance"
+            title="Household deposit"
+          />
         </div>
 
         <section
