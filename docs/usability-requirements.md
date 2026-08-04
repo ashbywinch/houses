@@ -7,9 +7,9 @@ are stated as user outcomes and behaviours — deliberately NOT as UI
 specifics (labels, buttons, placements). Implementation detail lives in
 [docs/ux-fixes-plan.md](ux-fixes-plan.md).
 
-## The general principles (P1–P6)
+## The general principles (P1–P13)
 
-The requirements below are instances of six durable principles. When the UI
+The requirements below are instances of durable principles (P1–P13). When the UI
 changes or a new feature arrives, test against the **principles** first —
 a requirement may be satisfied differently, but a violated principle is
 always a regression.
@@ -59,6 +59,51 @@ Requirements are outcomes, not pixels. Where a behaviour is checkable
 (propagation, language, addresses in links), it gets an automated test —
 this is what makes the baseline durable against regressions.
 
+**P7 — Real states are explicit, never approximated.** Every real-world
+state a user can be in (owns a home to sell / doesn't, already sold / not,
+has a car / not) is a first-class, explicit control or field — never
+encoded as a combination of other inputs, never silently inferred.
+Inference is allowed only as a one-time migration to an explicit value.
+Anti-patterns: zero-values-as-meaning ("no house" = empty fields), forcing
+the user to reverse-engineer a state out of unrelated inputs.
+
+**P8 — One standard affordance per pattern.** Every recurring interaction
+(revealing a derivation, editing a list, confirming a change) is served by
+exactly one reused, standardised component across the app. Consistent
+affordances are learnable; per-screen variants are invisible until
+discovered. Anti-pattern: `ⓘ`-style triggers that differ per screen for
+the same action.
+
+**P9 — Navigate like the web.** Identity and settings navigation uses
+standard web conventions (header menus, drop-downs), so a first-time
+user's web knowledge transfers instead of learning an app-specific scheme.
+Anti-patterns: bespoke page-level toolbar links for actions users expect
+in a header menu.
+
+**P10 — Model only distinctions that change behaviour or display.** Every
+user-facing category, toggle, or field must change what the app does or
+shows. Taxonomy that exists only to be edited is cost: it burdens the
+editor, migrations, and the user. Anti-pattern: an editable
+work/personal/school kind that changes nothing.
+
+**P11 — No bootstrap deadlocks.** A first user must be able to make the
+app useful without a pre-configured admin or identity linkage — a
+self-service identity-claiming path or a guaranteed first-run flow.
+Anti-pattern: an app where nobody can edit anything because no one is
+linked and no admin exists to link them.
+
+**P12 — User-entered data is never silently lost.** Updates merge into
+existing records; a partial edit never resets unrelated fields; writes
+from outside the app are guarded and explicit. Anti-patterns: replace
+semantics on PATCH, unguarded script/REPL writes to the production
+settings.
+
+**P13 — UX work is accepted by re-walking the scenarios.** The repeatable
+walkthrough prompt ([docs/ux-walkthrough-prompt.md](ux-walkthrough-prompt.md))
+is a living instrument: usability changes land only when the scenario
+walk-through no longer produces the confusions they targeted. Unit tests
+prove mechanics; the walkthrough proves the experience.
+
 | Principle | Requirements |
 |---|---|
 | P1 | A2, B4, B6 |
@@ -67,6 +112,19 @@ this is what makes the baseline durable against regressions.
 | P4 | A5, A6, B2, B3, D2, D3, D4 |
 | P5 | A2, B4, B6, D2 |
 | P6 | all (acceptance discipline) |
+| P7 | B7* |
+| P8 | B5, D3 |
+| P9 | D2, A7* |
+| P10 | — |
+| P11 | — |
+| P12 | — |
+| P13 | — |
+
+*Planned in [docs/ux-fixes-plan-2.md](ux-fixes-plan-2.md) (B7, A7).
+P10–P13 are meta rules: they constrain how requirements are implemented
+(no useless taxonomy, no bootstrap deadlock, no silent data loss) and how
+they are accepted (re-walk the scenarios), rather than naming one
+requirement each.
 
 ---
 
