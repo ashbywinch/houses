@@ -12,6 +12,20 @@ from houses.config import settings
 from tests.unit.isolation_fixtures import _sqlite_memory  # noqa: F401 — re-exported for integration tests
 
 
+@pytest.fixture(autouse=True)
+def _use_sqlite_memory(_sqlite_memory):  # noqa: F811
+    """Use in-memory SQLite for DAG persistence in integration tests.
+
+    MUST be the first autouse fixture: settings sources default-push when
+    no row exists, and the settings write guard (rightly) refuses those
+    pushes outside app/pytest-isolated processes.  On a fresh DB that push
+    happens during earlier services access (e.g. _reset_geo_cache) unless
+    the in-memory DB + per.testing flag are already active.  Autouse
+    fixtures run in definition order — keep this at the top.
+    """
+    pass
+
+
 def mock_httpx():
     """Context manager that patches both ``httpx.AsyncClient`` and
     ``httpx.Client`` with a ``MockTransport`` that returns synthetic
@@ -148,11 +162,6 @@ def _mock_http_requests():
     with async_patch, sync_patch:
         yield counter
 
-
-@pytest.fixture(autouse=True)
-def _use_sqlite_memory(_sqlite_memory):  # noqa: F811
-    """Use in-memory SQLite for DAG persistence in integration tests."""
-    pass
 
 
 @pytest.fixture(autouse=True)
