@@ -72,6 +72,65 @@ def test_services_has_all_three_persons():
     assert "George" in names, f"George not in persons_source: {names}"
 
 
+def test_default_persons_carry_explicit_modes_and_guardians():
+    """Defaults set acceptable_modes and editable_by explicitly — the
+    label-migration rule is only for legacy persisted data."""
+    persons = make_default_persons()
+    simon = next(p for p in persons if p.name == "Simon")
+    assert {poi.label: poi.acceptable_modes for poi in simon.places_of_interest} == {
+        "Pimlico": ("train",),
+        "Bracknell": ("car",),
+        "Dad": ("car",),
+    }
+    lorena = next(p for p in persons if p.name == "Lorena")
+    assert {poi.label: poi.acceptable_modes for poi in lorena.places_of_interest} == {"Aldgate": ("train",)}
+    george = next(p for p in persons if p.name == "George")
+    assert set(george.editable_by) == {"Simon", "Lorena", "Ashby"}
+    assert all(poi.acceptable_modes == ("walk",) for poi in george.places_of_interest)
+
+
+def test_effective_acceptable_modes_migration_rule():
+    """Unset (legacy) modes migrate by rule: offices → train, out-of-London
+    trips → car, schools → walk; anything else keeps the old all-modes
+    behaviour (no inference for unknown labels)."""
+    from houses.model.domain import PlaceOfInterest, effective_acceptable_modes
+
+    assert effective_acceptable_modes(PlaceOfInterest("Pimlico", "1 Drummond Gate, Pimlico, London SW1V 2QQ")) == (
+        "train",
+    )
+    assert effective_acceptable_modes(
+        PlaceOfInterest("Aldgate", "Eastgate House, 40 Dukes Place, London EC3A 7LP")
+    ) == ("train",)
+    assert effective_acceptable_modes(
+        PlaceOfInterest("Bracknell", "Waite House, Doncastle Road, Bracknell RG12 8YA")
+    ) == ("car",)
+    assert effective_acceptable_modes(PlaceOfInterest("Dad", "Flat 37, Watson Place, Trinity Road, OX7 5GZ")) == (
+        "car",
+    )
+    assert effective_acceptable_modes(PlaceOfInterest("Primary School", "")) == ("walk",)
+    assert effective_acceptable_modes(PlaceOfInterest("Gym", "High Street")) == ("train", "car", "walk")
+    # explicit modes always win — never overridden by the rule
+    assert effective_acceptable_modes(PlaceOfInterest("Pimlico", "x", acceptable_modes=("walk", "train"))) == (
+        "walk",
+        "train",
+    )
+
+
+def test_effective_editable_by_defaults():
+    """Unset editable_by defaults to self for adults and ALL adults for
+    children; explicit values always win."""
+    from houses.model.domain import Person, effective_editable_by
+
+    simon = Person("Simon", has_car=True)
+    lorena = Person("Lorena", has_car=False)
+    george = Person("George", has_car=False, is_child=True)
+    family = [simon, lorena, george]
+    assert effective_editable_by(simon, family) == ("Simon",)
+    assert effective_editable_by(george, family) == ("Simon", "Lorena")
+    explicit = Person("George", has_car=False, is_child=True, editable_by=("Lorena",))
+    assert effective_editable_by(explicit, family) == ("Lorena",)
+
+
 def test_rejects_stale_test_data_from_db():
     """When the DB has persisted persons with source_label='tests', Services()
     must raise RuntimeError — fail fast so the leak can't go unnoticed."""

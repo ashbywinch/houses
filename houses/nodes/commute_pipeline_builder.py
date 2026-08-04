@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dag.if_then_else import IfThenElseNode
 from dag.user_input_node import UserInputNode
-from houses.model.domain import Commute
+from houses.model.domain import Commute, effective_acceptable_modes
 from houses.nodes.bus import BodsFareNode, BusLegAugmentNode, BusRouteNode
 from houses.nodes.commute import CommuteSelectorNode, MergeRailFareNode, _needs_rail_fare
 from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
@@ -145,6 +145,7 @@ def build_commute_pipeline(prop) -> None:
                 drive_result=None if in_zone else drive_node,
                 is_child=is_child,
                 max_walk=int(p_info.bus_walk_penalty.magnitude),
+                acceptable_modes=effective_acceptable_modes(poi),
             )
 
             if is_child:

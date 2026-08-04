@@ -41,6 +41,7 @@ onMounted(fetchPersons)
           <span class="header__auth-status">…</span>
         </template>
         <template v-else-if="auth.user">
+          <router-link class="header__settings-link" to="/settings">Settings</router-link>
           <button
             v-if="auth.user.is_superuser"
             class="header__su-toggle"

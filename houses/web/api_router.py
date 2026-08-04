@@ -3,13 +3,15 @@ from __future__ import annotations
 import contextlib
 import logging
 
-from fastapi import APIRouter, Body, HTTPException, Request, WebSocket
+from fastapi import APIRouter, HTTPException, Request, WebSocket
 from pydantic import BaseModel, Field, field_validator
 
 from houses.geo import GeoPoint
+from houses.model.domain import Person, PlaceOfInterest, effective_acceptable_modes, effective_editable_by
 from houses.property_registry import get_property as get_registry_property
 from houses.property_registry import list_properties as list_registry_properties
 from houses.services_provider import get_services
+from houses.web.auth import get_session_user
 
 logger = logging.getLogger(__name__)
 
@@ -303,64 +305,138 @@ async def add_property_comment(rid: str, body: CommentBody, request: Request):
 
 
 @api_router.get("/settings")
-async def get_settings():
+async def get_settings(request: Request):
     svc = get_services()
+    persons_json = await svc.persons_source.to_json()
+    # Enrich each person with the EFFECTIVE per-POI modes, the effective
+    # guardian list, and the session-aware editable_by_me flag.  The
+    # server decides ownership; the UI only renders it.
+    attempt = svc.persons_source.latest_attempt()
+    persons = [p for p in (attempt.value_or_none() or []) if isinstance(p, Person)]
+    session_user = get_session_user(request)
+    session_name = _session_person_name(session_user, persons)
+    dumped = persons_json.get("value")
+    if isinstance(dumped, list):
+        for item, person in zip(dumped, persons, strict=True):
+            if not isinstance(item, dict):
+                continue
+            editable_by = effective_editable_by(person, persons)
+            item["editable_by"] = list(editable_by)
+            item["editable_by_me"] = _can_edit_person(session_user, session_name, person, persons)
+            for poi_item, poi in zip(item.get("places_of_interest") or (), person.places_of_interest, strict=True):
+                if isinstance(poi_item, dict):
+                    poi_item["acceptable_modes"] = list(effective_acceptable_modes(poi))
     return {
-        "persons": await svc.persons_source.to_json(),
+        "persons": persons_json,
         "financial": await svc.financial_source.to_json(),
         "commute_thresholds": await svc.commute_thresholds_source.to_json(),
     }
 
 
-@api_router.put("/settings/persons")
-async def put_persons(body: list = Body()):  # noqa: B008
-    """Replace the entire persons configuration.
+def _session_person_name(session_user: dict | None, persons: list) -> str:
+    """The session user's Person name (email match), or "" when unlinked."""
+    if not session_user:
+        return ""
+    folded = session_user.get("email", "").casefold()
+    for p in persons:
+        email = getattr(p, "email", "")
+        if email and email.casefold() == folded:
+            return getattr(p, "name", "")
+    return ""
 
-    This is PUT (not PATCH) because it replaces the full list.
-    An empty array is rejected — at least one person is required.
+
+def _can_edit_person(session_user: dict | None, session_name: str, person, persons: list) -> bool:
+    """Server-side ownership check — the UI never decides this."""
+    if not session_user:
+        return False
+    if session_user.get("is_superuser"):
+        return True
+    if not session_name:
+        return False
+    return session_name == person.name or session_name in effective_editable_by(person, persons)
+
+
+_PERSON_MONEY_FIELDS = {"home_sale_price", "outstanding_mortgage", "cash_contribution", "life_insurance_monthly"}
+
+
+def _person_from_dict(d: dict) -> Person:
+    """Build a Person from an API dict, normalising money + tuple fields."""
+    from money import Money as _Money
+
+    def _money(v):
+        if isinstance(v, (int, float)):
+            return _Money(str(v), "GBP")
+        if isinstance(v, dict):
+            return _Money(v["amount"], v.get("currency", "GBP"))
+        return v
+
+    cleaned = {k: v for k, v in d.items() if k != "thresholds"}
+    for f in _PERSON_MONEY_FIELDS:
+        if f in cleaned:
+            cleaned[f] = _money(cleaned[f])
+    if "editable_by" in cleaned and cleaned["editable_by"] is not None:
+        cleaned["editable_by"] = tuple(cleaned["editable_by"])
+    pois = cleaned.get("places_of_interest")
+    if isinstance(pois, list):
+        normalized = []
+        for poi in pois:
+            if isinstance(poi, dict):
+                modes = poi.get("acceptable_modes")
+                if modes is not None:
+                    poi = {**poi, "acceptable_modes": tuple(modes)}
+                normalized.append(PlaceOfInterest(**poi))
+            else:
+                normalized.append(poi)
+        cleaned["places_of_interest"] = tuple(normalized)
+    return Person(**cleaned)
+
+
+@api_router.patch("/settings/person/{name}")
+async def patch_person(name: str, body: dict, request: Request):
+    """Update one person's settings — own person / superuser / guardian.
+
+    Replaces the whole-list PUT: the server decides who may edit whom,
+    never the UI.  ``body`` is the full person record (the old PUT item)
+    plus an optional ``thresholds`` dict for the person's commute
+    thresholds, saved to the separate thresholds source under the same
+    ownership rule.
     """
     from fastapi import HTTPException
 
-    if not body:
-        raise HTTPException(status_code=400, detail="At least one person is required")
+    session_user = get_session_user(request)
+    if not session_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
 
-    from money import Money as _Money
+    svc = get_services()
+    persons = list(svc.persons_source.latest_attempt().value_or_none() or [])
+    target = next((p for p in persons if getattr(p, "name", "") == name), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"No person named {name!r}")
 
-    from houses.model.domain import Person, PlaceOfInterest
-
-    money_fields = {"home_sale_price", "outstanding_mortgage", "cash_contribution", "life_insurance_monthly"}
-
-    def _validate_money_fields(d: dict) -> dict:
-        for f in money_fields:
-            v = d.get(f)
-            if isinstance(v, (int, float)):
-                d[f] = _Money(str(v), "GBP")
-            elif isinstance(v, dict):
-                d[f] = _Money(v["amount"], v.get("currency", "GBP"))
-        return d
-
-    validated = []
-    for p in body:
-        if not isinstance(p, dict):
-            validated.append(p)
-            continue
-        _validate_money_fields(p)
-        validated.append(
-            Person(
-                **{
-                    k: (
-                        tuple(PlaceOfInterest(**poi) if isinstance(poi, dict) else poi for poi in v)
-                        if k == "places_of_interest"
-                        else v
-                    )
-                    for k, v in p.items()
-                }
-            )
+    session_name = _session_person_name(session_user, persons)
+    if not _can_edit_person(session_user, session_name, target, persons):
+        raise HTTPException(
+            status_code=403,
+            detail="You can only edit your own settings (or a child's, if you are their guardian)",
         )
+
+    if not session_user.get("is_superuser"):
+        # privilege fields are superuser-only: editing your own record
+        # must not escalate to superuser or hijack the email link
+        body = {**body, "is_superuser": target.is_superuser, "email": target.email}
+
+    updated = [_person_from_dict(body) if p is target else p for p in persons]
     try:
-        get_services().persons_source.push(validated, "user")
+        svc.persons_source.push(updated, "user")
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+    thresholds = body.get("thresholds")
+    if isinstance(thresholds, dict):
+        current = dict(svc.commute_thresholds_source.latest_attempt().value_or_none() or {})
+        current[name] = thresholds
+        svc.commute_thresholds_source.push(current, "user")
+
     return {"status": "ok"}
 
 

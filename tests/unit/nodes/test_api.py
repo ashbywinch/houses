@@ -100,21 +100,6 @@ class TestSettingsApi:
         _inject_session(client)
         return client
 
-    def test_put_persons_with_list(self):
-        """PUT /settings/persons must accept a raw JSON list body."""
-        client = self._setup()
-        resp = client.put(
-            "/api/settings/persons",
-            json=[{"name": "Simon", "has_car": True}],
-        )
-        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text[:200]}"
-
-    def test_put_persons_rejects_empty_list(self):
-        """PUT /settings/persons with empty list must return 400."""
-        client = self._setup()
-        resp = client.put("/api/settings/persons", json=[])
-        assert resp.status_code == 400, f"Expected 400 for empty list, got {resp.status_code}"
-
     def test_patch_financial_with_dict(self):
         """PATCH /settings/financial must accept a dict body."""
         client = self._setup()
@@ -125,6 +110,12 @@ class TestSettingsApi:
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
 
+    def test_put_persons_removed(self):
+        """PUT /settings/persons (whole-list, no authz) must be gone."""
+        client = self._setup()
+        resp = client.put("/api/settings/persons", json=[{"name": "Simon", "has_car": True}])
+        assert resp.status_code == 404, f"Expected 404 (endpoint removed), got {resp.status_code}"
+
     def test_reseed_endpoint_exists(self):
         """POST /api/admin/reseed must return a JSON response."""
         from unittest.mock import patch
@@ -134,6 +125,154 @@ class TestSettingsApi:
             resp = client.post("/api/admin/reseed")
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
+
+
+def _push_persons(*persons) -> None:
+    """Seed the persons settings node directly (module-level cache)."""
+    from houses.services_provider import get_services
+
+    get_services().persons_source.push(list(persons), "user")
+
+
+class TestPatchPersonApi:
+    """PATCH /api/settings/person/{name} — server-side ownership.
+
+    The server must enforce who may edit whom; the UI hiding controls is
+    never the enforcement (never trust the UI for ownership).
+    """
+
+    def _setup(self, *, superuser: bool = False):
+        from fastapi.testclient import TestClient
+
+        from houses.model.domain import Person, PlaceOfInterest
+        from houses.server import app
+        from houses.web.auth import _make_session_cookie
+
+        _push_persons(
+            Person(
+                name="Simon",
+                has_car=True,
+                email="simon@example.com",
+                places_of_interest=(PlaceOfInterest("Pimlico", "1 Drummond Gate, Pimlico, London SW1V 2QQ"),),
+            ),
+            Person(name="Lorena", has_car=False, email="lorena@example.com"),
+            Person(
+                name="George",
+                has_car=False,
+                is_child=True,
+                editable_by=("Simon",),
+                places_of_interest=(PlaceOfInterest("Primary School", ""),),
+            ),
+        )
+        client = TestClient(app)
+        client.cookies.set(
+            "session",
+            _make_session_cookie(email="simon@example.com", name="Simon", picture="", is_superuser=superuser),
+        )
+        return client
+
+    def _person(self, client, name: str) -> dict:
+        value = client.get("/api/settings").json()["persons"]["value"]
+        return next(p for p in value if p["name"] == name)
+
+    def test_requires_auth(self):
+        """No session cookie → 401."""
+        from fastapi.testclient import TestClient
+
+        from houses.server import app
+
+        _push_persons()
+        client = TestClient(app)
+        resp = client.patch("/api/settings/person/Simon", json={"name": "Simon", "has_car": True})
+        assert resp.status_code == 401
+
+    def test_own_person_allowed(self):
+        client = self._setup()
+        resp = client.patch("/api/settings/person/Simon", json={"name": "Simon", "has_car": False})
+        assert resp.status_code == 200, resp.text[:300]
+
+    def test_other_person_forbidden(self):
+        """Session Simon editing Lorena's record → 403, never 200."""
+        client = self._setup()
+        resp = client.patch("/api/settings/person/Lorena", json={"name": "Lorena", "has_car": True})
+        assert resp.status_code == 403, f"Expected 403, got {resp.status_code}: {resp.text[:300]}"
+
+    def test_superuser_can_edit_anyone(self):
+        client = self._setup(superuser=True)
+        resp = client.patch("/api/settings/person/Lorena", json={"name": "Lorena", "has_car": True})
+        assert resp.status_code == 200, resp.text[:300]
+
+    def test_guardian_edits_child(self):
+        """Simon is in George's editable_by → allowed even though Simon
+        is not George."""
+        client = self._setup()
+        resp = client.patch(
+            "/api/settings/person/George",
+            json={"name": "George", "has_car": False, "is_child": True, "places_of_interest": []},
+        )
+        assert resp.status_code == 200, resp.text[:300]
+
+    def test_unknown_person_404(self):
+        client = self._setup()
+        resp = client.patch("/api/settings/person/Nobody", json={"name": "Nobody", "has_car": True})
+        assert resp.status_code == 404
+
+    def test_updates_person_fields_and_thresholds(self):
+        """PATCH persists POI modes/trips and (optionally) the person's
+        commute thresholds in one call."""
+        client = self._setup()
+        resp = client.patch(
+            "/api/settings/person/Simon",
+            json={
+                "name": "Simon",
+                "has_car": True,
+                "places_of_interest": [
+                    {
+                        "label": "Pimlico",
+                        "address": "1 Drummond Gate, Pimlico, London SW1V 2QQ",
+                        "trips_per_week": 3,
+                        "weeks_per_year": 46,
+                        "acceptable_modes": ["train", "car"],
+                    }
+                ],
+                "thresholds": {"good_max_minutes": 25, "fine_max_minutes": 40},
+            },
+        )
+        assert resp.status_code == 200, resp.text[:300]
+        simon = self._person(client, "Simon")
+        poi = simon["places_of_interest"][0]
+        assert poi["acceptable_modes"] == ["train", "car"]
+        assert poi["trips_per_week"] == 3
+        thresholds = client.get("/api/settings").json()["commute_thresholds"]["value"]["Simon"]
+        assert thresholds == {"good_max_minutes": 25, "fine_max_minutes": 40}
+
+    def test_own_patch_cannot_escalate_to_superuser(self):
+        """A non-superuser editing their own record must not be able to
+        grant themselves is_superuser or hijack the email link."""
+        client = self._setup()
+        resp = client.patch(
+            "/api/settings/person/Simon",
+            json={"name": "Simon", "has_car": True, "is_superuser": True, "email": "hacker@example.com"},
+        )
+        assert resp.status_code == 200
+        simon = self._person(client, "Simon")
+        assert simon["is_superuser"] is False
+        assert simon["email"] == "simon@example.com"
+
+    def test_get_settings_carries_modes_editable_by_and_editable_by_me(self):
+        """GET /settings must expose per-POI effective modes, per-person
+        editable_by, and the session-aware editable_by_me flag."""
+        client = self._setup()
+        simon = self._person(client, "Simon")
+        assert simon["editable_by"] == ["Simon"]
+        assert simon["editable_by_me"] is True
+        # unset modes migrate by rule: Pimlico → train
+        assert simon["places_of_interest"][0]["acceptable_modes"] == ["train"]
+        lorena = self._person(client, "Lorena")
+        assert lorena["editable_by_me"] is False
+        george = self._person(client, "George")
+        assert george["editable_by_me"] is True  # Simon is George's guardian
+        assert george["places_of_interest"][0]["acceptable_modes"] == ["walk"]  # school rule
 
 
 class TestWorksEstimateApi:

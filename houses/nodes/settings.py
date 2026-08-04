@@ -33,19 +33,25 @@ def make_default_persons() -> list[Person]:
             life_insurance_monthly=Money("150", "GBP"),
             places_of_interest=(
                 PlaceOfInterest(
-                    label="Pimlico", address=settings.simon_destination, trips_per_week=1, weeks_per_year=46
+                    label="Pimlico",
+                    address=settings.simon_destination,
+                    trips_per_week=1,
+                    weeks_per_year=46,
+                    acceptable_modes=("train",),
                 ),
                 PlaceOfInterest(
                     label="Bracknell",
                     address="Waite House, Doncastle Road, Bracknell, Berkshire RG12 8YA",
                     trips_per_week=1,
                     weeks_per_year=46,
+                    acceptable_modes=("car",),
                 ),
                 PlaceOfInterest(
                     label="Dad",
                     address="Flat 37, Watson Place, Trinity Road, Chipping Norton OX7 5GZ",
-                    trips_per_week=0,
+                    trips_per_week=1,
                     weeks_per_year=46,
+                    acceptable_modes=("car",),
                 ),
             ),
         ),
@@ -57,7 +63,11 @@ def make_default_persons() -> list[Person]:
             bus_walk_penalty=Quantity(15, "minute"),
             places_of_interest=(
                 PlaceOfInterest(
-                    label="Aldgate", address=settings.lorena_destination, trips_per_week=2, weeks_per_year=46
+                    label="Aldgate",
+                    address=settings.lorena_destination,
+                    trips_per_week=2,
+                    weeks_per_year=46,
+                    acceptable_modes=("train",),
                 ),
             ),
         ),
@@ -78,9 +88,18 @@ def make_default_persons() -> list[Person]:
             has_car=False,
             is_child=True,
             acceptable_schools=("mixed", "boys", "girls"),
+            editable_by=("Simon", "Lorena", "Ashby"),
             places_of_interest=(
-                PlaceOfInterest(label="Primary School", address="", trips_per_week=5, weeks_per_year=39),
-                PlaceOfInterest(label="Secondary School", address="", trips_per_week=5, weeks_per_year=39),
+                PlaceOfInterest(
+                    label="Primary School", address="", trips_per_week=5, weeks_per_year=39, acceptable_modes=("walk",)
+                ),
+                PlaceOfInterest(
+                    label="Secondary School",
+                    address="",
+                    trips_per_week=5,
+                    weeks_per_year=39,
+                    acceptable_modes=("walk",),
+                ),
             ),
         ),
     ]

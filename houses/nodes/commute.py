@@ -159,6 +159,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         drive_result=None,
         is_child: bool = False,
         max_walk: int = 30,
+        acceptable_modes: tuple[str, ...] = (),
     ):
         self.origin = origin
         self.poi = poi
@@ -167,6 +168,10 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         self.drive_result = drive_result
         self.is_child = is_child
         self._max_walk = max_walk
+        # Empty (unset/legacy) means every mode is acceptable — the old
+        # behaviour.  An explicit set EXCLUDES the modes the person won't
+        # accept: a train-only POI is never scored by a car route.
+        self._acceptable_modes = tuple(acceptable_modes)
         deps = [origin, poi, transit_result]
         if walk_result is not None:
             deps.append(walk_result)
@@ -176,16 +181,21 @@ class CommuteSelectorNode(DerivedNode[Commute]):
 
         # Build expression once — cached so last_results persists across calls
         alts: dict[str, Expression] = {}
-        if self.walk_result is not None:
+        if self.walk_result is not None and self._mode_acceptable("walk"):
             alts["walk"] = Ref(self.walk_result)
-        alts["transit"] = Ref(self.transit_result)
-        if self.drive_result is not None:
+        if self._mode_acceptable("train"):
+            alts["transit"] = Ref(self.transit_result)
+        if self.drive_result is not None and self._mode_acceptable("car"):
             alts["drive"] = Ref(self.drive_result)
         self._expression = Choose(
             alternatives=alts,
             selector=self._pick_best,
             description="Selects the fastest feasible commute mode",
         )
+
+    def _mode_acceptable(self, mode: str) -> bool:
+        """Whether ``mode`` may be selected.  Unset = all acceptable."""
+        return not self._acceptable_modes or mode in self._acceptable_modes
 
     def _get_active_deps(self) -> tuple[Node, ...]:
         deps = [self.origin, self.poi, self.transit_result]

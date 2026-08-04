@@ -29,6 +29,193 @@ def _succeeded_walk_check(val: bool = False) -> DerivedNode:
 
 class TestCommuteSelectorNode:
     @pytest.mark.asyncio
+    async def test_train_only_poi_never_picks_drive(self):
+        """acceptable_modes=('train',) excludes the drive alternative even
+        when driving is fastest — a train-only POI is never scored by a
+        car route."""
+        from houses.nodes.commute import CommuteSelectorNode
+
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = FixedCommuteNode("transit")
+        walk = FixedCommuteNode("walk")
+        drive = FixedCommuteNode("drive")
+        _succeeded_walk_check(False)
+
+        node = CommuteSelectorNode(
+            "commute_selector",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            walk_result=walk,
+            drive_result=drive,
+            max_walk=30,
+            acceptable_modes=("train",),
+        )
+
+        origin.push(GeoPoint(51.5, -0.1), "user")
+        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"))
+        transit.push(_make_commute(duration_min=45, cost_gbp=4.50))
+        walk.push(_make_commute(duration_min=60, cost_gbp=0))
+        drive.push(_make_commute(duration_min=20, cost_gbp=8.00))
+
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded
+        val = a.value_or_none()
+        assert val is not None
+        assert val.duration.magnitude == 45  # transit, not the 20-min drive
+
+    @pytest.mark.asyncio
+    async def test_car_only_poi_never_picks_transit(self):
+        """acceptable_modes=('car',) excludes transit even when the train
+        is faster — the person only accepts driving."""
+        from houses.nodes.commute import CommuteSelectorNode
+
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = FixedCommuteNode("transit")
+        walk = FixedCommuteNode("walk")
+        drive = FixedCommuteNode("drive")
+        _succeeded_walk_check(False)
+
+        node = CommuteSelectorNode(
+            "commute_selector",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            walk_result=walk,
+            drive_result=drive,
+            max_walk=30,
+            acceptable_modes=("car",),
+        )
+
+        origin.push(GeoPoint(51.5, -0.1), "user")
+        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"))
+        transit.push(_make_commute(duration_min=30, cost_gbp=4.50))
+        walk.push(_make_commute(duration_min=60, cost_gbp=0))
+        drive.push(_make_commute(duration_min=50, cost_gbp=8.00))
+
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded
+        val = a.value_or_none()
+        assert val is not None
+        assert val.duration.magnitude == 50  # drive, not the 30-min train
+
+    @pytest.mark.asyncio
+    async def test_walk_only_poi_picks_walk(self):
+        """acceptable_modes=('walk',) selects the walk even when transit is
+        faster."""
+        from houses.nodes.commute import CommuteSelectorNode
+
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = FixedCommuteNode("transit")
+        walk = FixedCommuteNode("walk")
+        drive = FixedCommuteNode("drive")
+        _succeeded_walk_check(False)
+
+        node = CommuteSelectorNode(
+            "commute_selector",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            walk_result=walk,
+            drive_result=drive,
+            max_walk=30,
+            acceptable_modes=("walk",),
+        )
+
+        origin.push(GeoPoint(51.5, -0.1), "user")
+        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"))
+        transit.push(_make_commute(duration_min=25, cost_gbp=4.50))
+        walk.push(_make_commute(duration_min=35, cost_gbp=0))
+        drive.push(_make_commute(duration_min=20, cost_gbp=8.00))
+
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded
+        val = a.value_or_none()
+        assert val is not None
+        assert val.duration.magnitude == 35  # walk
+
+    @pytest.mark.asyncio
+    async def test_unset_modes_means_all_acceptable(self):
+        """acceptable_modes=() (unset/legacy) keeps the old behaviour: every
+        feasible mode competes."""
+        from houses.nodes.commute import CommuteSelectorNode
+
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = FixedCommuteNode("transit")
+        walk = FixedCommuteNode("walk")
+        drive = FixedCommuteNode("drive")
+        _succeeded_walk_check(False)
+
+        node = CommuteSelectorNode(
+            "commute_selector",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            walk_result=walk,
+            drive_result=drive,
+            max_walk=30,
+        )
+
+        origin.push(GeoPoint(51.5, -0.1), "user")
+        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"))
+        transit.push(_make_commute(duration_min=45, cost_gbp=4.50))
+        walk.push(_make_commute(duration_min=60, cost_gbp=0))
+        drive.push(_make_commute(duration_min=20, cost_gbp=8.00))
+
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded
+        val = a.value_or_none()
+        assert val is not None
+        assert val.duration.magnitude == 20  # drive wins
+
+    @pytest.mark.asyncio
+    async def test_no_acceptable_mode_feasible_means_impossible(self):
+        """When every acceptable mode is infeasible, the commute is
+        impossible — never a silent fallback to a mode the person didn't
+        accept."""
+        from houses.nodes.commute import CommuteSelectorNode
+
+        origin = UserInputNode[GeoPoint]("origin", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
+        transit = FixedCommuteNode("transit")
+        walk = FixedCommuteNode("walk")
+        _succeeded_walk_check(False)
+
+        node = CommuteSelectorNode(
+            "commute_selector",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            walk_result=walk,
+            drive_result=_impossible_commute("drive"),
+            max_walk=30,
+            acceptable_modes=("car",),
+        )
+
+        origin.push(GeoPoint(51.5, -0.1), "user")
+        poi.push(PlaceOfInterest("Office", "SW1V 2QQ"))
+        transit.push(_make_commute(duration_min=30, cost_gbp=4.50))
+        walk.push(_make_commute(duration_min=60, cost_gbp=0))
+
+        await flush_processor()
+
+        a = await node.attempt()
+        assert not a.succeeded
+        assert a.impossible or a.pending
+
+    @pytest.mark.asyncio
     async def test_transit_takes_priority(self):
         from houses.nodes.commute import CommuteSelectorNode
 
