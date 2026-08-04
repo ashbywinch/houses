@@ -111,6 +111,7 @@ make stop                       # Stop dev server + frontend
 
 ## Decision Tree
 
+- **Accessibility screening feature (PRD + implementation plan)**: [docs/prd-accessibility-screening.md](docs/prd-accessibility-screening.md) + [docs/implementation-plan-accessibility-screening.md](docs/implementation-plan-accessibility-screening.md)
 - **Develop / test / run**: [docs/development.md](docs/development.md)
 - **Coding standards / conventions**: [docs/coding-standards.md](docs/coding-standards.md)
 - **Writing tests**: [docs/testing-standards.md](docs/testing-standards.md)
