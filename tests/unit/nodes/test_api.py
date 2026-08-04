@@ -400,6 +400,29 @@ class TestSettingsPropagationApi:
         register_property(rid, prop)
         return rid
 
+    def test_get_settings_carries_effective_selling_home(self):
+        """GET /settings reports the EFFECTIVE selling-home state per
+        person (inferred where unset) so the toggle renders correctly."""
+        client = self._setup()
+        value = client.get("/api/settings").json()["persons"]["value"]
+        simon = next(p for p in value if p["name"] == "Simon")
+        assert simon["selling_home"] is True  # has home values -> inferred
+        ashby = next(p for p in value if p["name"] == "Ashby")
+        assert ashby["selling_home"] is False  # cash only -> inferred off
+
+    def test_patch_round_trips_selling_home(self):
+        """PATCHing selling_home stores it explicitly (merge semantics —
+        other fields survive)."""
+        client = self._setup()
+        resp = client.patch(
+            "/api/settings/person/Ashby",
+            json={"name": "Ashby", "has_car": True, "selling_home": True},
+        )
+        assert resp.status_code == 200, resp.text[:300]
+        value = client.get("/api/settings").json()["persons"]["value"]
+        ashby = next(p for p in value if p["name"] == "Ashby")
+        assert ashby["selling_home"] is True
+
     def test_get_settings_carries_household_deposit(self):
         """GET /settings reports the household deposit as one number —
         per person (sale − remaining mortgage + extra money) and the

@@ -25,6 +25,10 @@ function makeSettings() {
           is_superuser: true,
           editable_by: ['Simon'],
           editable_by_me: true,
+          selling_home: true,
+          home_sale_price: { amount: '550000.00', currency: 'GBP' },
+          outstanding_mortgage: { amount: '373000.00', currency: 'GBP' },
+          cash_contribution: { amount: '0.00', currency: 'GBP' },
           places_of_interest: [
             {
               label: 'Pimlico',
@@ -59,6 +63,18 @@ function makeSettings() {
               acceptable_modes: ['train'],
             },
           ],
+        },
+        {
+          name: 'Ashby',
+          has_car: true,
+          is_child: false,
+          email: 'emily.winch@gmail.com',
+          is_superuser: false,
+          editable_by: ['Ashby'],
+          editable_by_me: true,
+          selling_home: false,
+          cash_contribution: { amount: '300000.00', currency: 'GBP' },
+          places_of_interest: [],
         },
         {
           name: 'George',
@@ -239,5 +255,30 @@ describe('SettingsView — destination fields and person-scroll (A6, D2)', () =>
     await flush()
     const george = wrapper.findAll('.settings-person').find(s => s.text().includes('George'))!
     expect(george.classes()).toContain('settings-person--target')
+  })
+})
+
+describe('SettingsView — selling-home toggle (P7, B7)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('shows the current-home fields when a home is being sold', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
+    expect(simon.text()).toContain('I am selling a home to fund this purchase')
+    expect(simon.text()).toContain('Expected sale price of current home')
+    expect(simon.text()).toContain('Mortgage remaining on current home')
+  })
+
+  it('hides the current-home fields for a cash-only person and relabels the deposit', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const ashby = wrapper.findAll('.settings-person').find(s => s.text().includes('Ashby'))!
+    expect(ashby.text()).not.toContain('Expected sale price of current home')
+    expect(ashby.text()).not.toContain('Mortgage remaining on current home')
+    expect(ashby.text()).toContain('Cash available for the deposit')
+    expect(ashby.text()).toContain('Deposit is cash')
   })
 })

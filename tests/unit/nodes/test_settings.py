@@ -214,3 +214,31 @@ class TestSettingsWriteGuard:
         node = SettingsNode("persons", list[Person])
         with pytest.raises(RuntimeError):
             node.push([Person("Simon", has_car=True)], "user")
+
+def test_effective_selling_home_inference_and_override():
+    """Unset selling_home infers from whether home values exist; an
+    explicit value always wins (P7: states are explicit, inference is
+    only the migration)."""
+    from money import Money
+
+    from houses.model.domain import Person, effective_selling_home
+
+    simon = Person("Simon", has_car=True, home_sale_price=Money("550000", "GBP"),
+                   outstanding_mortgage=Money("373000", "GBP"))
+    ashby = Person("Ashby", has_car=True, cash_contribution=Money("300000", "GBP"))
+    assert effective_selling_home(simon) is True   # home values -> selling
+    assert effective_selling_home(ashby) is False  # zeroed home -> cash only
+    explicit_off = Person("Simon2", has_car=True, home_sale_price=Money("550000", "GBP"), selling_home=False)
+    assert effective_selling_home(explicit_off) is False
+    explicit_on = Person("Ashby2", has_car=True, cash_contribution=Money("300000", "GBP"), selling_home=True)
+    assert effective_selling_home(explicit_on) is True
+
+
+def test_default_persons_selling_home_flags():
+    """Defaults make the toggle explicit: Simon sells a home, everyone
+    else is cash-only (Ashby is the no-house exemplar)."""
+    persons = make_default_persons()
+    by_name = {p.name: p for p in persons}
+    assert by_name["Simon"].selling_home is True
+    for other in ("Lorena", "Ashby", "George"):
+        assert by_name[other].selling_home is False, f"{other} should be explicit not-selling"

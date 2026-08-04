@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { epcClass } from '../formatters/format'
 import { patchRentalIncome, patchWorksEstimate } from '../services/api'
 import { usePropertiesStore } from '../stores/properties'
@@ -109,6 +109,18 @@ const worksEstimates = (): Record<string, number> => {
   return out
 }
 
+// B8: when the deposit covers most of the price, say plainly that the
+// remaining balance is a mortgage on the new home (it stays — it's
+// Simon's mortgage; the deposit only reduces it).
+const depositDominates = computed(() => {
+  const eq = props.affordability?.total_equity
+  const mr = props.affordability?.mortgage_required
+  if (!eq?.succeeded || !mr?.succeeded) return false
+  const eqAmt = parseFloat(eq.value?.amount ?? '0')
+  const mrAmt = parseFloat(mr.value?.amount ?? '0')
+  return mrAmt > 0 && mrAmt < eqAmt
+})
+
 const buyerList = () =>
   props.persons?.value
     ? (props.persons.value as any[]).filter((p: any) => !p.is_child)
@@ -139,6 +151,9 @@ function canEdit(personName: string): boolean {
       <div v-if="showProvenance === 'mortgage' && affordability?.monthly_mortgage?.provenance" class="costs-provenance">
         <ProvenanceView :provenance="affordability.monthly_mortgage.provenance" title="Monthly mortgage" />
       </div>
+      <p v-if="depositDominates" class="costs-note">
+        The deposit covers most of the price — the remaining balance is a mortgage on the new home.
+      </p>
 
       <div class="costs-row">
         <span class="costs-label">Council Tax</span>

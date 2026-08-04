@@ -6,6 +6,7 @@ from money import Money
 
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
+from houses.model.domain import effective_selling_home as _selling_home
 
 _ZERO = Decimal("0")
 
@@ -64,7 +65,10 @@ class EquityTotalNode(DerivedNode[Money]):
             sale_amt = sale.amount if isinstance(sale, Money) else Decimal(str(sale))
             mortgage_amt = mortgage.amount if isinstance(mortgage, Money) else Decimal(str(mortgage))
             cash_amt = cash.amount if isinstance(cash, Money) else Decimal(str(cash))
-            equity = max(_ZERO, sale_amt - mortgage_amt)
+            # Home equity counts ONLY when the person is selling a home —
+            # otherwise the deposit is cash alone (a person with no home
+            # must not leak stale home fields into the deposit).
+            equity = max(_ZERO, sale_amt - mortgage_amt) if _selling_home(p) else _ZERO
             # Cash contributions excluded for Current (owner-occupied) properties
             if not is_current:
                 equity += cash_amt

@@ -170,3 +170,25 @@ describe('CostsSection blocked-state copy (C1/C2)', () => {
     expect(text).toContain("Can't calculate")
   })
 })
+
+describe('CostsSection mortgage framing (B8)', () => {
+  it('explains the remaining mortgage when the deposit dominates', () => {
+    const wrapper = mountCosts({
+      affordability: {
+        total_equity: { succeeded: true, value: { amount: '477000', currency: 'GBP' }, error: null, provenance: {} },
+        mortgage_required: { succeeded: true, value: { amount: '35000', currency: 'GBP' }, error: null, provenance: {} },
+      },
+    })
+    expect(wrapper.text()).toContain('The deposit covers most of the price')
+  })
+
+  it('shows no deposit note when the mortgage exceeds the deposit', () => {
+    const wrapper = mountCosts({
+      affordability: {
+        total_equity: { succeeded: true, value: { amount: '10000', currency: 'GBP' }, error: null, provenance: {} },
+        mortgage_required: { succeeded: true, value: { amount: '200000', currency: 'GBP' }, error: null, provenance: {} },
+      },
+    })
+    expect(wrapper.text()).not.toContain('The deposit covers most of the price')
+  })
+})

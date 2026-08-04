@@ -7,7 +7,13 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket
 from pydantic import BaseModel, Field, field_validator
 
 from houses.geo import GeoPoint
-from houses.model.domain import Person, PlaceOfInterest, effective_acceptable_modes, effective_editable_by
+from houses.model.domain import (
+    Person,
+    PlaceOfInterest,
+    effective_acceptable_modes,
+    effective_editable_by,
+    effective_selling_home,
+)
 from houses.property_registry import get_property as get_registry_property
 from houses.property_registry import list_properties as list_registry_properties
 from houses.services_provider import get_services
@@ -323,6 +329,7 @@ async def get_settings(request: Request):
             editable_by = effective_editable_by(person, persons)
             item["editable_by"] = list(editable_by)
             item["editable_by_me"] = _can_edit_person(session_user, session_name, person, persons)
+            item["selling_home"] = effective_selling_home(person)
             for poi_item, poi in zip(item.get("places_of_interest") or (), person.places_of_interest, strict=True):
                 if isinstance(poi_item, dict):
                     poi_item["acceptable_modes"] = list(effective_acceptable_modes(poi))

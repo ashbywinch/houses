@@ -25,6 +25,7 @@ interface PersonSettings {
   is_superuser: boolean
   editable_by: string[]
   editable_by_me: boolean
+  selling_home: boolean
   places_of_interest: PoiSettings[]
   home_sale_price?: MoneyValue
   outstanding_mortgage?: MoneyValue
@@ -216,30 +217,43 @@ const depositRows = computed(() => {
           </div>
 
           <div v-if="isOwn(person)" class="settings-person__money">
-            <label class="settings-person__label" for="home-sale">Expected sale price of current home (£)</label>
-            <input
-              id="home-sale"
-              type="number"
-              :value="person.home_sale_price?.amount"
-              @input="moneyInput(person.home_sale_price!, $event)"
-            />
-            <p class="settings-person__helper">What you expect to get when you sell it.</p>
-            <label class="settings-person__label" for="mortgage">Mortgage remaining on current home (£)</label>
-            <input
-              id="mortgage"
-              type="number"
-              :value="person.outstanding_mortgage?.amount"
-              @input="moneyInput(person.outstanding_mortgage!, $event)"
-            />
-            <p class="settings-person__helper">What you still owe on the house you're selling.</p>
-            <label class="settings-person__label" for="cash">Other money toward the deposit (£)</label>
+            <div class="settings-person__field">
+              <input id="selling-home" type="checkbox" v-model="person.selling_home" />
+              <label class="settings-person__label settings-person__label--inline" for="selling-home">
+                I am selling a home to fund this purchase
+              </label>
+            </div>
+            <template v-if="person.selling_home">
+              <label class="settings-person__label" for="home-sale">Expected sale price of current home (£)</label>
+              <input
+                id="home-sale"
+                type="number"
+                :value="person.home_sale_price?.amount"
+                @input="moneyInput(person.home_sale_price!, $event)"
+              />
+              <p class="settings-person__helper">What you expect to get when you sell it.</p>
+              <label class="settings-person__label" for="mortgage">Mortgage remaining on current home (£)</label>
+              <input
+                id="mortgage"
+                type="number"
+                :value="person.outstanding_mortgage?.amount"
+                @input="moneyInput(person.outstanding_mortgage!, $event)"
+              />
+              <p class="settings-person__helper">What you still owe on the house you're selling.</p>
+            </template>
+            <p v-else class="settings-person__helper">Deposit is cash — no current home.</p>
+            <label class="settings-person__label" for="cash">
+              {{ person.selling_home ? 'Other money toward the deposit (£)' : 'Cash available for the deposit (£)' }}
+            </label>
             <input
               id="cash"
               type="number"
               :value="person.cash_contribution?.amount"
               @input="moneyInput(person.cash_contribution!, $event)"
             />
-            <p class="settings-person__helper">Savings or gifts, on top of the sale proceeds.</p>
+            <p class="settings-person__helper">
+              {{ person.selling_home ? 'Savings or gifts, on top of the sale proceeds.' : 'Savings, gifts, or the proceeds of a sale.' }}
+            </p>
             <label class="settings-person__label" for="life-insurance">Life insurance (£/month)</label>
             <input
               id="life-insurance"
@@ -431,6 +445,9 @@ const depositRows = computed(() => {
   min-width: 11rem;
   color: var(--text-muted);
   font-size: 0.85rem;
+}
+.settings-person__label--inline {
+  min-width: 0;
 }
 .settings-person__money input,
 .settings-person__thresholds input,

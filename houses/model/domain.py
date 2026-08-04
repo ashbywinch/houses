@@ -63,6 +63,10 @@ class Person:
     # unset — see ``effective_editable_by`` (self for adults, ALL adults
     # for children).  Superusers may always edit anyone.
     editable_by: tuple[str, ...] = ()
+    # Whether this person is selling a home to fund the purchase.  None
+    # (unset) infers from the home fields — see ``effective_selling_home``.
+    # False means no current home: the deposit is cash only.
+    selling_home: bool | None = None
 
     def to_provenance_value(self) -> dict:
         """JSON-safe projection for provenance display.
@@ -101,6 +105,18 @@ def effective_acceptable_modes(poi: PlaceOfInterest) -> tuple[str, ...]:
     if label in ("pimlico", "aldgate"):
         return ("train",)
     return ALL_ACCEPTABLE_MODES
+
+
+def effective_selling_home(person: Person) -> bool:
+    """Whether the person is selling a home to fund the purchase.
+
+    Explicit ``selling_home`` always wins.  Unset infers from the home
+    fields: any sale price or remaining mortgage means a home is being
+    sold; a person with neither (e.g. Ashby — cash deposit only) is not.
+    """
+    if person.selling_home is not None:
+        return person.selling_home
+    return bool(person.home_sale_price.amount or person.outstanding_mortgage.amount)
 
 
 def effective_editable_by(person: Person, all_persons: list[Person]) -> tuple[str, ...]:
