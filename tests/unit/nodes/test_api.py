@@ -299,6 +299,43 @@ class TestPatchPersonApi:
         assert ashby["name"] == "Ashby", "rename escalation: record now has another person's name"
         assert ashby["is_child"] is False, "is_child escalation"
 
+    def test_non_superuser_cannot_rewrite_guardian_list(self):
+        """editable_by is the ownership root — a non-superuser editing
+        their own record must not delegate edit rights to arbitrary names,
+        and a guardian must not silently rewrite a child's guardian list."""
+        from fastapi.testclient import TestClient
+
+        from houses.model.domain import Person
+        from houses.server import app
+        from houses.web.auth import _make_session_cookie
+
+        _push_persons(
+            Person(name="Simon", has_car=True, email="simon@example.com"),
+            Person(name="George", has_car=False, is_child=True, editable_by=("Simon",)),
+        )
+        client = TestClient(app)
+        client.cookies.set(
+            "session",
+            _make_session_cookie(email="simon@example.com", name="Simon", picture="", is_superuser=False),
+        )
+        resp = client.patch(
+            "/api/settings/person/Simon",
+            json={"name": "Simon", "has_car": True, "editable_by": ["Hacker", "Simon"]},
+        )
+        assert resp.status_code == 200
+        value = client.get("/api/settings").json()["persons"]["value"]
+        simon = next(p for p in value if p["name"] == "Simon")
+        assert simon["editable_by"] == ["Simon"], "guardian list was rewritten by a non-superuser"
+
+    def test_malformed_money_payloads_are_400(self):
+        """A null/empty money or penalty value must be a 400 client error —
+        storing it would poison every downstream GET (None.amount) and
+        freeze the equity cascade."""
+        client = self._setup()
+        for bad in ({"home_sale_price": None}, {"home_sale_price": {}}, {"bus_walk_penalty": None}):
+            resp = client.patch("/api/settings/person/Simon", json={"name": "Simon", "has_car": True, **bad})
+            assert resp.status_code == 400, f"{bad}: expected 400, got {resp.status_code}: {resp.text[:150]}"
+
     def test_malformed_patch_body_returns_400_not_500(self):
         """An unknown field or malformed POI in the body is a CLIENT error
         (400 with detail), never a 500."""

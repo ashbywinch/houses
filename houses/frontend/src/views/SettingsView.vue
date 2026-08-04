@@ -141,12 +141,17 @@ async function save(person: PersonSettings) {
 const anyEditable = computed(() => persons.value.some(isOwn))
 
 function addDestination(person: PersonSettings) {
+  // explicit, concrete modes from the start — an empty list would be
+  // treated as legacy-unset by the server migration and could route the
+  // destination by modes the UI never offered (e.g. car for a no-car
+  // person)
+  const defaultModes = person.has_car ? ['train', 'car', 'walk'] : ['train', 'walk']
   person.places_of_interest.push({
     label: '',
     address: '',
     trips_per_week: 1,
     weeks_per_year: 46,
-    acceptable_modes: [],
+    acceptable_modes: defaultModes,
   })
 }
 

@@ -332,6 +332,18 @@ describe('SettingsView — commute destination CRUD (A7)', () => {
     expect(body.places_of_interest[2].label).toBe('')
   })
 
+  it('defaults a new destination to explicit modes matching the person', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    // Simon has a car -> train+car+walk; Lorena does not -> train+walk
+    const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
+    await simon.find('button.poi-add').trigger('click')
+    await simon.find('button.save').trigger('click')
+    const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
+    const added = body.places_of_interest[body.places_of_interest.length - 1]
+    expect(added.acceptable_modes).toEqual(['train', 'car', 'walk'])
+  })
+
   it('removes a destination row', async () => {
     const { wrapper, flush } = await mountView()
     await flush()

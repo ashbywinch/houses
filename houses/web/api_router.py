@@ -427,22 +427,35 @@ def _person_from_dict(d: dict, target: Person) -> Person:
     from pint import Quantity as _Quantity
 
     def _money(v):
+        """Validate the money shape: a number or {amount, currency}.  A
+        malformed value must raise (→ 400) — storing it would poison every
+        downstream read (.amount crashes) and freeze the equity cascade."""
         if isinstance(v, (int, float)):
             return _Money(str(v), "GBP")
         if isinstance(v, dict):
-            return _Money(v["amount"], v.get("currency", "GBP"))
-        return v
+            if "amount" not in v:
+                raise ValueError(f"money value missing 'amount': {v!r}")
+            try:
+                return _Money(v["amount"], v.get("currency", "GBP"))
+            except Exception as e:
+                raise ValueError(f"invalid money value {v!r}: {e}") from e
+        raise ValueError(f"invalid money value {v!r} — expected a number or {{'amount': ...}}")
+
+    def _penalty(v):
+        """Validate bus_walk_penalty: the {value, unit} serialization."""
+        if not isinstance(v, dict) or "value" not in v or "unit" not in v:
+            raise ValueError(f"invalid walk penalty {v!r} — expected {{'value': ..., 'unit': ...}}")
+        try:
+            return _Quantity(v["value"], v["unit"])
+        except Exception as e:
+            raise ValueError(f"invalid walk penalty {v!r}: {e}") from e
 
     updates = {k: v for k, v in d.items() if k != "thresholds"}
     for f in _PERSON_MONEY_FIELDS:
         if f in updates:
             updates[f] = _money(updates[f])
-    if isinstance(updates.get("bus_walk_penalty"), dict):
-        # GET /settings serializes the Quantity as {value, unit} — accept
-        # the same shape back on PATCH
-        updates["bus_walk_penalty"] = _Quantity(
-            updates["bus_walk_penalty"]["value"], updates["bus_walk_penalty"]["unit"]
-        )
+    if "bus_walk_penalty" in updates:
+        updates["bus_walk_penalty"] = _penalty(updates["bus_walk_penalty"])
     if "editable_by" in updates and updates["editable_by"] is not None:
         updates["editable_by"] = tuple(updates["editable_by"])
     pois = updates.get("places_of_interest")
@@ -500,6 +513,7 @@ async def patch_person(name: str, body: dict, request: Request):
             "is_child": target.is_child,
             "is_superuser": target.is_superuser,
             "email": target.email,
+            "editable_by": target.editable_by,
         }
 
     try:
