@@ -242,3 +242,15 @@ def test_default_persons_selling_home_flags():
     assert by_name["Simon"].selling_home is True
     for other in ("Lorena", "Ashby", "George"):
         assert by_name[other].selling_home is False, f"{other} should be explicit not-selling"
+
+def test_effective_selling_home_tolerates_legacy_money_shapes():
+    """Legacy persons may carry bare-number or dict money values — the
+    inference must not crash on .amount (which would freeze the cascade)."""
+    from houses.model.domain import Person, effective_selling_home
+
+    # bare numbers (not Money) construct fine — the dataclass doesn't
+    # validate; the inference must tolerate the shape
+    legacy = Person("Legacy", has_car=True, home_sale_price=500000)  # type: ignore[arg-type]
+    assert effective_selling_home(legacy) is True
+    zero = Person("Zero", has_car=True, home_sale_price=0, outstanding_mortgage=0)  # type: ignore[arg-type]
+    assert effective_selling_home(zero) is False

@@ -459,6 +459,8 @@ def _person_from_dict(d: dict, target: Person) -> Person:
     if "editable_by" in updates and updates["editable_by"] is not None:
         updates["editable_by"] = tuple(updates["editable_by"])
     pois = updates.get("places_of_interest")
+    if "places_of_interest" in updates and not isinstance(pois, list):
+        raise ValueError(f"places_of_interest must be a list, got {type(pois).__name__}")
     if isinstance(pois, list):
         normalized = []
         for poi in pois:

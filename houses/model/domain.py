@@ -116,7 +116,19 @@ def effective_selling_home(person: Person) -> bool:
     """
     if person.selling_home is not None:
         return person.selling_home
-    return bool(person.home_sale_price.amount or person.outstanding_mortgage.amount)
+
+    def _nonzero(v) -> bool:
+        """Legacy persons may hold bare numbers or dicts, not Money —
+        tolerate any shape without crashing on .amount."""
+        if v is None:
+            return False
+        if isinstance(v, Money):
+            return bool(v.amount)
+        if isinstance(v, dict):
+            return bool(v.get("amount") or v.get("value"))
+        return bool(v)
+
+    return _nonzero(person.home_sale_price) or _nonzero(person.outstanding_mortgage)
 
 
 def effective_editable_by(person: Person, all_persons: list[Person]) -> tuple[str, ...]:

@@ -392,3 +392,20 @@ describe('SettingsView — acceptable modes keep at least one (P7)', () => {
     expect(pimlico.acceptable_modes).toContain('train')
   })
 })
+
+describe('SettingsView — empty money inputs normalize on save', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('sends "0" for a cleared money field instead of failing the save', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
+    const sale = simon.find('input#home-sale')
+    await sale.setValue('')
+    await simon.find('button.save').trigger('click')
+    const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(body.home_sale_price.amount).toBe('0')
+  })
+})

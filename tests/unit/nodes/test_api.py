@@ -327,6 +327,16 @@ class TestPatchPersonApi:
         simon = next(p for p in value if p["name"] == "Simon")
         assert simon["editable_by"] == ["Simon"], "guardian list was rewritten by a non-superuser"
 
+    def test_malformed_poi_list_is_400(self):
+        """places_of_interest must be a list — storing null would poison
+        the enrichment and 500 every later GET."""
+        client = self._setup()
+        resp = client.patch(
+            "/api/settings/person/Simon",
+            json={"name": "Simon", "has_car": True, "places_of_interest": None},
+        )
+        assert resp.status_code == 400, f"expected 400, got {resp.status_code}: {resp.text[:150]}"
+
     def test_malformed_money_payloads_are_400(self):
         """A null/empty money or penalty value must be a 400 client error —
         storing it would poison every downstream GET (None.amount) and

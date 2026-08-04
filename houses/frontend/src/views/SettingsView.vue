@@ -125,7 +125,11 @@ async function save(person: PersonSettings) {
     places_of_interest: person.places_of_interest,
   }
   for (const f of ['home_sale_price', 'outstanding_mortgage', 'cash_contribution', 'life_insurance_monthly'] as const) {
-    if (person[f]) body[f] = person[f]
+    if (!person[f]) continue
+    // a cleared input serializes as {amount: ''} — normalize to 0 so a
+    // momentarily-empty field can't fail the whole save (the server
+    // rejects malformed money shapes)
+    body[f] = person[f].amount === '' ? { amount: '0', currency: person[f].currency } : person[f]
   }
   const t = thresholds.value[person.name]
   if (t) body.thresholds = { ...t }
