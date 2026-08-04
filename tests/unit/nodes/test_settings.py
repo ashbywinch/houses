@@ -165,3 +165,52 @@ def test_rejects_stale_test_data_from_db():
         _reset_settings_cache()
         with pytest.raises(RuntimeError, match="Stale test data"):
             Services()
+
+class TestSettingsWriteGuard:
+    """The settings nodes hold real family data — a stray script or REPL
+    kernel (no pytest isolation, not the uvicorn app) must not silently
+    replace them.  Deliberate data fixes opt in explicitly."""
+
+    def _non_app_env(self, monkeypatch, *, script_ok=False, app=False):
+        import dag.persistence as per
+        import houses.nodes.settings as settings_mod
+
+        monkeypatch.setattr(settings_mod, "_app_mode", False)
+        monkeypatch.delenv("HOUSES_SCRIPTS_MAY_WRITE", raising=False)
+        if script_ok:
+            monkeypatch.setenv("HOUSES_SCRIPTS_MAY_WRITE", "1")
+        if app:
+            settings_mod.set_app_mode()
+        monkeypatch.setattr(per, "testing", False)
+
+    def test_guard_blocks_unapproved_script_writes(self, monkeypatch):
+        import pytest
+
+        from houses.nodes.settings import guard_settings_write
+
+        self._non_app_env(monkeypatch)
+        with pytest.raises(RuntimeError):
+            guard_settings_write()
+
+    def test_guard_allows_explicit_script_opt_in(self, monkeypatch):
+        from houses.nodes.settings import guard_settings_write
+
+        self._non_app_env(monkeypatch, script_ok=True)
+        guard_settings_write()  # must not raise
+
+    def test_guard_allows_the_app_process(self, monkeypatch):
+        from houses.nodes.settings import guard_settings_write
+
+        self._non_app_env(monkeypatch, app=True)
+        guard_settings_write()  # must not raise
+
+    def test_settings_node_push_blocked_outside_the_app(self, monkeypatch):
+        import pytest
+
+        from houses.model.domain import Person
+        from houses.nodes.settings import SettingsNode
+
+        self._non_app_env(monkeypatch)
+        node = SettingsNode("persons", list[Person])
+        with pytest.raises(RuntimeError):
+            node.push([Person("Simon", has_car=True)], "user")

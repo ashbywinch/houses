@@ -69,6 +69,14 @@ make stop                       # Stop dev server + frontend
   - **Do NOT** run ``rm``, ``unlink``, ``truncate``, ``DROP TABLE``, or any
     command that deletes database files or tables.
   - **Do NOT** delete ``data/``, ``data/houses.db``, or any file under ``data/``.
+  - **Settings writes from scripts are guarded**: pushing to the settings
+    nodes (persons/financial/thresholds) from anything but the running app
+    or pytest raises ``RuntimeError`` unless ``HOUSES_SCRIPTS_MAY_WRITE=1``
+    is set — a deliberate data-fix script must set it explicitly. REPL/adhoc
+    kernels that skip pytest isolation cannot silently replace family data.
+    Prefer ``dataclasses.replace`` over rebuilding records: the settings
+    PATCH endpoint merges (unmentioned fields are preserved), and scripts
+    must do the same.
   - **If you believe the DB is corrupted**: reproduce the issue in a test against
     a clean in-memory SQLite database. If it reproduces, it's a code bug. If it
     doesn't, the real DB has data your code doesn't handle — fix the code.

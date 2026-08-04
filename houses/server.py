@@ -49,6 +49,12 @@ def _on_node_refreshed(node):
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # The app-process marker for the settings-write guard: every real
+    # worker runs the lifespan; ad-hoc scripts/REPLs that import the app
+    # modules do not, so they cannot silently write settings.
+    from houses.nodes.settings import set_app_mode
+
+    set_app_mode()
     level = logging.DEBUG if settings.trace else logging.INFO
     logging.basicConfig(
         level=level,

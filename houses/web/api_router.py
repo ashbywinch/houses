@@ -377,8 +377,16 @@ def _can_edit_person(session_user: dict | None, session_name: str, person, perso
 _PERSON_MONEY_FIELDS = {"home_sale_price", "outstanding_mortgage", "cash_contribution", "life_insurance_monthly"}
 
 
-def _person_from_dict(d: dict) -> Person:
-    """Build a Person from an API dict, normalising money + tuple fields."""
+def _person_from_dict(d: dict, target: Person) -> Person:
+    """MERGE an API dict into an existing Person — never replace.
+
+    Only the fields present in the body change; every unmentioned field
+    keeps the target's value.  Replace semantics silently reset real data
+    (emails, walk penalties, flags) whenever a client sends a partial
+    body — that is exactly how the family emails were wiped.
+    """
+    from dataclasses import replace
+
     from money import Money as _Money
     from pint import Quantity as _Quantity
 
@@ -389,19 +397,19 @@ def _person_from_dict(d: dict) -> Person:
             return _Money(v["amount"], v.get("currency", "GBP"))
         return v
 
-    cleaned = {k: v for k, v in d.items() if k != "thresholds"}
+    updates = {k: v for k, v in d.items() if k != "thresholds"}
     for f in _PERSON_MONEY_FIELDS:
-        if f in cleaned:
-            cleaned[f] = _money(cleaned[f])
-    if isinstance(cleaned.get("bus_walk_penalty"), dict):
+        if f in updates:
+            updates[f] = _money(updates[f])
+    if isinstance(updates.get("bus_walk_penalty"), dict):
         # GET /settings serializes the Quantity as {value, unit} — accept
         # the same shape back on PATCH
-        cleaned["bus_walk_penalty"] = _Quantity(
-            cleaned["bus_walk_penalty"]["value"], cleaned["bus_walk_penalty"]["unit"]
+        updates["bus_walk_penalty"] = _Quantity(
+            updates["bus_walk_penalty"]["value"], updates["bus_walk_penalty"]["unit"]
         )
-    if "editable_by" in cleaned and cleaned["editable_by"] is not None:
-        cleaned["editable_by"] = tuple(cleaned["editable_by"])
-    pois = cleaned.get("places_of_interest")
+    if "editable_by" in updates and updates["editable_by"] is not None:
+        updates["editable_by"] = tuple(updates["editable_by"])
+    pois = updates.get("places_of_interest")
     if isinstance(pois, list):
         normalized = []
         for poi in pois:
@@ -412,8 +420,8 @@ def _person_from_dict(d: dict) -> Person:
                 normalized.append(PlaceOfInterest(**poi))
             else:
                 normalized.append(poi)
-        cleaned["places_of_interest"] = tuple(normalized)
-    return Person(**cleaned)
+        updates["places_of_interest"] = tuple(normalized)
+    return replace(target, **updates)
 
 
 @api_router.patch("/settings/person/{name}")
@@ -450,7 +458,7 @@ async def patch_person(name: str, body: dict, request: Request):
         # must not escalate to superuser or hijack the email link
         body = {**body, "is_superuser": target.is_superuser, "email": target.email}
 
-    updated = [_person_from_dict(body) if p is target else p for p in persons]
+    updated = [_person_from_dict(body, target) if p is target else p for p in persons]
     try:
         svc.persons_source.push(updated, "user")
     except (ValueError, TypeError) as e:

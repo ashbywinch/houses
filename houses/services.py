@@ -256,7 +256,9 @@ def _reset_settings_cache():
 def _make_settings_source(node_id: str, value_type: type, default_factory):
     if node_id in _SETTINGS_SOURCE_CACHE:
         return _SETTINGS_SOURCE_CACHE[node_id]
-    node = UserInputNode(node_id, value_type)
+    from houses.nodes.settings import SettingsNode
+
+    node = SettingsNode(node_id, value_type)
     persisted = latest_node_result(node_id)
     if persisted and persisted.get("status") == "succeeded":
         source_label = persisted.get("source_label", "db")

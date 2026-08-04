@@ -10,13 +10,59 @@ helper used by the production ``Services`` constructor.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from money import Money
 from pint import Quantity
 
+from dag import persistence as _persistence
+from dag.user_input_node import UserInputNode
 from houses.config import settings
 from houses.model.domain import Person, PlaceOfInterest
+
+_app_mode = False
+
+
+def set_app_mode() -> None:
+    """Mark this process as the running app.
+
+    Called from the FastAPI lifespan — every real uvicorn worker (and
+    reloader respawn) runs the lifespan; an ad-hoc script or REPL kernel
+    that merely imports the app modules does not.
+    """
+    global _app_mode
+    _app_mode = True
+
+
+def guard_settings_write() -> None:
+    """Block silent settings writes from non-app, non-test processes.
+
+    The settings nodes (persons/financial/thresholds) hold real family
+    data.  A stray script or REPL kernel has no pytest isolation and is
+    not the running app, yet can silently replace the whole config —
+    which is exactly how the family emails were wiped.  Deliberate
+    data-fix scripts must opt in explicitly.
+    """
+    if _persistence.testing:
+        return  # pytest isolation fixtures
+    if _app_mode:
+        return  # the running uvicorn app (lifespan set the flag)
+    if os.environ.get("HOUSES_SCRIPTS_MAY_WRITE") == "1":
+        return  # explicit opt-in for deliberate data-fix scripts
+    raise RuntimeError(
+        "Refusing to write settings from a non-app process. "
+        "Set HOUSES_SCRIPTS_MAY_WRITE=1 to run a deliberate data-fix script."
+    )
+
+
+class SettingsNode(UserInputNode):
+    """A settings input node whose writes are guarded — only the app,
+    pytest, or an explicitly opted-in script may change family data."""
+
+    def push(self, value: Any, source_label: str = "") -> None:
+        guard_settings_write()
+        super().push(value, source_label)
 
 
 def make_default_persons() -> list[Person]:

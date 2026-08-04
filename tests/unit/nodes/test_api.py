@@ -268,6 +268,56 @@ class TestPatchPersonApi:
         assert simon["home_sale_price"] == {"amount": "550000.00", "currency": "GBP"}
 
 
+    def test_partial_patch_preserves_unmentioned_fields(self):
+        """A partial PATCH body must MERGE into the existing person —
+        never reset unmentioned fields to defaults.  Replace semantics
+        silently destroyed real data (emails, walk penalties) when a
+        partial body hit the endpoint."""
+        client = self._setup()
+        # _setup's Simon has email simon@example.com + a Pimlico POI
+        resp = client.patch("/api/settings/person/Simon", json={"name": "Simon", "has_car": True})
+        assert resp.status_code == 200, resp.text[:300]
+        simon = self._person(client, "Simon")
+        assert simon["email"] == "simon@example.com", "unmentioned email was reset"
+        assert [p["label"] for p in simon["places_of_interest"]] == ["Pimlico"], "unmentioned POIs were dropped"
+
+    def test_partial_patch_preserves_penalty_and_works_flag(self):
+        """Money-ish and behavioural fields also survive a partial PATCH."""
+        from fastapi.testclient import TestClient
+        from money import Money
+        from pint import Quantity
+
+        from houses.model.domain import Person
+        from houses.server import app
+        from houses.web.auth import _make_session_cookie
+
+        _push_persons(
+            Person(
+                name="Ashby",
+                has_car=True,
+                email="emily.winch@gmail.com",
+                bus_walk_penalty=Quantity(10, "minute"),  # type: ignore[arg-type]
+                works_estimate_required=True,
+                cash_contribution=Money("300000", "GBP"),
+            )
+        )
+        client = TestClient(app)
+        client.cookies.set(
+            "session",
+            _make_session_cookie(email="simon@example.com", name="Simon", picture="", is_superuser=True),
+        )
+        resp = client.patch(
+            "/api/settings/person/Ashby",
+            json={"name": "Ashby", "has_car": True, "cash_contribution": {"amount": "310000", "currency": "GBP"}},
+        )
+        assert resp.status_code == 200, resp.text[:300]
+        value = client.get("/api/settings").json()["persons"]["value"]
+        ashby = next(p for p in value if p["name"] == "Ashby")
+        assert ashby["email"] == "emily.winch@gmail.com"
+        assert ashby["bus_walk_penalty"] == {"value": 10, "unit": "minute"}
+        assert ashby["works_estimate_required"] is True
+        assert ashby["cash_contribution"]["amount"] == "310000.00"  # the mentioned field DID change
+
     def test_own_patch_cannot_escalate_to_superuser(self):
         """A non-superuser editing their own record must not be able to
         grant themselves is_superuser or hijack the email link."""
