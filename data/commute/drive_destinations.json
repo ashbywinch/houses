@@ -1,0 +1,7 @@
+{
+  "threshold_min": 90,
+  "destinations": [
+    {"label": "Dad", "postcode": "OX7 5GZ"},
+    {"label": "Bracknell", "postcode": "RG12 8YA"}
+  ]
+}
