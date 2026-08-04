@@ -6,7 +6,8 @@ from money import Money
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
-from dag.expression import Conditional, Literal, TieredRate
+from dag.expression import Conditional, Literal
+from houses.nodes.expressions import TieredRate
 
 
 class StampDutyNode(DerivedNode[Money]):

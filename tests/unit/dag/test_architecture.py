@@ -1,6 +1,15 @@
 """Enforce layer boundaries — dag/ must not import houses/, etc."""
 
+from pathlib import Path
+
 from archunitpython.layers import project_layers
+
+# archunitpython matches layer patterns against ABSOLUTE normalized file
+# paths.  Relative globs ("./dag/*.py") compile to regexes anchored on
+# "./" that match nothing — every edge then resolves to no layer and the
+# check passes VACUOUSLY.  Derive absolute patterns from the repo root so
+# the rules actually run.
+ROOT = str(Path(__file__).resolve().parents[3])  # repo root (tests/unit/dag -> 3 up)
 
 
 def _format_violations(violations: list) -> str:
@@ -13,13 +22,9 @@ def _format_violations(violations: list) -> str:
 
 def test_dag_does_not_import_houses():
     la = project_layers()
-    # NOTE: All layer patterns use a ``./`` prefix.  ``fnmatch.translate``
-    # converts ``*`` to ``.*`` which matches ``/``, so a bare ``dag/*.py``
-    # would also match ``tests/unit/dag/anything.py``.  The ``./`` anchors
-    # the match to the project root — do not remove it.
-    la = la.layer("dag").defined_by("./dag/*.py")
-    la = la.layer("dag_tests").defined_by("./tests/unit/dag/*.py")
-    la = la.layer("houses").defined_by("./houses/**/*.py")
+    la = la.layer("dag").defined_by(f"{ROOT}/dag/*.py")
+    la = la.layer("dag_tests").defined_by(f"{ROOT}/tests/unit/dag/*.py")
+    la = la.layer("houses").defined_by(f"{ROOT}/houses/*.py")  # fnmatch * crosses "/" — matches the whole tree
     la = la.where_layer("dag").may_only_depend_on_layers()
     la = la.where_layer("dag_tests").may_only_depend_on_layers("dag", "houses")
     violations = la.check()
@@ -34,8 +39,8 @@ def test_web_does_not_import_sheets():
     access from HTTP handlers bypasses caching and the DAG lifecycle.
     """
     la = project_layers()
-    la = la.layer("web").defined_by("./houses/web/*.py")
-    la = la.layer("sheets").defined_by("./houses/sheets/*.py")  # noqa: E501 — see note above for ./ prefix rationale
+    la = la.layer("web").defined_by(f"{ROOT}/houses/web/*.py")
+    la = la.layer("sheets").defined_by(f"{ROOT}/houses/sheets/*.py")
     la = la.where_layer("web").may_not_depend_on_layers("sheets")
     violations = la.check()
     assert len(violations) == 0, _format_violations(violations)
