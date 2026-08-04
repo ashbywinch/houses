@@ -5,6 +5,34 @@ Toolchain mechanics (stages, engines, artifacts, tolerances) live in
 [docs/rightmove-commute-monitor.md](rightmove-commute-monitor.md) — this doc
 covers only the website integration and links there instead of repeating it.
 
+## Progress (2026-08-04)
+
+Phase 1 items 1–3 landed on `main`:
+
+- `Person.editable_by` + `PlaceOfInterest.acceptable_modes` (train/car/walk
+  set) with defaults and the label-migration rule for legacy persisted data
+  (`effective_acceptable_modes` / `effective_editable_by` in
+  `houses/model/domain.py`); `make_default_persons` now carries explicit
+  modes/guardians; Dad's persisted trips/week fixed to 1.
+- `PUT /api/settings/persons` removed; `PATCH /api/settings/person/{name}`
+  added with server-side ownership (own person / superuser / guardian in
+  `editable_by`; non-superusers cannot escalate or hijack the email);
+  optional `thresholds` in the body updates the thresholds source. `GET
+  /api/settings` enriches persons with effective `acceptable_modes`,
+  `editable_by` and session-aware `editable_by_me`.
+- The per-property commute selector honours `acceptable_modes` — a train-only
+  POI is never scored by a car route (`CommuteSelectorNode.acceptable_modes`).
+- `SettingsView.vue` at `/settings` (header link): family sections, own-vs-
+  other rendering, child badge + school note, POI editor with mode
+  checkboxes (car only for people with a car), thresholds editing.
+- User-language sweep enforced by `tests/unit/test_user_language.py`
+  (templates + the committed map artifact; the map labels were already
+  "Train: …" / "Drive to …" / "Where we could live").
+
+Not yet done (Phase 1 items 4–5, then Phases 2–3): worst-commute ceiling
+filter + "worst commute < X" control, weekly-commute sort, generation
+runner/panel, crash resume, deep links.
+
 ## Goal
 
 Make the isochrones a first-class website feature:

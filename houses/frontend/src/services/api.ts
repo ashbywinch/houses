@@ -77,11 +77,11 @@ export async function fetchSettings(): Promise<Record<string, unknown>> {
   return parseJson(r)
 }
 
-export function putPersons(persons: unknown[]): Promise<Response> {
-  return fetch(`${BASE}/settings/persons`, {
-    method: 'PUT',
+export function patchPerson(name: string, body: Record<string, unknown>): Promise<Response> {
+  return fetch(`${BASE}/settings/person/${encodeURIComponent(name)}`, {
+    method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify(persons),
+    body: JSON.stringify(body),
   }).then(checkFor401)
 }
 

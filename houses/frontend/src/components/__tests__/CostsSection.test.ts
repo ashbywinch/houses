@@ -142,9 +142,54 @@ describe('CostsSection rental income', () => {
     expect(api.patchRentalIncome).toHaveBeenCalledWith('test123', 800)
   })
 
-  it('shows rental income provenance button when provenance exists', () => {
+  it('shows the standard provenance toggle when provenance exists', () => {
     const wrapper = mountCosts()
-    const howBtn = wrapper.find('.how-btn')
-    expect(howBtn.exists()).toBe(true)
+    const trigger = wrapper.find('.provenance-toggle__trigger')
+    expect(trigger.exists()).toBe(true)
+    expect(trigger.text()).toContain('How is this calculated?')
+  })
+})
+
+describe('CostsSection blocked-state copy (C1/C2)', () => {
+  it('explains the Council Tax lookup failure and how to fix it', () => {
+    const wrapper = mountCosts()  // council_tax failed -> '?'
+    const text = wrapper.text()
+    expect(text).toContain("Couldn't look up Council Tax")
+    expect(text).toContain('Edit address')
+  })
+
+  it('never shows a bare "Impossible" for blocked totals', () => {
+    // real payloads mark failed nodes with error != null (impossible)
+    const wrapper = mountCosts({
+      affordability: {
+        monthly_mortgage: { succeeded: false, value: null, error: 'dep failed', provenance: {} },
+        total_monthly_housing_cost: { succeeded: false, value: null, error: 'dep failed', provenance: {} },
+      },
+    })
+    const text = wrapper.text()
+    expect(text).not.toContain('Impossible')
+    expect(text).toContain("Can't calculate")
+  })
+})
+
+describe('CostsSection mortgage framing (B8)', () => {
+  it('explains the remaining mortgage when the deposit dominates', () => {
+    const wrapper = mountCosts({
+      affordability: {
+        total_equity: { succeeded: true, value: { amount: '477000', currency: 'GBP' }, error: null, provenance: {} },
+        mortgage_required: { succeeded: true, value: { amount: '35000', currency: 'GBP' }, error: null, provenance: {} },
+      },
+    })
+    expect(wrapper.text()).toContain('The deposit covers most of the price')
+  })
+
+  it('shows no deposit note when the mortgage exceeds the deposit', () => {
+    const wrapper = mountCosts({
+      affordability: {
+        total_equity: { succeeded: true, value: { amount: '10000', currency: 'GBP' }, error: null, provenance: {} },
+        mortgage_required: { succeeded: true, value: { amount: '200000', currency: 'GBP' }, error: null, provenance: {} },
+      },
+    })
+    expect(wrapper.text()).not.toContain('The deposit covers most of the price')
   })
 })

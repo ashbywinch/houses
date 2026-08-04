@@ -178,6 +178,84 @@ class TestEquityTotalNode:
         assert a.value_or_none() == Money("500000", "GBP")
 
     @pytest.mark.asyncio
+    async def test_tolerates_plain_dict_person_entries(self):
+        """A legacy dict person entry must fall back to the cash path, not
+        crash the equity node (which would freeze the mortgage cascade)."""
+        from houses.nodes.equity_total_node import EquityTotalNode
+
+        persons = UserInputNode[list]("eq5_ps", list)
+        node = EquityTotalNode("eq5", persons_source=persons)
+        persons.push(
+            [
+                {
+                    "name": "Legacy",
+                    "home_sale_price": Money("500000", "GBP"),
+                    "outstanding_mortgage": Money("300000", "GBP"),
+                    "cash_contribution": Money("100000", "GBP"),
+                }
+            ],
+            "test",
+        )
+        await flush_processor()
+        a = await node.attempt()
+        # the node must NOT crash (a crash would freeze the mortgage
+        # cascade); dict values are unreachable via getattr (pre-existing
+        # semantics) so a dict entry contributes 0
+        assert a.succeeded
+        assert a.value_or_none() == Money("0", "GBP")
+
+    @pytest.mark.asyncio
+    async def test_home_equity_excluded_when_not_selling(self):
+        """A person NOT selling a home contributes cash only — stale home
+        fields must not leak into equity (the Ashby shape)."""
+        from houses.nodes.equity_total_node import EquityTotalNode
+
+        persons = UserInputNode[list]("eq3_ps", list)
+        node = EquityTotalNode("eq3", persons_source=persons)
+        persons.push(
+            [
+                Person(
+                    name="Ashby",
+                    has_car=True,
+                    home_sale_price=Money("500000", "GBP"),
+                    outstanding_mortgage=Money("300000", "GBP"),
+                    cash_contribution=Money("100000", "GBP"),
+                    selling_home=False,
+                )
+            ],
+            "test",
+        )
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded
+        assert a.value_or_none() == Money("100000", "GBP")
+
+    @pytest.mark.asyncio
+    async def test_home_equity_inferred_when_selling(self):
+        """Home equity counts when selling_home is unset but home values
+        exist (the migration inference)."""
+        from houses.nodes.equity_total_node import EquityTotalNode
+
+        persons = UserInputNode[list]("eq4_ps", list)
+        node = EquityTotalNode("eq4", persons_source=persons)
+        persons.push(
+            [
+                Person(
+                    name="Simon",
+                    has_car=True,
+                    home_sale_price=Money("500000", "GBP"),
+                    outstanding_mortgage=Money("300000", "GBP"),
+                    cash_contribution=Money("100000", "GBP"),
+                )
+            ],
+            "test",
+        )
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded
+        assert a.value_or_none() == Money("300000", "GBP")
+
+    @pytest.mark.asyncio
     async def test_single_person_cash_only(self):
         from houses.nodes.equity_total_node import EquityTotalNode
 

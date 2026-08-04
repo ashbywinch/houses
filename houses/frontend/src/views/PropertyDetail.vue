@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { usePropertiesStore } from '../stores/properties'
 import Header from '../components/Header.vue'
+import * as api from '../services/api'
 import CommuteSection from '../components/CommuteSection.vue'
 import CostsSection from '../components/CostsSection.vue'
 import SchoolsSection from '../components/SchoolsSection.vue'
@@ -71,6 +72,50 @@ async function shareProperty() {
 async function toggleFavourite() {
   await store.toggleTriage(rid.value, 'favourite', !triage.value?.favourite)
 }
+
+// ── Address correction (C2) ─────────────────────────
+// A missing Council Tax lookup usually means the address isn't exact
+// enough.  The user corrects the address here; saving refetches the
+// detail so the DAG recomputes council tax (and everything downstream).
+const editingAddress = ref(false)
+const addressDraft = ref('')
+const addressSaving = ref(false)
+const addressError = ref('')
+const addressSaved = ref(false)
+
+function startAddressEdit() {
+  addressDraft.value = address.value
+  addressError.value = ''
+  addressSaved.value = false
+  editingAddress.value = true
+}
+
+function cancelAddressEdit() {
+  editingAddress.value = false
+  addressError.value = ''
+}
+
+async function saveAddress() {
+  const draft = addressDraft.value.trim()
+  if (!draft) {
+    addressError.value = "Address can't be empty."
+    return
+  }
+  addressSaving.value = true
+  addressError.value = ''
+  try {
+    await api.patchAddress(rid.value, draft)
+    editingAddress.value = false
+    addressSaved.value = true
+    // refetch: the DAG recomputes council tax and every downstream total
+    await store.loadDetail(rid.value)
+    setTimeout(() => (addressSaved.value = false), 3000)
+  } catch {
+    addressError.value = 'Could not save the address — try again.'
+  } finally {
+    addressSaving.value = false
+  }
+}
 </script>
 
 <template>
@@ -110,7 +155,23 @@ async function toggleFavourite() {
 
       <!-- Summary bar (sticky) -->
       <div class="summary-bar">
-        <h1 class="summary-address">{{ address }}</h1>
+        <div class="summary-address-row">
+          <h1 class="summary-address">{{ address }}</h1>
+          <button v-if="!editingAddress" class="summary-address-edit" @click="startAddressEdit">Edit address</button>
+          <span v-if="addressSaved" class="summary-address-saved">Saved — updating…</span>
+        </div>
+        <div v-if="editingAddress" class="address-editor">
+          <input
+            v-model="addressDraft"
+            class="address-edit-input"
+            aria-label="Correct the property address"
+          />
+          <button class="address-edit-save" :disabled="addressSaving" @click="saveAddress">
+            {{ addressSaving ? 'Saving…' : 'Save' }}
+          </button>
+          <button class="address-edit-cancel" @click="cancelAddressEdit">Cancel</button>
+          <p v-if="addressError" class="address-edit-error">{{ addressError }}</p>
+        </div>
         <div class="summary-row">
           <span v-if="price" class="summary-price">£{{ price.toLocaleString() }}</span>
           <span v-if="monthlyCost !== null" class="summary-monthly">£{{ monthlyCost.toLocaleString() }}/mo</span>
@@ -178,6 +239,7 @@ async function toggleFavourite() {
         :commutes="detail.commutes"
         :good-threshold="store.settings.commute_thresholds?.good ?? 45"
         :warn-threshold="store.settings.commute_thresholds?.warn ?? 75"
+        :current-person="currentPerson"
       />
 
       <!-- ═══════════ SCHOOLS ═══════════ -->
@@ -269,6 +331,59 @@ async function toggleFavourite() {
   background: var(--card-bg);
   padding: var(--sp-4) var(--sp-6);
   border-bottom: 1px solid var(--border);
+}
+.summary-address-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.summary-address-edit {
+  color: var(--blue);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0;
+}
+.summary-address-saved {
+  color: var(--green);
+  font-size: 0.85rem;
+}
+.address-editor {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 0.4rem;
+}
+.address-edit-input {
+  flex: 1;
+  min-width: 14rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.address-edit-save {
+  background: var(--blue);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 0.35rem 1rem;
+  cursor: pointer;
+}
+.address-edit-cancel {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0.8rem;
+  cursor: pointer;
+}
+.address-edit-error {
+  color: var(--red);
+  font-size: 0.85rem;
+  width: 100%;
+  margin: 0.25rem 0 0;
 }
 .summary-address {
   font-size: var(--fs-xl);

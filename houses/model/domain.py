@@ -32,10 +32,14 @@ class PlaceOfInterest:
     address: str = ""
     trips_per_week: int = 1
     weeks_per_year: int = 46
+    # Modes the person accepts for this commute: "train" | "car" | "walk",
+    # any combination.  Empty means unset (legacy) — the effective value is
+    # derived by ``effective_acceptable_modes`` and is what routing uses.
+    acceptable_modes: tuple[str, ...] = ()
 
     def to_provenance_value(self) -> dict:
         """JSON-safe projection for provenance display."""
-        return {"label": self.label, "address": self.address}
+        return {"label": self.label, "address": self.address, "acceptable_modes": list(self.acceptable_modes)}
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,14 @@ class Person:
     places_of_interest: tuple[PlaceOfInterest, ...] = ()
     email: str = ""
     is_superuser: bool = False
+    # Names of adults who may edit this person's settings.  Empty means
+    # unset — see ``effective_editable_by`` (self for adults, ALL adults
+    # for children).  Superusers may always edit anyone.
+    editable_by: tuple[str, ...] = ()
+    # Whether this person is selling a home to fund the purchase.  None
+    # (unset) infers from the home fields — see ``effective_selling_home``.
+    # False means no current home: the deposit is cash only.
+    selling_home: bool | None = None
 
     def to_provenance_value(self) -> dict:
         """JSON-safe projection for provenance display.
@@ -68,6 +80,70 @@ class Person:
             "is_child": self.is_child,
             "places": [p.to_provenance_value() for p in self.places_of_interest],
         }
+
+
+# Canonical order for the all-modes set (also the UI checkbox order).
+ALL_ACCEPTABLE_MODES: tuple[str, ...] = ("train", "car", "walk")
+
+
+def effective_acceptable_modes(poi: PlaceOfInterest) -> tuple[str, ...]:
+    """The modes a POI is actually routed by.
+
+    Explicit ``acceptable_modes`` always win.  An empty (unset, legacy)
+    value is migrated by label rule — the plan's migration for persisted
+    persons: offices default to train, out-of-London trips to car, schools
+    to walk.  Anything else keeps the old all-modes behaviour rather than
+    inferring acceptability for labels the rule doesn't know.
+    """
+    if poi.acceptable_modes:
+        return tuple(poi.acceptable_modes)
+    label = poi.label.casefold()
+    if "school" in label or "primary" in label or "secondary" in label:
+        return ("walk",)
+    if "bracknell" in label or "dad" in label:
+        return ("car",)
+    if label in ("pimlico", "aldgate"):
+        return ("train",)
+    return ALL_ACCEPTABLE_MODES
+
+
+def effective_selling_home(person: Person) -> bool:
+    """Whether the person is selling a home to fund the purchase.
+
+    Explicit ``selling_home`` always wins.  Unset infers from the home
+    fields: any sale price or remaining mortgage means a home is being
+    sold; a person with neither (e.g. Ashby — cash deposit only) is not.
+    """
+    if person.selling_home is not None:
+        return person.selling_home
+
+    def _nonzero(v) -> bool:
+        """Legacy persons may hold bare numbers or dicts, not Money —
+        tolerate any shape without crashing on .amount."""
+        if v is None:
+            return False
+        if isinstance(v, Money):
+            return bool(v.amount)
+        if isinstance(v, dict):
+            return bool(v.get("amount") or v.get("value"))
+        return bool(v)
+
+    return _nonzero(person.home_sale_price) or _nonzero(person.outstanding_mortgage)
+
+
+def effective_editable_by(person: Person, all_persons: list[Person]) -> tuple[str, ...]:
+    """Who may edit ``person``'s settings.
+
+    Explicit ``editable_by`` wins.  Unset defaults to the person themselves
+    for adults and to ALL adults for children (a child has no login, so any
+    adult guardian edits on their behalf).  Superusers may always edit
+    anyone — enforced by the endpoint, not encoded here.
+    """
+    if person.editable_by:
+        return tuple(person.editable_by)
+    if person.is_child:
+        return tuple(p.name for p in all_persons if not p.is_child)
+    return (person.name,)
 
 
 @dataclass(frozen=True)

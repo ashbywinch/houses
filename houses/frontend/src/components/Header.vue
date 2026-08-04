@@ -12,6 +12,15 @@ interface PersonEntry {
 }
 
 const persons = ref<PersonEntry[]>([])
+const settingsOpen = ref(false)
+
+function toggleSettingsMenu() {
+  settingsOpen.value = !settingsOpen.value
+}
+
+function closeSettingsMenu() {
+  settingsOpen.value = false
+}
 
 async function fetchPersons() {
   try {
@@ -41,14 +50,33 @@ onMounted(fetchPersons)
           <span class="header__auth-status">…</span>
         </template>
         <template v-else-if="auth.user">
+          <div class="header__menu">
+            <button
+              class="header__settings-menu"
+              :aria-expanded="settingsOpen"
+              @click="toggleSettingsMenu"
+            >Settings ▾</button>
+            <div v-if="settingsOpen" class="header__menu-list">
+              <router-link class="header__menu-item" to="/settings" @click="closeSettingsMenu">
+                Family settings
+              </router-link>
+              <router-link
+                v-for="p in persons"
+                :key="p.name"
+                class="header__menu-item header__menu-item--person"
+                :to="'/settings?person=' + encodeURIComponent(p.name)"
+                @click="closeSettingsMenu"
+              >{{ p.name }}</router-link>
+            </div>
+          </div>
           <button
             v-if="auth.user.is_superuser"
             class="header__su-toggle"
             :class="{ 'header__su-toggle--active': auth.superuserMode }"
             @click="auth.toggleSuperuser()"
-            title="Toggle superuser mode"
+            title="Admin: switch between your view and acting as someone else"
           >
-            SU
+            Admin
           </button>
           <button class="header__auth-btn" @click="auth.logout()">Logout</button>
         </template>

@@ -3,13 +3,21 @@ from __future__ import annotations
 import contextlib
 import logging
 
-from fastapi import APIRouter, Body, HTTPException, Request, WebSocket
+from fastapi import APIRouter, HTTPException, Request, WebSocket
 from pydantic import BaseModel, Field, field_validator
 
 from houses.geo import GeoPoint
+from houses.model.domain import (
+    Person,
+    PlaceOfInterest,
+    effective_acceptable_modes,
+    effective_editable_by,
+    effective_selling_home,
+)
 from houses.property_registry import get_property as get_registry_property
 from houses.property_registry import list_properties as list_registry_properties
 from houses.services_provider import get_services
+from houses.web.auth import get_session_user
 
 logger = logging.getLogger(__name__)
 
@@ -303,64 +311,226 @@ async def add_property_comment(rid: str, body: CommentBody, request: Request):
 
 
 @api_router.get("/settings")
-async def get_settings():
+async def get_settings(request: Request):
     svc = get_services()
-    return {
-        "persons": await svc.persons_source.to_json(),
-        "financial": await svc.financial_source.to_json(),
-        "commute_thresholds": await svc.commute_thresholds_source.to_json(),
-    }
+    persons_json = await svc.persons_source.to_json()
+    # Enrich each person with the EFFECTIVE per-POI modes, the effective
+    # guardian list, and the session-aware editable_by_me flag.  The
+    # server decides ownership; the UI only renders it.
+    attempt = svc.persons_source.latest_attempt()
+    persons = [p for p in (attempt.value_or_none() or []) if isinstance(p, Person)]
+    session_user = get_session_user(request)
+    session_name = _session_person_name(session_user, persons)
+    dumped = persons_json.get("value")
+    if isinstance(dumped, list):
+        # match serialized entries to Person models BY NAME — a legacy
+        # non-Person entry in the source must not crash the enrichment
+        by_name = {p.name: p for p in persons}
+        for item in dumped:
+            if not isinstance(item, dict):
+                continue
+            person = by_name.get(item.get("name") or "")
+            if person is None:
+                continue
+            editable_by = effective_editable_by(person, persons)
+            item["editable_by"] = list(editable_by)
+            item["editable_by_me"] = _can_edit_person(session_user, session_name, person, persons)
+            item["selling_home"] = effective_selling_home(person)
+            for poi_item, poi in zip(item.get("places_of_interest") or (), person.places_of_interest, strict=False):
+                if isinstance(poi_item, dict):
+                    poi_item["acceptable_modes"] = list(effective_acceptable_modes(poi))
 
-
-@api_router.put("/settings/persons")
-async def put_persons(body: list = Body()):  # noqa: B008
-    """Replace the entire persons configuration.
-
-    This is PUT (not PATCH) because it replaces the full list.
-    An empty array is rejected — at least one person is required.
-    """
-    from fastapi import HTTPException
-
-    if not body:
-        raise HTTPException(status_code=400, detail="At least one person is required")
+    # The family deposit as ONE number (P4: the household is the unit, not
+    # four person records): per person, sale proceeds − remaining mortgage +
+    # extra money; plus the household total.  Computed server-side from the
+    # settings inputs — the client never derives money from parts.  The
+    # toggle gate matches EquityTotalNode: a person not selling a home
+    # contributes cash only (P7).
+    from decimal import Decimal as _Decimal
 
     from money import Money as _Money
 
-    from houses.model.domain import Person, PlaceOfInterest
-
-    money_fields = {"home_sale_price", "outstanding_mortgage", "cash_contribution", "life_insurance_monthly"}
-
-    def _validate_money_fields(d: dict) -> dict:
-        for f in money_fields:
-            v = d.get(f)
-            if isinstance(v, (int, float)):
-                d[f] = _Money(str(v), "GBP")
-            elif isinstance(v, dict):
-                d[f] = _Money(v["amount"], v.get("currency", "GBP"))
-        return d
-
-    validated = []
-    for p in body:
-        if not isinstance(p, dict):
-            validated.append(p)
-            continue
-        _validate_money_fields(p)
-        validated.append(
-            Person(
-                **{
-                    k: (
-                        tuple(PlaceOfInterest(**poi) if isinstance(poi, dict) else poi for poi in v)
-                        if k == "places_of_interest"
-                        else v
-                    )
-                    for k, v in p.items()
-                }
+    deposit_persons: dict[str, dict] = {}
+    deposit_total = _Money("0", "GBP")
+    deposit_lines: list[dict] = []
+    for person in persons:
+        sale = person.home_sale_price.amount
+        mortgage = person.outstanding_mortgage.amount
+        cash = person.cash_contribution.amount
+        if effective_selling_home(person):
+            value = max(_Decimal("0"), sale - mortgage) + cash
+            line = (
+                f"£{sale:,.2f} sale − £{mortgage:,.2f} mortgage + £{cash:,.2f} cash "
+                f"= £{value:,.2f}"
             )
+        else:
+            value = cash
+            line = f"£0 home + £{cash:,.2f} cash = £{value:,.2f}"
+        deposit_persons[person.name] = {"amount": f"{value:.2f}", "currency": "GBP"}
+        deposit_total = deposit_total + _Money(str(value), "GBP")
+        deposit_lines.append({"label": person.name, "value": line})
+
+    return {
+        "persons": persons_json,
+        "financial": await svc.financial_source.to_json(),
+        "commute_thresholds": await svc.commute_thresholds_source.to_json(),
+        "household_deposit": {
+            "total": {"amount": f"{deposit_total.amount:.2f}", "currency": "GBP"},
+            "persons": deposit_persons,
+            "provenance": {
+                "label": "Household Deposit",
+                "value": f"£{deposit_total.amount:,.2f}",
+                "sourceType": "calc",
+                "formula": {"lines": deposit_lines, "result": f"£{deposit_total.amount:,.2f}"},
+            },
+        },
+    }
+
+
+def _session_person_name(session_user: dict | None, persons: list) -> str:
+    """The session user's Person name (email match), or "" when unlinked."""
+    if not session_user:
+        return ""
+    folded = session_user.get("email", "").casefold()
+    for p in persons:
+        email = getattr(p, "email", "")
+        if email and email.casefold() == folded:
+            return getattr(p, "name", "")
+    return ""
+
+
+def _can_edit_person(session_user: dict | None, session_name: str, person, persons: list) -> bool:
+    """Server-side ownership check — the UI never decides this."""
+    if not session_user:
+        return False
+    if session_user.get("is_superuser"):
+        return True
+    if not session_name:
+        return False
+    return session_name == person.name or session_name in effective_editable_by(person, persons)
+
+
+_PERSON_MONEY_FIELDS = {"home_sale_price", "outstanding_mortgage", "cash_contribution", "life_insurance_monthly"}
+
+
+def _person_from_dict(d: dict, target: Person) -> Person:
+    """MERGE an API dict into an existing Person — never replace.
+
+    Only the fields present in the body change; every unmentioned field
+    keeps the target's value.  Replace semantics silently reset real data
+    (emails, walk penalties, flags) whenever a client sends a partial
+    body — that is exactly how the family emails were wiped.
+    """
+    from dataclasses import replace
+
+    from money import Money as _Money
+    from pint import Quantity as _Quantity
+
+    def _money(v):
+        """Validate the money shape: a number or {amount, currency}.  A
+        malformed value must raise (→ 400) — storing it would poison every
+        downstream read (.amount crashes) and freeze the equity cascade."""
+        if isinstance(v, (int, float)):
+            return _Money(str(v), "GBP")
+        if isinstance(v, dict):
+            if "amount" not in v:
+                raise ValueError(f"money value missing 'amount': {v!r}")
+            try:
+                return _Money(v["amount"], v.get("currency", "GBP"))
+            except Exception as e:
+                raise ValueError(f"invalid money value {v!r}: {e}") from e
+        raise ValueError(f"invalid money value {v!r} — expected a number or {{'amount': ...}}")
+
+    def _penalty(v):
+        """Validate bus_walk_penalty: the {value, unit} serialization."""
+        if not isinstance(v, dict) or "value" not in v or "unit" not in v:
+            raise ValueError(f"invalid walk penalty {v!r} — expected {{'value': ..., 'unit': ...}}")
+        try:
+            return _Quantity(v["value"], v["unit"])
+        except Exception as e:
+            raise ValueError(f"invalid walk penalty {v!r}: {e}") from e
+
+    updates = {k: v for k, v in d.items() if k != "thresholds"}
+    for f in _PERSON_MONEY_FIELDS:
+        if f in updates:
+            updates[f] = _money(updates[f])
+    if "bus_walk_penalty" in updates:
+        updates["bus_walk_penalty"] = _penalty(updates["bus_walk_penalty"])
+    if "editable_by" in updates and updates["editable_by"] is not None:
+        updates["editable_by"] = tuple(updates["editable_by"])
+    pois = updates.get("places_of_interest")
+    if "places_of_interest" in updates and not isinstance(pois, list):
+        raise ValueError(f"places_of_interest must be a list, got {type(pois).__name__}")
+    if isinstance(pois, list):
+        normalized = []
+        for poi in pois:
+            if isinstance(poi, dict):
+                modes = poi.get("acceptable_modes")
+                if modes is not None:
+                    poi = {**poi, "acceptable_modes": tuple(modes)}
+                normalized.append(PlaceOfInterest(**poi))
+            else:
+                normalized.append(poi)
+        updates["places_of_interest"] = tuple(normalized)
+    return replace(target, **updates)
+
+
+@api_router.patch("/settings/person/{name}")
+async def patch_person(name: str, body: dict, request: Request):
+    """Update one person's settings — own person / superuser / guardian.
+
+    Replaces the whole-list PUT: the server decides who may edit whom,
+    never the UI.  ``body`` is the full person record (the old PUT item)
+    plus an optional ``thresholds`` dict for the person's commute
+    thresholds, saved to the separate thresholds source under the same
+    ownership rule.
+    """
+    from fastapi import HTTPException
+
+    session_user = get_session_user(request)
+    if not session_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    svc = get_services()
+    persons = list(svc.persons_source.latest_attempt().value_or_none() or [])
+    target = next((p for p in persons if getattr(p, "name", "") == name), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"No person named {name!r}")
+
+    session_name = _session_person_name(session_user, persons)
+    if not _can_edit_person(session_user, session_name, target, persons):
+        raise HTTPException(
+            status_code=403,
+            detail="You can only edit your own settings (or a child's, if you are their guardian)",
         )
+
+    if not session_user.get("is_superuser"):
+        # identity/privilege fields are superuser-only: editing your own
+        # record must not escalate to superuser, hijack the email link,
+        # rename yourself onto another person's ownership key (name IS the
+        # authz identity), or flip is_child (which changes guardianship)
+        body = {
+            **body,
+            "name": target.name,
+            "is_child": target.is_child,
+            "is_superuser": target.is_superuser,
+            "email": target.email,
+            "editable_by": target.editable_by,
+        }
+
     try:
-        get_services().persons_source.push(validated, "user")
+        updated = [_person_from_dict(body, target) if p is target else p for p in persons]
+        svc.persons_source.push(updated, "user")
     except (ValueError, TypeError) as e:
+        # malformed client input is a CLIENT error (400), never a 500
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+    thresholds = body.get("thresholds")
+    if isinstance(thresholds, dict):
+        current = dict(svc.commute_thresholds_source.latest_attempt().value_or_none() or {})
+        current[name] = thresholds
+        svc.commute_thresholds_source.push(current, "user")
+
     return {"status": "ok"}
 
 
@@ -480,7 +650,13 @@ async def list_persons():
 
 @api_router.get("/debug/scheduler")
 async def debug_scheduler():
-    """Dump the entire scheduler queue — for debugging stalled background processing."""
+    """Snapshot the scheduler's pending work — read-only, never drains.
+
+    The background processor drains the queue automatically; this endpoint
+    only reports what is queued right now.  (A manual get/put drain loop is
+    an infinite loop — re-putting before the empty check — and blocks the
+    event loop, wedging the server.)
+    """
     from dag.scheduler import AsyncQueueScheduler as _AsyncQueueScheduler
     from dag.scheduler import _get_scheduler
 
@@ -488,25 +664,18 @@ async def debug_scheduler():
     if not isinstance(sched, _AsyncQueueScheduler):
         return {"type": type(sched).__name__, "error": "not AsyncQueueScheduler"}
 
-    queue_snapshot = []
-    while not sched._queue.empty():
-        try:
-            ev = sched._queue.get_nowait()
-            queue_snapshot.append(
-                {
-                    "node_id": ev.node_id,
-                    "scheduled_at": ev.scheduled_at,
-                }
-            )
-            sched._queue.put_nowait(ev)
-        except Exception:
-            break
+    # _scheduled: node_id -> QueueEvent, one entry per queued node (the
+    # queue itself is drained by the processor — never touch it here)
+    queue_snapshot = [
+        {"node_id": node_id, "scheduled_at": event.scheduled_at}
+        for node_id, event in list(sched._scheduled.items())[:500]
+    ]
 
     return {
-        "queue_size": len(queue_snapshot),
+        "queue_size": sched._queue.qsize(),
         "scheduled_count": len(sched._scheduled),
         "wakeup_set": sched._wakeup.is_set(),
-        "queue": queue_snapshot[:500],
+        "queue": queue_snapshot,
     }
 
 

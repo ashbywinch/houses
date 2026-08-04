@@ -69,6 +69,14 @@ make stop                       # Stop dev server + frontend
   - **Do NOT** run ``rm``, ``unlink``, ``truncate``, ``DROP TABLE``, or any
     command that deletes database files or tables.
   - **Do NOT** delete ``data/``, ``data/houses.db``, or any file under ``data/``.
+  - **Settings writes from scripts are guarded**: pushing to the settings
+    nodes (persons/financial/thresholds) from anything but the running app
+    or pytest raises ``RuntimeError`` unless ``HOUSES_SCRIPTS_MAY_WRITE=1``
+    is set — a deliberate data-fix script must set it explicitly. REPL/adhoc
+    kernels that skip pytest isolation cannot silently replace family data.
+    Prefer ``dataclasses.replace`` over rebuilding records: the settings
+    PATCH endpoint merges (unmentioned fields are preserved), and scripts
+    must do the same.
   - **If you believe the DB is corrupted**: reproduce the issue in a test against
     a clean in-memory SQLite database. If it reproduces, it's a code bug. If it
     doesn't, the real DB has data your code doesn't handle — fix the code.
@@ -86,6 +94,7 @@ make stop                       # Stop dev server + frontend
 - **Isochrone website integration (settings page, generation, map)**: [docs/website-isochrone-integration.md](docs/website-isochrone-integration.md)
 - **Capture / compare the frontend DOM**: Run `tools/capture_dom.py`, then compare against `docs/current-ui/`. See `docs/development.md` → *Capturing the Frontend DOM*.
 - **Write docs**: [docs/writing-documentation.md](docs/writing-documentation.md)
+- **Remaining work (uncertainty in the DAG library, usability backlog)**: [docs/remaining-work-plan.md](docs/remaining-work-plan.md)
 - **Use the API**: [docs/api.md](docs/api.md)
 - **Troubleshoot batch endpoints**: [docs/troubleshooting-endpoints.md](docs/troubleshooting-endpoints.md)
 - **Users & UX requirements (provenance, filters, states)**: [docs/personas.md](docs/personas.md)

@@ -3,6 +3,7 @@ import { useAuthStore } from '../stores/auth'
 import PropertyList from '../views/PropertyList.vue'
 import PropertyDetail from '../views/PropertyDetail.vue'
 import LoginPage from '../views/LoginPage.vue'
+import SettingsView from '../views/SettingsView.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -10,6 +11,7 @@ const router = createRouter({
     { path: '/login', component: LoginPage },
     { path: '/', component: PropertyList, meta: { requiresAuth: true } },
     { path: '/property/:rid', component: PropertyDetail, meta: { requiresAuth: true } },
+    { path: '/settings', component: SettingsView, meta: { requiresAuth: true } },
   ],
 })
 

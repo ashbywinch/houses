@@ -81,6 +81,8 @@ export interface CommuteValue {
   details?: CostGroup[]
   route_description?: string
   is_child?: boolean
+  person?: { name?: string }
+  destination?: { label?: string; address?: string }
 }
 
 export interface SchoolValue {

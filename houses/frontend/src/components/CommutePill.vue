@@ -44,7 +44,7 @@ function formatDuration(minutes: number | null): string {
 </script>
 
 <template>
-  <span class="pill" :class="colour">
+  <span class="pill" :class="colour" :title="duration === null ? 'No route found for this commute' : undefined">
     {{ displayText }}
   </span>
 </template>

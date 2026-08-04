@@ -256,3 +256,92 @@ class TestUpgradeAddress:
 
         result = _upgrade_address("", "SW1V 2QQ")
         assert result == ""
+
+class TestSeedInputDefaults:
+    """A pending input node with no producer permanently blocks every
+    downstream refresh (the DAG waits for pending deps).  The load paths
+    must materialise input defaults so the settings cascade can always
+    propagate — an empty sheet "Status" cell must not freeze the money
+    chain forever."""
+
+    def _property(self, rid: str):
+        from houses.nodes.property import PropertyNodes
+
+        return PropertyNodes(rid)
+
+    def test_defaults_pending_inputs(self):
+        from money import Money
+
+        from houses.nodes.bootstrap import _seed_input_defaults
+
+        prop = self._property("99900001")  # nothing pushed — all pending
+        _seed_input_defaults(prop)
+        assert prop.comment_status.latest_attempt().value_or_none() == ""
+        assert prop.works_estimates.latest_attempt().value_or_none() == {}
+        assert prop.rental_income.latest_attempt().value_or_none() == Money("0", "GBP")
+
+    def test_defaults_do_not_overwrite_user_values(self):
+        from houses.nodes.bootstrap import _seed_input_defaults
+
+        prop = self._property("99900002")
+        prop.comment_status.push("Current", "user")
+        _seed_input_defaults(prop)
+        assert prop.comment_status.latest_attempt().value_or_none() == "Current"
+
+    def test_settings_cascade_propagates_when_comment_status_was_never_seeded(self):
+        """Production shape: comment_status has no DB row (empty sheet
+        cell) — with the fix, the load-path defaults unblock the cascade
+        and a settings change still flows to mortgage_required."""
+        from fastapi.testclient import TestClient
+
+        from houses.model.domain import Person
+        from houses.nodes.bootstrap import _seed_input_defaults
+        from houses.server import app
+        from houses.web.auth import _make_session_cookie
+        from tests.unit.nodes.test_api import _push_persons
+
+        _push_persons(
+            Person(name="Simon", has_car=True, home_sale_price=Money("550000", "GBP"),
+                   outstanding_mortgage=Money("373000", "GBP")),
+            Person(name="Ashby", has_car=True, cash_contribution=Money("300000", "GBP")),
+        )
+
+        rid = "99900003"
+        prop = self._property(rid)
+        prop.rightmove_price.push(Money("500000", "GBP"), "test")
+        prop.rightmove_address.push("1 Test St", "test")
+        prop.rightmove_bedrooms.push("3", "test")
+        prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.postcode.push("SW1V 2QQ", "test")
+        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+        # NOTE: comment_status deliberately left pending (production shape)
+        from houses.property_registry import register_property
+
+        _seed_input_defaults(prop)
+        register_property(rid, prop)
+
+        from tests.unit.conftest import flush_all
+
+        flush_all()  # one drain cascades the whole wave (see coding-standards)
+
+        client = TestClient(app)
+        client.cookies.set(
+            "session",
+            _make_session_cookie(email="simon@example.com", name="Simon", picture="", is_superuser=True),
+        )
+        baseline = client.get(f"/api/properties/{rid}/detail").json()["affordability"]["mortgage_required"]
+
+        resp = client.patch(
+            "/api/settings/person/Ashby",
+            json={"name": "Ashby", "has_car": True, "cash_contribution": {"amount": "310000", "currency": "GBP"}},
+        )
+        assert resp.status_code == 200
+        flush_all()
+
+        updated = client.get(f"/api/properties/{rid}/detail").json()["affordability"]["mortgage_required"]
+        from tests.unit.nodes.test_api import _amount_of
+
+        delta = _amount_of(updated) - _amount_of(baseline)
+        assert delta == -10000, f"cascade blocked by pending input, mortgage moved {delta}"

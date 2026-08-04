@@ -8,7 +8,8 @@ from decimal import Decimal
 from money import Money
 
 from dag.attempt import Attempt
-from dag.expression import PMT, Conditional, Literal, Ref, StampDutyFn
+from dag.expression import Conditional, Literal, Ref
+from houses.nodes.expressions import PMT, StampDutyFn
 
 # ── Test helper: a minimal node-like object ──
 
