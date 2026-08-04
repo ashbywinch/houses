@@ -116,6 +116,26 @@ function commuteLabel(c: unknown, key: string): string {
   return key.split("/").slice(1).join("/")
 }
 
+function commutePerson(c: unknown, key: string): string {
+  const val = (c as Record<string, unknown> | undefined)?.value as Record<string, unknown> | undefined
+  const person = (val?.person as Record<string, unknown> | undefined)?.name
+  if (typeof person === 'string' && person) return person
+  return key.split("/")[0]
+}
+
+function commuteAddress(c: unknown, key: string): string {
+  const val = (c as Record<string, unknown> | undefined)?.value as Record<string, unknown> | undefined
+  const address = (val?.destination as Record<string, unknown> | undefined)?.address
+  return typeof address === 'string' && address ? address : commuteLabel(c, key)
+}
+
+function commuteCostTitle(c: unknown): string | undefined {
+  // £100.00 is the TfL daily fare cap, not the actual ticket price —
+  // say so instead of letting it read as a real fare (P2).
+  if (commuteCost(c) === 100) return '£100.00 is the TfL daily maximum, not the actual fare'
+  return undefined
+}
+
 const adultCommutes = computed(() => {
   if (!props.data.commutes) return {}
   return Object.fromEntries(
@@ -154,6 +174,11 @@ async function toggleViewed() {
         <span v-if="monthlyCost !== null" class="card__monthly-cost">
           £{{ monthlyCost.toLocaleString() }}/mo
         </span>
+        <span
+          v-else
+          class="card__monthly-cost card__monthly-cost--unknown"
+          title="Can't calculate yet — see the property page (often Council Tax)"
+        >£?/mo</span>
       </div>
 
       <!-- Specs row: price · bedrooms · freshness -->
@@ -166,11 +191,11 @@ async function toggleViewed() {
       <!-- Commute rows: per-person -->
       <div v-if="data.commutes" class="card__commutes">
         <div v-for="(c, key) in adultCommutes" :key="key" class="card__commute-row">
-          <span class="card__commute-person">{{ commuteLabel(c.commute, key) }}</span>
+          <span class="card__commute-person">{{ commutePerson(c.commute, key) }} → {{ commuteLabel(c.commute, key) }}</span>
           <div class="card__commute-data">
             <a
               v-if="location"
-              :href="'https://www.google.com/maps/dir/' + location.lat + ',' + location.lon + '/' + encodeURIComponent(commuteLabel(c.commute, key))"
+              :href="'https://www.google.com/maps/dir/' + location.lat + ',' + location.lon + '/' + encodeURIComponent(commuteAddress(c.commute, key))"
               class="pill-link"
               target="_blank"
               rel="noopener"
@@ -184,7 +209,11 @@ async function toggleViewed() {
                 :fineMax="commuteMode(c.commute) === 'walk' ? 30 : 75"
               />
             </a>
-            <span v-if="commuteCost(c.commute) !== null" class="card__commute-cost">
+            <span
+              v-if="commuteCost(c.commute) !== null"
+              class="card__commute-cost"
+              :title="commuteCostTitle(c.commute)"
+            >
               £{{ commuteCost(c.commute)!.toFixed(2) }}/day
             </span>
           </div>
@@ -297,6 +326,9 @@ async function toggleViewed() {
 }
 .card__address:hover .card__address-text { color: var(--blue); text-decoration: underline; }
 
+.card__monthly-cost--unknown {
+  color: var(--text-muted);
+}
 .card__monthly-cost {
   flex-shrink: 0;
   font-size: var(--fs-sm);

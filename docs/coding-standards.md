@@ -200,6 +200,54 @@ Reusable fakes in `tests/helpers.py`; `make_services()` builds a `Services` with
 - **Integration** (`tests/integration/`): full pipeline; `Services` fakes, `ContextVar`, or MockTransport.
 - **E2E** (`@pytest.mark.e2e`): real external APIs; one consolidated suite per API; skipped by default.
 
+### Money in assertions
+
+The [Money rule](#value-types) applies to tests too — **never float-compare
+monetary values, even in test helpers.** The wire form is
+`{"amount": "35500.00", "currency": "GBP"}`; parse amounts with `Decimal`.
+`float` introduces representation noise that breaks exact-delta assertions
+(`35500.00 − 25500.00` must equal `10000.00`, not `9999.999…`).
+
+```python
+# ✗ float — inexact; violates the Money rule
+assert float(a["amount"]) - float(b["amount"]) == 10000.0
+
+# ✓ Decimal over the wire strings — exact, unit-aware comparison
+from decimal import Decimal
+
+assert Decimal(a["amount"]) - Decimal(b["amount"]) == Decimal("10000")
+```
+
+### DAG tests are deterministic — one flush drains the whole cascade
+
+`flush_processor()` drains the **entire** refresh cascade in one call: a
+node's refresh emits synchronously, queueing its dependents inside the same
+drain loop. **Never call `flush_all()` twice "for the two waves".** A test
+that seems to need two flushes has a bug — investigate (wrong node read,
+wrapper comparison, missing drain) instead of adding flushes. Tests are
+single-threaded; there is no timing dependency to work around.
+
+**Compare unwrapped values, never Attempt wrappers.** Two reads of the same
+node produce wrapper dicts that always differ (provenance timestamps are
+rebuilt per read), so `a != b` on wrappers passes even when **nothing**
+propagated:
+
+```python
+# ✗ vacuous — wrapper provenance timestamps differ on every read
+assert updated["affordability"]["mortgage_required"] != baseline["affordability"]["mortgage_required"]
+
+# ✓ unwrap the Attempt value, compare the money amount (Decimal)
+assert _amount_of(updated) == _amount_of(baseline) - Decimal("10000")
+```
+
+**Tests drain explicitly; production has a background processor.** The
+lifespan starts a processor that refreshes scheduled nodes automatically
+(and the WS broadcaster pushes the results); the test environment has none,
+so a propagation test drains with `flush_all()` and says so in a comment. A
+settings-change regression test must assert the **exact** money delta —
+then a broken dependency wiring (e.g. a node missing the `persons` dep)
+fails loudly instead of decaying into a staleness race.
+
 ## Documentation
 
 - **Delete, don't archive.** Obsolete content is a liability. Wrong = remove; no archive dirs, no deprecation notices.

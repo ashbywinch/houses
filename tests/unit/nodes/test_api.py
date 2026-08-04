@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from houses.geo import GeoPoint
 from tests.unit.conftest import flush_all
 
@@ -295,6 +297,146 @@ class TestPatchPersonApi:
         assert george["places_of_interest"][0]["acceptable_modes"] == ["walk"]  # school rule
 
 
+class TestSettingsPropagationApi:
+    """P1: facts in, consequences out — a settings change must flow to
+    every property's totals automatically (the DAG, never the client)."""
+
+    def _setup(self):
+        from fastapi.testclient import TestClient
+        from money import Money
+
+        from houses.model.domain import Person
+        from houses.server import app
+        from houses.web.auth import _make_session_cookie
+
+        _push_persons(
+            Person(
+                name="Simon",
+                has_car=True,
+                email="simon@example.com",
+                home_sale_price=Money("550000", "GBP"),
+                outstanding_mortgage=Money("373000", "GBP"),
+            ),
+            Person(name="Lorena", has_car=False, email="lorena@example.com"),
+            Person(name="Ashby", has_car=True, cash_contribution=Money("300000", "GBP")),
+        )
+        client = TestClient(app)
+        client.cookies.set(
+            "session",
+            _make_session_cookie(email="simon@example.com", name="Simon", picture="", is_superuser=True),
+        )
+        return client
+
+    def _seed_property(self) -> str:
+        from money import Money
+
+        from houses.geo import GeoPoint
+        from houses.nodes.property import PropertyNodes
+        from houses.property_registry import register_property
+
+        rid = "42345678"
+        prop = PropertyNodes(rid)
+        prop.rightmove_price.push(Money("500000", "GBP"), "test")
+        prop.rightmove_address.push("1 Test St", "test")
+        prop.rightmove_bedrooms.push("3", "test")
+        prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.postcode.push("SW1V 2QQ", "test")
+        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.works_estimates.push({}, "test")
+        prop.rental_income.push(Money("0", "GBP"), "test")
+        prop.comment_status.push("", "test")
+        register_property(rid, prop)
+        return rid
+
+    def test_get_settings_carries_household_deposit(self):
+        """GET /settings reports the household deposit as one number —
+        per person (sale − remaining mortgage + extra money) and the
+        total — so the family sees the whole deposit without adding
+        four sections."""
+        client = self._setup()
+        data = client.get("/api/settings").json()
+        hd = data["household_deposit"]
+        assert hd["total"] == {"amount": "477000.00", "currency": "GBP"}
+        assert hd["persons"]["Simon"] == {"amount": "177000.00", "currency": "GBP"}
+        assert hd["persons"]["Ashby"] == {"amount": "300000.00", "currency": "GBP"}
+
+    def test_settings_change_updates_property_totals(self):
+        """PATCH a person's cash contribution → mortgage_required drops by
+        exactly the delta and the list total follows — automatically, via
+        the DAG.  One flush drains the WHOLE cascade (equity → mortgage →
+        monthly payment → housing cost) deterministically; production's
+        background processor does the same without test machinery."""
+        from tests.unit.conftest import flush_all
+
+        client = self._setup()
+        rid = self._seed_property()
+        flush_all()
+        flush_all()  # two-level DAG wave (mortgage → monthly housing cost)
+
+        baseline = client.get(f"/api/properties/{rid}/detail").json()
+        baseline_mortgage = baseline["affordability"]["mortgage_required"]
+        assert baseline_mortgage is not None
+        # capture the list baseline BEFORE the change (the summary and
+        # detail read the same node — compare unwrapped values)
+        baseline_total = _money_amount(
+            client.get("/api/properties/all").json()[rid]["total_monthly_cost"]["value"]
+        )
+
+        resp = client.patch(
+            "/api/settings/person/Ashby",
+            json={"name": "Ashby", "has_car": True, "cash_contribution": {"amount": "310000", "currency": "GBP"}},
+        )
+        assert resp.status_code == 200, resp.text[:300]
+
+        # The test environment has no background processor (production starts
+        # one in lifespan).  A single flush drains the full refresh cascade:
+        # each node's refresh emits synchronously, queueing its dependents
+        # inside the SAME process_pending loop.
+        flush_all()
+
+        updated = client.get(f"/api/properties/{rid}/detail").json()
+        updated_mortgage = updated["affordability"]["mortgage_required"]
+        assert updated_mortgage is not None
+        # Compare the MONEY VALUE (unwrap the Attempt wrapper) — comparing
+        # wrapper dicts always "differs" because provenance timestamps
+        # change between reads, which masks a non-propagation as success.
+        delta = _amount_of(updated_mortgage) - _amount_of(baseline_mortgage)
+        assert delta == Decimal("-10000"), f"mortgage_required should drop by exactly £10,000, moved {delta}"
+
+        # the property list summary follows automatically too — same node,
+        # same drain, and the drop equals the mortgage-payment drop
+        updated_total = _money_amount(
+            client.get("/api/properties/all").json()[rid]["total_monthly_cost"]["value"]
+        )
+        assert updated_total < baseline_total, "list total did not decrease after the settings change"
+        assert baseline_total - updated_total == _amount_of(
+            baseline["affordability"]["monthly_mortgage"]
+        ) - _amount_of(updated["affordability"]["monthly_mortgage"]), (
+            "list total moved by exactly the monthly-payment delta"
+        )
+
+
+def _money_amount(v) -> Decimal:
+    """Money amount from a raw value dict: {amount, currency}.
+
+    Money rule: amounts are Decimal-backed strings on the wire — never
+    float, which introduces representation noise into exact assertions.
+    """
+    if isinstance(v, dict):
+        return Decimal(v.get("amount") or "0")
+    return Decimal(str(v))
+
+
+def _amount_of(attempt: dict) -> Decimal:
+    """Money amount inside an Attempt wrapper: {status, value: {amount, currency}}."""
+    val = attempt.get("value") or {}
+    if isinstance(val, dict):
+        return Decimal(val.get("amount") or "0")
+    return Decimal(str(val))
+
+
 class TestWorksEstimateApi:
     """PATCH /api/properties/{rid}/works-estimate endpoint."""
 
@@ -383,8 +525,13 @@ class TestWorksEstimateApi:
         )
         assert resp.status_code == 200, resp.text[:500]
 
-        # Re-fetch detail IMMEDIATELY — no manual flush.
-        # The PATCH endpoint must flush the processor itself.
+        # The test environment has no background processor — drain the
+        # queue explicitly (production's lifespan processor does this
+        # automatically, and the WS broadcaster pushes the fresh totals).
+        from tests.unit.conftest import flush_all as _flush
+
+        _flush()
+
         resp = client.get(f"/api/properties/{rid}/detail")
         assert resp.status_code == 200, resp.text[:500]
         detail_after = resp.json()
@@ -392,8 +539,11 @@ class TestWorksEstimateApi:
         af_after = detail_after.get("affordability")
         updated_mortgage = af_after.get("mortgage_required")
 
+        # Compare the MONEY VALUE, not the wrapper dict — the wrapper's
+        # provenance timestamps always differ between reads, so a `!=` on
+        # the dicts passes even when nothing propagated.
         assert updated_mortgage is not None
-        assert updated_mortgage != baseline_mortgage, (
+        assert _amount_of(updated_mortgage) != _amount_of(baseline_mortgage), (
             f"mortgage_required did not change after works update: "
             f"baseline={baseline_mortgage}, updated={updated_mortgage}"
         )

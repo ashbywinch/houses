@@ -165,6 +165,94 @@ describe('PropertyCard basic rendering', () => {
   })
 })
 
+describe('PropertyCard commute attribution (P2)', () => {
+  it('labels commute rows with the person and the destination', () => {
+    const summary = makeSummary({
+      commutes: {
+        'Simon/Pimlico': {
+          commute: {
+            succeeded: true,
+            value: { duration: { value: 32, unit: 'minute' }, label: 'Pimlico', person: { name: 'Simon' } },
+            error: null, provenance: { label: 'test' }, is_child: false,
+          },
+        },
+      },
+    })
+    const wrapper = mountCard({ rid: '123', data: summary })
+    expect(wrapper.text()).toContain('Simon → Pimlico')
+  })
+
+  it('falls back to the commute key for the person name', () => {
+    const summary = makeSummary({
+      commutes: {
+        'Lorena/Aldgate': {
+          commute: {
+            succeeded: true,
+            value: { duration: { value: 40, unit: 'minute' }, label: 'Aldgate' },
+            error: null, provenance: { label: 'test' }, is_child: false,
+          },
+        },
+      },
+    })
+    const wrapper = mountCard({ rid: '123', data: summary })
+    expect(wrapper.text()).toContain('Lorena → Aldgate')
+  })
+
+  it('points directions at the destination address, not the label', () => {
+    const summary = makeSummary({
+      commutes: {
+        'Simon/Pimlico': {
+          commute: {
+            succeeded: true,
+            value: {
+              duration: { value: 32, unit: 'minute' },
+              label: 'Pimlico',
+              person: { name: 'Simon' },
+              destination: { label: 'Pimlico', address: '1 Drummond Gate, Pimlico, London SW1V 2QQ' },
+            },
+            error: null, provenance: { label: 'test' }, is_child: false,
+          },
+        },
+      },
+    })
+    const wrapper = mountCard({ rid: '123', data: summary })
+    const href = wrapper.find('a.pill-link').attributes('href') ?? ''
+    expect(href).toContain(encodeURIComponent('1 Drummond Gate, Pimlico, London SW1V 2QQ'))
+  })
+})
+
+describe('PropertyCard affordability honesty (P2)', () => {
+  it('shows a muted can-not-calculate marker when the total is impossible', () => {
+    const summary = makeSummary({
+      total_monthly_cost: { succeeded: false, value: null, error: 'x', provenance: { label: 'test' } },
+    })
+    const wrapper = mountCard({ rid: '123', data: summary })
+    expect(wrapper.text()).toContain('£?/mo')
+  })
+
+  it('explains the TfL daily maximum instead of presenting it as a fare', () => {
+    const summary = makeSummary({
+      commutes: {
+        'Simon/Pimlico': {
+          commute: {
+            succeeded: true,
+            value: {
+              duration: { value: 87, unit: 'minute' },
+              label: 'Pimlico',
+              daily_cost: { amount: '100.00', currency: 'GBP' },
+            },
+            error: null, provenance: { label: 'test' }, is_child: false,
+          },
+        },
+      },
+    })
+    const wrapper = mountCard({ rid: '123', data: summary })
+    const cost = wrapper.find('.card__commute-cost')
+    expect(cost.text()).toContain('£100.00')
+    expect(cost.attributes('title') ?? '').toContain('TfL daily maximum')
+  })
+})
+
 describe('PropertyCard error handling', () => {
   it('handles missing price', () => {
     const summary = makeSummary({
@@ -173,7 +261,8 @@ describe('PropertyCard error handling', () => {
     })
     const wrapper = mountCard({ rid: '123', data: summary })
     expect(wrapper.text()).not.toContain('£500,000')
-    expect(wrapper.text()).not.toContain('/mo')
+    // an uncomputable total is never hidden silently — it reads as unknown
+    expect(wrapper.text()).toContain('£?/mo')
   })
 
   it('handles empty commutes', () => {

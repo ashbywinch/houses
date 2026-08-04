@@ -21,3 +21,11 @@ describe('CommutePill optional cost', () => {
     expect(wrapper.text()).toContain('£4.50')
   })
 })
+
+describe('CommutePill missing-route state (A4)', () => {
+  it('explains a ? duration as a missing route', () => {
+    const wrapper = mount(CommutePill, { props: { label: '', duration: null } })
+    expect(wrapper.text()).toContain('?')
+    expect(wrapper.attributes('title')).toContain('No route found')
+  })
+})

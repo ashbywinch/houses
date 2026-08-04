@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import Header from '../components/Header.vue'
 import * as api from '../services/api'
 
@@ -36,11 +37,22 @@ interface Thresholds {
   fine_max_minutes: number
 }
 
+interface HouseholdDeposit {
+  total: MoneyValue
+  persons: Record<string, MoneyValue>
+}
+
+const route = useRoute()
 const loading = ref(true)
 const error = ref('')
 const persons = ref<PersonSettings[]>([])
 const thresholds = ref<Record<string, Thresholds>>({})
+const deposit = ref<HouseholdDeposit | null>(null)
 const savedFor = ref<string>('')
+
+// person-scroll target from the URL (?person=Simon), set by the
+// "Change destinations" link on the property page
+const targetPerson = computed(() => (route.query.person as string) || '')
 
 // The three ways a commute can happen. "Car" is only offered to people
 // who have one; "walk" is always an option (walking is accepted even when
@@ -60,13 +72,20 @@ async function load() {
     const data = (await api.fetchSettings()) as {
       persons?: { value?: PersonSettings[] }
       commute_thresholds?: { value?: Record<string, Thresholds> }
+      household_deposit?: HouseholdDeposit
     }
     persons.value = data.persons?.value ?? []
     thresholds.value = data.commute_thresholds?.value ?? {}
+    deposit.value = data.household_deposit ?? null
   } catch {
     error.value = 'Could not load the family settings.'
   } finally {
     loading.value = false
+  }
+  if (targetPerson.value) {
+    await nextTick()
+    const el = document.getElementById('person-' + encodeURIComponent(targetPerson.value))
+    el?.scrollIntoView?.({ behavior: 'smooth' })
   }
 }
 
@@ -113,6 +132,21 @@ async function save(person: PersonSettings) {
 }
 
 const anyEditable = computed(() => persons.value.some(isOwn))
+
+function pounds(money: MoneyValue | undefined): string {
+  if (!money) return '£0'
+  const n = Number(money.amount)
+  return '£' + (Number.isFinite(n) ? n.toLocaleString() : money.amount)
+}
+
+const depositRows = computed(() => {
+  const d = deposit.value
+  if (!d) return []
+  return persons.value.map(p => ({
+    name: p.name,
+    amount: d.persons[p.name],
+  }))
+})
 </script>
 
 <template>
@@ -134,11 +168,29 @@ const anyEditable = computed(() => persons.value.some(isOwn))
           household can see the whole picture — you can only change your own.
         </p>
 
+        <div v-if="deposit" class="settings-deposit">
+          <h2 class="settings-deposit__title">Total deposit from everyone: {{ pounds(deposit.total) }}</h2>
+          <p class="settings-deposit__note">
+            What you'll have for the next house: expected sale price minus what's owed, plus any
+            extra money — added up across the family.
+          </p>
+          <ul class="settings-deposit__rows">
+            <li v-for="row in depositRows" :key="row.name" class="settings-deposit__row">
+              <span>{{ row.name }}</span>
+              <span>{{ pounds(row.amount) }}</span>
+            </li>
+          </ul>
+        </div>
+
         <section
           v-for="person in persons"
           :key="person.name"
+          :id="'person-' + encodeURIComponent(person.name)"
           class="settings-person"
-          :class="{ 'settings-person--locked': !isOwn(person) }"
+          :class="{
+            'settings-person--locked': !isOwn(person),
+            'settings-person--target': targetPerson === person.name,
+          }"
         >
           <header class="settings-person__header">
             <h2 class="settings-person__name">{{ person.name }}</h2>
@@ -164,27 +216,30 @@ const anyEditable = computed(() => persons.value.some(isOwn))
           </div>
 
           <div v-if="isOwn(person)" class="settings-person__money">
-            <label class="settings-person__label" for="home-sale">Current home value (£)</label>
+            <label class="settings-person__label" for="home-sale">Expected sale price of current home (£)</label>
             <input
               id="home-sale"
               type="number"
               :value="person.home_sale_price?.amount"
               @input="moneyInput(person.home_sale_price!, $event)"
             />
-            <label class="settings-person__label" for="mortgage">Outstanding mortgage (£)</label>
+            <p class="settings-person__helper">What you expect to get when you sell it.</p>
+            <label class="settings-person__label" for="mortgage">Mortgage remaining on current home (£)</label>
             <input
               id="mortgage"
               type="number"
               :value="person.outstanding_mortgage?.amount"
               @input="moneyInput(person.outstanding_mortgage!, $event)"
             />
-            <label class="settings-person__label" for="cash">Cash contribution (£)</label>
+            <p class="settings-person__helper">What you still owe on the house you're selling.</p>
+            <label class="settings-person__label" for="cash">Other money toward the deposit (£)</label>
             <input
               id="cash"
               type="number"
               :value="person.cash_contribution?.amount"
               @input="moneyInput(person.cash_contribution!, $event)"
             />
+            <p class="settings-person__helper">Savings or gifts, on top of the sale proceeds.</p>
             <label class="settings-person__label" for="life-insurance">Life insurance (£/month)</label>
             <input
               id="life-insurance"
@@ -212,7 +267,7 @@ const anyEditable = computed(() => persons.value.some(isOwn))
             class="settings-poi"
           >
             <div class="settings-poi__row">
-              <label class="settings-person__label" :for="`label-${person.name}-${poi.label}`">Place</label>
+              <label class="settings-person__label" :for="`label-${person.name}-${poi.label}`">Destination name</label>
               <input
                 :id="`label-${person.name}-${poi.label}`"
                 type="text"
@@ -220,8 +275,9 @@ const anyEditable = computed(() => persons.value.some(isOwn))
                 :disabled="!isOwn(person)"
               />
             </div>
+            <p class="settings-person__helper">Shown on property cards (e.g. "Pimlico").</p>
             <div class="settings-poi__row">
-              <label class="settings-person__label" :for="`address-${person.name}-${poi.label}`">Address</label>
+              <label class="settings-person__label" :for="`address-${person.name}-${poi.label}`">Office / location address</label>
               <input
                 :id="`address-${person.name}-${poi.label}`"
                 type="text"
@@ -230,6 +286,7 @@ const anyEditable = computed(() => persons.value.some(isOwn))
                 :placeholder="poi.address === '' ? 'no fixed address' : ''"
               />
             </div>
+            <p class="settings-person__helper">Used to calculate the commute. Leave empty when there's no fixed address.</p>
             <div class="settings-poi__row">
               <label class="settings-person__label" :for="`trips-${person.name}-${poi.label}`">Trips per week</label>
               <input
@@ -296,6 +353,10 @@ const anyEditable = computed(() => persons.value.some(isOwn))
 .settings-person--locked {
   opacity: 0.75;
 }
+.settings-person--target {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px var(--blue, #2f6fed) inset;
+}
 .settings-person__header {
   display: flex;
   align-items: center;
@@ -321,6 +382,37 @@ const anyEditable = computed(() => persons.value.some(isOwn))
 .settings-person__saved {
   color: var(--green);
   font-size: 0.85rem;
+}
+.settings-deposit {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  margin: 1rem 0;
+  background: var(--bg-subtle, #fafafa);
+}
+.settings-deposit__title {
+  margin: 0 0 0.25rem;
+}
+.settings-deposit__note {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin: 0 0 0.75rem;
+}
+.settings-deposit__rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.settings-deposit__row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.2rem 0;
+  border-top: 1px dashed var(--border);
+}
+.settings-person__helper {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin: 0 0 0.5rem;
 }
 .settings-person__note,
 .settings-poi__empty {

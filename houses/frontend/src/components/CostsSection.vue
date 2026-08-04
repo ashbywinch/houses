@@ -127,7 +127,7 @@ function canEdit(personName: string): boolean {
       <div class="costs-row" :class="{ 'costs-row--impossible': isImpossible(affordability?.monthly_mortgage) }">
         <span class="costs-label">Mortgage</span>
         <span v-if="affordability?.monthly_mortgage?.succeeded && affordability?.monthly_mortgage?.value" class="costs-value">£{{ affordability.monthly_mortgage.value.amount }}</span>
-        <span v-else-if="isImpossible(affordability?.monthly_mortgage)" class="costs-value costs-value--impossible">Impossible</span>
+        <span v-else-if="isImpossible(affordability?.monthly_mortgage)" class="costs-value costs-value--impossible">Can't calculate</span>
         <span v-else class="costs-value">?</span>
         <button
           v-if="affordability?.monthly_mortgage?.provenance"
@@ -153,6 +153,9 @@ function canEdit(personName: string): boolean {
       <div v-if="showProvenance === 'council_tax' && affordability?.council_tax?.provenance" class="costs-provenance">
         <ProvenanceView :provenance="affordability.council_tax.provenance" title="Council Tax" />
       </div>
+      <p v-if="!affordability?.council_tax?.succeeded" class="costs-note">
+        Couldn't look up Council Tax — the address above may not be exact. Edit the address to retry.
+      </p>
 
       <div class="costs-row">
         <span class="costs-label">Sinking Fund</span>
@@ -314,7 +317,7 @@ function canEdit(personName: string): boolean {
       <div class="costs-row costs-row--total" :class="{ 'costs-row--impossible': isImpossible(affordability?.total_monthly_housing_cost) }">
         <span class="costs-label">Total Monthly</span>
         <span v-if="affordability?.total_monthly_housing_cost?.succeeded && affordability?.total_monthly_housing_cost?.value" class="costs-value">£{{ affordability.total_monthly_housing_cost.value.amount }}</span>
-        <span v-else-if="isImpossible(affordability?.total_monthly_housing_cost)" class="costs-value costs-value--impossible">Impossible</span>
+        <span v-else-if="isImpossible(affordability?.total_monthly_housing_cost)" class="costs-value costs-value--impossible">Can't calculate</span>
         <span v-else class="costs-value">?</span>
         <button
           v-if="affordability?.total_monthly_housing_cost?.provenance"
@@ -386,6 +389,11 @@ function canEdit(personName: string): boolean {
   border-radius: 2px;
 }
 .costs-subsection { display: flex; flex-direction: column; }
+.costs-note {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 0.25rem 0 0.75rem;
+}
 .costs-provenance { margin: var(--sp-2) 0; }
 .costs-edit-group { display: flex; align-items: center; gap: 2px; margin-left: auto; margin-right: var(--sp-2); }
 .costs-edit-prefix { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text); }

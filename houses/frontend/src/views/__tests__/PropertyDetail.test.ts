@@ -464,3 +464,70 @@ describe('PropertyDetail map embed', () => {
     expect(wrapper.text()).toContain('No location data')
   })
 })
+
+describe('PropertyDetail address edit (C2)', () => {
+  it('lets the user correct the address and refetches so council tax recomputes', async () => {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/property/:rid', component: PropertyDetail }],
+    })
+    router.push('/property/123')
+    await router.isReady()
+
+    const wrapper = mount(PropertyDetail, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+
+    const store = usePropertiesStore()
+    store.details['123'] = makeDetail()
+    store.loading = false
+    store.loadDetail = vi.fn().mockResolvedValue(undefined)
+
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('.summary-address-edit').trigger('click')
+    const input = wrapper.find('input.address-edit-input')
+    expect(input.exists()).toBe(true)
+    await input.setValue('1 Main St, London SW1V 2QQ')
+    await wrapper.find('button.address-edit-save').trigger('click')
+
+    expect(api.patchAddress).toHaveBeenCalledWith('123', '1 Main St, London SW1V 2QQ')
+    expect(store.loadDetail).toHaveBeenCalledWith('123')
+  })
+})
+
+describe('PropertyDetail commute settings link (D2)', () => {
+  it('links the commute section to settings for the session person', async () => {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/property/:rid', component: PropertyDetail }],
+    })
+    router.push('/property/123')
+    await router.isReady()
+
+    const wrapper = mount(PropertyDetail, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+
+    const store = usePropertiesStore()
+    store.details['123'] = makeDetail()
+    store.loading = false
+
+    const { useAuthStore } = await import('../../stores/auth')
+    const auth = useAuthStore()
+    auth.user = { email: 'simon@example.com', name: 'Simon', picture: '', person: 'Simon', is_superuser: false } as any
+
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    const link = wrapper.find('a.change-destinations')
+    expect(link.exists()).toBe(true)
+    expect(link.attributes('href') ?? '').toContain('#/settings')
+    expect(link.attributes('href') ?? '').toContain('person=Simon')
+  })
+})

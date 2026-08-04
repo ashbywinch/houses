@@ -154,6 +154,27 @@ def bootstrap_from_row(row: dict[str, Any], sources: dict[str, UserInputNode]) -
     return pushed
 
 
+def _seed_input_defaults(prop) -> None:
+    """Materialise defaults for input nodes that are still pending.
+
+    A pending input node with no producer permanently blocks every
+    downstream refresh: ``refresh()`` waits for pending deps, so an empty
+    sheet "Status" cell (or a DB row that was never written) freezes the
+    whole money cascade — equity → mortgage → monthly payment — forever.
+    Defaults match the sheet path's semantics: empty status = not
+    "Current", no works estimates = {}, no rental income = £0.  Never
+    overwrite a value the user (or a source) already set.
+    """
+    if prop.comment_status.latest_attempt().pending:
+        prop.comment_status.push("", "default")
+    if prop.comment_status_reason.latest_attempt().pending:
+        prop.comment_status_reason.push("", "default")
+    if prop.works_estimates.latest_attempt().pending:
+        prop.works_estimates.push({}, "default")
+    if prop.rental_income.latest_attempt().pending:
+        prop.rental_income.push(Money("0", "GBP"), "default")
+
+
 def load_property_nodes_from_db() -> int:
     """Create PropertyNodes for every RID found in the DB.
     Called on normal startup. No sheet dependency.
@@ -164,6 +185,7 @@ def load_property_nodes_from_db() -> int:
     count = 0
     for rid in property_rids():
         prop = PropertyNodes(rid)
+        _seed_input_defaults(prop)
         register_property(rid, prop)
         count += 1
     logger.info("Loaded %d properties from DB", count)
@@ -217,15 +239,11 @@ def load_property_nodes_from_rows(rows: list[dict[str, Any]]) -> int:
                 prop.works_estimates.push({"Ashby": Money(str(parsed), "GBP")}, "Sheet")
             except (ValueError, TypeError):
                 logger.warning("Invalid works estimate for RID %s: %s", raw_rid, ws_value)
-        elif prop.works_estimates.latest_attempt().pending:
-            # Default empty dict — Ashby's missing estimate will make
-            # the chain impossible until entered via the PATCH endpoint.
-            prop.works_estimates.push({}, "default")
-
-        # Default rental_income to £0 so total_monthly_cost resolves.
-        # Only set if the node is still pending (no user value yet).
-        if prop.rental_income.latest_attempt().pending:
-            prop.rental_income.push(Money("0", "GBP"), "default")
+        # Default empty works estimates / rental income / comment status so
+        # the money chain resolves even when a sheet cell was empty (a
+        # pending input permanently blocks the cascade).  Never overwrites
+        # a value the user or a source already set.
+        _seed_input_defaults(prop)
 
         register_property(raw_rid, prop)
         count += 1

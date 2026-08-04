@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import SettingsView from '../SettingsView.vue'
 
@@ -86,15 +87,29 @@ function makeSettings() {
         Lorena: { good_max_minutes: 40, fine_max_minutes: 60 },
       },
     },
+    household_deposit: {
+      total: { amount: '477000.00', currency: 'GBP' },
+      persons: {
+        Simon: { amount: '177000.00', currency: 'GBP' },
+        Lorena: { amount: '0.00', currency: 'GBP' },
+        George: { amount: '0.00', currency: 'GBP' },
+      },
+    },
   }
 }
 
-function mountView() {
+async function mountView(query = '') {
   setActivePinia(createPinia())
   const auth = useAuthStore()
   auth.user = { email: 'simon@example.com', name: 'Simon', picture: '', person: 'Simon', is_superuser: true } as any
   ;(api.fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValue(makeSettings())
-  return { wrapper: mount(SettingsView), flush: flushPromises }
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/settings', component: SettingsView }],
+  })
+  await router.push('/settings' + query)
+  await router.isReady()
+  return { wrapper: mount(SettingsView, { global: { plugins: [router] } }), flush: flushPromises, router }
 }
 
 describe('SettingsView — family sections', () => {
@@ -103,7 +118,7 @@ describe('SettingsView — family sections', () => {
   })
 
   it('renders a section per person', async () => {
-    const { wrapper, flush } = mountView()
+    const { wrapper, flush } = await mountView()
     await flush()
     const text = wrapper.text()
     expect(text).toContain('Simon')
@@ -112,14 +127,14 @@ describe('SettingsView — family sections', () => {
   })
 
   it('marks the session person with a "you" badge and the child with a child badge', async () => {
-    const { wrapper, flush } = mountView()
+    const { wrapper, flush } = await mountView()
     await flush()
     expect(wrapper.text()).toContain('you')
     expect(wrapper.text()).toContain('child')
   })
 
   it('renders the school note for a child with no-address POIs', async () => {
-    const { wrapper, flush } = mountView()
+    const { wrapper, flush } = await mountView()
     await flush()
     expect(wrapper.text()).toContain('Goes to school near the house')
   })
@@ -131,7 +146,7 @@ describe('SettingsView — ownership rendering', () => {
   })
 
   it('makes the own person editable with a save button', async () => {
-    const { wrapper, flush } = mountView()
+    const { wrapper, flush } = await mountView()
     await flush()
     const simonSection = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
     expect(simonSection.find('button.save').exists()).toBe(true)
@@ -139,7 +154,7 @@ describe('SettingsView — ownership rendering', () => {
   })
 
   it('locks other people — read-only, no save button', async () => {
-    const { wrapper, flush } = mountView()
+    const { wrapper, flush } = await mountView()
     await flush()
     const lorenaSection = wrapper.findAll('.settings-person').find(s => s.text().includes('Lorena'))!
     expect(lorenaSection.text()).toContain('read-only')
@@ -147,7 +162,7 @@ describe('SettingsView — ownership rendering', () => {
   })
 
   it('does not offer the car mode to people without a car', async () => {
-    const { wrapper, flush } = mountView()
+    const { wrapper, flush } = await mountView()
     await flush()
     const lorenaSection = wrapper.findAll('.settings-person').find(s => s.text().includes('Lorena'))!
     // the checkbox is present but hidden and disabled — car is not an option
@@ -160,13 +175,37 @@ describe('SettingsView — ownership rendering', () => {
   })
 })
 
+describe('SettingsView — deposit summary and money labels', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('renders the household deposit as one number with a breakdown', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const text = wrapper.text()
+    expect(text).toContain('Total deposit from everyone')
+    expect(text).toContain('477,000')
+    expect(text).toContain('177,000')
+  })
+
+  it('labels the money fields unambiguously', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const text = wrapper.text()
+    expect(text).toContain('Expected sale price of current home')
+    expect(text).toContain('Mortgage remaining on current home')
+    expect(text).toContain('Other money toward the deposit')
+  })
+})
+
 describe('SettingsView — saving', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
   it('saves the edited person and their thresholds via PATCH', async () => {
-    const { wrapper, flush } = mountView()
+    const { wrapper, flush } = await mountView()
     await flush()
     const simonSection = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
     // tick a mode checkbox, then save
@@ -179,5 +218,26 @@ describe('SettingsView — saving', () => {
     const pimlico = body.places_of_interest.find((p: { label: string }) => p.label === 'Pimlico')
     expect(pimlico.acceptable_modes).toContain('walk')
     expect(body.thresholds).toEqual({ good_max_minutes: 30, fine_max_minutes: 45 })
+  })
+})
+
+describe('SettingsView — destination fields and person-scroll (A6, D2)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('distinguishes the destination name from its address', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const text = wrapper.text()
+    expect(text).toContain('Destination name')
+    expect(text).toContain('Office / location address')
+  })
+
+  it('highlights and scrolls to the person named in the URL', async () => {
+    const { wrapper, flush } = await mountView('?person=George')
+    await flush()
+    const george = wrapper.findAll('.settings-person').find(s => s.text().includes('George'))!
+    expect(george.classes()).toContain('settings-person--target')
   })
 })

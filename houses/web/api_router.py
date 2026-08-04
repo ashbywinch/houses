@@ -326,10 +326,28 @@ async def get_settings(request: Request):
             for poi_item, poi in zip(item.get("places_of_interest") or (), person.places_of_interest, strict=True):
                 if isinstance(poi_item, dict):
                     poi_item["acceptable_modes"] = list(effective_acceptable_modes(poi))
+
+    # The family deposit as ONE number (P4: the household is the unit, not
+    # four person records): per person, sale proceeds − remaining mortgage +
+    # extra money; plus the household total.  Computed server-side from the
+    # settings inputs — the client never derives money from parts.
+    from money import Money as _Money
+
+    deposit_persons: dict[str, dict] = {}
+    deposit_total = _Money("0", "GBP")
+    for person in persons:
+        value = person.home_sale_price - person.outstanding_mortgage + person.cash_contribution
+        deposit_persons[person.name] = {"amount": f"{value.amount:.2f}", "currency": "GBP"}
+        deposit_total = deposit_total + value
+
     return {
         "persons": persons_json,
         "financial": await svc.financial_source.to_json(),
         "commute_thresholds": await svc.commute_thresholds_source.to_json(),
+        "household_deposit": {
+            "total": {"amount": f"{deposit_total.amount:.2f}", "currency": "GBP"},
+            "persons": deposit_persons,
+        },
     }
 
 
@@ -563,7 +581,13 @@ async def list_persons():
 
 @api_router.get("/debug/scheduler")
 async def debug_scheduler():
-    """Dump the entire scheduler queue — for debugging stalled background processing."""
+    """Snapshot the scheduler's pending work — read-only, never drains.
+
+    The background processor drains the queue automatically; this endpoint
+    only reports what is queued right now.  (A manual get/put drain loop is
+    an infinite loop — re-putting before the empty check — and blocks the
+    event loop, wedging the server.)
+    """
     from dag.scheduler import AsyncQueueScheduler as _AsyncQueueScheduler
     from dag.scheduler import _get_scheduler
 
@@ -571,25 +595,18 @@ async def debug_scheduler():
     if not isinstance(sched, _AsyncQueueScheduler):
         return {"type": type(sched).__name__, "error": "not AsyncQueueScheduler"}
 
-    queue_snapshot = []
-    while not sched._queue.empty():
-        try:
-            ev = sched._queue.get_nowait()
-            queue_snapshot.append(
-                {
-                    "node_id": ev.node_id,
-                    "scheduled_at": ev.scheduled_at,
-                }
-            )
-            sched._queue.put_nowait(ev)
-        except Exception:
-            break
+    # _scheduled: node_id -> QueueEvent, one entry per queued node (the
+    # queue itself is drained by the processor — never touch it here)
+    queue_snapshot = [
+        {"node_id": node_id, "scheduled_at": event.scheduled_at}
+        for node_id, event in list(sched._scheduled.items())[:500]
+    ]
 
     return {
-        "queue_size": len(queue_snapshot),
+        "queue_size": sched._queue.qsize(),
         "scheduled_count": len(sched._scheduled),
         "wakeup_set": sched._wakeup.is_set(),
-        "queue": queue_snapshot[:500],
+        "queue": queue_snapshot,
     }
 
 

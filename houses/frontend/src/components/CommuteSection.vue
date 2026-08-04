@@ -7,6 +7,7 @@ const props = defineProps<{
   commutes: any
   goodThreshold?: number
   warnThreshold?: number
+  currentPerson?: string | null
 }>()
 
 // ── Accordion state ────────────────────────────────────
@@ -28,7 +29,14 @@ function toggleProvenance(key: string) {
 
 <template>
   <section id="section-commute" class="detail-section">
-    <h2 class="detail-section__title">Commute</h2>
+    <div class="detail-section__title-row">
+      <h2 class="detail-section__title">Commute</h2>
+      <router-link
+        class="change-destinations"
+        :to="'/settings' + (props.currentPerson ? '?person=' + encodeURIComponent(props.currentPerson) : '')"
+      >Change destinations →</router-link>
+    </div>
+    <div class="detail-section__title-row" />
     <div v-for="(c, key) in commutes" :key="key" class="commute-accordion">
       <button class="commute-accordion__header" @click="toggleCommute(key as string)">
         <span class="commute-accordion__label">{{ key }}</span>
@@ -88,6 +96,17 @@ function toggleProvenance(key: string) {
   letter-spacing: 0.04em;
 }
 
+.detail-section__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+.change-destinations {
+  color: var(--blue);
+  font-size: 0.85rem;
+  text-decoration: none;
+}
 .commute-accordion {
   border: 1px solid var(--border);
   border-radius: var(--radius);

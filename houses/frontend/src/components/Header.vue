@@ -47,9 +47,9 @@ onMounted(fetchPersons)
             class="header__su-toggle"
             :class="{ 'header__su-toggle--active': auth.superuserMode }"
             @click="auth.toggleSuperuser()"
-            title="Toggle superuser mode"
+            title="Admin: switch between your view and acting as someone else"
           >
-            SU
+            Admin
           </button>
           <button class="header__auth-btn" @click="auth.logout()">Logout</button>
         </template>

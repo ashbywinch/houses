@@ -148,3 +148,25 @@ describe('CostsSection rental income', () => {
     expect(howBtn.exists()).toBe(true)
   })
 })
+
+describe('CostsSection blocked-state copy (C1/C2)', () => {
+  it('explains the Council Tax lookup failure and how to fix it', () => {
+    const wrapper = mountCosts()  // council_tax failed -> '?'
+    const text = wrapper.text()
+    expect(text).toContain("Couldn't look up Council Tax")
+    expect(text).toContain('Edit the address')
+  })
+
+  it('never shows a bare "Impossible" for blocked totals', () => {
+    // real payloads mark failed nodes with error != null (impossible)
+    const wrapper = mountCosts({
+      affordability: {
+        monthly_mortgage: { succeeded: false, value: null, error: 'dep failed', provenance: {} },
+        total_monthly_housing_cost: { succeeded: false, value: null, error: 'dep failed', provenance: {} },
+      },
+    })
+    const text = wrapper.text()
+    expect(text).not.toContain('Impossible')
+    expect(text).toContain("Can't calculate")
+  })
+})
