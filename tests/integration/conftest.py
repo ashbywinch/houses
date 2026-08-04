@@ -142,8 +142,14 @@ def _isolate_api_cache():
 
 
 @pytest.fixture(autouse=True)
-def _reset_geo_cache():
-    """Give each integration test its own geocode cache."""
+def _reset_geo_cache(_use_sqlite_memory):  # noqa: ARG001 — ordering dependency
+    """Give each integration test its own geocode cache.
+
+    Depends on the DB isolation fixture EXPLICITLY: autouse ordering is not
+    declaration order in this pytest version, and touching services on a
+    fresh DB before the in-memory DB + per.testing flag are active trips
+    the settings write guard (or writes a real DB).
+    """
     from houses.services_provider import get_services
 
     get_services().geo_cache = {}
