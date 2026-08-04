@@ -311,3 +311,34 @@ describe('SettingsView — deposit provenance through the standard toggle (P8)',
     expect(wrapper.text()).toContain('£550,000.00 sale')
   })
 })
+
+describe('SettingsView — commute destination CRUD (A7)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('adds a blank destination row and saves it with the list', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
+    await simon.find('button.poi-add').trigger('click')
+    await flush()
+    const rows = simon.findAll('.settings-poi')
+    expect(rows.length).toBe(3)  // Pimlico, Bracknell + the new blank row
+    await simon.find('button.save').trigger('click')
+    const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(name).toBe('Simon')
+    expect(body.places_of_interest.length).toBe(3)
+    expect(body.places_of_interest[2].label).toBe('')
+  })
+
+  it('removes a destination row', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
+    expect(simon.findAll('.settings-poi').length).toBe(2)
+    await simon.findAll('button.poi-remove')[0].trigger('click')
+    await flush()
+    expect(simon.findAll('.settings-poi').length).toBe(1)
+  })
+})

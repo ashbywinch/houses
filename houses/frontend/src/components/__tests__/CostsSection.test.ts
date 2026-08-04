@@ -155,7 +155,7 @@ describe('CostsSection blocked-state copy (C1/C2)', () => {
     const wrapper = mountCosts()  // council_tax failed -> '?'
     const text = wrapper.text()
     expect(text).toContain("Couldn't look up Council Tax")
-    expect(text).toContain('Edit the address')
+    expect(text).toContain('Edit address')
   })
 
   it('never shows a bare "Impossible" for blocked totals', () => {

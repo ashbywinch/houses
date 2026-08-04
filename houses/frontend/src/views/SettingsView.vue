@@ -137,6 +137,20 @@ async function save(person: PersonSettings) {
 
 const anyEditable = computed(() => persons.value.some(isOwn))
 
+function addDestination(person: PersonSettings) {
+  person.places_of_interest.push({
+    label: '',
+    address: '',
+    trips_per_week: 1,
+    weeks_per_year: 46,
+    acceptable_modes: [],
+  })
+}
+
+function removeDestination(person: PersonSettings, index: number) {
+  person.places_of_interest.splice(index, 1)
+}
+
 function pounds(money: MoneyValue | undefined): string {
   if (!money) return '£0'
   const n = Number(money.amount)
@@ -283,11 +297,24 @@ const depositRows = computed(() => {
           </div>
 
           <h3 class="settings-person__subtitle">Commutes</h3>
+          <button
+            v-if="isOwn(person)"
+            class="poi-add"
+            type="button"
+            @click="addDestination(person)"
+          >+ Add destination</button>
           <div
-            v-for="poi in person.places_of_interest"
-            :key="poi.label"
+            v-for="(poi, poiIndex) in person.places_of_interest"
+            :key="poiIndex"
             class="settings-poi"
           >
+            <button
+              v-if="isOwn(person)"
+              class="poi-remove"
+              type="button"
+              :aria-label="'Remove ' + (poi.label || 'destination')"
+              @click="removeDestination(person, poiIndex)"
+            >×</button>
             <div class="settings-poi__row">
               <label class="settings-person__label" :for="`label-${person.name}-${poi.label}`">Destination name</label>
               <input
@@ -297,7 +324,7 @@ const depositRows = computed(() => {
                 :disabled="!isOwn(person)"
               />
             </div>
-            <p class="settings-person__helper">Shown on property cards (e.g. "Pimlico").</p>
+            <p class="settings-person__helper">Shown on cards as 'Simon → &lt;name&gt;'. Edit it to your new office.</p>
             <div class="settings-poi__row">
               <label class="settings-person__label" :for="`address-${person.name}-${poi.label}`">Office / location address</label>
               <input
@@ -473,6 +500,27 @@ const depositRows = computed(() => {
 .settings-poi {
   border-top: 1px dashed var(--border);
   padding: 0.5rem 0;
+  position: relative;
+}
+.poi-add {
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--blue);
+  cursor: pointer;
+  padding: 0.3rem 0.7rem;
+  margin: 0.4rem 0;
+}
+.poi-remove {
+  position: absolute;
+  top: 0.4rem;
+  right: 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 0 0.3rem;
 }
 .settings-poi__modes {
   display: flex;

@@ -154,7 +154,8 @@ function canEdit(personName: string): boolean {
               </div>
       <ProvenanceToggle v-if="affordability?.council_tax?.provenance" :provenance="affordability?.council_tax?.provenance" title="Council Tax" />
       <p v-if="!affordability?.council_tax?.succeeded" class="costs-note">
-        Couldn't look up Council Tax — the address above may not be exact. Edit the address to retry.
+        Couldn't look up Council Tax — make sure the property's address is complete and correct
+        (Edit address above).
       </p>
 
       <div class="costs-row">
