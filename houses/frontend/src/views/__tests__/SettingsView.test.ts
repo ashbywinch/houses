@@ -8,6 +8,7 @@ import SettingsView from '../SettingsView.vue'
 vi.mock('../../services/api', () => ({
   fetchSettings: vi.fn(),
   patchPerson: vi.fn().mockResolvedValue({ status: 'ok' }),
+  patchFinancial: vi.fn().mockResolvedValue({ status: 'ok' }),
 }))
 
 import * as api from '../../services/api'
@@ -101,6 +102,16 @@ function makeSettings() {
       value: {
         Simon: { good_max_minutes: 30, fine_max_minutes: 45 },
         Lorena: { good_max_minutes: 40, fine_max_minutes: 60 },
+      },
+    },
+    financial: {
+      status: 'succeeded',
+      value: {
+        mortgage_rate: 0.0495,
+        mortgage_term_years: 27,
+        sinking_fund_rate: 0.01,
+        petrol_mpg: 45,
+        petrol_cost_per_litre: 1.45,
       },
     },
     household_deposit: {
@@ -212,6 +223,42 @@ describe('SettingsView — ownership rendering', () => {
     await simon.flush()
     const simonSection = simon.wrapper.findAll('.settings-person')[0]
     expect(simonSection.find('.settings-poi__mode--hidden input[data-mode="car"]').exists()).toBe(false)
+  })
+})
+
+describe('SettingsView — household finances', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('renders the live household-finance assumptions with converted display values', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const text = wrapper.text()
+    expect(text).toContain('Household finances')
+    // stored rates (0.0495, 0.01) display as percentages (4.95, 1)
+    expect((wrapper.find('input#mortgage-rate').element as HTMLInputElement).value).toBe('4.95')
+    expect((wrapper.find('input#mortgage-term').element as HTMLInputElement).value).toBe('27')
+    expect((wrapper.find('input#sinking-fund').element as HTMLInputElement).value).toBe('1')
+    expect((wrapper.find('input#petrol-mpg').element as HTMLInputElement).value).toBe('45')
+    expect((wrapper.find('input#petrol-cost').element as HTMLInputElement).value).toBe('1.45')
+  })
+
+  it('saves financial edits back as stored values (percent → fraction)', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    await wrapper.find('input#mortgage-rate').setValue('6')
+    await wrapper.find('input#sinking-fund').setValue('1.5')
+    await wrapper.find('input#petrol-cost').setValue('1.50')
+    await wrapper.find('.settings-finances').trigger('focusout')
+    await flush()
+    expect(api.patchFinancial).toHaveBeenCalledTimes(1)
+    const body = (api.patchFinancial as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(body.mortgage_rate).toBe(0.06)
+    expect(body.sinking_fund_rate).toBe(0.015)
+    expect(body.petrol_cost_per_litre).toBe(1.5)
+    expect(body.petrol_mpg).toBe(45)
+    expect(body.mortgage_term_years).toBe(27)
   })
 })
 

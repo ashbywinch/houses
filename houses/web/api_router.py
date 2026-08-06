@@ -378,6 +378,8 @@ async def add_property_comment(rid: str, body: CommentBody, request: Request):
 
 @api_router.get("/settings")
 async def get_settings(request: Request):
+    from houses.nodes.settings_node import aggregate_dict
+
     svc = get_services()
     persons_json = await svc.persons_source.to_json()
     # Enrich each person with the EFFECTIVE per-POI modes, the effective
@@ -438,7 +440,7 @@ async def get_settings(request: Request):
 
     return {
         "persons": persons_json,
-        "financial": await svc.financial_source.to_json(),
+        "financial": {"status": "succeeded", "value": aggregate_dict(svc.setting_nodes)},
         "commute_thresholds": await svc.commute_thresholds_source.to_json(),
         "household_deposit": {
             "total": {"amount": f"{deposit_total.amount:.2f}", "currency": "GBP"},

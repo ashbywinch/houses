@@ -18,6 +18,7 @@ from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNod
 from houses.nodes.monthly_sinking_fund_node import MonthlySinkingFundNode
 from houses.nodes.mortgage_required_node import MortgageRequiredNode
 from houses.nodes.schools import PrimarySchoolNode, SecondarySchoolNode
+from houses.nodes.settings_node import aggregate_dict
 from houses.nodes.stamp_duty_node import StampDutyNode
 from houses.nodes.total_monthly_housing_cost_node import TotalMonthlyHousingCostNode
 from houses.nodes.total_works_node import TotalWorksNode
@@ -330,6 +331,6 @@ class PropertyNodes:
             },
             "settings": {
                 "persons": await self._svc.persons_source.to_json(),
-                "financial": await self._svc.financial_source.to_json(),
+                "financial": {"status": "succeeded", "value": aggregate_dict(self._svc.setting_nodes)},
             },
         }

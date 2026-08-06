@@ -49,6 +49,14 @@ interface Thresholds {
   fine_max_minutes: number
 }
 
+interface FinancialSettings {
+  mortgage_rate: number
+  mortgage_term_years: number
+  sinking_fund_rate: number
+  petrol_mpg: number
+  petrol_cost_per_litre: number
+}
+
 interface HouseholdDeposit {
   total: MoneyValue
   persons: Record<string, MoneyValue>
@@ -79,6 +87,22 @@ const error = ref('')
 const persons = ref<PersonSettings[]>([])
 const thresholds = ref<Record<string, Thresholds>>({})
 const deposit = ref<HouseholdDeposit | null>(null)
+const financial = ref<FinancialSettings | null>(null)
+
+// Display-form copies of the finance fields (rates shown as
+// percentages); converted back to stored fractions on save.
+const fin = ref<Record<string, string>>({})
+function loadFinancial(f: FinancialSettings | null) {
+  financial.value = f
+  if (!f) return
+  fin.value = {
+    'mortgage-rate': String(Number((f.mortgage_rate * 100).toFixed(2))),
+    'mortgage-term': String(f.mortgage_term_years),
+    'sinking-fund': String(Number((f.sinking_fund_rate * 100).toFixed(2))),
+    'petrol-mpg': String(f.petrol_mpg),
+    'petrol-cost': String(f.petrol_cost_per_litre),
+  }
+}
 
 // ── Autosave (C2/C3) ───────────────────────────────────────────
 // No Save button: edits persist automatically (debounced + on blur),
@@ -88,9 +112,11 @@ type SaveState = 'idle' | 'saving' | 'saved' | 'error'
 const saveState = ref<Record<string, SaveState>>({})
 const undoSnap = ref<Record<string, Record<string, unknown> | null>>({})
 const saveTimers: Record<string, ReturnType<typeof setTimeout>> = {}
+let financialTimer: ReturnType<typeof setTimeout> | null = null
 
 onBeforeUnmount(() => {
   for (const t of Object.values(saveTimers)) clearTimeout(t)
+  if (financialTimer) clearTimeout(financialTimer)
 })
 
 function scheduleSave(person: PersonSettings) {
@@ -162,6 +188,32 @@ function retry(person: PersonSettings) {
   void save(person)
 }
 
+// ── Household finances (shared assumptions) ─────────────
+function scheduleFinancialSave() {
+  if (financialTimer) clearTimeout(financialTimer)
+  financialTimer = setTimeout(() => void saveFinancial(), 800)
+}
+
+function flushFinancialSave() {
+  if (financialTimer) {
+    clearTimeout(financialTimer)
+    financialTimer = null
+  }
+  void saveFinancial()
+}
+
+async function saveFinancial() {
+  if (!financial.value) return
+  const n = (k: string) => Number(fin.value[k] ?? 0)
+  await api.patchFinancial({
+    mortgage_rate: n('mortgage-rate') / 100,
+    mortgage_term_years: Math.round(n('mortgage-term')),
+    sinking_fund_rate: n('sinking-fund') / 100,
+    petrol_mpg: Math.round(n('petrol-mpg')),
+    petrol_cost_per_litre: n('petrol-cost'),
+  })
+}
+
 // person-scroll target from the URL (?person=Simon), set by the
 // "Change destinations" link on the property page
 const targetPerson = computed(() => (route.query.person as string) || '')
@@ -185,10 +237,12 @@ async function load() {
       persons?: { value?: PersonSettings[] }
       commute_thresholds?: { value?: Record<string, Thresholds> }
       household_deposit?: HouseholdDeposit
+      financial?: { value?: FinancialSettings }
     }
     persons.value = data.persons?.value ?? []
     thresholds.value = data.commute_thresholds?.value ?? {}
     deposit.value = data.household_deposit ?? null
+    loadFinancial(data.financial?.value ?? null)
   } catch {
     error.value = 'Could not load the family settings.'
   } finally {
@@ -312,6 +366,39 @@ const depositRows = computed(() => {
             title="Household deposit"
           />
         </div>
+
+        <section
+          v-if="financial"
+          class="settings-finances"
+          @input="scheduleFinancialSave"
+          @change="scheduleFinancialSave"
+          @focusout="flushFinancialSave"
+        >
+          <h2 class="settings-person__name">Household finances</h2>
+          <p class="settings-person__note">
+            Shared assumptions every property's monthly cost is built from.
+          </p>
+          <div class="settings-person__field">
+            <label class="settings-person__label" for="mortgage-rate">Mortgage rate (%)</label>
+            <input id="mortgage-rate" type="text" inputmode="decimal" v-model="fin['mortgage-rate']" />
+          </div>
+          <div class="settings-person__field">
+            <label class="settings-person__label" for="mortgage-term">Mortgage term (years)</label>
+            <input id="mortgage-term" type="text" inputmode="numeric" v-model="fin['mortgage-term']" />
+          </div>
+          <div class="settings-person__field">
+            <label class="settings-person__label" for="sinking-fund">Sinking fund (% of value per year)</label>
+            <input id="sinking-fund" type="text" inputmode="decimal" v-model="fin['sinking-fund']" />
+          </div>
+          <div class="settings-person__field">
+            <label class="settings-person__label" for="petrol-mpg">Petrol economy (MPG)</label>
+            <input id="petrol-mpg" type="text" inputmode="numeric" v-model="fin['petrol-mpg']" />
+          </div>
+          <div class="settings-person__field">
+            <label class="settings-person__label" for="petrol-cost">Petrol cost (£ per litre)</label>
+            <input id="petrol-cost" type="text" inputmode="decimal" v-model="fin['petrol-cost']" />
+          </div>
+        </section>
 
         <section
           v-for="person in visiblePersons"

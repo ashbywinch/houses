@@ -299,8 +299,7 @@ class TestFinancialSettingsPropagation:
         # Push new financial settings via the shared Services instance
         new_financials = dict(fin1)
         new_financials["mortgage_rate"] = 0.99
-        get_services().financial_source.push(new_financials, "user")
-        # Also push to individual setting nodes for the expression system
+        # Push to individual setting nodes (the canonical financial source)
         from houses.nodes.settings_node import API_KEY_TO_NODE
 
         svc = get_services()

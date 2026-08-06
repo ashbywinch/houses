@@ -376,6 +376,19 @@ Either user nodes in the dag or things like those commute colour bands."
 | commute_thresholds | fine_max_minutes ✓ ("worst acceptable") · good_max_minutes (NEW) | both now in Settings ✓ |
 | financial | mortgage_rate, mortgage_term_years, sinking_fund_rate, petrol_mpg, petrol_cost_per_litre, working_weeks_per_year, rental_income_monthly (legacy dupes: current_home_*, gross_ashby_contribution) | **NO UI** — live in the DAG (feed the monthly total) but only PATCHable via API. Candidate for a household-finances section; NOT built (changes the monthly-total math — needs sign-off). |
 
+Built 2026-08-06 (second pass): the 5 LIVE financial fields now have a
+"Household finances" section on the settings page (mortgage rate %,
+term, sinking-fund %, petrol MPG, petrol cost £/l), autosaved via
+PATCH /settings/financial with percent↔fraction conversion. The GET
+/settings financial blob previously came from a legacy dict node that
+went STALE after any PATCH (the DAG always read the individual
+setting nodes) — it now serializes the live nodes
+(settings_node.aggregate_dict); the legacy `financial_source` field
+and `make_default_financials` are removed. The remaining financial
+keys (working_weeks_per_year, rental_income_monthly,
+current_home_*, gross_ashby_contribution) have NO DAG consumers —
+dead defaults, deliberately not surfaced.
+
 ### Colour bands now actually work
 
 The card and detail-page pills previously used hardcoded thresholds

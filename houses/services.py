@@ -23,7 +23,7 @@ from houses.epc import lookup_epc
 from houses.geo import GeoPoint
 from houses.location import _geocode_address, find_nearest_town_name, geocode
 from houses.model.domain import Commute, Person
-from houses.nodes.settings import make_default_financials, make_default_persons, make_default_thresholds
+from houses.nodes.settings import make_default_persons, make_default_thresholds
 from houses.routing import CommuteRouter
 from houses.school import School
 from houses.school_gender import SchoolGender
@@ -374,13 +374,11 @@ class Services:
     persons_source: UserInputNode[list[Person]] = dataclasses.field(
         default_factory=lambda: _make_settings_source("persons", list[Person], make_default_persons)
     )
-    # Individual financial setting nodes (created in __post_init__)
+    # Individual financial setting nodes (created in __post_init__);
+    # the API reads them through the aggregate (settings_view).
     setting_nodes: dict[str, UserInputNode] = dataclasses.field(default_factory=dict)
     # SettingsNode aggregate (lazily created, accessed via settings_view)
     _settings_view: Any | None = dataclasses.field(default=None)
-    financial_source: UserInputNode[dict] = dataclasses.field(
-        default_factory=lambda: _make_settings_source("financial", dict, make_default_financials)
-    )
     commute_thresholds_source: UserInputNode[dict] = dataclasses.field(
         default_factory=lambda: _make_settings_source("commute_thresholds", dict, make_default_thresholds)
     )
@@ -393,7 +391,7 @@ class Services:
     def __post_init__(self):
         from houses.nodes.settings_node import SETTING_DEFAULTS
 
-        # Create individual setting nodes alongside the existing financial_source
+        # Create individual setting nodes
         if not self.setting_nodes:
             self.setting_nodes = {}
             for node_id, (val_type, default_fn) in SETTING_DEFAULTS.items():

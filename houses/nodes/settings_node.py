@@ -74,6 +74,26 @@ def _serialize_for_api(val):
     return val
 
 
+
+
+def aggregate_dict(setting_nodes: dict[str, UserInputNode]) -> dict:
+    """Build the API-key financial dict from the individual setting
+    nodes — a synchronous read for API serialization (no scheduler
+    needed). Falls back to the defaults for nodes never written."""
+    result: dict = {}
+    for node_id, node in setting_nodes.items():
+        api_key = NODE_TO_API_KEY.get(node_id)
+        if api_key is None:
+            continue
+        attempt = node.latest_attempt()
+        val = attempt.value_or_none() if attempt and attempt.succeeded else None
+        if val is None:
+            default = SETTING_DEFAULTS.get(node_id)
+            val = default[1]() if default else None
+        if val is not None:
+            result[api_key] = _serialize_for_api(val)
+    return result
+
 # ── SettingsNode Aggregate ───────────────────────────────
 
 

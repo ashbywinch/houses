@@ -112,6 +112,32 @@ class TestSettingsApi:
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
 
+    def test_get_settings_financial_reflects_patch(self):
+        """GET /settings financial must return the LIVE node values —
+        a patched rate shows up on the next read (regression: the old
+        aggregate blob went stale after PATCH)."""
+        from houses.nodes.settings_node import SETTING_DEFAULTS, aggregate_dict
+        from houses.services_provider import get_services
+
+        client = self._setup()
+        before = client.get("/api/settings").json()["financial"]
+        # sanity: the endpoint returns the API-key shape with defaults
+        assert "mortgage_rate" in before["value"]
+        assert "petrol_cost_per_litre" in before["value"]
+
+        resp = client.patch(
+            "/api/settings/financial",
+            json={"mortgage_rate": 0.06, "petrol_mpg": 40},
+        )
+        assert resp.status_code == 200
+
+        after = client.get("/api/settings").json()["financial"]
+        assert after["value"]["mortgage_rate"] == 0.06
+        assert after["value"]["petrol_mpg"] == 40
+        # untouched nodes keep their defaults (serialized to float)
+        assert after["value"]["sinking_fund_rate"] == float(SETTING_DEFAULTS["settings/sinking_fund_rate"][1]())
+        assert aggregate_dict(get_services().setting_nodes) == after["value"]
+
     def test_put_persons_removed(self):
         """PUT /settings/persons (whole-list, no authz) must be gone."""
         client = self._setup()
