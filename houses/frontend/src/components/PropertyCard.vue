@@ -5,7 +5,6 @@ import { usePropertiesStore } from '../stores/properties'
 import CommutePill from './CommutePill.vue'
 import { simpleOfsted, ofstedClass } from '../formatters/format'
 import { schoolWalkMin } from '../formatters/school'
-import { pillColour } from '../formatters/commute'
 
 const store = usePropertiesStore()
 const props = defineProps<{
@@ -44,28 +43,6 @@ const monthlyCostApprox = computed(() => {
 // Part D: a hypothetical total from the "What if…" panel (overlaid by
 // PropertyList) is marked so it is never mistaken for a real number.
 const isWhatIf = computed(() => props.data.total_monthly_cost.provenance?.label === 'what-if')
-
-// Left border colour = triage state, matching the triage buttons
-// exactly (favourite=blue, dismissed=red, seen=green). The default
-// (untouched) card has NO border — one mystery colour per card max,
-// and only when it means something.
-const borderClass = computed(() => {
-  const t = triage.value
-  if (!t) return ''
-  if (t.dismissed) return 'card__border--dismissed'
-  if (t.favourite) return 'card__border--favourite'
-  if (t.is_viewed) return 'card__border--viewed'
-  return ''
-})
-
-const borderTitle = computed(() => {
-  const cls = borderClass.value
-  if (cls === 'card__border--favourite') return 'Favourite'
-  if (cls === 'card__border--dismissed') return 'Dismissed'
-  if (cls === 'card__border--viewed') return 'Seen'
-  return undefined
-})
-
 
 // Freshness badge — how many days ago the property was added
 const freshnessDays = computed(() => {
@@ -172,32 +149,6 @@ function isStaleOffice(key: string): boolean {
   return !current.includes(label)
 }
 
-/** Top status bar colour = the worst adult commute severity (mockup).
- *  Green/orange/red match the legend in the list header; a card whose
- *  commutes have no route at all is muted, not green. */
-const statusClass = computed(() => {
-  const entries = Object.entries(adultCommutes.value)
-  if (entries.length === 0) return ''
-  let worst = -1 // -1 no route, 0 ok, 1 tight, 2 far
-  for (const [, c] of entries) {
-    const mode = commuteMode(c.commute)
-    const cls = pillColour(c.commute, mode === 'walk' ? 15 : 45, mode === 'walk' ? 30 : 75)
-    const s = cls === 'pill--good' ? 0 : cls === 'pill--warn' ? 1 : cls === 'pill--bad' ? 2 : -1
-    if (s > worst) worst = s
-  }
-  return worst === -1 ? 'card__status--none' : worst === 0 ? 'card__status--ok' : worst === 1 ? 'card__status--tight' : 'card__status--far'
-})
-
-/** Hover text so the top bar is never a mystery colour. */
-const statusTitle = computed(() => {
-  const cls = statusClass.value
-  if (cls === 'card__status--ok') return 'All commutes within target'
-  if (cls === 'card__status--tight') return 'A commute is getting tight'
-  if (cls === 'card__status--far') return 'A commute is too far'
-  if (cls === 'card__status--none') return 'No route found for a commute'
-  return undefined
-})
-
 async function toggleFavourite() {
   await store.toggleTriage(props.rid, 'favourite', !triage.value?.favourite)
 }
@@ -213,14 +164,14 @@ async function toggleViewed() {
 
 <template>
   <article class="card" :class="{ 'card--dismissed': triage?.dismissed }">
-    <!-- Worst-commute status bar (redesign mockup); title explains the colour -->
-    <div class="card__status" :class="statusClass" :title="statusTitle" />
-    <!-- Triage border: favourite / dismissed / seen — matches the buttons -->
-    <div class="card__border" :class="borderClass" :title="borderTitle" />
-
     <div class="card__body">
       <!-- Top row: Address | Monthly cost -->
       <div class="card__top">
+        <span v-if="triage?.favourite" class="card__fav-icon" role="img" aria-label="Favourite">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2">
+            <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
+          </svg>
+        </span>
         <a :href="'#/property/' + rid" class="card__address" :aria-label="'View details for ' + address">
           <h3 class="card__address-text">{{ address }}</h3>
         </a>
@@ -243,6 +194,7 @@ async function toggleViewed() {
         <span v-if="price" class="card__tag card__tag--price">£{{ price.toLocaleString() }}</span>
         <span v-if="bedrooms" class="card__tag">{{ bedrooms }} bed</span>
         <span v-if="freshnessLabel" class="card__tag" :class="freshnessClass">{{ freshnessLabel }}</span>
+        <span v-if="triage?.is_viewed" class="card__tag card__tag--seen">Seen</span>
       </div>
 
       <!-- Commute rows: per-person -->
@@ -339,26 +291,6 @@ async function toggleViewed() {
 }
 .card--dismissed { opacity: 0.6; }
 
-.card__status {
-  height: 4px;
-  flex-shrink: 0;
-}
-.card__status--ok    { background: var(--green); }
-.card__status--tight { background: var(--orange); }
-.card__status--far   { background: var(--red); }
-.card__status--none  { background: var(--commute-none); }
-
-.card__border {
-  position: absolute;
-  top: 0; left: 0;
-  width: 4px; height: 100%;
-  border-radius: 0;
-}
-/* Same colours as the triage buttons' active states — one axis, one palette. */
-.card__border--favourite { background: var(--blue); }
-.card__border--dismissed { background: var(--red); }
-.card__border--viewed { background: var(--green); }
-
 .card__body {
   padding: 14px 14px 12px;
   display: flex;
@@ -372,6 +304,16 @@ async function toggleViewed() {
   align-items: flex-start;
   gap: var(--sp-3);
 }
+/* Favourite heart — the visible marker on favourited cards (no hover needed) */
+.card__fav-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 2px;
+  color: var(--blue);
+  flex-shrink: 0;
+}
+.card__fav-icon svg { display: block; }
+
 .card__address {
   flex: 1;
   min-width: 0;
@@ -430,6 +372,7 @@ async function toggleViewed() {
   color: var(--text-secondary);
 }
 .card__tag--price { font-weight: var(--fw-semibold); color: var(--text); }
+.card__tag--seen { background: var(--slate-100); color: var(--slate-600); }
 .card__tag.pill--good { background: var(--green-bg); color: var(--green-text); }
 .card__tag.pill--warn { background: var(--orange-bg); color: var(--orange-text); }
 .card__tag.pill--bad { background: var(--red-bg); color: var(--red-text); }

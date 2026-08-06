@@ -335,69 +335,49 @@ describe('PropertyCard error handling', () => {
 
 })
 
-describe('PropertyCard status bar', () => {
-  function commuteSummary(duration?: number): PropertySummary {
-    return makeSummary({
-      commutes: {
-        'Simon/Pimlico': {
-          commute: {
-            succeeded: true,
-            value: duration === undefined
-              ? { label: 'Pimlico' }
-              : { duration: { value: duration, unit: 'minute' }, label: 'Pimlico' },
-            error: null, provenance: { label: 'test' }, is_child: false,
-          },
-        },
-      },
-    })
+describe('PropertyCard triage markers', () => {
+  const noTriage = { favourite: false, dismissed: false, is_viewed: false, user_notes: '', triage_status: '' }
+
+  function mountWithTriage(triage: typeof noTriage) {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = usePropertiesStore()
+    store.triage['123'] = triage
+    const wrapper = mount(PropertyCard, { props: { rid: '123', data: makeSummary() }, global: { plugins: [pinia] } })
+    return { wrapper, store }
   }
 
-  it('colours the top bar by the worst commute severity, with a tooltip', async () => {
-    const cases: Array<[number | undefined, string, string]> = [
-      [32, 'card__status--ok', 'All commutes within target'],
-      [55, 'card__status--tight', 'A commute is getting tight'],
-      [90, 'card__status--far', 'A commute is too far'],
-      [undefined, 'card__status--none', 'No route found for a commute'],
-    ]
-    for (const [duration, cls, title] of cases) {
-      const wrapper = mountCard({ rid: '123', data: commuteSummary(duration) })
-      const bar = wrapper.find('.card__status')
-      expect(bar.classes()).toContain(cls)
-      expect(bar.attributes('title')).toBe(title)
-    }
+  it('has NO colour bars at all (status bar and accent border are gone)', () => {
+    const { wrapper } = mountWithTriage(noTriage)
+    expect(wrapper.find('.card__status').exists()).toBe(false)
+    expect(wrapper.find('.card__border').exists()).toBe(false)
+  })
+
+  it('shows the favourite heart icon on favourited cards only', async () => {
+    const { wrapper, store } = mountWithTriage(noTriage)
+    expect(wrapper.find('.card__fav-icon').exists()).toBe(false)
+    store.triage['123'] = { ...noTriage, favourite: true }
+    await wrapper.vm.$nextTick()
+    const icon = wrapper.find('.card__fav-icon')
+    expect(icon.exists()).toBe(true)
+    expect(icon.attributes('aria-label')).toBe('Favourite')
+  })
+
+  it('shows a Seen tag on viewed cards only', async () => {
+    const { wrapper, store } = mountWithTriage(noTriage)
+    expect(wrapper.find('.card__tag--seen').exists()).toBe(false)
+    store.triage['123'] = { ...noTriage, is_viewed: true }
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.card__tag--seen').text()).toBe('Seen')
+  })
+
+  it('greys the whole card when dismissed', async () => {
+    const { wrapper, store } = mountWithTriage(noTriage)
+    expect(wrapper.find('.card').classes()).not.toContain('card--dismissed')
+    store.triage['123'] = { ...noTriage, dismissed: true }
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.card').classes()).toContain('card--dismissed')
   })
 })
 
-describe('PropertyCard triage border', () => {
-  it('has NO border or tooltip for an untouched card (default state)', () => {
-    const pinia = createPinia()
-    setActivePinia(pinia)
-    const store = usePropertiesStore()
-    store.triage['123'] = { favourite: false, dismissed: false, is_viewed: false, user_notes: '', triage_status: '' }
-    const wrapper = mount(PropertyCard, { props: { rid: '123', data: makeSummary() }, global: { plugins: [pinia] } })
-    const border = wrapper.find('.card__border')
-    expect([...border.classes()].filter(c => c.startsWith('card__border--'))).toEqual([])
-    expect(border.attributes('title')).toBeUndefined()
-  })
-
-  it('colours the left border to match the triage buttons, with a tooltip', async () => {
-    const pinia = createPinia()
-    setActivePinia(pinia)
-    const store = usePropertiesStore()
-    store.triage['123'] = { favourite: false, dismissed: false, is_viewed: false, user_notes: '', triage_status: '' }
-    const wrapper = mount(PropertyCard, { props: { rid: '123', data: makeSummary() }, global: { plugins: [pinia] } })
-    const cases: Array<[{ favourite?: boolean; dismissed?: boolean; is_viewed?: boolean }, string, string]> = [
-      [{ favourite: true }, 'card__border--favourite', 'Favourite'],
-      [{ dismissed: true }, 'card__border--dismissed', 'Dismissed'],
-      [{ is_viewed: true }, 'card__border--viewed', 'Seen'],
-    ]
-    for (const [triage, cls, title] of cases) {
-      store.triage['123'] = { favourite: false, dismissed: false, is_viewed: false, user_notes: '', triage_status: '', ...triage }
-      await wrapper.vm.$nextTick()
-      const border = wrapper.find('.card__border')
-      expect(border.classes()).toContain(cls)
-      expect(border.attributes('title')).toBe(title)
-    }
-  })
-})
 

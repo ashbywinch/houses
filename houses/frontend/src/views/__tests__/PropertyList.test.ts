@@ -236,7 +236,7 @@ describe('PropertyList filtering', () => {
     const legend = wrapper.find('.legend-strip')
     expect(legend.text()).toContain('fine')
     expect(legend.text()).toContain('getting tight')
-    expect(legend.text()).toContain('too far')
+    expect(legend.text()).toContain('yikes')
     expect(legend.text()).toContain('no route')
   })
 
@@ -296,6 +296,113 @@ describe('PropertyList sorting', () => {
     expect(sorted).toEqual(['prop-c', 'prop-b', 'prop-a'])
   })
 })
+describe('PropertyList sort and filter sheets', () => {
+  beforeEach(() => {
+    vi.mocked(api.fetchAllSummaries).mockResolvedValue(mockData as any)
+  })
+
+  async function mountList() {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(PropertyList, { global: { plugins: [pinia] } })
+    await flushPromises()
+    return wrapper
+  }
+
+  it('opens the sort sheet from the Sort pill and the filter sheet from the Filter pill — separately', async () => {
+    const wrapper = await mountList()
+    expect(wrapper.find('[aria-label="Sort properties"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="Filter properties"]').exists()).toBe(false)
+
+    await wrapper.findAll('.controls-row .pill')[0].trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[aria-label="Sort properties"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="Filter properties"]').exists()).toBe(false)
+
+    await wrapper.find('[aria-label="Close sort"]').trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.findAll('.controls-row .pill')[1].trigger('click')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[aria-label="Filter properties"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="Sort properties"]').exists()).toBe(false)
+  })
+
+  it('shows the active sort choice on the Sort pill', async () => {
+    const wrapper = await mountList()
+    expect(wrapper.findAll('.controls-row .pill')[0].text()).toContain('Date Added')
+    await wrapper.findAll('.controls-row .pill')[0].trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.find('.sheet__select').setValue('price_asc')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.findAll('.controls-row .pill')[0].text()).toContain('Price: Low→High')
+  })
+})
+
+describe('PropertyList weekly commute sort', () => {  beforeEach(() => {
+    vi.mocked(api.fetchAllSummaries).mockResolvedValue(mockData as any)
+  })
+
+  function commute(mins: number, isChild = false) {
+    return {
+      commute: {
+        succeeded: true,
+        value: { duration: { value: mins, unit: 'minute' } },
+        error: null, provenance: { label: 'test' },
+        is_child: isChild,
+      },
+    }
+  }
+
+  async function mountWithCommutes(commutes: Record<string, Record<string, ReturnType<typeof commute>>>) {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = usePropertiesStore()
+    const wrapper = mount(PropertyList, { global: { plugins: [pinia] } })
+    await flushPromises() // let onMounted's loadAll settle, then take over
+    store.rids = ['prop-a', 'prop-b', 'prop-c']
+    store.summaries = {
+      'prop-a': { ...mockData['prop-a'], commutes: commutes['prop-a'] },
+      'prop-b': { ...mockData['prop-b'], commutes: commutes['prop-b'] },
+      'prop-c': { ...mockData['prop-c'], commutes: commutes['prop-c'] },
+    } as any
+    await wrapper.vm.$nextTick()
+    return wrapper
+  }
+
+  /** Open the sort sheet and pick an option — the real user path. */
+  async function chooseSort(wrapper: ReturnType<typeof mount>, value: string) {
+    await wrapper.findAll('.controls-row .pill')[0].trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.find('.sheet__select').setValue(value)
+    await wrapper.vm.$nextTick()
+  }
+
+  it('sorts by total weekly adult commute time ascending (2 trips × 5 days)', async () => {
+    const wrapper = await mountWithCommutes({
+      // Simon 60 + Lorena 10 = 70/day → 700/wk
+      'prop-a': { 'Simon/Office': commute(60), 'Lorena/Office': commute(10) },
+      // Simon 30 → 300/wk
+      'prop-b': { 'Simon/Office': commute(30) },
+      // Simon 90 → 900/wk; George's 20 is a CHILD commute and must not count
+      'prop-c': { 'Simon/Office': commute(90), 'George/School': commute(20, true) },
+    })
+    await chooseSort(wrapper, 'weekly_commute')
+    const addrs = wrapper.findAll('.card__address-text').map(a => a.text())
+    expect(addrs).toEqual(['20 Mid Rd', '10 Cheap St', '30 Expensive Ave'])
+  })
+
+  it('puts houses with no commute data last', async () => {
+    const wrapper = await mountWithCommutes({
+      'prop-a': { 'Simon/Office': commute(60) },
+      'prop-b': {},
+      'prop-c': { 'Simon/Office': commute(90) },
+    })
+    await chooseSort(wrapper, 'weekly_commute')
+    const addrs = wrapper.findAll('.card__address-text').map(a => a.text())
+    expect(addrs).toEqual(['10 Cheap St', '30 Expensive Ave', '20 Mid Rd'])
+  })
+})
+
 describe('PropertyList map tab markers', () => {
   beforeEach(() => {
     vi.mocked(api.fetchAllSummaries).mockResolvedValue(mockData as any)

@@ -9,7 +9,12 @@ import WhatIfPanel from '../components/WhatIfPanel.vue'
 const store = usePropertiesStore()
 
 const sortBy = ref<string>('date_added')
+const showSortSheet = ref(false)
 const showFilterSheet = ref(false)
+
+/** The Sort pill shows the active choice, so it never lies about what
+ *  the list is ordered by. */
+const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)?.label ?? sortBy.value)
 const activeTab = ref<'properties' | 'favourites' | 'map'>('properties')
 const maxPriceFilter = ref<number | null>(null)
 const minBedroomsFilter = ref<number | null>(null)
@@ -23,6 +28,7 @@ const sortOptions = [
   { value: 'price_desc', label: 'Price: High→Low' },
   { value: 'monthly_cost', label: 'Monthly Cost' },
   { value: 'commute', label: 'Commute Time' },
+  { value: 'weekly_commute', label: 'Weekly Commute (all)' },
   { value: 'ofsted', label: 'Ofsted Rating' },
   { value: 'bedrooms', label: 'Bedrooms' },
   { value: 'date_added', label: 'Date Added' },
@@ -66,6 +72,23 @@ function bestCommuteMin(rid: string) {
     if (mins != null && mins < best) best = mins
   }
   return best
+}
+
+/** Total weekly commute time across ALL adults: each adult commutes 2
+ *  trips a day, 5 days a week (child commutes don't count). */
+function weeklyCommuteMin(rid: string) {
+  const commutes = store.summaries[rid]?.commutes
+  if (!commutes) return Infinity
+  let total = 0
+  for (const c of Object.values(commutes)) {
+    if (c.commute?.is_child) continue
+    const val = c.commute?.value as Record<string, unknown> | undefined
+    const dur = val?.duration as Record<string, unknown> | undefined
+    const mins = dur?.value as number | undefined
+    if (mins == null) continue
+    total += mins * 2 * 5
+  }
+  return total === 0 ? Infinity : total
 }
 
 // ── C9: per-person commute ceiling ─────────────────────────────
@@ -191,6 +214,7 @@ const displayedRids = computed(() => {
     case 'price_desc': rids.sort((a, b) => priceNum(b) - priceNum(a)); break
     case 'monthly_cost': rids.sort((a, b) => monthlyCostNum(a) - monthlyCostNum(b)); break
     case 'commute': rids.sort((a, b) => bestCommuteMin(a) - bestCommuteMin(b)); break
+    case 'weekly_commute': rids.sort((a, b) => weeklyCommuteMin(a) - weeklyCommuteMin(b)); break
     case 'ofsted': rids.sort((a, b) => bestOfsted(a) - bestOfsted(b)); break
     case 'bedrooms': rids.sort((a, b) => bedroomNum(b) - bedroomNum(a)); break
     case 'date_added': rids.sort((a, b) => addedDate(b).localeCompare(addedDate(a))); break
@@ -262,8 +286,8 @@ const ceilingLimitText = computed(() => {
     </div>
 
     <div class="controls-row">
-      <button class="pill" @click="showFilterSheet = true">
-        <span class="pill__label">Date Added</span>
+      <button class="pill" @click="showSortSheet = true">
+        <span class="pill__label">{{ sortLabel }}</span>
         <svg class="pill-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
       </button>
       <button class="pill" :class="{ 'pill--active': activeFilterCount > 0 }" @click="showFilterSheet = true">
@@ -297,7 +321,7 @@ const ceilingLimitText = computed(() => {
     <div class="legend-strip" role="note" aria-label="Commute time colours">
       <span class="legend-item"><i class="legend-dot legend-dot--good"></i>fine</span>
       <span class="legend-item"><i class="legend-dot legend-dot--warn"></i>getting tight</span>
-      <span class="legend-item"><i class="legend-dot legend-dot--bad"></i>too far</span>
+      <span class="legend-item"><i class="legend-dot legend-dot--bad"></i>yikes</span>
       <span class="legend-item"><i class="legend-dot legend-dot--muted"></i>no route</span>
     </div>
 
@@ -321,20 +345,34 @@ const ceilingLimitText = computed(() => {
 
     <div class="tab-bar-spacer" />
 
-    <div v-if="showFilterSheet" class="sheet-overlay" @click="showFilterSheet = false" />
-    <div v-if="showFilterSheet" class="sheet" role="dialog" aria-label="Filter properties" aria-modal="true">
+    <div v-if="showSortSheet" class="sheet-overlay" @click="showSortSheet = false" />
+    <div v-if="showSortSheet" class="sheet" role="dialog" aria-label="Sort properties" aria-modal="true">
       <div class="sheet__handle" />
       <div class="sheet__header">
-        <h2 class="sheet__title">Sort &amp; Filter</h2>
-        <button class="sheet__close" @click="showFilterSheet = false" aria-label="Close">&times;</button>
+        <h2 class="sheet__title">Sort</h2>
+        <button class="sheet__close" @click="showSortSheet = false" aria-label="Close sort">&times;</button>
       </div>
       <div class="sheet__body">
         <div class="sheet__section">
           <label class="sheet__label">Sort by</label>
-          <select v-model="sortBy" class="sheet__select" @change="showFilterSheet = false">
+          <select v-model="sortBy" class="sheet__select" @change="showSortSheet = false">
             <option v-for="opt in sortOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
           </select>
         </div>
+        <div class="sheet__section">
+          <button class="sheet__apply" @click="showSortSheet = false">Apply</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showFilterSheet" class="sheet-overlay" @click="showFilterSheet = false" />
+    <div v-if="showFilterSheet" class="sheet" role="dialog" aria-label="Filter properties" aria-modal="true">
+      <div class="sheet__handle" />
+      <div class="sheet__header">
+        <h2 class="sheet__title">Filter</h2>
+        <button class="sheet__close" @click="showFilterSheet = false" aria-label="Close filter">&times;</button>
+      </div>
+      <div class="sheet__body">
         <div class="sheet__section">
           <label class="sheet__label">Max monthly cost (£)</label>
           <input v-model.number="maxPriceFilter" type="number" class="sheet__input" placeholder="e.g. 3000" min="0" step="100" />
