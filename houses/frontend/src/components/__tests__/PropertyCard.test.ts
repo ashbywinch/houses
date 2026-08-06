@@ -21,7 +21,7 @@ function makeSummary(overrides?: Partial<PropertySummary>): PropertySummary {
     best_location: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 'test' } },
     rightmove_price: { succeeded: true, value: {amount: "500000", currency: 'GBP'}, error: null, provenance: { label: 'test' } },
     rightmove_bedrooms: { succeeded: true, value: '3', error: null, provenance: { label: 'test' } },
-    total_monthly_cost: { succeeded: true, value: {amount: "2500", currency: "GBP"}, error: null, provenance: { label: 'test' } },
+    total_monthly_cost: { succeeded: true, value: { value: { amount: "2500", currency: "GBP" }, stddev: 0 }, error: null, provenance: { label: 'test' } },
     walkability: { succeeded: true, value: { walk_to_town: {value: 15, unit: 'minute'} }, error: null, provenance: { label: 'test' } },
     town_name: { succeeded: true, value: 'London', error: null, provenance: { label: 'test' } },
     commutes: {},
@@ -144,6 +144,20 @@ describe('PropertyCard basic rendering', () => {
   it('shows total monthly cost', () => {
     const wrapper = mountCard({ rid: '123', data: makeSummary() })
     expect(wrapper.text()).toContain('£2,500')
+  })
+
+  it('renders ≈ prefix with the one-step reason when total is approximate (Part A)', () => {
+    const summary = makeSummary({
+      total_monthly_cost: {
+        succeeded: true,
+        value: { value: { amount: '2500', currency: 'GBP' }, stddev: 50 },
+        error: null,
+        provenance: { label: 'test' },
+      },
+    })
+    const wrapper = mountCard({ rid: '123', data: summary })
+    expect(wrapper.text()).toContain('≈£2,500/mo')
+    expect(wrapper.find('.card__monthly-cost').attributes('title')).toContain('approximate')
   })
 
   it('shows freshness badge with property_added_at', () => {

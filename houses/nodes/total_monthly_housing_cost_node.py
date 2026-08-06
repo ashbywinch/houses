@@ -5,13 +5,18 @@ from money import Money
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.expression import Attr, Conditional, Div, Field, Literal, Ref
+from dag.measurement import Measurement
 
 
-class TotalMonthlyHousingCostNode(DerivedNode[Money]):
+class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
     """Total monthly housing cost.
 
     = Mortgage + SinkingFund(monthly) + LifeInsurance + Commute + CouncilTax - RentalIncome
     When Status is "Current", sinking fund and life insurance are excluded.
+
+    The value is a ``Measurement``: exact (stddev 0) when every component
+    is exact; approximate when a component (council tax estimate) carries
+    a spread — the total "inherits ≈" (Part A).
     """
 
     def __init__(
@@ -31,7 +36,7 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
         self._life_insurance_node = life_insurance_node
         super().__init__(
             node_id,
-            Money,
+            Measurement[Money],
             (
                 monthly_mortgage_node,
                 rental_income_node,
@@ -95,5 +100,5 @@ class TotalMonthlyHousingCostNode(DerivedNode[Money]):
         council_tax: Attempt,
         sinking: Attempt[Money] | None = None,
         life_insurance: Attempt[Money] | None = None,
-    ) -> Attempt[Money]:
+    ) -> Attempt[Measurement[Money]]:
         return self.expression.evaluate()

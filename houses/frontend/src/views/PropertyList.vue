@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import { usePropertiesStore } from '../stores/properties'
+import type { PropertySummary } from '../types'
 import Header from '../components/Header.vue'
 import PropertyCard from '../components/PropertyCard.vue'
+import WhatIfPanel from '../components/WhatIfPanel.vue'
 
 const store = usePropertiesStore()
 
@@ -36,10 +38,21 @@ function bedroomNum(rid: string) {
   return b?.succeeded && b.value ? Number(b.value) : 0
 }
 function monthlyCostNum(rid: string) {
-  const m = store.summaries[rid]?.total_monthly_cost
-  if (!m?.succeeded || m.value == null) return Infinity
-  if (typeof m.value === 'number') return m.value
+  const m = store.monthlyTotalFor(rid)
+  if (!m) return Infinity
   return parseFloat(m.value.amount)
+}
+
+/** Card data with the hypothetical total overlaid while the what-if is
+ *  active (labelled 'what-if' so the card can mark it as a preview). */
+function cardData(rid: string): PropertySummary {
+  const s = store.summaries[rid]
+  const wt = store.whatIfTotals?.[rid]
+  if (!s || !wt) return s
+  return {
+    ...s,
+    total_monthly_cost: { succeeded: true, value: wt, error: null, provenance: { label: 'what-if' } },
+  }
 }
 function bestCommuteMin(rid: string) {
   const commutes = store.summaries[rid]?.commutes
@@ -218,6 +231,8 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
       </div>
     </div>
 
+    <WhatIfPanel :threshold="maxPriceFilter ?? 1500" />
+
     <div class="results-header" role="status" aria-live="polite">{{ displayedRids.length }} properties found</div>
 
     <div v-if="store.loading" class="empty-state"><p class="empty-state__text">Loading...</p></div>
@@ -225,7 +240,7 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
     <div v-else-if="displayedRids.length === 0" class="empty-state"><p class="empty-state__text">No properties match your criteria.</p></div>
     <div v-else class="card-list" role="list">
       <template v-for="rid in displayedRids" :key="rid">
-        <PropertyCard :rid :data="store.summaries[rid]" />
+        <PropertyCard :rid :data="cardData(rid)" />
       </template>
     </div>
 

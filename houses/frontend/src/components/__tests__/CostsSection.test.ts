@@ -172,6 +172,51 @@ describe('CostsSection blocked-state copy (C1/C2)', () => {
   })
 })
 
+describe('CostsSection uncertainty rendering (Part A)', () => {
+  it('renders the Band D estimate with spread when council tax is estimated', () => {
+    const wrapper = mountCosts({
+      affordability: {
+        council_tax: {
+          succeeded: true,
+          value: { band: '?', yearly_cost: { value: { amount: '1200', currency: 'GBP' }, stddev: 50 }, evidence_url: '' },
+          error: null,
+          provenance: {},
+        },
+      },
+    })
+    expect(wrapper.text()).toContain('? · (£1,200 ± £50)/yr')
+  })
+
+  it('renders an exact council tax without a spread', () => {
+    const wrapper = mountCosts({
+      affordability: {
+        council_tax: {
+          succeeded: true,
+          value: { band: 'D', yearly_cost: { value: { amount: '1800', currency: 'GBP' }, stddev: 0 }, evidence_url: '' },
+          error: null,
+          provenance: {},
+        },
+      },
+    })
+    expect(wrapper.text()).toContain('D · £1,800/yr')
+  })
+
+  it('renders ≈ on the Total Monthly row when approximate', () => {
+    const wrapper = mountCosts({
+      affordability: {
+        total_monthly_housing_cost: {
+          succeeded: true,
+          value: { value: { amount: '1100', currency: 'GBP' }, stddev: 4.17 },
+          error: null,
+          provenance: {},
+        },
+      },
+    })
+    const totalRow = wrapper.find('.costs-row--total')
+    expect(totalRow.text()).toContain('≈ £1100')
+  })
+})
+
 describe('CostsSection mortgage framing (B8)', () => {
   it('explains the remaining mortgage when the deposit dominates', () => {
     const wrapper = mountCosts({

@@ -7,6 +7,7 @@ from __future__ import annotations
 import pytest
 from money import Money
 
+from dag.measurement import Measurement
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.council_tax_info import CouncilTaxInfo
@@ -248,15 +249,17 @@ class TestCurrentPropertyGating:
         fin.push({}, "test")
         cb.push({}, "test")
         ct.push(
-            CouncilTaxInfo(band="D", yearly_cost=Money("1800", "GBP")),
+            CouncilTaxInfo(band="D", yearly_cost=Measurement(Money("1800", "GBP"), 0.0)),
             "test",
         )
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
+        total = a.value_or_none()
+        assert total is not None
         # Total = 1000 + 12000/12*2/3 + 150 + 1800/12 - 600
         #       = 1000 + 666.67 + 150 + 150 - 600 = 1366.67
         expected = round(1000 + 12000 / 12 * 2 / 3 + 150 + 1800 / 12 - 600, 2)
-        assert float(a.value_or_none().amount) == pytest.approx(expected, abs=0.01), (
-            f"Expected ~{expected}, got {a.value_or_none()}"
+        assert float(total.value.amount) == pytest.approx(expected, abs=0.01), (
+            f"Expected ~{expected}, got {total}"
         )

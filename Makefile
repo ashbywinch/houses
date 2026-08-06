@@ -119,12 +119,14 @@ coverage: setup
 	@$(UV) run coverage html
 	@echo "${GREEN}Coverage report: htmlcov/index.html${NC}"
 
-lint: setup
-	@$(RUFF) check houses/ tests/ tools/
+lint: setup lint-check
+
+lint-check:  # Shared with the pre-commit hook — single source of truth for the lint scope
+	@$(RUFF) check houses/ tests/ tools/ dag/
 	cd houses/frontend && npm run lint:css
 
 lint-github: setup   # CI only: findings surface as PR annotations
-	@$(RUFF) check houses/ tests/ tools/ --output-format=github
+	@$(RUFF) check houses/ tests/ tools/ dag/ --output-format=github
 	cd houses/frontend && npm run lint:css   # keep the same coverage as `make lint`
 
 typecheck: setup
@@ -133,8 +135,8 @@ typecheck: setup
 .PHONY: typecheck
 
 format: setup
-	@$(RUFF) check --fix houses/ tests/
-	@$(RUFF) format houses/ tests/
+	@$(RUFF) check --fix houses/ tests/ dag/
+	@$(RUFF) format houses/ tests/ dag/
 
 clean:
 	@rm -rf .venv htmlcov/

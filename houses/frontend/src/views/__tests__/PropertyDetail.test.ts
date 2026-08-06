@@ -55,7 +55,7 @@ function makeDetail(): PropertyDetailType {
       monthly_sinking_fund: { succeeded: true, value: {amount: "200", currency: "GBP"}, error: null, provenance: { label: 'test' } },
       monthly_commute_cost: { succeeded: true, value: { persons: { Simon: { daily_gbp: 12.5, yearly_gbp: 5750 } }, yearly_total_gbp: 5750, formula_explanation: 'Aggregated' }, error: null, provenance: { label: 'test' } },
       rental_income: { succeeded: true, value: {amount: "0", currency: "GBP"}, error: null, provenance: { label: 'test' } },
-      total_monthly_housing_cost: { succeeded: true, value: {amount: "1700", currency: "GBP"}, error: null, provenance: { label: 'test' } },
+      total_monthly_housing_cost: { succeeded: true, value: { value: {amount: "1700", currency: "GBP"}, stddev: 0 }, error: null, provenance: { label: 'test' } },
     },
     area: {
       walkability: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },

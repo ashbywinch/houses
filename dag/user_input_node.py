@@ -8,6 +8,7 @@ from typing import Any, Generic, TypeVar
 from pydantic_core import core_schema
 
 from dag.attempt import Attempt, Provenance, SourceType, project_value
+from dag.eval_context import staged_attempt
 from dag.node import Node
 
 # Friendly display names for settings nodes, keyed by the node id stem
@@ -206,6 +207,11 @@ class UserInputNode(Node[T], Generic[T]):
         return Attempt.pending()
 
     def latest_attempt(self) -> Attempt:
+        # During a scenario evaluation (dag.evaluate), the staged
+        # hypothetical attempt shadows the real value.
+        staged = staged_attempt(self._id)
+        if staged is not None:
+            return staged
         if self._value is not None:
             return Attempt.succeeded(self._value)
         return Attempt.pending()

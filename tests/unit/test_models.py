@@ -95,9 +95,15 @@ def test_bracknell_commute_defaults() -> None:
 def test_council_tax_info() -> None:
     from money import Money
 
-    c = CouncilTaxInfo(band="D", yearly_cost=Money("2000", "GBP"), evidence_url="https://gov.uk/council-tax-bands")
+    from dag.measurement import Measurement
+
+    c = CouncilTaxInfo(
+        band="D",
+        yearly_cost=Measurement(Money("2000", "GBP"), 0.0),
+        evidence_url="https://gov.uk/council-tax-bands",
+    )
     assert c.band == "D"
-    assert c.yearly_cost == Money("2000", "GBP")
+    assert c.yearly_cost == Measurement(Money("2000", "GBP"), 0.0)
     assert c.evidence_url == "https://gov.uk/council-tax-bands"
 
 

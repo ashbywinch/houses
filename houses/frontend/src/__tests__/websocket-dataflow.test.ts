@@ -125,7 +125,7 @@ describe('loadAll data flow', () => {
         best_location: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 'api' } },
         rightmove_price: { succeeded: true, value: { amount: "300000", currency: 'GBP' }, error: null, provenance: { label: 'api' } },
         rightmove_bedrooms: { succeeded: true, value: '3', error: null, provenance: { label: 'api' } },
-        total_monthly_cost: { succeeded: true, value: { amount: "1800", currency: 'GBP' }, error: null, provenance: { label: 'api' } },
+        total_monthly_cost: { succeeded: true, value: { value: { amount: "1800", currency: "GBP" }, stddev: 0 }, error: null, provenance: { label: 'api' } },
         town_name: { succeeded: true, value: 'Testown', error: null, provenance: { label: 'api' } },
         commutes: {},
         schools: {
@@ -141,7 +141,7 @@ describe('loadAll data flow', () => {
         best_location: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 'api' } },
         rightmove_price: { succeeded: true, value: { amount: "500000", currency: 'GBP' }, error: null, provenance: { label: 'api' } },
         rightmove_bedrooms: { succeeded: true, value: '4', error: null, provenance: { label: 'api' } },
-        total_monthly_cost: { succeeded: true, value: { amount: "2500", currency: 'GBP' }, error: null, provenance: { label: 'api' } },
+        total_monthly_cost: { succeeded: true, value: { value: { amount: "2500", currency: "GBP" }, stddev: 0 }, error: null, provenance: { label: 'api' } },
         town_name: { succeeded: true, value: 'Big Town', error: null, provenance: { label: 'api' } },
         commutes: { 'Simon/Office': { commute: { succeeded: true, value: { duration: { value: 45, unit: 'minute' } }, error: null, provenance: { label: 'api' } } } },
         schools: {

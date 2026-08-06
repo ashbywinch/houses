@@ -46,6 +46,7 @@ class TestCouncilTaxNode:
         """CouncilTaxNode returns yearly_cost not cost (matches frontend expectation)."""
         from money import Money
 
+        from dag.measurement import Measurement
         from houses.council_tax_info import CouncilTaxInfo
         from houses.nodes.epc_node import CouncilTaxNode
         from houses.services_provider import _request_services as _sp
@@ -55,7 +56,9 @@ class TestCouncilTaxNode:
             async def lookup(self, postcode, address=""):
                 from dag.attempt import Attempt
 
-                return Attempt.succeeded(CouncilTaxInfo(band="D", yearly_cost=Money("1800", "GBP")))
+                return Attempt.succeeded(
+                    CouncilTaxInfo(band="D", yearly_cost=Measurement(Money("1800", "GBP"), 0.0))
+                )
 
         svc = make_services(council_tax_service=_FakeCT())
         token = _sp.set(svc)
@@ -75,7 +78,7 @@ class TestCouncilTaxNode:
             val = a.value_or_none()
             assert val is not None
             assert val.band == "D"
-            assert val.yearly_cost == Money("1800", "GBP")
+            assert val.yearly_cost == Measurement(Money("1800", "GBP"), 0.0)
         finally:
             _sp.reset(token)
 

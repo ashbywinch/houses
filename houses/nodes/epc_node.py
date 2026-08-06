@@ -1,9 +1,19 @@
 from __future__ import annotations
 
-from dag.attempt import Attempt, SourceType
+from dataclasses import replace
+
+from money import Money
+
+from dag.attempt import Attempt, Provenance, SourceType
 from dag.derived_node import DerivedNode
+from dag.measurement import Measurement
 from houses.council_tax_info import CouncilTaxInfo
 from houses.services_provider import get_services
+
+# Fallback when the council tax lookup fails: a Band D estimate with a
+# spread, so the total can show "≈" instead of a bare "?" (Part A).
+_FALLBACK_YEARLY_COST = Money("1200", "GBP")
+_FALLBACK_STDDEV = 50.0
 
 
 class EpcNode(DerivedNode[dict]):
@@ -47,13 +57,37 @@ class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
         svc = get_services()
         result = await svc.council_tax_service.lookup(postcode.value_or_none() or "", address=addr)
         if result.succeeded:
-            return Attempt.succeeded(result.value_or_none())
-        # Propagate the real reason (e.g. ambiguous address) so the frontend
-        # can show it — not a generic "no council tax data".
-        return Attempt.impossible(result.error or "no council tax data")
+            info = result.value_or_none()
+            if info is None:
+                return Attempt.impossible("no council tax data")
+            # Normalise: the value always carries a Measurement, exact
+            # (stddev 0) when the lookup succeeded.
+            if info.yearly_cost is not None and not isinstance(info.yearly_cost, Measurement):
+                info = replace(info, yearly_cost=Measurement(info.yearly_cost, 0.0))
+            return Attempt.succeeded(info)
+        # Lookup failed — return a Band D estimate with a spread instead
+        # of plain "?"; provenance notes the fallback (Part A).
+        return Attempt.succeeded(
+            CouncilTaxInfo(
+                band="?",
+                yearly_cost=Measurement(_FALLBACK_YEARLY_COST, _FALLBACK_STDDEV),
+            )
+        )
 
     @property
     def provenance_source_type(self) -> SourceType:
         return SourceType.API
+
+    async def build_provenance(self) -> Provenance:
+        p = await super().build_provenance()
+        v = self._attempt.value_or_none()
+        if (
+            self._attempt.succeeded
+            and v is not None
+            and v.yearly_cost is not None
+            and v.yearly_cost.stddev > 0
+        ):
+            p.description = "Council tax estimated — address lookup failed."
+        return p
 
     # Default build_provenance() walks best_address and postcode deps.

@@ -1,4 +1,4 @@
-import type { PropertyDetail, PropertySummary } from '../types'
+import type { MeasurementValue, PropertyDetail, PropertySummary } from '../types'
 import { useAuthStore } from '../stores/auth'
 import router from '../router'
 
@@ -83,6 +83,23 @@ export function patchPerson(name: string, body: Record<string, unknown>): Promis
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
   }).then(checkFor401)
+}
+
+export interface WhatIfResult {
+  succeeded: boolean
+  monthly_total: MeasurementValue | null
+  error?: string
+}
+
+export async function postWhatIf(persons: Record<string, unknown>[]): Promise<Record<string, WhatIfResult>> {
+  const r = await fetch(`${BASE}/what-if`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ persons }),
+  }).then(checkFor401)
+  if (!r.ok) throw new Error(`What-if failed: ${r.status}`)
+  const data = await parseJson<{ results: Record<string, WhatIfResult> }>(r)
+  return data.results
 }
 
 export function patchFinancial(financial: Record<string, unknown>): Promise<Response> {

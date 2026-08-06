@@ -1,0 +1,157 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { setActivePinia, createPinia } from 'pinia'
+import { mount } from '@vue/test-utils'
+import WhatIfPanel from '../WhatIfPanel.vue'
+import { usePropertiesStore } from '../../stores/properties'
+
+vi.mock('../../services/api', () => ({
+  fetchSettings: vi.fn(),
+  postWhatIf: vi.fn(),
+  patchPerson: vi.fn().mockResolvedValue(new Response()),
+  fetchAllSummaries: vi.fn().mockResolvedValue({}),
+}))
+
+import * as api from '../../services/api'
+
+const settingsPersons = {
+  persons: {
+    succeeded: true,
+    value: [
+      {
+        name: 'Simon',
+        selling_home: true,
+        home_sale_price: { amount: '550000', currency: 'GBP' },
+        outstanding_mortgage: { amount: '373000', currency: 'GBP' },
+        cash_contribution: { amount: '0', currency: 'GBP' },
+        places_of_interest: [{ label: 'Pimlico', address: '1 Pimlico Rd', trips_per_week: 1, weeks_per_year: 46, acceptable_modes: ['train'] }],
+      },
+      {
+        name: 'Ashby',
+        selling_home: false,
+        cash_contribution: { amount: '300000', currency: 'GBP' },
+        places_of_interest: [],
+      },
+    ],
+  },
+}
+
+function mountPanel() {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const wrapper = mount(WhatIfPanel, { global: { plugins: [pinia] } })
+  return { wrapper, store: usePropertiesStore() }
+}
+
+/** Flush microtasks (onMounted load, async run) without wall-clock time. */
+async function settle() {
+  await vi.advanceTimersByTimeAsync(0)
+}
+
+/** Fire the 400ms debounce deterministically and flush its async body. */
+async function runDebouncedEval() {
+  await vi.advanceTimersByTimeAsync(500)
+}
+
+describe('WhatIfPanel', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.mocked(api.fetchSettings).mockResolvedValue(settingsPersons as unknown as Record<string, unknown>)
+    vi.mocked(api.postWhatIf).mockResolvedValue({
+      'prop-a': { succeeded: true, monthly_total: { value: { amount: '900', currency: 'GBP' }, stddev: 0 } },
+    })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('renders the family and the editable money fields', async () => {
+    const { wrapper } = mountPanel()
+    await settle()
+    expect(wrapper.text()).toContain('What if…')
+    expect(wrapper.text()).toContain('Simon')
+    expect(wrapper.text()).toContain('Ashby')
+    expect(wrapper.text()).toContain('Expected sale price (£)')
+    // nothing is "saved" until the user asks — badge hidden initially
+    expect(wrapper.text()).not.toContain('not saved')
+  })
+
+  it('runs the what-if on edit and marks it not saved', async () => {
+    const { wrapper } = mountPanel()
+    await settle()
+
+    const cashInputs = wrapper.findAll('input[type="number"]')
+    const ashbyCash = cashInputs[cashInputs.length - 1] // last field = Ashby's cash
+    await ashbyCash.setValue('400000')
+
+    await runDebouncedEval()
+    expect(api.postWhatIf).toHaveBeenCalled()
+    const payload = vi.mocked(api.postWhatIf).mock.calls[0][0]
+    const ashby = payload.find((p: Record<string, unknown>) => p.name === 'Ashby')
+    expect(ashby?.cash_contribution).toEqual({ amount: '400000', currency: 'GBP' })
+
+    await settle()
+    expect(wrapper.text()).toContain('not saved')
+  })
+
+  it('shows a delta headline against real totals', async () => {
+    const { wrapper, store } = mountPanel()
+    store.rids = ['prop-a']
+    store.summaries = {
+      'prop-a': {
+        rid: 'prop-a',
+        best_address: { succeeded: true, value: '10 Cheap St', error: null, provenance: { label: 't' } },
+        best_location: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 't' } },
+        rightmove_price: { succeeded: true, value: { amount: '200000', currency: 'GBP' }, error: null, provenance: { label: 't' } },
+        rightmove_bedrooms: { succeeded: true, value: '2', error: null, provenance: { label: 't' } },
+        total_monthly_cost: { succeeded: true, value: { value: { amount: '1600', currency: 'GBP' }, stddev: 0 }, error: null, provenance: { label: 't' } },
+        walkability: { succeeded: false, value: null, error: null, provenance: { label: 't' } },
+        commutes: {},
+        schools: {
+          primary: { school: { succeeded: false, value: null, error: null, provenance: { label: 't' } } },
+          secondary: { school: { succeeded: false, value: null, error: null, provenance: { label: 't' } } },
+        },
+      },
+    }
+    await settle()
+
+    const cashInputs = wrapper.findAll('input[type="number"]')
+    await cashInputs[cashInputs.length - 1].setValue('400000')
+    await runDebouncedEval()
+    await settle()
+
+    // real 1600 is NOT under 1500, hypothetical 900 IS → one more house
+    expect(wrapper.text()).toContain('1 more house under £1,500/mo')
+  })
+
+  it('applies the numbers to the family settings and clears the panel', async () => {
+    const { wrapper } = mountPanel()
+    await settle()
+
+    const cashInputs = wrapper.findAll('input[type="number"]')
+    await cashInputs[cashInputs.length - 1].setValue('400000')
+    await runDebouncedEval()
+    await settle()
+    expect(wrapper.text()).toContain('not saved')
+
+    await wrapper.findAll('button').find(b => b.text().includes('Use these numbers'))!.trigger('click')
+    await settle()
+
+    expect(api.patchPerson).toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('not saved')
+  })
+
+  it('backs out to real numbers without saving', async () => {
+    const { wrapper, store } = mountPanel()
+    await settle()
+
+    store.applyWhatIf({ 'prop-a': { succeeded: true, monthly_total: { value: { amount: '900', currency: 'GBP' }, stddev: 0 } } })
+    await settle()
+    expect(wrapper.text()).toContain('not saved')
+
+    await wrapper.findAll('button').find(b => b.text().includes('Back to real numbers'))!.trigger('click')
+    await settle()
+    expect(store.whatIfTotals).toBeNull()
+    expect(wrapper.text()).not.toContain('not saved')
+  })
+})

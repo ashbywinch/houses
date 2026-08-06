@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from money import Money
 
+from dag.measurement import Measurement
 from houses.council_tax import lookup_council_tax
 
 MockBand = namedtuple("MockBand", ["band", "address", "postcode", "local_authority", "local_authority_url"])
@@ -90,7 +91,7 @@ class TestLookupCouncilTax:
             assert result.succeeded
             ct = result.value_or_none()
             assert ct.band == "B"
-            assert ct.yearly_cost == Money("1500", "GBP")
+            assert ct.yearly_cost == Measurement(Money("1500", "GBP"), 0.0)
             assert "west-berkshire" in ct.evidence_url
 
     @pytest.mark.asyncio
@@ -305,12 +306,13 @@ class TestLookupYearlyCost:
 class TestCouncilTaxNodeProvenance:
     """The node path the frontend consumes: to_json() → provenance dict.
 
-    The frontend renders provenance JSON directly; an impossible lookup
-    must surface status="impossible" + error so the UI shows the failure.
+    Part A: a failed lookup is no longer "impossible" — the node returns
+    a Band D estimate with a spread, and provenance notes the estimation
+    so the UI can show the one-step reason ("≈").
     """
 
     @pytest.mark.asyncio
-    async def test_impossible_lookup_emits_status_and_error_in_provenance(self):
+    async def test_failed_lookup_falls_back_to_estimate_in_provenance(self):
         from dag.scheduler import flush_processor
         from dag.user_input_node import UserInputNode
         from houses.nodes.epc_node import CouncilTaxNode
@@ -340,10 +342,12 @@ class TestCouncilTaxNodeProvenance:
             await flush_processor()
             j = await node.to_json()
 
-        assert j["status"] == "impossible"
-        assert "multiple properties" in (j.get("error") or "")
+        assert j["status"] == "succeeded"
+        assert j["value"]["band"] == "?"
+        assert j["value"]["yearly_cost"]["value"]["amount"] == "1200.00"
+        assert j["value"]["yearly_cost"]["stddev"] == 50.0
         prov = j["provenance"]
-        assert prov["status"] == "impossible"
-        assert "multiple properties" in prov["error"]
+        assert prov.get("status", "") != "impossible"
+        assert "estimated" in (prov.get("description") or "")
         assert prov["sourceType"] == "api"
         assert prov["label"]

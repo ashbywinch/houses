@@ -9,6 +9,7 @@ from inspect import iscoroutine
 from typing import Generic, TypeVar
 
 from dag.attempt import Attempt, AttemptError, Formula, Provenance, SourceType, project_value
+from dag.eval_context import staged_attempt
 from dag.expression import Expression
 from dag.node import Node
 from dag.scheduler import _get_scheduler
@@ -79,7 +80,11 @@ class DerivedNode(Node[T], Generic[T]):
         return self._deps
 
     def latest_attempt(self) -> Attempt:
-        return self._attempt
+        # During a scenario evaluation (dag.evaluate), the staged
+        # hypothetical attempt shadows the real one — compute bodies
+        # reading deps through this path see the what-if transparently.
+        staged = staged_attempt(self._id)
+        return staged if staged is not None else self._attempt
 
     def _on_dep_changed(self) -> None:
         self._retry_count = 0
@@ -278,9 +283,13 @@ class DerivedNode(Node[T], Generic[T]):
         # used — retry either way, using the exception it recorded.
         if result.impossible and not result.pending:
             info = result.error_info
-            if info is not None and info.retryable and info.exc is not None:
-                if self.schedule_retry(self._retry_delay_from(info.exc)):
-                    result = Attempt.pending()
+            if (
+                info is not None
+                and info.retryable
+                and isinstance(info.exc, Exception)
+                and self.schedule_retry(self._retry_delay_from(info.exc))
+            ):
+                result = Attempt.pending()
         # requests before we do sync persist work (json.dumps + SQLite).
         await asyncio.sleep(0)
 
@@ -335,7 +344,6 @@ class DerivedNode(Node[T], Generic[T]):
         if formula is None:
             formula = self._build_formula_from_expression()
 
-        description = self._attempt.error if self._attempt.impossible else None
         status = "impossible" if self._attempt.impossible else ("pending" if self._attempt.pending else "")
         error_info = self._attempt.error_info
         # The provenance error/description feed the UI — use the friendly

@@ -12,6 +12,7 @@ from pint import Quantity
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
+from dag.measurement import Measurement
 from houses.council_tax_info import CouncilTaxInfo
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
@@ -205,7 +206,8 @@ class FakeEPC(EPCLookupService):
 
 class FakeCouncilTax(CouncilTaxService):
     def __init__(self, result: CouncilTaxInfo | None = None):
-        self.result = result or CouncilTaxInfo(band="D", yearly_cost=Money("2000", "GBP"))
+        default = CouncilTaxInfo(band="D", yearly_cost=Measurement(Money("2000", "GBP"), 0.0))
+        self.result = result or default
 
     async def lookup(self, postcode: str, address: str = "") -> Attempt[CouncilTaxInfo]:
         return Attempt.succeeded(self.result)

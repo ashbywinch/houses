@@ -605,12 +605,15 @@ class TestSettingsPropagationApi:
 
 
 def _money_amount(v) -> Decimal:
-    """Money amount from a raw value dict: {amount, currency}.
+    """Money amount from a raw value dict.
 
-    Money rule: amounts are Decimal-backed strings on the wire — never
-    float, which introduces representation noise into exact assertions.
+    Handles both Money ``{amount, currency}`` and Measurement
+    ``{value: {amount, currency}, stddev}`` shapes (the total monthly
+    cost became a Measurement in Part A).
     """
     if isinstance(v, dict):
+        if "value" in v and isinstance(v["value"], dict):
+            v = v["value"]
         return Decimal(v.get("amount") or "0")
     return Decimal(str(v))
 
@@ -621,6 +624,102 @@ def _amount_of(attempt: dict) -> Decimal:
     if isinstance(val, dict):
         return Decimal(val.get("amount") or "0")
     return Decimal(str(val))
+
+
+class TestWhatIfApi:
+    """POST /api/what-if — pure evaluation, nothing persisted."""
+
+    def _setup(self):
+        from fastapi.testclient import TestClient
+        from money import Money
+
+        from houses.model.domain import Person
+        from houses.property_registry import _registry
+        from houses.server import app
+
+        _push_persons(
+            Person(
+                name="Simon",
+                has_car=True,
+                email="simon@example.com",
+                home_sale_price=Money("550000", "GBP"),
+                outstanding_mortgage=Money("373000", "GBP"),
+            ),
+            Person(name="Lorena", has_car=False, email="lorena@example.com"),
+            Person(name="Ashby", has_car=True, cash_contribution=Money("300000", "GBP")),
+        )
+        _registry.clear()
+        client = TestClient(app)
+        _inject_session(client)
+        return client, _registry
+
+    def _seed(self, reg):
+        from money import Money
+
+        from houses.geo import GeoPoint
+        from houses.nodes.property import PropertyNodes
+
+        prop = PropertyNodes("whatif1")
+        prop.rightmove_price.push(Money("500000", "GBP"), "test")
+        prop.rightmove_address.push("1 Test St", "test")
+        prop.rightmove_bedrooms.push("3", "test")
+        prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.postcode.push("SW1V 2QQ", "test")
+        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.works_estimates.push({}, "test")
+        prop.rental_income.push(Money("0", "GBP"), "test")
+        prop.comment_status.push("", "test")
+        reg["whatif1"] = prop
+        return prop
+
+    def test_what_if_changes_totals_without_persisting(self):
+        client, reg = self._setup()
+        self._seed(reg)
+        flush_all()
+
+        baseline = client.get("/api/properties/all").json()["whatif1"]["total_monthly_cost"]
+
+        # What-if: Ashby's cash contribution up £100k → equity up → the
+        # mortgage (and so the monthly total) must drop.
+        resp = client.post(
+            "/api/what-if",
+            json={"persons": [{"name": "Ashby", "cash_contribution": {"amount": "400000", "currency": "GBP"}}]},
+        )
+        assert resp.status_code == 200
+        result = resp.json()["results"]["whatif1"]
+        assert result["succeeded"], result.get("error")
+        hypothetical = Decimal(result["monthly_total"]["value"]["amount"])
+
+        base_total = _money_amount(baseline["value"])
+        assert hypothetical < base_total, "extra cash must lower the monthly total"
+
+        # Nothing persisted: the summary (and the real persons) are unchanged.
+        after = client.get("/api/properties/all").json()["whatif1"]["total_monthly_cost"]
+        assert after == baseline
+
+    def test_what_if_requires_persons_and_known_names(self):
+        client, reg = self._setup()
+        self._seed(reg)
+        flush_all()
+
+        assert client.post("/api/what-if", json={}).status_code == 422
+        assert client.post("/api/what-if", json={"persons": []}).status_code == 422
+        resp = client.post("/api/what-if", json={"persons": [{"name": "Nobody"}]})
+        assert resp.status_code == 422
+        assert "unknown person" in resp.json()["detail"]
+
+    def test_what_if_rejects_malformed_money(self):
+        client, reg = self._setup()
+        self._seed(reg)
+        flush_all()
+
+        resp = client.post(
+            "/api/what-if",
+            json={"persons": [{"name": "Ashby", "cash_contribution": "not-money"}]},
+        )
+        assert resp.status_code == 400
 
 
 class TestWorksEstimateApi:

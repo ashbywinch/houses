@@ -21,7 +21,7 @@ const mockData: Record<string, PropertySummary> = {
     best_location: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 'test' } },
     rightmove_price: { succeeded: true, value: {amount: "200000", currency: "GBP"}, error: null, provenance: { label: 'test' } },
     rightmove_bedrooms: { succeeded: true, value: '2', error: null, provenance: { label: 'test' } },
-    total_monthly_cost: { succeeded: true, value: {amount: "1500", currency: "GBP"}, error: null, provenance: { label: 'test' } },
+    total_monthly_cost: { succeeded: true, value: { value: { amount: "1500", currency: "GBP" }, stddev: 0 }, error: null, provenance: { label: 'test' } },
     walkability: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
     commutes: { 'Simon/Office': { commute: { succeeded: true, value: { duration: { value: 60, unit: 'minute' } }, error: null, provenance: { label: 'test' } } } },
     schools: {
@@ -36,7 +36,7 @@ const mockData: Record<string, PropertySummary> = {
     best_location: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 'test' } },
     rightmove_price: { succeeded: true, value: {amount: "300000", currency: "GBP"}, error: null, provenance: { label: 'test' } },
     rightmove_bedrooms: { succeeded: true, value: '3', error: null, provenance: { label: 'test' } },
-    total_monthly_cost: { succeeded: true, value: {amount: "2000", currency: "GBP"}, error: null, provenance: { label: 'test' } },
+    total_monthly_cost: { succeeded: true, value: { value: { amount: "2000", currency: "GBP" }, stddev: 0 }, error: null, provenance: { label: 'test' } },
     walkability: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
     commutes: { 'Simon/Office': { commute: { succeeded: true, value: { duration: { value: 30, unit: 'minute' } }, error: null, provenance: { label: 'test' } } } },
     schools: {
@@ -51,7 +51,7 @@ const mockData: Record<string, PropertySummary> = {
     best_location: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 'test' } },
     rightmove_price: { succeeded: true, value: {amount: "500000", currency: "GBP"}, error: null, provenance: { label: 'test' } },
     rightmove_bedrooms: { succeeded: true, value: '4', error: null, provenance: { label: 'test' } },
-    total_monthly_cost: { succeeded: true, value: {amount: "3500", currency: "GBP"}, error: null, provenance: { label: 'test' } },
+    total_monthly_cost: { succeeded: true, value: { value: { amount: "3500", currency: "GBP" }, stddev: 0 }, error: null, provenance: { label: 'test' } },
     walkability: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
     commutes: { 'Simon/Office': { commute: { succeeded: true, value: { duration: { value: 90, unit: 'minute' } }, error: null, provenance: { label: 'test' } } } },
     schools: {
@@ -66,7 +66,7 @@ const mockData: Record<string, PropertySummary> = {
     best_location: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 'test' } },
     rightmove_price: { succeeded: true, value: {amount: "250000", currency: "GBP"}, error: null, provenance: { label: 'test' } },
     rightmove_bedrooms: { succeeded: true, value: '3', error: null, provenance: { label: 'test' } },
-    total_monthly_cost: { succeeded: true, value: {amount: "1800", currency: "GBP"}, error: null, provenance: { label: 'test' } },
+    total_monthly_cost: { succeeded: true, value: { value: { amount: "1800", currency: "GBP" }, stddev: 0 }, error: null, provenance: { label: 'test' } },
     walkability: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
     commutes: { 'Simon/Office': { commute: { succeeded: true, value: { duration: { value: 45, unit: 'minute' } }, error: null, provenance: { label: 'test' } } } },
     schools: {
@@ -271,7 +271,7 @@ describe('PropertyList map tab markers', () => {
         best_location: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
         rightmove_price: { succeeded: true, value: {amount: "300000", currency: "GBP"}, error: null, provenance: { label: 'test' } },
         rightmove_bedrooms: { succeeded: true, value: '3', error: null, provenance: { label: 'test' } },
-        total_monthly_cost: { succeeded: true, value: {amount: "2000", currency: "GBP"}, error: null, provenance: { label: 'test' } },
+        total_monthly_cost: { succeeded: true, value: { value: { amount: "2000", currency: "GBP" }, stddev: 0 }, error: null, provenance: { label: 'test' } },
         walkability: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
         commutes: {},
         schools: {

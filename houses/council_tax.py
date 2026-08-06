@@ -12,6 +12,7 @@ import httpx
 from money import Money
 
 from dag.attempt import Attempt
+from dag.measurement import Measurement
 from houses.api_cache import cached_sync_client, get_cached, set_cached
 from houses.council_tax_info import CouncilTaxInfo
 
@@ -282,5 +283,9 @@ async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[Counci
         logger.warning("No local authority found for %s postcode %s", building_id, postcode)
 
     return Attempt.succeeded(
-        CouncilTaxInfo(band=matched["band"], yearly_cost=yearly_cost, evidence_url=evidence_url),
+        CouncilTaxInfo(
+            band=matched["band"],
+            yearly_cost=Measurement(yearly_cost, 0.0) if yearly_cost is not None else None,
+            evidence_url=evidence_url,
+        ),
     )

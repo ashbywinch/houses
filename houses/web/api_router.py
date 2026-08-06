@@ -59,6 +59,72 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     await register_client(websocket)
 
 
+@api_router.post("/what-if")
+async def post_what_if(body: dict):
+    """Pure what-if: evaluate every property's total monthly cost under
+    candidate person settings (Part D).
+
+    The body carries per-person updates in the same shape as
+    ``PATCH /settings/person/{name}``; each is merged into the current
+    person. Nothing is persisted — the DAG is evaluated with the
+    candidate values staged and discarded (``dag.evaluate``), so the
+    real scheduler, database, and node state are untouched.
+
+    Response: ``{"results": {rid: {"succeeded": bool,
+    "monthly_total": {"value": {"amount", "currency"}, "stddev"} | None,
+    "error"?: str}}}``.
+    """
+    updates = body.get("persons")
+    if not isinstance(updates, list) or not updates:
+        raise HTTPException(status_code=422, detail="persons required")
+
+    svc = get_services()
+    current = list(svc.persons_source.latest_attempt().value_or_none() or [])
+    by_name = {p.name: p for p in current}
+    merged: list = []
+    merged_names: set[str] = set()
+    for d in updates:
+        if not isinstance(d, dict) or not d.get("name"):
+            raise HTTPException(status_code=422, detail="each person update needs a name")
+        target = by_name.get(d["name"])
+        if target is None:
+            raise HTTPException(status_code=422, detail=f"unknown person {d['name']!r}")
+        try:
+            merged.append(_person_from_dict(d, target))
+        except (ValueError, TypeError) as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        merged_names.add(d["name"])
+    # Unmentioned persons keep their current values — the what-if only
+    # changes what the client edited.
+    merged.extend(p for p in current if p.name not in merged_names)
+
+    from dag.evaluate import evaluate
+
+    results: dict[str, dict] = {}
+    for rid in list_registry_properties():
+        prop = get_registry_property(rid)
+        if prop is None:
+            continue
+        attempts = await evaluate(prop.total_monthly_cost, overrides={"persons": merged})
+        att = attempts[prop.total_monthly_cost._id]
+        if att.succeeded and att.value is not None:
+            results[rid] = {
+                "succeeded": True,
+                "monthly_total": {
+                    "value": {
+                        "amount": f"{att.value.value.amount:.2f}",
+                        "currency": att.value.value.currency,
+                    },
+                    "stddev": att.value.stddev,
+                },
+            }
+        elif att.impossible:
+            results[rid] = {"succeeded": False, "error": att.error}
+        else:
+            results[rid] = {"succeeded": False, "error": "pending"}
+    return {"results": results}
+
+
 @api_router.get("/properties/{rid}/staleness")
 async def staleness_check(rid: str, nodes: str = ""):
     """Check which DAG nodes are stale for a given property.

@@ -42,7 +42,13 @@ const bedrooms = computed(() => detail.value?.rightmove_bedrooms?.succeeded
   ? detail.value.rightmove_bedrooms.value : null)
 
 const monthlyCost = computed(() => detail.value?.affordability?.total_monthly_housing_cost?.succeeded
-  ? parseFloat(detail.value.affordability.total_monthly_housing_cost.value?.amount ?? '0') || null : null)
+  ? parseFloat(detail.value.affordability.total_monthly_housing_cost.value?.value?.amount ?? '0') || null : null)
+
+// Part A: an approximate total (stddev > 0) renders as "≈ £X/mo".
+const monthlyCostApprox = computed(() => {
+  const m = detail.value?.affordability?.total_monthly_housing_cost
+  return !!m?.succeeded && (m.value?.stddev ?? 0) > 0
+})
 
 // ── Surface existing data ────────────────────────────
 const townDescription = computed(() => {
@@ -174,7 +180,11 @@ async function saveAddress() {
         </div>
         <div class="summary-row">
           <span v-if="price" class="summary-price">£{{ price.toLocaleString() }}</span>
-          <span v-if="monthlyCost !== null" class="summary-monthly">£{{ monthlyCost.toLocaleString() }}/mo</span>
+          <span
+            v-if="monthlyCost !== null"
+            class="summary-monthly"
+            :title="monthlyCostApprox ? 'Council tax estimated — total is approximate' : undefined"
+          >{{ monthlyCostApprox ? '≈' : '' }}£{{ monthlyCost.toLocaleString() }}/mo</span>
           <span v-if="bedrooms" class="summary-bedrooms">{{ bedrooms }} bed</span>
         </div>
       </div>

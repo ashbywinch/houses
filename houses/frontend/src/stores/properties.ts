@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { PropertyDetail, PropertySummary, TriageEntry } from '../types'
+import type { MeasurementValue, PropertyDetail, PropertySummary, TriageEntry } from '../types'
 import { fetchAllSummaries, fetchPropertyDetail, fetchSettings, patchTriage } from '../services/api'
 
 export const usePropertiesStore = defineStore('properties', () => {
@@ -11,6 +11,32 @@ export const usePropertiesStore = defineStore('properties', () => {
   const error = ref<string | null>(null)
   const settings = ref<{ commute_thresholds?: { good: number; warn: number } }>({})
   const triage = ref<Record<string, TriageEntry>>({})
+
+  // ── What-if (Part D) ──────────────────────────────────────────
+  // Hypothetical monthly totals per property while the "What if…"
+  // panel is active; null when showing real numbers.
+  const whatIfTotals = ref<Record<string, MeasurementValue> | null>(null)
+
+  function applyWhatIf(results: Record<string, { succeeded: boolean; monthly_total: MeasurementValue | null }>) {
+    const totals: Record<string, MeasurementValue> = {}
+    for (const [rid, r] of Object.entries(results)) {
+      if (r.succeeded && r.monthly_total) totals[rid] = r.monthly_total
+    }
+    whatIfTotals.value = Object.keys(totals).length > 0 ? totals : null
+  }
+
+  function clearWhatIf() {
+    whatIfTotals.value = null
+  }
+
+  /** The monthly total to show/filter/sort by for a property: the
+   * hypothetical value when the what-if is active, else the real one. */
+  function monthlyTotalFor(rid: string): MeasurementValue | null {
+    const wt = whatIfTotals.value?.[rid]
+    if (wt) return wt
+    const s = summaries.value[rid]?.total_monthly_cost
+    return s?.succeeded && s.value ? s.value : null
+  }
 
   async function loadAll() {
     loading.value = true
@@ -88,5 +114,9 @@ export const usePropertiesStore = defineStore('properties', () => {
     details.value[rid] = data
   }
 
-  return { rids, summaries, details, triage, settings, loading, error, loadAll, loadDetail, updateSummary, updateDetail, toggleTriage }
+  return {
+    rids, summaries, details, triage, settings, loading, error,
+    whatIfTotals, applyWhatIf, clearWhatIf, monthlyTotalFor,
+    loadAll, loadDetail, updateSummary, updateDetail, toggleTriage,
+  }
 })

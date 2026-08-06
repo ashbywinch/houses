@@ -591,6 +591,7 @@ dependencies = [
     { name = "setuptools" },
     { name = "uk-postcodes-parsing" },
     { name = "uk-property-apis" },
+    { name = "uncertainties" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -632,6 +633,7 @@ requires-dist = [
     { name = "setuptools", specifier = ">=82.0.1" },
     { name = "uk-postcodes-parsing", specifier = ">=2.1.0" },
     { name = "uk-property-apis", git = "https://github.com/kubilay-yavuz/uk-property-intel.git?subdirectory=packages%2Fapis" },
+    { name = "uncertainties", specifier = ">=3.2.3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
 ]
 provides-extras = ["dev"]
@@ -1321,6 +1323,15 @@ dependencies = [
     { name = "pydantic" },
     { name = "selectolax" },
     { name = "tenacity" },
+]
+
+[[package]]
+name = "uncertainties"
+version = "3.2.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/fe/0c/cb09f33b26955399c675ab378e4063ed7e48422d3d49f96219ab0be5eba9/uncertainties-3.2.3.tar.gz", hash = "sha256:76a5653e686f617a42922d546a239e9efce72e6b35411b7750a1d12dcba03031", size = 160492, upload-time = "2025-04-21T19:58:28.63Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8f/5e/f1e1dd319e35e962a4e00b33150a8868b6329cc1d19fd533436ba5488f09/uncertainties-3.2.3-py3-none-any.whl", hash = "sha256:313353900d8f88b283c9bad81e7d2b2d3d4bcc330cbace35403faaed7e78890a", size = 60118, upload-time = "2025-04-21T19:58:26.864Z" },
 ]
 
 [[package]]

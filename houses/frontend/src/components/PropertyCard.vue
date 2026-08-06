@@ -31,8 +31,18 @@ const bedrooms = computed(() => props.data.rightmove_bedrooms.succeeded
   : null)
 
 const monthlyCost = computed(() => props.data.total_monthly_cost.succeeded
-  ? parseFloat(props.data.total_monthly_cost.value?.amount ?? '0') || null
+  ? parseFloat(props.data.total_monthly_cost.value?.value?.amount ?? '0') || null
   : null)
+
+// Part A: an approximate total (stddev > 0) renders as "≈ £X/mo".
+const monthlyCostApprox = computed(() => {
+  const m = props.data.total_monthly_cost
+  return m.succeeded && (m.value?.stddev ?? 0) > 0
+})
+
+// Part D: a hypothetical total from the "What if…" panel (overlaid by
+// PropertyList) is marked so it is never mistaken for a real number.
+const isWhatIf = computed(() => props.data.total_monthly_cost.provenance?.label === 'what-if')
 
 // Border color based on triage state
 const borderClass = computed(() => {
@@ -171,8 +181,12 @@ async function toggleViewed() {
         <a :href="'#/property/' + rid" class="card__address" :aria-label="'View details for ' + address">
           <h3 class="card__address-text">{{ address }}</h3>
         </a>
-        <span v-if="monthlyCost !== null" class="card__monthly-cost">
-          £{{ monthlyCost.toLocaleString() }}/mo
+        <span
+          v-if="monthlyCost !== null"
+          class="card__monthly-cost"
+          :title="monthlyCostApprox ? 'Council tax estimated — total is approximate' : undefined"
+        >{{ monthlyCostApprox ? '≈' : '' }}£{{ monthlyCost.toLocaleString() }}/mo
+          <span v-if="isWhatIf" class="card__whatif">what-if</span>
         </span>
         <span
           v-else
@@ -335,6 +349,19 @@ async function toggleViewed() {
   font-weight: var(--fw-bold);
   color: var(--green);
   white-space: nowrap;
+}
+.card__whatif {
+  display: inline-block;
+  margin-left: 0.3rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--blue);
+  border: 1px solid var(--blue);
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
+  vertical-align: middle;
 }
 
 /* Specs row */

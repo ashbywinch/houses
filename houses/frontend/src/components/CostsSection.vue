@@ -24,6 +24,29 @@ function isImpossible(val: any): boolean {
   return val && !val.succeeded && val.error != null
 }
 
+// ── Part A: uncertainty rendering ──────────────────────
+
+/** Council Tax row label. Exact: "D · £1,800/yr". Estimated
+ *  (lookup failed, Band D fallback): "? · (£1,200 ± £50)/yr". */
+const councilTaxLabel = computed(() => {
+  const ct = props.affordability?.council_tax?.value
+  if (!ct) return '?'
+  const band = ct.band ?? '?'
+  const yc = ct.yearly_cost
+  if (!yc?.value?.amount) return `${band} · £?/yr`
+  const amount = Number(yc.value.amount).toLocaleString()
+  const stddev = yc.stddev ?? 0
+  return stddev > 0
+    ? `${band} · (£${amount} ± £${stddev})/yr`
+    : `${band} · £${amount}/yr`
+})
+
+/** True when the total monthly cost is approximate (stddev > 0). */
+const totalMonthlyApprox = computed(() => {
+  const m = props.affordability?.total_monthly_housing_cost
+  return !!m?.succeeded && (m.value?.stddev ?? 0) > 0
+})
+
 // ── Works estimate inline editing ─────────────────────
 const editingPerson = ref<string | null>(null)
 const editValue = ref<string>('')
@@ -150,7 +173,7 @@ function canEdit(personName: string): boolean {
 
       <div class="costs-row">
         <span class="costs-label">Council Tax</span>
-        <span class="costs-value">{{ affordability?.council_tax?.value?.band ?? '?' }} · £{{ affordability?.council_tax?.value?.yearly_cost?.amount ?? '?' }}/yr</span>
+        <span class="costs-value">{{ councilTaxLabel }}</span>
               </div>
       <ProvenanceToggle v-if="affordability?.council_tax?.provenance" :provenance="affordability?.council_tax?.provenance" title="Council Tax" />
       <p v-if="!affordability?.council_tax?.succeeded" class="costs-note">
@@ -277,7 +300,11 @@ function canEdit(personName: string): boolean {
       <!-- Total Monthly -->
       <div class="costs-row costs-row--total" :class="{ 'costs-row--impossible': isImpossible(affordability?.total_monthly_housing_cost) }">
         <span class="costs-label">Total Monthly</span>
-        <span v-if="affordability?.total_monthly_housing_cost?.succeeded && affordability?.total_monthly_housing_cost?.value" class="costs-value">£{{ affordability.total_monthly_housing_cost.value.amount }}</span>
+        <span
+          v-if="affordability?.total_monthly_housing_cost?.succeeded && affordability?.total_monthly_housing_cost?.value"
+          class="costs-value"
+          :title="totalMonthlyApprox ? 'Council tax estimated — total is approximate' : undefined"
+        >{{ totalMonthlyApprox ? '≈ ' : '' }}£{{ affordability.total_monthly_housing_cost.value.value.amount }}</span>
         <span v-else-if="isImpossible(affordability?.total_monthly_housing_cost)" class="costs-value costs-value--impossible">Can't calculate</span>
         <span v-else class="costs-value">?</span>
               </div>

@@ -61,6 +61,12 @@ export interface MoneyValue {
   currency: string
 }
 
+/** A value with an uncertainty — exact when stddev is absent/0 (Part A). */
+export interface MeasurementValue {
+  value: MoneyValue
+  stddev?: number
+}
+
 export interface JourneyLeg {
   mode: string
   duration: { value: number; unit: string }
@@ -139,7 +145,7 @@ export interface PropertySummary {
     secondary: { school: AttemptValue<SchoolValue> }
   }
   town_name?: AttemptValue<string>
-  total_monthly_cost: AttemptValue<MoneyValue>
+  total_monthly_cost: AttemptValue<MeasurementValue>
   walkability: AttemptValue<Record<string, unknown>>
   epc?: AttemptValue<{ band: string; potential?: string }>
   triage?: TriageResponse
@@ -180,7 +186,7 @@ export interface PropertyDetail {
     monthly_commute_cost: AttemptValue<CommuteBreakdown>
     stamp_duty: AttemptValue<MoneyValue>
     rental_income: AttemptValue<MoneyValue>
-    total_monthly_housing_cost: AttemptValue<MoneyValue>
+    total_monthly_housing_cost: AttemptValue<MeasurementValue>
   }
   area: {
     walkability: AttemptValue<Record<string, unknown>>

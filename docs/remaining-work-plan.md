@@ -117,11 +117,89 @@ Workstreams (each red/green):
 - `dag/` must stay houses-agnostic: new domain expressions belong in
   `houses/nodes/expressions.py`, not `dag/expression.py`.
 
+## Part D — What-if / scenario evaluation (IMPLEMENTED 2026-08-06)
+
+D1 (library `dag/evaluate.py` — task-local staged evaluation,
+node-keyed overrides, incremental recompute of only the changed
+subtree) and D2 (houses `POST /api/what-if` + the "What if…" panel on
+the property list; override catalog = the `persons` settings node,
+which carries every editable field: money, selling-home toggle,
+`trips_per_week`) are implemented and tested. What remains open: the
+library's original redesign ambition (full structure/state separation
+for forking graphs) is NOT needed for the current catalog — `evaluate`
+stages overrides through a ContextVar read-hook instead. Revisit only
+if a what-if needs to fork a graph mid-session.
+
+Why the current design isn't conducive (grounded in `dag/`):
+
+1. **Push, not pull.** The runtime is a reactive scheduler
+   (`AsyncQueueScheduler`): input change → invalidate → recompute →
+   persist → signal → downstream invalidation. There is no "evaluate
+   node X under inputs with override δ, throwaway" path.
+2. **Identity is global persisted state.** Nodes are keyed by ids
+   (`settings/…`, per-rid nodes) and values live in `node_results`; a
+   candidate value has no representation. Mutating a real input node
+   fires real invalidation + persistence and needs rollback — the
+   "delete state" antipattern.
+3. **Provenance is a persistence record** (timestamped `Attempt`s).
+   What-if provenance must say "hypothetical input, not saved" — the
+   `SourceType` enum doesn't model that.
+4. **No snapshot/fork.** The graph is a live object; there is no cheap
+   "same structure, different inputs" instantiation.
+
+Redesign sketch (library work, houses-agnostic — mirrors Part A's rule):
+
+- Separate graph **structure** (edges + compute) from **state** (values)
+  so a scenario = same structure + input overrides.
+- Add a synchronous, memoized, side-effect-free pull evaluation of the
+  dependency closure (`evaluate(graph, targets, overrides)`), reusing
+  `DerivedNode.compute`, producing throwaway `Attempt`s. Persistence
+  stays entirely out of this path; the existing scheduler/persistence is
+  unchanged for the real path. Overrides are keyed by node id
+  (`node_id → candidate value`); which nodes are override-able is
+  registered per project (houses side), keeping the library generic.
+- Provenance marks overridden inputs so the UI can render "hypothetical".
+- **Synergy with Part A**: a `Measurement` wrapper flows through the same
+  pure evaluation, so a what-if over an uncertain input yields a range
+  ("if we sell around £600k, monthly cost lands £1,200–£1,400") — the
+  honest way to present a hypothetical. Tests also gain a DB-free
+  evaluation path.
+
+UX direction (settled 2026-08-06):
+
+- A what-if is a QUESTION; settings is the FACTS form. Live-preview
+  inside the settings form blurs "is this number true or hypothetical?"
+  and the interesting consequences are house-shaped (which houses fall
+  under £X/mo), not settings-shaped. Financial what-if tools (Relm,
+  ifso, calculators) keep "play" separate from committed state and
+  emphasize deltas over absolutes.
+- The what-if lives in a "What if…" panel on the property list (where
+  the consequences are). Ephemeral by design (refresh → gone), single
+  clear exit + "apply to settings" escape hatch (existing PATCH path),
+  delta framing ("3 more houses under £1,500/mo") over new totals,
+  provenance shows the hypothetical input through the existing
+  `ProvenanceToggle`.
+- The panel's input catalog is DECLARATIVE and extensible — driven by
+  a list of override-able DAG inputs (node id + label + unit + current
+  value), not hardcoded fields. v1 ships: selling-home toggle + money
+  fields (sale price / mortgage / cash) + commute frequency
+  (trips_per_week per person/POI). Later additions must slot in without
+  redesign: life insurance, the works estimate, and any other spend
+  the user could choose not to make. Mechanics for per-property
+  derived spends (e.g. zeroing the works estimate) are open — the
+  catalog requirement is that they must be representable.
+- Excluded by design: destination/address changes ("what if I worked
+  somewhere else") — they trigger routing API calls. The commute
+  what-if is frequency-only ("what if I went in one day a week").
+
 ## Sequencing
 
-A (library first: A1 → A2 → A3 → A4) → B backlog items in user-approved
-order → walkthrough re-run after each batch → full suite
-(`make test` + language sweep) before every push.
+A (library first: A1 → A2 → A3 → A4) → D (library `evaluate` primitive,
+then the houses override catalog + "What if…" panel) → B backlog items in
+user-approved order → walkthrough re-run after each batch → full suite
+(`make test` + language sweep) before every push. A before D: Part A's
+`Measurement` gives what-if range rendering, and the `evaluate` primitive
+builds on the same pure-evaluation path (settled 2026-08-06).
 
 ## Verification
 
