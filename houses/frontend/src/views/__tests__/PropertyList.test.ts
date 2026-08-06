@@ -176,6 +176,39 @@ describe('PropertyList filtering', () => {
     expect(filtered).toEqual(['prop-a', 'prop-b'])
   })
 
+  it('filters by address search (C11)', async () => {
+    const store = initStore()
+    store.rids = ['prop-a', 'prop-d']
+    const wrapper = mount(PropertyList)
+    await wrapper.find('.search-input').setValue('school')
+    expect(wrapper.text()).toContain('40 School Ln')
+    expect(wrapper.text()).not.toContain('10 Cheap St')
+  })
+
+  it('hides houses over the family commute ceiling with a chip to reveal them (C9)', async () => {
+    const store = initStore()
+    store.rids = ['prop-a', 'prop-d']
+    // prop-d's Simon/Office commute is 45m; Simon's ceiling is 30 → hidden
+    store.commuteCeilings = { Simon: { fine: 30, isChild: false } }
+    const wrapper = mount(PropertyList)
+    expect(wrapper.text()).not.toContain('40 School Ln')
+    expect(wrapper.text()).toContain('Commute ceiling')
+
+    const ceilingChip = wrapper.findAll('.chip').find(c => c.text().includes('Commute ceiling'))!
+    await ceilingChip.find('.chip__remove').trigger('click')
+    expect(wrapper.text()).toContain('40 School Ln')
+  })
+
+  it('shows a legend for the commute pill colours (C7)', () => {
+    initStore()
+    const wrapper = mount(PropertyList)
+    const legend = wrapper.find('.pill-legend')
+    expect(legend.text()).toContain('fine')
+    expect(legend.text()).toContain('getting tight')
+    expect(legend.text()).toContain('too far')
+    expect(legend.text()).toContain('no route')
+  })
+
   it('combines multiple filters', () => {
     const store = initStore()
 

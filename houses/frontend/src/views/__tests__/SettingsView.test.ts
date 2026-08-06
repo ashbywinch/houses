@@ -173,11 +173,11 @@ describe('SettingsView — ownership rendering', () => {
     vi.clearAllMocks()
   })
 
-  it('makes the own person editable with a save button', async () => {
+  it('makes the own person editable — autosave, no save button', async () => {
     const { wrapper, flush } = await mountView()
     await flush()
     const simonSection = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
-    expect(simonSection.find('button.save').exists()).toBe(true)
+    expect(simonSection.find('button.save').exists()).toBe(false)
     expect(simonSection.find('input[type="checkbox"][data-mode="walk"]').attributes('disabled')).toBeUndefined()
   })
 
@@ -232,14 +232,15 @@ describe('SettingsView — saving', () => {
     vi.clearAllMocks()
   })
 
-  it('saves the edited person and their thresholds via PATCH', async () => {
+  it('saves the edited person and their thresholds via autosave', async () => {
     const { wrapper, flush } = await mountView()
     await flush()
     const simonSection = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
-    // tick a mode checkbox, then save
+    // tick a mode checkbox — blurring the section autosaves
     const walk = simonSection.find('input[type="checkbox"][data-mode="walk"]')
     await walk.setValue(true)
-    await simonSection.find('button.save').trigger('click')
+    await simonSection.trigger('focusout')
+    await flush()
     expect(api.patchPerson).toHaveBeenCalledTimes(1)
     const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
     expect(name).toBe('Simon')
@@ -325,7 +326,8 @@ describe('SettingsView — commute destination CRUD (A7)', () => {
     await flush()
     const rows = simon.findAll('.settings-poi')
     expect(rows.length).toBe(3)  // Pimlico, Bracknell + the new blank row
-    await simon.find('button.save').trigger('click')
+    await simon.trigger('focusout')  // blur autosaves the added row
+    await flush()
     const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
     expect(name).toBe('Simon')
     expect(body.places_of_interest.length).toBe(3)
@@ -338,7 +340,8 @@ describe('SettingsView — commute destination CRUD (A7)', () => {
     // Simon has a car -> train+car+walk; Lorena does not -> train+walk
     const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
     await simon.find('button.poi-add').trigger('click')
-    await simon.find('button.save').trigger('click')
+    await simon.trigger('focusout')
+    await flush()
     const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
     const added = body.places_of_interest[body.places_of_interest.length - 1]
     expect(added.acceptable_modes).toEqual(['train', 'car', 'walk'])
@@ -365,7 +368,8 @@ describe('SettingsView — selling-home persists on save (B7)', () => {
     await flush()
     const ashby = wrapper.findAll('.settings-person').find(s => s.text().includes('Ashby'))!
     await ashby.find('input#selling-home').setValue(true)
-    await ashby.find('button.save').trigger('click')
+    await ashby.trigger('focusout')
+    await flush()
     const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
     expect(name).toBe('Ashby')
     expect(body.selling_home).toBe(true)
@@ -385,11 +389,67 @@ describe('SettingsView — acceptable modes keep at least one (P7)', () => {
     // mode (an empty set would be reinterpreted by the server migration)
     const train = simon.find('input[type="checkbox"][data-mode="train"]')
     await train.setValue(false)
-    await simon.find('button.save').trigger('click')
+    await simon.trigger('focusout')
+    await flush()
     const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
     expect(name).toBe('Simon')
     const pimlico = body.places_of_interest.find((p: { label: string }) => p.label === 'Pimlico')
     expect(pimlico.acceptable_modes).toContain('train')
+  })
+})
+
+describe('SettingsView — autosave status and undo (C2/C3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('shows "Saved ✓" with an Undo action after an autosave', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
+    await simon.find('input#cash').setValue('5000')
+    await simon.trigger('focusout')
+    await flush()
+    expect(wrapper.text()).toContain('Saved ✓')
+    expect(simon.find('.settings-person__undo').text()).toContain('Undo')
+  })
+
+  it('undo re-patches the previous snapshot', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
+    await simon.find('input#cash').setValue('5000')
+    await simon.trigger('focusout')
+    await flush()
+    const savedBody = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0][1]
+    await simon.find('.settings-person__undo').trigger('click')
+    await flush()
+    expect(api.patchPerson).toHaveBeenCalledTimes(2)
+    expect((api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[1][1]).toEqual(savedBody)
+  })
+
+  it('autosaves on the debounce without waiting for blur', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    vi.useFakeTimers()
+    const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
+    await simon.find('input#cash').setValue('5000')
+    await vi.advanceTimersByTimeAsync(900)
+    await flush()
+    expect(api.patchPerson).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
+  it('shows an error state with Retry when the save fails', async () => {
+    vi.mocked(api.patchPerson).mockRejectedValueOnce(new Error('boom'))
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
+    await simon.find('input#cash').setValue('5000')
+    await simon.trigger('focusout')
+    await flush()
+    expect(wrapper.text()).toContain("Couldn't save")
+    expect(simon.find('.settings-person__undo').text()).toContain('Retry')
   })
 })
 
@@ -404,7 +464,8 @@ describe('SettingsView — empty money inputs normalize on save', () => {
     const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
     const sale = simon.find('input#home-sale')
     await sale.setValue('')
-    await simon.find('button.save').trigger('click')
+    await simon.trigger('focusout')
+    await flush()
     const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
     expect(body.home_sale_price.amount).toBe('0')
   })

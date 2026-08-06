@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { createPinia } from 'pinia'
+import { createPinia, setActivePinia } from 'pinia'
 import PropertyCard from '../PropertyCard.vue'
 import { usePropertiesStore } from '../../stores/properties'
 import type { PropertySummary } from '../../types'
@@ -158,6 +158,25 @@ describe('PropertyCard basic rendering', () => {
     const wrapper = mountCard({ rid: '123', data: summary })
     expect(wrapper.text()).toContain('≈£2,500/mo')
     expect(wrapper.find('.card__monthly-cost').attributes('title')).toContain('approximate')
+  })
+
+  it('marks a commute whose office was renamed or removed as old (C4)', () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = usePropertiesStore()
+    store.poiLabels = { Simon: ['Pimlico'] }
+    const summary = makeSummary({
+      commutes: {
+        'Simon/Old Office': {
+          commute: {
+            succeeded: true, value: { duration: { value: 32, unit: 'minute' }, label: 'Old Office' },
+            error: null, provenance: { label: 'test' },
+          },
+        },
+      },
+    })
+    const wrapper = mount(PropertyCard, { props: { rid: '123', data: summary }, global: { plugins: [pinia] } })
+    expect(wrapper.text()).toContain('old office')
   })
 
   it('shows freshness badge with property_added_at', () => {

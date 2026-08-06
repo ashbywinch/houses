@@ -186,6 +186,10 @@ function canEdit(personName: string): boolean {
         <span class="costs-value">£{{ affordability?.monthly_sinking_fund?.value?.amount ?? '?' }}</span>
               </div>
       <ProvenanceToggle v-if="affordability?.monthly_sinking_fund?.provenance" :provenance="affordability?.monthly_sinking_fund?.provenance" title="Sinking fund" />
+      <p v-if="affordability?.monthly_sinking_fund?.succeeded && affordability?.monthly_sinking_fund?.value" class="costs-note">
+        The monthly figure is ⅔ of the yearly fund split across 12 months — e.g.
+        £7,800/yr ÷ 12 = £650, and ⅔ of that is £433.
+      </p>
 
       <!-- Life Insurance -->
       <div class="costs-row">
@@ -201,6 +205,9 @@ function canEdit(personName: string): boolean {
         <span v-else-if="isImpossible(affordability?.total_works)" class="costs-value costs-value--impossible">£? — required</span>
         <span v-else class="costs-value">?</span>
       </div>
+      <p v-if="affordability?.total_works?.succeeded" class="costs-note">
+        Renovation costs are added to the amount you borrow — they're part of the mortgage, not a monthly bill.
+      </p>
       <!-- Per-person works breakdown -->
       <div v-if="affordability?.works_estimates?.succeeded" class="costs-subsection">
         <div
@@ -308,6 +315,9 @@ function canEdit(personName: string): boolean {
         <span v-else-if="isImpossible(affordability?.total_monthly_housing_cost)" class="costs-value costs-value--impossible">Can't calculate</span>
         <span v-else class="costs-value">?</span>
               </div>
+      <p v-if="affordability?.total_monthly_housing_cost?.succeeded" class="costs-note">
+        Everything above added together: mortgage + sinking fund + life insurance + commutes + council tax − rental income.
+      </p>
       <ProvenanceToggle v-if="affordability?.total_monthly_housing_cost?.provenance" :provenance="affordability?.total_monthly_housing_cost?.provenance" title="Total monthly housing cost" />
     </div>
 

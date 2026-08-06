@@ -172,6 +172,36 @@ describe('CostsSection blocked-state copy (C1/C2)', () => {
   })
 })
 
+describe('CostsSection explanatory copy (C5/C6/C10)', () => {
+  it('explains the sinking fund ⅔ split', () => {
+    const wrapper = mountCosts({
+      affordability: {
+        monthly_sinking_fund: { succeeded: true, value: { amount: '433', currency: 'GBP' }, error: null, provenance: {} },
+      },
+    })
+    expect(wrapper.text()).toContain('⅔ of the yearly fund')
+  })
+
+  it('explains what Total Monthly includes', () => {
+    const wrapper = mountCosts({
+      affordability: {
+        total_monthly_housing_cost: {
+          succeeded: true,
+          value: { value: { amount: '1100', currency: 'GBP' }, stddev: 0 },
+          error: null,
+          provenance: {},
+        },
+      },
+    })
+    expect(wrapper.text()).toContain('Everything above added together')
+  })
+
+  it('explains that renovation costs are added to the mortgage', () => {
+    const wrapper = mountCosts()
+    expect(wrapper.text()).toContain('added to the amount you borrow')
+  })
+})
+
 describe('CostsSection uncertainty rendering (Part A)', () => {
   it('renders the Band D estimate with spread when council tax is estimated', () => {
     const wrapper = mountCosts({

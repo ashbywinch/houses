@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import Header from '../components/Header.vue'
 import ProvenanceToggle from '../components/ProvenanceToggle.vue'
@@ -52,7 +52,88 @@ const error = ref('')
 const persons = ref<PersonSettings[]>([])
 const thresholds = ref<Record<string, Thresholds>>({})
 const deposit = ref<HouseholdDeposit | null>(null)
-const savedFor = ref<string>('')
+
+// ── Autosave (C2/C3) ───────────────────────────────────────────
+// No Save button: edits persist automatically (debounced + on blur),
+// with an explicit status line and Undo. The server PATCH merges, so
+// Undo is just the inverse PATCH of the last-saved snapshot.
+type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+const saveState = ref<Record<string, SaveState>>({})
+const undoSnap = ref<Record<string, Record<string, unknown> | null>>({})
+const saveTimers: Record<string, ReturnType<typeof setTimeout>> = {}
+
+onBeforeUnmount(() => {
+  for (const t of Object.values(saveTimers)) clearTimeout(t)
+})
+
+function scheduleSave(person: PersonSettings) {
+  if (!isOwn(person)) return
+  if (saveTimers[person.name]) clearTimeout(saveTimers[person.name])
+  saveTimers[person.name] = setTimeout(() => save(person), 800)
+}
+
+function flushSave(person: PersonSettings) {
+  if (saveTimers[person.name]) {
+    clearTimeout(saveTimers[person.name])
+    delete saveTimers[person.name]
+  }
+  if (!isOwn(person)) return
+  void save(person)
+}
+
+function buildSaveBody(person: PersonSettings): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    name: person.name,
+    has_car: person.has_car,
+    is_child: person.is_child,
+    email: person.email,
+    is_superuser: person.is_superuser,
+    selling_home: person.selling_home,
+    places_of_interest: person.places_of_interest,
+  }
+  for (const f of ['home_sale_price', 'outstanding_mortgage', 'cash_contribution', 'life_insurance_monthly'] as const) {
+    if (!person[f]) continue
+    // a cleared input serializes as {amount: ''} — normalize to 0 so a
+    // momentarily-empty field can't fail the whole save (the server
+    // rejects malformed money shapes)
+    body[f] = person[f].amount === '' ? { amount: '0', currency: person[f].currency } : person[f]
+  }
+  const t = thresholds.value[person.name]
+  if (t) body.thresholds = { ...t }
+  return body
+}
+
+async function save(person: PersonSettings) {
+  const body = buildSaveBody(person)
+  saveState.value[person.name] = 'saving'
+  try {
+    await api.patchPerson(person.name, body)
+    undoSnap.value[person.name] = body
+    saveState.value[person.name] = 'saved'
+    const name = person.name
+    setTimeout(() => {
+      if (saveState.value[name] === 'saved') saveState.value[name] = 'idle'
+    }, 4000)
+  } catch {
+    saveState.value[person.name] = 'error'
+  }
+}
+
+async function undo(person: PersonSettings) {
+  const snap = undoSnap.value[person.name]
+  if (!snap) return
+  saveState.value[person.name] = 'saving'
+  try {
+    await api.patchPerson(person.name, snap)
+    saveState.value[person.name] = 'saved'
+  } catch {
+    saveState.value[person.name] = 'error'
+  }
+}
+
+function retry(person: PersonSettings) {
+  void save(person)
+}
 
 // person-scroll target from the URL (?person=Simon), set by the
 // "Change destinations" link on the property page
@@ -112,34 +193,6 @@ function allCommutesAreSchool(person: PersonSettings): boolean {
 
 function isOwn(person: PersonSettings): boolean {
   return person.editable_by_me === true
-}
-
-async function save(person: PersonSettings) {
-  const body: Record<string, unknown> = {
-    name: person.name,
-    has_car: person.has_car,
-    is_child: person.is_child,
-    email: person.email,
-    is_superuser: person.is_superuser,
-    selling_home: person.selling_home,
-    places_of_interest: person.places_of_interest,
-  }
-  for (const f of ['home_sale_price', 'outstanding_mortgage', 'cash_contribution', 'life_insurance_monthly'] as const) {
-    if (!person[f]) continue
-    // a cleared input serializes as {amount: ''} — normalize to 0 so a
-    // momentarily-empty field can't fail the whole save (the server
-    // rejects malformed money shapes)
-    body[f] = person[f].amount === '' ? { amount: '0', currency: person[f].currency } : person[f]
-  }
-  const t = thresholds.value[person.name]
-  if (t) body.thresholds = { ...t }
-  try {
-    await api.patchPerson(person.name, body)
-    savedFor.value = person.name
-    setTimeout(() => (savedFor.value = ''), 2500)
-  } catch {
-    error.value = `Could not save ${person.name}'s settings.`
-  }
 }
 
 const anyEditable = computed(() => persons.value.some(isOwn))
@@ -226,14 +279,28 @@ const depositRows = computed(() => {
             'settings-person--locked': !isOwn(person),
             'settings-person--target': targetPerson === person.name,
           }"
+          @input="scheduleSave(person)"
+          @change="scheduleSave(person)"
+          @focusout="flushSave(person)"
         >
           <header class="settings-person__header">
             <h2 class="settings-person__name">{{ person.name }}</h2>
             <span v-if="isOwn(person)" class="settings-person__badge">you</span>
             <span v-if="person.is_child" class="settings-person__badge settings-person__badge--child">child</span>
             <span v-if="!isOwn(person)" class="settings-person__locked-note">read-only</span>
-            <button v-if="isOwn(person)" class="save" @click="save(person)">Save</button>
-            <span v-if="savedFor === person.name" class="settings-person__saved">Saved ✓</span>
+            <span v-if="isOwn(person) && saveState[person.name] === 'saving'" class="settings-person__status">Saving…</span>
+            <span
+              v-else-if="isOwn(person) && saveState[person.name] === 'saved'"
+              class="settings-person__status settings-person__status--saved"
+            >Saved ✓
+              <button class="settings-person__undo" type="button" @mousedown.prevent @click="undo(person)">Undo</button>
+            </span>
+            <span
+              v-else-if="isOwn(person) && saveState[person.name] === 'error'"
+              class="settings-person__status settings-person__status--error"
+            >Couldn't save —
+              <button class="settings-person__undo" type="button" @mousedown.prevent @click="retry(person)">Retry</button>
+            </span>
           </header>
 
           <p v-if="person.is_child && allCommutesAreSchool(person)" class="settings-person__note">
@@ -313,7 +380,7 @@ const depositRows = computed(() => {
             v-if="isOwn(person)"
             class="poi-add"
             type="button"
-            @click="addDestination(person)"
+            @click="addDestination(person); scheduleSave(person)"
           >+ Add destination</button>
           <div
             v-for="(poi, poiIndex) in person.places_of_interest"
@@ -325,7 +392,7 @@ const depositRows = computed(() => {
               class="poi-remove"
               type="button"
               :aria-label="'Remove ' + (poi.label || 'destination')"
-              @click="removeDestination(person, poiIndex)"
+              @click="removeDestination(person, poiIndex); scheduleSave(person)"
             >×</button>
             <div class="settings-poi__row">
               <label class="settings-person__label" :for="`label-${person.name}-${poi.label}`">Destination name</label>
@@ -440,9 +507,27 @@ const depositRows = computed(() => {
   color: var(--text-muted);
   font-size: 0.85rem;
 }
-.settings-person__saved {
-  color: var(--green);
+.settings-person__status {
+  margin-left: auto;
   font-size: 0.85rem;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.settings-person__status--saved {
+  color: var(--green);
+}
+.settings-person__status--error {
+  color: var(--red);
+}
+.settings-person__undo {
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.5rem;
+  cursor: pointer;
 }
 .settings-deposit {
   border: 1px solid var(--border);
@@ -542,15 +627,6 @@ const depositRows = computed(() => {
 }
 .settings-poi__mode--hidden {
   display: none;
-}
-button.save {
-  margin-left: auto;
-  background: var(--blue);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  padding: 0.4rem 1.2rem;
-  cursor: pointer;
 }
 .settings__back {
   color: var(--blue);

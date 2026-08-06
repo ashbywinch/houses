@@ -14,6 +14,7 @@ const activeTab = ref<'properties' | 'favourites' | 'map'>('properties')
 const maxPriceFilter = ref<number | null>(null)
 const minBedroomsFilter = ref<number | null>(null)
 const maxCommuteFilter = ref<number | null>(null)
+const mapFailed = ref(false)
 
 onMounted(() => { store.loadAll() })
 
@@ -66,6 +67,31 @@ function bestCommuteMin(rid: string) {
   }
   return best
 }
+
+// ── C9: per-person commute ceiling ─────────────────────────────
+// Houses where ANY adult's commute exceeds their fine_max_minutes are
+// hidden by default (chip toggles them back on).
+
+const showOverCeiling = ref(false)
+
+function overCeiling(rid: string): boolean {
+  const commutes = store.summaries[rid]?.commutes
+  if (!commutes) return false
+  for (const [key, c] of Object.entries(commutes)) {
+    const person = key.split('/')[0]
+    const ceiling = store.commuteCeilings[person]
+    if (!ceiling || ceiling.isChild) continue
+    const val = c.commute?.value as Record<string, unknown> | undefined
+    const dur = val?.duration as Record<string, unknown> | undefined
+    const mins = dur?.value as number | undefined
+    if (mins != null && mins > ceiling.fine) return true
+  }
+  return false
+}
+
+// ── C11: area / address search ─────────────────────────────────
+
+const searchQuery = ref('')
 function bestOfsted(rid: string) {
   const schools = store.summaries[rid]?.schools
   const rank: Record<string, number> = { Outstanding: 1, Good: 2, 'Requires Improvement': 3, Inadequate: 4 }
@@ -150,6 +176,13 @@ const displayedRids = computed(() => {
   if (maxCommuteFilter.value != null) {
     rids = rids.filter(rid => bestCommuteMin(rid) <= maxCommuteFilter.value!)
   }
+  if (searchQuery.value.trim()) {
+    const q = searchQuery.value.trim().toLowerCase()
+    rids = rids.filter(rid => (store.summaries[rid]?.best_address?.value ?? '').toLowerCase().includes(q))
+  }
+  if (!showOverCeiling.value) {
+    rids = rids.filter(rid => !overCeiling(rid))
+  }
   rids = [...rids]
   switch (sortBy.value) {
     case 'price_asc': rids.sort((a, b) => priceNum(a) - priceNum(b)); break
@@ -168,15 +201,22 @@ const activeChips = computed(() => {
   if (maxPriceFilter.value != null) chips.push({ label: `Max monthly: £${maxPriceFilter.value}/mo`, key: 'maxPrice' })
   if (minBedroomsFilter.value != null) chips.push({ label: `Beds: ${minBedroomsFilter.value}+`, key: 'minBeds' })
   if (maxCommuteFilter.value != null) chips.push({ label: `Commute < ${maxCommuteFilter.value}m`, key: 'maxCommute' })
+  if (searchQuery.value.trim()) chips.push({ label: `Search: ${searchQuery.value.trim()}`, key: 'search' })
+  if (!showOverCeiling.value && Object.keys(store.commuteCeilings).length > 0) {
+    chips.push({ label: 'Commute ceiling — some houses hidden', key: 'ceiling' })
+  }
   return chips
 })
 function removeChip(key: string) {
   if (key === 'maxPrice') maxPriceFilter.value = null
   if (key === 'minBeds') minBedroomsFilter.value = null
   if (key === 'maxCommute') maxCommuteFilter.value = null
+  if (key === 'search') searchQuery.value = ''
+  if (key === 'ceiling') showOverCeiling.value = true
 }
 function clearAllFilters() {
-  maxPriceFilter.value = null; minBedroomsFilter.value = null; maxCommuteFilter.value = null; sortBy.value = 'date_added'
+  maxPriceFilter.value = null; minBedroomsFilter.value = null; maxCommuteFilter.value = null
+  searchQuery.value = ''; showOverCeiling.value = false; sortBy.value = 'date_added'
 }
 const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)?.label ?? 'Sort')
 </script>
@@ -187,10 +227,15 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
   <!-- Map tab -->
   <div v-if="activeTab === 'map'" class="map-full">
     <iframe
+      v-if="!mapFailed"
       :src="'https://www.openstreetmap.org/export/embed.html?bbox=' + mapBbox() + '&layer=mapnik'"
       width="100%" height="100%" style="border:0;" loading="lazy"
       referrerpolicy="no-referrer" title="Properties on OpenStreetMap"
+      @error="mapFailed = true"
     ></iframe>
+    <p v-if="mapFailed" class="map-fallback-note">
+      The map didn't load — your browser may block embedded maps. The pins are listed below.
+    </p>
     <div class="map-pins">
       <a
         v-for="loc in allLocations()"
@@ -229,6 +274,22 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
         </span>
         <button v-if="activeChips.length" class="chips-clear" @click="clearAllFilters">Clear all</button>
       </div>
+    </div>
+
+    <div class="search-bar">
+      <input
+        v-model="searchQuery"
+        class="search-input"
+        type="search"
+        placeholder="Search by area or address"
+        aria-label="Search by area or address"
+      />
+    </div>
+    <div class="pill-legend" role="note" aria-label="Commute time colours">
+      <span class="pill-legend__item"><i class="pill-legend__dot pill-legend__dot--good"></i>fine</span>
+      <span class="pill-legend__item"><i class="pill-legend__dot pill-legend__dot--warn"></i>getting tight</span>
+      <span class="pill-legend__item"><i class="pill-legend__dot pill-legend__dot--bad"></i>too far</span>
+      <span class="pill-legend__item"><i class="pill-legend__dot pill-legend__dot--muted"></i>no route</span>
     </div>
 
     <WhatIfPanel :threshold="maxPriceFilter ?? 1500" />
@@ -356,5 +417,50 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
 .tab-bar__tab { display:flex; flex-direction:column; align-items:center; gap:2px; border:none; background:none; cursor:pointer; color:var(--text-muted); min-width:56px; min-height:44px; padding:4px 12px; }
 .tab-bar__tab--active { color:var(--blue); }
 .tab-bar__tab--active svg { stroke:var(--blue); }
+.search-bar {
+  padding: 4px 0 8px;
+}
+.search-input {
+  width: 100%;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.9rem;
+}
+.pill-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  padding: 0 0 8px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.pill-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.pill-legend__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.pill-legend__dot--good { background: var(--green); }
+.pill-legend__dot--warn { background: var(--orange); }
+.pill-legend__dot--bad { background: var(--red); }
+.pill-legend__dot--muted { background: var(--slate-100); border: 1px solid var(--border); }
+.map-fallback-note {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.85rem;
+  z-index: 2;
+}
 .tab-bar__label { font-size:10px; font-weight:600; }
 </style>

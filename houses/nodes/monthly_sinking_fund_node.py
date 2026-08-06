@@ -23,7 +23,8 @@ class MonthlySinkingFundNode(DerivedNode[Money]):
         yearly = self._yearly_node.latest_attempt().value_or_none()
         lines: list[FormulaLine] = [
             FormulaLine(label="Yearly sinking fund", value=str(yearly) if yearly is not None else "—"),
-            FormulaLine(label="÷ 12 × ⅔ (monthly share)", value=str(val)),
+            FormulaLine(label="÷ 12 (monthly)", value=f"£{yearly.amount / 12:,.2f}" if yearly is not None else "—"),
+            FormulaLine(label="× ⅔ (monthly share)", value=str(val)),
         ]
         return Formula(lines=lines, result=str(val))
 

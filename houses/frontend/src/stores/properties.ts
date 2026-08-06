@@ -11,6 +11,11 @@ export const usePropertiesStore = defineStore('properties', () => {
   const error = ref<string | null>(null)
   const settings = ref<{ commute_thresholds?: { good: number; warn: number } }>({})
   const triage = ref<Record<string, TriageEntry>>({})
+  // Per-person commute ceilings (fine_max_minutes) + current POI labels
+  // (C4/C9): captured from /api/settings so cards can flag stale offices
+  // and the list can hide houses over the family's ceiling.
+  const commuteCeilings = ref<Record<string, { fine: number; isChild: boolean }>>({})
+  const poiLabels = ref<Record<string, string[]>>({})
 
   // ── What-if (Part D) ──────────────────────────────────────────
   // Hypothetical monthly totals per property while the "What if…"
@@ -67,9 +72,35 @@ export const usePropertiesStore = defineStore('properties', () => {
     }
   }
 
+  interface PersonEntry {
+    name: string
+    is_child?: boolean
+    places_of_interest?: { label: string }[]
+  }
+  interface SettingsPayload {
+    persons?: { value?: PersonEntry[] }
+    commute_thresholds?: { value?: Record<string, { fine_max_minutes?: number }> }
+  }
+
   async function loadSettings() {
     try {
-      settings.value = await fetchSettings()
+      const data = (await fetchSettings()) as SettingsPayload
+      settings.value = data as unknown as { commute_thresholds?: { good: number; warn: number } }
+      const thresholds = data.commute_thresholds?.value ?? {}
+      const persons = data.persons?.value ?? []
+      const byName = new Map(persons.map(p => [p.name, p]))
+      const ceilings: Record<string, { fine: number; isChild: boolean }> = {}
+      const labels: Record<string, string[]> = {}
+      for (const [name, t] of Object.entries(thresholds)) {
+        const p = byName.get(name)
+        ceilings[name] = {
+          fine: t.fine_max_minutes ?? 75,
+          isChild: Boolean(p?.is_child),
+        }
+        labels[name] = (p?.places_of_interest ?? []).map(poi => poi.label)
+      }
+      commuteCeilings.value = ceilings
+      poiLabels.value = labels
     } catch {
       // defaults used
     }
@@ -116,6 +147,7 @@ export const usePropertiesStore = defineStore('properties', () => {
 
   return {
     rids, summaries, details, triage, settings, loading, error,
+    commuteCeilings, poiLabels,
     whatIfTotals, applyWhatIf, clearWhatIf, monthlyTotalFor,
     loadAll, loadDetail, updateSummary, updateDetail, toggleTriage,
   }
