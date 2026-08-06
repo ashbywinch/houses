@@ -27,7 +27,7 @@ function isImpossible(val: any): boolean {
 // ── Part A: uncertainty rendering ──────────────────────
 
 /** Council Tax row label. Exact: "D · £1,800/yr". Estimated
- *  (lookup failed, Band D fallback): "? · (£1,200 ± £50)/yr". */
+ *  (lookup failed, Band D fallback): "Band unknown · (£1,200 ± £50)/yr". */
 const councilTaxLabel = computed(() => {
   const ct = props.affordability?.council_tax?.value
   if (!ct) return '?'
@@ -36,15 +36,34 @@ const councilTaxLabel = computed(() => {
   if (!yc?.value?.amount) return `${band} · £?/yr`
   const amount = Number(yc.value.amount).toLocaleString()
   const stddev = yc.stddev ?? 0
-  return stddev > 0
-    ? `${band} · (£${amount} ± £${stddev})/yr`
-    : `${band} · £${amount}/yr`
+  if (stddev > 0) return `Band unknown · (£${amount} ± £${stddev})/yr`
+  return `${band} · £${amount}/yr`
 })
 
 /** True when the total is approximate (stddev > 0). */
 const totalMonthlyApprox = computed(() => {
   const m = props.affordability?.total_monthly_housing_cost
   return !!m?.succeeded && (m.value?.stddev ?? 0) > 0
+})
+
+/** Sinking fund note using THIS property's actual figures: the monthly
+ *  shown is ⅔ of the yearly fund split across 12 months. */
+const sinkingFundNote = computed(() => {
+  const m = props.affordability?.monthly_sinking_fund
+  if (!m?.succeeded || !m.value) return ''
+  const monthly = parseFloat(m.value.amount)
+  if (!Number.isFinite(monthly) || monthly <= 0) return ''
+  const yearly = Math.round(monthly * 18) // monthly = yearly ÷ 12 × ⅔
+  return `£${monthly.toLocaleString()}/mo is ⅔ of the yearly fund (about £${yearly.toLocaleString()}/yr) split across 12 months.`
+})
+
+/** When the total can't be calculated, name the leaf reason the UI
+ *  knows (e.g. "Works estimate required for: Ashby"). */
+const totalBlockedReason = computed(() => {
+  const t = props.affordability?.total_monthly_housing_cost
+  if (!t || t.succeeded || t.error == null) return ''
+  const detail = (t as { error_detail?: { user_message?: string } }).error_detail
+  return detail?.user_message || t.error || ''
 })
 
 /** High commute figures are usually the TfL daily maximum, not a real
@@ -197,10 +216,7 @@ function canEdit(personName: string): boolean {
         <span class="costs-value">£{{ affordability?.monthly_sinking_fund?.value?.amount ?? '?' }}</span>
               </div>
       <ProvenanceToggle v-if="affordability?.monthly_sinking_fund?.provenance" :provenance="affordability?.monthly_sinking_fund?.provenance" title="Sinking fund" />
-      <p v-if="affordability?.monthly_sinking_fund?.succeeded && affordability?.monthly_sinking_fund?.value" class="costs-note">
-        The monthly figure is ⅔ of the yearly fund split across 12 months — e.g.
-        £7,800/yr ÷ 12 = £650, and ⅔ of that is £433.
-      </p>
+      <p v-if="sinkingFundNote" class="costs-note">{{ sinkingFundNote }}</p>
 
       <!-- Life Insurance -->
       <div class="costs-row">
@@ -329,6 +345,7 @@ function canEdit(personName: string): boolean {
         <span v-else-if="isImpossible(affordability?.total_monthly_housing_cost)" class="costs-value costs-value--impossible">Can't calculate</span>
         <span v-else class="costs-value">?</span>
               </div>
+      <p v-if="totalBlockedReason" class="costs-note costs-note--blocked">{{ totalBlockedReason }}</p>
       <p v-if="affordability?.total_monthly_housing_cost?.succeeded" class="costs-note">
         Everything above added together: mortgage + sinking fund + life insurance + commutes + council tax − rental income.
       </p>
@@ -397,6 +414,9 @@ function canEdit(personName: string): boolean {
   color: var(--text-muted);
   font-size: 0.85rem;
   margin: 0.25rem 0 0.75rem;
+}
+.costs-note--blocked {
+  color: var(--red);
 }
 .costs-provenance { margin: var(--sp-2) 0; }
 .costs-edit-group { display: flex; align-items: center; gap: 2px; margin-left: auto; margin-right: var(--sp-2); }

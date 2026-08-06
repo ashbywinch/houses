@@ -202,6 +202,20 @@ describe('PropertyList filtering', () => {
     expect(wrapper.text()).toContain('Hiding 3 houses over the family')
   })
 
+  it('does not offer to hide when every house is over the commute limit', async () => {
+    const store = initStore()
+    const wrapper = mount(PropertyList)
+    await flushPromises()
+    store.commuteCeilings = { Simon: { fine: 0, isChild: false } } // every commute is over
+    await flushPromises()
+    expect(wrapper.text()).toContain("All 4 houses are over the family's commute limit")
+
+    // Tapping the chip must NOT hide everything — houses stay visible
+    const chip = wrapper.findAll('.chip').find(c => c.text().includes("over the family's commute limit"))!
+    await chip.trigger('click')
+    expect(wrapper.text()).toContain('40 School Ln')
+  })
+
   it('shows a legend for the commute pill colours (C7)', () => {
     initStore()
     const wrapper = mount(PropertyList)

@@ -227,6 +227,39 @@ Deferred / needs a user decision:
   works-estimate data gap).
 - Optional polish: favourites distinctness beyond the heading.
 
+## Part E — Walkthrough run 5 (2026-08-06, P13 loop after run-4 fixes)
+
+Re-run after the run-4 fixes + the council-tax regeneration: participant
+`UxParticipantRun2` (19m walk, screenshots in /tmp/ux-houses-run2/),
+evaluator `UxEvaluatorRun2` (report in agent://UxEvaluatorRun2). 13
+confusions; triaged:
+
+Fixed in PR #54:
+
+- Commute-limit chip: no longer offers to hide when it would hide EVERY
+  house (info chip "All N houses are over the family's commute
+  limit — change the limit in Settings"); empty state guides the user
+  back to the chip.
+- "Total Monthly — Can't calculate" now names the missing piece (leaf
+  reason, e.g. "Works estimate required for: Ashby").
+- Council Tax estimate label: "? · (£1,200 ± £50)/yr" → "Band unknown ·
+  (£1,200 ± £50)/yr".
+- Sinking-fund note now uses THIS property's actual figures (was a
+  static £7,800/£433 example that never matched).
+- Commute "how is this calculated?" drops petrol sources for non-car
+  routes (the provenance walks every mode branch).
+- Cap fares show inline "(max)"; school walks say "min walk" not "m
+  walk"; filter label "Max Monthly Outgoings" → "Max monthly cost".
+
+Verified NOT reproducible (rows/data present — scroll artifacts):
+"mortgage missing from Costs tab" (row is first, data succeeded) and
+"Pimlico missing from Commute tab" (key present, no template filter);
+no red-wavy-underline style exists in the code.
+
+Deferred (data/scope): Summary tab describes the town, not the house
+(no photos/bathroom data in the DAG); map marker clustering + legend;
+favourites distinctness beyond the heading.
+
 ## Sequencing
 
 A (library first: A1 → A2 → A3 → A4) → D (library `evaluate` primitive,

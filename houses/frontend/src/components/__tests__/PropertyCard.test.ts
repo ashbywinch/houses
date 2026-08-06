@@ -117,7 +117,7 @@ describe('PropertyCard commute filtering', () => {
     const wrapper = mountCard({ rid: '123', data: summary })
     expect(wrapper.text()).toContain('Test Primary')
     // School commute time should appear alongside the school name
-    expect(wrapper.text()).toContain('20m')
+    expect(wrapper.text()).toContain('20 min walk')
   })
 })
 

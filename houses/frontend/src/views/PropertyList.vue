@@ -205,10 +205,14 @@ const activeChips = computed(() => {
   if (maxCommuteFilter.value != null) chips.push({ label: `Commute < ${maxCommuteFilter.value}m`, key: 'maxCommute' })
   if (searchQuery.value.trim()) chips.push({ label: `Search: ${searchQuery.value.trim()}`, key: 'search' })
   if (hiddenOverCeilingCount.value > 0) {
+    const n = hiddenOverCeilingCount.value
+    const hidesEverything = n >= store.rids.length && store.rids.length > 0
     chips.push(
       store.showOverCeiling
-        ? { label: `Hiding ${hiddenOverCeilingCount.value} house${hiddenOverCeilingCount.value === 1 ? '' : 's'} over the family's commute limit`, key: 'ceiling' }
-        : { label: `${hiddenOverCeilingCount.value} house${hiddenOverCeilingCount.value === 1 ? '' : 's'} over the family's commute limit — tap to hide`, key: 'ceiling' },
+        ? { label: `Hiding ${n} house${n === 1 ? '' : 's'} over the family's commute limit`, key: 'ceiling' }
+        : hidesEverything
+          ? { label: `All ${n} houses are over the family's commute limit — change the limit in Settings`, key: 'ceiling' }
+          : { label: `${n} house${n === 1 ? '' : 's'} over the family's commute limit — tap to hide`, key: 'ceiling' },
     )
   }
   return chips
@@ -218,7 +222,12 @@ function removeChip(key: string) {
   if (key === 'minBeds') minBedroomsFilter.value = null
   if (key === 'maxCommute') maxCommuteFilter.value = null
   if (key === 'search') searchQuery.value = ''
-  if (key === 'ceiling') store.showOverCeiling = !store.showOverCeiling
+  if (key === 'ceiling') {
+    // never toggle into a state where the filter hides EVERY house
+    if (store.showOverCeiling || hiddenOverCeilingCount.value < store.rids.length) {
+      store.showOverCeiling = !store.showOverCeiling
+    }
+  }
 }
 function clearAllFilters() {
   maxPriceFilter.value = null; minBedroomsFilter.value = null; maxCommuteFilter.value = null
@@ -278,7 +287,7 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
           v-for="chip in activeChips"
           :key="chip.key"
           class="chip"
-          :class="{ 'chip--actionable': chip.key === 'ceiling' && !store.showOverCeiling }"
+          :class="{ 'chip--actionable': chip.key === 'ceiling' && (store.showOverCeiling || hiddenOverCeilingCount < store.rids.length) }"
           :role="chip.key === 'ceiling' ? 'button' : undefined"
           @click="chip.key === 'ceiling' && removeChip('ceiling')"
         >
@@ -317,7 +326,14 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
 
     <div v-if="store.loading" class="empty-state"><p class="empty-state__text">Loading...</p></div>
     <div v-else-if="store.error" class="empty-state"><p class="empty-state__text">Error: {{ store.error }}</p></div>
-    <div v-else-if="displayedRids.length === 0" class="empty-state"><p class="empty-state__text">No properties match your criteria.</p></div>
+    <div v-else-if="displayedRids.length === 0" class="empty-state">
+      <p class="empty-state__text">
+        <template v-if="store.showOverCeiling && hiddenOverCeilingCount > 0">
+          All houses are hidden by the family's commute limit — tap the "Hiding" chip to show them.
+        </template>
+        <template v-else>No properties match your criteria.</template>
+      </p>
+    </div>
     <div v-else class="card-list" role="list">
       <template v-for="rid in displayedRids" :key="rid">
         <PropertyCard :rid :data="cardData(rid)" />
@@ -341,7 +357,7 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
           </select>
         </div>
         <div class="sheet__section">
-          <label class="sheet__label">Max Monthly Outgoings (£)</label>
+          <label class="sheet__label">Max monthly cost (£)</label>
           <input v-model.number="maxPriceFilter" type="number" class="sheet__input" placeholder="e.g. 3000" min="0" step="100" />
         </div>
         <div class="sheet__section">

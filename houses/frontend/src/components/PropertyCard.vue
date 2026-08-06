@@ -239,7 +239,7 @@ async function toggleViewed() {
               class="card__commute-cost"
               :title="commuteCostTitle(c.commute)"
             >
-              £{{ commuteCost(c.commute)!.toFixed(2) }}/day
+              £{{ commuteCost(c.commute)!.toFixed(2) }}/day{{ (commuteCost(c.commute) ?? 0) >= 100 ? ' (max)' : '' }}
             </span>
           </div>
         </div>

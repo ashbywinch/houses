@@ -200,6 +200,32 @@ describe('CostsSection explanatory copy (C5/C6/C10)', () => {
     const wrapper = mountCosts()
     expect(wrapper.text()).toContain('added to the amount you borrow')
   })
+
+  it('names the missing piece when the total cannot be calculated', () => {
+    const wrapper = mountCosts({
+      affordability: {
+        total_monthly_housing_cost: {
+          succeeded: false,
+          value: null,
+          error: '77777777/total_monthly_cost: dep failed (Works estimate required for: Ashby)',
+          error_detail: { user_message: 'Works estimate required for: Ashby' },
+          provenance: {},
+        },
+      },
+    })
+    expect(wrapper.text()).toContain('Works estimate required for: Ashby')
+  })
+
+  it('sinking fund note uses this property actual numbers', () => {
+    const wrapper = mountCosts({
+      affordability: {
+        monthly_sinking_fund: { succeeded: true, value: { amount: '361.11', currency: 'GBP' }, error: null, provenance: {} },
+      },
+    })
+    // 361.11/mo × 18 ≈ £6,500/yr
+    expect(wrapper.text()).toContain('£361.11/mo is ⅔ of the yearly fund')
+    expect(wrapper.text()).toContain('£6,500/yr')
+  })
 })
 
 describe('CostsSection uncertainty rendering (Part A)', () => {
@@ -214,7 +240,7 @@ describe('CostsSection uncertainty rendering (Part A)', () => {
         },
       },
     })
-    expect(wrapper.text()).toContain('? · (£1,200 ± £50)/yr')
+    expect(wrapper.text()).toContain('Band unknown · (£1,200 ± £50)/yr')
   })
 
   it('renders an exact council tax without a spread', () => {

@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { commuteDuration, commuteCost, pillColour } from '../formatters/commute'
 import ProvenanceView from './ProvenanceView.vue'
+import type { Provenance } from '../types'
 
 const props = defineProps<{
   commutes: any
@@ -9,6 +10,25 @@ const props = defineProps<{
   warnThreshold?: number
   currentPerson?: string | null
 }>()
+
+/** A commute's "how is this calculated?" must not list fuel sources the
+ *  route doesn't use — the provenance walks every mode branch, so a
+ *  train route shows petrol inputs. Drop petrol-labelled sources unless
+ *  the winning mode is car/drive. */
+function provenanceForMode(p: Provenance, mode?: string): Provenance {
+  const isCar = mode === 'car' || mode === 'drive'
+  const keep = (label: string): boolean => isCar || !/petrol/i.test(label)
+  const walk = (node: Provenance): Provenance | null => {
+    if (!keep(node.label)) return null
+    const sources: Record<string, Provenance> = {}
+    for (const [key, child] of Object.entries(node.sources ?? {})) {
+      const filtered = walk(child)
+      if (filtered) sources[key] = filtered
+    }
+    return { ...node, sources }
+  }
+  return walk(p) ?? p
+}
 
 // ── Accordion state ────────────────────────────────────
 const expandedCommutes = ref<Set<string>>(new Set())
@@ -82,7 +102,10 @@ function toggleProvenance(key: string) {
           </button>
         </div>
         <div v-if="showProvenance === key && c?.provenance" class="commute-provenance-tree">
-          <ProvenanceView :provenance="c.provenance" title="Commute" />
+          <ProvenanceView
+            :provenance="provenanceForMode(c.provenance, c?.value?.mode)"
+            title="Commute"
+          />
         </div>
       </div>
     </div>
