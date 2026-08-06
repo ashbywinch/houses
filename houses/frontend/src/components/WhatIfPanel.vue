@@ -2,6 +2,12 @@
 import { computed, onMounted, ref } from 'vue'
 import * as api from '../services/api'
 import { usePropertiesStore } from '../stores/properties'
+import {
+  blockWholePoundsKey,
+  forceIntegerPounds,
+  integerPounds,
+  sanitizeWholePoundsPaste,
+} from '../formatters/money'
 
 // ── Editable person shape (a question, not a form) ─────────────
 
@@ -37,17 +43,6 @@ const threshold = computed(() => props.threshold ?? 1500)
 
 function money(amount: string): { amount: string; currency: string } {
   return { amount, currency: 'GBP' }
-}
-
-/** Money displays and sends as integer pounds — no decimals. */
-function integerPounds(amount: string | undefined): string {
-  if (amount == null || amount === '') return ''
-  return String(Math.round(Number(amount)))
-}
-
-/** Keep money inputs as strings on the wire (the API convention). */
-function asString(e: Event): string {
-  return (e.target as HTMLInputElement).value
 }
 
 onMounted(load)
@@ -180,7 +175,7 @@ function backToReal() {
       <p v-if="active" class="whatif__delta">{{ deltaHeadline }}</p>
       <p class="whatif__intro">
         Try different numbers without changing the family settings. Nothing is saved until you
-        choose "Use these numbers".
+        choose "Use these numbers". Money is in whole pounds.
       </p>
 
     <div class="whatif__persons">
@@ -198,14 +193,18 @@ function backToReal() {
             Expected sale price (£)
             <input
               :value="p.home_sale_price" type="number" inputmode="numeric"
-              @input="p.home_sale_price = asString($event); scheduleEval()"
+              @keydown="blockWholePoundsKey"
+              @paste="sanitizeWholePoundsPaste"
+              @input="p.home_sale_price = forceIntegerPounds($event); scheduleEval()"
             />
           </label>
           <label class="whatif-person__field">
             Mortgage remaining (£)
             <input
               :value="p.outstanding_mortgage" type="number" inputmode="numeric"
-              @input="p.outstanding_mortgage = asString($event); scheduleEval()"
+              @keydown="blockWholePoundsKey"
+              @paste="sanitizeWholePoundsPaste"
+              @input="p.outstanding_mortgage = forceIntegerPounds($event); scheduleEval()"
             />
           </label>
         </div>
@@ -214,7 +213,9 @@ function backToReal() {
           Cash available for the deposit (£)
           <input
             :value="p.cash_contribution" type="number" inputmode="numeric"
-            @input="p.cash_contribution = asString($event); scheduleEval()"
+            @keydown="blockWholePoundsKey"
+              @paste="sanitizeWholePoundsPaste"
+              @input="p.cash_contribution = forceIntegerPounds($event); scheduleEval()"
           />
         </label>
 

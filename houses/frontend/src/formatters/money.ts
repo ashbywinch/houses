@@ -1,35 +1,65 @@
-/**
- * Money formatting helpers.
- *
- * The backend serialises all monetary ``amount`` values as **strings** with
- * 2 decimal places (e.g. ``"1800.00"``).  These helpers parse them back to
- * numbers for display formatting without losing precision.
- */
+/** Large house-purchase amounts (sale price, mortgage, deposit, works
+ *  estimates) are whole pounds — never pence. Entry is PREVENTED at the
+ *  keystroke/paste level, and the constraint is visible via helper hints
+ *  on the fields. Small recurring amounts (life insurance, rental
+ *  income, commute costs) allow pence — max 2dp, per GOV.UK/HMRC money
+ *  input guidance. */
 
-/** Parse a money amount string to a number suitable for display formatting. */
-export function parseAmount(amount: string | number | undefined | null): number {
-  if (amount == null) return 0
-  if (typeof amount === 'number') return amount
-  return parseFloat(amount)
+export function integerPounds(value: string | undefined): string {
+  if (value == null) return ''
+  const dot = value.indexOf('.')
+  return dot === -1 ? value : value.slice(0, dot)
 }
 
-/** Format a money amount string as a display string (e.g. ``"£4.50"``). */
-export function formatMoney(amount: string | number | undefined | null, _currency = 'GBP'): string {
-  const n = parseAmount(amount)
-  if (n === 0 && amount == null) return ''
-  return `£${n.toFixed(2)}`
+/** Backstop for whole-pound inputs: force the DOM value to the integer
+ *  part even when the model is unchanged (Vue would skip the no-change
+ *  patch and leave a typed decimal point visible). */
+export function forceIntegerPounds(e: Event): string {
+  const el = e.target as HTMLInputElement
+  const clean = integerPounds(el.value)
+  el.value = clean
+  return clean
 }
 
-/** Format a money amount string with locale formatting (e.g. ``"£500,000"``). */
-export function formatMoneyLocale(amount: string | number | undefined | null, _currency = 'GBP'): string {
-  const n = parseAmount(amount)
-  if (n === 0 && amount == null) return ''
-  return `£${n.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
+/** Block keystrokes that can't produce a whole pound amount: the decimal
+ *  point (UK + US), thousands separators, exponent notation, sign. */
+export function blockWholePoundsKey(e: KeyboardEvent): void {
+  if (['.', ',', 'e', 'E', '+', '-'].includes(e.key)) e.preventDefault()
 }
 
-/** Extract the numeric amount from a ``{amount, currency}`` object or raw number. */
-export function extractAmount(val: { amount: string | number; currency?: string } | number | undefined | null): number {
-  if (val == null) return 0
-  if (typeof val === 'number') return val
-  return parseAmount(val.amount)
+/** Block keystrokes that can't produce a valid pence amount (0–2dp):
+ *  exponent notation and sign; the decimal point is allowed. */
+export function blockPenceKey(e: KeyboardEvent): void {
+  if (['e', 'E', '+', '-'].includes(e.key)) e.preventDefault()
+}
+
+/** Sanitize a paste into a whole-pound input: strip everything that
+ *  isn't a digit (handles "£550,000", "550 000", "550000.99"). */
+export function sanitizeWholePoundsPaste(e: ClipboardEvent): void {
+  const text = e.clipboardData?.getData('text') ?? ''
+  const clean = text.replace(/[^0-9]/g, '')
+  if (clean !== text) {
+    e.preventDefault()
+    insertText(e.target as HTMLInputElement, clean)
+  }
+}
+
+/** Normalize a pence-allowed money string to at most 2dp on blur —
+ *  "150.5" stays, "150.505" rounds to "150.51" (GOV.UK: pounds and
+ *  pence only). */
+export function normalizePence(value: string): string {
+  const dot = value.indexOf('.')
+  if (dot === -1) return value
+  const whole = value.slice(0, dot)
+  let frac = value.slice(dot + 1)
+  if (frac.length <= 2) return value
+  frac = String(Math.round(Number(`0.${frac}`) * 100) / 100).slice(2)
+  return `${whole}.${frac}`
+}
+
+function insertText(el: HTMLInputElement, text: string): void {
+  const start = el.selectionStart ?? el.value.length
+  const end = el.selectionEnd ?? el.value.length
+  el.value = el.value.slice(0, start) + text + el.value.slice(end)
+  el.dispatchEvent(new Event('input', { bubbles: true }))
 }

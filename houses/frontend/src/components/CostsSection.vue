@@ -2,6 +2,11 @@
 import { computed, ref } from 'vue'
 import ProvenanceToggle from './ProvenanceToggle.vue'
 import { epcClass } from '../formatters/format'
+import {
+  blockWholePoundsKey,
+  forceIntegerPounds,
+  sanitizeWholePoundsPaste,
+} from '../formatters/money'
 import { patchRentalIncome, patchWorksEstimate } from '../services/api'
 import { usePropertiesStore } from '../stores/properties'
 
@@ -104,6 +109,8 @@ async function saveEdit(person: string) {
 }
 
 function handleKeydown(e: KeyboardEvent, person: string) {
+  // Whole-pounds rule first (blocks '.'/'e'/sign), then Enter/Escape.
+  blockWholePoundsKey(e)
   if (e.key === 'Enter') saveEdit(person)
   else if (e.key === 'Escape') cancelEdit()
 }
@@ -248,10 +255,13 @@ function canEdit(personName: string): boolean {
             <span class="costs-edit-prefix">£</span>
             <input
               v-model="editValue"
-              type="number"
+              type="text"
+              inputmode="numeric"
               class="costs-edit-input"
               autofocus
               @keydown="handleKeydown($event, p.name as string)"
+              @paste="sanitizeWholePoundsPaste"
+              @input="editValue = forceIntegerPounds($event)"
               @blur="saveEdit(p.name as string)"
             />
           </div>

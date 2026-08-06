@@ -96,6 +96,15 @@ describe('WhatIfPanel', () => {
     expect(wrapper.text()).not.toContain('George')
   })
 
+  it('rejects pence as typed (whole pounds only)', async () => {
+    const { wrapper } = mountPanel()
+    await settle()
+    await expand(wrapper)
+    const sale = wrapper.find('input[type="number"]')
+    await sale.setValue('550000.50')
+    expect((sale.element as HTMLInputElement).value).toBe('550000')
+  })
+
   it('displays money as integer pounds (no decimals)', async () => {
     const { wrapper } = mountPanel()
     await settle()

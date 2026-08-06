@@ -4,6 +4,14 @@ import { useRoute } from 'vue-router'
 import Header from '../components/Header.vue'
 import ProvenanceToggle from '../components/ProvenanceToggle.vue'
 import * as api from '../services/api'
+import {
+  blockPenceKey,
+  blockWholePoundsKey,
+  forceIntegerPounds,
+  integerPounds,
+  normalizePence,
+  sanitizeWholePoundsPaste,
+} from '../formatters/money'
 import type { Provenance } from '../types'
 
 interface PoiSettings {
@@ -184,7 +192,21 @@ function toggleMode(poi: PoiSettings, mode: string) {
 }
 
 function moneyInput(money: MoneyValue | undefined, event: Event) {
+  // Generic money input — pence allowed (life insurance etc.).
   if (money) money.amount = String((event.target as HTMLInputElement).value)
+}
+
+/** Whole-pounds money input (sale price, mortgage, cash): pence are
+ *  blocked at the keystroke and paste level (see formatters/money). */
+function wholePoundsInput(money: MoneyValue | undefined, event: Event) {
+  if (money) money.amount = forceIntegerPounds(event)
+}
+
+/** Pence-allowed money input: cap at 2dp on blur (GOV.UK rule). */
+function penceInput(money: MoneyValue | undefined, event: Event) {
+  moneyInput(money, event)
+  const el = event.target as HTMLInputElement
+  el.value = normalizePence(el.value)
 }
 
 function allCommutesAreSchool(person: PersonSettings): boolean {
@@ -328,19 +350,25 @@ const depositRows = computed(() => {
               <label class="settings-person__label" for="home-sale">Expected sale price of current home (£)</label>
               <input
                 id="home-sale"
-                type="number"
-                :value="person.home_sale_price?.amount"
-                @input="moneyInput(person.home_sale_price!, $event)"
+                type="text"
+                inputmode="numeric"
+                :value="person.home_sale_price ? integerPounds(person.home_sale_price.amount) : ''"
+                @keydown="blockWholePoundsKey"
+                @paste="sanitizeWholePoundsPaste"
+                @input="wholePoundsInput(person.home_sale_price!, $event)"
               />
-              <p class="settings-person__helper">What you expect to get when you sell it.</p>
+              <p class="settings-person__helper">What you expect to get when you sell it. Whole pounds only.</p>
               <label class="settings-person__label" for="mortgage">Mortgage remaining on current home (£)</label>
               <input
                 id="mortgage"
-                type="number"
-                :value="person.outstanding_mortgage?.amount"
-                @input="moneyInput(person.outstanding_mortgage!, $event)"
+                type="text"
+                inputmode="numeric"
+                :value="person.outstanding_mortgage ? integerPounds(person.outstanding_mortgage.amount) : ''"
+                @keydown="blockWholePoundsKey"
+                @paste="sanitizeWholePoundsPaste"
+                @input="wholePoundsInput(person.outstanding_mortgage!, $event)"
               />
-              <p class="settings-person__helper">What you still owe on the house you're selling.</p>
+              <p class="settings-person__helper">What you still owe on the house you're selling. Whole pounds only.</p>
             </template>
             <p v-else class="settings-person__helper">Deposit is cash — no current home.</p>
             <label class="settings-person__label" for="cash">
@@ -348,9 +376,12 @@ const depositRows = computed(() => {
             </label>
             <input
               id="cash"
-              type="number"
-              :value="person.cash_contribution?.amount"
-              @input="moneyInput(person.cash_contribution!, $event)"
+              type="text"
+              inputmode="numeric"
+              :value="person.cash_contribution ? integerPounds(person.cash_contribution.amount) : ''"
+              @keydown="blockWholePoundsKey"
+              @paste="sanitizeWholePoundsPaste"
+              @input="wholePoundsInput(person.cash_contribution!, $event)"
             />
             <p class="settings-person__helper">
               {{ person.selling_home ? 'Savings or gifts, on top of the sale proceeds.' : 'Savings, gifts, or the proceeds of a sale.' }}
@@ -358,9 +389,12 @@ const depositRows = computed(() => {
             <label class="settings-person__label" for="life-insurance">Life insurance (£/month)</label>
             <input
               id="life-insurance"
-              type="number"
+              type="text"
+              inputmode="decimal"
               :value="person.life_insurance_monthly?.amount"
+              @keydown="blockPenceKey"
               @input="moneyInput(person.life_insurance_monthly!, $event)"
+              @blur="penceInput(person.life_insurance_monthly!, $event)"
             />
           </div>
 

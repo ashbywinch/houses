@@ -86,6 +86,14 @@ describe('CostsSection works estimates', () => {
     expect(wrapper.find('input').exists()).toBe(true)
   })
 
+  it('rejects pence in the works-estimate editor (whole pounds only)', async () => {
+    const wrapper = mountCosts()
+    await wrapper.find('.costs-value--editable').trigger('click')
+    const input = wrapper.find('input')
+    await input.setValue('20000.50')
+    expect((input.element as HTMLInputElement).value).toBe('20000')
+  })
+
   it('shows non-current persons as read-only', () => {
     const wrapper = mountCosts()
     const nonEditable = wrapper.findAll('.costs-value:not(.costs-value--editable)')

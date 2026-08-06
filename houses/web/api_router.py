@@ -492,20 +492,28 @@ def _person_from_dict(d: dict, target: Person) -> Person:
     from money import Money as _Money
     from pint import Quantity as _Quantity
 
-    def _money(v):
+    # Large house-purchase / deposit amounts are whole pounds — never
+    # pence (the UI enforces this too; this is the hard guarantee).
+    whole_pound_fields = {"home_sale_price", "outstanding_mortgage", "cash_contribution"}
+
+    def _money(v, *, whole_pounds: bool = False, field: str = "amount"):
         """Validate the money shape: a number or {amount, currency}.  A
         malformed value must raise (→ 400) — storing it would poison every
         downstream read (.amount crashes) and freeze the equity cascade."""
         if isinstance(v, (int, float)):
-            return _Money(str(v), "GBP")
-        if isinstance(v, dict):
+            m = _Money(str(v), "GBP")
+        elif isinstance(v, dict):
             if "amount" not in v:
                 raise ValueError(f"money value missing 'amount': {v!r}")
             try:
-                return _Money(v["amount"], v.get("currency", "GBP"))
+                m = _Money(v["amount"], v.get("currency", "GBP"))
             except Exception as e:
                 raise ValueError(f"invalid money value {v!r}: {e}") from e
-        raise ValueError(f"invalid money value {v!r} — expected a number or {{'amount': ...}}")
+        else:
+            raise ValueError(f"invalid money value {v!r} — expected a number or {{'amount': ...}}")
+        if whole_pounds and m.amount != m.amount.to_integral_value():
+            raise ValueError(f"{field} must be a whole number of pounds — no pence")
+        return m
 
     def _penalty(v):
         """Validate bus_walk_penalty: the {value, unit} serialization."""
@@ -519,7 +527,7 @@ def _person_from_dict(d: dict, target: Person) -> Person:
     updates = {k: v for k, v in d.items() if k != "thresholds"}
     for f in _PERSON_MONEY_FIELDS:
         if f in updates:
-            updates[f] = _money(updates[f])
+            updates[f] = _money(updates[f], whole_pounds=f in whole_pound_fields, field=f)
     if "bus_walk_penalty" in updates:
         updates["bus_walk_penalty"] = _penalty(updates["bus_walk_penalty"])
     if "editable_by" in updates and updates["editable_by"] is not None:

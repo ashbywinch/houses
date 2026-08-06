@@ -501,6 +501,28 @@ class TestSettingsPropagationApi:
         register_property(rid, prop)
         return rid
 
+    def test_whole_pounds_large_money_fields_reject_pence(self):
+        """House-purchase amounts (sale/mortgage/cash) are whole pounds —
+        the server REJECTS pence (400) rather than silently rounding;
+        small monthly amounts still allow pence."""
+        client = self._setup()
+        resp = client.patch(
+            "/api/settings/person/Ashby",
+            json={"name": "Ashby", "has_car": True, "cash_contribution": {"amount": "300000.50", "currency": "GBP"}},
+        )
+        assert resp.status_code == 400, resp.text
+        assert "whole number of pounds" in resp.json()["detail"]
+
+        # pence are fine on the small monthly field
+        resp = client.patch(
+            "/api/settings/person/Ashby",
+            json={"name": "Ashby", "has_car": True, "life_insurance_monthly": {"amount": "150.50", "currency": "GBP"}},
+        )
+        assert resp.status_code == 200, resp.text
+        value = client.get("/api/settings").json()["persons"]["value"]
+        ashby = next(p for p in value if p["name"] == "Ashby")
+        assert ashby["life_insurance_monthly"]["amount"] == "150.50"
+
     def test_get_settings_carries_effective_selling_home(self):
         """GET /settings reports the EFFECTIVE selling-home state per
         person (inferred where unset) so the toggle renders correctly."""

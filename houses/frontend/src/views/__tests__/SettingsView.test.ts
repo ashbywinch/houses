@@ -469,4 +469,29 @@ describe('SettingsView — empty money inputs normalize on save', () => {
     const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
     expect(body.home_sale_price.amount).toBe('0')
   })
+
+  it('rejects pence in the large money fields (whole pounds only)', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
+    const sale = simon.find('input#home-sale')
+    await sale.setValue('550000.99')
+    expect((sale.element as HTMLInputElement).value).toBe('550000')
+    await simon.trigger('focusout')
+    await flush()
+    const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(body.home_sale_price.amount).toBe('550000')
+  })
+
+  it('blocks the decimal key outright on whole-pound fields', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
+    const sale = simon.find('input#home-sale')
+    await sale.setValue('550000')
+    const evt = new KeyboardEvent('keydown', { key: '.', cancelable: true })
+    sale.element.dispatchEvent(evt)
+    expect(evt.defaultPrevented).toBe(true)
+    expect((sale.element as HTMLInputElement).value).toBe('550000')
+  })
 })
