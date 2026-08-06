@@ -45,14 +45,25 @@ const monthlyCostApprox = computed(() => {
 // PropertyList) is marked so it is never mistaken for a real number.
 const isWhatIf = computed(() => props.data.total_monthly_cost.provenance?.label === 'what-if')
 
-// Border color based on triage state
+// Left border colour = triage state, matching the triage buttons
+// exactly (favourite=blue, dismissed=red, seen=green). The default
+// (untouched) card has NO border — one mystery colour per card max,
+// and only when it means something.
 const borderClass = computed(() => {
   const t = triage.value
-  if (!t) return 'card__border--active'
+  if (!t) return ''
   if (t.dismissed) return 'card__border--dismissed'
   if (t.favourite) return 'card__border--favourite'
   if (t.is_viewed) return 'card__border--viewed'
-  return 'card__border--active'
+  return ''
+})
+
+const borderTitle = computed(() => {
+  const cls = borderClass.value
+  if (cls === 'card__border--favourite') return 'Favourite'
+  if (cls === 'card__border--dismissed') return 'Dismissed'
+  if (cls === 'card__border--viewed') return 'Seen'
+  return undefined
 })
 
 
@@ -161,18 +172,30 @@ function isStaleOffice(key: string): boolean {
   return !current.includes(label)
 }
 
-/** Top status bar colour = the worst adult commute severity (mockup). */
+/** Top status bar colour = the worst adult commute severity (mockup).
+ *  Green/orange/red match the legend in the list header; a card whose
+ *  commutes have no route at all is muted, not green. */
 const statusClass = computed(() => {
   const entries = Object.entries(adultCommutes.value)
   if (entries.length === 0) return ''
-  let worst = 0 // 0 ok, 1 tight, 2 far
+  let worst = -1 // -1 no route, 0 ok, 1 tight, 2 far
   for (const [, c] of entries) {
     const mode = commuteMode(c.commute)
     const cls = pillColour(c.commute, mode === 'walk' ? 15 : 45, mode === 'walk' ? 30 : 75)
     const s = cls === 'pill--good' ? 0 : cls === 'pill--warn' ? 1 : cls === 'pill--bad' ? 2 : -1
     if (s > worst) worst = s
   }
-  return worst === 0 ? 'card__status--ok' : worst === 1 ? 'card__status--tight' : 'card__status--far'
+  return worst === -1 ? 'card__status--none' : worst === 0 ? 'card__status--ok' : worst === 1 ? 'card__status--tight' : 'card__status--far'
+})
+
+/** Hover text so the top bar is never a mystery colour. */
+const statusTitle = computed(() => {
+  const cls = statusClass.value
+  if (cls === 'card__status--ok') return 'All commutes within target'
+  if (cls === 'card__status--tight') return 'A commute is getting tight'
+  if (cls === 'card__status--far') return 'A commute is too far'
+  if (cls === 'card__status--none') return 'No route found for a commute'
+  return undefined
 })
 
 async function toggleFavourite() {
@@ -190,10 +213,10 @@ async function toggleViewed() {
 
 <template>
   <article class="card" :class="{ 'card--dismissed': triage?.dismissed }">
-    <!-- Worst-commute status bar (redesign mockup) -->
-    <div class="card__status" :class="statusClass" />
-    <!-- Accent border -->
-    <div class="card__border" :class="borderClass" />
+    <!-- Worst-commute status bar (redesign mockup); title explains the colour -->
+    <div class="card__status" :class="statusClass" :title="statusTitle" />
+    <!-- Triage border: favourite / dismissed / seen — matches the buttons -->
+    <div class="card__border" :class="borderClass" :title="borderTitle" />
 
     <div class="card__body">
       <!-- Top row: Address | Monthly cost -->
@@ -323,6 +346,7 @@ async function toggleViewed() {
 .card__status--ok    { background: var(--green); }
 .card__status--tight { background: var(--orange); }
 .card__status--far   { background: var(--red); }
+.card__status--none  { background: var(--commute-none); }
 
 .card__border {
   position: absolute;
@@ -330,10 +354,10 @@ async function toggleViewed() {
   width: 4px; height: 100%;
   border-radius: 0;
 }
-.card__border--active { background: var(--green); }
-.card__border--favourite { background: var(--amber); }
+/* Same colours as the triage buttons' active states — one axis, one palette. */
+.card__border--favourite { background: var(--blue); }
 .card__border--dismissed { background: var(--red); }
-.card__border--viewed { background: var(--blue); }
+.card__border--viewed { background: var(--green); }
 
 .card__body {
   padding: 14px 14px 12px;

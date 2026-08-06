@@ -308,6 +308,41 @@ Not code-fixable / inherent:
   only that person can enter it (ownership) — no inline path for
   others, by design.
 
+## Part E — Card-band snag (2026-08-06, user report)
+
+"House cards have the coloured band on two sides and they're not all
+the same colour on the same card — I don't know what either one
+represents."
+
+Root cause: the card had TWO silent colour axes. (1) Top status bar =
+worst-commute severity (green ok / orange tight / red far — the palette
+the list-header legend already documents, but nothing connected the bar
+to it). (2) Left accent border = triage state — and it was broken in
+three ways: the default "active" state painted EVERY untouched card
+green (a second band with no meaning); the palette collided with the
+status axis (amber favourite ≈ orange tight, red dismissed = red far);
+and favourite was amber while the favourite BUTTON was blue — the
+border didn't even match its own axis.
+
+Fixed:
+
+- Border appears only for real triage states (favourite/dismissed/seen);
+  untouched cards have no border. One meaningful band per card max.
+- Border colours now match the triage buttons exactly (favourite=blue
+  accent, dismissed=red, seen=green) — one axis, one palette, and the
+  favourite border is no longer confused with the commute palette.
+- Both bars carry a hover title ("A commute is too far", "Favourite",
+  …) so a colour is never unexplained.
+- Status bar bug: a card whose commutes ALL had no route showed GREEN
+  (the worst-severity loop initialised at 0); now muted gray
+  (`--commute-none`), matching the legend's "no route" dot.
+
+Verified: computed styles on the live app (favourite border =
+rgb(45,106,79) = --blue accent; default border = transparent; status
+bars red/orange), plus 3 new PropertyCard tests (default has no
+border, triage borders + titles, severity classes + titles) — 221
+frontend green.
+
 ## Sequencing
 
 A (library first: A1 → A2 → A3 → A4) → D (library `evaluate` primitive,

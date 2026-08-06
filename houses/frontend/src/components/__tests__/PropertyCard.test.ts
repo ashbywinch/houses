@@ -335,3 +335,69 @@ describe('PropertyCard error handling', () => {
 
 })
 
+describe('PropertyCard status bar', () => {
+  function commuteSummary(duration?: number): PropertySummary {
+    return makeSummary({
+      commutes: {
+        'Simon/Pimlico': {
+          commute: {
+            succeeded: true,
+            value: duration === undefined
+              ? { label: 'Pimlico' }
+              : { duration: { value: duration, unit: 'minute' }, label: 'Pimlico' },
+            error: null, provenance: { label: 'test' }, is_child: false,
+          },
+        },
+      },
+    })
+  }
+
+  it('colours the top bar by the worst commute severity, with a tooltip', async () => {
+    const cases: Array<[number | undefined, string, string]> = [
+      [32, 'card__status--ok', 'All commutes within target'],
+      [55, 'card__status--tight', 'A commute is getting tight'],
+      [90, 'card__status--far', 'A commute is too far'],
+      [undefined, 'card__status--none', 'No route found for a commute'],
+    ]
+    for (const [duration, cls, title] of cases) {
+      const wrapper = mountCard({ rid: '123', data: commuteSummary(duration) })
+      const bar = wrapper.find('.card__status')
+      expect(bar.classes()).toContain(cls)
+      expect(bar.attributes('title')).toBe(title)
+    }
+  })
+})
+
+describe('PropertyCard triage border', () => {
+  it('has NO border or tooltip for an untouched card (default state)', () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = usePropertiesStore()
+    store.triage['123'] = { favourite: false, dismissed: false, is_viewed: false, user_notes: '', triage_status: '' }
+    const wrapper = mount(PropertyCard, { props: { rid: '123', data: makeSummary() }, global: { plugins: [pinia] } })
+    const border = wrapper.find('.card__border')
+    expect([...border.classes()].filter(c => c.startsWith('card__border--'))).toEqual([])
+    expect(border.attributes('title')).toBeUndefined()
+  })
+
+  it('colours the left border to match the triage buttons, with a tooltip', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = usePropertiesStore()
+    store.triage['123'] = { favourite: false, dismissed: false, is_viewed: false, user_notes: '', triage_status: '' }
+    const wrapper = mount(PropertyCard, { props: { rid: '123', data: makeSummary() }, global: { plugins: [pinia] } })
+    const cases: Array<[{ favourite?: boolean; dismissed?: boolean; is_viewed?: boolean }, string, string]> = [
+      [{ favourite: true }, 'card__border--favourite', 'Favourite'],
+      [{ dismissed: true }, 'card__border--dismissed', 'Dismissed'],
+      [{ is_viewed: true }, 'card__border--viewed', 'Seen'],
+    ]
+    for (const [triage, cls, title] of cases) {
+      store.triage['123'] = { favourite: false, dismissed: false, is_viewed: false, user_notes: '', triage_status: '', ...triage }
+      await wrapper.vm.$nextTick()
+      const border = wrapper.find('.card__border')
+      expect(border.classes()).toContain(cls)
+      expect(border.attributes('title')).toBe(title)
+    }
+  })
+})
+
