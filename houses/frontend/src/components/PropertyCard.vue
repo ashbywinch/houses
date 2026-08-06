@@ -202,7 +202,7 @@ async function toggleViewed() {
           v-else
           class="card__monthly-cost card__monthly-cost--unknown"
           title="Can't calculate yet — see the property page (often Council Tax)"
-        >£?/mo</span>
+        >£—/mo</span>
       </div>
 
       <!-- Specs row: price · bedrooms · freshness -->
@@ -243,6 +243,7 @@ async function toggleViewed() {
             </span>
           </div>
         </div>
+        <a v-if="Object.keys(adultCommutes).length > 0" href="#/settings" class="card__change-dest">Change destinations →</a>
       </div>
 
       <!-- Schools / EPC -->
@@ -401,6 +402,16 @@ async function toggleViewed() {
   border-radius: 999px;
   padding: 0.05rem 0.4rem;
   white-space: nowrap;
+}
+.card__change-dest {
+  display: inline-block;
+  margin-top: 0.3rem;
+  font-size: 0.75rem;
+  color: var(--blue);
+  text-decoration: none;
+}
+.card__change-dest:hover {
+  text-decoration: underline;
 }
 .card__commute-row {
   display: flex;

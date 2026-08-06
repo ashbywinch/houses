@@ -28,6 +28,7 @@ const store = usePropertiesStore()
 const persons = ref<PersonEdit[]>([])
 const busy = ref(false)
 const errorMsg = ref('')
+const collapsed = ref(true)
 let timer: ReturnType<typeof setTimeout> | null = null
 
 const active = computed(() => store.whatIfTotals != null)
@@ -157,15 +158,20 @@ function backToReal() {
 </script>
 
 <template>
-  <section class="whatif" aria-label="What if">
+  <section class="whatif" :class="{ 'whatif--collapsed': collapsed }" aria-label="What if">
     <header class="whatif__header">
-      <h2 class="whatif__title">What if…</h2>
+      <button class="whatif__toggle" type="button" @click="collapsed = !collapsed">
+        <h2 class="whatif__title">What if…</h2>
+        <span class="whatif__chevron" aria-hidden="true">{{ collapsed ? '▸' : '▾' }}</span>
+      </button>
       <span v-if="active" class="whatif__badge">not saved</span>
     </header>
-    <p class="whatif__intro">
-      Try different numbers without changing the family settings. Nothing is saved until you
-      choose "Use these numbers".
-    </p>
+
+    <template v-if="!collapsed">
+      <p class="whatif__intro">
+        Try different numbers without changing the family settings. Nothing is saved until you
+        choose "Use these numbers".
+      </p>
 
     <div class="whatif__persons">
       <div v-for="p in persons" :key="p.name" class="whatif-person">
@@ -227,6 +233,7 @@ function backToReal() {
         Use these numbers
       </button>
     </footer>
+    </template>
   </section>
 </template>
 
@@ -242,6 +249,23 @@ function backToReal() {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+.whatif__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.whatif__chevron {
+  font-size: 0.8rem;
+}
+.whatif--collapsed {
+  padding: 0.6rem 1rem;
 }
 .whatif__title {
   margin: 0;

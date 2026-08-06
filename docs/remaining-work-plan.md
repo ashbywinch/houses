@@ -192,6 +192,39 @@ UX direction (settled 2026-08-06):
   somewhere else") — they trigger routing API calls. The commute
   what-if is frequency-only ("what if I went in one day a week").
 
+## Part E — Walkthrough run 4 (2026-08-06)
+
+Two-phase walkthrough re-run (P13) against the live app: participant
+`UxParticipant2` (16m walk, 22 screenshots), evaluator `UxEvaluator`
+(report in agent://UxEvaluator). Confusions by severity: two blockers
+(old-office commutes + "Can't calculate" totals), three highs, five
+mediums/lows.
+
+Fixed in PR #54 (this session):
+
+- Commute-ceiling filter: default OFF (it hid ALL houses on first
+  visit), store-persisted toggle (no longer silently re-applies on
+  navigation), plain-language chip showing the hidden count.
+- Detail-page bare "?" commute pills → "No route" with a tooltip.
+- Card "£?/mo" → "£—/mo" (the "?" read as "£7/mo" at a glance).
+- Favourites view gets a heading + "N saved houses" count.
+- "What if…" panel collapsed by default (was a wall of family
+  numbers above the houses on first visit).
+- Cards get a "Change destinations →" link (the only path was buried
+  on the detail page).
+- Costs page explains very high commute figures (TfL daily maximum).
+
+Deferred / needs a user decision:
+
+- Run-4 blocker "Total Monthly — Can't calculate" everywhere is STALE
+  PERSISTED DAG STATE: the A3 council-tax fallback only applies on
+  recompute, and the live DB's persisted results predate it. Requires
+  a one-off data refresh (re-touch addresses or a re-enrichment pass)
+  — a data operation on the live DB, not a code change.
+- "Max Monthly Outgoings" offered while totals are unavailable (same
+  data refresh).
+- Optional polish: favourites distinctness beyond the heading.
+
 ## Sequencing
 
 A (library first: A1 → A2 → A3 → A4) → D (library `evaluate` primitive,

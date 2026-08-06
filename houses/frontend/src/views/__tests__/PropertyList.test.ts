@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { usePropertiesStore } from '../../stores/properties'
 import PropertyList from '../PropertyList.vue'
 import type { PropertySummary } from '../../types'
@@ -185,18 +185,21 @@ describe('PropertyList filtering', () => {
     expect(wrapper.text()).not.toContain('10 Cheap St')
   })
 
-  it('hides houses over the family commute ceiling with a chip to reveal them (C9)', async () => {
+  it('hides houses over the family commute ceiling when the user opts in (C9)', async () => {
     const store = initStore()
-    store.rids = ['prop-a', 'prop-d']
-    // prop-d's Simon/Office commute is 45m; Simon's ceiling is 30 → hidden
-    store.commuteCeilings = { Simon: { fine: 30, isChild: false } }
     const wrapper = mount(PropertyList)
-    expect(wrapper.text()).not.toContain('40 School Ln')
-    expect(wrapper.text()).toContain('Commute ceiling')
-
-    const ceilingChip = wrapper.findAll('.chip').find(c => c.text().includes('Commute ceiling'))!
-    await ceilingChip.find('.chip__remove').trigger('click')
+    await flushPromises() // let loadAll() populate all four rids
+    store.commuteCeilings = { Simon: { fine: 30, isChild: false } }
+    await flushPromises()
+    // commutes: prop-a 60m, prop-b 30m, prop-c 90m, prop-d 45m → 3 over
     expect(wrapper.text()).toContain('40 School Ln')
+    expect(wrapper.text()).toContain("3 houses over the family's commute limit")
+
+    // Tapping the chip hides them
+    const chip = wrapper.findAll('.chip').find(c => c.text().includes('commute limit'))!
+    await chip.trigger('click')
+    expect(wrapper.text()).not.toContain('40 School Ln')
+    expect(wrapper.text()).toContain('Hiding 3 houses over the family')
   })
 
   it('shows a legend for the commute pill colours (C7)', () => {

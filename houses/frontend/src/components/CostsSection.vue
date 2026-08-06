@@ -41,10 +41,21 @@ const councilTaxLabel = computed(() => {
     : `${band} · £${amount}/yr`
 })
 
-/** True when the total monthly cost is approximate (stddev > 0). */
+/** True when the total is approximate (stddev > 0). */
 const totalMonthlyApprox = computed(() => {
   const m = props.affordability?.total_monthly_housing_cost
   return !!m?.succeeded && (m.value?.stddev ?? 0) > 0
+})
+
+/** High commute figures are usually the TfL daily maximum, not a real
+ *  fare — surface that without requiring a hover (walkthrough C9). */
+const tflCapNote = computed(() => {
+  const persons = props.affordability?.monthly_commute_cost?.value?.persons
+  if (!persons || typeof persons !== 'object') return false
+  return Object.values(persons).some((p: unknown) => {
+    const daily = (p as { daily_gbp?: unknown }).daily_gbp
+    return Number(daily ?? 0) >= 100
+  })
 })
 
 // ── Works estimate inline editing ─────────────────────
@@ -275,6 +286,9 @@ function canEdit(personName: string): boolean {
         </div>
       </div>
       <ProvenanceToggle v-if="affordability?.monthly_commute_cost?.provenance" :provenance="affordability?.monthly_commute_cost?.provenance" title="Monthly commute cost" />
+      <p v-if="tflCapNote" class="costs-note">
+        Includes the TfL daily maximum fare (£100/day) on routes that hit it — not a mistake.
+      </p>
 
       <!-- Rental Income (editable by current person) -->
       <div class="costs-row">

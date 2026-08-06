@@ -260,7 +260,7 @@ describe('PropertyCard affordability honesty (P2)', () => {
       total_monthly_cost: { succeeded: false, value: null, error: 'x', provenance: { label: 'test' } },
     })
     const wrapper = mountCard({ rid: '123', data: summary })
-    expect(wrapper.text()).toContain('£?/mo')
+    expect(wrapper.text()).toContain('£—/mo')
   })
 
   it('explains the TfL daily maximum instead of presenting it as a fare', () => {
@@ -295,7 +295,7 @@ describe('PropertyCard error handling', () => {
     const wrapper = mountCard({ rid: '123', data: summary })
     expect(wrapper.text()).not.toContain('£500,000')
     // an uncomputable total is never hidden silently — it reads as unknown
-    expect(wrapper.text()).toContain('£?/mo')
+    expect(wrapper.text()).toContain('£—/mo')
   })
 
   it('handles empty commutes', () => {

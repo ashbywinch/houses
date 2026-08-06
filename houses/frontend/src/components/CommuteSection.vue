@@ -40,9 +40,16 @@ function toggleProvenance(key: string) {
     <div v-for="(c, key) in commutes" :key="key" class="commute-accordion">
       <button class="commute-accordion__header" @click="toggleCommute(key as string)">
         <span class="commute-accordion__label">{{ key }}</span>
-        <span class="pill" :class="pillColour(c, goodThreshold ?? 45, warnThreshold ?? 75)">
-          {{ commuteDuration(c?.value?.duration) }}
-          {{ commuteCost(c?.value?.daily_cost) }}
+        <span
+          class="pill"
+          :class="pillColour(c, goodThreshold ?? 45, warnThreshold ?? 75)"
+          :title="c?.value?.duration ? undefined : 'No route found for this commute'"
+        >
+          <template v-if="c?.value?.duration">
+            {{ commuteDuration(c?.value?.duration) }}
+            {{ commuteCost(c?.value?.daily_cost) }}
+          </template>
+          <template v-else>No route</template>
         </span>
         <span class="commute-accordion__chevron" :class="{ 'commute-accordion__chevron--open': expandedCommutes.has(key as string) }">▼</span>
       </button>

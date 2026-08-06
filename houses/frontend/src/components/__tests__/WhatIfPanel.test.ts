@@ -42,6 +42,11 @@ function mountPanel() {
   return { wrapper, store: usePropertiesStore() }
 }
 
+/** The panel is collapsed by default — open it before interacting. */
+async function expand(wrapper: ReturnType<typeof mount>) {
+  await wrapper.find('.whatif__toggle').trigger('click')
+}
+
 /** Flush microtasks (onMounted load, async run) without wall-clock time. */
 async function settle() {
   await vi.advanceTimersByTimeAsync(0)
@@ -69,6 +74,7 @@ describe('WhatIfPanel', () => {
     const { wrapper } = mountPanel()
     await settle()
     expect(wrapper.text()).toContain('What if…')
+    await expand(wrapper)
     expect(wrapper.text()).toContain('Simon')
     expect(wrapper.text()).toContain('Ashby')
     expect(wrapper.text()).toContain('Expected sale price (£)')
@@ -79,6 +85,7 @@ describe('WhatIfPanel', () => {
   it('runs the what-if on edit and marks it not saved', async () => {
     const { wrapper } = mountPanel()
     await settle()
+    await expand(wrapper)
 
     const cashInputs = wrapper.findAll('input[type="number"]')
     const ashbyCash = cashInputs[cashInputs.length - 1] // last field = Ashby's cash
@@ -96,6 +103,8 @@ describe('WhatIfPanel', () => {
 
   it('shows a delta headline against real totals', async () => {
     const { wrapper, store } = mountPanel()
+    await settle()
+    await expand(wrapper)
     store.rids = ['prop-a']
     store.summaries = {
       'prop-a': {
@@ -127,6 +136,7 @@ describe('WhatIfPanel', () => {
   it('applies the numbers to the family settings and clears the panel', async () => {
     const { wrapper } = mountPanel()
     await settle()
+    await expand(wrapper)
 
     const cashInputs = wrapper.findAll('input[type="number"]')
     await cashInputs[cashInputs.length - 1].setValue('400000')
@@ -144,6 +154,7 @@ describe('WhatIfPanel', () => {
   it('backs out to real numbers without saving', async () => {
     const { wrapper, store } = mountPanel()
     await settle()
+    await expand(wrapper)
 
     store.applyWhatIf({ 'prop-a': { succeeded: true, monthly_total: { value: { amount: '900', currency: 'GBP' }, stddev: 0 } } })
     await settle()

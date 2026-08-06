@@ -70,9 +70,9 @@ function bestCommuteMin(rid: string) {
 
 // ── C9: per-person commute ceiling ─────────────────────────────
 // Houses where ANY adult's commute exceeds their fine_max_minutes are
-// hidden by default (chip toggles them back on).
-
-const showOverCeiling = ref(false)
+// hidden ONLY when the user opts in (persisted in the store so the
+// choice survives navigation). The chip is always visible when there
+// are over-ceiling houses, in plain language, with the count.
 
 function overCeiling(rid: string): boolean {
   const commutes = store.summaries[rid]?.commutes
@@ -88,6 +88,8 @@ function overCeiling(rid: string): boolean {
   }
   return false
 }
+
+const hiddenOverCeilingCount = computed(() => store.rids.filter(overCeiling).length)
 
 // ── C11: area / address search ─────────────────────────────────
 
@@ -180,7 +182,7 @@ const displayedRids = computed(() => {
     const q = searchQuery.value.trim().toLowerCase()
     rids = rids.filter(rid => (store.summaries[rid]?.best_address?.value ?? '').toLowerCase().includes(q))
   }
-  if (!showOverCeiling.value) {
+  if (store.showOverCeiling) {
     rids = rids.filter(rid => !overCeiling(rid))
   }
   rids = [...rids]
@@ -202,8 +204,12 @@ const activeChips = computed(() => {
   if (minBedroomsFilter.value != null) chips.push({ label: `Beds: ${minBedroomsFilter.value}+`, key: 'minBeds' })
   if (maxCommuteFilter.value != null) chips.push({ label: `Commute < ${maxCommuteFilter.value}m`, key: 'maxCommute' })
   if (searchQuery.value.trim()) chips.push({ label: `Search: ${searchQuery.value.trim()}`, key: 'search' })
-  if (!showOverCeiling.value && Object.keys(store.commuteCeilings).length > 0) {
-    chips.push({ label: 'Commute ceiling — some houses hidden', key: 'ceiling' })
+  if (hiddenOverCeilingCount.value > 0) {
+    chips.push(
+      store.showOverCeiling
+        ? { label: `Hiding ${hiddenOverCeilingCount.value} house${hiddenOverCeilingCount.value === 1 ? '' : 's'} over the family's commute limit`, key: 'ceiling' }
+        : { label: `${hiddenOverCeilingCount.value} house${hiddenOverCeilingCount.value === 1 ? '' : 's'} over the family's commute limit — tap to hide`, key: 'ceiling' },
+    )
   }
   return chips
 })
@@ -212,11 +218,11 @@ function removeChip(key: string) {
   if (key === 'minBeds') minBedroomsFilter.value = null
   if (key === 'maxCommute') maxCommuteFilter.value = null
   if (key === 'search') searchQuery.value = ''
-  if (key === 'ceiling') showOverCeiling.value = true
+  if (key === 'ceiling') store.showOverCeiling = !store.showOverCeiling
 }
 function clearAllFilters() {
   maxPriceFilter.value = null; minBedroomsFilter.value = null; maxCommuteFilter.value = null
-  searchQuery.value = ''; showOverCeiling.value = false; sortBy.value = 'date_added'
+  searchQuery.value = ''; store.showOverCeiling = false; sortBy.value = 'date_added'
 }
 const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)?.label ?? 'Sort')
 </script>
@@ -268,7 +274,14 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
 
     <div v-if="activeChips.length > 0" class="filter-chips">
       <div class="chips-scroll">
-        <span v-for="chip in activeChips" :key="chip.key" class="chip">
+        <span
+          v-for="chip in activeChips"
+          :key="chip.key"
+          class="chip"
+          :class="{ 'chip--actionable': chip.key === 'ceiling' && !store.showOverCeiling }"
+          :role="chip.key === 'ceiling' ? 'button' : undefined"
+          @click="chip.key === 'ceiling' && removeChip('ceiling')"
+        >
           {{ chip.label }}
           <button class="chip__remove" @click="removeChip(chip.key)" aria-label="Remove filter">&times;</button>
         </span>
@@ -294,7 +307,13 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
 
     <WhatIfPanel :threshold="maxPriceFilter ?? 1500" />
 
-    <div class="results-header" role="status" aria-live="polite">{{ displayedRids.length }} properties found</div>
+    <h2 v-if="activeTab === 'favourites'" class="tab-heading">Favourites</h2>
+    <div class="results-header" role="status" aria-live="polite">
+      <template v-if="activeTab === 'favourites'">
+        {{ displayedRids.length }} saved house{{ displayedRids.length === 1 ? '' : 's' }}
+      </template>
+      <template v-else>{{ displayedRids.length }} properties found</template>
+    </div>
 
     <div v-if="store.loading" class="empty-state"><p class="empty-state__text">Loading...</p></div>
     <div v-else-if="store.error" class="empty-state"><p class="empty-state__text">Error: {{ store.error }}</p></div>
@@ -381,9 +400,11 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
 .filter-chips { padding:4px 0; overflow-x:auto; -webkit-overflow-scrolling:touch; }
 .chips-scroll { display:flex; gap:8px; align-items:center; white-space:nowrap; }
 .chip { display:inline-flex; align-items:center; gap:4px; padding:6px 12px; border-radius:999px; background:var(--blue-bg); color:var(--blue); font-size:13px; font-weight:500; white-space:nowrap; }
+.chip--actionable { cursor:pointer; text-decoration:underline; }
 .chip__remove { border:none; background:none; color:var(--blue); font-size:16px; line-height:1; cursor:pointer; padding:0 2px; min-width:24px; min-height:24px; display:flex; align-items:center; justify-content:center; }
 .chips-clear { border:none; background:none; color:var(--text-secondary); font-size:13px; cursor:pointer; padding:4px 8px; white-space:nowrap; text-decoration:underline; min-height:44px; }
 .results-header { font-size:14px; color:var(--text-secondary); padding:8px 0 12px; }
+.tab-heading { font-size:1.1rem; margin:0; padding:8px 0 0; }
 .card-list { display:flex; flex-direction:column; gap:12px; }
 .empty-state { text-align:center; padding:60px 20px; }
 .empty-state__text { font-size:16px; color:var(--text-muted); }

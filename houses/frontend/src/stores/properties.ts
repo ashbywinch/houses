@@ -16,6 +16,9 @@ export const usePropertiesStore = defineStore('properties', () => {
   // and the list can hide houses over the family's ceiling.
   const commuteCeilings = ref<Record<string, { fine: number; isChild: boolean }>>({})
   const poiLabels = ref<Record<string, string[]>>({})
+  // C9: houses over the family commute ceiling are hidden only when the
+  // user opts in — persisted here so the choice survives navigation.
+  const showOverCeiling = ref(false)
 
   // ── What-if (Part D) ──────────────────────────────────────────
   // Hypothetical monthly totals per property while the "What if…"
@@ -147,7 +150,7 @@ export const usePropertiesStore = defineStore('properties', () => {
 
   return {
     rids, summaries, details, triage, settings, loading, error,
-    commuteCeilings, poiLabels,
+    commuteCeilings, poiLabels, showOverCeiling,
     whatIfTotals, applyWhatIf, clearWhatIf, monthlyTotalFor,
     loadAll, loadDetail, updateSummary, updateDetail, toggleTriage,
   }
