@@ -197,8 +197,15 @@ class DerivedNode(Node[T], Generic[T]):
             "provenance": await self._build_provenance_dict(),
         }
 
-    async def refresh(self) -> None:
-        if not self._is_stale():
+    async def refresh(self, force: bool = False) -> None:
+        """Recompute and persist this node.
+
+        Skips nodes whose inputs haven't changed since they were last
+        computed. ``force=True`` bypasses the staleness check — for
+        code changes that alter computation under unchanged inputs
+        (the persisted results are fresh-by-timestamp but wrong).
+        """
+        if not force and not self._is_stale():
             return
         active_deps = self._get_active_deps()
         for i, dep in enumerate(active_deps):

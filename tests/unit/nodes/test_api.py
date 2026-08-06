@@ -722,6 +722,108 @@ class TestWhatIfApi:
         assert resp.status_code == 400
 
 
+class TestRegenerateApi:
+    """POST /api/admin/regenerate — force recompute of non-stale nodes."""
+
+    def _setup(self):
+        from fastapi.testclient import TestClient
+
+        from houses.property_registry import _registry
+        from houses.server import app
+
+        _registry.clear()
+        client = TestClient(app)
+        return client, _registry
+
+    def _seed(self, reg):
+        from money import Money
+
+        from houses.geo import GeoPoint
+        from houses.nodes.property import PropertyNodes
+
+        prop = PropertyNodes("77777777")
+        prop.rightmove_price.push(Money("500000", "GBP"), "test")
+        prop.rightmove_address.push("1 Test St", "test")
+        prop.rightmove_bedrooms.push("3", "test")
+        prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.postcode.push("SW1V 2QQ", "test")
+        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.works_estimates.push({}, "test")
+        prop.rental_income.push(Money("0", "GBP"), "test")
+        prop.comment_status.push("", "test")
+        reg["77777777"] = prop
+        return prop
+
+    def test_requires_superuser(self):
+        client, _ = self._setup()
+        resp = client.post("/api/admin/regenerate", json={"patterns": ["*"]})
+        # app-level auth answers first for an anonymous call
+        assert resp.status_code in (401, 403)
+
+    def test_requires_patterns(self):
+        client, _ = self._setup()
+        _inject_session(client)
+        assert client.post("/api/admin/regenerate", json={}).status_code == 422
+        assert client.post("/api/admin/regenerate", json={"patterns": []}).status_code == 422
+
+    def test_regenerates_council_tax_stale_in_code(self):
+        from money import Money
+
+        from dag.attempt import Attempt
+        from dag.persistence import save_node_result
+        from houses.model.domain import Person
+
+        _push_persons(
+            Person(name="Simon", has_car=True, email="simon@example.com"),
+            Person(name="Ashby", has_car=True, cash_contribution=Money("300000", "GBP")),
+        )
+        client, reg = self._setup()
+        _inject_session(client)
+        prop = self._seed(reg)
+        flush_all()
+
+        # Simulate a pre-A3 persisted state: council tax impossible and
+        # NOT stale (dep timestamps older than the compute).
+        nid = prop.council_tax._id
+        save_node_result(
+            nid,
+            {"status": "impossible", "value": None, "error": "pre-A3 state", "succeeded": False, "provenance": {}},
+        )
+        prop.council_tax._attempt = Attempt.impossible("pre-A3 state")
+
+        # A plain flush does NOT regenerate it — timestamps say fresh.
+        flush_all()
+        assert prop.council_tax.latest_attempt().impossible
+
+        resp = client.post("/api/admin/regenerate", json={"patterns": ["*/council_tax"]})
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["matched"] >= 1
+        entry = next(r for r in data["regenerated"] if r["node"] == nid)
+        assert entry["status"] == "succeeded"
+
+        # Live node is regenerated (real lookup succeeds here — cached
+        # VOA data; the fallback only fires when the lookup fails); the
+        # downstream total is recomputed too (cascade drained).
+        ct = prop.council_tax.latest_attempt()
+        assert ct.succeeded
+        info = ct.value_or_none()
+        assert info is not None and info.band
+        total = prop.total_monthly_cost.latest_attempt()
+        assert total.succeeded
+
+    def test_non_matching_pattern_regenerates_nothing(self):
+        client, reg = self._setup()
+        _inject_session(client)
+        self._seed(reg)
+        flush_all()
+        resp = client.post("/api/admin/regenerate", json={"patterns": ["no-such-nodes/*"]})
+        assert resp.status_code == 200
+        assert resp.json()["matched"] == 0
+
+
 class TestWorksEstimateApi:
     """PATCH /api/properties/{rid}/works-estimate endpoint."""
 

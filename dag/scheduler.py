@@ -44,6 +44,14 @@ class RefreshScheduler:
     def unregister(self, node: DerivedNode) -> None:
         """Called when a DerivedNode is disconnected (cleanup)."""
 
+    def registered_nodes(self) -> dict[str, DerivedNode]:
+        """Every DerivedNode currently registered, by node id.
+
+        The default scheduler does not track nodes; production's
+        AsyncQueueScheduler does (used for admin force-regeneration).
+        """
+        return {}
+
     def schedule(self, node: DerivedNode) -> None:
         """Request that *node* be refreshed when convenient."""
 
@@ -68,12 +76,14 @@ class AsyncQueueScheduler(RefreshScheduler):
     def __init__(self, respect_time: bool = True) -> None:
         self._queue: asyncio.PriorityQueue[QueueEvent] = asyncio.PriorityQueue()
         self._scheduled: dict[str, QueueEvent] = {}
+        self._registered: dict[str, DerivedNode] = {}
         self._wakeup = asyncio.Event()
         self._after_refresh_callback: Callable[[DerivedNode], object] | None = None
         self._respect_time = respect_time
 
     def register(self, node: DerivedNode) -> None:
         """Called when a node is created. Schedules it at its stored retry time or immediately."""
+        self._registered[node._id] = node
         if node._id in self._scheduled:
             return
         if node._retry_at is not None and node._retry_at > datetime.now(UTC):
@@ -84,6 +94,11 @@ class AsyncQueueScheduler(RefreshScheduler):
     def unregister(self, node: DerivedNode) -> None:
         """Called when a node is disconnected (cleanup)."""
         self._scheduled.pop(node._id, None)
+        self._registered.pop(node._id, None)
+
+    def registered_nodes(self) -> dict[str, DerivedNode]:
+        """Every DerivedNode currently registered, by node id."""
+        return dict(self._registered)
 
     def schedule(self, node: DerivedNode) -> None:
         """Schedule for immediate processing. No-op if node already queued."""
