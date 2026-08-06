@@ -198,32 +198,21 @@ const displayedRids = computed(() => {
   return rids
 })
 
-const activeChips = computed(() => {
-  const chips: { label: string; key: string }[] = []
-  if (maxPriceFilter.value != null) chips.push({ label: `Max monthly: £${maxPriceFilter.value}/mo`, key: 'maxPrice' })
-  if (minBedroomsFilter.value != null) chips.push({ label: `Beds: ${minBedroomsFilter.value}+`, key: 'minBeds' })
-  if (maxCommuteFilter.value != null) chips.push({ label: `Commute < ${maxCommuteFilter.value}m`, key: 'maxCommute' })
-  if (searchQuery.value.trim()) chips.push({ label: `Search: ${searchQuery.value.trim()}`, key: 'search' })
-  if (store.showOverCeiling && hiddenOverCeilingCount.value > 0) {
-    const n = hiddenOverCeilingCount.value
-    const maxFine = Math.max(0, ...Object.values(store.commuteCeilings).map(c => c.fine))
-    const limit = maxFine > 0 ? `${maxFine}-minute` : 'family'
-    chips.push({ label: `Hiding ${n} house${n === 1 ? '' : 's'} with a commute over the ${limit} limit`, key: 'ceiling' })
-  }
-  return chips
+/** Active-filter count for the Filter pill badge (mockup hierarchy 2). */
+const activeFilterCount = computed(() => {
+  let n = 0
+  if (maxPriceFilter.value != null) n++
+  if (minBedroomsFilter.value != null) n++
+  if (maxCommuteFilter.value != null) n++
+  if (searchQuery.value.trim()) n++
+  if (store.showOverCeiling) n++
+  return n
 })
-function removeChip(key: string) {
-  if (key === 'maxPrice') maxPriceFilter.value = null
-  if (key === 'minBeds') minBedroomsFilter.value = null
-  if (key === 'maxCommute') maxCommuteFilter.value = null
-  if (key === 'search') searchQuery.value = ''
-  if (key === 'ceiling') store.showOverCeiling = false
-}
-function clearAllFilters() {
-  maxPriceFilter.value = null; minBedroomsFilter.value = null; maxCommuteFilter.value = null
-  searchQuery.value = ''; store.showOverCeiling = false; sortBy.value = 'date_added'
-}
-const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)?.label ?? 'Sort')
+
+const ceilingLimitText = computed(() => {
+  const maxFine = Math.max(0, ...Object.values(store.commuteCeilings).map(c => c.fine))
+  return maxFine > 0 ? `${maxFine}-minute` : 'family'
+})
 </script>
 
 <template>
@@ -256,75 +245,70 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
 
   <!-- Properties / Favourites tab -->
   <main v-else class="page" role="main">
-    <nav class="filter-bar" aria-label="Filter and sort options">
-      <button class="filter-btn" @click="showFilterSheet = true">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="4" y1="6" x2="20" y2="6" /><line x1="8" y1="12" x2="20" y2="12" /><line x1="12" y1="18" x2="20" y2="18" />
+    <div class="search-section">
+      <label class="search-bar">
+        <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
         </svg>
-        <span class="filter-btn__label">{{ sortLabel }}</span>
-      </button>
-      <button class="filter-btn" @click="showFilterSheet = true">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" />
-        </svg>
-        <span class="filter-btn__label">Filter</span>
-      </button>
-    </nav>
-
-    <div v-if="activeChips.length > 0" class="filter-chips">
-      <div class="chips-scroll">
-        <span
-          v-for="chip in activeChips"
-          :key="chip.key"
-          class="chip"
-          :class="{ 'chip--actionable': chip.key === 'ceiling' }"
-          :role="chip.key === 'ceiling' ? 'button' : undefined"
-          @click="chip.key === 'ceiling' && removeChip('ceiling')"
-        >
-          {{ chip.label }}
-          <button
-            v-if="chip.key !== 'ceiling'"
-            class="chip__remove"
-            @click="removeChip(chip.key)"
-            aria-label="Remove filter"
-          >&times;</button>
-        </span>
-        <button v-if="activeChips.length" class="chips-clear" @click="clearAllFilters">Clear all</button>
-      </div>
+        <input
+          v-model="searchQuery"
+          class="search-input"
+          type="search"
+          placeholder="Search by area or address"
+          aria-label="Search by area or address"
+        />
+      </label>
     </div>
 
-    <div class="search-bar">
-      <input
-        v-model="searchQuery"
-        class="search-input"
-        type="search"
-        placeholder="Search by area or address"
-        aria-label="Search by area or address"
-      />
+    <div class="controls-row">
+      <button class="pill" @click="showFilterSheet = true">
+        <span class="pill__label">Date Added</span>
+        <svg class="pill-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
+      </button>
+      <button class="pill" :class="{ 'pill--active': activeFilterCount > 0 }" @click="showFilterSheet = true">
+        <svg class="pill-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z" /></svg>
+        <span class="pill__label">Filter</span>
+        <span v-if="activeFilterCount > 0" class="pill-badge">{{ activeFilterCount }}</span>
+      </button>
+      <span class="count-text" role="status" aria-live="polite">
+        <template v-if="activeTab === 'favourites'">
+          {{ displayedRids.length }} saved
+        </template>
+        <template v-else>{{ displayedRids.length }} found</template>
+      </span>
     </div>
-    <div class="pill-legend" role="note" aria-label="Commute time colours">
-      <span class="pill-legend__item"><i class="pill-legend__dot pill-legend__dot--good"></i>fine</span>
-      <span class="pill-legend__item"><i class="pill-legend__dot pill-legend__dot--warn"></i>getting tight</span>
-      <span class="pill-legend__item"><i class="pill-legend__dot pill-legend__dot--bad"></i>too far</span>
-      <span class="pill-legend__item"><i class="pill-legend__dot pill-legend__dot--muted"></i>no route</span>
+
+    <div v-if="store.showOverCeiling && hiddenOverCeilingCount > 0" class="commute-status" role="status">
+      <span class="commute-status-icon" aria-hidden="true">⚠</span>
+      <span>
+        Hiding {{ hiddenOverCeilingCount }} house{{ hiddenOverCeilingCount === 1 ? '' : 's' }} with a commute over the
+        {{ ceilingLimitText }} limit.
+      </span>
+      <button
+        class="commute-status-dismiss"
+        aria-label="Show all houses"
+        @click="store.showOverCeiling = false"
+      >&times;</button>
     </div>
 
     <WhatIfPanel :threshold="maxPriceFilter ?? 1500" />
 
-    <h2 v-if="activeTab === 'favourites'" class="tab-heading">Favourites</h2>
-    <div class="results-header" role="status" aria-live="polite">
-      <template v-if="activeTab === 'favourites'">
-        {{ displayedRids.length }} saved house{{ displayedRids.length === 1 ? '' : 's' }}
-      </template>
-      <template v-else>{{ displayedRids.length }} properties found</template>
+    <div class="legend-strip" role="note" aria-label="Commute time colours">
+      <span class="legend-item"><i class="legend-dot legend-dot--good"></i>fine</span>
+      <span class="legend-item"><i class="legend-dot legend-dot--warn"></i>getting tight</span>
+      <span class="legend-item"><i class="legend-dot legend-dot--bad"></i>too far</span>
+      <span class="legend-item"><i class="legend-dot legend-dot--muted"></i>no route</span>
     </div>
+
+    <h2 v-if="activeTab === 'favourites'" class="tab-heading">Favourites</h2>
 
     <div v-if="store.loading" class="empty-state"><p class="empty-state__text">Loading...</p></div>
     <div v-else-if="store.error" class="empty-state"><p class="empty-state__text">Error: {{ store.error }}</p></div>
     <div v-else-if="displayedRids.length === 0" class="empty-state">
       <p class="empty-state__text">
         <template v-if="store.showOverCeiling && hiddenOverCeilingCount > 0">
-          All houses are hidden by the family's commute limit — tap the "Hiding" chip to show them.
+          Every house is hidden by the family's commute limit — show them above.
         </template>
         <template v-else>No properties match your criteria.</template>
       </p>
@@ -411,19 +395,78 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
 
 <style scoped>
 .page { max-width:1200px; margin:0 auto; padding:12px 12px 0; }
-.filter-bar { display:flex; gap:10px; padding:8px 0 4px; }
-.filter-btn { display:inline-flex; align-items:center; gap:6px; min-width:44px; min-height:44px; padding:6px 16px; border-radius:999px; background:var(--card-bg); border:1px solid var(--border); color:var(--text); font-size:14px; font-weight:500; cursor:pointer; box-shadow:var(--shadow); }
-.filter-btn:hover { background:#f5f5f5; }
-.filter-btn__label { font-size:13px; }
-.filter-chips { padding:4px 0; overflow-x:auto; -webkit-overflow-scrolling:touch; }
-.chips-scroll { display:flex; gap:8px; align-items:center; white-space:nowrap; }
-.chip { display:inline-flex; align-items:center; gap:4px; padding:6px 12px; border-radius:999px; background:var(--blue-bg); color:var(--blue); font-size:13px; font-weight:500; white-space:nowrap; }
-.chip--actionable { cursor:pointer; text-decoration:underline; }
-.chip__remove { border:none; background:none; color:var(--blue); font-size:16px; line-height:1; cursor:pointer; padding:0 2px; min-width:24px; min-height:24px; display:flex; align-items:center; justify-content:center; }
-.chips-clear { border:none; background:none; color:var(--text-secondary); font-size:13px; cursor:pointer; padding:4px 8px; white-space:nowrap; text-decoration:underline; min-height:44px; }
-.results-header { font-size:14px; color:var(--text-secondary); padding:8px 0 12px; }
+.search-section { padding: 12px 0 0; }
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--card-bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 11px 14px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.search-bar:focus-within {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(45, 106, 79, 0.12);
+}
+.search-icon { flex-shrink: 0; width: 18px; height: 18px; color: var(--text-muted); }
+.search-input { flex: 1; border: none; background: none; font-size: 0.9375rem; color: var(--text); outline: none; }
+.search-input::placeholder { color: var(--text-muted); }
+
+.controls-row { display: flex; align-items: center; gap: 8px; padding: 12px 0 0; }
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--radius-full);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  border: 1.5px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  min-height: 40px;
+}
+.pill:hover { border-color: var(--text-muted); }
+.pill--active { background: var(--blue); color: #fff; border-color: var(--blue); }
+.pill-icon { width: 14px; height: 14px; flex-shrink: 0; }
+.pill-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  font-size: 0.6875rem; font-weight: 600; background: var(--blue); color: #fff;
+}
+.pill--active .pill-badge { background: rgba(255, 255, 255, 0.3); }
+.count-text { margin-left: auto; font-size: 0.8125rem; color: var(--text-muted); white-space: nowrap; }
+
+.commute-status {
+  display: flex; align-items: center; gap: 8px;
+  margin: 10px 0 0; padding: 8px 12px;
+  background: var(--amber-bg); border-radius: var(--radius-sm);
+  font-size: 0.8125rem; color: var(--amber-text); line-height: 1.35;
+}
+.commute-status-icon { flex-shrink: 0; font-size: 1rem; }
+.commute-status-dismiss {
+  margin-left: auto; background: none; border: none; color: var(--amber-text);
+  opacity: 0.6; cursor: pointer; padding: 2px; font-size: 1.1rem; line-height: 1; min-width: 32px; min-height: 32px;
+}
+
+.legend-strip {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 0 0; flex-wrap: wrap;
+}
+.legend-item { display: inline-flex; align-items: center; gap: 5px; font-size: 0.6875rem; color: var(--text-muted); }
+.legend-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.legend-dot--good { background: var(--green); }
+.legend-dot--warn { background: var(--orange); }
+.legend-dot--bad { background: var(--red); }
+.legend-dot--muted { background: var(--commute-none); }
+
 .tab-heading { font-size:1.1rem; margin:0; padding:8px 0 0; }
-.card-list { display:flex; flex-direction:column; gap:12px; }
+.card-list { display:flex; flex-direction:column; gap:12px; padding-top: 14px; }
 .empty-state { text-align:center; padding:60px 20px; }
 .empty-state__text { font-size:16px; color:var(--text-muted); }
 .tab-bar-spacer { height:72px; }
@@ -458,39 +501,6 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
 .tab-bar__tab { display:flex; flex-direction:column; align-items:center; gap:2px; border:none; background:none; cursor:pointer; color:var(--text-muted); min-width:56px; min-height:44px; padding:4px 12px; }
 .tab-bar__tab--active { color:var(--blue); }
 .tab-bar__tab--active svg { stroke:var(--blue); }
-.search-bar {
-  padding: 4px 0 8px;
-}
-.search-input {
-  width: 100%;
-  padding: 0.55rem 0.8rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  font-size: 0.9rem;
-}
-.pill-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 1rem;
-  padding: 0 0 8px;
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-.pill-legend__item {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-}
-.pill-legend__dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  display: inline-block;
-}
-.pill-legend__dot--good { background: var(--green); }
-.pill-legend__dot--warn { background: var(--orange); }
-.pill-legend__dot--bad { background: var(--red); }
-.pill-legend__dot--muted { background: var(--slate-100); border: 1px solid var(--border); }
 .map-fallback-note {
   position: absolute;
   top: 8px;

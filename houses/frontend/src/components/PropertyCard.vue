@@ -5,6 +5,7 @@ import { usePropertiesStore } from '../stores/properties'
 import CommutePill from './CommutePill.vue'
 import { simpleOfsted, ofstedClass } from '../formatters/format'
 import { schoolWalkMin } from '../formatters/school'
+import { pillColour } from '../formatters/commute'
 
 const store = usePropertiesStore()
 const props = defineProps<{
@@ -167,6 +168,20 @@ function isStaleOffice(key: string): boolean {
   return !current.includes(label)
 }
 
+/** Top status bar colour = the worst adult commute severity (mockup). */
+const statusClass = computed(() => {
+  const entries = Object.entries(adultCommutes.value)
+  if (entries.length === 0) return ''
+  let worst = 0 // 0 ok, 1 tight, 2 far
+  for (const [, c] of entries) {
+    const mode = commuteMode(c.commute)
+    const cls = pillColour(c.commute, mode === 'walk' ? 15 : 45, mode === 'walk' ? 30 : 75)
+    const s = cls === 'pill--good' ? 0 : cls === 'pill--warn' ? 1 : cls === 'pill--bad' ? 2 : -1
+    if (s > worst) worst = s
+  }
+  return worst === 0 ? 'card__status--ok' : worst === 1 ? 'card__status--tight' : 'card__status--far'
+})
+
 async function toggleFavourite() {
   await store.toggleTriage(props.rid, 'favourite', !triage.value?.favourite)
 }
@@ -182,6 +197,8 @@ async function toggleViewed() {
 
 <template>
   <article class="card" :class="{ 'card--dismissed': triage?.dismissed }">
+    <!-- Worst-commute status bar (redesign mockup) -->
+    <div class="card__status" :class="statusClass" />
     <!-- Accent border -->
     <div class="card__border" :class="borderClass" />
 
@@ -296,7 +313,7 @@ async function toggleViewed() {
 .card {
   position: relative;
   background: var(--card-bg);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
   border: 1px solid var(--border);
   overflow: hidden;
@@ -313,11 +330,19 @@ async function toggleViewed() {
 }
 .card--dismissed { opacity: 0.6; }
 
+.card__status {
+  height: 4px;
+  flex-shrink: 0;
+}
+.card__status--ok    { background: var(--green); }
+.card__status--tight { background: var(--orange); }
+.card__status--far   { background: var(--red); }
+
 .card__border {
   position: absolute;
   top: 0; left: 0;
   width: 4px; height: 100%;
-  border-radius: var(--radius) 0 0 var(--radius);
+  border-radius: 0;
 }
 .card__border--active { background: var(--green); }
 .card__border--favourite { background: var(--amber); }
@@ -500,8 +525,10 @@ async function toggleViewed() {
 .triage-btn--confirm.triage-btn--active { border-color: var(--green); color: var(--green); background: var(--green-bg); }
 .triage-btn__label { font-size: 10px; }
 
-/* Pill system */
-.pill {
+/* Pill system — scoped to the SCHOOL rows so it never overrides the
+ * shared CommutePill classes (which are solid; the mockup's school
+ * rating chips stay light). */
+.card__school-row .pill {
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -512,10 +539,10 @@ async function toggleViewed() {
   line-height: 1.6;
   white-space: nowrap;
 }
-.pill--xs { font-size: 10px; padding: 1px 5px; }
-.pill--sm { font-size: 11px; padding: 1px 7px; }
-.pill--good { background: var(--green-bg); color: var(--green-text); }
-.pill--warn { background: var(--orange-bg); color: var(--orange-text); }
-.pill--bad { background: var(--red-bg); color: var(--red-text); }
-.pill--slate { background: var(--slate-100); color: var(--slate-600); }
+.card__school-row .pill--xs { font-size: 10px; padding: 1px 5px; }
+.card__school-row .pill--sm { font-size: 11px; padding: 1px 7px; }
+.card__school-row .pill--good { background: var(--green-bg); color: var(--green-text); }
+.card__school-row .pill--warn { background: var(--orange-bg); color: var(--orange-text); }
+.card__school-row .pill--bad { background: var(--red-bg); color: var(--red-text); }
+.card__school-row .pill--slate { background: var(--slate-100); color: var(--slate-600); }
 </style>

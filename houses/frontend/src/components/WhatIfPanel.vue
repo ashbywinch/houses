@@ -177,6 +177,7 @@ function backToReal() {
     </header>
 
     <template v-if="!collapsed">
+      <p v-if="active" class="whatif__delta">{{ deltaHeadline }}</p>
       <p class="whatif__intro">
         Try different numbers without changing the family settings. Nothing is saved until you
         choose "Use these numbers".
@@ -230,7 +231,6 @@ function backToReal() {
       </div>
     </div>
 
-    <p v-if="active" class="whatif__delta">{{ deltaHeadline }}</p>
     <p v-if="busy" class="whatif__status">Updating…</p>
     <p v-if="errorMsg" class="whatif__error">{{ errorMsg }}</p>
 
@@ -248,11 +248,7 @@ function backToReal() {
 
 <style scoped>
 .whatif {
-  border: 1px dashed var(--blue);
-  border-radius: 12px;
-  padding: 1rem;
-  margin: 0 1rem 1rem;
-  background: color-mix(in srgb, var(--blue) 6%, white);
+  padding: 12px 0 0;
 }
 .whatif__header {
   display: flex;
@@ -265,40 +261,56 @@ function backToReal() {
   justify-content: space-between;
   width: 100%;
   min-height: 44px;
-  background: none;
-  border: none;
-  padding: 0;
+  padding: 12px 14px;
+  border: 1.5px dashed var(--text-muted);
+  border-radius: var(--radius);
+  background: var(--card-bg);
   cursor: pointer;
+  transition: background 0.15s;
   color: inherit;
   font: inherit;
 }
+.whatif__toggle:hover {
+  background: var(--pill-bg);
+}
 .whatif__chevron {
   font-size: 0.8rem;
-}
-.whatif--collapsed {
-  padding: 0.6rem 1rem;
+  color: var(--text-muted);
 }
 .whatif__title {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
 }
 .whatif__badge {
-  font-size: 0.75rem;
+  font-size: 0.6875rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: white;
+  color: #fff;
   background: var(--blue);
   border-radius: 999px;
   padding: 0.15rem 0.6rem;
+  white-space: nowrap;
+}
+.whatif__delta {
+  padding: 10px 12px;
+  background: var(--green-bg);
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--green-text);
+  margin: 10px 0 0;
+  text-align: center;
 }
 .whatif__intro {
-  margin: 0.4rem 0 0.8rem;
-  font-size: 0.85rem;
-  color: var(--text-muted, #666);
+  margin: 0.6rem 0 0.4rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
 }
 .whatif-person {
-  border-top: 1px solid var(--border, #ddd);
+  border-top: 1px solid var(--divider);
   padding: 0.6rem 0;
 }
 .whatif-person__head {
@@ -322,52 +334,59 @@ function backToReal() {
 .whatif-person__field {
   display: flex;
   flex-direction: column;
-  font-size: 0.8rem;
+  font-size: 0.8125rem;
   gap: 0.2rem;
   margin-right: 1rem;
   min-width: 10rem;
+  color: var(--text-secondary);
 }
 .whatif-person__field input {
-  padding: 0.3rem 0.5rem;
-  border: 1px solid var(--border, #ccc);
-  border-radius: 6px;
-}
-.whatif__delta {
+  padding: 4px 10px;
+  border: none;
+  background: var(--pill-bg);
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
   font-weight: 600;
-  margin: 0.6rem 0 0;
+  color: var(--text);
+  text-align: right;
+  outline: none;
+  min-height: 32px;
 }
 .whatif__status {
-  color: var(--text-muted, #666);
+  color: var(--text-muted);
   font-size: 0.85rem;
   margin: 0.4rem 0 0;
 }
 .whatif__error {
-  color: var(--red, #c0392b);
+  color: var(--red);
   font-size: 0.85rem;
   margin: 0.4rem 0 0;
 }
 .whatif__footer {
   display: flex;
-  gap: 0.6rem;
-  margin-top: 0.8rem;
+  gap: 8px;
+  margin-top: 14px;
 }
 .whatif__btn {
+  flex: 1;
   border: none;
-  border-radius: 8px;
-  padding: 0.45rem 0.9rem;
-  font-size: 0.85rem;
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  font-size: 0.8125rem;
+  font-weight: 600;
   cursor: pointer;
+  text-align: center;
 }
 .whatif__btn:disabled {
   opacity: 0.5;
   cursor: default;
 }
 .whatif__btn--ghost {
-  background: transparent;
-  border: 1px solid var(--border, #ccc);
+  background: var(--pill-bg);
+  color: var(--text-secondary);
 }
 .whatif__btn--primary {
   background: var(--blue);
-  color: white;
+  color: #fff;
 }
 </style>

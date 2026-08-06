@@ -61,8 +61,8 @@ function formatDuration(minutes: number | null): string {
   white-space: nowrap;
   min-height: 44px;
 }
-.pill--good { background: var(--green-bg); color: var(--green); }
-.pill--warn { background: var(--orange-bg); color: var(--orange); }
-.pill--bad { background: var(--red-bg); color: var(--red); }
-.pill--muted { background: var(--slate-100); color: var(--text-muted); }
+.pill--good { background: var(--green); color: #fff; }
+.pill--warn { background: var(--orange); color: #fff; }
+.pill--bad { background: var(--red); color: #fff; }
+.pill--muted { background: var(--commute-none); color: #fff; }
 </style>

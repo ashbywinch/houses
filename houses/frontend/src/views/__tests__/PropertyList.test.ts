@@ -202,16 +202,15 @@ describe('PropertyList filtering', () => {
     store.commuteCeilings = { Simon: { fine: 30, isChild: false } }
     await flushPromises()
     // commutes: prop-a 60m, prop-b 30m, prop-c 90m, prop-d 45m → 3 over
-    const filterBtn = wrapper.findAll('.filter-btn').find(b => b.text().includes('Filter'))!
+    const filterBtn = wrapper.findAll('.pill').find(b => b.text().includes('Filter'))!
     await filterBtn.trigger('click')
     await wrapper.find('.sheet__check input').setValue(true)
     await flushPromises()
     expect(wrapper.text()).not.toContain('40 School Ln')
     expect(wrapper.text()).toContain('Hiding 3 houses with a commute over the 30-minute limit')
 
-    // Dismissing the chip turns the filter back off
-    const chip = wrapper.findAll('.chip').find(c => c.text().includes('commute over the'))!
-    await chip.trigger('click')
+    // Dismissing the banner turns the filter back off
+    await wrapper.find('.commute-status-dismiss').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('40 School Ln')
     expect(wrapper.text()).not.toContain('commute over the')
@@ -223,18 +222,18 @@ describe('PropertyList filtering', () => {
     await flushPromises()
     store.commuteCeilings = { Simon: { fine: 1, isChild: false } } // every commute is over 1m
     await flushPromises()
-    const filterBtn = wrapper.findAll('.filter-btn').find(b => b.text().includes('Filter'))!
+    const filterBtn = wrapper.findAll('.pill').find(b => b.text().includes('Filter'))!
     await filterBtn.trigger('click')
     await wrapper.find('.sheet__check input').setValue(true)
     await flushPromises()
-    expect(wrapper.text()).toContain('0 properties found')
+    expect(wrapper.text()).toContain('0 found')
     expect(wrapper.text()).toContain('Hiding 4 houses with a commute over the 1-minute limit')
   })
 
   it('shows a legend for the commute pill colours (C7)', () => {
     initStore()
     const wrapper = mount(PropertyList)
-    const legend = wrapper.find('.pill-legend')
+    const legend = wrapper.find('.legend-strip')
     expect(legend.text()).toContain('fine')
     expect(legend.text()).toContain('getting tight')
     expect(legend.text()).toContain('too far')

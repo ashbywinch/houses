@@ -31,57 +31,52 @@ button { font: inherit; cursor: pointer; border: none; background: none; }
 [hidden] { display: none !important; }
 
 :root {
-  /* ── Slate palette ── */
-  --slate-50: #f8fafc;
-  --slate-100: #f1f5f9;
-  --slate-200: #e2e8f0;
-  --slate-300: #cbd5e1;
-  --slate-400: #94a3b8;
-  --slate-500: #64748b;
-  --slate-600: #475569;
-  --slate-700: #334155;
-  --slate-800: #1e293b;
-  --slate-900: #0f172a;
+  /* ── Warm neutral palette (redesign mockup) ── */
+  --slate-50: #f5f3ef;
+  --slate-100: #f0ece6;
+  --slate-200: #e5e1db;
+  --slate-300: #d6d0c8;
+  --slate-400: #b3aca3;
+  --slate-500: #9e9891;
+  --slate-600: #6b6560;
+  --slate-700: #4a4541;
+  --slate-800: #2b2825;
+  --slate-900: #1a1a1a;
 
   /* ── Semantic colors ── */
-  --green: #16a34a;
-  --green-bg: #dcfce7;
-  --green-text: #15803d;
-  --orange: #f97316;
-  --epc-a: #2e7d32;
-  --epc-b: #4caf50;
-  --epc-c: #8bc34a;
-  --epc-d: #ffeb3b;
-  --epc-e: #ff9800;
-  --epc-f: #e65100;
-  --epc-g: #c62828;
-  --orange-bg: #ffedd5;
-  --orange-text: #ea580c;
-  --red: #dc2626;
-  --red-bg: #fee2e2;
-  --red-text: #b91c1c;
-  --blue: #3b82f6;
-  --blue-bg: #dbeafe;
-  --blue-text: #2563eb;
-  --amber: #f59e0b;
-  --amber-bg: #fef3c7;
-  --amber-text: #92400e;
+  --green: #2d6a4f;
+  --green-bg: #d8f3dc;
+  --green-text: #1f4d38;
+  --orange: #e09f3e;
+  --orange-bg: #fef3e2;
+  --orange-text: #7f4f24;
+  --red: #c1121f;
+  --red-bg: #fde8e8;
+  --red-text: #9a0e18;
+  --blue: #2d6a4f;
+  --blue-bg: #d8f3dc;
+  --blue-text: #1f4d38;
+  --amber: #e09f3e;
+  --amber-bg: #fef3e2;
+  --amber-text: #7f4f24;
   --purple: #8b5cf6;
   --purple-bg: #ede9fe;
   --purple-text: #6d28d9;
+  --commute-none: #adb5bd;
 
   /* ── Neutrals ── */
-  --text: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #94a3b8;
-  --border: #e2e8f0;
-  --divider: #f1f5f9;
-  --card-bg: #fff;
-  --page-bg: #f8fafc;
-  --header-bg: #1e293b;
+  --text: #1a1a1a;
+  --text-secondary: #6b6560;
+  --text-muted: #9e9891;
+  --border: #e5e1db;
+  --divider: #eee9e2;
+  --card-bg: #ffffff;
+  --page-bg: #f5f3ef;
+  --header-bg: #ffffff;
+  --pill-bg: #f0ece6;
 
   /* ── Typography ── */
-  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", monospace;
   --fs-xs: 0.6875rem;
   --fs-sm: 0.8125rem;
@@ -109,11 +104,11 @@ button { font: inherit; cursor: pointer; border: none; background: none; }
   --sp-12: 48px;
 
   /* ── Radii ── */
-  --radius-sm: 4px;
-  --radius: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
-  --radius-full: 999px;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 100px;
 
   /* ── Shadows ── */
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.06);

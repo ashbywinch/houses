@@ -104,7 +104,8 @@ onMounted(fetchPersons)
 <style scoped>
 .header {
   background: var(--header-bg);
-  color: #fff;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
   z-index: 10;
@@ -113,34 +114,43 @@ onMounted(fetchPersons)
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px;
+  padding: 10px 16px;
   max-width: 1200px;
   margin: 0 auto;
 }
 .header__title {
-  font-size: 20px;
+  font-size: 1.125rem;
   font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
 }
 .header__actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
 }
 .header__auth-btn,
-.header__su-toggle {
-  background: rgba(255, 255, 255, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: #fff;
-  border-radius: 4px;
-  padding: 4px 10px;
-  font-size: 12px;
+.header__su-toggle,
+.header__settings-menu {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 0.8125rem;
+  font-weight: 500;
   cursor: pointer;
+  transition: background 0.15s;
+}
+.header__auth-btn:hover,
+.header__su-toggle:hover,
+.header__settings-menu:hover {
+  background: var(--pill-bg);
 }
 .header__su-toggle--active {
-  background: var(--amber-bg, #f59e0b);
-  color: #1a1a1a;
+  background: var(--amber-bg);
+  color: var(--amber-text);
   font-weight: 700;
-  border-color: var(--amber-bg, #f59e0b);
 }
 .header__auth-status {
   font-size: 12px;
@@ -152,8 +162,8 @@ onMounted(fetchPersons)
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  background: var(--amber-bg, #f59e0b);
-  color: #1a1a1a;
+  background: var(--amber-bg);
+  color: var(--amber-text);
   font-size: 13px;
   max-width: 1200px;
   margin: 0 auto;
@@ -165,15 +175,15 @@ onMounted(fetchPersons)
 .su-bar__select {
   padding: 3px 8px;
   border-radius: 4px;
-  border: 1px solid rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border);
   font-size: 13px;
   background: #fff;
-  color: #1a1a1a;
+  color: var(--text);
 }
 .su-bar__exit {
   margin-left: auto;
   background: rgba(0, 0, 0, 0.1);
-  border: 1px solid rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 3px 10px;
   font-size: 12px;

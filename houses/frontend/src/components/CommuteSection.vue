@@ -222,7 +222,8 @@ function toggleProvenance(key: string) {
   line-height: 1.6;
   white-space: nowrap;
 }
-.pill--good { background: var(--green-bg); color: var(--green-text); }
-.pill--warn { background: var(--orange-bg); color: var(--orange-text); }
-.pill--bad { background: var(--red-bg); color: var(--red-text); }
+.pill--good { background: var(--green); color: #fff; }
+.pill--warn { background: var(--orange); color: #fff; }
+.pill--bad { background: var(--red); color: #fff; }
+.pill--muted { background: var(--commute-none); color: #fff; }
 </style>
