@@ -206,13 +206,15 @@ const activeChips = computed(() => {
   if (searchQuery.value.trim()) chips.push({ label: `Search: ${searchQuery.value.trim()}`, key: 'search' })
   if (hiddenOverCeilingCount.value > 0) {
     const n = hiddenOverCeilingCount.value
+    const maxFine = Math.max(0, ...Object.values(store.commuteCeilings).map(c => c.fine))
+    const limit = maxFine > 0 ? `${maxFine}-minute` : 'family'
     const hidesEverything = n >= store.rids.length && store.rids.length > 0
     chips.push(
       store.showOverCeiling
-        ? { label: `Hiding ${n} house${n === 1 ? '' : 's'} over the family's commute limit`, key: 'ceiling' }
+        ? { label: `Hiding ${n} house${n === 1 ? '' : 's'} with a commute over the ${limit} limit`, key: 'ceiling' }
         : hidesEverything
-          ? { label: `All ${n} houses are over the family's commute limit — change the limit in Settings`, key: 'ceiling' }
-          : { label: `${n} house${n === 1 ? '' : 's'} over the family's commute limit — tap to hide`, key: 'ceiling' },
+          ? { label: `All ${n} houses have a commute over the ${limit} limit — the worst commute counts; change it in Settings`, key: 'ceiling' }
+          : { label: `${n} house${n === 1 ? '' : 's'} have a commute over the ${limit} limit — tap to hide`, key: 'ceiling' },
     )
   }
   return chips
@@ -292,7 +294,12 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
           @click="chip.key === 'ceiling' && removeChip('ceiling')"
         >
           {{ chip.label }}
-          <button class="chip__remove" @click="removeChip(chip.key)" aria-label="Remove filter">&times;</button>
+          <button
+            v-if="chip.key !== 'ceiling' || store.showOverCeiling || hiddenOverCeilingCount < store.rids.length"
+            class="chip__remove"
+            @click="removeChip(chip.key)"
+            aria-label="Remove filter"
+          >&times;</button>
         </span>
         <button v-if="activeChips.length" class="chips-clear" @click="clearAllFilters">Clear all</button>
       </div>
@@ -430,7 +437,7 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
 
 .map-full { position:fixed; top:56px; left:0; right:0; bottom:56px; z-index:1; }
 .map-pins { position:absolute; inset:0; pointer-events:none; }
-.map-pin { position:absolute; pointer-events:auto; text-decoration:none; transform:translate(-50%,-100%); }
+.map-pin { position:absolute; pointer-events:auto; text-decoration:none; transform:translate(-50%,-100%); padding:10px; margin:-10px; }
 .map-pin__label {
   display:block; background:var(--card-bg); color:var(--text); font-size:11px; font-weight:700;
   padding:2px 8px; border-radius:6px; border:2px solid var(--blue); white-space:nowrap;

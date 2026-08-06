@@ -193,25 +193,25 @@ describe('PropertyList filtering', () => {
     await flushPromises()
     // commutes: prop-a 60m, prop-b 30m, prop-c 90m, prop-d 45m → 3 over
     expect(wrapper.text()).toContain('40 School Ln')
-    expect(wrapper.text()).toContain("3 houses over the family's commute limit")
+    expect(wrapper.text()).toContain("3 houses have a commute over the 30-minute limit")
 
     // Tapping the chip hides them
-    const chip = wrapper.findAll('.chip').find(c => c.text().includes('commute limit'))!
+    const chip = wrapper.findAll('.chip').find(c => c.text().includes('commute over the'))!
     await chip.trigger('click')
     expect(wrapper.text()).not.toContain('40 School Ln')
-    expect(wrapper.text()).toContain('Hiding 3 houses over the family')
+    expect(wrapper.text()).toContain('Hiding 3 houses with a commute over the 30-minute limit')
   })
 
   it('does not offer to hide when every house is over the commute limit', async () => {
     const store = initStore()
     const wrapper = mount(PropertyList)
     await flushPromises()
-    store.commuteCeilings = { Simon: { fine: 0, isChild: false } } // every commute is over
+    store.commuteCeilings = { Simon: { fine: 1, isChild: false } } // every commute is over 1m
     await flushPromises()
-    expect(wrapper.text()).toContain("All 4 houses are over the family's commute limit")
+    expect(wrapper.text()).toContain("All 4 houses have a commute over the 1-minute limit")
 
     // Tapping the chip must NOT hide everything — houses stay visible
-    const chip = wrapper.findAll('.chip').find(c => c.text().includes("over the family's commute limit"))!
+    const chip = wrapper.findAll('.chip').find(c => c.text().includes('commute over the'))!
     await chip.trigger('click')
     expect(wrapper.text()).toContain('40 School Ln')
   })

@@ -7,7 +7,7 @@ from enum import Enum
 from money import Money
 from pint import Quantity
 
-from dag.attempt import Attempt
+from dag.attempt import Attempt, AttemptError
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.commute import LegMode
@@ -261,7 +261,19 @@ class TransitNode(DerivedNode[Commute]):
             best_val = no_bus_val
         elif no_bus_val is None and with_bus_val is None:
             errors = [e for e in (no_bus.error, with_bus.error) if e]
-            return Attempt.impossible("; ".join(errors) if errors else "no transit route available")
+            message = "; ".join(errors) if errors else "no transit route available"
+            # Keep the raw client errors in the internal message (logs),
+            # but never surface them: display_message resolves to this
+            # friendly user_message (walkthrough run 3 — a raw TfL 404
+            # blob was rendered to the user).
+            return Attempt.impossible(
+                message,
+                error_info=AttemptError(
+                    code="no_data",
+                    message=message,
+                    user_message="Couldn't find a route to this destination — check the address.",
+                ),
+            )
         else:
             empty = Commute(
                 person=Person(name="", has_car=self._has_car),

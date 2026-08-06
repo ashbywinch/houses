@@ -74,6 +74,9 @@ function toggleProvenance(key: string) {
         <span class="commute-accordion__chevron" :class="{ 'commute-accordion__chevron--open': expandedCommutes.has(key as string) }">▼</span>
       </button>
       <div v-if="expandedCommutes.has(key as string)" class="commute-accordion__body">
+        <p v-if="!c?.value?.details?.length && !c?.provenance" class="commute-accordion__empty">
+          No route found for this destination — check the address in Settings.
+        </p>
         <div v-if="c?.value?.details?.length" class="commute-legs">
           <template v-for="(group, gi) in c.value.details" :key="gi">
             <div v-for="(leg, li) in group.legs" :key="`${gi}-${li}`" class="commute-leg">
@@ -160,6 +163,11 @@ function toggleProvenance(key: string) {
 .commute-accordion__label { font-weight: var(--fw-semibold); font-size: var(--fs-sm); flex: 1; }
 .commute-accordion__chevron { font-size: 10px; color: var(--text-muted); transition: transform var(--transition); }
 .commute-accordion__chevron--open { transform: rotate(180deg); }
+.commute-accordion__empty {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 0.5rem 0;
+}
 .commute-accordion__body {
   padding: var(--sp-3) var(--sp-4);
   border-top: 1px solid var(--border);

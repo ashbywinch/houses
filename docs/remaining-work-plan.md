@@ -275,6 +275,39 @@ Deferred (data/scope): Summary tab describes the town, not the house
 (no photos/bathroom data in the DAG); map marker clustering + legend;
 favourites distinctness beyond the heading.
 
+## Part E — Walkthrough run 6 (2026-08-06, P13 loop after run-5 fixes)
+
+Re-run after the run-5 fixes: participant `UxParticipantRun3` (13m walk,
+screenshots in /tmp/ux-houses-run3/), evaluator `UxEvaluatorRun3` (report
+in agent://UxEvaluatorRun3). 8 confusions; triaged:
+
+Fixed in PR #54:
+
+- Raw TfL "HTTP 404: {$type: ...}" blob was rendered on a "Can't
+  calculate" total — a regression from the run-5 leaf-reason fix. The
+  route-merge node (TransitNode) now attaches a friendly user_message
+  ("Couldn't find a route to this destination — check the address.")
+  while keeping the raw error in the internal message for logs.
+- Commute-limit chip: the all-hidden info chip no longer renders a
+  dead "×" (clicking it did nothing); copy now explains the worst-
+  commute judgement ("All N houses have a commute over the 45-minute
+  limit — the worst commute counts").
+- Map pins: enlarged hit target (padding + negative margin).
+- Commute accordion: an expanded no-route row shows "No route found
+  for this destination — check the address in Settings." instead of
+  an apparently-empty body.
+
+Not code-fixable / inherent:
+
+- "Commute is to the old office" — the app cannot know a destination
+  is stale until the family updates it in Settings (protocol-
+  constrained walk: the participant was told not to edit inputs).
+- "Who is Ashby?" — real family data; the settings page shows names
+  and badges but not relationships.
+- Works-estimate blocker names the missing person (C1 satisfied) but
+  only that person can enter it (ownership) — no inline path for
+  others, by design.
+
 ## Sequencing
 
 A (library first: A1 → A2 → A3 → A4) → D (library `evaluate` primitive,
