@@ -216,13 +216,15 @@ Fixed in PR #54 (this session):
 
 Deferred / needs a user decision:
 
-- Run-4 blocker "Total Monthly — Can't calculate" everywhere is STALE
-  PERSISTED DAG STATE: the A3 council-tax fallback only applies on
-  recompute, and the live DB's persisted results predate it. Requires
-  a one-off data refresh (re-touch addresses or a re-enrichment pass)
-  — a data operation on the live DB, not a code change.
+- ~~Run-4 blocker "Total Monthly — Can't calculate" everywhere~~ —
+  RESOLVED 2026-08-06 via `POST /api/admin/regenerate` (force
+  recompute of code-stale nodes; `{"patterns": ["*/council_tax"]}`):
+  all 40 council-tax nodes regenerated, 16 totals unblocked. The
+  remaining 24 impossible totals are "Works estimate required for:
+  Ashby" — real settings data the family hasn't entered, not
+  staleness (enter per-property works estimates in Settings).
 - "Max Monthly Outgoings" offered while totals are unavailable (same
-  data refresh).
+  works-estimate data gap).
 - Optional polish: favourites distinctness beyond the heading.
 
 ## Sequencing
