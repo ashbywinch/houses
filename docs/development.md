@@ -101,44 +101,28 @@ Extraction/troubleshooting: `docs/bus-fares.md` (extraction process, flags, shee
 
 ## Fixing Bugs That Produced Wrong Persisted Data
 
-A code fix changes what a node computes, but existing `node_results` rows still hold buggy output. **The DAG only recomputes when a dep's timestamp changes — it doesn't detect code changes.**
+A code fix changes what a node computes, but existing `node_results` rows still hold buggy output. **The DAG only recomputes when a dep's timestamp changes — it doesn't detect code changes.** So after a fix you must force the affected nodes to recompute.
 
-### Step 1 — Find affected `node_results`
+### The mechanism — `POST /api/admin/regenerate`
 
-Node IDs: `{rid}/{person}/{label}/{node_type}` (e.g. `88639800/Lorena/Aldgate/computed_transit`). The affected nodes = the fixed node + everything downstream. Example:
-
-```sql
-SELECT DISTINCT SUBSTR(node_id, 1, INSTR(node_id, '/') - 1) AS rid
-FROM node_results
-WHERE node_id LIKE '%/Lorena/Aldgate/computed_transit';
-```
-
-### Step 2 — Delete ONLY the root node; restart; cascade propagates
-
-Delete rows for the **fixed node** only. After restart it becomes pending (no DB row), recomputes with the fix, fires `changed`; downstream detects the newer timestamp via `_is_stale()` and schedules itself.
-
-```sql
--- per RID + node type
-DELETE FROM node_results WHERE node_id = '{rid}/Lorena/Aldgate/computed_transit';
--- all affected properties at once
-DELETE FROM node_results
-WHERE node_id IN (
-    SELECT node_id FROM node_results
-    WHERE node_id LIKE '%/Lorena/Aldgate/computed_transit'
-);
-```
-
-**Do NOT delete** downstream nodes (`commute`, `final_fuel`, `commute_breakdown`) — they recompute when their dep finishes. **Do NOT delete** leaf inputs (`walk`, `drive`, `poi`, `person_name`) — unaffected by the fix.
-
-### Step 3 — Trigger server reload
-
-Nodes load state from `node_results` at startup. If you deleted rows while the server runs, in-memory nodes still hold old results:
+Superuser-only. Body is a list of node-id **patterns** where `*` matches any run of characters (including `/`); a pattern without `*` is an exact id. The matched nodes recompute through the normal refresh path (persist + signals), and the scheduler cascade is drained before the response returns — downstream nodes recompute automatically, no restart needed.
 
 ```bash
-touch houses/server.py   # any watched .py triggers --reload
+COOKIE="$(cat /tmp/cookie.txt)"   # a superuser session
+curl -b "session=$COOKIE" -X POST http://localhost:8765/api/admin/regenerate \
+  -H 'Content-Type: application/json' \
+  -d '{"patterns": ["*/computed_transit"]}'
+# → {"matched": 40, "regenerated": [{"node": ".../computed_transit", "status": "succeeded"}, ...], "skipped": []}
 ```
 
-Wait for "Application startup complete" in logs. Deleted nodes become pending; the background processor recomputes; cascade propagates.
+- **Find the node ids**: `{rid}/{person}/{label}/{node_type}` (e.g. `88639800/Lorena/Aldgate/computed_transit`). The affected nodes = the fixed node + everything downstream — but you only need to list the **root** of each affected chain; the cascade handles the rest. `*`-patterns cover all properties in one string (`["*/council_tax"]`).
+- **Matched input nodes** (no computation) are reported in `skipped`, never silently dropped.
+- **Example**: the A3 council-tax fallback changed `CouncilTaxNode.compute`, but every property's persisted result stayed `impossible` (fresh-by-timestamp, wrong). One call — `{"patterns": ["*/council_tax"]}` — regenerated all 40 nodes and unblocked 16 downstream totals.
+
+### When the endpoint doesn't fit
+
+- **Non-superuser environment** (a fresh checkout, no admin session): you can fall back to the old approach — delete the affected `node_results` rows for the fixed node only, then `touch houses/server.py` to trigger `--reload`; deleted nodes become pending and recompute at startup. This is manual and easy to over-delete, so prefer the endpoint.
+- **Permanently new semantics**: if a compute change makes old results *meaningless* (not just wrong), bump the node id (`"{rid}/town_desc_v2"`) instead — see `docs/dag-library.md`.
 
 ### Verification
 
@@ -146,4 +130,4 @@ Wait for "Application startup complete" in logs. Deleted nodes become pending; t
 curl -s http://localhost:8765/api/properties/{rid}/detail | python3 -m json.tool
 ```
 
-Affected field should no longer be `pending` and show the corrected value. Poll if compute takes time — the processor may be working through other properties.
+Affected field should show the corrected value and `status: succeeded`. Poll if compute takes time — the processor may be working through other properties.
