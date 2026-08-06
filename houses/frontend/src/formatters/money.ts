@@ -33,11 +33,18 @@ export function blockPenceKey(e: KeyboardEvent): void {
   if (['e', 'E', '+', '-'].includes(e.key)) e.preventDefault()
 }
 
-/** Sanitize a paste into a whole-pound input: strip everything that
- *  isn't a digit (handles "£550,000", "550 000", "550000.99"). */
+/** Extract a whole-pound amount from pasted text: everything from the
+ *  decimal point onward is dropped, then non-digits stripped — so
+ *  "£550,000.99" and "550000.99" both become "550000" (never
+ *  "55000099"). */
+export function wholePoundsFromPaste(text: string): string {
+  return integerPounds(text).replace(/[^0-9]/g, '')
+}
+
+/** Sanitize a paste into a whole-pound input. */
 export function sanitizeWholePoundsPaste(e: ClipboardEvent): void {
   const text = e.clipboardData?.getData('text') ?? ''
-  const clean = text.replace(/[^0-9]/g, '')
+  const clean = wholePoundsFromPaste(text)
   if (clean !== text) {
     e.preventDefault()
     insertText(e.target as HTMLInputElement, clean)
