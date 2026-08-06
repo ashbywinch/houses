@@ -4,9 +4,9 @@ import * as api from '../services/api'
 import { usePropertiesStore } from '../stores/properties'
 import {
   blockWholePoundsKey,
-  forceIntegerPounds,
   integerPounds,
-  sanitizeWholePoundsPaste,
+  rejectWholePoundsPaste,
+  wholePoundsValue,
 } from '../formatters/money'
 
 // ── Editable person shape (a question, not a form) ─────────────
@@ -194,8 +194,8 @@ function backToReal() {
             <input
               :value="p.home_sale_price" type="number" inputmode="numeric"
               @keydown="blockWholePoundsKey"
-              @paste="sanitizeWholePoundsPaste"
-              @input="p.home_sale_price = forceIntegerPounds($event); scheduleEval()"
+              @paste="rejectWholePoundsPaste"
+              @input="p.home_sale_price = wholePoundsValue($event.target as HTMLInputElement, p.home_sale_price); scheduleEval()"
             />
           </label>
           <label class="whatif-person__field">
@@ -203,8 +203,8 @@ function backToReal() {
             <input
               :value="p.outstanding_mortgage" type="number" inputmode="numeric"
               @keydown="blockWholePoundsKey"
-              @paste="sanitizeWholePoundsPaste"
-              @input="p.outstanding_mortgage = forceIntegerPounds($event); scheduleEval()"
+              @paste="rejectWholePoundsPaste"
+              @input="p.outstanding_mortgage = wholePoundsValue($event.target as HTMLInputElement, p.outstanding_mortgage); scheduleEval()"
             />
           </label>
         </div>
@@ -214,8 +214,8 @@ function backToReal() {
           <input
             :value="p.cash_contribution" type="number" inputmode="numeric"
             @keydown="blockWholePoundsKey"
-              @paste="sanitizeWholePoundsPaste"
-              @input="p.cash_contribution = forceIntegerPounds($event); scheduleEval()"
+              @paste="rejectWholePoundsPaste"
+              @input="p.cash_contribution = wholePoundsValue($event.target as HTMLInputElement, p.cash_contribution); scheduleEval()"
           />
         </label>
 

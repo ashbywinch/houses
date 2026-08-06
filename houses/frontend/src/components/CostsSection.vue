@@ -4,8 +4,8 @@ import ProvenanceToggle from './ProvenanceToggle.vue'
 import { epcClass } from '../formatters/format'
 import {
   blockWholePoundsKey,
-  forceIntegerPounds,
-  sanitizeWholePoundsPaste,
+  rejectWholePoundsPaste,
+  wholePoundsValue,
 } from '../formatters/money'
 import { patchRentalIncome, patchWorksEstimate } from '../services/api'
 import { usePropertiesStore } from '../stores/properties'
@@ -254,14 +254,14 @@ function canEdit(personName: string): boolean {
           <div v-if="editingPerson === p.name" class="costs-edit-group">
             <span class="costs-edit-prefix">£</span>
             <input
-              v-model="editValue"
+              :value="editValue"
               type="text"
               inputmode="numeric"
               class="costs-edit-input"
               autofocus
               @keydown="handleKeydown($event, p.name as string)"
-              @paste="sanitizeWholePoundsPaste"
-              @input="editValue = forceIntegerPounds($event)"
+              @paste="rejectWholePoundsPaste"
+              @input="editValue = wholePoundsValue($event.target as HTMLInputElement, editValue)"
               @blur="saveEdit(p.name as string)"
             />
           </div>

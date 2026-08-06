@@ -7,10 +7,10 @@ import * as api from '../services/api'
 import {
   blockPenceKey,
   blockWholePoundsKey,
-  forceIntegerPounds,
   integerPounds,
   normalizePence,
-  sanitizeWholePoundsPaste,
+  rejectWholePoundsPaste,
+  wholePoundsValue,
 } from '../formatters/money'
 import type { Provenance } from '../types'
 
@@ -196,10 +196,13 @@ function moneyInput(money: MoneyValue | undefined, event: Event) {
   if (money) money.amount = String((event.target as HTMLInputElement).value)
 }
 
-/** Whole-pounds money input (sale price, mortgage, cash): pence are
- *  blocked at the keystroke and paste level (see formatters/money). */
+/** Whole-pounds money input (sale price, mortgage, cash): non-digits
+ *  are blocked at the keystroke/paste level and any leak reverts the
+ *  field whole — entry is prevented, never truncated (formatters/money). */
 function wholePoundsInput(money: MoneyValue | undefined, event: Event) {
-  if (money) money.amount = forceIntegerPounds(event)
+  // The revert fallback is the display form (whole pounds) — a stored
+  // '550000.00' stays whole on the screen.
+  if (money) money.amount = wholePoundsValue(event.target as HTMLInputElement, integerPounds(money.amount))
 }
 
 /** Pence-allowed money input: cap at 2dp on blur (GOV.UK rule). */
@@ -354,7 +357,7 @@ const depositRows = computed(() => {
                 inputmode="numeric"
                 :value="person.home_sale_price ? integerPounds(person.home_sale_price.amount) : ''"
                 @keydown="blockWholePoundsKey"
-                @paste="sanitizeWholePoundsPaste"
+                @paste="rejectWholePoundsPaste"
                 @input="wholePoundsInput(person.home_sale_price!, $event)"
               />
               <p class="settings-person__helper">What you expect to get when you sell it. Whole pounds only.</p>
@@ -365,7 +368,7 @@ const depositRows = computed(() => {
                 inputmode="numeric"
                 :value="person.outstanding_mortgage ? integerPounds(person.outstanding_mortgage.amount) : ''"
                 @keydown="blockWholePoundsKey"
-                @paste="sanitizeWholePoundsPaste"
+                @paste="rejectWholePoundsPaste"
                 @input="wholePoundsInput(person.outstanding_mortgage!, $event)"
               />
               <p class="settings-person__helper">What you still owe on the house you're selling. Whole pounds only.</p>
@@ -380,7 +383,7 @@ const depositRows = computed(() => {
               inputmode="numeric"
               :value="person.cash_contribution ? integerPounds(person.cash_contribution.amount) : ''"
               @keydown="blockWholePoundsKey"
-              @paste="sanitizeWholePoundsPaste"
+              @paste="rejectWholePoundsPaste"
               @input="wholePoundsInput(person.cash_contribution!, $event)"
             />
             <p class="settings-person__helper">

@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { integerPounds, normalizePence, wholePoundsFromPaste } from '../formatters/money'
+import { integerPounds, normalizePence, wholePoundsValue } from '../formatters/money'
 
-describe('integerPounds', () => {
+describe('integerPounds (display only — never used on entry)', () => {
   it('leaves whole values untouched', () => {
     expect(integerPounds('550000')).toBe('550000')
   })
 
-  it('truncates at the decimal point', () => {
-    expect(integerPounds('550000.99')).toBe('550000')
+  it('truncates at the decimal point for display', () => {
+    expect(integerPounds('550000.00')).toBe('550000')
   })
 
   it('handles undefined and empty', () => {
@@ -16,17 +16,34 @@ describe('integerPounds', () => {
   })
 })
 
-describe('wholePoundsFromPaste', () => {
-  it('drops pence without inflating the number', () => {
-    expect(wholePoundsFromPaste('550000.99')).toBe('550000')
+describe('wholePoundsValue (rejects invalid entry whole — never edits it)', () => {
+  function input(value: string): HTMLInputElement {
+    const el = document.createElement('input')
+    el.value = value
+    return el
+  }
+
+  it('accepts pure digits', () => {
+    const el = input('550000')
+    expect(wholePoundsValue(el, '500000')).toBe('550000')
+    expect(el.value).toBe('550000')
   })
 
-  it('strips £, commas and spaces', () => {
-    expect(wholePoundsFromPaste('£550,000')).toBe('550000')
+  it('accepts an empty field (user clearing to retype)', () => {
+    const el = input('')
+    expect(wholePoundsValue(el, '550000')).toBe('')
   })
 
-  it('keeps plain digits', () => {
-    expect(wholePoundsFromPaste('550000')).toBe('550000')
+  it('reverts a pasted/IME decimal whole — does not truncate it', () => {
+    const el = input('550000.99')
+    expect(wholePoundsValue(el, '550000')).toBe('550000')
+    expect(el.value).toBe('550000')
+  })
+
+  it('reverts letters whole — does not strip them', () => {
+    const el = input('55x000')
+    expect(wholePoundsValue(el, '550000')).toBe('550000')
+    expect(el.value).toBe('550000')
   })
 })
 
