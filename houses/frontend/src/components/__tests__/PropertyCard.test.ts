@@ -381,3 +381,34 @@ describe('PropertyCard triage markers', () => {
 })
 
 
+
+describe('PropertyCard commute colour bands', () => {
+  function commuteSummary(mins: number): PropertySummary {
+    return makeSummary({
+      commutes: {
+        'Lorena/Office': {
+          commute: {
+            succeeded: true,
+            value: { duration: { value: mins, unit: 'minute' }, label: 'Office' },
+            error: null, provenance: { label: 'test' }, is_child: false,
+          },
+        },
+      },
+    })
+  }
+
+  it('uses the person\'s own thresholds for the pill colours, not a global constant', () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = usePropertiesStore()
+    // Lorena's bands: good 40, fine 60 (from Settings)
+    store.commuteGoods = { Lorena: 40 }
+    store.commuteCeilings = { Lorena: { fine: 60, isChild: false } }
+    // 50 min: over good (40) but under fine (60) → 'getting tight'
+    const tight = mount(PropertyCard, { props: { rid: '123', data: commuteSummary(50) }, global: { plugins: [pinia] } })
+    expect(tight.find('.card__commute-data .pill').classes()).toContain('pill--warn')
+    // 70 min: over fine (60) → 'yikes' — the old hardcoded 75 would say 'tight'
+    const yikes = mount(PropertyCard, { props: { rid: '123', data: commuteSummary(70) }, global: { plugins: [pinia] } })
+    expect(yikes.find('.card__commute-data .pill').classes()).toContain('pill--bad')
+  })
+})

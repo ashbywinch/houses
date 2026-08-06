@@ -343,7 +343,50 @@ bars red/orange), plus 3 new PropertyCard tests (default has no
 border, triage borders + titles, severity classes + titles) — 221
 frontend green.
 
-## Sequencing
+## Part E — Settings overhaul + settable-audit (2026-08-06, user report)
+
+"Clicking Settings is highly confusing. It should just show you your
+settings. … What's left that should be user settable somehow but isn't?
+Either user nodes in the dag or things like those commute colour bands."
+
+### Settings page
+
+- The page showed EVERY family member's full settings (read-only for
+  others) plus the deposit. Now it shows ONLY the session person's
+  settings: impersonated person (superuser mode) → session person
+  (server email linkage) → session display name (the DAG keys people by
+  NAME, so the Google/device profile name is the identity when the
+  email isn't linked — the dev login email simon@example.com doesn't
+  match the person record's smwinch@gmail.com). Truly-unlinked sessions
+  still see everyone read-only.
+- The header "Settings ▾" drop-down (which confusingly listed every
+  family member) is now a direct Settings link. The per-person
+  ?person= deep-links from the old menu are gone; the property page's
+  "Change destinations →" still works (it links the session person).
+- The deposit summary stays (it is the readout of the money fields).
+- NEW settable fields: "Commute is easy up to (minutes)"
+  (good_max_minutes — the green→amber band) and per-destination
+  "Weeks per year" (was silently defaulting to 46).
+
+### Settable-audit (user DAG nodes vs UI)
+
+| Node | Fields | UI |
+|---|---|---|
+| persons | has_car, selling_home, sale/mortgage/cash (whole £), life insurance, destinations (label/address/trips/weeks/modes) | Settings ✓ (what-if overrides sale/mortgage/cash) |
+| commute_thresholds | fine_max_minutes ✓ ("worst acceptable") · good_max_minutes (NEW) | both now in Settings ✓ |
+| financial | mortgage_rate, mortgage_term_years, sinking_fund_rate, petrol_mpg, petrol_cost_per_litre, working_weeks_per_year, rental_income_monthly (legacy dupes: current_home_*, gross_ashby_contribution) | **NO UI** — live in the DAG (feed the monthly total) but only PATCHable via API. Candidate for a household-finances section; NOT built (changes the monthly-total math — needs sign-off). |
+
+### Colour bands now actually work
+
+The card and detail-page pills previously used hardcoded thresholds
+(15/45 walk, 45/75 non-walk) — even the "worst acceptable commute" in
+Settings did NOT change the pill colours (only the hide-over-ceiling
+filter used it). Now pills resolve per person from the settings node
+(good = green→amber, fine = amber→red), so the bands are real: Simon
+30/45, Lorena 40/60.
+
+Verified live: settings page shows only Simon's section; good/fine
+bands + weeks inputs present; 229 frontend tests green.
 
 A (library first: A1 → A2 → A3 → A4) → D (library `evaluate` primitive,
 then the houses override catalog + "What if…" panel) → B backlog items in

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
 import Header from '../components/Header.vue'
 import ProvenanceToggle from '../components/ProvenanceToggle.vue'
 import * as api from '../services/api'
@@ -55,6 +56,24 @@ interface HouseholdDeposit {
 }
 
 const route = useRoute()
+const auth = useAuthStore()
+
+/** The settings page shows YOUR settings: the person you're acting as.
+ *  Resolution: impersonated person (superuser mode) → the session's
+ *  linked person (server matches by email) → the session's display
+ *  name. The DAG keys people BY NAME, so the Google/device profile
+ *  name is the identity when the email isn't linked yet. */
+const me = computed(() => {
+  if (auth.superuserMode && auth.impersonating) return auth.impersonating
+  const user = auth.user
+  if (user?.person) return user.person
+  const byName = user?.name ? persons.value.find(p => p.name === user.name) : undefined
+  return byName?.name ?? ''
+})
+const visiblePersons = computed(() => {
+  if (!me.value) return persons.value // unlinked session — show everyone read-only
+  return persons.value.filter(p => p.name === me.value)
+})
 const loading = ref(true)
 const error = ref('')
 const persons = ref<PersonSettings[]>([])
@@ -272,8 +291,7 @@ const depositRows = computed(() => {
 
       <template v-else>
         <p class="settings__intro">
-          Everything the commute map is built from lives here. Everyone's commutes are shown so the
-          household can see the whole picture — you can only change your own.
+          Your settings — the commute map, the deposit and the monthly costs are all built from these.
         </p>
 
         <div v-if="deposit" class="settings-deposit">
@@ -296,7 +314,7 @@ const depositRows = computed(() => {
         </div>
 
         <section
-          v-for="person in persons"
+          v-for="person in visiblePersons"
           :key="person.name"
           :id="'person-' + encodeURIComponent(person.name)"
           class="settings-person"
@@ -402,6 +420,14 @@ const depositRows = computed(() => {
           </div>
 
           <div class="settings-person__thresholds">
+            <label class="settings-person__label" for="good-max">Commute is easy up to (minutes)</label>
+            <input
+              id="good-max"
+              type="number"
+              :value="thresholds[person.name]?.good_max_minutes"
+              :disabled="!isOwn(person)"
+              @input="(e) => { const t = thresholds[person.name]; if (t) t.good_max_minutes = Number((e.target as HTMLInputElement).value) }"
+            />
             <label class="settings-person__label" for="fine-max">Worst acceptable commute (minutes)</label>
             <input
               id="fine-max"
@@ -410,6 +436,10 @@ const depositRows = computed(() => {
               :disabled="!isOwn(person)"
               @input="(e) => { const t = thresholds[person.name]; if (t) t.fine_max_minutes = Number((e.target as HTMLInputElement).value) }"
             />
+            <p class="settings-person__helper">
+              These colour the commute pills on the cards: up to the first is 'fine', between the two is
+              'getting tight', over the worst is 'yikes'.
+            </p>
           </div>
 
           <h3 class="settings-person__subtitle">Commutes</h3>
@@ -460,6 +490,16 @@ const depositRows = computed(() => {
                 v-model.number="poi.trips_per_week"
                 :disabled="!isOwn(person)"
               />
+            </div>
+            <div class="settings-poi__row">
+              <label class="settings-person__label" :for="`weeks-${person.name}-${poi.label}`">Weeks per year</label>
+              <input
+                :id="`weeks-${person.name}-${poi.label}`"
+                type="number"
+                v-model.number="poi.weeks_per_year"
+                :disabled="!isOwn(person)"
+              />
+              <p class="settings-person__helper">Working weeks this destination is used (default 46).</p>
             </div>
             <div class="settings-poi__modes">
               <span class="settings-person__label">How they get there</span>

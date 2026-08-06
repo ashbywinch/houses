@@ -12,15 +12,6 @@ interface PersonEntry {
 }
 
 const persons = ref<PersonEntry[]>([])
-const settingsOpen = ref(false)
-
-function toggleSettingsMenu() {
-  settingsOpen.value = !settingsOpen.value
-}
-
-function closeSettingsMenu() {
-  settingsOpen.value = false
-}
 
 async function fetchPersons() {
   try {
@@ -50,25 +41,7 @@ onMounted(fetchPersons)
           <span class="header__auth-status">…</span>
         </template>
         <template v-else-if="auth.user">
-          <div class="header__menu">
-            <button
-              class="header__settings-menu"
-              :aria-expanded="settingsOpen"
-              @click="toggleSettingsMenu"
-            >Settings ▾</button>
-            <div v-if="settingsOpen" class="header__menu-list">
-              <router-link class="header__menu-item" to="/settings" @click="closeSettingsMenu">
-                Family settings
-              </router-link>
-              <router-link
-                v-for="p in persons"
-                :key="p.name"
-                class="header__menu-item header__menu-item--person"
-                :to="'/settings?person=' + encodeURIComponent(p.name)"
-                @click="closeSettingsMenu"
-              >{{ p.name }}</router-link>
-            </div>
-          </div>
+          <router-link class="header__settings-link" to="/settings">Settings</router-link>
           <button
             v-if="auth.user.is_superuser"
             class="header__su-toggle"
@@ -131,7 +104,7 @@ onMounted(fetchPersons)
 }
 .header__auth-btn,
 .header__su-toggle,
-.header__settings-menu {
+.header__settings-link {
   background: none;
   border: none;
   color: var(--text-secondary);
@@ -141,10 +114,11 @@ onMounted(fetchPersons)
   font-weight: var(--fw-medium);
   cursor: pointer;
   transition: background 0.15s;
+  text-decoration: none;
 }
 .header__auth-btn:hover,
 .header__su-toggle:hover,
-.header__settings-menu:hover {
+.header__settings-link:hover {
   background: var(--pill-bg);
 }
 .header__su-toggle--active {

@@ -15,6 +15,9 @@ export const usePropertiesStore = defineStore('properties', () => {
   // (C4/C9): captured from /api/settings so cards can flag stale offices
   // and the list can hide houses over the family's ceiling.
   const commuteCeilings = ref<Record<string, { fine: number; isChild: boolean }>>({})
+  // The green→amber boundary (good_max_minutes) — the 'commute colour
+  // bands' — set per person in Settings and read by the card pills.
+  const commuteGoods = ref<Record<string, number>>({})
   const poiLabels = ref<Record<string, string[]>>({})
   // C9: houses over the family commute ceiling are hidden only when the
   // user opts in — persisted here so the choice survives navigation.
@@ -82,7 +85,7 @@ export const usePropertiesStore = defineStore('properties', () => {
   }
   interface SettingsPayload {
     persons?: { value?: PersonEntry[] }
-    commute_thresholds?: { value?: Record<string, { fine_max_minutes?: number }> }
+    commute_thresholds?: { value?: Record<string, { good_max_minutes?: number; fine_max_minutes?: number }> }
   }
 
   async function loadSettings() {
@@ -100,6 +103,7 @@ export const usePropertiesStore = defineStore('properties', () => {
           fine: t.fine_max_minutes ?? 75,
           isChild: Boolean(p?.is_child),
         }
+        commuteGoods.value[name] = t.good_max_minutes ?? 45
         labels[name] = (p?.places_of_interest ?? []).map(poi => poi.label)
       }
       commuteCeilings.value = ceilings
@@ -150,7 +154,7 @@ export const usePropertiesStore = defineStore('properties', () => {
 
   return {
     rids, summaries, details, triage, settings, loading, error,
-    commuteCeilings, poiLabels, showOverCeiling,
+    commuteCeilings, commuteGoods, poiLabels, showOverCeiling,
     whatIfTotals, applyWhatIf, clearWhatIf, monthlyTotalFor,
     loadAll, loadDetail, updateSummary, updateDetail, toggleTriage,
   }

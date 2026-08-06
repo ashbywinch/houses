@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
 import CommuteSection from '../CommuteSection.vue'
+
+function mountSection(commutes: unknown) {
+  setActivePinia(createPinia())
+  return mount(CommuteSection, { props: { commutes } })
+}
 
 function makeCommutes(mode: string) {
   return {
@@ -33,7 +39,7 @@ async function openProvenance(wrapper: VueWrapper) {
 
 describe('CommuteSection provenance (round-2 walkthrough)', () => {
   it('hides petrol sources for a transit route', async () => {
-    const wrapper = mount(CommuteSection, { props: { commutes: makeCommutes('transit') } })
+    const wrapper = mountSection(makeCommutes('transit'))
     await openProvenance(wrapper)
     const text = wrapper.text()
     expect(text).not.toContain('Petrol MPG')
@@ -42,7 +48,7 @@ describe('CommuteSection provenance (round-2 walkthrough)', () => {
   })
 
   it('keeps petrol sources for a drive route', async () => {
-    const wrapper = mount(CommuteSection, { props: { commutes: makeCommutes('drive') } })
+    const wrapper = mountSection(makeCommutes('drive'))
     await openProvenance(wrapper)
     expect(wrapper.text()).toContain('Petrol MPG')
   })

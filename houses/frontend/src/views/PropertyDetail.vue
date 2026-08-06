@@ -247,8 +247,6 @@ async function saveAddress() {
       <!-- ═══════════ COMMUTE ═══════════ -->
       <CommuteSection
         :commutes="detail.commutes"
-        :good-threshold="store.settings.commute_thresholds?.good ?? 45"
-        :warn-threshold="store.settings.commute_thresholds?.warn ?? 75"
         :current-person="currentPerson"
       />
 

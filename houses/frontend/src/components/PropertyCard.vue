@@ -149,6 +149,18 @@ function isStaleOffice(key: string): boolean {
   return !current.includes(label)
 }
 
+/** C?: the commute colour bands are the person's own thresholds
+ *  (Settings → 'commute bands'), not a global constant: good = the
+ *  green→amber boundary, fine = amber→red. Falls back to the walk /
+ *  non-walk scales when the person has no thresholds set. */
+function pillThresholds(key: string, isWalk: boolean): { goodMax: number; fineMax: number } {
+  const person = key.split('/')[0]
+  const good = store.commuteGoods[person]
+  const fine = store.commuteCeilings[person]?.fine
+  if (good != null && fine != null) return { goodMax: good, fineMax: fine }
+  return isWalk ? { goodMax: 15, fineMax: 30 } : { goodMax: 45, fineMax: 75 }
+}
+
 async function toggleFavourite() {
   await store.toggleTriage(props.rid, 'favourite', !triage.value?.favourite)
 }
@@ -215,8 +227,8 @@ async function toggleViewed() {
                 :duration="commuteDuration(c.commute)"
                 :mode="commuteMode(c.commute)"
                 :cost="commuteCost(c.commute)"
-                :goodMax="commuteMode(c.commute) === 'walk' ? 15 : 45"
-                :fineMax="commuteMode(c.commute) === 'walk' ? 30 : 75"
+                :goodMax="pillThresholds(key, commuteMode(c.commute) === 'walk').goodMax"
+                :fineMax="pillThresholds(key, commuteMode(c.commute) === 'walk').fineMax"
               />
             </a>
           </div>

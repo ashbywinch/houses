@@ -126,10 +126,10 @@ function makeSettings() {
   }
 }
 
-async function mountView(query = '') {
+async function mountView(query = '', personName = 'Simon') {
   setActivePinia(createPinia())
   const auth = useAuthStore()
-  auth.user = { email: 'simon@example.com', name: 'Simon', picture: '', person: 'Simon', is_superuser: true } as any
+  auth.user = { email: `${personName.toLowerCase()}@example.com`, name: personName, picture: '', person: personName, is_superuser: personName === 'Simon' } as any
   ;(api.fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValue(makeSettings())
   const router = createRouter({
     history: createMemoryHistory(),
@@ -145,24 +145,33 @@ describe('SettingsView — family sections', () => {
     vi.clearAllMocks()
   })
 
-  it('renders a section per person', async () => {
+  it("renders ONLY the session person's settings — not the whole family's", async () => {
     const { wrapper, flush } = await mountView()
     await flush()
-    const text = wrapper.text()
-    expect(text).toContain('Simon')
-    expect(text).toContain('Lorena')
-    expect(text).toContain('George')
+    const sections = wrapper.findAll('.settings-person')
+    expect(sections.length).toBe(1)
+    expect(sections[0].text()).toContain('Simon')
+    expect(sections[0].text()).not.toContain('Lorena')
+    expect(sections[0].text()).not.toContain('George')
+    // the deposit breakdown still shows the whole household
+    expect(wrapper.text()).toContain('Total deposit from everyone')
   })
 
-  it('marks the session person with a "you" badge and the child with a child badge', async () => {
-    const { wrapper, flush } = await mountView()
-    await flush()
-    expect(wrapper.text()).toContain('you')
-    expect(wrapper.text()).toContain('child')
+  it('marks the session person with a "you" badge, or "child" for a child user', async () => {
+    const simon = await mountView()
+    await simon.flush()
+    const simonSection = simon.wrapper.findAll('.settings-person')[0]
+    expect(simonSection.text()).toContain('you')
+    expect(simonSection.text()).not.toContain('child')
+
+    const george = await mountView('', 'George')
+    await george.flush()
+    const georgeSection = george.wrapper.findAll('.settings-person')[0]
+    expect(georgeSection.text()).toContain('child')
   })
 
   it('renders the school note for a child with no-address POIs', async () => {
-    const { wrapper, flush } = await mountView()
+    const { wrapper, flush } = await mountView('', 'George')
     await flush()
     expect(wrapper.text()).toContain('Goes to school near the house')
   })
@@ -181,24 +190,27 @@ describe('SettingsView — ownership rendering', () => {
     expect(simonSection.find('input[type="checkbox"][data-mode="walk"]').attributes('disabled')).toBeUndefined()
   })
 
-  it('locks other people — read-only, no save button', async () => {
-    const { wrapper, flush } = await mountView()
+  it('shows a person without edit rights as read-only — no save button', async () => {
+    const { wrapper, flush } = await mountView('', 'Lorena')
     await flush()
-    const lorenaSection = wrapper.findAll('.settings-person').find(s => s.text().includes('Lorena'))!
+    const lorenaSection = wrapper.findAll('.settings-person')[0]
     expect(lorenaSection.text()).toContain('read-only')
     expect(lorenaSection.find('button.save').exists()).toBe(false)
   })
 
   it('does not offer the car mode to people without a car', async () => {
-    const { wrapper, flush } = await mountView()
-    await flush()
-    const lorenaSection = wrapper.findAll('.settings-person').find(s => s.text().includes('Lorena'))!
+    const lorena = await mountView('', 'Lorena')
+    await lorena.flush()
+    const lorenaSection = lorena.wrapper.findAll('.settings-person')[0]
     // the checkbox is present but hidden and disabled — car is not an option
     const carInput = lorenaSection.find('input[type="checkbox"][data-mode="car"]')
     expect(carInput.exists()).toBe(true)
     expect(carInput.attributes('disabled')).toBeDefined()
     expect(lorenaSection.find('.settings-poi__mode--hidden input[data-mode="car"]').exists()).toBe(true)
-    const simonSection = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
+
+    const simon = await mountView()
+    await simon.flush()
+    const simonSection = simon.wrapper.findAll('.settings-person')[0]
     expect(simonSection.find('.settings-poi__mode--hidden input[data-mode="car"]').exists()).toBe(false)
   })
 })
@@ -248,6 +260,32 @@ describe('SettingsView — saving', () => {
     expect(pimlico.acceptable_modes).toContain('walk')
     expect(body.thresholds).toEqual({ good_max_minutes: 30, fine_max_minutes: 45 })
   })
+
+  it('saves the commute colour bands — good AND fine — when they change', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = wrapper.findAll('.settings-person')[0]
+    expect(simon.find('input#good-max').exists()).toBe(true)
+    await simon.find('input#good-max').setValue(35)
+    await simon.find('input#fine-max').setValue(50)
+    await simon.trigger('focusout')
+    await flush()
+    const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(body.thresholds).toEqual({ good_max_minutes: 35, fine_max_minutes: 50 })
+  })
+
+  it('saves the destination weeks per year', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = wrapper.findAll('.settings-person')[0]
+    const weeks = simon.findAll('input[id^="weeks-"]')[0]
+    expect(weeks.exists()).toBe(true)
+    await weeks.setValue(48)
+    await simon.trigger('focusout')
+    await flush()
+    const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(body.places_of_interest[0].weeks_per_year).toBe(48)
+  })
 })
 
 describe('SettingsView — destination fields and person-scroll (A6, D2)', () => {
@@ -263,11 +301,11 @@ describe('SettingsView — destination fields and person-scroll (A6, D2)', () =>
     expect(text).toContain('Office / location address')
   })
 
-  it('highlights and scrolls to the person named in the URL', async () => {
-    const { wrapper, flush } = await mountView('?person=George')
+  it('highlights and scrolls to the session person named in the URL', async () => {
+    const { wrapper, flush } = await mountView('?person=Simon')
     await flush()
-    const george = wrapper.findAll('.settings-person').find(s => s.text().includes('George'))!
-    expect(george.classes()).toContain('settings-person--target')
+    const simon = wrapper.findAll('.settings-person')[0]
+    expect(simon.classes()).toContain('settings-person--target')
   })
 })
 
@@ -286,9 +324,9 @@ describe('SettingsView — selling-home toggle (P7, B7)', () => {
   })
 
   it('hides the current-home fields for a cash-only person and relabels the deposit', async () => {
-    const { wrapper, flush } = await mountView()
+    const { wrapper, flush } = await mountView('', 'Ashby')
     await flush()
-    const ashby = wrapper.findAll('.settings-person').find(s => s.text().includes('Ashby'))!
+    const ashby = wrapper.findAll('.settings-person')[0]
     expect(ashby.text()).not.toContain('Expected sale price of current home')
     expect(ashby.text()).not.toContain('Mortgage remaining on current home')
     expect(ashby.text()).toContain('Cash available for the deposit')
@@ -364,9 +402,9 @@ describe('SettingsView — selling-home persists on save (B7)', () => {
   })
 
   it('sends the selling-home toggle in the save body', async () => {
-    const { wrapper, flush } = await mountView()
+    const { wrapper, flush } = await mountView('', 'Ashby')
     await flush()
-    const ashby = wrapper.findAll('.settings-person').find(s => s.text().includes('Ashby'))!
+    const ashby = wrapper.findAll('.settings-person')[0]
     await ashby.find('input#selling-home').setValue(true)
     await ashby.trigger('focusout')
     await flush()

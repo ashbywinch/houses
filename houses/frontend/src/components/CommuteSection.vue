@@ -1,15 +1,26 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { commuteDuration, commuteCost, pillColour } from '../formatters/commute'
+import { usePropertiesStore } from '../stores/properties'
 import ProvenanceView from './ProvenanceView.vue'
 import type { Provenance } from '../types'
 
+const store = usePropertiesStore()
+
 const props = defineProps<{
   commutes: any
-  goodThreshold?: number
-  warnThreshold?: number
   currentPerson?: string | null
 }>()
+
+/** The colour bands are the person's own thresholds from Settings
+ *  (same rule as the house cards), not a global constant. */
+function thresholdsFor(key: string): { good: number; fine: number } {
+  const person = key.split('/')[0]
+  const good = store.commuteGoods[person]
+  const fine = store.commuteCeilings[person]?.fine
+  if (good != null && fine != null) return { good, fine }
+  return { good: 45, fine: 75 }
+}
 
 /** A commute's "how is this calculated?" must not list fuel sources the
  *  route doesn't use — the provenance walks every mode branch, so a
@@ -62,7 +73,7 @@ function toggleProvenance(key: string) {
         <span class="commute-accordion__label">{{ key }}</span>
         <span
           class="pill"
-          :class="pillColour(c, goodThreshold ?? 45, warnThreshold ?? 75)"
+          :class="pillColour(c, thresholdsFor(String(key)).good, thresholdsFor(String(key)).fine)"
           :title="c?.value?.duration ? undefined : 'No route found for this commute'"
         >
           <template v-if="c?.value?.duration">
