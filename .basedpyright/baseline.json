@@ -26,14 +26,6 @@
                     "endColumn": 37,
                     "lineCount": 1
                 }
-            },
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 62,
-                    "endColumn": 70,
-                    "lineCount": 1
-                }
             }
         ],
         "./dag/expression.py": [
@@ -2252,16 +2244,6 @@
                 }
             }
         ],
-        "./tests/unit/nodes/test_current_property.py": [
-            {
-                "code": "reportOptionalMemberAccess",
-                "range": {
-                    "startColumn": 39,
-                    "endColumn": 45,
-                    "lineCount": 1
-                }
-            }
-        ],
         "./tests/unit/nodes/test_enrichment.py": [
             {
                 "code": "reportArgumentType",
@@ -2508,24 +2490,6 @@
                 "range": {
                     "startColumn": 90,
                     "endColumn": 97,
-                    "lineCount": 1
-                }
-            }
-        ],
-        "./tests/unit/nodes/test_monthly_costs.py": [
-            {
-                "code": "reportOptionalMemberAccess",
-                "range": {
-                    "startColumn": 39,
-                    "endColumn": 45,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportOptionalMemberAccess",
-                "range": {
-                    "startColumn": 39,
-                    "endColumn": 45,
                     "lineCount": 1
                 }
             }
