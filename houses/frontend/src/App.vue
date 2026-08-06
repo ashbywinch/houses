@@ -63,6 +63,13 @@ button { font: inherit; cursor: pointer; border: none; background: none; }
   --purple-bg: #ede9fe;
   --purple-text: #6d28d9;
   --commute-none: #adb5bd;
+  --epc-a: #2e7d32;
+  --epc-b: #4caf50;
+  --epc-c: #8bc34a;
+  --epc-d: #ffeb3b;
+  --epc-e: #ff9800;
+  --epc-f: #e65100;
+  --epc-g: #c62828;
 
   /* ── Neutrals ── */
   --text: #1a1a1a;
@@ -78,11 +85,13 @@ button { font: inherit; cursor: pointer; border: none; background: none; }
   /* ── Typography ── */
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", monospace;
+  --fs-2xs: 0.625rem;
   --fs-xs: 0.6875rem;
-  --fs-sm: 0.8125rem;
-  --fs-base: 0.9375rem;
-  --fs-lg: 1.0625rem;
-  --fs-xl: 1.25rem;
+  --fs-sm: 0.75rem;
+  --fs-md: 0.8125rem;
+  --fs-base: 0.875rem;
+  --fs-lg: 0.9375rem;
+  --fs-xl: 1.125rem;
   --fs-2xl: 1.5rem;
   --lh-tight: 1.25;
   --lh: 1.5;

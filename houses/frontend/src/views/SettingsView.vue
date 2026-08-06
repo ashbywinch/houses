@@ -496,7 +496,7 @@ const depositRows = computed(() => {
 .settings-person__badge {
   background: var(--blue);
   color: white;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   padding: 0.1rem 0.6rem;
   font-size: 0.75rem;
 }

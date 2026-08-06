@@ -49,15 +49,16 @@ function getSchoolWalkMinutes(commutes: any, labelPart: string): { value: number
   border-bottom: 8px solid var(--page-bg);
 }
 .detail-section__title {
-  font-size: 16px; font-weight: 700; margin: 0 0 12px;
+  font-size: var(--fs-lg); font-weight: var(--fw-bold); margin: 0 0 12px;
 }
 .detail-field {
   display: flex; flex-wrap: wrap; align-items: baseline;
   gap: 8px; padding: 6px 0;
 }
-.detail-field__label { font-size: 13px; font-weight: 600; color: var(--text-secondary); min-width: 80px; }
-.detail-field__value { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 14px; }
-.pill { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; line-height: 1.6; white-space: nowrap; }
-.pill--sm { font-size: 11px; padding: 1px 7px; }
+.detail-field__label { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-secondary); min-width: 80px; }
+.detail-field__value { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--fs-base); }
+.pill { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: var(--radius-full); font-size: var(--fs-sm); font-weight: var(--fw-bold); line-height: 1.6; white-space: nowrap; }
+.pill--sm { font-size: var(--fs-xs); padding: 1px 7px; }
 .pill--good { background: var(--green-bg); color: var(--green); }
+.school-walk { margin-left: auto; font-size: var(--fs-sm); color: var(--text-muted); white-space: nowrap; }
 </style>

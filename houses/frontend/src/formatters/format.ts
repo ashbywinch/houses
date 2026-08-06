@@ -19,9 +19,11 @@ export function epcClass(band: string | undefined): string {
     if (!band) return ''
     const b = band.toUpperCase()
     if (b === 'A') return 'a'
-    if (b === 'B' || b === 'C') return 'bc'
+    if (b === 'B') return 'b'
+    if (b === 'C') return 'c'
     if (b === 'D') return 'd'
     if (b === 'E') return 'e'
-    if (b === 'F' || b === 'G') return 'fg'
+    if (b === 'F') return 'f'
+    if (b === 'G') return 'g'
     return ''
 }

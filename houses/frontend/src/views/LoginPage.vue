@@ -67,14 +67,14 @@ async function signIn() {
 }
 
 .login-card__title {
-  font-size: 28px;
-  font-weight: 700;
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-bold);
   margin: 0 0 8px;
   color: var(--text);
 }
 
 .login-card__desc {
-  font-size: 14px;
+  font-size: var(--fs-base);
   color: var(--text-secondary, #666);
   margin: 0 0 24px;
 }
@@ -85,8 +85,8 @@ async function signIn() {
   border: none;
   background: var(--blue, #1a73e8);
   color: #fff;
-  font-size: 15px;
-  font-weight: 600;
+  font-size: var(--fs-base);
+  font-weight: var(--fw-semibold);
   cursor: pointer;
   width: 100%;
 }
@@ -97,7 +97,7 @@ async function signIn() {
 }
 
 .login-card__error {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
 }
 </style>

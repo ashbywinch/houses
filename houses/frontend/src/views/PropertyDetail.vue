@@ -454,7 +454,7 @@ async function saveAddress() {
   border-radius: var(--radius-full);
   background: rgba(255,255,255,0.12);
   color: #fff;
-  font-size: 20px;
+  font-size: var(--fs-xl);
   line-height: 1;
   display: flex;
   align-items: center;
@@ -523,7 +523,7 @@ async function saveAddress() {
   color: var(--text);
   resize: vertical;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   box-sizing: border-box;
 }
 .notes-actions {
@@ -562,7 +562,7 @@ async function saveAddress() {
 
 
 .tab-bar__tab--active svg { stroke: var(--blue); }
-.tab-bar__label { font-size: 10px; font-weight: var(--fw-semibold); }
+.tab-bar__label { font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
 
 @media (max-width: 767px) {
   .summary-bar { padding: var(--sp-3) var(--sp-4); }

@@ -161,7 +161,7 @@ function toggleProvenance(key: string) {
 }
 .commute-accordion__header:hover { background: var(--slate-50); }
 .commute-accordion__label { font-weight: var(--fw-semibold); font-size: var(--fs-sm); flex: 1; }
-.commute-accordion__chevron { font-size: 10px; color: var(--text-muted); transition: transform var(--transition); }
+.commute-accordion__chevron { font-size: var(--fs-xs); color: var(--text-muted); transition: transform var(--transition); }
 .commute-accordion__chevron--open { transform: rotate(180deg); }
 .commute-accordion__empty {
   color: var(--text-muted);
@@ -198,7 +198,7 @@ function toggleProvenance(key: string) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--slate-400);
   background: none;
   border: 1px solid var(--slate-200);

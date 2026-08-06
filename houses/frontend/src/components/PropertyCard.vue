@@ -140,13 +140,6 @@ function commuteAddress(c: unknown, key: string): string {
   return typeof address === 'string' && address ? address : commuteLabel(c, key)
 }
 
-function commuteCostTitle(c: unknown): string | undefined {
-  // £100.00 is the TfL daily fare cap, not the actual ticket price —
-  // say so instead of letting it read as a real fare (P2).
-  if (commuteCost(c) === 100) return '£100.00 is the TfL daily maximum, not the actual fare'
-  return undefined
-}
-
 const adultCommutes = computed(() => {
   if (!props.data.commutes) return {}
   return Object.fromEntries(
@@ -222,11 +215,11 @@ async function toggleViewed() {
         >£—/mo</span>
       </div>
 
-      <!-- Specs row: price · bedrooms · freshness -->
-      <div class="card__specs">
-        <span v-if="price" class="card__price">£{{ price.toLocaleString() }}</span>
-        <span v-if="bedrooms">{{ bedrooms }} bed</span>
-        <span v-if="freshnessLabel" class="pill pill--sm" :class="freshnessClass">{{ freshnessLabel }}</span>
+      <!-- Meta tags: price · bedrooms · freshness -->
+      <div class="card__meta">
+        <span v-if="price" class="card__tag card__tag--price">£{{ price.toLocaleString() }}</span>
+        <span v-if="bedrooms" class="card__tag">{{ bedrooms }} bed</span>
+        <span v-if="freshnessLabel" class="card__tag" :class="freshnessClass">{{ freshnessLabel }}</span>
       </div>
 
       <!-- Commute rows: per-person -->
@@ -251,13 +244,6 @@ async function toggleViewed() {
                 :fineMax="commuteMode(c.commute) === 'walk' ? 30 : 75"
               />
             </a>
-            <span
-              v-if="commuteCost(c.commute) !== null"
-              class="card__commute-cost"
-              :title="commuteCostTitle(c.commute)"
-            >
-              £{{ commuteCost(c.commute)!.toFixed(2) }}/day{{ (commuteCost(c.commute) ?? 0) >= 100 ? ' (max)' : '' }}
-            </span>
           </div>
         </div>
         <a v-if="Object.keys(adultCommutes).length > 0" href="#/settings" class="card__change-dest">Change destinations →</a>
@@ -350,10 +336,10 @@ async function toggleViewed() {
 .card__border--viewed { background: var(--blue); }
 
 .card__body {
-  padding: var(--sp-4);
+  padding: 14px 14px 12px;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
+  gap: 8px;
 }
 
 /* Top row */
@@ -369,11 +355,12 @@ async function toggleViewed() {
   color: var(--slate-800);
 }
 .card__address-text {
-  font-size: var(--fs-base);
+  font-size: var(--fs-lg);
   font-weight: var(--fw-semibold);
   margin: 0;
   word-break: break-word;
-  line-height: var(--lh-tight);
+  line-height: 1.3;
+  color: var(--text);
 }
 .card__address:hover .card__address-text { color: var(--blue); text-decoration: underline; }
 
@@ -382,7 +369,7 @@ async function toggleViewed() {
 }
 .card__monthly-cost {
   flex-shrink: 0;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-lg);
   font-weight: var(--fw-bold);
   color: var(--green);
   white-space: nowrap;
@@ -391,40 +378,54 @@ async function toggleViewed() {
   display: inline-block;
   margin-left: 0.3rem;
   font-size: 0.65rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--blue);
   border: 1px solid var(--blue);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   padding: 0.05rem 0.4rem;
   vertical-align: middle;
 }
 
 /* Specs row */
-.card__specs {
+.card__meta {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--fs-sm);
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.card__tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  background: var(--pill-bg);
   color: var(--text-secondary);
 }
-.card__price { font-weight: var(--fw-semibold); color: var(--slate-700); }
+.card__tag--price { font-weight: var(--fw-semibold); color: var(--text); }
+.card__tag.pill--good { background: var(--green-bg); color: var(--green-text); }
+.card__tag.pill--warn { background: var(--orange-bg); color: var(--orange-text); }
+.card__tag.pill--bad { background: var(--red-bg); color: var(--red-text); }
+.card__tag.pill--muted { background: var(--pill-bg); color: var(--text-secondary); }
 
 /* Commute rows */
 .card__commutes {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-1);
+  gap: 6px;
+  margin-bottom: 10px;
 }
 .card__commute-stale {
   font-size: 0.65rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--orange);
   border: 1px solid var(--orange);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   padding: 0.05rem 0.4rem;
   white-space: nowrap;
 }
@@ -441,14 +442,17 @@ async function toggleViewed() {
 .card__commute-row {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--fs-sm);
+  gap: 6px;
+  font-size: var(--fs-md);
 }
 .card__commute-person {
-  font-weight: var(--fw-medium);
-  color: var(--slate-700);
-  min-width: 70px;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-normal);
+  color: var(--text-secondary);
+  min-width: 0;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .card__commute-data {
   display: flex;
@@ -456,7 +460,6 @@ async function toggleViewed() {
   gap: var(--sp-2);
   color: var(--text-secondary);
 }
-.card__commute-cost { color: var(--slate-500); font-size: var(--fs-xs); }
 .pill-link { text-decoration: none; }
 
 /* School rows */
@@ -470,16 +473,16 @@ async function toggleViewed() {
 .card__school-row {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  gap: 6px;
   font-size: var(--fs-sm);
 }
 .card__school-type {
-  font-weight: var(--fw-medium);
-  color: var(--slate-500);
+  font-weight: var(--fw-semibold);
+  color: var(--text-muted);
   min-width: 70px;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-2xs);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
 }
 .card__school-name {
   color: var(--blue);
@@ -515,7 +518,7 @@ async function toggleViewed() {
   background: var(--card-bg);
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: var(--fw-medium);
   transition: all var(--transition);
 }
@@ -523,7 +526,7 @@ async function toggleViewed() {
 .triage-btn--active { border-color: var(--blue); color: var(--blue); background: var(--blue-bg); }
 .triage-btn--danger.triage-btn--active { border-color: var(--red); color: var(--red); background: var(--red-bg); }
 .triage-btn--confirm.triage-btn--active { border-color: var(--green); color: var(--green); background: var(--green-bg); }
-.triage-btn__label { font-size: 10px; }
+.triage-btn__label { font-size: var(--fs-xs); }
 
 /* Pill system — scoped to the SCHOOL rows so it never overrides the
  * shared CommutePill classes (which are solid; the mockup's school
@@ -539,10 +542,10 @@ async function toggleViewed() {
   line-height: 1.6;
   white-space: nowrap;
 }
-.card__school-row .pill--xs { font-size: 10px; padding: 1px 5px; }
-.card__school-row .pill--sm { font-size: 11px; padding: 1px 7px; }
-.card__school-row .pill--good { background: var(--green-bg); color: var(--green-text); }
+.card__school-row .pill--xs { font-size: var(--fs-xs); padding: 1px 5px; }
+.card__school-row .pill--sm { font-size: var(--fs-xs); padding: 1px 7px; }
+.card__school-row .pill--good { background: var(--green-bg); color: var(--green); }
 .card__school-row .pill--warn { background: var(--orange-bg); color: var(--orange-text); }
 .card__school-row .pill--bad { background: var(--red-bg); color: var(--red-text); }
-.card__school-row .pill--slate { background: var(--slate-100); color: var(--slate-600); }
+.card__school-row .pill--slate { background: var(--slate-100); color: var(--slate-600); margin-left: auto; }
 </style>

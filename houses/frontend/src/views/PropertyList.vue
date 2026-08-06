@@ -422,7 +422,7 @@ const ceilingLimitText = computed(() => {
   padding: 8px 14px;
   border-radius: var(--radius-full);
   font-size: 0.8125rem;
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   border: 1.5px solid var(--border);
   background: var(--card-bg);
   color: var(--text-secondary);
@@ -437,7 +437,7 @@ const ceilingLimitText = computed(() => {
 .pill-badge {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
-  font-size: 0.6875rem; font-weight: 600; background: var(--blue); color: #fff;
+  font-size: 0.6875rem; font-weight: var(--fw-semibold); background: var(--blue); color: #fff;
 }
 .pill--active .pill-badge { background: rgba(255, 255, 255, 0.3); }
 .count-text { margin-left: auto; font-size: 0.8125rem; color: var(--text-muted); white-space: nowrap; }
@@ -468,7 +468,7 @@ const ceilingLimitText = computed(() => {
 .tab-heading { font-size:1.1rem; margin:0; padding:8px 0 0; }
 .card-list { display:flex; flex-direction:column; gap:12px; padding-top: 14px; }
 .empty-state { text-align:center; padding:60px 20px; }
-.empty-state__text { font-size:16px; color:var(--text-muted); }
+.empty-state__text { font-size: var(--fs-lg); color:var(--text-muted); }
 .tab-bar-spacer { height:72px; }
 @media (min-width:600px) { .card-list { display:grid; grid-template-columns:1fr 1fr; gap:12px; } .page { padding-left:16px; padding-right:16px; } }
 @media (min-width:960px) { .card-list { grid-template-columns:1fr 1fr 1fr; } }
@@ -477,7 +477,7 @@ const ceilingLimitText = computed(() => {
 .map-pins { position:absolute; inset:0; pointer-events:none; }
 .map-pin { position:absolute; pointer-events:auto; text-decoration:none; transform:translate(-50%,-100%); padding:10px; margin:-10px; }
 .map-pin__label {
-  display:block; background:var(--card-bg); color:var(--text); font-size:11px; font-weight:700;
+  display:block; background:var(--card-bg); color:var(--text); font-size: var(--fs-xs); font-weight: var(--fw-bold);
   padding:2px 8px; border-radius:6px; border:2px solid var(--blue); white-space:nowrap;
   box-shadow:0 1px 4px rgba(0,0,0,0.2); line-height:1.4;
 }
@@ -487,15 +487,15 @@ const ceilingLimitText = computed(() => {
 .sheet { position:fixed; bottom:0; left:0; right:0; background:var(--card-bg); border-radius:16px 16px 0 0; z-index:100; padding:12px 16px 24px; max-height:80vh; overflow-y:auto; box-shadow:0 -2px 12px rgba(0,0,0,0.15); }
 .sheet__handle { width:36px; height:4px; border-radius:2px; background:var(--border); margin:0 auto 12px; }
 .sheet__header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
-.sheet__title { font-size:18px; font-weight:700; }
-.sheet__close { border:none; background:none; font-size:24px; cursor:pointer; color:var(--text-secondary); min-width:44px; min-height:44px; display:flex; align-items:center; justify-content:center; }
+.sheet__title { font-size: var(--fs-xl); font-weight: var(--fw-bold); }
+.sheet__close { border:none; background:none; font-size: var(--fs-2xl); cursor:pointer; color:var(--text-secondary); min-width:44px; min-height:44px; display:flex; align-items:center; justify-content:center; }
 .sheet__body { display:flex; flex-direction:column; gap:16px; }
 .sheet__section { display:flex; flex-direction:column; gap:8px; }
-.sheet__label { font-size:14px; font-weight:600; color:var(--text-secondary); }
-.sheet__check { display:flex; align-items:center; gap:8px; font-size:14px; color:var(--text); min-height:44px; }
+.sheet__label { font-size: var(--fs-base); font-weight: var(--fw-semibold); color:var(--text-secondary); }
+.sheet__check { display:flex; align-items:center; gap:8px; font-size: var(--fs-base); color:var(--text); min-height:44px; }
 .sheet__check input { width:20px; height:20px; }
-.sheet__select, .sheet__input { font:inherit; padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size:15px; width:100%; min-height:44px; }
-.sheet__apply { width:100%; padding:12px; border:none; border-radius:8px; background:var(--blue); color:#fff; font-size:16px; font-weight:600; cursor:pointer; min-height:44px; }
+.sheet__select, .sheet__input { font:inherit; padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size: var(--fs-base); width:100%; min-height:44px; }
+.sheet__apply { width:100%; padding:12px; border:none; border-radius:8px; background:var(--blue); color:#fff; font-size: var(--fs-lg); font-weight: var(--fw-semibold); cursor:pointer; min-height:44px; }
 
 .tab-bar { position:fixed; bottom:0; left:0; right:0; height:56px; background:var(--card-bg); border-top:1px solid var(--border); display:flex; align-items:center; justify-content:space-around; z-index:80; padding-bottom:env(safe-area-inset-bottom,0); }
 .tab-bar__tab { display:flex; flex-direction:column; align-items:center; gap:2px; border:none; background:none; cursor:pointer; color:var(--text-muted); min-width:56px; min-height:44px; padding:4px 12px; }
@@ -513,5 +513,5 @@ const ceilingLimitText = computed(() => {
   font-size: 0.85rem;
   z-index: 2;
 }
-.tab-bar__label { font-size:10px; font-weight:600; }
+.tab-bar__label { font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
 </style>

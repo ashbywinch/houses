@@ -280,17 +280,17 @@ function backToReal() {
 .whatif__title {
   margin: 0;
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   color: var(--text-secondary);
 }
 .whatif__badge {
   font-size: 0.6875rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #fff;
   background: var(--blue);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   padding: 0.15rem 0.6rem;
   white-space: nowrap;
 }
@@ -299,7 +299,7 @@ function backToReal() {
   background: var(--green-bg);
   border-radius: var(--radius-sm);
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   color: var(--green-text);
   margin: 10px 0 0;
   text-align: center;
@@ -346,7 +346,7 @@ function backToReal() {
   background: var(--pill-bg);
   border-radius: var(--radius-sm);
   font-size: 0.875rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   color: var(--text);
   text-align: right;
   outline: none;
@@ -373,7 +373,7 @@ function backToReal() {
   border-radius: var(--radius-sm);
   padding: 10px;
   font-size: 0.8125rem;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   cursor: pointer;
   text-align: center;
 }

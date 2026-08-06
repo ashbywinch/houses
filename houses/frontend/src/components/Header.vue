@@ -120,7 +120,7 @@ onMounted(fetchPersons)
 }
 .header__title {
   font-size: 1.125rem;
-  font-weight: 700;
+  font-weight: var(--fw-bold);
   letter-spacing: -0.01em;
   color: var(--text);
 }
@@ -138,7 +138,7 @@ onMounted(fetchPersons)
   border-radius: var(--radius-sm);
   padding: 6px 10px;
   font-size: 0.8125rem;
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   cursor: pointer;
   transition: background 0.15s;
 }
@@ -150,10 +150,10 @@ onMounted(fetchPersons)
 .header__su-toggle--active {
   background: var(--amber-bg);
   color: var(--amber-text);
-  font-weight: 700;
+  font-weight: var(--fw-bold);
 }
 .header__auth-status {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   opacity: 0.6;
 }
 /* Superuser bar */
@@ -164,19 +164,19 @@ onMounted(fetchPersons)
   padding: 8px 16px;
   background: var(--amber-bg);
   color: var(--amber-text);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   max-width: 1200px;
   margin: 0 auto;
 }
 .su-bar__label {
   white-space: nowrap;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 .su-bar__select {
   padding: 3px 8px;
   border-radius: 4px;
   border: 1px solid var(--border);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   background: #fff;
   color: var(--text);
 }
@@ -186,8 +186,8 @@ onMounted(fetchPersons)
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 3px 10px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 </style>

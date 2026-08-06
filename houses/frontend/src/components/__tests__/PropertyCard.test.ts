@@ -280,9 +280,9 @@ describe('PropertyCard affordability honesty (P2)', () => {
       },
     })
     const wrapper = mountCard({ rid: '123', data: summary })
-    const cost = wrapper.find('.card__commute-cost')
-    expect(cost.text()).toContain('£100.00')
-    expect(cost.attributes('title') ?? '').toContain('TfL daily maximum')
+    const pill = wrapper.find('.card__commute-data .pill')
+    expect(pill.text()).toContain('(max)')
+    expect(pill.attributes('title') ?? '').toContain('TfL daily maximum')
   })
 })
 

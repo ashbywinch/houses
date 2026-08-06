@@ -357,7 +357,7 @@ function canEdit(personName: string): boolean {
       <h3 class="epc-title">EPC Rating</h3>
       <div class="epc-scale">
         <div v-for="band in ['A','B','C','D','E','F','G']" :key="band"
-          class="epc-step" :class="epcStepClass(epc.value?.band ?? '')">
+          class="epc-step" :class="epcStepClass(band)">
           {{ band }}
           <span v-if="(epc.value?.band ?? '').toUpperCase() === band" class="epc-step__marker">▲</span>
         </div>
@@ -448,7 +448,7 @@ function canEdit(personName: string): boolean {
   background: var(--slate-100);
   position: relative;
 }
-.epc-step__marker { position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%); font-size: 12px; }
+.epc-step__marker { position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%); font-size: var(--fs-sm); }
 .epc-step--a { background: var(--epc-a); color: #fff; }
 .epc-step--b { background: var(--epc-b); color: #fff; }
 .epc-step--c { background: var(--epc-c); color: #fff; }
