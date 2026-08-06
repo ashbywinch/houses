@@ -17,6 +17,7 @@ fallback_models = []
 verbosity_level = 3
 repo_context_from_default_branch = true # standards docs read from main (maintainer-controlled), never the PR head
 repo_context_files = [
+    "AGENTS.md",
     "docs/coding-standards.md",
     "docs/testing-standards.md",
     "docs/writing-documentation.md",
@@ -28,7 +29,7 @@ require_tests_review = true
 require_security_review = true
 require_estimate_effort_to_review = true
 num_max_findings = 10
-extra_instructions = "In addition to your standard review, check the PR against each file in repo_context_files. Add a 'Compliance' section per doc: 'Coding Standards', 'Testing Standards', 'Documentation Standards', 'DAG Library'. For each, list any violations found, or state 'No violations' if the PR complies."
+extra_instructions = "In addition to your standard review, check the PR against each file in repo_context_files. Add a 'Compliance' section per doc: 'Coding Standards', 'Testing Standards', 'Documentation Standards', 'DAG Library', 'Docs Navigation (AGENTS.md)'. For each, list any violations found, or state 'No violations' if the PR complies. For Docs Navigation: any doc added, renamed, or removed must be reachable from AGENTS.md's decision tree and must update its cross-references (link, never copy; one topic per file)."
 
 [github_action_config]
 handle_push_trigger = true
