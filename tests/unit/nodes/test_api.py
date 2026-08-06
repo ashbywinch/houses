@@ -506,12 +506,13 @@ class TestSettingsPropagationApi:
         the server REJECTS pence (400) rather than silently rounding;
         small monthly amounts still allow pence."""
         client = self._setup()
-        resp = client.patch(
-            "/api/settings/person/Ashby",
-            json={"name": "Ashby", "has_car": True, "cash_contribution": {"amount": "300000.50", "currency": "GBP"}},
-        )
-        assert resp.status_code == 400, resp.text
-        assert "whole number of pounds" in resp.json()["detail"]
+        for field in ("home_sale_price", "outstanding_mortgage", "cash_contribution"):
+            resp = client.patch(
+                "/api/settings/person/Ashby",
+                json={"name": "Ashby", "has_car": True, field: {"amount": "300000.50", "currency": "GBP"}},
+            )
+            assert resp.status_code == 400, f"{field}: expected 400, got {resp.status_code}: {resp.text}"
+            assert "whole number of pounds" in resp.json()["detail"], f"{field}: {resp.json()['detail']}"
 
         # pence are fine on the small monthly field
         resp = client.patch(
@@ -743,6 +744,21 @@ class TestWhatIfApi:
         )
         assert resp.status_code == 400
 
+    def test_what_if_rejects_pence_on_whole_pound_fields(self):
+        """What-if uses the same money rules as settings: pence on
+        sale/mortgage/cash fail fast (400), never rounded."""
+        client, reg = self._setup()
+        self._seed(reg)
+        flush_all()
+
+        for field in ("home_sale_price", "outstanding_mortgage", "cash_contribution"):
+            resp = client.post(
+                "/api/what-if",
+                json={"persons": [{"name": "Ashby", field: {"amount": "300000.50", "currency": "GBP"}}]},
+            )
+            assert resp.status_code == 400, f"{field}: expected 400, got {resp.status_code}: {resp.text}"
+            assert "whole number of pounds" in resp.json()["detail"], f"{field}: {resp.json()['detail']}"
+
 
 class TestRegenerateApi:
     """POST /api/admin/regenerate — force recompute of non-stale nodes."""
@@ -877,6 +893,29 @@ class TestWorksEstimateApi:
         )
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text[:500]}"
         assert resp.json() == {"status": "ok"}
+
+    def test_works_estimate_rejects_pence(self):
+        """Works estimates are whole pounds — pence fail fast (400)."""
+        from houses.nodes.property import PropertyNodes
+        from houses.property_registry import register_property
+
+        rid = "12345679"
+        client = self._setup()
+        register_property(rid, PropertyNodes(rid))
+
+        resp = client.patch(
+            f"/api/properties/{rid}/works-estimate",
+            json={"person": "Ashby", "value": 15000.50},
+        )
+        assert resp.status_code == 400, f"Expected 400, got {resp.status_code}: {resp.text[:300]}"
+        assert "whole number" in resp.json()["detail"]
+
+        # nothing was stored
+        from houses.property_registry import get_property
+
+        prop = get_property(rid)
+        assert prop is not None
+        assert prop.works_estimates.latest_attempt().value_or_none() is None
 
     def test_works_estimate_propagates_to_detail(self):
         """After PATCH, GET detail must show updated mortgage

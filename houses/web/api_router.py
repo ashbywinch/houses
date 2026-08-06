@@ -690,6 +690,13 @@ async def patch_works_estimate(
             status_code=400,
             detail="value must be a number",
         )
+    # Works estimates are large house-purchase amounts — whole pounds
+    # only. Pence fail fast (400), never silently rounded.
+    if value is not None and value != int(value):
+        raise HTTPException(
+            status_code=400,
+            detail="value must be a whole number of pounds — no pence",
+        )
 
     current = prop.works_estimates.latest_attempt().value_or_none() or {}
     # Store as Money — the Money rule applies to all monetary values.
