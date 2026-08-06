@@ -251,10 +251,25 @@ Fixed in PR #54:
 - Cap fares show inline "(max)"; school walks say "min walk" not "m
   walk"; filter label "Max Monthly Outgoings" → "Max monthly cost".
 
-Verified NOT reproducible (rows/data present — scroll artifacts):
-"mortgage missing from Costs tab" (row is first, data succeeded) and
-"Pimlico missing from Commute tab" (key present, no template filter);
-no red-wavy-underline style exists in the code.
+Verified NOT reproducible — CONFIRMED against the run-2 screenshots and
+the live DOM (screenshot-first, per the walkthrough protocol):
+
+- "Mortgage missing from Costs tab" — refuted: the row is the FIRST
+  costs row and renders "Mortgage £1,080.94"; a fresh Costs-tab click
+  lands it at the top of the viewport (verified live in the DOM).
+  Screenshot 04/05 captured scrolled positions.
+- "Pimlico missing from Commute tab" — refuted: the DOM renders
+  Simon/Pimlico as the first accordion item (all 6 commutes present).
+  Screenshot 06 captured a scrolled position.
+- "Red wavy underline on monthly cost" — refuted: screenshot 01 shows
+  plain green figures (`≈£2,244.59/mo`, `£—/mo`) with no underline,
+  and no such style exists in the code (likely a browser-spellcheck
+  artifact in the participant's viewport).
+
+Residual UX kernel (no code bug): the participant scrolled past the
+top rows without noticing them — the mortgage (largest cost) and
+Pimlico (first commute) don't stand out visually. Prominence polish
+only; both are already the first rows.
 
 Deferred (data/scope): Summary tab describes the town, not the house
 (no photos/bathroom data in the DAG); map marker clustering + legend;
