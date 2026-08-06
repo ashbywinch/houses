@@ -20,7 +20,7 @@ const settingsPersons = {
       {
         name: 'Simon',
         selling_home: true,
-        home_sale_price: { amount: '550000', currency: 'GBP' },
+        home_sale_price: { amount: '550000.49', currency: 'GBP' },
         outstanding_mortgage: { amount: '373000', currency: 'GBP' },
         cash_contribution: { amount: '0', currency: 'GBP' },
         places_of_interest: [{ label: 'Pimlico', address: '1 Pimlico Rd', trips_per_week: 1, weeks_per_year: 46, acceptable_modes: ['train'] }],
@@ -30,6 +30,13 @@ const settingsPersons = {
         selling_home: false,
         cash_contribution: { amount: '300000', currency: 'GBP' },
         places_of_interest: [],
+      },
+      {
+        name: 'George',
+        is_child: true,
+        selling_home: false,
+        cash_contribution: { amount: '0', currency: 'GBP' },
+        places_of_interest: [{ label: 'Primary School', address: '', trips_per_week: 5, weeks_per_year: 39, acceptable_modes: ['walk'] }],
       },
     ],
   },
@@ -80,6 +87,22 @@ describe('WhatIfPanel', () => {
     expect(wrapper.text()).toContain('Expected sale price (£)')
     // nothing is "saved" until the user asks — badge hidden initially
     expect(wrapper.text()).not.toContain('not saved')
+  })
+
+  it('never shows children — they have no finances', async () => {
+    const { wrapper } = mountPanel()
+    await settle()
+    await expand(wrapper)
+    expect(wrapper.text()).not.toContain('George')
+  })
+
+  it('displays money as integer pounds (no decimals)', async () => {
+    const { wrapper } = mountPanel()
+    await settle()
+    await expand(wrapper)
+    // Simon's sale price is 550000.49 in the fixture → shown as 550000
+    const sale = wrapper.find('input[type="number"]')
+    expect((sale.element as HTMLInputElement).value).toBe('550000')
   })
 
   it('runs the what-if on edit and marks it not saved', async () => {

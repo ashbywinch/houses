@@ -204,18 +204,11 @@ const activeChips = computed(() => {
   if (minBedroomsFilter.value != null) chips.push({ label: `Beds: ${minBedroomsFilter.value}+`, key: 'minBeds' })
   if (maxCommuteFilter.value != null) chips.push({ label: `Commute < ${maxCommuteFilter.value}m`, key: 'maxCommute' })
   if (searchQuery.value.trim()) chips.push({ label: `Search: ${searchQuery.value.trim()}`, key: 'search' })
-  if (hiddenOverCeilingCount.value > 0) {
+  if (store.showOverCeiling && hiddenOverCeilingCount.value > 0) {
     const n = hiddenOverCeilingCount.value
     const maxFine = Math.max(0, ...Object.values(store.commuteCeilings).map(c => c.fine))
     const limit = maxFine > 0 ? `${maxFine}-minute` : 'family'
-    const hidesEverything = n >= store.rids.length && store.rids.length > 0
-    chips.push(
-      store.showOverCeiling
-        ? { label: `Hiding ${n} house${n === 1 ? '' : 's'} with a commute over the ${limit} limit`, key: 'ceiling' }
-        : hidesEverything
-          ? { label: `All ${n} houses have a commute over the ${limit} limit — the worst commute counts; change it in Settings`, key: 'ceiling' }
-          : { label: `${n} house${n === 1 ? '' : 's'} have a commute over the ${limit} limit — tap to hide`, key: 'ceiling' },
-    )
+    chips.push({ label: `Hiding ${n} house${n === 1 ? '' : 's'} with a commute over the ${limit} limit`, key: 'ceiling' })
   }
   return chips
 })
@@ -224,12 +217,7 @@ function removeChip(key: string) {
   if (key === 'minBeds') minBedroomsFilter.value = null
   if (key === 'maxCommute') maxCommuteFilter.value = null
   if (key === 'search') searchQuery.value = ''
-  if (key === 'ceiling') {
-    // never toggle into a state where the filter hides EVERY house
-    if (store.showOverCeiling || hiddenOverCeilingCount.value < store.rids.length) {
-      store.showOverCeiling = !store.showOverCeiling
-    }
-  }
+  if (key === 'ceiling') store.showOverCeiling = false
 }
 function clearAllFilters() {
   maxPriceFilter.value = null; minBedroomsFilter.value = null; maxCommuteFilter.value = null
@@ -289,13 +277,13 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
           v-for="chip in activeChips"
           :key="chip.key"
           class="chip"
-          :class="{ 'chip--actionable': chip.key === 'ceiling' && (store.showOverCeiling || hiddenOverCeilingCount < store.rids.length) }"
+          :class="{ 'chip--actionable': chip.key === 'ceiling' }"
           :role="chip.key === 'ceiling' ? 'button' : undefined"
           @click="chip.key === 'ceiling' && removeChip('ceiling')"
         >
           {{ chip.label }}
           <button
-            v-if="chip.key !== 'ceiling' || store.showOverCeiling || hiddenOverCeilingCount < store.rids.length"
+            v-if="chip.key !== 'ceiling'"
             class="chip__remove"
             @click="removeChip(chip.key)"
             aria-label="Remove filter"
@@ -384,6 +372,13 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
           </select>
         </div>
         <div class="sheet__section">
+          <span class="sheet__label">Commute limit</span>
+          <label class="sheet__check">
+            <input v-model="store.showOverCeiling" type="checkbox" />
+            Hide houses where any commute is over the family's limit
+          </label>
+        </div>
+        <div class="sheet__section">
           <button class="sheet__apply" @click="showFilterSheet = false">Apply</button>
         </div>
       </div>
@@ -454,6 +449,8 @@ const sortLabel = computed(() => sortOptions.find(o => o.value === sortBy.value)
 .sheet__body { display:flex; flex-direction:column; gap:16px; }
 .sheet__section { display:flex; flex-direction:column; gap:8px; }
 .sheet__label { font-size:14px; font-weight:600; color:var(--text-secondary); }
+.sheet__check { display:flex; align-items:center; gap:8px; font-size:14px; color:var(--text); min-height:44px; }
+.sheet__check input { width:20px; height:20px; }
 .sheet__select, .sheet__input { font:inherit; padding:10px 12px; border:1px solid var(--border); border-radius:8px; font-size:15px; width:100%; min-height:44px; }
 .sheet__apply { width:100%; padding:12px; border:none; border-radius:8px; background:var(--blue); color:#fff; font-size:16px; font-weight:600; cursor:pointer; min-height:44px; }
 

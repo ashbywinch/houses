@@ -39,6 +39,12 @@ function money(amount: string): { amount: string; currency: string } {
   return { amount, currency: 'GBP' }
 }
 
+/** Money displays and sends as integer pounds — no decimals. */
+function integerPounds(amount: string | undefined): string {
+  if (amount == null || amount === '') return ''
+  return String(Math.round(Number(amount)))
+}
+
 /** Keep money inputs as strings on the wire (the API convention). */
 function asString(e: Event): string {
   return (e.target as HTMLInputElement).value
@@ -49,20 +55,23 @@ onMounted(load)
 async function load() {
   try {
     const data = (await api.fetchSettings()) as { persons?: { value?: Record<string, unknown>[] } }
-    persons.value = (data.persons?.value ?? []).map(p => ({
-      name: String(p.name),
-      selling_home: Boolean(p.selling_home),
-      home_sale_price: (p.home_sale_price as { amount?: string } | undefined)?.amount ?? '',
-      outstanding_mortgage: (p.outstanding_mortgage as { amount?: string } | undefined)?.amount ?? '',
-      cash_contribution: (p.cash_contribution as { amount?: string } | undefined)?.amount ?? '',
-      places_of_interest: ((p.places_of_interest as PoiEdit[] | undefined) ?? []).map(poi => ({
-        label: poi.label,
-        address: poi.address,
-        trips_per_week: poi.trips_per_week ?? 1,
-        weeks_per_year: poi.weeks_per_year ?? 46,
-        acceptable_modes: [...poi.acceptable_modes],
-      })),
-    }))
+    persons.value = (data.persons?.value ?? [])
+      // children have no finances — never show them in the what-if
+      .filter(p => !p.is_child)
+      .map(p => ({
+        name: String(p.name),
+        selling_home: Boolean(p.selling_home),
+        home_sale_price: integerPounds((p.home_sale_price as { amount?: string } | undefined)?.amount),
+        outstanding_mortgage: integerPounds((p.outstanding_mortgage as { amount?: string } | undefined)?.amount),
+        cash_contribution: integerPounds((p.cash_contribution as { amount?: string } | undefined)?.amount),
+        places_of_interest: ((p.places_of_interest as PoiEdit[] | undefined) ?? []).map(poi => ({
+          label: poi.label,
+          address: poi.address,
+          trips_per_week: poi.trips_per_week ?? 1,
+          weeks_per_year: poi.weeks_per_year ?? 46,
+          acceptable_modes: [...poi.acceptable_modes],
+        })),
+      }))
   } catch {
     errorMsg.value = "Couldn't load the family settings."
   }
@@ -248,12 +257,14 @@ function backToReal() {
 .whatif__header {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  width: 100%;
 }
 .whatif__toggle {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 0.4rem;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 44px;
   background: none;
   border: none;
   padding: 0;

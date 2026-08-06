@@ -185,35 +185,50 @@ describe('PropertyList filtering', () => {
     expect(wrapper.text()).not.toContain('10 Cheap St')
   })
 
-  it('hides houses over the family commute ceiling when the user opts in (C9)', async () => {
+  it('shows no commute-limit info while the filter is inactive (C9)', async () => {
     const store = initStore()
     const wrapper = mount(PropertyList)
-    await flushPromises() // let loadAll() populate all four rids
+    await flushPromises()
+    store.commuteCeilings = { Simon: { fine: 30, isChild: false } }
+    await flushPromises()
+    expect(wrapper.text()).toContain('40 School Ln')
+    expect(wrapper.text()).not.toContain('commute over the')
+  })
+
+  it('hides houses over the ceiling only when the filter is switched on (C9)', async () => {
+    const store = initStore()
+    const wrapper = mount(PropertyList)
+    await flushPromises()
     store.commuteCeilings = { Simon: { fine: 30, isChild: false } }
     await flushPromises()
     // commutes: prop-a 60m, prop-b 30m, prop-c 90m, prop-d 45m → 3 over
-    expect(wrapper.text()).toContain('40 School Ln')
-    expect(wrapper.text()).toContain("3 houses have a commute over the 30-minute limit")
-
-    // Tapping the chip hides them
-    const chip = wrapper.findAll('.chip').find(c => c.text().includes('commute over the'))!
-    await chip.trigger('click')
+    const filterBtn = wrapper.findAll('.filter-btn').find(b => b.text().includes('Filter'))!
+    await filterBtn.trigger('click')
+    await wrapper.find('.sheet__check input').setValue(true)
+    await flushPromises()
     expect(wrapper.text()).not.toContain('40 School Ln')
     expect(wrapper.text()).toContain('Hiding 3 houses with a commute over the 30-minute limit')
+
+    // Dismissing the chip turns the filter back off
+    const chip = wrapper.findAll('.chip').find(c => c.text().includes('commute over the'))!
+    await chip.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('40 School Ln')
+    expect(wrapper.text()).not.toContain('commute over the')
   })
 
-  it('does not offer to hide when every house is over the commute limit', async () => {
+  it('shows an empty list when the filter is on and excludes every house', async () => {
     const store = initStore()
     const wrapper = mount(PropertyList)
     await flushPromises()
     store.commuteCeilings = { Simon: { fine: 1, isChild: false } } // every commute is over 1m
     await flushPromises()
-    expect(wrapper.text()).toContain("All 4 houses have a commute over the 1-minute limit")
-
-    // Tapping the chip must NOT hide everything — houses stay visible
-    const chip = wrapper.findAll('.chip').find(c => c.text().includes('commute over the'))!
-    await chip.trigger('click')
-    expect(wrapper.text()).toContain('40 School Ln')
+    const filterBtn = wrapper.findAll('.filter-btn').find(b => b.text().includes('Filter'))!
+    await filterBtn.trigger('click')
+    await wrapper.find('.sheet__check input').setValue(true)
+    await flushPromises()
+    expect(wrapper.text()).toContain('0 properties found')
+    expect(wrapper.text()).toContain('Hiding 4 houses with a commute over the 1-minute limit')
   })
 
   it('shows a legend for the commute pill colours (C7)', () => {
