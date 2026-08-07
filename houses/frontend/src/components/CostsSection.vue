@@ -31,67 +31,51 @@ function isImpossible(val: any): boolean {
 
 // ── Part A: uncertainty rendering ──────────────────────
 
-/** Council Tax row label. Exact: "D · £1,800/yr". Estimated
- *  (lookup failed, Band D fallback): "Band unknown · (£1,200 ± £50)/yr". */
-const councilTaxLabel = computed(() => {
-  const ct = props.affordability?.council_tax?.value
-  if (!ct) return '?'
-  const band = ct.band ?? '?'
-  const yc = ct.yearly_cost
-  if (!yc?.value?.amount) return `${band} · £?/yr`
-  const amount = Number(yc.value.amount).toLocaleString()
-  const stddev = yc.stddev ?? 0
-  if (stddev > 0) return `Band unknown · (£${amount} ± £${stddev})/yr`
-  return `${band} · £${amount}/yr`
-})
-
 /** True when the total is approximate (stddev > 0). */
 const totalMonthlyApprox = computed(() => {
   const m = props.affordability?.group_monthly_cost
   return !!m?.succeeded && ((m.value?.couple?.stddev ?? 0) > 0)
 })
 
-/** Sinking fund note: the monthly shown is the yearly fund split across
- *  12 months (the old ×⅔ fudge is gone — per-person shares are applied
- *  by the headline's group node, not here). */
-const sinkingFundNote = computed(() => {
-  const m = props.affordability?.monthly_sinking_fund
-  if (!m?.succeeded || !m.value) return ''
-  const monthly = parseFloat(m.value.amount)
-  if (!Number.isFinite(monthly) || monthly <= 0) return ''
-  const yearly = Math.round(monthly * 12)
-  return `£${monthly.toLocaleString()}/mo is the yearly fund (about £${yearly.toLocaleString()}/yr) split across 12 months.`
-})
-
 const fmt = (n: number | undefined): string =>
   n == null ? '' : `${n < 0 ? '−' : ''}£${Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
 
+/** Zero values are omitted — a row only appears when the number is
+ *  non-zero. */
+function row(label: string, value: number | undefined): { label: string; value: string } | null {
+  if (value == null || value === 0) return null
+  return { label, value: fmt(value) }
+}
+
 /** Row labels for the joint-owners' breakdown — mortgage and rental
- *  income belong to them; shared bills and commutes split by group. */
+ *  income belong to them; council tax, sinking fund and commutes split
+ *  by group. */
 function coupleRows() {
   const b = props.affordability?.group_monthly_cost?.value?.couple_breakdown
   if (!b) return []
   return [
-    { label: 'Mortgage', value: fmt(b.mortgage) },
-    { label: 'Shared bills (council tax + sinking fund)', value: fmt(b.shared) },
-    { label: 'Commutes', value: fmt(b.commutes) },
-    { label: 'Life insurance', value: fmt(b.insurance) },
-    { label: 'Rental income', value: fmt(b.rental_income) },
-    { label: 'Rent received', value: fmt(b.rent_received) },
-  ].filter(r => r.value !== '')
+    row('Mortgage', b.mortgage),
+    row('Council tax', b.council_tax),
+    row('Sinking fund', b.sinking_fund),
+    row('Commutes', b.commutes),
+    row('Life insurance', b.insurance),
+    row('Rental income', b.rental_income),
+    row('Rent received', b.rent_received),
+  ].filter((r): r is { label: string; value: string } => r !== null)
 }
 
 /** Row labels for the other adults' breakdown — their rent paid is their
- *  own cost; shared bills and commutes split by group. */
+ *  own cost; council tax, sinking fund and commutes split by group. */
 function othersRows() {
   const b = props.affordability?.group_monthly_cost?.value?.others_breakdown
   if (!b) return []
   return [
-    { label: 'Shared bills (council tax + sinking fund)', value: fmt(b.shared) },
-    { label: 'Commutes', value: fmt(b.commutes) },
-    { label: 'Life insurance', value: fmt(b.insurance) },
-    { label: 'Rent paid', value: fmt(b.rent_paid) },
-  ].filter(r => r.value !== '')
+    row('Council tax', b.council_tax),
+    row('Sinking fund', b.sinking_fund),
+    row('Commutes', b.commutes),
+    row('Life insurance', b.insurance),
+    row('Rent paid', b.rent_paid),
+  ].filter((r): r is { label: string; value: string } => r !== null)
 }
 
 /** When the total can't be calculated, name the leaf reason the UI
@@ -101,17 +85,6 @@ const totalBlockedReason = computed(() => {
   if (!t || t.succeeded || t.error == null) return ''
   const detail = (t as { error_detail?: { user_message?: string } }).error_detail
   return detail?.user_message || t.error || ''
-})
-
-/** High commute figures are usually the TfL daily maximum, not a real
- *  fare — surface that without requiring a hover (walkthrough C9). */
-const tflCapNote = computed(() => {
-  const persons = props.affordability?.monthly_commute_cost?.value?.persons
-  if (!persons || typeof persons !== 'object') return false
-  return Object.values(persons).some((p: unknown) => {
-    const daily = (p as { daily_gbp?: unknown }).daily_gbp
-    return Number(daily ?? 0) >= 100
-  })
 })
 
 // ── Works estimate inline editing ─────────────────────
@@ -197,18 +170,6 @@ const worksEstimates = (): Record<string, number> => {
   return out
 }
 
-// B8: when the deposit covers most of the price, say plainly that the
-// remaining balance is a mortgage on the new home (it stays — it's
-// Simon's mortgage; the deposit only reduces it).
-const depositDominates = computed(() => {
-  const eq = props.affordability?.total_equity
-  const mr = props.affordability?.mortgage_required
-  if (!eq?.succeeded || !mr?.succeeded) return false
-  const eqAmt = parseFloat(eq.value?.amount ?? '0')
-  const mrAmt = parseFloat(mr.value?.amount ?? '0')
-  return mrAmt > 0 && mrAmt < eqAmt
-})
-
 const buyerList = () =>
   props.persons?.value
     ? (props.persons.value as any[]).filter((p: any) => !p.is_child)
@@ -224,47 +185,8 @@ function canEdit(personName: string): boolean {
     <h2 class="detail-section__title">Costs</h2>
 
     <div class="costs-table">
-      <div class="costs-row" :class="{ 'costs-row--impossible': isImpossible(affordability?.monthly_mortgage) }">
-        <span class="costs-label">Mortgage</span>
-        <span v-if="affordability?.monthly_mortgage?.succeeded && affordability?.monthly_mortgage?.value" class="costs-value">£{{ affordability.monthly_mortgage.value.amount }}</span>
-        <span v-else-if="isImpossible(affordability?.monthly_mortgage)" class="costs-value costs-value--impossible">Can't calculate</span>
-        <span v-else class="costs-value">?</span>
-              </div>
-      <ProvenanceToggle
-        v-if="affordability?.monthly_mortgage?.provenance"
-        :provenance="affordability?.monthly_mortgage?.provenance"
-        title="Monthly mortgage"
-        hint="The deposit reduces the mortgage — raise the deposit in Settings."
-      />
-      <p v-if="depositDominates" class="costs-note">
-        The deposit covers most of the price — the remaining balance is a mortgage on the new home.
-      </p>
-
-      <div class="costs-row">
-        <span class="costs-label">Council Tax</span>
-        <span class="costs-value">{{ councilTaxLabel }}</span>
-              </div>
-      <ProvenanceToggle v-if="affordability?.council_tax?.provenance" :provenance="affordability?.council_tax?.provenance" title="Council Tax" />
-      <p v-if="!affordability?.council_tax?.succeeded" class="costs-note">
-        Couldn't look up Council Tax — make sure the property's address is complete and correct
-        (Edit address above).
-      </p>
-
-      <div class="costs-row">
-        <span class="costs-label">Sinking Fund</span>
-        <span class="costs-value">£{{ affordability?.monthly_sinking_fund?.value?.amount ?? '?' }}</span>
-              </div>
-      <ProvenanceToggle v-if="affordability?.monthly_sinking_fund?.provenance" :provenance="affordability?.monthly_sinking_fund?.provenance" title="Sinking fund" />
-      <p v-if="sinkingFundNote" class="costs-note">{{ sinkingFundNote }}</p>
-
-      <!-- Life Insurance -->
-      <div class="costs-row">
-        <span class="costs-label">Life Insurance</span>
-        <span class="costs-value">£{{ affordability?.life_insurance_total?.value?.amount ?? '?' }}</span>
-              </div>
-      <ProvenanceToggle v-if="affordability?.life_insurance_total?.provenance" :provenance="affordability?.life_insurance_total?.provenance" title="Life insurance" />
-
-      <!-- Cost of Works -->
+      <!-- Cost of Works (editable per-person input — not part of the
+           monthly group breakdown) -->
       <div class="costs-row" :class="{ 'costs-row--impossible': isImpossible(affordability?.total_works) }">
         <span class="costs-label">Cost of Works</span>
         <span v-if="affordability?.total_works?.succeeded && affordability?.total_works?.value" class="costs-value">£{{ affordability.total_works.value.amount }}</span>
@@ -330,21 +252,6 @@ function canEdit(personName: string): boolean {
       </div>
       <ProvenanceToggle v-if="affordability?.total_works?.provenance" :provenance="affordability?.total_works?.provenance" title="Cost of works" />
 
-      <div class="costs-row">
-        <span class="costs-label">Commute Cost</span>
-        <span class="costs-value">£{{ affordability?.monthly_commute_cost?.value?.yearly_total_gbp != null ? (parseFloat(affordability.monthly_commute_cost.value.yearly_total_gbp ?? '0') / 12).toFixed(2) : '?' }}</span>
-      </div>
-      <div v-if="affordability?.monthly_commute_cost?.succeeded && affordability?.monthly_commute_cost?.value?.persons" class="costs-subsection">
-        <div v-for="(cost, name) in affordability.monthly_commute_cost.value.persons" :key="name" class="costs-row costs-row--sub">
-          <span class="costs-label">{{ name }}</span>
-          <span class="costs-value">£{{ (parseFloat(cost.yearly_gbp ?? '0') / 12).toFixed(2) }}/mo</span>
-        </div>
-      </div>
-      <ProvenanceToggle v-if="affordability?.monthly_commute_cost?.provenance" :provenance="affordability?.monthly_commute_cost?.provenance" title="Monthly commute cost" />
-      <p v-if="tflCapNote" class="costs-note">
-        Includes the TfL daily maximum fare (£100/day) on routes that hit it — not a mistake.
-      </p>
-
       <!-- Rental Income (editable by current person) -->
       <div class="costs-row">
         <span class="costs-label">Rental Income</span>
@@ -373,12 +280,15 @@ function canEdit(personName: string): boolean {
               </div>
       <ProvenanceToggle v-if="affordability?.rental_income?.provenance" :provenance="affordability?.rental_income?.provenance" title="Rental income" />
 
-      <!-- Monthly cost by group — S+L (the joint owners) and the others
-           are shown as SEPARATE blocks; the per-group components come
-           from the DAG node so the split is never recomputed here. -->
+      <!-- Monthly cost by group — S+L (the joint owners) and the other
+           adults are shown as SEPARATE blocks; the per-group components
+           come from the DAG node so the split is never recomputed here. -->
       <template v-if="affordability?.group_monthly_cost?.succeeded && affordability?.group_monthly_cost?.value?.couple">
         <div class="costs-row costs-row--group">
-          <span class="costs-label">{{ affordability.group_monthly_cost.value.couple_label }} — the joint owners</span>
+          <span class="costs-label">
+            {{ affordability.group_monthly_cost.value.couple_names || affordability.group_monthly_cost.value.couple_label }} — the joint owners
+            <ProvenanceToggle v-if="affordability?.group_monthly_cost?.provenance" :provenance="affordability?.group_monthly_cost?.provenance" title="Total monthly cost" />
+          </span>
           <span class="costs-value" :title="totalMonthlyApprox ? 'Council tax estimated — total is approximate' : undefined">
             {{ totalMonthlyApprox ? '≈ ' : '' }}£{{ affordability.group_monthly_cost.value.couple.value }}/mo
           </span>
@@ -390,7 +300,10 @@ function canEdit(personName: string): boolean {
           </div>
         </div>
         <div v-if="affordability?.group_monthly_cost?.value?.others" class="costs-row costs-row--group costs-row--group-others">
-          <span class="costs-label">{{ affordability.group_monthly_cost.value.others_label }} — the other adults</span>
+          <span class="costs-label">
+            {{ affordability.group_monthly_cost.value.others_label }}
+            <ProvenanceToggle v-if="affordability?.group_monthly_cost?.provenance" :provenance="affordability?.group_monthly_cost?.provenance" title="Total monthly cost" />
+          </span>
           <span class="costs-value">
             {{ totalMonthlyApprox ? '≈ ' : '' }}£{{ affordability.group_monthly_cost.value.others.value }}/mo
           </span>
@@ -410,8 +323,9 @@ function canEdit(personName: string): boolean {
                 </div>
       </template>
       <p v-if="totalBlockedReason" class="costs-note costs-note--blocked">{{ totalBlockedReason }}</p>
-      <p v-if="affordability?.group_monthly_cost?.succeeded" class="costs-note">
-        Each group's monthly cost: mortgage, shared bills and commutes split by the adults in that group.
+      <p v-if="!affordability?.council_tax?.succeeded" class="costs-note">
+        Couldn't look up Council Tax — make sure the property's address is complete and correct
+        (Edit address above).
       </p>
       <ProvenanceToggle v-if="affordability?.group_monthly_cost?.provenance" :provenance="affordability?.group_monthly_cost?.provenance" title="Total monthly housing cost" />
     </div>
@@ -459,6 +373,15 @@ function canEdit(personName: string): boolean {
 .costs-row--total { font-weight: var(--fw-bold); border-bottom: none; border-top: 2px solid var(--slate-200); margin-top: var(--sp-2); padding-top: var(--sp-3); }
 .costs-row--group { font-weight: var(--fw-bold); border-bottom: none; border-top: 2px solid var(--slate-200); margin-top: var(--sp-3); padding-top: var(--sp-3); }
 .costs-row--group-others { margin-top: var(--sp-4); }
+.costs-row--group .costs-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.costs-row--group .costs-label .provenance-toggle__trigger {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
 .costs-group-breakdown { margin-top: var(--sp-1); }
 .costs-row--impossible { opacity: 0.5; }
 .costs-label { font-size: var(--fs-sm); color: var(--text); }

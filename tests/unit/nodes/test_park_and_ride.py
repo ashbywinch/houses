@@ -206,6 +206,57 @@ class TestParkAndRideAugmentNode:
             _request_services.reset(token)
 
     @pytest.mark.asyncio
+    async def test_drive_replaces_walk_even_without_parking_cost(self):
+        """Regression: a station with NO known parking cost made the node
+        bail entirely, leaving a 76-minute walk to the station.  Driving
+        is still better than walking — the walk must become a drive leg
+        even when the parking cost is unknown; the parking-cost leg is
+        only added when a cost exists."""
+        from houses.car_park import CarPark
+        from houses.services_provider import _request_services
+        from tests.helpers import FakeDriveTime, make_services
+
+        class _NoCostCarParkRegistry(CarParkRegistry):
+            def find_car_park(self, station):
+                return CarPark(name="Reading Station Car Park", daily_cost=None)  # unknown cost
+
+        fake_drive = FakeDriveTime(minutes=11)
+        svc = make_services(drive_time_service=fake_drive)
+        token = _request_services.set(svc)
+        try:
+            postcode = UserInputNode[str]("pp5_pc", str)
+            postcode.push("RG4 9EJ", "test")
+            location = UserInputNode[GeoPoint]("pp5_loc", GeoPoint)
+            location.push(GeoPoint(51.5, -0.1), "test")
+            transit = UserInputNode[Commute]("pp5_transit", Commute)
+            mw = UserInputNode[int]("pp5_mw", int)
+            node = ParkAndRideAugmentNode(
+                "pp5",
+                transit_node=transit,
+                best_location=location,
+                postcode_node=postcode,
+                has_car=True,
+                max_walk_node=mw,
+                station_registry=_FakeStationRegistry(),
+                car_park_registry=_NoCostCarParkRegistry(),
+            )
+            transit.push(_walk_commute(), "test")
+            mw.push(30, "test")
+            await flush_processor()
+            a = await node.attempt()
+            assert a.succeeded, f"got {a.status}: {a.error}"
+            val = a.value_or_none()
+            assert val is not None
+            # The long walk became a drive leg, even though parking cost is unknown
+            assert val.details[0].legs[0].mode == LegMode.DRIVE
+            assert val.details[0].legs[0].duration.magnitude == 11
+            # No PARK leg when the cost is unknown
+            modes = [leg.mode for g in val.details for leg in g.legs]
+            assert LegMode.PARK not in modes
+        finally:
+            _request_services.reset(token)
+
+    @pytest.mark.asyncio
     async def test_location_arrives_after_pending_still_recomputes(self):
         """If the node computed with a pending postcode, a postcode that
         arrives LATER must re-schedule it (the static dep signal) so the

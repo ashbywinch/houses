@@ -72,7 +72,8 @@ export interface GroupCostValue {
 export interface GroupCostBreakdown {
   commutes: number
   insurance: number
-  shared: number
+  council_tax: number
+  sinking_fund: number
   mortgage?: number
   rental_income?: number
   rent_received?: number
@@ -83,6 +84,7 @@ export interface GroupMonthlyCost {
   others: GroupCostValue | null
   couple_label: string
   others_label: string
+  couple_names?: string
   couple_breakdown?: GroupCostBreakdown
   others_breakdown?: GroupCostBreakdown
 }

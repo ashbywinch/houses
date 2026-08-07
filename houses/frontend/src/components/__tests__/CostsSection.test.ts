@@ -183,18 +183,7 @@ describe('CostsSection blocked-state copy (C1/C2)', () => {
 })
 
 describe('CostsSection explanatory copy (C5/C6/C10)', () => {
-  it('explains the sinking fund is the yearly fund split across 12 months', () => {
-    const wrapper = mountCosts({
-      affordability: {
-        monthly_sinking_fund: { succeeded: true, value: { amount: '433', currency: 'GBP' }, error: null, provenance: {} },
-      },
-    })
-    expect(wrapper.text()).toContain('is the yearly fund')
-    expect(wrapper.text()).toContain('split across 12 months')
-    expect(wrapper.text()).not.toContain('⅔')  // the ×⅔ fudge is gone
-  })
-
-  it('explains what Total Monthly includes', () => {
+  it('explains what the group figures include', () => {
     const wrapper = mountCosts({
       affordability: {
         group_monthly_cost: {
@@ -203,14 +192,18 @@ describe('CostsSection explanatory copy (C5/C6/C10)', () => {
             couple: { value: '1100', stddev: 0 },
             others: { value: '200', stddev: 0 },
             couple_label: 'S',
-            others_label: 'A',
+            others_label: 'Ashby',
+            couple_names: 'Simon+Lorena',
           },
           error: null,
           provenance: {},
         },
       },
     })
-    expect(wrapper.text()).toContain("Each group's monthly cost")
+    expect(wrapper.text()).toContain('Simon+Lorena — the joint owners')
+    expect(wrapper.text()).toContain('Ashby')
+    // the impersonal "other adults" label is gone — the person's name
+    expect(wrapper.text()).not.toContain('the other adults')
   })
 
   it('does NOT claim renovation costs are part of the mortgage', () => {
@@ -236,48 +229,9 @@ describe('CostsSection explanatory copy (C5/C6/C10)', () => {
     })
     expect(wrapper.text()).toContain('Works estimate required for: Ashby')
   })
-
-  it('sinking fund note uses this property actual numbers', () => {
-    const wrapper = mountCosts({
-      affordability: {
-        monthly_sinking_fund: { succeeded: true, value: { amount: '361.11', currency: 'GBP' }, error: null, provenance: {} },
-      },
-    })
-    // 361.11/mo × 12 ≈ £4,333/yr (no ×⅔)
-    expect(wrapper.text()).toContain('£361.11/mo is the yearly fund')
-    expect(wrapper.text()).toContain('£4,333/yr')
-  })
 })
 
 describe('CostsSection uncertainty rendering (Part A)', () => {
-  it('renders the Band D estimate with spread when council tax is estimated', () => {
-    const wrapper = mountCosts({
-      affordability: {
-        council_tax: {
-          succeeded: true,
-          value: { band: '?', yearly_cost: { value: { amount: '1200', currency: 'GBP' }, stddev: 50 }, evidence_url: '' },
-          error: null,
-          provenance: {},
-        },
-      },
-    })
-    expect(wrapper.text()).toContain('Band unknown · (£1,200 ± £50)/yr')
-  })
-
-  it('renders an exact council tax without a spread', () => {
-    const wrapper = mountCosts({
-      affordability: {
-        council_tax: {
-          succeeded: true,
-          value: { band: 'D', yearly_cost: { value: { amount: '1800', currency: 'GBP' }, stddev: 0 }, evidence_url: '' },
-          error: null,
-          provenance: {},
-        },
-      },
-    })
-    expect(wrapper.text()).toContain('D · £1,800/yr')
-  })
-
   it('renders ≈ on the group figures when approximate', () => {
     const wrapper = mountCosts({
       affordability: {
@@ -298,10 +252,12 @@ describe('CostsSection uncertainty rendering (Part A)', () => {
     expect(groupRows[0].text()).toContain('≈ £1100/mo')
   })
 
-  it('renders the couple and others as SEPARATE blocks', () => {
+  it('renders the couple and others as SEPARATE blocks with split components', () => {
     // Regression: household rows were mixed together with a single
     // couple headline. The two groups' figures must render as separate
-    // labelled blocks, each with its own breakdown rows from the DAG.
+    // labelled blocks, each with its own breakdown rows from the DAG;
+    // council tax and sinking fund are separate rows (not merged), and
+    // zero rows are omitted.
     const wrapper = mountCosts({
       affordability: {
         group_monthly_cost: {
@@ -310,20 +266,21 @@ describe('CostsSection uncertainty rendering (Part A)', () => {
             couple: { value: '1548.67', stddev: 0 },
             others: { value: '322.5', stddev: 0 },
             couple_label: 'S+L',
-            others_label: 'A',
+            others_label: 'Ashby',
+            couple_names: 'Simon+Lorena',
             couple_breakdown: {
               mortgage: 3000,
-              shared: 433.36,
+              council_tax: 100,
+              sinking_fund: 333.36,
               commutes: 300,
               insurance: 150,
-              rental_income: -800,
-              rent_received: -600,
+              rental_income: 0,
             },
             others_breakdown: {
-              shared: 216.65,
-              commutes: 50,
-              insurance: 30,
-              rent_paid: 600,
+              council_tax: 50,
+              sinking_fund: 166.65,
+              commutes: 0,
+              insurance: 0,
             },
           },
           error: null,
@@ -332,36 +289,17 @@ describe('CostsSection uncertainty rendering (Part A)', () => {
       },
     })
     const text = wrapper.text()
-    expect(text).toContain('S+L — the joint owners')
-    expect(text).toContain('A — the other adults')
+    expect(text).toContain('Simon+Lorena — the joint owners')
+    expect(text).toContain('Ashby')
     expect(text).toContain('£1548.67/mo')
     expect(text).toContain('£322.5/mo')
-    // The S+L breakdown is separate from the A breakdown
-    expect(text).toContain('Mortgage')
-    expect(text).toContain('Rent received')
-    expect(text).toContain('Rent paid')
+    // Council tax and sinking fund are separate rows, not merged
+    expect(text).toContain('Council tax')
+    expect(text).toContain('Sinking fund')
+    expect(text).not.toContain('Shared bills')
+    // Zero rows are omitted: commutes/insurance 0 in the others block,
+    // rental income 0 in the couple block
+    expect(text).not.toContain('Rental income')
     expect(wrapper.find('.costs-row--total').exists()).toBe(false)
-  })
-})
-
-describe('CostsSection mortgage framing (B8)', () => {
-  it('explains the remaining mortgage when the deposit dominates', () => {
-    const wrapper = mountCosts({
-      affordability: {
-        total_equity: { succeeded: true, value: { amount: '477000', currency: 'GBP' }, error: null, provenance: {} },
-        mortgage_required: { succeeded: true, value: { amount: '35000', currency: 'GBP' }, error: null, provenance: {} },
-      },
-    })
-    expect(wrapper.text()).toContain('The deposit covers most of the price')
-  })
-
-  it('shows no deposit note when the mortgage exceeds the deposit', () => {
-    const wrapper = mountCosts({
-      affordability: {
-        total_equity: { succeeded: true, value: { amount: '10000', currency: 'GBP' }, error: null, provenance: {} },
-        mortgage_required: { succeeded: true, value: { amount: '200000', currency: 'GBP' }, error: null, provenance: {} },
-      },
-    })
-    expect(wrapper.text()).not.toContain('The deposit covers most of the price')
   })
 })

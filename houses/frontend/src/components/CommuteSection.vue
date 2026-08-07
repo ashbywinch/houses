@@ -70,7 +70,12 @@ function toggleProvenance(key: string) {
     <div class="detail-section__title-row" />
     <div v-for="(c, key) in commutes" :key="key" class="commute-accordion">
       <button class="commute-accordion__header" @click="toggleCommute(key as string)">
-        <span class="commute-accordion__label">{{ key }}</span>
+        <span class="commute-accordion__label">
+          {{ key }}
+          <span v-if="c?.value?.destination?.address" class="commute-accordion__destination">
+            {{ c.value.destination.address }}
+          </span>
+        </span>
         <span
           class="pill"
           :class="pillColour(c, thresholdsFor(String(key)).good, thresholdsFor(String(key)).fine)"
@@ -171,7 +176,23 @@ function toggleProvenance(key: string) {
   min-height: 44px;
 }
 .commute-accordion__header:hover { background: var(--slate-50); }
-.commute-accordion__label { font-weight: var(--fw-semibold); font-size: var(--fs-sm); flex: 1; }
+.commute-accordion__label {
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-sm);
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.commute-accordion__destination {
+  font-weight: 400;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .commute-accordion__chevron { font-size: var(--fs-xs); color: var(--text-muted); transition: transform var(--transition); }
 .commute-accordion__chevron--open { transform: rotate(180deg); }
 .commute-accordion__empty {

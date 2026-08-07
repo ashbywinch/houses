@@ -197,13 +197,16 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         def group_figure(group: list, owner_share: float, rent: Decimal) -> tuple[Decimal, float, dict]:
             commutes = sum((commute_monthly(p.name) for p in group), Decimal(0))
             insurance = insurance_scale * sum((money_of(p, "life_insurance_monthly") for p in group), Decimal(0))
-            shared = Decimal(str(round(owner_share, 4))) * (council_monthly + sinking_monthly)
-            value = commutes + insurance + shared + rent
+            share = Decimal(str(round(owner_share, 4)))
+            council_share = share * council_monthly
+            sinking_share = share * sinking_monthly
+            value = commutes + insurance + council_share + sinking_share + rent
             stddev = owner_share * float(council_stddev) / 12.0
             breakdown = {
                 "commutes": round(float(commutes), 2),
                 "insurance": round(float(insurance), 2),
-                "shared": round(float(shared), 2),
+                "council_tax": round(float(council_share), 2),
+                "sinking_fund": round(float(sinking_share), 2),
             }
             return value, round(stddev, 2), breakdown
 
@@ -237,7 +240,10 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
                 "couple": {"value": f"{couple_val:.2f}", "stddev": couple_std},
                 "others": {"value": f"{others_val:.2f}", "stddev": others_std},
                 "couple_label": "+".join(p.name[0].upper() for p in adults if p.name in owners),
-                "others_label": "+".join(p.name[0].upper() for p in others),
+                # Full names, not initials — the detail page says "Ashby",
+                # not "A". The card still uses the short couple label.
+                "couple_names": "+".join(p.name for p in adults if p.name in owners),
+                "others_label": "+".join(p.name for p in others),
                 "couple_breakdown": couple_breakdown,
                 "others_breakdown": others_breakdown,
             }

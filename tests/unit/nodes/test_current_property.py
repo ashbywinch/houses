@@ -415,14 +415,17 @@ class TestGroupMonthlyCostNode:
         assert a.succeeded
         val = a.value_or_none()
         assert val is not None
-        # couple = commutes(300) + insurance(150) + shared (share=round(2/3,4)
-        # of council 150 + sinking 500 = 433.36) + mortgage 3000 − rental 800.
+        # couple = commutes(300) + insurance(150) + council ⅔(150=100.01) +
+        # sinking ⅔(500=333.35) + mortgage 3000 − rental 800.
         # NO rent transfer — Ashby's rent stays with him (current-home only).
         couple = val["couple_breakdown"]
         assert float(couple["commutes"]) == pytest.approx(300, abs=0.01)
         assert float(couple["insurance"]) == pytest.approx(150, abs=0.01)
-        assert float(couple["shared"]) == pytest.approx(
-            round(float(Decimal(str(round(2 / 3, 4))) * Decimal(650)), 2), abs=0.01
+        assert float(couple["council_tax"]) == pytest.approx(
+            round(float(Decimal(str(round(2 / 3, 4))) * Decimal(150)), 2), abs=0.01
+        )
+        assert float(couple["sinking_fund"]) == pytest.approx(
+            round(float(Decimal(str(round(2 / 3, 4))) * Decimal(500)), 2), abs=0.01
         )
         assert float(couple["mortgage"]) == pytest.approx(3000, abs=0.01)
         assert float(couple["rental_income"]) == pytest.approx(-800, abs=0.01)
@@ -430,18 +433,24 @@ class TestGroupMonthlyCostNode:
         assert float(val["couple"]["value"]) == pytest.approx(
             300 + 150 + float(Decimal(str(round(2 / 3, 4))) * Decimal(650)) + 3000 - 800, abs=0.01
         )
-        # others = commutes(50) + insurance(30) + shared (share=round(1/3,4)
-        # of 650 = 216.65) — NO rent paid (current-home only)
+        # others = commutes(50) + insurance(30) + council ⅓(150=50) +
+        # sinking ⅓(500=166.68) — NO rent paid (current-home only)
         others = val["others_breakdown"]
         assert float(others["commutes"]) == pytest.approx(50, abs=0.01)
         assert float(others["insurance"]) == pytest.approx(30, abs=0.01)
-        assert float(others["shared"]) == pytest.approx(
-            round(float(Decimal(str(round(1 / 3, 4))) * Decimal(650)), 2), abs=0.01
+        assert float(others["council_tax"]) == pytest.approx(
+            round(float(Decimal(str(round(1 / 3, 4))) * Decimal(150)), 2), abs=0.01
+        )
+        assert float(others["sinking_fund"]) == pytest.approx(
+            round(float(Decimal(str(round(1 / 3, 4))) * Decimal(500)), 2), abs=0.01
         )
         assert others.get("rent_paid") in (None, 0), "rent must NOT transfer for a non-current property"
         assert float(val["others"]["value"]) == pytest.approx(
             50 + 30 + float(Decimal(str(round(1 / 3, 4))) * Decimal(650)), abs=0.01
         )
+        # Full names, not initials — the UI says "Ashby", not "A"
+        assert val["others_label"] == "Ashby"
+        assert val["couple_names"] == "Simon+Lorena"
 
     @pytest.mark.asyncio
     async def test_rent_transferred_only_when_current_home(self):

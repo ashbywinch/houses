@@ -41,16 +41,19 @@ const price = computed(() => detail.value?.rightmove_price?.succeeded
 const bedrooms = computed(() => detail.value?.rightmove_bedrooms?.succeeded
   ? detail.value.rightmove_bedrooms.value : null)
 
-const monthlyCost = computed(() => {
+const monthlyGroups = computed(() => {
   const g = detail.value?.affordability?.group_monthly_cost
   if (!g?.succeeded || !g.value?.couple) return null
-  return Number(g.value.couple.value)
-})
-
-// Part A: an approximate total (stddev > 0) renders as "≈ £X/mo".
-const monthlyCostApprox = computed(() => {
-  const g = detail.value?.affordability?.group_monthly_cost
-  return !!g?.succeeded && ((g.value?.couple?.stddev ?? 0) > 0)
+  const couple = Number(g.value.couple.value)
+  const others = g.value.others ? Number(g.value.others.value) : null
+  const approx = (g.value.couple.stddev ?? 0) > 0
+  return {
+    coupleLabel: g.value.couple_label || 'S+L',
+    couple,
+    othersLabel: g.value.others_label || 'A',
+    others,
+    approx,
+  }
 })
 
 // ── Surface existing data ────────────────────────────
@@ -184,10 +187,15 @@ async function saveAddress() {
         <div class="summary-row">
           <span v-if="price" class="summary-price">£{{ price.toLocaleString() }}</span>
           <span
-            v-if="monthlyCost !== null"
+            v-if="monthlyGroups"
             class="summary-monthly"
-            :title="monthlyCostApprox ? 'Council tax estimated — total is approximate' : undefined"
-          >{{ monthlyCostApprox ? '≈' : '' }}£{{ monthlyCost.toLocaleString() }}/mo</span>
+            :title="monthlyGroups.approx ? 'Council tax estimated — total is approximate' : undefined"
+          >
+            {{ monthlyGroups.coupleLabel }} {{ monthlyGroups.approx ? '≈' : '' }}£{{ monthlyGroups.couple.toLocaleString() }}/mo
+            <template v-if="monthlyGroups.others !== null">
+              · {{ monthlyGroups.othersLabel }} {{ monthlyGroups.approx ? '≈' : '' }}£{{ monthlyGroups.others.toLocaleString() }}/mo
+            </template>
+          </span>
           <span v-if="bedrooms" class="summary-bedrooms">{{ bedrooms }} bed</span>
         </div>
       </div>
