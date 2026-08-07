@@ -68,6 +68,7 @@ class Person:
     petrol_mpg: int = 45
     home_co_owners: tuple[HomeCoOwner, ...] = ()
     home_property_rid: str = ""
+    rent_paid_monthly: Money = Money("0", "GBP")
     home_sale_price: Money = Money("0", "GBP")
     outstanding_mortgage: Money = Money("0", "GBP")
     cash_contribution: Money = Money("0", "GBP")
@@ -265,6 +266,31 @@ class Walkability:
     walk_to_town: _Quantity | None = None
     amenities: str = ""
     town_description: str = ""
+
+
+def joint_owner_names(persons: list) -> set[str]:
+    """The people who will jointly own the new house — derived from
+    current-home ownership: the holder plus everyone named as a
+    co-owner (children never count). Their expenses form the headline
+    monthly figure; everyone else is still a buyer (their cash counts
+    in the deposit) but their monthly costs aren't the deal-breaker.
+
+    Falls back to ALL adults when nobody holds a home (e.g. all-cash
+    first-time buyers) so the figure never collapses to zero.
+    """
+    adults = [p for p in persons if isinstance(p, Person) and not p.is_child]
+    owners = {
+        p.name
+        for p in adults
+        if (p.home_sale_price and p.home_sale_price.amount > 0)
+        or (p.outstanding_mortgage and p.outstanding_mortgage.amount > 0)
+        or p.home_co_owners
+    }
+    for p in adults:
+        owners.update(co.name for co in p.home_co_owners)
+    if not owners:
+        return {p.name for p in adults}
+    return owners
 
 
 def home_equity_contributions(persons: list) -> dict[str, Decimal]:

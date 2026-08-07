@@ -95,7 +95,7 @@ class TestSummaryShape:
         assert "best_location" in s
         assert "rightmove_price" in s
         assert "rightmove_bedrooms" in s
-        assert "total_monthly_cost" in s
+        assert "group_monthly_cost" in s
         assert "commutes" in s
         assert "schools" in s
         assert "walkability" in s
@@ -110,7 +110,7 @@ class TestSummaryShape:
             "best_location",
             "rightmove_price",
             "rightmove_bedrooms",
-            "total_monthly_cost",
+            "group_monthly_cost",
             "walkability",
             "epc",
         ):
@@ -154,7 +154,7 @@ class TestDetailShape:
             "monthly_sinking_fund",
             "monthly_commute_cost",
             "rental_income",
-            "total_monthly_housing_cost",
+            "group_monthly_cost",
         )
         for key in expected:
             assert key in af, f"missing affordability key: {key}"

@@ -164,8 +164,9 @@ class TestTotalMonthlyHousingCostNode:
         assert a.succeeded
         total = a.value_or_none()
         assert total is not None
-        # 2000 + (6000/12*2/3) + 50 + (1200/12) + (2400/12) - 0
-        expected = 2000 + 333.33 + 50 + 100 + 200
+        # the sinking fund is the FULL monthly share (no ⅔ fudge — every
+        # adult is a buyer, so all shares count): 2000 + 500 + 50 + 100 + 200
+        expected = 2000 + 500 + 50 + 100 + 200
         assert float(total.value.amount) == pytest.approx(expected, abs=0.01)
         assert total.stddev == 0.0
 

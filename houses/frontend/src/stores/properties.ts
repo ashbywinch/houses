@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { MeasurementValue, PropertyDetail, PropertySummary, TriageEntry } from '../types'
+import type { GroupMonthlyCost, PropertyDetail, PropertySummary, TriageEntry } from '../types'
 import { fetchAllSummaries, fetchPropertyDetail, fetchSettings, patchTriage } from '../services/api'
 
 export const usePropertiesStore = defineStore('properties', () => {
@@ -26,12 +26,12 @@ export const usePropertiesStore = defineStore('properties', () => {
   // ── What-if (Part D) ──────────────────────────────────────────
   // Hypothetical monthly totals per property while the "What if…"
   // panel is active; null when showing real numbers.
-  const whatIfTotals = ref<Record<string, MeasurementValue> | null>(null)
+  const whatIfTotals = ref<Record<string, GroupMonthlyCost> | null>(null)
 
-  function applyWhatIf(results: Record<string, { succeeded: boolean; monthly_total: MeasurementValue | null }>) {
-    const totals: Record<string, MeasurementValue> = {}
+  function applyWhatIf(results: Record<string, { succeeded: boolean; group?: GroupMonthlyCost | null }>) {
+    const totals: Record<string, GroupMonthlyCost> = {}
     for (const [rid, r] of Object.entries(results)) {
-      if (r.succeeded && r.monthly_total) totals[rid] = r.monthly_total
+      if (r.succeeded && r.group) totals[rid] = r.group
     }
     whatIfTotals.value = Object.keys(totals).length > 0 ? totals : null
   }
@@ -42,10 +42,19 @@ export const usePropertiesStore = defineStore('properties', () => {
 
   /** The monthly total to show/filter/sort by for a property: the
    * hypothetical value when the what-if is active, else the real one. */
-  function monthlyTotalFor(rid: string): MeasurementValue | null {
+  /** The couple's monthly figure (the deal-breaker) — what-if overlay
+   *  when active, else the real summary value. */
+  function coupleTotalFor(rid: string): number | null {
+    const wt = whatIfTotals.value?.[rid]
+    const g = wt ?? (summaries.value[rid]?.group_monthly_cost?.succeeded ? summaries.value[rid]?.group_monthly_cost?.value : null)
+    if (!g?.couple) return null
+    return Number(g.couple.value)
+  }
+
+  function groupCostFor(rid: string): GroupMonthlyCost | null {
     const wt = whatIfTotals.value?.[rid]
     if (wt) return wt
-    const s = summaries.value[rid]?.total_monthly_cost
+    const s = summaries.value[rid]?.group_monthly_cost
     return s?.succeeded && s.value ? s.value : null
   }
 
@@ -155,7 +164,7 @@ export const usePropertiesStore = defineStore('properties', () => {
   return {
     rids, summaries, details, triage, settings, loading, error,
     commuteCeilings, commuteGoods, poiLabels, showOverCeiling,
-    whatIfTotals, applyWhatIf, clearWhatIf, monthlyTotalFor,
+    whatIfTotals, applyWhatIf, clearWhatIf, coupleTotalFor, groupCostFor,
     loadAll, loadSettings, loadDetail, updateSummary, updateDetail, toggleTriage,
   }
 })

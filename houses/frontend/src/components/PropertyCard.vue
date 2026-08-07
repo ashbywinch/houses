@@ -30,19 +30,34 @@ const bedrooms = computed(() => props.data.rightmove_bedrooms.succeeded
   ? props.data.rightmove_bedrooms.value
   : null)
 
-const monthlyCost = computed(() => props.data.total_monthly_cost.succeeded
-  ? parseFloat(props.data.total_monthly_cost.value?.value?.amount ?? '0') || null
-  : null)
-
 // Part A: an approximate total (stddev > 0) renders as "≈ £X/mo".
 const monthlyCostApprox = computed(() => {
-  const m = props.data.total_monthly_cost
-  return m.succeeded && (m.value?.stddev ?? 0) > 0
+  const g = props.data.group_monthly_cost
+  return g.succeeded && ((g.value?.couple?.stddev ?? 0) > 0 || (g.value?.others?.stddev ?? 0) > 0)
 })
 
 // Part D: a hypothetical total from the "What if…" panel (overlaid by
 // PropertyList) is marked so it is never mistaken for a real number.
-const isWhatIf = computed(() => props.data.total_monthly_cost.provenance?.label === 'what-if')
+const isWhatIf = computed(() => props.data.group_monthly_cost.provenance?.label === 'what-if')
+
+// The headline's TWO numbers: the joint owners (the couple) and the
+// other adults, labelled dynamically — overlaid by the what-if.
+const groupCost = computed(() => {
+  const wt = store.whatIfTotals?.[props.rid]
+  if (wt) return wt
+  const g = props.data.group_monthly_cost
+  return g?.succeeded && g.value ? g.value : null
+})
+const coupleLabel = computed(() => groupCost.value?.couple_label || '')
+const othersLabel = computed(() => groupCost.value?.others_label || '')
+const coupleCost = computed(() => {
+  const c = groupCost.value?.couple
+  return c ? Number(c.value) : null
+})
+const othersCost = computed(() => {
+  const c = groupCost.value?.others
+  return c ? Number(c.value) : null
+})
 
 // Freshness badge — how many days ago the property was added
 const freshnessDays = computed(() => {
@@ -187,11 +202,13 @@ async function toggleViewed() {
         <a :href="'#/property/' + rid" class="card__address" :aria-label="'View details for ' + address">
           <h3 class="card__address-text">{{ address }}</h3>
         </a>
-        <span
-          v-if="monthlyCost !== null"
-          class="card__monthly-cost"
-          :title="monthlyCostApprox ? 'Council tax estimated — total is approximate' : undefined"
-        >{{ monthlyCostApprox ? '≈' : '' }}£{{ monthlyCost.toLocaleString() }}/mo
+        <span v-if="coupleCost !== null" class="card__monthly-cost">
+          <span class="card__cost-line" :title="monthlyCostApprox ? 'Council tax estimated — total is approximate' : undefined">
+            <strong>{{ coupleLabel }}</strong> {{ monthlyCostApprox ? '≈' : '' }}£{{ coupleCost.toLocaleString() }}/mo
+          </span>
+          <span v-if="othersCost !== null" class="card__cost-line card__cost-line--others">
+            <strong>{{ othersLabel }}</strong> £{{ othersCost.toLocaleString() }}/mo
+          </span>
           <span v-if="isWhatIf" class="card__whatif">what-if</span>
         </span>
         <span
@@ -342,6 +359,9 @@ async function toggleViewed() {
 }
 .card__address:hover .card__address-text { color: var(--blue); text-decoration: underline; }
 
+.card__cost-line { display: block; }
+.card__cost-line strong { font-weight: var(--fw-semibold); }
+.card__cost-line--others { font-size: var(--fs-xs); color: var(--text-secondary); margin-top: 2px; }
 .card__monthly-cost--unknown {
   color: var(--text-muted);
 }

@@ -39,6 +39,7 @@ interface PersonSettings {
   life_insurance_monthly?: MoneyValue
   petrol_mpg?: number
   bus_walk_penalty?: { value: number; unit: string }
+  rent_paid_monthly?: { amount: string; currency: string }
   home_co_owners?: { name: string; share: number }[]
   home_property_rid?: string
   home_property_address?: string
@@ -163,6 +164,7 @@ function buildSaveBody(person: PersonSettings): Record<string, unknown> {
   if (person.bus_walk_penalty) body.bus_walk_penalty = { ...person.bus_walk_penalty }
   if (person.home_co_owners?.length) body.home_co_owners = person.home_co_owners
   if (person.home_property_rid) body.home_property_rid = person.home_property_rid
+  if (person.rent_paid_monthly) body.rent_paid_monthly = { ...person.rent_paid_monthly }
   const t = thresholds.value[person.name]
   if (t) body.thresholds = { ...t }
   return body
@@ -543,6 +545,20 @@ const depositRows = computed(() => {
                 @input="moneyInput(person.life_insurance_monthly!, $event)"
                 @blur="penceInput(person.life_insurance_monthly!, $event)"
               />
+            </div>
+            <div class="stack-field">
+              <label for="rent-paid">Rent paid to the joint owners (£/month)</label>
+              <input
+                id="rent-paid"
+                type="text"
+                inputmode="decimal"
+                :value="person.rent_paid_monthly?.amount"
+                :disabled="!isOwn(person)"
+                @keydown="blockPenceKey"
+                @input="moneyInput(person.rent_paid_monthly!, $event)"
+                @blur="penceInput(person.rent_paid_monthly!, $event)"
+              />
+              <span class="band-helper">What you pay the joint owners for your share of the current home.</span>
             </div>
 
             <hr class="divider" />

@@ -1,4 +1,4 @@
-import type { MeasurementValue, PropertyDetail, PropertySummary } from '../types'
+import type { GroupMonthlyCost, PropertyDetail, PropertySummary } from '../types'
 import { useAuthStore } from '../stores/auth'
 import router from '../router'
 
@@ -87,7 +87,7 @@ export function patchPerson(name: string, body: Record<string, unknown>): Promis
 
 export interface WhatIfResult {
   succeeded: boolean
-  monthly_total: MeasurementValue | null
+  group: GroupMonthlyCost | null
   error?: string
 }
 

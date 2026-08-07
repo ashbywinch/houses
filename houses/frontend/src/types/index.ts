@@ -62,6 +62,16 @@ export interface MoneyValue {
 }
 
 /** A value with an uncertainty — exact when stddev is absent/0 (Part A). */
+export interface GroupCostValue {
+  value: string
+  stddev: number
+}
+export interface GroupMonthlyCost {
+  couple: GroupCostValue | null
+  others: GroupCostValue | null
+  couple_label: string
+  others_label: string
+}
 export interface MeasurementValue {
   value: MoneyValue
   stddev?: number
@@ -145,7 +155,8 @@ export interface PropertySummary {
     secondary: { school: AttemptValue<SchoolValue> }
   }
   town_name?: AttemptValue<string>
-  total_monthly_cost: AttemptValue<MeasurementValue>
+  total_monthly_cost?: AttemptValue<MeasurementValue>
+  group_monthly_cost: AttemptValue<GroupMonthlyCost>
   walkability: AttemptValue<Record<string, unknown>>
   epc?: AttemptValue<{ band: string; potential?: string }>
   triage?: TriageResponse
@@ -186,8 +197,8 @@ export interface PropertyDetail {
     monthly_commute_cost: AttemptValue<CommuteBreakdown>
     stamp_duty: AttemptValue<MoneyValue>
     rental_income: AttemptValue<MoneyValue>
-    total_monthly_housing_cost: AttemptValue<MeasurementValue>
   }
+  group_monthly_cost: AttemptValue<GroupMonthlyCost>
   area: {
     walkability: AttemptValue<Record<string, unknown>>
     town_description: AttemptValue<string>

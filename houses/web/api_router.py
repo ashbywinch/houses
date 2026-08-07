@@ -111,21 +111,15 @@ async def post_what_if(body: dict):
         prop = get_registry_property(rid)
         if prop is None:
             continue
-        attempts = await evaluate(prop.total_monthly_cost, overrides={"persons": merged})
-        att = attempts[prop.total_monthly_cost._id]
-        if att.succeeded and att.value is not None:
-            results[rid] = {
-                "succeeded": True,
-                "monthly_total": {
-                    "value": {
-                        "amount": f"{att.value.value.amount:.2f}",
-                        "currency": att.value.value.currency,
-                    },
-                    "stddev": att.value.stddev,
-                },
-            }
-        elif att.impossible:
-            results[rid] = {"succeeded": False, "error": att.error}
+        group_node = getattr(prop, "group_monthly_cost", None)
+        if group_node is None:
+            continue
+        attempts = await evaluate(group_node, overrides={"persons": merged})
+        group_att = attempts[group_node._id]
+        if group_att.succeeded and group_att.value is not None:
+            results[rid] = {"succeeded": True, "group": group_att.value_or_none()}
+        elif group_att.impossible:
+            results[rid] = {"succeeded": False, "error": group_att.error}
         else:
             results[rid] = {"succeeded": False, "error": "pending"}
     return {"results": results}
@@ -607,6 +601,8 @@ def _person_from_dict(d: dict, target: Person) -> Person:
         if rid is not None and not isinstance(rid, str):
             raise ValueError("home_property_rid must be a string or null")
         updates["home_property_rid"] = rid or ""
+    if "rent_paid_monthly" in updates:
+        updates["rent_paid_monthly"] = _money(updates["rent_paid_monthly"], field="rent_paid_monthly")
     if "editable_by" in updates and updates["editable_by"] is not None:
         updates["editable_by"] = tuple(updates["editable_by"])
     pois = updates.get("places_of_interest")

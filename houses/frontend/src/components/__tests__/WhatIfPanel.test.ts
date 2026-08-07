@@ -74,7 +74,7 @@ describe('WhatIfPanel', () => {
     vi.useFakeTimers()
     vi.mocked(api.fetchSettings).mockResolvedValue(settingsPersons as unknown as Record<string, unknown>)
     vi.mocked(api.postWhatIf).mockResolvedValue({
-      'prop-a': { succeeded: true, monthly_total: { value: { amount: '900', currency: 'GBP' }, stddev: 0 } },
+      'prop-a': { succeeded: true, group: { couple: { value: '900', stddev: 0 }, others: { value: '200', stddev: 0 }, couple_label: 'S&L', others_label: 'A' } },
     })
   })
 
@@ -153,7 +153,7 @@ describe('WhatIfPanel', () => {
         best_location: { succeeded: true, value: { lat: 51.5, lon: -0.1 }, error: null, provenance: { label: 't' } },
         rightmove_price: { succeeded: true, value: { amount: '200000', currency: 'GBP' }, error: null, provenance: { label: 't' } },
         rightmove_bedrooms: { succeeded: true, value: '2', error: null, provenance: { label: 't' } },
-        total_monthly_cost: { succeeded: true, value: { value: { amount: '1600', currency: 'GBP' }, stddev: 0 }, error: null, provenance: { label: 't' } },
+        group_monthly_cost: { succeeded: true, value: { couple: { value: '1600', stddev: 0 }, others: { value: '400', stddev: 0 }, couple_label: 'S&L', others_label: 'A' }, error: null, provenance: { label: 't' } },
         walkability: { succeeded: false, value: null, error: null, provenance: { label: 't' } },
         commutes: {},
         schools: {
@@ -196,7 +196,7 @@ describe('WhatIfPanel', () => {
     await settle()
     await expand(wrapper)
 
-    store.applyWhatIf({ 'prop-a': { succeeded: true, monthly_total: { value: { amount: '900', currency: 'GBP' }, stddev: 0 } } })
+    store.applyWhatIf({ 'prop-a': { succeeded: true, group: { couple: { value: '900', stddev: 0 }, others: { value: '200', stddev: 0 }, couple_label: 'S&L', others_label: 'A' } } })
     await settle()
     expect(wrapper.text()).toContain('not saved')
 
@@ -212,7 +212,7 @@ describe('WhatIfPanel — commute tab (MPG + max walk)', () => {
     vi.useFakeTimers()
     vi.mocked(api.fetchSettings).mockResolvedValue(settingsPersons as unknown as Record<string, unknown>)
     vi.mocked(api.postWhatIf).mockResolvedValue({
-      'prop-a': { succeeded: true, monthly_total: { value: { amount: '900', currency: 'GBP' }, stddev: 0 } },
+      'prop-a': { succeeded: true, group: { couple: { value: '900', stddev: 0 }, others: { value: '200', stddev: 0 }, couple_label: 'S&L', others_label: 'A' } },
     })
   })
 

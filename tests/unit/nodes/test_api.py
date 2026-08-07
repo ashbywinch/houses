@@ -706,8 +706,8 @@ class TestSettingsPropagationApi:
         assert baseline_mortgage is not None
         # capture the list baseline BEFORE the change (the summary and
         # detail read the same node — compare unwrapped values)
-        baseline_total = _money_amount(
-            client.get("/api/properties/all").json()[rid]["total_monthly_cost"]["value"]
+        baseline_total = Decimal(
+            client.get("/api/properties/all").json()[rid]["group_monthly_cost"]["value"]["couple"]["value"]
         )
 
         resp = client.patch(
@@ -733,14 +733,13 @@ class TestSettingsPropagationApi:
 
         # the property list summary follows automatically too — same node,
         # same drain, and the drop equals the mortgage-payment drop
-        updated_total = _money_amount(
-            client.get("/api/properties/all").json()[rid]["total_monthly_cost"]["value"]
-        )
+        updated_group = client.get("/api/properties/all").json()[rid]["group_monthly_cost"]["value"]
+        updated_total = Decimal(updated_group["couple"]["value"])
         assert updated_total < baseline_total, "list total did not decrease after the settings change"
-        assert baseline_total - updated_total == _amount_of(
-            baseline["affordability"]["monthly_mortgage"]
-        ) - _amount_of(updated["affordability"]["monthly_mortgage"]), (
-            "list total moved by exactly the monthly-payment delta"
+        bm = _amount_of(baseline["affordability"]["monthly_mortgage"])
+        um = _amount_of(updated["affordability"]["monthly_mortgage"])
+        assert abs((baseline_total - updated_total) - (bm - um)) <= Decimal("0.01"), (
+            "list total moved by the monthly-payment delta (within 0.01 rounding)"
         )
 
 
@@ -819,10 +818,11 @@ class TestWhatIfApi:
         self._seed(reg)
         flush_all()
 
-        baseline = client.get("/api/properties/all").json()["whatif1"]["total_monthly_cost"]
+        baseline = client.get("/api/properties/all").json()["whatif1"]["group_monthly_cost"]
+        base_couple = Decimal(baseline["value"]["couple"]["value"])
 
         # What-if: Ashby's cash contribution up £100k → equity up → the
-        # mortgage (and so the monthly total) must drop.
+        # mortgage (and so the couple's monthly total) must drop.
         resp = client.post(
             "/api/what-if",
             json={"persons": [{"name": "Ashby", "cash_contribution": {"amount": "400000", "currency": "GBP"}}]},
@@ -830,13 +830,12 @@ class TestWhatIfApi:
         assert resp.status_code == 200
         result = resp.json()["results"]["whatif1"]
         assert result["succeeded"], result.get("error")
-        hypothetical = Decimal(result["monthly_total"]["value"]["amount"])
+        hypothetical = Decimal(result["group"]["couple"]["value"])
 
-        base_total = _money_amount(baseline["value"])
-        assert hypothetical < base_total, "extra cash must lower the monthly total"
+        assert hypothetical < base_couple, "extra cash must lower the couple's monthly total"
 
         # Nothing persisted: the summary (and the real persons) are unchanged.
-        after = client.get("/api/properties/all").json()["whatif1"]["total_monthly_cost"]
+        after = client.get("/api/properties/all").json()["whatif1"]["group_monthly_cost"]
         assert after == baseline
 
     def test_what_if_requires_persons_and_known_names(self):
@@ -966,7 +965,7 @@ class TestRegenerateApi:
         assert ct.succeeded
         info = ct.value_or_none()
         assert info is not None and info.band
-        total = prop.total_monthly_cost.latest_attempt()
+        total = prop.group_monthly_cost.latest_attempt()
         assert total.succeeded
 
     def test_non_matching_pattern_regenerates_nothing(self):

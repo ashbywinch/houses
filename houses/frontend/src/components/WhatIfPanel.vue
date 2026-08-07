@@ -123,9 +123,9 @@ async function run() {
 // ── Delta headline ─────────────────────────────────────────────
 
 const realOf = (rid: string): number | null => {
-  const s = store.summaries[rid]?.total_monthly_cost
-  if (!s?.succeeded || !s.value) return null
-  return parseFloat(s.value.value.amount)
+  const g = store.summaries[rid]?.group_monthly_cost
+  if (!g?.succeeded || !g.value?.couple) return null
+  return Number(g.value.couple.value)
 }
 
 const deltaHeadline = computed(() => {
@@ -136,7 +136,8 @@ const deltaHeadline = computed(() => {
   for (const rid of store.rids) {
     const real = realOf(rid)
     if (real != null && real <= threshold.value) realUnder++
-    const hypo = totals[rid] ? parseFloat(totals[rid].value.amount) : null
+    const grp = totals[rid];
+    const hypo = grp?.couple ? Number(grp.couple.value) : null
     if (hypo != null && hypo <= threshold.value) hypoUnder++
   }
   const diff = hypoUnder - realUnder

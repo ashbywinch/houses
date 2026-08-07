@@ -41,13 +41,16 @@ const price = computed(() => detail.value?.rightmove_price?.succeeded
 const bedrooms = computed(() => detail.value?.rightmove_bedrooms?.succeeded
   ? detail.value.rightmove_bedrooms.value : null)
 
-const monthlyCost = computed(() => detail.value?.affordability?.total_monthly_housing_cost?.succeeded
-  ? parseFloat(detail.value.affordability.total_monthly_housing_cost.value?.value?.amount ?? '0') || null : null)
+const monthlyCost = computed(() => {
+  const g = detail.value?.group_monthly_cost
+  if (!g?.succeeded || !g.value?.couple) return null
+  return Number(g.value.couple.value)
+})
 
 // Part A: an approximate total (stddev > 0) renders as "≈ £X/mo".
 const monthlyCostApprox = computed(() => {
-  const m = detail.value?.affordability?.total_monthly_housing_cost
-  return !!m?.succeeded && (m.value?.stddev ?? 0) > 0
+  const g = detail.value?.group_monthly_cost
+  return !!g?.succeeded && ((g.value?.couple?.stddev ?? 0) > 0)
 })
 
 // ── Surface existing data ────────────────────────────

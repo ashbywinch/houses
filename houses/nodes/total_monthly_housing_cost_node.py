@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from money import Money
 
 from dag.attempt import Attempt
@@ -57,7 +59,7 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
                     (self._status_node.latest_attempt().value_or_none() or "").strip().lower() != "current"
                 ),
                 if_true=(
-                    Div(Ref(self._sinking_node), Literal(12)) * Literal(2) / Literal(3)
+                    Div(Ref(self._sinking_node), Literal(12))
                     + Ref(self._life_insurance_node)
                 ),
                 if_false=Literal(Money("0", "GBP")),
@@ -102,3 +104,112 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
         life_insurance: Attempt[Money] | None = None,
     ) -> Attempt[Measurement[Money]]:
         return self.expression.evaluate()
+
+
+class GroupMonthlyCostNode(DerivedNode[dict]):
+    """The headline's TWO numbers: the joint owners' monthly cost and
+    the other adults'.
+
+    The joint owners (current-home holder + co-owners — the couple who
+    will carry the mortgage) are the deal-breaker; the others' costs
+    are shown too so nobody's figure is hidden. Shared costs (council
+    tax, sinking fund of the new house) split evenly across ALL adults,
+    each group's shares counted. The couple's figure subtracts rent
+    received from the others; the others' figure adds the rent they pay.
+    """
+
+    def __init__(
+        self,
+        node_id: str,
+        *,
+        monthly_mortgage_node,
+        yearly_sinking_fund_node,
+        life_insurance_node,
+        rental_income_node,
+        status_node,
+        commute_breakdown_node,
+        council_tax_node,
+        persons_source,
+    ):
+        super().__init__(
+            node_id,
+            dict,
+            (
+                monthly_mortgage_node,
+                yearly_sinking_fund_node,
+                life_insurance_node,
+                rental_income_node,
+                status_node,
+                commute_breakdown_node,
+                council_tax_node,
+                persons_source,
+            ),
+        )
+
+    def compute(
+        self,
+        mortgage: Attempt[Money],
+        sinking: Attempt[Money],
+        life_insurance: Attempt[Money],
+        rental_income: Attempt[Money],
+        status: Attempt[str],
+        commute: Attempt[dict],
+        council_tax: Attempt,
+        persons: Attempt[list],
+    ) -> Attempt[dict]:
+        from houses.model.domain import joint_owner_names
+
+        ps = persons.value_or_none() or []
+        adults = [p for p in ps if not getattr(p, "is_child", False)]
+        if not adults:
+            return Attempt.succeeded({"couple": None, "others": None, "couple_label": "", "others_label": ""})
+        owners = joint_owner_names(ps)
+        others = [p for p in adults if p.name not in owners]
+        n_adults = len(adults)
+
+        def money_of(p, field: str) -> Decimal:
+            val = getattr(p, field, None)
+            return val.amount if val is not None else Decimal(0)
+
+        def commute_monthly(name: str) -> Decimal:
+            per = (commute.value_or_none() or {}).get("persons") or {}
+            yearly = (per.get(name) or {}).get("yearly_gbp") or 0
+            return Decimal(str(yearly)) / Decimal(12)
+
+        is_current = status.succeeded and (status.value_or_none() or "").strip().lower() == "current"
+        council = council_tax.value_or_none()
+        council_stddev = getattr(council, "stddev", 0) or 0
+        council_monthly = Decimal(str(getattr(council, "value", Decimal(0)))) / Decimal(12)
+        # For a Current property the sinking fund and life insurance are
+        # excluded (the family's current living cost, not the purchase).
+        sinking_monthly = Decimal(0) if is_current else (sinking.value_or_none() or Money("0", "GBP")).amount / Decimal(12)  # noqa: E501
+        insurance_scale = 0 if is_current else 1
+
+        def group_figure(group: list, owner_share: float, rent: Decimal) -> tuple[Decimal, float]:
+            commutes = sum((commute_monthly(p.name) for p in group), Decimal(0))
+            insurance = insurance_scale * sum((money_of(p, "life_insurance_monthly") for p in group), Decimal(0))
+            shared = Decimal(str(round(owner_share, 4))) * (council_monthly + sinking_monthly)
+            value = commutes + insurance + shared + rent
+            stddev = owner_share * float(council_stddev) / 12.0
+            return value, round(stddev, 2)
+
+        others_rent = sum((money_of(p, "rent_paid_monthly") for p in others), Decimal(0))
+        couple_rent = others_rent  # the rent the others pay goes to the couple
+        mortgage_val = (mortgage.value_or_none() or Money("0", "GBP")).amount
+        rental_val = (rental_income.value_or_none() or Money("0", "GBP")).amount
+
+        owner_share = len(owners) / n_adults
+        others_share = len(others) / n_adults
+
+        couple_val, couple_std = group_figure([p for p in adults if p.name in owners], owner_share, -couple_rent)
+        couple_val += mortgage_val - rental_val
+        others_val, others_std = group_figure(others, others_share, others_rent)
+
+        return Attempt.succeeded(
+            {
+                "couple": {"value": f"{couple_val:.2f}", "stddev": couple_std},
+                "others": {"value": f"{others_val:.2f}", "stddev": others_std},
+                "couple_label": " & ".join(p.name for p in adults if p.name in owners),
+                "others_label": " & ".join(p.name for p in others),
+            }
+        )

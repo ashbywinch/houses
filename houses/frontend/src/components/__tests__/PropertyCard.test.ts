@@ -22,6 +22,11 @@ function makeSummary(overrides?: Partial<PropertySummary>): PropertySummary {
     rightmove_price: { succeeded: true, value: {amount: "500000", currency: 'GBP'}, error: null, provenance: { label: 'test' } },
     rightmove_bedrooms: { succeeded: true, value: '3', error: null, provenance: { label: 'test' } },
     total_monthly_cost: { succeeded: true, value: { value: { amount: "2500", currency: "GBP" }, stddev: 0 }, error: null, provenance: { label: 'test' } },
+    group_monthly_cost: {
+      succeeded: true,
+      value: { couple: { value: '2100.00', stddev: 0 }, others: { value: '400.00', stddev: 0 }, couple_label: 'Simon & Lorena', others_label: 'Ashby' },
+      error: null, provenance: { label: 'test' },
+    },
     walkability: { succeeded: true, value: { walk_to_town: {value: 15, unit: 'minute'} }, error: null, provenance: { label: 'test' } },
     town_name: { succeeded: true, value: 'London', error: null, provenance: { label: 'test' } },
     commutes: {},
@@ -141,9 +146,10 @@ describe('PropertyCard basic rendering', () => {
     expect(wrapper.text()).toContain('123')
   })
 
-  it('shows total monthly cost', () => {
+  it('shows the two headline numbers, labelled by the groups', () => {
     const wrapper = mountCard({ rid: '123', data: makeSummary() })
-    expect(wrapper.text()).toContain('£2,500')
+    expect(wrapper.text()).toContain('Simon & Lorena £2,100/mo')
+    expect(wrapper.text()).toContain('Ashby £400/mo')
   })
 
   it('renders ≈ prefix with the one-step reason when total is approximate (Part A)', () => {
@@ -154,10 +160,15 @@ describe('PropertyCard basic rendering', () => {
         error: null,
         provenance: { label: 'test' },
       },
+      group_monthly_cost: {
+        succeeded: true,
+        value: { couple: { value: '2100', stddev: 50 }, others: { value: '400', stddev: 0 }, couple_label: 'Simon & Lorena', others_label: 'Ashby' },
+        error: null, provenance: { label: 'test' },
+      },
     })
     const wrapper = mountCard({ rid: '123', data: summary })
-    expect(wrapper.text()).toContain('≈£2,500/mo')
-    expect(wrapper.find('.card__monthly-cost').attributes('title')).toContain('approximate')
+    expect(wrapper.text()).toContain('≈£2,100/mo')
+    expect(wrapper.find('.card__monthly-cost .card__cost-line').attributes('title')).toContain('approximate')
   })
 
   it('marks a commute whose office was renamed or removed as old (C4)', () => {
@@ -258,6 +269,7 @@ describe('PropertyCard affordability honesty (P2)', () => {
   it('shows a muted can-not-calculate marker when the total is impossible', () => {
     const summary = makeSummary({
       total_monthly_cost: { succeeded: false, value: null, error: 'x', provenance: { label: 'test' } },
+      group_monthly_cost: { succeeded: false, value: null, error: 'x', provenance: { label: 'test' } },
     })
     const wrapper = mountCard({ rid: '123', data: summary })
     expect(wrapper.text()).toContain('£—/mo')
@@ -291,6 +303,7 @@ describe('PropertyCard error handling', () => {
     const summary = makeSummary({
       rightmove_price: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
       total_monthly_cost: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
+      group_monthly_cost: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
     })
     const wrapper = mountCard({ rid: '123', data: summary })
     expect(wrapper.text()).not.toContain('£500,000')

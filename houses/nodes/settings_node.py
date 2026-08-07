@@ -94,6 +94,7 @@ def aggregate_dict(setting_nodes: dict[str, UserInputNode]) -> dict:
 # ── SettingsNode Aggregate ───────────────────────────────
 
 
+
 class SettingsNode(DerivedNode[dict]):
     """Aggregates all individual setting nodes into a single dict.
 

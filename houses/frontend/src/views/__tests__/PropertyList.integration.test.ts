@@ -29,6 +29,7 @@ function makeRealisticData(): Record<string, PropertySummary> {
     rightmove_price: { succeeded: true, value: { amount: "350000", currency: 'GBP' }, error: null, provenance: { label: 'test' } },
     rightmove_bedrooms: { succeeded: true, value: '3', error: null, provenance: { label: 'test' } },
     total_monthly_cost: { succeeded: true, value: { value: { amount: "2000", currency: "GBP" }, stddev: 0 }, error: null, provenance: { label: 'test' } },
+    group_monthly_cost: { succeeded: true, value: { couple: { value: '2000', stddev: 0 }, others: { value: '400', stddev: 0 }, couple_label: 'S&L', others_label: 'A' }, error: null, provenance: { label: 'test' } },
     town_name: { succeeded: true, value: 'Test Town', error: null, provenance: { label: 'test' } },
     commutes: {
       'Simon/Office': {

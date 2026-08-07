@@ -259,7 +259,7 @@ class TestCurrentPropertyGating:
         assert total is not None
         # Total = 1000 + 12000/12*2/3 + 150 + 1800/12 - 600
         #       = 1000 + 666.67 + 150 + 150 - 600 = 1366.67
-        expected = round(1000 + 12000 / 12 * 2 / 3 + 150 + 1800 / 12 - 600, 2)
+        expected = round(1000 + 12000 / 12 + 150 + 1800 / 12 - 600, 2)
         assert float(total.value.amount) == pytest.approx(expected, abs=0.01), (
             f"Expected ~{expected}, got {total}"
         )

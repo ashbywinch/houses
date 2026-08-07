@@ -45,9 +45,9 @@ function bedroomNum(rid: string) {
   return b?.succeeded && b.value ? Number(b.value) : 0
 }
 function monthlyCostNum(rid: string) {
-  const m = store.monthlyTotalFor(rid)
-  if (!m) return Infinity
-  return parseFloat(m.value.amount)
+  const m = store.coupleTotalFor(rid)
+  if (m == null) return Infinity
+  return m
 }
 
 /** Card data with the hypothetical total overlaid while the what-if is
@@ -58,7 +58,7 @@ function cardData(rid: string): PropertySummary {
   if (!s || !wt) return s
   return {
     ...s,
-    total_monthly_cost: { succeeded: true, value: wt, error: null, provenance: { label: 'what-if' } },
+    group_monthly_cost: { succeeded: true, value: wt, error: null, provenance: { label: 'what-if' } },
   }
 }
 function bestCommuteMin(rid: string) {
