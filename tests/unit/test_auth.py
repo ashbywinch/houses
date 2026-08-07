@@ -159,6 +159,54 @@ class TestMe:
         assert resp.json()["authenticated"] is False
 
 
+class TestLiveSuperuserDerivation:
+    """is_superuser is re-derived from LIVE settings, not the cookie
+    snapshot — a promotion in Settings applies without re-login."""
+
+    def _push_superuser_person(self, email: str) -> None:
+        from dataclasses import replace
+
+        from houses.nodes.settings import make_default_persons
+        from houses.services_provider import get_services
+
+        svc = get_services()
+        persons = [
+            replace(p, email=email, is_superuser=True) if p.name == "Simon" else p
+            for p in make_default_persons()
+        ]
+        svc.persons_source.push(persons, "test")
+
+    def test_me_derives_superuser_from_live_settings(self):
+        """A cookie minted BEFORE the promotion (is_superuser=False) must
+        still report true when the live settings say the person is one."""
+        self._push_superuser_person(email="simon@example.com")
+        cookie = _inject_session(email="simon@example.com", is_superuser=False)
+        resp = client.get("/api/auth/me", cookies={"session": cookie})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["authenticated"] is True
+        assert data["is_superuser"] is True
+
+    def test_me_keeps_false_when_settings_do_not_promote(self):
+        """No live superuser flag → the cookie snapshot stands."""
+        cookie = _inject_session(email="simon@example.com", is_superuser=False)
+        resp = client.get("/api/auth/me", cookies={"session": cookie})
+        assert resp.status_code == 200
+        assert resp.json()["is_superuser"] is False
+
+    def test_impersonate_allowed_with_stale_cookie_and_live_flag(self):
+        """The superuser-only impersonate endpoint must accept a session
+        whose cookie predates the promotion, when live settings promote."""
+        self._push_superuser_person(email="simon@example.com")
+        cookie = _inject_session(email="simon@example.com", is_superuser=False)
+        resp = client.post(
+            "/api/auth/impersonate",
+            json={"person": "Ashby"},
+            cookies={"session": cookie},
+        )
+        assert resp.status_code == 200, f"got {resp.status_code}: {resp.text[:200]}"
+
+
 class TestLogout:
     def test_logout_clears_cookie(self):
         cookie = _inject_session(email="simon@example.com")

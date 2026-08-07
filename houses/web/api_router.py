@@ -23,7 +23,7 @@ from houses.model.domain import (
 from houses.property_registry import get_property as get_registry_property
 from houses.property_registry import list_properties as list_registry_properties
 from houses.services_provider import get_services
-from houses.web.auth import get_session_user
+from houses.web.auth import effective_session_user
 
 logger = logging.getLogger(__name__)
 
@@ -352,13 +352,13 @@ async def add_property_comment(rid: str, body: CommentBody, request: Request):
     """
     from houses.comments import add_comment
     from houses.services_provider import get_services
-    from houses.web.auth import get_session_user
+    from houses.web.auth import effective_session_user
 
     prop = get_registry_property(rid)
     if prop is None:
         raise HTTPException(status_code=404, detail="Property not found")
 
-    session_user = get_session_user(request)
+    session_user = effective_session_user(request)
     if not session_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
@@ -405,7 +405,7 @@ async def get_settings(request: Request):
     # server decides ownership; the UI only renders it.
     attempt = svc.persons_source.latest_attempt()
     persons = [p for p in (attempt.value_or_none() or []) if isinstance(p, Person)]
-    session_user = get_session_user(request)
+    session_user = effective_session_user(request)
     session_name = _session_person_name(session_user, persons)
     dumped = persons_json.get("value")
     if isinstance(dumped, list):
@@ -652,7 +652,7 @@ async def patch_person(name: str, body: dict, request: Request):
     """
     from fastapi import HTTPException
 
-    session_user = get_session_user(request)
+    session_user = effective_session_user(request)
     if not session_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 

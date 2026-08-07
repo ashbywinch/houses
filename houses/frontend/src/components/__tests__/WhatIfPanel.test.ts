@@ -141,6 +141,27 @@ describe('WhatIfPanel', () => {
     expect(wrapper.text()).toContain('not saved')
   })
 
+  it('uses the common settings-card layout for person cards', async () => {
+    // The What If person cards must reuse the standard card/heading/
+    // toggle-row CSS — no inline margin bodges, no zeroed padding.
+    const { wrapper } = mountPanel()
+    await settle()
+    await expand(wrapper)
+    const card = wrapper.find('.whatif-person')
+    // card uses the common padding (not a bespoke 0 0.6rem override)
+    const cardStyle = getComputedStyle(card.element)
+    expect(cardStyle.paddingLeft).not.toBe('0px')
+    expect(cardStyle.paddingRight).not.toBe('0px')
+    // toggle-row is a SIBLING of card-heading (common pattern), not an
+    // inline-styled child inside it
+    const heading = card.find('.card-heading')
+    expect(heading.exists()).toBe(true)
+    const toggle = card.find('.toggle-row')
+    expect(toggle.exists()).toBe(true)
+    expect(toggle.element.parentElement).toBe(card.element)
+    expect(toggle.element.getAttribute('style')).toBeNull()
+  })
+
   it('shows a delta headline against real totals', async () => {
     const { wrapper, store } = mountPanel()
     await settle()

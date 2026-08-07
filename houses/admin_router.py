@@ -33,9 +33,9 @@ async def reseed_from_sheet(request: Request):
     endpoint explicitly after seeding the sheet with new properties.
     """
     from houses.sheets.reader import get_properties_data
-    from houses.web.auth import get_session_user
+    from houses.web.auth import effective_session_user
 
-    user = get_session_user(request)
+    user = effective_session_user(request)
     if not user or not user.get("is_superuser"):
         raise HTTPException(status_code=403, detail="Superuser access required")
 
@@ -59,9 +59,9 @@ async def regenerate_nodes(body: dict, request: Request):
     """
     from dag.regenerate import force_regenerate, nodes_matching
     from dag.scheduler import _get_scheduler
-    from houses.web.auth import get_session_user
+    from houses.web.auth import effective_session_user
 
-    user = get_session_user(request)
+    user = effective_session_user(request)
     if not user or not user.get("is_superuser"):
         raise HTTPException(status_code=403, detail="Superuser access required")
 

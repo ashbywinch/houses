@@ -275,6 +275,31 @@ describe('PropertyCard affordability honesty (P2)', () => {
     expect(wrapper.text()).toContain('£—/mo')
   })
 
+  it('shows BOTH per-month rows when the group total is impossible', async () => {
+    // Regression: an impossible monthly payment collapsed the card to a
+    // single unlabelled £—/mo. The two groups (joint owners + other
+    // adults) must still render as separate labelled rows, each showing
+    // the unknown marker — the labels come from the settings persons.
+    const summary = makeSummary({
+      total_monthly_cost: { succeeded: false, value: null, error: 'x', provenance: { label: 'test' } },
+      group_monthly_cost: { succeeded: false, value: null, error: 'Works estimate required for: Ashby', provenance: { label: 'test' } },
+    })
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(PropertyCard, { props: { rid: '123', data: summary }, global: { plugins: [pinia] } })
+    const store = usePropertiesStore()
+    store.triage['123'] = { favourite: false, dismissed: false, is_viewed: false, user_notes: '', triage_status: '' }
+    // settings persons: Simon+Lorena own the home, Ashby is the other adult
+    store.groupLabels = { coupleLabel: 'S+L', othersLabel: 'Ashby' }
+    await wrapper.vm.$nextTick()
+    const lines = wrapper.findAll('.card__cost-line')
+    expect(lines.length).toBe(2)
+    expect(lines[0].text()).toContain('S+L')
+    expect(lines[0].text()).toContain('£—/mo')
+    expect(lines[1].text()).toContain('Ashby')
+    expect(lines[1].text()).toContain('£—/mo')
+  })
+
   it('explains the TfL daily maximum instead of presenting it as a fare', () => {
     const summary = makeSummary({
       commutes: {

@@ -202,12 +202,14 @@ async function toggleViewed() {
         <a :href="'#/property/' + rid" class="card__address" :aria-label="'View details for ' + address">
           <h3 class="card__address-text">{{ address }}</h3>
         </a>
-        <span v-if="coupleCost !== null" class="card__monthly-cost">
+        <span v-if="coupleCost !== null || store.groupLabels.coupleLabel" class="card__monthly-cost">
           <span class="card__cost-line" :title="monthlyCostApprox ? 'Council tax estimated — total is approximate' : undefined">
-            <strong>{{ coupleLabel }}</strong> {{ monthlyCostApprox ? '≈' : '' }}£{{ coupleCost.toLocaleString() }}/mo
+            <strong>{{ coupleLabel || store.groupLabels.coupleLabel }}</strong>
+            {{ monthlyCostApprox ? '≈' : '' }}{{ coupleCost !== null ? '£' + coupleCost.toLocaleString() + '/mo' : '£—/mo' }}
           </span>
-          <span v-if="othersCost !== null" class="card__cost-line card__cost-line--others">
-            <strong>{{ othersLabel }}</strong> £{{ othersCost.toLocaleString() }}/mo
+          <span v-if="othersCost !== null || store.groupLabels.othersLabel" class="card__cost-line card__cost-line--others">
+            <strong>{{ othersLabel || store.groupLabels.othersLabel }}</strong>
+            {{ othersCost !== null ? '£' + othersCost.toLocaleString() + '/mo' : '£—/mo' }}
           </span>
           <span v-if="isWhatIf" class="card__whatif">what-if</span>
         </span>

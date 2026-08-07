@@ -65,6 +65,49 @@ def get_session_user(request: Request) -> dict[str, Any] | None:
         return None
 
 
+def _person_superuser_flag(email: str, persons_attempt_value: Any) -> bool | None:
+    """The LIVE is_superuser flag for *email* from the settings persons.
+
+    Returns ``None`` when the persons source is unavailable or the email
+    matches no person — the caller falls back to the cookie's snapshot.
+    """
+    folded = email.casefold()
+    for p in persons_attempt_value or []:
+        if isinstance(p, dict):
+            pe = p.get("email")
+            if pe is not None and pe.casefold() == folded:
+                return bool(p.get("is_superuser"))
+        elif hasattr(p, "email") and p.email is not None and p.email.casefold() == folded:
+            return bool(getattr(p, "is_superuser", False))
+    return None
+
+
+def effective_session_user(request: Request) -> dict[str, Any] | None:
+    """The session user with is_superuser re-derived from LIVE settings.
+
+    The cookie bakes is_superuser at login (30-day validity) — a
+    promotion in Settings would otherwise leave the user's existing
+    session without the flag until re-login. The cookie still carries
+    identity; the privilege is looked up fresh each request and falls
+    back to the cookie snapshot only when settings are unavailable.
+    """
+    session = get_session_user(request)
+    if not session:
+        return None
+    try:
+        from houses.services_provider import get_services
+
+        svc = get_services()
+        persons_attempt = svc.persons_source.latest_attempt()
+        if persons_attempt.succeeded:
+            live = _person_superuser_flag(session.get("email", ""), persons_attempt.value_or_none())
+            if live is not None and live != session.get("is_superuser", False):
+                session = {**session, "is_superuser": live}
+    except Exception:
+        logger.exception("Failed to re-derive superuser flag from settings")
+    return session
+
+
 def _make_session_cookie(
     email: str,
     name: str,
@@ -351,8 +394,10 @@ async def me(request: Request):
 
     When authenticated, includes email, name, picture, person,
     is_superuser, and impersonating (if a superuser is impersonating someone).
+    is_superuser is re-derived from LIVE settings, so a promotion applies
+    to an existing session without re-login.
     """
-    session = get_session_user(request)
+    session = effective_session_user(request)
     if not session:
         return {"authenticated": False}
 
@@ -422,7 +467,7 @@ async def impersonate(request: Request, body: dict):
     Returns a new session cookie with the ``impersonating`` field updated.
     Survives server restarts.
     """
-    session = get_session_user(request)
+    session = effective_session_user(request)
     if not session:
         raise HTTPException(status_code=401, detail="Not authenticated")
     if not session.get("is_superuser"):

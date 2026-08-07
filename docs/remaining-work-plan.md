@@ -523,6 +523,29 @@ PARK leg because Reading's car-park cost was unknown.
   (cookie=false, settings=true, button hidden). Fix = log out / back in;
   remove the trace after the user confirms.
 
+## Part E — New houses, common CSS, impossible-card rows, live superuser (2026-08-07)
+
+- Added 174910202 (Willowmead Gardens, Marlow SL7 1HW, £899k, 5 bed)
+  and 90427107 (Rupert Avenue, High Wycombe HP12 3NL, £775k, 5 bed);
+  both fully enriched (commutes, schools, town, group monthly cost).
+- What If person cards now use the common `.settings-card` /
+  `.card-heading` / `.toggle-row` pattern — the toggle-row is a SIBLING
+  of the heading (was an inline-styled child), and the bespoke
+  `.whatif-person { padding: 0.6rem 0 }` override (zero horizontal
+  padding) is gone. Verified: 16px side padding, no inline style.
+- PropertyCard renders BOTH per-month rows when group_monthly_cost is
+  impossible: the two labels ("S+L", "Ashby") come from the settings
+  persons (store `groupLabels`, mirroring `joint_owner_names`), each
+  row showing `£—/mo`. Previously an impossible total collapsed the
+  card to a single unlabelled `£—/mo`.
+- **Live superuser, no re-login**: `effective_session_user` re-derives
+  `is_superuser` from LIVE settings on every request (cookie snapshot
+  is the fallback), so a Settings promotion applies to an existing
+  session immediately. Used in `/me`, `/impersonate`, the settings
+  PATCH + triage endpoints, and both admin routes. Tests updated to
+  push `is_superuser=True` persons where they exercise superuser paths
+  (settings are now authoritative both ways).
+
 ## Verification
 
 - `make test` green; ruff + basedpyright clean; language sweep green.

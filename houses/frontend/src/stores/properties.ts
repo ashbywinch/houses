@@ -23,6 +23,13 @@ export const usePropertiesStore = defineStore('properties', () => {
   // user opts in — persisted here so the choice survives navigation.
   const showOverCeiling = ref(false)
 
+  // The two headline labels ("S+L", "Ashby") derived from the settings
+  // persons (joint owners = current-home holders + co-owners; everyone
+  // else is an other adult). Used when a property's group_monthly_cost
+  // is impossible — the card still shows BOTH labelled rows, each with
+  // the unknown marker, instead of collapsing to one.
+  const groupLabels = ref<{ coupleLabel: string; othersLabel: string }>({ coupleLabel: '', othersLabel: '' })
+
   // ── What-if (Part D) ──────────────────────────────────────────
   // Hypothetical monthly totals per property while the "What if…"
   // panel is active; null when showing real numbers.
@@ -91,6 +98,9 @@ export const usePropertiesStore = defineStore('properties', () => {
     name: string
     is_child?: boolean
     places_of_interest?: { label: string }[]
+    home_sale_price?: { amount: string }
+    outstanding_mortgage?: { amount: string }
+    home_co_owners?: { name: string; share?: number }[]
   }
   interface SettingsPayload {
     persons?: { value?: PersonEntry[] }
@@ -117,6 +127,24 @@ export const usePropertiesStore = defineStore('properties', () => {
       }
       commuteCeilings.value = ceilings
       poiLabels.value = labels
+      // Mirror the DAG's joint_owner_names: current-home holders +
+      // co-owners form the couple; every other adult is an other.
+      const adults = persons.filter(p => !p.is_child)
+      const money = (v?: { amount: string }) => Number(v?.amount ?? 0) > 0
+      const owners = new Set<string>()
+      for (const p of adults) {
+        if (money(p.home_sale_price) || money(p.outstanding_mortgage) || (p.home_co_owners?.length ?? 0) > 0) {
+          owners.add(p.name)
+        }
+        for (const co of p.home_co_owners ?? []) owners.add(co.name)
+      }
+      if (owners.size === 0) {
+        for (const p of adults) owners.add(p.name)
+      }
+      groupLabels.value = {
+        coupleLabel: [...adults.filter(p => owners.has(p.name))].map(p => p.name[0]?.toUpperCase() ?? '').join('+'),
+        othersLabel: adults.filter(p => !owners.has(p.name)).map(p => p.name).join('+'),
+      }
     } catch {
       // defaults used
     }
@@ -163,7 +191,7 @@ export const usePropertiesStore = defineStore('properties', () => {
 
   return {
     rids, summaries, details, triage, settings, loading, error,
-    commuteCeilings, commuteGoods, poiLabels, showOverCeiling,
+    commuteCeilings, commuteGoods, poiLabels, showOverCeiling, groupLabels,
     whatIfTotals, applyWhatIf, clearWhatIf, coupleTotalFor, groupCostFor,
     loadAll, loadSettings, loadDetail, updateSummary, updateDetail, toggleTriage,
   }

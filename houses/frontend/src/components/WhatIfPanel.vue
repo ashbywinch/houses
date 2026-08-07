@@ -222,13 +222,11 @@ function backToReal() {
 
       <div v-if="activeTab === 'finances'" class="settings-panel" role="tabpanel">
         <div v-for="p in persons" :key="p.name" class="settings-card whatif-person">
-          <div class="card-heading">
-            {{ p.name }}
-            <label class="toggle-row" style="margin-top: var(--sp-2)">
-              <span class="toggle-row__label">Selling a home to fund this purchase</span>
-              <ToggleSwitch v-model="p.selling_home" @change="scheduleEval" />
-            </label>
-          </div>
+          <div class="card-heading">{{ p.name }}</div>
+          <label class="toggle-row">
+            <span class="toggle-row__label">Selling a home to fund this purchase</span>
+            <ToggleSwitch v-model="p.selling_home" @change="scheduleEval" />
+          </label>
 
           <div v-if="p.selling_home" class="whatif-person__fields">
             <label class="whatif-person__field">
@@ -375,10 +373,6 @@ function backToReal() {
   margin: 0.6rem 0 0.4rem;
   font-size: 0.8125rem;
   color: var(--text-muted);
-}
-.whatif-person {
-  border-top: 1px solid var(--divider);
-  padding: 0.6rem 0;
 }
 .whatif-person__head {
   display: flex;

@@ -238,6 +238,7 @@ class TestPatchPersonApi:
                 name="Simon",
                 has_car=True,
                 email="simon@example.com",
+                is_superuser=superuser,  # live settings are authoritative
                 places_of_interest=(PlaceOfInterest("Pimlico", "1 Drummond Gate, Pimlico, London SW1V 2QQ"),),
             ),
             Person(name="Lorena", has_car=False, email="lorena@example.com"),
@@ -550,6 +551,7 @@ class TestSettingsPropagationApi:
                 name="Simon",
                 has_car=True,
                 email="simon@example.com",
+                is_superuser=True,  # live settings are authoritative
                 home_sale_price=Money("550000", "GBP"),
                 outstanding_mortgage=Money("373000", "GBP"),
             ),
@@ -836,6 +838,7 @@ class TestWhatIfApi:
                 name="Simon",
                 has_car=True,
                 email="simon@example.com",
+                is_superuser=True,  # live settings are authoritative
                 home_sale_price=Money("550000", "GBP"),
                 outstanding_mortgage=Money("373000", "GBP"),
             ),
@@ -985,7 +988,7 @@ class TestRegenerateApi:
         from houses.model.domain import Person
 
         _push_persons(
-            Person(name="Simon", has_car=True, email="simon@example.com"),
+            Person(name="Simon", has_car=True, email="simon@example.com", is_superuser=True),
             Person(name="Ashby", has_car=True, cash_contribution=Money("300000", "GBP")),
         )
         client, reg = self._setup()
