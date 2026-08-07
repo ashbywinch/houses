@@ -32,7 +32,7 @@ class PlaceOfInterest:
     address: str = ""
     trips_per_week: int = 1
     weeks_per_year: int = 46
-    # Modes the person accepts for this commute: "train" | "car" | "walk",
+    # Modes the person accepts for this commute: "transit" | "car" | "walk",
     # any combination.  Empty means unset (legacy) — the effective value is
     # derived by ``effective_acceptable_modes`` and is what routing uses.
     acceptable_modes: tuple[str, ...] = ()
@@ -51,6 +51,7 @@ class Person:
     is_child: bool = False
     bus_walk_penalty: _Quantity = _Quantity(30, "minute")
     acceptable_schools: tuple[str, ...] = ("mixed",)
+    petrol_mpg: int = 45
     home_sale_price: Money = Money("0", "GBP")
     outstanding_mortgage: Money = Money("0", "GBP")
     cash_contribution: Money = Money("0", "GBP")
@@ -83,7 +84,7 @@ class Person:
 
 
 # Canonical order for the all-modes set (also the UI checkbox order).
-ALL_ACCEPTABLE_MODES: tuple[str, ...] = ("train", "car", "walk")
+ALL_ACCEPTABLE_MODES: tuple[str, ...] = ("transit", "car", "walk")
 
 
 def effective_acceptable_modes(poi: PlaceOfInterest) -> tuple[str, ...]:
@@ -103,7 +104,7 @@ def effective_acceptable_modes(poi: PlaceOfInterest) -> tuple[str, ...]:
     if "bracknell" in label or "dad" in label:
         return ("car",)
     if label in ("pimlico", "aldgate"):
-        return ("train",)
+        return ("transit",)
     return ALL_ACCEPTABLE_MODES
 
 

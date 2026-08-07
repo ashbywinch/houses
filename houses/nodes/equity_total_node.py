@@ -60,6 +60,10 @@ class EquityTotalNode(DerivedNode[Money]):
         ps = persons.value_or_none()
         total = _ZERO
         for p in ps:
+            # Children never contribute (they don't sell homes or carry
+            # cash) — skip so provenance lines never list them.
+            if isinstance(p, Person) and p.is_child:
+                continue
             sale = getattr(p, "home_sale_price", zero)
             mortgage = getattr(p, "outstanding_mortgage", zero)
             cash = getattr(p, "cash_contribution", zero)

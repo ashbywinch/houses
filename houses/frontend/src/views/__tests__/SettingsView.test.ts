@@ -36,7 +36,7 @@ function makeSettings() {
               address: '1 Drummond Gate, Pimlico, London SW1V 2QQ',
               trips_per_week: 1,
               weeks_per_year: 46,
-              acceptable_modes: ['train'],
+              acceptable_modes: ['transit'],
             },
             {
               label: 'Bracknell',
@@ -61,7 +61,7 @@ function makeSettings() {
               address: 'Eastgate House, 40 Dukes Place, London EC3A 7LP',
               trips_per_week: 2,
               weeks_per_year: 46,
-              acceptable_modes: ['train'],
+              acceptable_modes: ['transit'],
             },
           ],
         },
@@ -429,7 +429,7 @@ describe('SettingsView — commute destination CRUD (A7)', () => {
     await flush()
     const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
     const added = body.places_of_interest[body.places_of_interest.length - 1]
-    expect(added.acceptable_modes).toEqual(['train', 'car', 'walk'])
+    expect(added.acceptable_modes).toEqual(['transit', 'car', 'walk'])
   })
 
   it('removes a destination row', async () => {
@@ -470,16 +470,16 @@ describe('SettingsView — acceptable modes keep at least one (P7)', () => {
     const { wrapper, flush } = await mountView()
     await flush()
     const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
-    // Pimlico has only ['train'] — unchecking it must not remove the last
+    // Pimlico has only ['transit'] — unchecking it must not remove the last
     // mode (an empty set would be reinterpreted by the server migration)
-    const train = simon.find('input[type="checkbox"][data-mode="train"]')
-    await train.setValue(false)
+    const transit = simon.find('input[type="checkbox"][data-mode="transit"]')
+    await transit.setValue(false)
     await simon.trigger('focusout')
     await flush()
     const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
     expect(name).toBe('Simon')
     const pimlico = body.places_of_interest.find((p: { label: string }) => p.label === 'Pimlico')
-    expect(pimlico.acceptable_modes).toContain('train')
+    expect(pimlico.acceptable_modes).toContain('transit')
   })
 })
 

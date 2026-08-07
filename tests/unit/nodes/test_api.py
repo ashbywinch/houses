@@ -127,13 +127,15 @@ class TestSettingsApi:
 
         resp = client.patch(
             "/api/settings/financial",
-            json={"mortgage_rate": 0.06, "petrol_mpg": 40},
+            json={"mortgage_rate": 0.06, "petrol_cost_per_litre": 1.60},
         )
         assert resp.status_code == 200
 
         after = client.get("/api/settings").json()["financial"]
         assert after["value"]["mortgage_rate"] == 0.06
-        assert after["value"]["petrol_mpg"] == 40
+        assert after["value"]["petrol_cost_per_litre"] == 1.60
+        # MPG is per-person now, not a household finance
+        assert "petrol_mpg" not in after["value"]
         # untouched nodes keep their defaults (serialized to float)
         assert after["value"]["sinking_fund_rate"] == float(SETTING_DEFAULTS["settings/sinking_fund_rate"][1]())
         assert aggregate_dict(get_services().setting_nodes) == after["value"]
@@ -260,7 +262,7 @@ class TestPatchPersonApi:
                         "address": "1 Drummond Gate, Pimlico, London SW1V 2QQ",
                         "trips_per_week": 3,
                         "weeks_per_year": 46,
-                        "acceptable_modes": ["train", "car"],
+                        "acceptable_modes": ["transit", "car"],
                     }
                 ],
                 "thresholds": {"good_max_minutes": 25, "fine_max_minutes": 40},
@@ -269,7 +271,7 @@ class TestPatchPersonApi:
         assert resp.status_code == 200, resp.text[:300]
         simon = self._person(client, "Simon")
         poi = simon["places_of_interest"][0]
-        assert poi["acceptable_modes"] == ["train", "car"]
+        assert poi["acceptable_modes"] == ["transit", "car"]
         assert poi["trips_per_week"] == 3
         thresholds = client.get("/api/settings").json()["commute_thresholds"]["value"]["Simon"]
         assert thresholds == {"good_max_minutes": 25, "fine_max_minutes": 40}
@@ -285,12 +287,14 @@ class TestPatchPersonApi:
                 "name": "Simon",
                 "has_car": True,
                 "bus_walk_penalty": {"value": 20, "unit": "minute"},
+                "petrol_mpg": 40,
                 "home_sale_price": {"amount": "550000", "currency": "GBP"},
             },
         )
         assert resp.status_code == 200, resp.text[:300]
         simon = self._person(client, "Simon")
         assert simon["bus_walk_penalty"] == {"value": 20, "unit": "minute"}
+        assert simon["petrol_mpg"] == 40
         assert simon["home_sale_price"] == {"amount": "550000.00", "currency": "GBP"}
 
 
@@ -466,7 +470,7 @@ class TestPatchPersonApi:
         assert simon["editable_by"] == ["Simon"]
         assert simon["editable_by_me"] is True
         # unset modes migrate by rule: Pimlico → train
-        assert simon["places_of_interest"][0]["acceptable_modes"] == ["train"]
+        assert simon["places_of_interest"][0]["acceptable_modes"] == ["transit"]
         lorena = self._person(client, "Lorena")
         assert lorena["editable_by_me"] is False
         george = self._person(client, "George")
@@ -597,6 +601,37 @@ class TestSettingsPropagationApi:
         assert "£550,000.00 sale − £373,000.00 mortgage + £0.00 cash = £177,000.00" in lines.values()
         assert lines["Ashby"] == "£0 home + £300,000.00 cash = £300,000.00"
         assert prov["formula"]["result"] == "£477,000.00"
+
+    def test_deposit_excludes_children_completely(self):
+        """Children never appear in the deposit breakdown, provenance
+        lines, or the total — even one with a stray cash contribution."""
+        from decimal import Decimal as _Decimal
+
+        from money import Money
+
+        from houses.model.domain import Person
+        from houses.web.api_router import _deposit_breakdown
+
+        persons = [
+            Person(
+                name="Simon",
+                has_car=True,
+                home_sale_price=Money("550000", "GBP"),
+                outstanding_mortgage=Money("373000", "GBP"),
+                cash_contribution=Money("50000", "GBP"),
+            ),
+            Person(
+                name="George",
+                has_car=False,
+                is_child=True,
+                cash_contribution=Money("999999", "GBP"),  # must be ignored
+            ),
+        ]
+        deposit_persons, total, lines = _deposit_breakdown(persons)
+        assert "George" not in deposit_persons
+        assert "George" not in [line["label"] for line in lines]
+        assert total.amount == _Decimal("227000.00")
+        assert deposit_persons["Simon"] == {"amount": "227000.00", "currency": "GBP"}
 
     def test_settings_change_updates_property_totals(self):
         """PATCH a person's cash contribution → mortgage_required drops by

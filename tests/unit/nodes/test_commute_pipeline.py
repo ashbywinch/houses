@@ -321,7 +321,6 @@ class TestFullCommutePipeline:
         )
         get_services().rail_fare_registry = registry
         svc = get_services()
-        svc.setting_nodes["settings/petrol_mpg"].push(45, "test")
         svc.setting_nodes["settings/petrol_cost_per_litre"].push(Decimal("1.45"), "test")
         poi_src = UserInputNode[str]("poi_mh", str)
         poi_src.push("RG12 8YA", "persons_source")
@@ -367,10 +366,12 @@ class TestFullCommutePipeline:
                 CarPark(name="Test Car Park", daily_cost=Money("10.00", "GBP")),
             ),
         )
+        mpg_node = UserInputNode("test/dad/petrol_mpg", int)
+        mpg_node.push(45, "test")
         petrol_cost = PetrolCostAugmentNode(
             "test/dad/petrol_cost",
             commute_node=park_and_ride,
-            petrol_mpg_node=svc.setting_nodes.get("settings/petrol_mpg"),
+            petrol_mpg_node=mpg_node,
             petrol_cost_per_litre_node=svc.setting_nodes.get("settings/petrol_cost_per_litre"),
         )
         # Bus is slower than transit so transit wins
@@ -456,7 +457,6 @@ class TestFullCommutePipeline:
         pc_src = UserInputNode[str]("pc_dr", str)
         pc_src.push("RG12 8YA", "test")
 
-        svc.setting_nodes["settings/petrol_mpg"].push(45, "test")
         svc.setting_nodes["settings/petrol_cost_per_litre"].push(Decimal("1.45"), "test")
 
         drive = Commute(
@@ -518,10 +518,12 @@ class TestFullCommutePipeline:
             commute_result=selector,
             rail_fare_result=rf_if,
         )
+        mpg_node = UserInputNode("test/dr/petrol_mpg", int)
+        mpg_node.push(45, "test")
         final_fuel = PetrolCostAugmentNode(
             "test/dr/final_fuel",
             commute_node=merge_node,
-            petrol_mpg_node=svc.setting_nodes.get("settings/petrol_mpg"),
+            petrol_mpg_node=mpg_node,
             petrol_cost_per_litre_node=svc.setting_nodes.get("settings/petrol_cost_per_litre"),
         )
 

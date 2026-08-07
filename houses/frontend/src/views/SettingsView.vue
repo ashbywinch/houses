@@ -222,7 +222,7 @@ const targetPerson = computed(() => (route.query.person as string) || '')
 // who have one; "walk" is always an option (walking is accepted even when
 // they also drive — the map draws it only when they don't).
 const MODE_OPTIONS = [
-  { value: 'train', label: 'Trains' },
+  { value: 'transit', label: 'Transit' },
   { value: 'car', label: 'Driving' },
   { value: 'walk', label: 'Walking' },
 ]
@@ -300,7 +300,7 @@ function addDestination(person: PersonSettings) {
   // treated as legacy-unset by the server migration and could route the
   // destination by modes the UI never offered (e.g. car for a no-car
   // person)
-  const defaultModes = person.has_car ? ['train', 'car', 'walk'] : ['train', 'walk']
+  const defaultModes = person.has_car ? ['transit', 'car', 'walk'] : ['transit', 'walk']
   person.places_of_interest.push({
     label: '',
     address: '',

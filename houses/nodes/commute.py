@@ -176,7 +176,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         # dependency — a permanently pending excluded node must not stall
         # the selector's refresh (same freeze the bootstrap fix addresses)
         deps = [origin, poi]
-        if self._mode_acceptable("train"):
+        if self._mode_acceptable("transit"):
             deps.append(transit_result)
         if walk_result is not None and self._mode_acceptable("walk"):
             deps.append(walk_result)
@@ -188,7 +188,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         alts: dict[str, Expression] = {}
         if self.walk_result is not None and self._mode_acceptable("walk"):
             alts["walk"] = Ref(self.walk_result)
-        if self._mode_acceptable("train"):
+        if self._mode_acceptable("transit"):
             alts["transit"] = Ref(self.transit_result)
         if self.drive_result is not None and self._mode_acceptable("car"):
             alts["drive"] = Ref(self.drive_result)
@@ -204,7 +204,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
 
     def _get_active_deps(self) -> tuple[Node, ...]:
         deps = [self.origin, self.poi]
-        if self._mode_acceptable("train"):
+        if self._mode_acceptable("transit"):
             deps.append(self.transit_result)
         if self.walk_result is not None and self._mode_acceptable("walk"):
             deps.append(self.walk_result)

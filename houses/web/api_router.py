@@ -408,35 +408,10 @@ async def get_settings(request: Request):
                 if isinstance(poi_item, dict):
                     poi_item["acceptable_modes"] = list(effective_acceptable_modes(poi))
 
-    # The family deposit as ONE number (P4: the household is the unit, not
-    # four person records): per person, sale proceeds − remaining mortgage +
-    # extra money; plus the household total.  Computed server-side from the
-    # settings inputs — the client never derives money from parts.  The
-    # toggle gate matches EquityTotalNode: a person not selling a home
-    # contributes cash only (P7).
-    from decimal import Decimal as _Decimal
-
-    from money import Money as _Money
-
-    deposit_persons: dict[str, dict] = {}
-    deposit_total = _Money("0", "GBP")
-    deposit_lines: list[dict] = []
-    for person in persons:
-        sale = person.home_sale_price.amount
-        mortgage = person.outstanding_mortgage.amount
-        cash = person.cash_contribution.amount
-        if effective_selling_home(person):
-            value = max(_Decimal("0"), sale - mortgage) + cash
-            line = (
-                f"£{sale:,.2f} sale − £{mortgage:,.2f} mortgage + £{cash:,.2f} cash "
-                f"= £{value:,.2f}"
-            )
-        else:
-            value = cash
-            line = f"£0 home + £{cash:,.2f} cash = £{value:,.2f}"
-        deposit_persons[person.name] = {"amount": f"{value:.2f}", "currency": "GBP"}
-        deposit_total = deposit_total + _Money(str(value), "GBP")
-        deposit_lines.append({"label": person.name, "value": line})
+    # The family deposit as ONE number (P4): per person, sale proceeds −
+    # remaining mortgage + extra money, plus the household total —
+    # computed server-side, never derived from parts by the client.
+    deposit_persons, deposit_total, deposit_lines = _deposit_breakdown(persons)
 
     return {
         "persons": persons_json,
@@ -453,6 +428,40 @@ async def get_settings(request: Request):
             },
         },
     }
+
+
+def _deposit_breakdown(persons: list) -> tuple[dict, object, list[dict]]:
+    """Per-person deposit (sale − mortgage + cash, or cash alone) and the
+    household total. Children never contribute and never appear. Pure —
+    unit-testable without the request context (P4)."""
+    from decimal import Decimal as _Decimal
+
+    from money import Money as _Money
+
+    deposit_persons: dict[str, dict] = {}
+    deposit_total = _Money("0", "GBP")
+    deposit_lines: list[dict] = []
+    for person in persons:
+        # Children never contribute to the deposit — they don't sell homes
+        # and shouldn't carry money fields; listing them adds noise.
+        if person.is_child:
+            continue
+        sale = person.home_sale_price.amount
+        mortgage = person.outstanding_mortgage.amount
+        cash = person.cash_contribution.amount
+        if effective_selling_home(person):
+            value = max(_Decimal("0"), sale - mortgage) + cash
+            line = (
+                f"£{sale:,.2f} sale − £{mortgage:,.2f} mortgage + £{cash:,.2f} cash "
+                f"= £{value:,.2f}"
+            )
+        else:
+            value = cash
+            line = f"£0 home + £{cash:,.2f} cash = £{value:,.2f}"
+        deposit_persons[person.name] = {"amount": f"{value:.2f}", "currency": "GBP"}
+        deposit_total = deposit_total + _Money(str(value), "GBP")
+        deposit_lines.append({"label": person.name, "value": line})
+    return deposit_persons, deposit_total, deposit_lines
 
 
 def _session_person_name(session_user: dict | None, persons: list) -> str:
@@ -532,6 +541,11 @@ def _person_from_dict(d: dict, target: Person) -> Person:
             updates[f] = _money(updates[f], whole_pounds=f in whole_pound_fields, field=f)
     if "bus_walk_penalty" in updates:
         updates["bus_walk_penalty"] = _penalty(updates["bus_walk_penalty"])
+    if "petrol_mpg" in updates:
+        mpg = updates["petrol_mpg"]
+        if not isinstance(mpg, (int, float)) or mpg <= 0:
+            raise ValueError(f"petrol_mpg must be a positive number, got {mpg!r}")
+        updates["petrol_mpg"] = int(mpg)
     if "editable_by" in updates and updates["editable_by"] is not None:
         updates["editable_by"] = tuple(updates["editable_by"])
     pois = updates.get("places_of_interest")

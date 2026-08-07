@@ -84,7 +84,7 @@ def make_default_persons() -> list[Person]:
                     address=settings.simon_destination,
                     trips_per_week=1,
                     weeks_per_year=46,
-                    acceptable_modes=("train",),
+                    acceptable_modes=("transit",),
                 ),
                 PlaceOfInterest(
                     label="Bracknell",
@@ -115,7 +115,7 @@ def make_default_persons() -> list[Person]:
                     address=settings.lorena_destination,
                     trips_per_week=2,
                     weeks_per_year=46,
-                    acceptable_modes=("train",),
+                    acceptable_modes=("transit",),
                 ),
             ),
         ),

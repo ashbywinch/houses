@@ -7,7 +7,7 @@ from houses.nodes.bus import BodsFareNode, BusLegAugmentNode, BusRouteNode
 from houses.nodes.commute import CommuteSelectorNode, MergeRailFareNode, _needs_rail_fare
 from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 from houses.nodes.park_and_ride import ParkAndRideAugmentNode
-from houses.nodes.petrol import PetrolCostAugmentNode
+from houses.nodes.petrol import PersonPetrolMpgNode, PetrolCostAugmentNode
 from houses.nodes.schools import SchoolLocationNode
 from houses.nodes.transit import DriveNode, TflTransitNode, TransitNode, WalkNode
 from houses.routing import CommuteRouter
@@ -190,10 +190,15 @@ def build_commute_pipeline(prop) -> None:
                 rail_fare_result=rail_fare_result,
             )
 
+            mpg_node = PersonPetrolMpgNode(
+                f"{prop.rid}/{key}/petrol_mpg",
+                persons_source=prop._svc.persons_source,
+                person_name=p_info.name,
+            )
             final_fuel = PetrolCostAugmentNode(
                 f"{prop.rid}/{key}/final_fuel",
                 commute_node=merge_node,
-                petrol_mpg_node=prop._svc.setting_nodes.get("settings/petrol_mpg"),
+                petrol_mpg_node=mpg_node,
                 petrol_cost_per_litre_node=prop._svc.setting_nodes.get("settings/petrol_cost_per_litre"),
             )
             prop.commute_selectors[key] = final_fuel

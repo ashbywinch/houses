@@ -58,7 +58,7 @@ class TestCommuteSelectorNode:
 
     @pytest.mark.asyncio
     async def test_train_only_poi_never_picks_drive(self):
-        """acceptable_modes=('train',) excludes the drive alternative even
+        """acceptable_modes=('transit',) excludes the drive alternative even
         when driving is fastest — a train-only POI is never scored by a
         car route."""
         from houses.nodes.commute import CommuteSelectorNode
@@ -78,7 +78,7 @@ class TestCommuteSelectorNode:
             walk_result=walk,
             drive_result=drive,
             max_walk=30,
-            acceptable_modes=("train",),
+            acceptable_modes=("transit",),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")

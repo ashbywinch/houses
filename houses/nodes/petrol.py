@@ -1,8 +1,10 @@
-"""DAG node that adds fuel costs for drive-leg commutes.
+"""DAG nodes for drive-leg fuel costs.
 
-Uses actual distance (``distance_km``) from drive legs when available,
-otherwise estimating from drive minutes at 48 km/h.  Reads petrol_mpg
-and petrol_cost_per_litre from individual setting nodes.
+PetrolCostAugmentNode adds fuel costs using actual distance when
+available, otherwise estimating from drive minutes at 48 km/h.  The
+MPG is the car OWNER's own economy (PersonPetrolMpgNode reads the
+persons node); petrol cost per litre is a market price from the
+household finances.
 """
 
 from __future__ import annotations
@@ -41,6 +43,28 @@ def _fuel_cost_for(drive_legs: list[JourneyLeg], mpg: int, cost_per_litre: float
     if fuel_cost_amount <= 0:
         return None
     return Money(str(fuel_cost_amount), "GBP")
+
+
+class PersonPetrolMpgNode(DerivedNode[int]):
+    """The car owner's own petrol economy (miles per imperial gallon).
+
+    Reads the person from the settings persons node by name — changing
+    the person's MPG in Settings flows into every drive commute without
+    a rebuild (provenance shows the persons source).
+    """
+
+    def __init__(self, node_id: str, *, persons_source, person_name: str):
+        self._person_name = person_name
+        super().__init__(node_id, int, (persons_source,))
+        self.display_name = "Petrol MPG"
+
+    def compute(self, persons: Attempt[list]) -> Attempt[int]:
+        if not persons.succeeded:
+            return Attempt.impossible(persons.error)
+        for p in persons.value_or_none() or []:
+            if getattr(p, "name", None) == self._person_name:
+                return Attempt.succeeded(int(getattr(p, "petrol_mpg", 45)))
+        return Attempt.succeeded(45)
 
 
 class PetrolCostAugmentNode(DerivedNode[Commute]):

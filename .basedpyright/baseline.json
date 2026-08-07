@@ -718,6 +718,14 @@
                     "endColumn": 15,
                     "lineCount": 1
                 }
+            },
+            {
+                "code": "reportIncompatibleMethodOverride",
+                "range": {
+                    "startColumn": 8,
+                    "endColumn": 15,
+                    "lineCount": 1
+                }
             }
         ],
         "./houses/nodes/property.py": [

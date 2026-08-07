@@ -337,3 +337,29 @@ class TestPetrolProvenanceFormula:
         assert any("Drive distance" in lab for lab in labels), labels
         assert any(lab.startswith("Fuel:") for lab in labels), labels
         assert prov.formula.result == "GBP 2.91"
+
+
+def test_person_mpg_node_reads_the_owner_s_own_economy():
+    """PersonPetrolMpgNode resolves MPG from the persons node by name —
+    the car owner's own value, not a global."""
+    from houses.nodes.petrol import PersonPetrolMpgNode
+    from houses.nodes.settings import make_default_persons
+
+    persons = UserInputNode("_persons_mpg", list)
+    persons.push(list(make_default_persons()), "test")
+    node = PersonPetrolMpgNode("x/petrol_mpg", persons_source=persons, person_name="Simon")
+    attempt = node.compute(persons.latest_attempt())
+    assert attempt.succeeded
+    assert attempt.value_or_none() == 45  # Person default
+
+    # a person with an explicit economy
+    from dataclasses import replace
+
+    customized = [replace(p, petrol_mpg=38) if p.name == "Simon" else p for p in make_default_persons()]
+    persons.push(customized, "test")
+    attempt = node.compute(persons.latest_attempt())
+    assert attempt.value_or_none() == 38
+
+    # unknown person falls back to the default
+    other = PersonPetrolMpgNode("y/petrol_mpg", persons_source=persons, person_name="Nobody")
+    assert other.compute(persons.latest_attempt()).value_or_none() == 45

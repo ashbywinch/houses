@@ -23,7 +23,7 @@ const settingsPersons = {
         home_sale_price: { amount: '550000.49', currency: 'GBP' },
         outstanding_mortgage: { amount: '373000', currency: 'GBP' },
         cash_contribution: { amount: '0', currency: 'GBP' },
-        places_of_interest: [{ label: 'Pimlico', address: '1 Pimlico Rd', trips_per_week: 1, weeks_per_year: 46, acceptable_modes: ['train'] }],
+        places_of_interest: [{ label: 'Pimlico', address: '1 Pimlico Rd', trips_per_week: 1, weeks_per_year: 46, acceptable_modes: ['transit'] }],
       },
       {
         name: 'Ashby',
