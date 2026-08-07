@@ -76,12 +76,15 @@ class TestPropertyApi:
         assert resp.status_code == 200
         assert isinstance(resp.json(), dict)
 
-    def test_current_homes_not_shadowed_by_rid_route(self):
-        """/api/properties/current-homes must not be captured by the
-        /api/properties/{rid} route (route ORDER regression: the literal
-        route used to be declared after the parameterised one, so the
-        endpoint returned 'Property current-homes not found' and the
-        settings dropdown was empty)."""
+    def test_current_homes_and_rid_routes_both_resolve(self):
+        """/api/properties/current-homes and /api/properties/{rid} must
+        EACH resolve to their own handler — a shadowing bug in either
+        direction breaks one of them, so the routing contract is tested
+        from both callers' perspectives: the literal route returns the
+        homes list, and a real property RID still returns that property.
+        (Regression: the literal route was declared after the
+        parameterised one, so current-homes returned 'Property
+        current-homes not found' and the settings dropdown was empty.)"""
         from money import Money
 
         from houses.nodes.property import PropertyNodes
@@ -101,20 +104,30 @@ class TestPropertyApi:
         prop.rental_income.push(Money("0", "GBP"), "test")
         prop.comment_status.push("current", "test")
         register_property("88275093", prop)
-        flush_all()
-
-        resp = client.get("/api/properties/current-homes")
-        assert resp.status_code == 200, resp.text
-        data = resp.json()
-        assert data["homes"] == [{"rid": "88275093", "address": "31 Isambard Road, Southall, UB2 4GN"}]
-
-        # A non-current property must not appear in the list
+        # A non-current property must not appear in the homes list
         other = PropertyNodes("99999999")
         other.comment_status.push("", "test")
         register_property("99999999", other)
         flush_all()
-        data = client.get("/api/properties/current-homes").json()
-        assert data["homes"] == [{"rid": "88275093", "address": "31 Isambard Road, Southall, UB2 4GN"}]
+
+        # The literal route resolves to the homes list (not a {rid} lookup)
+        resp = client.get("/api/properties/current-homes")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["homes"] == [
+            {"rid": "88275093", "address": "31 Isambard Road, Southall, UB2 4GN"}
+        ]
+
+        # AND the parameterised route still resolves to its own property
+        # (a reorder that shadows {rid} would fail here)
+        resp = client.get("/api/properties/88275093")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["rid"] == "88275093"
+
+        # A non-current RID is still a valid property lookup — only the
+        # homes FILTER excluded it, not the routing
+        resp = client.get("/api/properties/99999999")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["rid"] == "99999999"
 
     def test_detail_subroute_not_caught_by_rid(self):
         """Detail sub-route should not be caught by {rid}."""

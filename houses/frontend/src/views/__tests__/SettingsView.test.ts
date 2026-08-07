@@ -1,9 +1,21 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import SettingsView from '../SettingsView.vue'
+
+// Determinism guarantees:
+// - unmount every mounted component after each test so SettingsView's
+//   onBeforeUnmount clears pending debounce timers (otherwise a test that
+//   schedules a save without flushing leaks an 800ms timer into later
+//   tests and corrupts their mock.calls)
+// - restore real timers after each test so a failing fake-timer test
+//   cannot leak fake timers into the rest of the file
+enableAutoUnmount(afterEach)
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 vi.mock('../../services/api', () => ({
   fetchSettings: vi.fn(),
@@ -288,9 +300,6 @@ describe('SettingsView — home co-owners and the house link', () => {
     const addRow = simon.find('.co-owner-add')
     await addRow.find('select').setValue('Ashby')
     expect(simon.text()).toContain('Ashby — 50%')
-    // flush the pending autosave so no stray timer leaks into later tests
-    await simon.trigger('focusout')
-    await flush()
   })
 
   it('refuses a co-owner when the shares would exceed 100%', async () => {
@@ -306,9 +315,6 @@ describe('SettingsView — home co-owners and the house link', () => {
     await addRow.find('input').setValue(40)
     await addRow.find('select').setValue('Ashby')
     expect(simon.text()).toContain('Ashby — 40%')
-    // flush the pending autosave so no stray timer leaks into later tests
-    await simon.trigger('focusout')
-    await flush()
   })
 
   it('shows a read-only co-owner note on the co-owner\'s own settings', async () => {
@@ -546,9 +552,6 @@ describe('SettingsView — selling-home toggle (P7, B7)', () => {
     expect(simon.find('input#rent-paid').exists()).toBe(false)
     expect(simon.find('select#home-property').exists()).toBe(false)
     expect(simon.find('.co-owner-add').exists()).toBe(false)
-    // flush the pending autosave so no stray timer leaks into later tests
-    await simon.trigger('focusout')
-    await flush()
   })
 })
 
@@ -696,7 +699,6 @@ describe('SettingsView — autosave status and undo (C2/C3)', () => {
     await vi.advanceTimersByTimeAsync(900)
     await flush()
     expect(api.patchPerson).toHaveBeenCalledTimes(1)
-    vi.useRealTimers()
   })
 
   it('shows an error state with Retry when the save fails', async () => {
