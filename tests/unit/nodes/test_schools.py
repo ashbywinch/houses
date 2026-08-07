@@ -794,6 +794,66 @@ class TestFindNearestFilters:
         assert result.value_or_none() is None
 
     @pytest.mark.asyncio
+    async def test_excludes_special_schools(self, monkeypatch):
+        """A special school (even at the property) must not be returned as
+        the family's primary/secondary — the family needs a mainstream
+        school. Regression: 90427107's nearest school for BOTH age 4 and
+        age 12 was Chiltern Wood, a community special school (ages 3-19),
+        so primary and secondary showed the same special school."""
+        from houses.school import School
+        from houses.school_gender import SchoolGender
+        from houses.schools import find_nearest
+
+        special = School.from_GIAS_row(
+            {
+                "EstablishmentName": "Special Needs School",
+                "Gender (name)": "Mixed",
+                "PhaseOfEducation (name)": "Not applicable",
+                "TypeOfEstablishment (name)": "Community special school",
+                "Latitude": "51.5005",
+                "Longitude": "-0.1005",
+                "CorrectedLatitude": "51.5005",
+                "CorrectedLongitude": "-0.1005",
+                "Postcode": "SL6 1AA",
+                "StatutoryLowAge": "3",
+                "StatutoryHighAge": "19",
+            }
+        )
+        mainstream = School.from_GIAS_row(
+            {
+                "EstablishmentName": "Mainstream Primary",
+                "Gender (name)": "Mixed",
+                "PhaseOfEducation (name)": "Primary",
+                "TypeOfEstablishment (name)": "Community School",
+                "Latitude": "51.501",
+                "Longitude": "-0.101",
+                "CorrectedLatitude": "51.501",
+                "CorrectedLongitude": "-0.101",
+                "Postcode": "SL6 2BB",
+            }
+        )
+        monkeypatch.setattr("houses.schools._load_schools", lambda: [special, mainstream])
+
+        async def mock_geocode(*_, **__):
+            from dag.attempt import Attempt
+            from houses.geo import GeoPoint
+
+            return Attempt.succeeded(GeoPoint(51.5005, -0.1005))
+
+        monkeypatch.setattr("houses.schools.geocode", mock_geocode)
+        monkeypatch.setattr("houses.schools._geocode_address", mock_geocode)
+
+        result = await find_nearest(
+            "SL6 3CC", child_age=7, acceptable=(SchoolGender.BOYS, SchoolGender.GIRLS, SchoolGender.MIXED)
+        )
+        assert result.succeeded, "Expected a school, got None"
+        school = result.value_or_none()
+        assert school is not None
+        assert school.name == "Mainstream Primary", (
+            f"Expected Mainstream Primary (special school skipped), got {school.name}"
+        )
+
+    @pytest.mark.asyncio
     async def test_find_nearest_filters_by_acceptable_girls_only(self, monkeypatch):
         """With acceptable=(GIRLS,), should return nearest girls school only."""
         from houses.school import School

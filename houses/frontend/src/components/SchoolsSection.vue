@@ -27,7 +27,8 @@ function getSchoolWalkMinutes(commutes: any, labelPart: string): { value: number
     <div v-if="schools?.primary?.school?.succeeded" class="detail-field">
       <span class="detail-field__label">Primary</span>
       <div class="detail-field__value">
-        <a :href="schools.primary.school.value?.url" target="_blank">{{ schools.primary.school.value?.name }}</a>
+        <a v-if="schools.primary.school.value?.url" :href="schools.primary.school.value.url" target="_blank" rel="noopener">{{ schools.primary.school.value?.name }}</a>
+        <template v-else>{{ schools.primary.school.value?.name }}</template>
         <span class="pill pill--sm" :class="ofstedClass(schools.primary.school.value?.ofsted)">{{ schools.primary.school.value?.ofsted }}</span>
         <span v-if="getSchoolWalkMinutes(commutes, 'Primary')" class="pill pill--sm pill--good">{{ schoolWalkMin(getSchoolWalkMinutes(commutes, 'Primary')) }}</span>
       </div>
@@ -35,7 +36,8 @@ function getSchoolWalkMinutes(commutes: any, labelPart: string): { value: number
     <div v-if="schools?.secondary?.school?.succeeded" class="detail-field">
       <span class="detail-field__label">Secondary</span>
       <div class="detail-field__value">
-        <a :href="schools.secondary.school.value?.url" target="_blank">{{ schools.secondary.school.value?.name }}</a>
+        <a v-if="schools.secondary.school.value?.url" :href="schools.secondary.school.value.url" target="_blank" rel="noopener">{{ schools.secondary.school.value?.name }}</a>
+        <template v-else>{{ schools.secondary.school.value?.name }}</template>
         <span class="pill pill--sm" :class="ofstedClass(schools.secondary.school.value?.ofsted)">{{ schools.secondary.school.value?.ofsted }}</span>
         <span v-if="getSchoolWalkMinutes(commutes, 'Secondary')" class="pill pill--sm pill--good">{{ schoolWalkMin(getSchoolWalkMinutes(commutes, 'Secondary')) }}</span>
       </div>

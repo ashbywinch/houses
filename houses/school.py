@@ -124,6 +124,11 @@ class School:
         postcode = (row.get(cls._COL_POSTCODE) or "").strip()
         address_parts = [p for p in (street, locality, address3, town, county, postcode) if p]
         full_address = ", ".join(address_parts)
+        raw_website = (row.get(cls._COL_WEBSITE) or "").strip()
+        website = raw_website
+        # GIAS stores bare domains ("www.school.sch.uk") — the detail
+        # page links to the school's own site, so the url needs a scheme.
+        url = f"https://{raw_website}" if raw_website and "://" not in raw_website else raw_website
         return cls(
             urn=urn,
             name=(row.get(cls._COL_NAME) or "").strip(),
@@ -133,11 +138,12 @@ class School:
             gender=gender,
             type_of_establishment=(row.get(cls._COL_TYPE) or "").strip(),
             postcode=postcode,
-            website=(row.get(cls._COL_WEBSITE) or "").strip(),
+            website=website,
             ofsted_rating=(row.get(cls._COL_OFSTED) or "").strip(),
             inspection_year=(row.get(cls._COL_INSPECTION_YEAR) or "").strip(),
             coords=coords,
             full_address=full_address,
+            url=url,
             _postcode_centroid=original,
         )
 

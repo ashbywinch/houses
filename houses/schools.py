@@ -109,6 +109,13 @@ async def find_nearest(
             continue
         if school.fee_paying:
             continue
+        # Special schools are not the family's mainstream option — a
+        # community/other special school must never surface as the
+        # nearest primary or secondary (it accepts both age bands, so
+        # without this filter primary and secondary collapse to the same
+        # special school at the property).
+        if school.type_of_establishment.lower().endswith("special school"):
+            continue
         if not school.name.strip():
             continue
         sc = school.coords

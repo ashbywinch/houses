@@ -99,6 +99,29 @@ def test_school_from_gias_row_captures_full_address() -> None:
     )
 
 
+def test_school_from_gias_row_captures_website_as_url() -> None:
+    """The GIAS SchoolWebsite column must populate the school's url so
+    the detail page links to the school's own site — not the current
+    page. Regression: url stayed '' while website held the value."""
+    school = School.from_GIAS_row(
+        {
+            "EstablishmentName": "Chiltern Wood School",
+            "SchoolWebsite": "www.chilternwood.bucks.sch.uk",
+            "Latitude": "51.62",
+            "Longitude": "-0.77",
+        }
+    )
+    assert school.website == "www.chilternwood.bucks.sch.uk"
+    assert school.url == "https://www.chilternwood.bucks.sch.uk"
+
+
+def test_school_default_url_empty_without_website() -> None:
+    """No SchoolWebsite column → url stays empty (the frontend renders
+    the name as plain text, never a dead link)."""
+    school = School.from_GIAS_row({})
+    assert school.url == ""
+
+
 def test_bracknell_commute_defaults() -> None:
     from money import Money
     from pint import Quantity

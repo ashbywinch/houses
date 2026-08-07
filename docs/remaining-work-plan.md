@@ -585,6 +585,27 @@ PARK leg because Reading's car-park cost was unknown.
   green/amber graduation-cap for primary/secondary schools.
 - Tests updated for the new marker kinds + leaflet control mock.
 
+## Part E — School links + special-school filter (2026-08-07)
+
+- **School link bug**: `School.url` was never populated — `from_GIAS_row`
+  captured `website` but left `url=""`, so the detail page rendered
+  `href=""` and "clicking the school" opened the CURRENT property page
+  in a new tab. `url` is now derived from the GIAS SchoolWebsite column
+  (scheme-prefixed: `www.school.sch.uk` → `https://www.school.sch.uk`),
+  and the frontend renders a link ONLY when a url exists (plain text
+  otherwise).
+- **Same primary+secondary**: 90427107's nearest school for both age 4
+  and age 12 was Chiltern Wood — a community SPECIAL school (ages
+  3-19) at the property's own coordinates, so primary and secondary
+  collapsed to the same school. Special schools are now excluded from
+  the mainstream nearest-school search (alongside fee-paying and
+  blank-name filters). 90427107 now shows St Michael's Catholic School
+  (primary, Good) and John Hampden Grammar School (secondary,
+  Outstanding) — distinct, real, both with working website links.
+- Tests: special-school exclusion (strictly-closest fixture), website→url
+  capture, url stays empty without website, SchoolsSection renders a
+  link only when url exists.
+
 ## Verification
 
 - `make test` green; ruff + basedpyright clean; language sweep green.
