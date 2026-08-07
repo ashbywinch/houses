@@ -92,7 +92,7 @@ function toggleProvenance(key: string) {
           <template v-for="(group, gi) in c.value._details" :key="gi">
             <div v-for="(leg, li) in group.legs" :key="`${gi}-${li}`" class="commute-leg">
               <span class="commute-leg__mode">{{ leg.mode }}</span>
-              <span v-if="leg.mode !== 'park'" class="commute-leg__duration">{{ leg.duration.value }} min</span>
+              <span v-if="leg.duration.value > 0" class="commute-leg__duration">{{ leg.duration.value }} min</span>
               <span v-if="li === 0 && group.cost != null" class="commute-leg__cost">
                 £{{ (typeof group.cost === 'number' ? group.cost : parseFloat(group.cost?.amount ?? '0')).toFixed(2) }}
               </span>

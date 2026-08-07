@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import ProvenanceToggle from './ProvenanceToggle.vue'
 import { epcClass } from '../formatters/format'
+import type { Provenance } from '../types'
 import {
   blockWholePoundsKey,
   rejectWholePoundsPaste,
@@ -42,26 +43,32 @@ const fmt = (n: number | undefined): string =>
 
 /** Zero values are omitted — a row only appears when the number is
  *  non-zero. */
-function row(label: string, value: number | undefined): { label: string; value: string } | null {
+function row(
+  label: string,
+  value: number | undefined,
+  provenance?: Provenance,
+): { label: string; value: string; provenance?: Provenance } | null {
   if (value == null || value === 0) return null
-  return { label, value: fmt(value) }
+  return { label, value: fmt(value), provenance }
 }
 
 /** Row labels for the joint-owners' breakdown — mortgage and rental
  *  income belong to them; council tax, sinking fund and commutes split
- *  by group. */
+ *  by group. Each row carries the provenance of its DAG component so
+ *  the ⓘ explains exactly that figure. */
 function coupleRows() {
   const b = props.affordability?.group_monthly_cost?.value?.couple_breakdown
   if (!b) return []
+  const a = props.affordability ?? {}
   return [
-    row('Mortgage', b.mortgage),
-    row('Council tax', b.council_tax),
-    row('Sinking fund', b.sinking_fund),
-    row('Commutes', b.commutes),
-    row('Life insurance', b.insurance),
-    row('Rental income', b.rental_income),
-    row('Rent received', b.rent_received),
-  ].filter((r): r is { label: string; value: string } => r !== null)
+    row('Mortgage', b.mortgage, a.monthly_mortgage?.provenance),
+    row('Council tax', b.council_tax, a.council_tax?.provenance),
+    row('Sinking fund', b.sinking_fund, a.monthly_sinking_fund?.provenance),
+    row('Commutes', b.commutes, a.monthly_commute_cost?.provenance),
+    row('Life insurance', b.insurance, a.life_insurance_total?.provenance),
+    row('Rental income', b.rental_income, a.rental_income?.provenance),
+    row('Rent received', b.rent_received, a.group_monthly_cost?.provenance),
+  ].filter((r): r is { label: string; value: string; provenance?: Provenance } => r !== null)
 }
 
 /** Row labels for the other adults' breakdown — their rent paid is their
@@ -69,13 +76,14 @@ function coupleRows() {
 function othersRows() {
   const b = props.affordability?.group_monthly_cost?.value?.others_breakdown
   if (!b) return []
+  const a = props.affordability ?? {}
   return [
-    row('Council tax', b.council_tax),
-    row('Sinking fund', b.sinking_fund),
-    row('Commutes', b.commutes),
-    row('Life insurance', b.insurance),
-    row('Rent paid', b.rent_paid),
-  ].filter((r): r is { label: string; value: string } => r !== null)
+    row('Council tax', b.council_tax, a.council_tax?.provenance),
+    row('Sinking fund', b.sinking_fund, a.monthly_sinking_fund?.provenance),
+    row('Commutes', b.commutes, a.monthly_commute_cost?.provenance),
+    row('Life insurance', b.insurance, a.life_insurance_total?.provenance),
+    row('Rent paid', b.rent_paid, a.group_monthly_cost?.provenance),
+  ].filter((r): r is { label: string; value: string; provenance?: Provenance } => r !== null)
 }
 
 /** When the total can't be calculated, name the leaf reason the UI
@@ -297,6 +305,11 @@ function canEdit(personName: string): boolean {
           <div v-for="(row, key) in coupleRows()" :key="key" class="costs-row costs-row--sub">
             <span class="costs-label">{{ row.label }}</span>
             <span class="costs-value">{{ row.value }}</span>
+            <ProvenanceToggle
+              v-if="row.provenance"
+              :provenance="row.provenance"
+              :title="row.label"
+            />
           </div>
         </div>
         <div v-if="affordability?.group_monthly_cost?.value?.others" class="costs-row costs-row--group costs-row--group-others">
@@ -312,6 +325,11 @@ function canEdit(personName: string): boolean {
           <div v-for="(row, key) in othersRows()" :key="key" class="costs-row costs-row--sub">
             <span class="costs-label">{{ row.label }}</span>
             <span class="costs-value">{{ row.value }}</span>
+            <ProvenanceToggle
+              v-if="row.provenance"
+              :provenance="row.provenance"
+              :title="row.label"
+            />
           </div>
         </div>
       </template>

@@ -504,6 +504,25 @@ PARK leg because Reading's car-park cost was unknown.
   unknown cost (operator present, cost null); DB-level dedupe rejects
   a seeded rid with no sheet client.
 
+## Part E — Zero-min durations, per-row provenance, superuser trace (2026-08-07)
+
+- Frontend hides the duration on ANY zero-minute leg (park legs were
+  the visible case, but the rule is "0 min" not "park").
+- CostsSection renders a ⓘ on every financial breakdown row (Mortgage,
+  Council tax, Sinking fund, Commutes, Life insurance — both the couple
+  and others blocks) wired to each component's own DAG provenance;
+  previously only the group totals had toggles while the 5–7 component
+  rows sat unannotated.
+- TEMP-DEBUG superuser trace in `houses/web/auth.py`: `/me` logs
+  `SUPERUSER-TRACE email=… cookie_is_superuser=… matched_person=…
+  settings_is_superuser=… client_host=…` and `_build_session` logs
+  `SUPERUSER-LOGIN-TRACE baked_is_superuser=…`. Diagnosis: the cookie's
+  is_superuser flag is baked at LOGIN (30-day validity); Ashby was
+  promoted in settings AFTER her last login, so her device cookie still
+  says false → no 👤 button. Reproduced exactly with a stale cookie
+  (cookie=false, settings=true, button hidden). Fix = log out / back in;
+  remove the trace after the user confirms.
+
 ## Verification
 
 - `make test` green; ruff + basedpyright clean; language sweep green.

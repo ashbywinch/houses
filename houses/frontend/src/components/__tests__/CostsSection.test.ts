@@ -302,4 +302,67 @@ describe('CostsSection uncertainty rendering (Part A)', () => {
     expect(text).not.toContain('Rental income')
     expect(wrapper.find('.costs-row--total').exists()).toBe(false)
   })
+
+  it('shows a provenance icon on every financial breakdown row', () => {
+    // Each affordability component (mortgage, council tax, sinking fund,
+    // commutes, insurance) carries its own provenance in the DAG — the
+    // breakdown rows must expose it, not just the group total.
+    const wrapper = mountCosts({
+      affordability: {
+        monthly_mortgage: {
+          succeeded: true, value: { amount: '3008.98', currency: 'GBP' }, error: null,
+          provenance: { label: 'Monthly Mortgage', sourceType: 'calc', sources: { mortgage_required: {} } },
+        },
+        council_tax: {
+          succeeded: true, value: { amount: '800', currency: 'GBP' }, error: null,
+          provenance: { label: 'Council Tax', sourceType: 'calc', sources: { band: {} } },
+        },
+        monthly_sinking_fund: {
+          succeeded: true, value: { amount: '5000', currency: 'GBP' }, error: null,
+          provenance: { label: 'Monthly Sinking Fund', sourceType: 'calc', sources: { yearly: {} } },
+        },
+        monthly_commute_cost: {
+          succeeded: true, value: null, error: null,
+          provenance: { label: 'Commute Breakdown', sourceType: 'calc', sources: { simon: {} } },
+        },
+        life_insurance_total: {
+          succeeded: true, value: { amount: '1800', currency: 'GBP' }, error: null,
+          provenance: { label: 'Life Insurance Total', sourceType: 'calc', sources: { simon: {} } },
+        },
+        group_monthly_cost: {
+          succeeded: true,
+          value: {
+            couple: { value: '4613.98', stddev: 0 },
+            others: { value: '254.14', stddev: 0 },
+            couple_label: 'S+L',
+            others_label: 'Ashby',
+            couple_names: 'Simon+Lorena',
+            couple_breakdown: {
+              mortgage: 3008.98,
+              council_tax: 66.67,
+              sinking_fund: 441.69,
+              commutes: 946.64,
+              insurance: 150,
+              rental_income: 0,
+            },
+            others_breakdown: {
+              council_tax: 33.33,
+              sinking_fund: 220.81,
+              commutes: 0,
+              insurance: 0,
+            },
+          },
+          error: null,
+          provenance: { label: 'Group Monthly Cost', sourceType: 'calc', sources: { mortgage: {} } },
+        },
+      },
+    })
+    const rows = wrapper.findAll('.costs-row--sub')
+    // Mortgage, Council tax, Sinking fund, Commutes, Life insurance
+    // (couple) + Council tax, Sinking fund (others) — every row has a ⓘ
+    expect(rows.length).toBeGreaterThanOrEqual(5)
+    for (const r of rows) {
+      expect(r.find('.provenance-toggle__trigger').exists()).toBe(true)
+    }
+  })
 })
