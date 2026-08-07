@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from money import Money
+
 import contextlib
 import logging
 
@@ -430,7 +435,7 @@ async def get_settings(request: Request):
     }
 
 
-def _deposit_breakdown(persons: list) -> tuple[dict, object, list[dict]]:
+def _deposit_breakdown(persons: list) -> tuple[dict, Money, list[dict]]:
     """Per-person deposit (sale − mortgage + cash, or cash alone) and the
     household total. Children never contribute and never appear. Pure —
     unit-testable without the request context (P4)."""
