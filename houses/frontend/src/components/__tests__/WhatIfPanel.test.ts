@@ -100,7 +100,7 @@ describe('WhatIfPanel', () => {
     const { wrapper } = mountPanel()
     await settle()
     await expand(wrapper)
-    const sale = wrapper.find('input[type="number"]')
+    const sale = wrapper.findAll('.whatif-person__field input')[0]
     await sale.setValue('550000.50')
     expect((sale.element as HTMLInputElement).value).toBe('550000')
   })
@@ -110,7 +110,7 @@ describe('WhatIfPanel', () => {
     await settle()
     await expand(wrapper)
     // Simon's sale price is 550000.49 in the fixture → shown as 550000
-    const sale = wrapper.find('input[type="number"]')
+    const sale = wrapper.findAll('.whatif-person__field input')[0]
     expect((sale.element as HTMLInputElement).value).toBe('550000')
   })
 
@@ -119,7 +119,7 @@ describe('WhatIfPanel', () => {
     await settle()
     await expand(wrapper)
 
-    const cashInputs = wrapper.findAll('input[type="number"]')
+    const cashInputs = wrapper.findAll('.whatif-person__field input')
     const ashbyCash = cashInputs[cashInputs.length - 1] // last field = Ashby's cash
     await ashbyCash.setValue('400000')
 
@@ -156,7 +156,7 @@ describe('WhatIfPanel', () => {
     }
     await settle()
 
-    const cashInputs = wrapper.findAll('input[type="number"]')
+    const cashInputs = wrapper.findAll('.whatif-person__field input')
     await cashInputs[cashInputs.length - 1].setValue('400000')
     await runDebouncedEval()
     await settle()
@@ -170,7 +170,7 @@ describe('WhatIfPanel', () => {
     await settle()
     await expand(wrapper)
 
-    const cashInputs = wrapper.findAll('input[type="number"]')
+    const cashInputs = wrapper.findAll('.whatif-person__field input')
     await cashInputs[cashInputs.length - 1].setValue('400000')
     await runDebouncedEval()
     await settle()

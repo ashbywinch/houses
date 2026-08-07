@@ -2,12 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import * as api from '../services/api'
 import { usePropertiesStore } from '../stores/properties'
-import {
-  blockWholePoundsKey,
-  integerPounds,
-  rejectWholePoundsPaste,
-  wholePoundsValue,
-} from '../formatters/money'
+import { integerPounds } from '../formatters/money'
+import WholePoundsField from './WholePoundsField.vue'
 
 // ── Editable person shape (a question, not a form) ─────────────
 
@@ -191,32 +187,17 @@ function backToReal() {
         <div v-if="p.selling_home" class="whatif-person__fields">
           <label class="whatif-person__field">
             Expected sale price (£)
-            <input
-              :value="p.home_sale_price" type="number" inputmode="numeric"
-              @keydown="blockWholePoundsKey"
-              @paste="rejectWholePoundsPaste"
-              @input="p.home_sale_price = wholePoundsValue($event.target as HTMLInputElement, p.home_sale_price); scheduleEval()"
-            />
+            <WholePoundsField v-model="p.home_sale_price" @input="scheduleEval" />
           </label>
           <label class="whatif-person__field">
             Mortgage remaining (£)
-            <input
-              :value="p.outstanding_mortgage" type="number" inputmode="numeric"
-              @keydown="blockWholePoundsKey"
-              @paste="rejectWholePoundsPaste"
-              @input="p.outstanding_mortgage = wholePoundsValue($event.target as HTMLInputElement, p.outstanding_mortgage); scheduleEval()"
-            />
+            <WholePoundsField v-model="p.outstanding_mortgage" @input="scheduleEval" />
           </label>
         </div>
 
         <label class="whatif-person__field">
           Cash available for the deposit (£)
-          <input
-            :value="p.cash_contribution" type="number" inputmode="numeric"
-            @keydown="blockWholePoundsKey"
-              @paste="rejectWholePoundsPaste"
-              @input="p.cash_contribution = wholePoundsValue($event.target as HTMLInputElement, p.cash_contribution); scheduleEval()"
-          />
+          <WholePoundsField v-model="p.cash_contribution" @input="scheduleEval" />
         </label>
 
         <div v-if="p.places_of_interest.length" class="whatif-person__pois">
