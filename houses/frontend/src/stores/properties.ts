@@ -70,12 +70,16 @@ export const usePropertiesStore = defineStore('properties', () => {
           }
         }
       }
-    } catch (e) {
+      } catch (e) {
       console.error('Failed to load properties:', e)
       error.value = 'Something went wrong loading properties. Please try again.'
     } finally {
       loading.value = false
     }
+    // Settings (commute colour bands, ceilings, MPG, max walk) may have
+    // changed since the store was created — refresh so the pills and the
+    // over-ceiling filter are never stale after a settings edit.
+    await loadSettings()
   }
 
   interface PersonEntry {

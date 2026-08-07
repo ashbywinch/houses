@@ -20,6 +20,9 @@ const settingsPersons = {
       {
         name: 'Simon',
         selling_home: true,
+        has_car: true,
+        petrol_mpg: 45,
+        bus_walk_penalty: { value: 20, unit: 'minute' },
         home_sale_price: { amount: '550000.49', currency: 'GBP' },
         outstanding_mortgage: { amount: '373000', currency: 'GBP' },
         cash_contribution: { amount: '0', currency: 'GBP' },
@@ -28,6 +31,8 @@ const settingsPersons = {
       {
         name: 'Ashby',
         selling_home: false,
+        has_car: false,
+        bus_walk_penalty: { value: 15, unit: 'minute' },
         cash_contribution: { amount: '300000', currency: 'GBP' },
         places_of_interest: [],
       },
@@ -196,5 +201,38 @@ describe('WhatIfPanel', () => {
     await settle()
     expect(store.whatIfTotals).toBeNull()
     expect(wrapper.text()).not.toContain('not saved')
+  })
+})
+
+describe('WhatIfPanel — commute tab (MPG + max walk)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.mocked(api.fetchSettings).mockResolvedValue(settingsPersons as unknown as Record<string, unknown>)
+    vi.mocked(api.postWhatIf).mockResolvedValue({
+      'prop-a': { succeeded: true, monthly_total: { value: { amount: '900', currency: 'GBP' }, stddev: 0 } },
+    })
+  })
+
+  it('sends the car MPG and max-walk in the what-if payload and commits them', async () => {
+    const { wrapper } = mountPanel()
+    await settle()
+    await expand(wrapper)
+    // switch to the Commutes tab
+    await wrapper.findAll('.settings-tabs button')[1].trigger('click')
+    await wrapper.vm.$nextTick()
+    const simon = wrapper.findAll('.whatif-person')[0]
+    const mpg = simon.find('input[type="number"]')
+    await mpg.setValue(38)
+    const mw = wrapper.find('input[type="number"][min="0"]')
+    await mw.setValue(25)
+    await runDebouncedEval()
+    expect(api.postWhatIf).toHaveBeenCalled()
+    const body = (api.postWhatIf as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as Array<Record<string, unknown>>
+    const simonBody = body.find((b: Record<string, unknown>) => b.name === 'Simon')
+    expect(simonBody?.petrol_mpg).toBe(38)
+    expect(simonBody?.bus_walk_penalty).toEqual({ value: 25, unit: 'minute' })
+    // Ashby keeps her own values
+    const ashbyBody = body.find((b: Record<string, unknown>) => b.name === 'Ashby')
+    expect(ashbyBody?.bus_walk_penalty).toEqual({ value: 15, unit: 'minute' })
   })
 })

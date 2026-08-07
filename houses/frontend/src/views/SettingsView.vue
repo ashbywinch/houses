@@ -666,32 +666,6 @@ const depositRows = computed(() => {
 </template>
 
 <style scoped>
-.settings-tabs {
-  display: flex;
-  gap: var(--sp-2);
-  padding: var(--sp-2) 0;
-  position: sticky;
-  top: var(--header-h);
-  background: var(--page-bg);
-  z-index: 5;
-}
-.settings-tabs button {
-  flex: 1;
-  border: 1px solid var(--border);
-  background: var(--card-bg);
-  color: var(--text-secondary);
-  border-radius: var(--radius);
-  font-size: var(--fs-base);
-  font-weight: var(--fw-semibold);
-  min-height: 44px;
-  cursor: pointer;
-}
-.settings-tabs button.settings-tab--active {
-  background: var(--green);
-  border-color: var(--green);
-  color: #fff;
-}
-.settings-panel { display: flex; flex-direction: column; gap: var(--sp-4); }
 .settings-person__strip { margin: var(--sp-2) 0 0; }
 
 .settings__main {

@@ -18,6 +18,9 @@ interface PoiEdit {
 interface PersonEdit {
   name: string
   selling_home: boolean
+  has_car: boolean
+  petrol_mpg: number
+  bus_walk_penalty: { value: number; unit: string }
   home_sale_price: string
   outstanding_mortgage: string
   cash_contribution: string
@@ -31,6 +34,7 @@ const persons = ref<PersonEdit[]>([])
 const busy = ref(false)
 const errorMsg = ref('')
 const collapsed = ref(true)
+const activeTab = ref<'finances' | 'commutes'>('finances')
 let timer: ReturnType<typeof setTimeout> | null = null
 
 const active = computed(() => store.whatIfTotals != null)
@@ -52,6 +56,12 @@ async function load() {
       .map(p => ({
         name: String(p.name),
         selling_home: Boolean(p.selling_home),
+        has_car: Boolean(p.has_car),
+        petrol_mpg: Number((p as Record<string, unknown>).petrol_mpg ?? 45),
+        bus_walk_penalty: {
+          value: Number(((p as Record<string, unknown>).bus_walk_penalty as { value?: number } | undefined)?.value ?? 20),
+          unit: 'minute',
+        },
         home_sale_price: integerPounds((p.home_sale_price as { amount?: string } | undefined)?.amount),
         outstanding_mortgage: integerPounds((p.outstanding_mortgage as { amount?: string } | undefined)?.amount),
         cash_contribution: integerPounds((p.cash_contribution as { amount?: string } | undefined)?.amount),
@@ -77,7 +87,12 @@ function scheduleEval() {
 
 function payload() {
   return persons.value.map(p => {
-    const body: Record<string, unknown> = { name: p.name, selling_home: p.selling_home }
+    const body: Record<string, unknown> = {
+      name: p.name,
+      selling_home: p.selling_home,
+      petrol_mpg: p.petrol_mpg,
+      bus_walk_penalty: { ...p.bus_walk_penalty },
+    }
     if (p.selling_home) {
       body.home_sale_price = money(p.home_sale_price)
       body.outstanding_mortgage = money(p.outstanding_mortgage)
@@ -134,7 +149,12 @@ async function useTheseNumbers() {
   errorMsg.value = ''
   try {
     for (const p of persons.value) {
-      const body: Record<string, unknown> = { name: p.name, selling_home: p.selling_home }
+      const body: Record<string, unknown> = {
+        name: p.name,
+        selling_home: p.selling_home,
+        petrol_mpg: p.petrol_mpg,
+        bus_walk_penalty: { ...p.bus_walk_penalty },
+      }
       if (p.selling_home) {
         body.home_sale_price = money(p.home_sale_price)
         body.outstanding_mortgage = money(p.outstanding_mortgage)
@@ -174,44 +194,86 @@ function backToReal() {
         choose "Use these numbers". Money is in whole pounds.
       </p>
 
-    <div class="whatif__persons">
-      <div v-for="p in persons" :key="p.name" class="whatif-person">
-        <div class="whatif-person__head">
-          <strong>{{ p.name }}</strong>
-          <label class="whatif-person__toggle">
-            <input v-model="p.selling_home" type="checkbox" @change="scheduleEval" />
-            Selling a home to fund this purchase
-          </label>
-        </div>
+      <!-- Same two tabs as the settings page: Finances | Commutes -->
+      <nav class="settings-tabs" role="tablist" aria-label="What-if sections">
+        <button
+          role="tab"
+          type="button"
+          :aria-selected="activeTab === 'finances'"
+          :class="{ 'settings-tab--active': activeTab === 'finances' }"
+          @click="activeTab = 'finances'"
+        >Finances</button>
+        <button
+          role="tab"
+          type="button"
+          :aria-selected="activeTab === 'commutes'"
+          :class="{ 'settings-tab--active': activeTab === 'commutes' }"
+          @click="activeTab = 'commutes'"
+        >Commutes</button>
+      </nav>
 
-        <div v-if="p.selling_home" class="whatif-person__fields">
+      <div v-if="activeTab === 'finances'" class="settings-panel" role="tabpanel">
+        <div v-for="p in persons" :key="p.name" class="whatif-person">
+          <div class="whatif-person__head">
+            <strong>{{ p.name }}</strong>
+            <label class="whatif-person__toggle">
+              <input v-model="p.selling_home" type="checkbox" @change="scheduleEval" />
+              Selling a home to fund this purchase
+            </label>
+          </div>
+
+          <div v-if="p.selling_home" class="whatif-person__fields">
+            <label class="whatif-person__field">
+              Expected sale price (£)
+              <WholePoundsField v-model="p.home_sale_price" @input="scheduleEval" />
+            </label>
+            <label class="whatif-person__field">
+              Mortgage remaining (£)
+              <WholePoundsField v-model="p.outstanding_mortgage" @input="scheduleEval" />
+            </label>
+          </div>
+
           <label class="whatif-person__field">
-            Expected sale price (£)
-            <WholePoundsField v-model="p.home_sale_price" @input="scheduleEval" />
-          </label>
-          <label class="whatif-person__field">
-            Mortgage remaining (£)
-            <WholePoundsField v-model="p.outstanding_mortgage" @input="scheduleEval" />
-          </label>
-        </div>
-
-        <label class="whatif-person__field">
-          Cash available for the deposit (£)
-          <WholePoundsField v-model="p.cash_contribution" @input="scheduleEval" />
-        </label>
-
-        <div v-if="p.places_of_interest.length" class="whatif-person__pois">
-          <label v-for="poi in p.places_of_interest" :key="poi.label" class="whatif-person__field">
-            {{ poi.label }} — days per week
-            <input
-              v-model.number="poi.trips_per_week"
-              type="number" min="0" max="7" inputmode="numeric"
-              @input="scheduleEval"
-            />
+            Cash available for the deposit (£)
+            <WholePoundsField v-model="p.cash_contribution" @input="scheduleEval" />
           </label>
         </div>
       </div>
-    </div>
+
+      <div v-else class="settings-panel" role="tabpanel">
+        <div v-for="p in persons" :key="p.name" class="whatif-person">
+          <label class="whatif-person__field">
+            Has a car
+            <input v-model="p.has_car" type="checkbox" @change="scheduleEval" />
+          </label>
+          <label v-if="p.has_car" class="whatif-person__field">
+            Your car's petrol economy (MPG)
+            <input
+              v-model.number="p.petrol_mpg"
+              type="number" min="1" inputmode="numeric"
+              @input="scheduleEval"
+            />
+          </label>
+          <label class="whatif-person__field">
+            Willing to walk up to (minutes)
+            <input
+              v-model.number="p.bus_walk_penalty.value"
+              type="number" min="0" inputmode="numeric"
+              @input="scheduleEval"
+            />
+          </label>
+          <div v-if="p.places_of_interest.length" class="whatif-person__pois">
+            <label v-for="poi in p.places_of_interest" :key="poi.label" class="whatif-person__field">
+              {{ poi.label }} — days per week
+              <input
+                v-model.number="poi.trips_per_week"
+                type="number" min="0" max="7" inputmode="numeric"
+                @input="scheduleEval"
+              />
+            </label>
+          </div>
+        </div>
+      </div>
 
     <p v-if="busy" class="whatif__status">Updating…</p>
     <p v-if="errorMsg" class="whatif__error">{{ errorMsg }}</p>
