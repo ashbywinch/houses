@@ -328,9 +328,13 @@ function pounds(money: MoneyValue | undefined): string {
 const depositRows = computed(() => {
   const d = deposit.value
   if (!d) return []
+  const linesByLabel = new Map(
+    (d.provenance?.formula?.lines ?? []).map(l => [l.label, l.value])
+  )
   return persons.value.map(p => ({
     name: p.name,
     amount: d.persons[p.name],
+    formula: linesByLabel.get(p.name) ?? '',
   }))
 })
 </script>
@@ -400,7 +404,10 @@ const depositRows = computed(() => {
                 :key="row.name"
                 :class="{ 'deposit-rows__zero': Number(row.amount?.amount ?? 0) === 0 }"
               >
-                <span>{{ row.name }}</span>
+                <span>
+                  {{ row.name }}
+                  <small v-if="row.formula" class="deposit-rows__formula">{{ row.formula }}</small>
+                </span>
                 <span class="amount">{{ pounds(row.amount) }}</span>
               </li>
             </ul>
@@ -426,12 +433,12 @@ const depositRows = computed(() => {
               <span v-if="isOwn(person)" class="settings-person__badge">you</span>
             </div>
             <label class="toggle-row">
-              <span class="toggle-row__label">I am selling a home to fund this purchase</span>
+              <span class="toggle-row__label">Selling a home to fund this purchase</span>
               <ToggleSwitch v-model="person.selling_home" :disabled="!isOwn(person)" @change="scheduleSave(person)" />
             </label>
             <template v-if="person.selling_home">
               <div class="stack-field">
-                <label for="home-sale">Expected sale price of current home (£)</label>
+                <label for="home-sale">Expected sale price (£)</label>
                 <WholePoundsField
                   id="home-sale"
                   :model-value="person.home_sale_price ? integerPounds(person.home_sale_price.amount) : ''"
@@ -439,7 +446,7 @@ const depositRows = computed(() => {
                 />
               </div>
               <div class="stack-field">
-                <label for="mortgage">Mortgage remaining on current home (£)</label>
+                <label for="mortgage">Mortgage remaining (£)</label>
                 <WholePoundsField
                   id="mortgage"
                   :model-value="person.outstanding_mortgage ? integerPounds(person.outstanding_mortgage.amount) : ''"

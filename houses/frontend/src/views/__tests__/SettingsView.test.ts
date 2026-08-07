@@ -310,8 +310,8 @@ describe('SettingsView — deposit summary and money labels', () => {
     const { wrapper, flush } = await mountView()
     await flush()
     const text = wrapper.text()
-    expect(text).toContain('Expected sale price of current home')
-    expect(text).toContain('Mortgage remaining on current home')
+    expect(text).toContain('Expected sale price (£)')
+    expect(text).toContain('Mortgage remaining (£)')
     expect(text).toContain('Other money toward the deposit')
   })
 })
@@ -426,9 +426,9 @@ describe('SettingsView — selling-home toggle (P7, B7)', () => {
     const { wrapper, flush } = await mountView()
     await flush()
     const simon = personSection(wrapper)
-    expect(simon.text()).toContain('I am selling a home to fund this purchase')
-    expect(simon.text()).toContain('Expected sale price of current home')
-    expect(simon.text()).toContain('Mortgage remaining on current home')
+    expect(simon.text()).toContain('Selling a home to fund this purchase')
+    expect(simon.text()).toContain('Expected sale price (£)')
+    expect(simon.text()).toContain('Mortgage remaining (£)')
   })
 
   it('hides the current-home fields for a cash-only person and relabels the deposit', async () => {

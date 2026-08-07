@@ -316,14 +316,14 @@ const ceilingLimitText = computed(() => {
       >&times;</button>
     </div>
 
-    <WhatIfPanel :threshold="maxPriceFilter ?? 1500" />
-
     <div class="legend-strip" role="note" aria-label="Commute time colours">
       <span class="legend-item"><i class="legend-dot legend-dot--good"></i>fine</span>
       <span class="legend-item"><i class="legend-dot legend-dot--warn"></i>getting tight</span>
       <span class="legend-item"><i class="legend-dot legend-dot--bad"></i>yikes</span>
       <span class="legend-item"><i class="legend-dot legend-dot--muted"></i>no route</span>
     </div>
+
+    <WhatIfPanel :threshold="maxPriceFilter ?? 1500" />
 
     <h2 v-if="activeTab === 'favourites'" class="tab-heading">Favourites</h2>
 

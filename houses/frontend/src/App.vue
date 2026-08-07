@@ -293,6 +293,13 @@ button { font: inherit; cursor: pointer; border: none; background: none; }
 }
 .deposit-rows li .amount { font-weight: var(--fw-semibold); color: var(--text); }
 .deposit-rows__zero { opacity: 0.45; }
+.deposit-rows__formula {
+  display: block;
+  font-size: var(--fs-2xs);
+  color: var(--text-muted);
+  font-weight: var(--fw-normal);
+  margin-top: 1px;
+}
 
 /* Buttons + footer */
 .btn-add {

@@ -227,22 +227,25 @@ function backToReal() {
             <label class="whatif-person__field">
               Expected sale price (£)
               <WholePoundsField v-model="p.home_sale_price" @input="scheduleEval" />
+              <span class="band-helper">What you expect to get when you sell it. Whole pounds only.</span>
             </label>
             <label class="whatif-person__field">
               Mortgage remaining (£)
               <WholePoundsField v-model="p.outstanding_mortgage" @input="scheduleEval" />
+              <span class="band-helper">What you still owe on the home you're selling. Whole pounds only.</span>
             </label>
           </div>
 
           <label class="whatif-person__field">
-            Cash available for the deposit (£)
+            {{ p.selling_home ? 'Other money toward the deposit (£)' : 'Cash available for the deposit (£)' }}
             <WholePoundsField v-model="p.cash_contribution" @input="scheduleEval" />
+            <span class="band-helper">{{ p.selling_home ? 'Savings or gifts, on top of the sale proceeds.' : 'Savings, gifts, or the proceeds of a sale.' }}</span>
           </label>
         </div>
       </div>
 
       <div v-else class="settings-panel" role="tabpanel">
-        <div v-for="p in persons" :key="p.name" class="settings-card whatif-person">
+        <div v-for="p in persons" :key="p.name" class="settings-card dest-card whatif-person">
           <label class="toggle-row">
             <span class="toggle-row__label">Has a car</span>
             <ToggleSwitch v-model="p.has_car" @change="scheduleEval" />
@@ -379,12 +382,24 @@ function backToReal() {
 .whatif-person__field {
   display: flex;
   flex-direction: column;
-  font-size: 0.8125rem;
-  gap: 0.2rem;
-  margin-right: 1rem;
-  min-width: 10rem;
+  gap: 0.25rem;
+  margin-bottom: var(--sp-2);
   color: var(--text-secondary);
+  font-size: var(--fs-sm);
 }
+.whatif-person__field input {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-base);
+  font-family: inherit;
+  color: var(--text);
+  background: var(--card-bg);
+  min-height: 44px;
+  box-sizing: border-box;
+  width: 100%;
+}
+.whatif-person__field .band-helper { font-size: var(--fs-2xs); }
 .whatif-person__field input {
   padding: 4px 10px;
   border: none;
