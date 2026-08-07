@@ -99,6 +99,22 @@ The session cookie lasts 30 days. On expiry the tool fails with a "Session expir
 
 Extraction/troubleshooting: `docs/bus-fares.md` (extraction process, flags, sheet update).
 
+## Fixing Bugs — Write the Contract Test First
+
+Before changing any code for a bug, write the regression test. The rule:
+
+> **Test the contract the user relies on, not the mechanism you're about to change.** The test must fail today, pass after your fix, and still fail if the same symptom regresses through a *different* mechanism.
+
+A test that only passes because of the specific lines you changed is a test of your edit, not of the bug.
+
+Apply it:
+
+1. **State the symptom as an invariant** in the user's language — "the current-house dropdown lists the family's current homes", "the commute shows on the property card".
+2. **Derive assertions from the symptom, not the code.** Reading the buggy code first biases you toward testing the mechanism; the bug report is what tells you the contract.
+3. **Assert outcomes, not internals.** Assert the commute is *available on the card*, not that `RailFareNode` returned `Attempt.succeeded`.
+4. **Test both sides of an interaction.** Where two things can shadow each other (literal vs parameterised routes, toggle on/off, serialization keys), pin both states — a precedence bug in either direction must fail loudly.
+5. **Watch it fail for the right reason**, fix the mechanism, then re-check: *would this test also catch a different mechanism producing the same symptom?* If not, widen it before committing.
+
 ## Fixing Bugs That Produced Wrong Persisted Data
 
 A code fix changes what a node computes, but existing `node_results` rows still hold buggy output. **The DAG only recomputes when a dep's timestamp changes — it doesn't detect code changes.** So after a fix you must force the affected nodes to recompute.
