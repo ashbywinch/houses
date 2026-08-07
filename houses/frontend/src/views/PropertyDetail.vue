@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { usePropertiesStore } from '../stores/properties'
 import Header from '../components/Header.vue'
+import MapView, { type MapMarker } from '../components/MapView.vue'
 import * as api from '../services/api'
 import CommuteSection from '../components/CommuteSection.vue'
 import CostsSection from '../components/CostsSection.vue'
@@ -72,6 +73,32 @@ const rightmoveUrl = computed(() =>
   detail.value?.rightmove_url?.succeeded ? detail.value.rightmove_url.value : null)
 const bestLocation = computed(() =>
   detail.value?.location?.best_location?.succeeded ? detail.value.location.best_location.value : null)
+
+// ── Map markers: the property + the two schools ─────
+const mapMarkers = computed<MapMarker[]>(() => {
+  const markers: MapMarker[] = []
+  if (bestLocation.value) {
+    markers.push({
+      lat: bestLocation.value.lat,
+      lon: bestLocation.value.lon,
+      label: address.value,
+      color: '#2563eb',
+    })
+  }
+  for (const key of ['primary', 'secondary'] as const) {
+    const school = detail.value?.schools?.[key]?.school
+    if (school?.succeeded && school.value?.lat != null && school.value?.lon != null) {
+      markers.push({
+        lat: school.value.lat,
+        lon: school.value.lon,
+        label: `${school.value.name} (${key === 'primary' ? 'Primary' : 'Secondary'})`,
+        color: key === 'primary' ? '#16a34a' : '#d97706',
+      })
+    }
+  }
+  return markers
+})
+const detailMapFailed = ref(false)
 
 // ── Share / Favourite ────────────────────────────────
 async function shareProperty() {
@@ -233,17 +260,17 @@ async function saveAddress() {
       <section id="section-summary" class="detail-section">
         <h2 class="detail-section__title">Summary</h2>
 
-        <!-- Embedded map -->
+        <!-- Map: the property + the two schools -->
         <div v-if="bestLocation" class="map-embed">
-          <iframe
-            :src="'https://www.openstreetmap.org/export/embed.html?bbox=' + (bestLocation.lon - 0.02) + '%2C' + (bestLocation.lat - 0.02) + '%2C' + (bestLocation.lon + 0.02) + '%2C' + (bestLocation.lat + 0.02) + '&amp;layer=mapnik&amp;marker=' + bestLocation.lat + '%2C' + bestLocation.lon"
-            width="100%"
-            height="180"
-            style="border: 0; border-radius: 12px;"
-            loading="lazy"
-            referrerpolicy="no-referrer"
-            title="Property location on OpenStreetMap"
-          ></iframe>
+          <MapView
+            v-if="!detailMapFailed"
+            :markers="mapMarkers"
+            :height="180"
+            @error="detailMapFailed = true"
+          />
+          <p v-else class="map-fallback-note">
+            The map didn't load — your browser may block embedded maps.
+          </p>
         </div>
         <div v-else class="map-placeholder">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
@@ -542,6 +569,21 @@ async function saveAddress() {
 .detail-field__value a:hover { text-decoration: underline; }
 
 /* Map */
+.map-embed {
+  margin-bottom: var(--sp-3);
+}
+.map-embed .map-view {
+  overflow: hidden;
+}
+.map-fallback-note {
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--slate-100);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
 .map-placeholder {
   display: flex;
   flex-direction: column;

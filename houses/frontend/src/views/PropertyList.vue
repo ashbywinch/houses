@@ -5,6 +5,7 @@ import type { PropertySummary } from '../types'
 import Header from '../components/Header.vue'
 import PropertyCard from '../components/PropertyCard.vue'
 import WhatIfPanel from '../components/WhatIfPanel.vue'
+import MapView, { type MapLayer, type MapMarker } from '../components/MapView.vue'
 
 const store = usePropertiesStore()
 
@@ -20,8 +21,36 @@ const maxPriceFilter = ref<number | null>(null)
 const minBedroomsFilter = ref<number | null>(null)
 const maxCommuteFilter = ref<number | null>(null)
 const mapFailed = ref(false)
+const isochroneLayers = ref<MapLayer[]>([])
 
-onMounted(() => { store.loadAll() })
+onMounted(() => {
+  store.loadAll()
+  fetchIsochrones()
+})
+
+/** The isochrone polygons for the Map page — the committed toolchain
+ *  artifacts (train shed, drive sheds, all-commutes intersection). */
+async function fetchIsochrones() {
+  try {
+    const r = await fetch('/api/map/isochrones')
+    if (r.ok) {
+      const data = await r.json()
+      isochroneLayers.value = data.layers ?? []
+    }
+  } catch (e) {
+    console.error('Failed to load isochrone layers:', e)
+  }
+}
+
+/** Property pins for the map: every house with a location. */
+const mapMarkers = computed<MapMarker[]>(() =>
+  allLocations().map(loc => ({
+    lat: loc.lat,
+    lon: loc.lon,
+    label: loc.price || loc.address,
+    url: '#/property/' + loc.rid,
+  })),
+)
 
 const sortOptions = [
   { value: 'price_asc', label: 'Price: Low→High' },
@@ -155,36 +184,6 @@ function allLocations() {
   return locs
 }
 
-function _mapBounds() {
-  const locs = allLocations()
-  if (locs.length === 0) return null
-  let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180
-  for (const l of locs) {
-    if (l.lat < minLat) minLat = l.lat; if (l.lat > maxLat) maxLat = l.lat
-    if (l.lon < minLon) minLon = l.lon; if (l.lon > maxLon) maxLon = l.lon
-  }
-  const pad = Math.max((maxLat - minLat) * 0.3, 0.01)
-  return { minLat: minLat - pad, maxLat: maxLat + pad, minLon: minLon - pad, maxLon: maxLon + pad }
-}
-
-function mapBbox() {
-  const b = _mapBounds()
-  if (!b) return '-0.2,51.3,0.0,51.7'
-  return `${b.minLon.toFixed(4)},${b.minLat.toFixed(4)},${b.maxLon.toFixed(4)},${b.maxLat.toFixed(4)}`
-}
-
-function pinStyle(lat: number, lon: number) {
-  const b = _mapBounds()
-  if (!b) return { display: 'none' }
-  const lonRange = b.maxLon - b.minLon
-  const latRange = b.maxLat - b.minLat
-  if (lonRange === 0 || latRange === 0) return { display: 'none' }
-  return {
-    left: `${((lon - b.minLon) / lonRange * 100).toFixed(2)}%`,
-    top: `${(100 - (lat - b.minLat) / latRange * 100).toFixed(2)}%`,
-  }
-}
-
 // ── Display list (filtered + sorted) ──────────────────
 
 const displayedRids = computed(() => {
@@ -244,27 +243,16 @@ const ceilingLimitText = computed(() => {
 
   <!-- Map tab -->
   <div v-if="activeTab === 'map'" class="map-full">
-    <iframe
+    <MapView
       v-if="!mapFailed"
-      :src="'https://www.openstreetmap.org/export/embed.html?bbox=' + mapBbox() + '&layer=mapnik'"
-      width="100%" height="100%" style="border:0;" loading="lazy"
-      referrerpolicy="no-referrer" title="Properties on OpenStreetMap"
+      :markers="mapMarkers"
+      :layers="isochroneLayers"
+      class="map-full__leaflet"
       @error="mapFailed = true"
-    ></iframe>
+    />
     <p v-if="mapFailed" class="map-fallback-note">
       The map didn't load — your browser may block embedded maps. The pins are listed below.
     </p>
-    <div class="map-pins">
-      <a
-        v-for="loc in allLocations()"
-        :key="loc.rid"
-        :href="'#/property/' + loc.rid"
-        class="map-pin"
-        :style="pinStyle(loc.lat, loc.lon)"
-      >
-        <span class="map-pin__label">{{ loc.price || loc.address }}</span>
-      </a>
-    </div>
   </div>
 
   <!-- Properties / Favourites tab -->
@@ -512,14 +500,7 @@ const ceilingLimitText = computed(() => {
 @media (min-width:960px) { .card-list { grid-template-columns:1fr 1fr 1fr; } }
 
 .map-full { position:fixed; top:56px; left:0; right:0; bottom:56px; z-index:1; }
-.map-pins { position:absolute; inset:0; pointer-events:none; }
-.map-pin { position:absolute; pointer-events:auto; text-decoration:none; transform:translate(-50%,-100%); padding:10px; margin:-10px; }
-.map-pin__label {
-  display:block; background:var(--card-bg); color:var(--text); font-size: var(--fs-xs); font-weight: var(--fw-bold);
-  padding:2px 8px; border-radius:6px; border:2px solid var(--blue); white-space:nowrap;
-  box-shadow:0 1px 4px rgba(0,0,0,0.2); line-height:1.4;
-}
-.map-pin:hover .map-pin__label { border-color:var(--green); background:var(--green-bg); }
+.map-full__leaflet { height: 100%; width: 100%; }
 
 .sheet-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:90; }
 .sheet {

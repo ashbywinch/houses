@@ -124,6 +124,10 @@ export interface SchoolValue {
   ofsted: string
   distance: { value: number; unit: string }
   url: string
+  lat?: number
+  lon?: number
+  postcode?: string
+  full_address?: string
 }
 
 export interface MonthlyCostSummary {

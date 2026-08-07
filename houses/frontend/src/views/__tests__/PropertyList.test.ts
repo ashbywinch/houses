@@ -12,6 +12,29 @@ vi.mock('../../services/api', () => ({
   patchTriage: vi.fn(),
 }))
 
+// Leaflet needs a real layout engine — jsdom can't size a map. The
+// MapView catches init failure and emits 'error' (the fallback note),
+// so a stub map object keeps the component mounting without a DOM.
+const mockMap = {
+  addLayer: vi.fn(),
+  remove: vi.fn(),
+  fitBounds: vi.fn(),
+  invalidateSize: vi.fn(),
+  on: vi.fn(),
+  removeLayer: vi.fn(),
+}
+vi.mock('leaflet', () => ({
+  default: {
+    map: vi.fn(() => mockMap),
+    tileLayer: vi.fn(() => ({ addTo: vi.fn() })),
+    layerGroup: vi.fn(() => ({ addTo: vi.fn(), clearLayers: vi.fn() })),
+    polygon: vi.fn(() => ({ bindPopup: vi.fn(), addTo: vi.fn() })),
+    circleMarker: vi.fn(() => ({ bindPopup: vi.fn(), addTo: vi.fn() })),
+    latLngBounds: vi.fn(() => ({ pad: vi.fn(() => ({})) })),
+  },
+}))
+vi.mock('leaflet/dist/leaflet.css', () => ({}))
+
 import * as api from '../../services/api'
 
 const mockData: Record<string, PropertySummary> = {
@@ -412,7 +435,7 @@ describe('PropertyList map tab markers', () => {
     vi.mocked(api.fetchAllSummaries).mockResolvedValue(mockData as any)
   })
 
-  it('renders a pin for each property with location data', async () => {
+  it('passes a marker to the map for each property with location data', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = usePropertiesStore()
@@ -432,12 +455,16 @@ describe('PropertyList map tab markers', () => {
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
 
-    // all three mock properties have best_location set — loadAll fetches all 3
-    const pins = wrapper.findAll('.map-pin')
-    expect(pins.length).toBe(4)
+    const mapView = wrapper.findComponent({ name: 'MapView' })
+    expect(mapView.exists()).toBe(true)
+    const markers = mapView.props('markers') as { lat: number; lon: number; url: string }[]
+    expect(markers.length).toBeGreaterThanOrEqual(2)
+    for (const m of markers) {
+      expect(m.url).toMatch(/^#\/property\//)
+    }
   })
 
-  it('renders no pins when no properties have location data', async () => {
+  it('passes no markers when no properties have location data', async () => {
     // Override the mock for this test — return properties without locations
     vi.mocked(api.fetchAllSummaries).mockResolvedValue({
       'prop-x': {
@@ -472,8 +499,9 @@ describe('PropertyList map tab markers', () => {
     await wrapper.setData({ activeTab: 'map' })
     await wrapper.vm.$nextTick()
 
-    const pins = wrapper.findAll('.map-pin')
-    expect(pins.length).toBe(0)
+    const mapView = wrapper.findComponent({ name: 'MapView' })
+    expect(mapView.exists()).toBe(true)
+    expect((mapView.props('markers') as unknown[]).length).toBe(0)
   })
 })
 describe('PropertyList map pins are interactive', () => {
@@ -481,7 +509,7 @@ describe('PropertyList map pins are interactive', () => {
     vi.mocked(api.fetchAllSummaries).mockResolvedValue(mockData as any)
   })
 
-  it('each pin is a link to the property detail page', async () => {
+  it('each marker links to the property detail page', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const wrapper = mount(PropertyList, {
@@ -495,16 +523,15 @@ describe('PropertyList map pins are interactive', () => {
     await wrapper.setData({ activeTab: 'map' })
     await wrapper.vm.$nextTick()
 
-    const pins = wrapper.findAll('.map-pin')
-    expect(pins.length).toBeGreaterThan(0)
-    pins.forEach(pin => {
-      expect(pin.element.tagName).toBe('A')
-      const href = pin.attributes('href')
-      expect(href).toMatch(/^#\/property\//)
+    const mapView = wrapper.findComponent({ name: 'MapView' })
+    const markers = mapView.props('markers') as { url: string; label: string }[]
+    expect(markers.length).toBeGreaterThan(0)
+    markers.forEach(m => {
+      expect(m.url).toMatch(/^#\/property\//)
     })
   })
 
-  it('pin shows the property price as visible label', async () => {
+  it('marker labels show the property price', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const wrapper = mount(PropertyList, {
@@ -518,11 +545,13 @@ describe('PropertyList map pins are interactive', () => {
     await wrapper.setData({ activeTab: 'map' })
     await wrapper.vm.$nextTick()
 
-    const pinText = wrapper.text()
-    // Property prices from mockData should appear on pins
-    expect(pinText).toContain('£200,000')
-    expect(pinText).toContain('£300,000')
-    expect(pinText).toContain('£500,000')
+    const mapView = wrapper.findComponent({ name: 'MapView' })
+    const markers = mapView.props('markers') as { label: string }[]
+    const labels = markers.map(m => m.label).join(' ')
+    // Property prices from mockData should appear on markers
+    expect(labels).toContain('£200,000')
+    expect(labels).toContain('£300,000')
+    expect(labels).toContain('£500,000')
   })
 })
 

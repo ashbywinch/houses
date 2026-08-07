@@ -640,6 +640,18 @@ def _person_from_dict(d: dict, target: Person) -> Person:
     return replace(target, **updates)
 
 
+@api_router.get("/map/isochrones")
+async def get_isochrone_layers():
+    """The isochrone polygons for the Map page (transit shed, drive sheds,
+    all-commutes intersection) from the committed toolchain artifacts.
+
+    Returns ``{"layers": [...]}``; empty layers when no artifacts exist.
+    """
+    from houses.map_layers import isochrone_layers
+
+    return {"layers": isochrone_layers()}
+
+
 @api_router.patch("/settings/person/{name}")
 async def patch_person(name: str, body: dict, request: Request):
     """Update one person's settings — own person / superuser / guardian.

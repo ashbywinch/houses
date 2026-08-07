@@ -16,6 +16,29 @@ vi.mock('../../services/api', () => ({
   postComment: vi.fn().mockResolvedValue({ person: 'Ashby', text: '', timestamp: new Date().toISOString() }),
 }))
 
+// Leaflet needs a real layout engine — jsdom can't size a map. The
+// MapView catches init failure and emits 'error' (the fallback note),
+// so a stub map object keeps the component mounting without a DOM.
+const mockMap = {
+  addLayer: vi.fn(),
+  remove: vi.fn(),
+  fitBounds: vi.fn(),
+  invalidateSize: vi.fn(),
+  on: vi.fn(),
+  removeLayer: vi.fn(),
+}
+vi.mock('leaflet', () => ({
+  default: {
+    map: vi.fn(() => mockMap),
+    tileLayer: vi.fn(() => ({ addTo: vi.fn() })),
+    layerGroup: vi.fn(() => ({ addTo: vi.fn(), clearLayers: vi.fn() })),
+    polygon: vi.fn(() => ({ bindPopup: vi.fn(), addTo: vi.fn() })),
+    circleMarker: vi.fn(() => ({ bindPopup: vi.fn(), addTo: vi.fn() })),
+    latLngBounds: vi.fn(() => ({ pad: vi.fn(() => ({})) })),
+  },
+}))
+vi.mock('leaflet/dist/leaflet.css', () => ({}))
+
 function makeDetail(): PropertyDetailType {
   return {
     rid: '123',
@@ -158,6 +181,90 @@ describe('PropertyDetail renders commute legs from CostGroups', () => {
     expect(text).not.toContain('NaN')
     // Should show the raw-number cost
     expect(text).toContain('15.50')
+  })
+})
+
+describe('PropertyDetail map shows property + schools', () => {
+  async function mountWithDetail(overrides?: Partial<ReturnType<typeof makeDetail>>) {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/property/:rid', component: PropertyDetail }],
+    })
+    router.push('/property/123')
+    await router.isReady()
+
+    const wrapper = mount(PropertyDetail, {
+      global: { plugins: [createPinia(), router] },
+    })
+
+    const store = usePropertiesStore()
+    store.details['123'] = makeDetail()
+    if (overrides) {
+      store.details['123'] = { ...makeDetail(), ...overrides }
+    }
+    store.loading = false
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    return wrapper
+  }
+
+  it('passes a marker for the property plus the two schools', async () => {
+    const wrapper = await mountWithDetail({
+      schools: {
+        primary: {
+          school: {
+            succeeded: true,
+            value: { name: 'Heights Primary', ofsted: 'Good', distance: { value: 1, unit: 'km' }, url: '', lat: 51.48, lon: -0.99 },
+            error: null,
+            provenance: { label: 'test' },
+          },
+        },
+        secondary: {
+          school: {
+            succeeded: true,
+            value: { name: 'Highdown School', ofsted: 'Good', distance: { value: 2, unit: 'km' }, url: '', lat: 51.5, lon: -0.97 },
+            error: null,
+            provenance: { label: 'test' },
+          },
+        },
+      },
+    })
+
+    const mapView = wrapper.findComponent({ name: 'MapView' })
+    expect(mapView.exists()).toBe(true)
+    const markers = mapView.props('markers') as { label: string; lat: number; lon: number }[]
+    expect(markers.length).toBe(3)
+    expect(markers[0].label).toBe('1 Main St, London')
+    expect(markers.some(m => m.label.includes('Heights Primary'))).toBe(true)
+    expect(markers.some(m => m.label.includes('Highdown School'))).toBe(true)
+  })
+
+  it('skips schools without coordinates', async () => {
+    const wrapper = await mountWithDetail({
+      schools: {
+        primary: {
+          school: {
+            succeeded: true,
+            value: { name: 'No Coords Primary', ofsted: '', distance: { value: 1, unit: 'km' }, url: '' },
+            error: null,
+            provenance: { label: 'test' },
+          },
+        },
+        secondary: {
+          school: {
+            succeeded: false,
+            value: null,
+            error: 'not found',
+            provenance: { label: 'test' },
+          },
+        },
+      },
+    })
+
+    const mapView = wrapper.findComponent({ name: 'MapView' })
+    const markers = mapView.props('markers') as { label: string }[]
+    expect(markers.length).toBe(1) // property only
+    expect(markers[0].label).toBe('1 Main St, London')
   })
 })
 
@@ -406,7 +513,7 @@ describe('PropertyDetail notes', () => {
 })
 
 describe('PropertyDetail map embed', () => {
-  it('renders embedded map iframe when location is available', async () => {
+  it('renders the Leaflet map when location is available', async () => {
     const router = createRouter({
       history: createWebHashHistory(),
       routes: [{ path: '/property/:rid', component: PropertyDetail }],
@@ -428,12 +535,11 @@ describe('PropertyDetail map embed', () => {
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
 
-    const iframe = wrapper.find('iframe')
-    expect(iframe.exists()).toBe(true)
-    const src = iframe.attributes('src') ?? ''
-    expect(src).toContain('openstreetmap.org/export/embed')
-    expect(src).toContain('51.5')
-    expect(src).toContain('-0.1')
+    const mapView = wrapper.findComponent({ name: 'MapView' })
+    expect(mapView.exists()).toBe(true)
+    const markers = mapView.props('markers') as { lat: number; lon: number }[]
+    // the property's location is on the map
+    expect(markers.some(m => m.lat === 51.5 && m.lon === -0.1)).toBe(true)
   })
 
   it('shows placeholder when no location data', async () => {

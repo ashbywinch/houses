@@ -546,6 +546,27 @@ PARK leg because Reading's car-park cost was unknown.
   push `is_superuser=True` persons where they exercise superuser paths
   (settings are now authoritative both ways).
 
+## Part E — Leaflet maps: isochrones + schools (2026-08-07)
+
+- The Map page tab and the detail-page map are now real Leaflet maps
+  (npm leaflet, shared `MapView.vue` component) instead of OSM embed
+  iframes.
+- `GET /api/map/isochrones` serves the committed toolchain artifacts
+  (`union.json` transit shed → "Train: Pimlico & Aldgate",
+  `drive_searches.json` → one "Drive to <label>" layer per destination,
+  `intersection.json` → "Where we could live") via `houses/map_layers.py`
+  — the same shape the toolchain's own map renders.
+- Map page: property pins (blue circle markers linking to detail) over
+  the isochrone polygons; the old absolute-positioned pin overlay and
+  iframe are gone.
+- Detail page: the summary map shows the property (blue) plus the two
+  schools (primary green, secondary amber) when they carry coordinates;
+  `SchoolValue` type gained `lat`/`lon`/`postcode`/`full_address`.
+- Both maps fall back to a "map didn't load" note on init failure.
+- Tests: `test_map_layers.py` (artifact→layers shape + endpoint);
+  PropertyList/PropertyDetail map tests assert the MapView marker/layer
+  props (Leaflet mocked — jsdom can't size a map).
+
 ## Verification
 
 - `make test` green; ruff + basedpyright clean; language sweep green.
