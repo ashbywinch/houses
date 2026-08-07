@@ -94,7 +94,9 @@ export interface CommuteValue {
   mode?: string
   duration?: { value: number; unit: string }
   daily_cost?: { amount: string; currency: string }
-  details?: CostGroup[]
+  // The API serializes the Commute model's stored field (_details), not
+  // the guarded `details` property (which raises for infeasible commutes).
+  _details?: CostGroup[]
   route_description?: string
   is_child?: boolean
   person?: { name?: string }
