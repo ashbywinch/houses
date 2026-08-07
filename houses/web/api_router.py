@@ -731,10 +731,12 @@ async def patch_works_estimate(
 
 @api_router.get("/persons")
 async def list_persons():
-    """Return the list of persons with non-empty email addresses.
+    """Return ALL persons (name, email when present, is_child).
 
-    Used by the frontend superuser impersonation dropdown.
-    Requires authentication via the /api/ middleware.
+    Used by the frontend superuser impersonation dropdown. The email
+    filter is gone — callers that need only email-linked persons (or
+    only adults) must filter themselves; the impersonate endpoint
+    enforces the no-children rule server-side.
     """
     svc = get_services()
     persons_attempt = svc.persons_source.latest_attempt()
@@ -742,11 +744,17 @@ async def list_persons():
     if persons_attempt.succeeded:
         for p in persons_attempt.value_or_none() or []:
             if isinstance(p, dict):
-                email = p.get("email", "")
-                if email:
-                    result.append({"name": p.get("name", ""), "email": email})
-            elif hasattr(p, "email") and p.email:
-                result.append({"name": getattr(p, "name", ""), "email": p.email})
+                result.append(
+                    {"name": p.get("name", ""), "email": p.get("email", ""), "is_child": bool(p.get("is_child"))}
+                )
+            else:
+                result.append(
+                    {
+                        "name": getattr(p, "name", ""),
+                        "email": getattr(p, "email", ""),
+                        "is_child": bool(getattr(p, "is_child", False)),
+                    }
+                )
     return {"persons": result}
 
 

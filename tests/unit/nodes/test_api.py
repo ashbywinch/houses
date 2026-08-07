@@ -577,6 +577,21 @@ class TestSettingsPropagationApi:
         ashby = next(p for p in value if p["name"] == "Ashby")
         assert ashby["selling_home"] is True
 
+    def test_list_persons_returns_everyone_including_email_less(self):
+        """The impersonation dropdown lists ALL persons — no email
+        filter; callers that need only email-linked persons filter
+        themselves (the server's no-children rule lives in the
+        impersonate endpoint)."""
+        client = self._setup()
+        persons = client.get("/api/persons").json()["persons"]
+        names = {p["name"]: p for p in persons}
+        # email-less persons are present (Ashby has no email in defaults)
+        assert "Ashby" in names
+        assert names["Ashby"]["email"] == ""
+        assert names["Ashby"]["is_child"] is False
+        assert "Simon" in names
+        assert "email" in names["Simon"]
+
     def test_get_settings_carries_household_deposit(self):
         """GET /settings reports the household deposit as one number —
         per person (sale − remaining mortgage + extra money) and the

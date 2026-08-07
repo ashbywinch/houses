@@ -212,6 +212,17 @@ class TestImpersonate:
         assert "session=" in set_cookie
         assert "Max-Age=0" not in set_cookie
 
+    def test_cannot_impersonate_a_child(self):
+        """Superusers may act as any ADULT — children are off limits."""
+        cookie = _inject_session(email="simon@example.com", is_superuser=True)
+        resp = client.post(
+            "/api/auth/impersonate",
+            json={"person": "George"},  # a child in the family defaults
+            cookies={"session": cookie},
+        )
+        assert resp.status_code == 400
+        assert "child" in resp.json()["detail"].lower()
+
     def test_stop_impersonating(self):
         cookie = _inject_session(email="simon@example.com", is_superuser=True, impersonating="Ashby")
         resp = client.post(

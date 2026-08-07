@@ -411,33 +411,6 @@ const depositRows = computed(() => {
             />
           </div>
 
-          <!-- Household finances -->
-          <section
-            v-if="financial"
-            class="settings-finances settings-card"
-            @input="scheduleFinancialSave"
-            @change="scheduleFinancialSave"
-            @focusout="flushFinancialSave"
-          >
-            <div class="card-heading">Household finances</div>
-            <div class="stack-field">
-              <label for="mortgage-rate">Mortgage rate (%)</label>
-              <input id="mortgage-rate" type="text" inputmode="decimal" v-model="fin['mortgage-rate']" />
-            </div>
-            <div class="stack-field">
-              <label for="mortgage-term">Mortgage term (years)</label>
-              <input id="mortgage-term" type="text" inputmode="numeric" v-model="fin['mortgage-term']" />
-            </div>
-            <div class="stack-field">
-              <label for="sinking-fund">Sinking fund (% of value per year)</label>
-              <input id="sinking-fund" type="text" inputmode="decimal" v-model="fin['sinking-fund']" />
-            </div>
-            <div class="stack-field">
-              <label for="petrol-cost">Petrol cost (£ per litre)</label>
-              <input id="petrol-cost" type="text" inputmode="decimal" v-model="fin['petrol-cost']" />
-            </div>
-          </section>
-
           <!-- The person's money -->
           <section
             v-for="person in visiblePersons"
@@ -500,6 +473,33 @@ const depositRows = computed(() => {
               />
             </div>
           </section>
+          <!-- Household finances -->
+          <section
+            v-if="financial"
+            class="settings-finances settings-card"
+            @input="scheduleFinancialSave"
+            @change="scheduleFinancialSave"
+            @focusout="flushFinancialSave"
+          >
+            <div class="card-heading">Household finances</div>
+            <div class="stack-field">
+              <label for="mortgage-rate">Mortgage rate (%)</label>
+              <input id="mortgage-rate" type="text" inputmode="decimal" v-model="fin['mortgage-rate']" />
+            </div>
+            <div class="stack-field">
+              <label for="mortgage-term">Mortgage term (years)</label>
+              <input id="mortgage-term" type="text" inputmode="numeric" v-model="fin['mortgage-term']" />
+            </div>
+            <div class="stack-field">
+              <label for="sinking-fund">Sinking fund (% of value per year)</label>
+              <input id="sinking-fund" type="text" inputmode="decimal" v-model="fin['sinking-fund']" />
+            </div>
+            <div class="stack-field">
+              <label for="petrol-cost">Petrol cost (£ per litre)</label>
+              <input id="petrol-cost" type="text" inputmode="decimal" v-model="fin['petrol-cost']" />
+            </div>
+          </section>
+
         </div>
 
         <!-- ═══════ COMMUTES ═══════ -->
@@ -517,83 +517,7 @@ const depositRows = computed(() => {
               Goes to school near the house, so school runs are worked out per property.
             </p>
 
-            <!-- Has a car + the car's own MPG -->
-            <div class="settings-card">
-              <label class="toggle-row">
-                <span class="toggle-row__label">Has a car</span>
-                <ToggleSwitch v-model="person.has_car" :disabled="!isOwn(person)" @change="scheduleSave(person)" />
-              </label>
-              <div v-if="person.has_car" class="stack-field">
-                <label for="petrol-mpg">Your car's petrol economy (MPG)</label>
-                <input
-                  id="petrol-mpg"
-                  type="text"
-                  inputmode="numeric"
-                  :value="person.petrol_mpg ?? 45"
-                  :disabled="!isOwn(person)"
-                  @input="(e) => { const v = Number((e.target as HTMLInputElement).value); if (Number.isFinite(v) && v > 0) person.petrol_mpg = v }"
-                />
-              </div>
-            </div>
-
-            <!-- Commute colour bands -->
-            <div class="settings-card">
-              <div class="card-heading">Commute colour bands</div>
-              <div class="band-row">
-                <input
-                  id="good-max"
-                  class="input-half"
-                  type="number"
-                  :value="thresholds[person.name]?.good_max_minutes"
-                  :disabled="!isOwn(person)"
-                  aria-label="Commute is easy up to (minutes)"
-                  @input="(e) => { const t = thresholds[person.name]; if (t) t.good_max_minutes = Number((e.target as HTMLInputElement).value) }"
-                />
-                <div class="band" role="img" aria-label="Easy to hard: green to red">
-                  <span class="band__good"></span><span class="band__warn"></span><span class="band__bad"></span>
-                </div>
-                <input
-                  id="fine-max"
-                  class="input-half"
-                  type="number"
-                  :value="thresholds[person.name]?.fine_max_minutes"
-                  :disabled="!isOwn(person)"
-                  aria-label="Worst acceptable commute (minutes)"
-                  @input="(e) => { const t = thresholds[person.name]; if (t) t.fine_max_minutes = Number((e.target as HTMLInputElement).value) }"
-                />
-              </div>
-              <div class="band-caption"><span>easy</span><span>tight</span><span>yikes</span></div>
-              <div class="band-preview">
-                <span class="band-preview__item">
-                  <span class="band-preview__pill band-preview__pill--good">22 min</span>
-                  under {{ thresholds[person.name]?.good_max_minutes ?? 30 }} = fine
-                </span>
-                <span class="band-preview__item">
-                  <span class="band-preview__pill band-preview__pill--warn">38 min</span>
-                  {{ thresholds[person.name]?.good_max_minutes ?? 30 }}–{{ thresholds[person.name]?.fine_max_minutes ?? 45 }} = tight
-                </span>
-                <span class="band-preview__item">
-                  <span class="band-preview__pill band-preview__pill--bad">52 min</span>
-                  over {{ thresholds[person.name]?.fine_max_minutes ?? 45 }} = yikes
-                </span>
-              </div>
-              <div class="stack-field">
-                <label for="max-walk">Willing to walk up to (minutes)</label>
-                <input
-                  id="max-walk"
-                  type="number"
-                  :value="walkMinutes(person)"
-                  :disabled="!isOwn(person)"
-                  @input="setWalkMinutes(person, $event)"
-                />
-              </div>
-              <p class="band-helper">
-                These colour the commute pills on the cards: up to the first is 'fine', between the two
-                is 'getting tight', over the worst is 'yikes'. Walking is only offered for shorter trips.
-              </p>
-            </div>
-
-            <!-- Destinations: one card each -->
+            <!-- Destinations first — the most-edited settings -->
             <div class="card-heading">Destinations</div>
             <button
               v-if="isOwn(person)"
@@ -677,6 +601,89 @@ const depositRows = computed(() => {
                 </div>
               </div>
             </div>
+            <p v-if="person.places_of_interest.length === 0" class="settings-poi__empty">
+              No regular commutes.
+            </p>
+
+            <!-- Has-a-car and the colour bands only matter when there ARE commutes -->
+            <template v-if="person.places_of_interest.length > 0">
+            <!-- Has a car + the car's own MPG -->
+            <div class="settings-card">
+              <label class="toggle-row">
+                <span class="toggle-row__label">Has a car</span>
+                <ToggleSwitch v-model="person.has_car" :disabled="!isOwn(person)" @change="scheduleSave(person)" />
+              </label>
+              <div v-if="person.has_car" class="stack-field">
+                <label for="petrol-mpg">Your car's petrol economy (MPG)</label>
+                <input
+                  id="petrol-mpg"
+                  type="text"
+                  inputmode="numeric"
+                  :value="person.petrol_mpg ?? 45"
+                  :disabled="!isOwn(person)"
+                  @input="(e) => { const v = Number((e.target as HTMLInputElement).value); if (Number.isFinite(v) && v > 0) person.petrol_mpg = v }"
+                />
+              </div>
+            </div>
+
+            <!-- Commute colour bands -->
+            <div class="settings-card">
+              <div class="card-heading">Commute colour bands</div>
+              <div class="band-row">
+                <input
+                  id="good-max"
+                  class="input-half"
+                  type="number"
+                  :value="thresholds[person.name]?.good_max_minutes"
+                  :disabled="!isOwn(person)"
+                  aria-label="Commute is easy up to (minutes)"
+                  @input="(e) => { const t = thresholds[person.name]; if (t) t.good_max_minutes = Number((e.target as HTMLInputElement).value) }"
+                />
+                <div class="band" role="img" aria-label="Easy to hard: green to red">
+                  <span class="band__good"></span><span class="band__warn"></span><span class="band__bad"></span>
+                </div>
+                <input
+                  id="fine-max"
+                  class="input-half"
+                  type="number"
+                  :value="thresholds[person.name]?.fine_max_minutes"
+                  :disabled="!isOwn(person)"
+                  aria-label="Worst acceptable commute (minutes)"
+                  @input="(e) => { const t = thresholds[person.name]; if (t) t.fine_max_minutes = Number((e.target as HTMLInputElement).value) }"
+                />
+              </div>
+              <div class="band-caption"><span>easy</span><span>tight</span><span>yikes</span></div>
+              <div class="band-preview">
+                <span class="band-preview__item">
+                  <span class="band-preview__pill band-preview__pill--good">22 min</span>
+                  under {{ thresholds[person.name]?.good_max_minutes ?? 30 }} = fine
+                </span>
+                <span class="band-preview__item">
+                  <span class="band-preview__pill band-preview__pill--warn">38 min</span>
+                  {{ thresholds[person.name]?.good_max_minutes ?? 30 }}–{{ thresholds[person.name]?.fine_max_minutes ?? 45 }} = tight
+                </span>
+                <span class="band-preview__item">
+                  <span class="band-preview__pill band-preview__pill--bad">52 min</span>
+                  over {{ thresholds[person.name]?.fine_max_minutes ?? 45 }} = yikes
+                </span>
+              </div>
+              <div class="stack-field">
+                <label for="max-walk">Willing to walk up to (minutes)</label>
+                <input
+                  id="max-walk"
+                  type="number"
+                  :value="walkMinutes(person)"
+                  :disabled="!isOwn(person)"
+                  @input="setWalkMinutes(person, $event)"
+                />
+              </div>
+              <p class="band-helper">
+                These colour the commute pills on the cards: up to the first is 'fine', between the two
+                is 'getting tight', over the worst is 'yikes'. Walking is only offered for shorter trips.
+              </p>
+            </div>
+            </template>
+
             <p v-if="person.places_of_interest.length === 0" class="settings-poi__empty">
               No regular commutes.
             </p>

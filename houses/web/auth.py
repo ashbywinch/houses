@@ -400,6 +400,17 @@ async def impersonate(request: Request, body: dict):
     person = body.get("person")
     if person is not None and not isinstance(person, str):
         raise HTTPException(status_code=400, detail="person must be a string or null")
+    if person is not None:
+        from houses.services_provider import get_services
+
+        persons_attempt = get_services().persons_source.latest_attempt()
+        for p in persons_attempt.value_or_none() or []:
+            name = getattr(p, "name", None) if not isinstance(p, dict) else p.get("name")
+            if name == person:
+                is_child = bool(p.get("is_child")) if isinstance(p, dict) else bool(getattr(p, "is_child", False))
+                if is_child:
+                    raise HTTPException(status_code=400, detail="Cannot impersonate a child")
+                break
 
     new_cookie = _make_session_cookie(
         email=session["email"],
