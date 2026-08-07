@@ -186,7 +186,9 @@ class TestMonthlySinkingFundProvenance:
 
         a = await node.attempt()
         assert a.succeeded, f"expected succeeded, got: {a.status}: {a.error}"
-        assert a.value_or_none() == Money("416.67", "GBP")
+        # The ⅔ fudge is gone: monthly = yearly ÷ 12 (the per-person
+        # share is applied separately by the headline's group node).
+        assert a.value_or_none() == Money("625.00", "GBP")
 
         prov = await node.build_provenance()
         assert prov.formula is not None, "monthly sinking must expose a formula"

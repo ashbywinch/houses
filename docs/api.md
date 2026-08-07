@@ -6,7 +6,7 @@ All endpoints live on port 8765 (`make run`). **The source of truth is the runni
 |----------|--------------------|
 | `GET /properties`, `GET /properties/{rid}` | **Require `?tab=view` or `?tab=data`** — missing tab is an error |
 | `GET /properties/{rid}` | Detects duplicate RIDs → `409 Conflict` |
-| `POST /properties` | Single-property upsert **or** batch refresh (see below) |
+| `POST /api/properties` | Single-property upsert (scrape a Rightmove URL) **or** batch refresh (see below) |
 | `POST /properties/compare` | No-write re-enrich → TSV diff of sheet vs fresh values |
 | `POST /sync-view-formulas` | Refresh View tab XLOOKUPs after column changes; idempotent |
 
@@ -27,7 +27,7 @@ Query params:
 | `force` | bool | false | `true` = overwrite existing cells; `false` = fill blanks only |
 | `no_write` | bool | false | enrich without writing to the sheet |
 
-Example — force refresh Simon/Lorena for specific rows: `curl -X POST "http://localhost:8765/properties?fields=simon,lorena&force=true&rids=88275093,173431283"`.
+Example — force refresh Simon/Lorena for specific rows: `curl -X POST "http://localhost:8765/api/properties?fields=simon,lorena&force=true&rids=88275093,173431283"`.
 
 ## POST /properties/compare
 

@@ -88,8 +88,9 @@ Workstreams (each red/green):
     adjust; the DAG propagates correctly after save).
   - C3 — no unsaved-changes indicator; edits silently revert on refresh.
   - C4 — old-office commute on cards has no staleness signal.
-  - C5 — sinking fund £7,800/yr vs £433/mo looks inconsistent (the ⅔ split
-    is never explained) — provenance/copy fix.
+  - C5 — ~~sinking fund £7,800/yr vs £433/mo looks inconsistent (the ⅔ split
+    is never explained)~~ DONE: the ×⅔ fudge is removed (monthly = yearly ÷ 12)
+    and the note now reads "£X/mo is the yearly fund split across 12 months".
   - C6 — no plain-language sentence for what "Total Monthly" includes.
   - C7 — commute pill colours have no legend.
   - C8 — Map tab renders a bare price list, not a map.

@@ -2544,6 +2544,32 @@
                 }
             }
         ],
+        "./tests/unit/nodes/test_park_and_ride.py": [
+            {
+                "code": "reportArgumentType",
+                "range": {
+                    "startColumn": 17,
+                    "endColumn": 50,
+                    "lineCount": 1
+                }
+            },
+            {
+                "code": "reportArgumentType",
+                "range": {
+                    "startColumn": 33,
+                    "endColumn": 61,
+                    "lineCount": 1
+                }
+            },
+            {
+                "code": "reportArgumentType",
+                "range": {
+                    "startColumn": 68,
+                    "endColumn": 90,
+                    "lineCount": 1
+                }
+            }
+        ],
         "./tests/unit/nodes/test_person_serialization.py": [
             {
                 "code": "reportArgumentType",

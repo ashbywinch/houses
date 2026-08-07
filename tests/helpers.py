@@ -20,6 +20,7 @@ from houses.school import School
 from houses.school_gender import SchoolGender
 from houses.services import (
     CouncilTaxService,
+    DriveTimeService,
     EPCLookupService,
     GeocodingService,
     OAuthService,
@@ -223,6 +224,29 @@ class FakeRailFare(RailFareService):
         lorena: Commute | None,
     ) -> tuple[Commute | None, Commute | None]:
         return None, None
+
+
+class FakeDriveTime(DriveTimeService):
+    """Canned drive times — record which entry point was used so tests
+    can assert the postcode vs location fallback path."""
+
+    def __init__(
+        self,
+        minutes: int | None = 12,
+        location_minutes: int | None = None,
+    ):
+        self.minutes = minutes
+        self.location_minutes = minutes if location_minutes is None else location_minutes
+        self.estimate_calls: list[tuple[str, str]] = []
+        self.location_calls: list[tuple[Any, str]] = []
+
+    async def estimate(self, origin_postcode: str, station_name: str) -> int | None:
+        self.estimate_calls.append((origin_postcode, station_name))
+        return self.minutes
+
+    async def estimate_from_location(self, origin, station_name: str) -> int | None:
+        self.location_calls.append((origin, station_name))
+        return self.location_minutes
 
 
 class FakeOAuthService(OAuthService):

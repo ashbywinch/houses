@@ -12,6 +12,24 @@ from houses.server import app
 client = TestClient(app)
 
 
+def _inject_session(c: TestClient) -> None:
+    """Add a valid signed session cookie — /api/* routes require auth."""
+    from houses.web.auth import _make_session_cookie
+
+    c.cookies.set(
+        "session",
+        _make_session_cookie(
+            email="simon@example.com",
+            name="Simon",
+            picture="",
+            is_superuser=True,
+        ),
+    )
+
+
+_inject_session(client)
+
+
 class TestInjectProperty:
     VALID_PAYLOAD = {
         "url": "https://www.rightmove.co.uk/properties/123456789",
@@ -27,7 +45,7 @@ class TestInjectProperty:
 
     @pytest.mark.integration
     def test_valid_payload_returns_data(self):
-        resp = client.post("/properties", json=self.VALID_PAYLOAD)
+        resp = client.post("/api/properties", json=self.VALID_PAYLOAD)
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] == "ok"
@@ -39,7 +57,7 @@ class TestInjectProperty:
         fixture_dir = Path(__file__).parent.parent / "fixtures"
         settings.rightmove_sample_page = str(fixture_dir / "rightmove_sample.html")
         try:
-            resp = client.post("/properties", json={"url": "https://www.rightmove.co.uk/properties/1"})
+            resp = client.post("/api/properties", json={"url": "https://www.rightmove.co.uk/properties/1"})
             assert resp.status_code == 200
             assert "url" in resp.json()["data"]
         finally:
@@ -48,7 +66,7 @@ class TestInjectProperty:
     @pytest.mark.integration
     def test_accepts_any_url(self):
         payload = {**self.VALID_PAYLOAD, "url": "https://example.com/"}
-        resp = client.post("/properties", json=payload)
+        resp = client.post("/api/properties", json=payload)
         assert resp.status_code == 200
 
     def test_rejects_existing_property_without_fields(self):
@@ -78,7 +96,7 @@ class TestInjectProperty:
         try:
             with patch("houses.server.get_client", return_value=mock_client):
                 resp = client.post(
-                    "/properties",
+                    "/api/properties",
                     json={"url": "https://www.rightmove.co.uk/properties/88375569"},
                 )
             assert resp.status_code == 400, f"Expected 400, got {resp.status_code}: {resp.text[:100]}"
@@ -90,7 +108,7 @@ class TestInjectProperty:
 
     @pytest.mark.integration
     def test_enrichment_fields_present(self):
-        resp = client.post("/properties", json=self.VALID_PAYLOAD)
+        resp = client.post("/api/properties", json=self.VALID_PAYLOAD)
         data = resp.json()["data"]
         assert "simon_commute" in data
         assert "lorena_commute" in data
@@ -104,7 +122,7 @@ class TestInjectProperty:
     @pytest.mark.integration
     def test_maidenhead_outcode_gets_full_enrichment(self):
         """Address with only outcode 'SL6' — server must accept it."""
-        resp = client.post("/properties", json=self.MAIDENHEAD_PAYLOAD)
+        resp = client.post("/api/properties", json=self.MAIDENHEAD_PAYLOAD)
         assert resp.status_code == 200
         data = resp.json()["data"]
         assert data["url"] == self.MAIDENHEAD_PAYLOAD["url"]

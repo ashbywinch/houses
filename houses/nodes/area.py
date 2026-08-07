@@ -52,20 +52,36 @@ class NearestTownNode(DerivedNode[str]):
 
 class TownDescNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, best_location, nearest_town, town_name, postcode_node):
+        self._postcode_node = postcode_node
+        self.best_location = best_location
+        self._nearest_town = nearest_town
+        self._town_name = town_name
         deps: tuple[Node, ...] = (best_location, nearest_town, town_name, postcode_node)
         super().__init__(node_id, dict, deps)
+
+    def _get_active_deps(self):
+        """The postcode is an optional refinement for the LLM prompt — a
+        pending/empty postcode (a property with no known postcode) must
+        not stall the town description.  The describe call works with an
+        empty postcode string."""
+        deps: list[Node] = [self.best_location, self._nearest_town, self._town_name]
+        pc = self._postcode_node.latest_attempt()
+        if pc.succeeded and pc.value_or_none():
+            deps.append(self._postcode_node)
+        return tuple(deps)
 
     async def compute(
         self,
         location: Attempt[GeoPoint],
         nearest_town: Attempt[str],
         town_name: Attempt[str],
-        postcode: Attempt[str],
+        postcode: Attempt[str] | None = None,
     ) -> Attempt[dict]:
         # Prefer the address-extracted town name (more specific), fall back to
         # reverse-geocoded town when the address has no recognizable town.
         town = town_name.value_or_none() or nearest_town.value_or_none()
-        pc = postcode.value_or_none() or ""
+        pc = postcode.value_or_none() if postcode is not None else None
+        pc = pc or ""
         if not town:
             return Attempt.impossible("no town name available from address or reverse geocode")
         svc = get_services()

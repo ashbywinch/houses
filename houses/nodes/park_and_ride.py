@@ -27,7 +27,14 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
     """Augments a transit commute with park-and-ride (drive to station, park, ride transit).
 
     Depends on the transit result, the property's location (for station lookups),
-    and the property's postcode (for drive time estimation).
+    and — when known — the property's postcode (for drive time estimation).
+
+    The postcode is a CONDITIONAL dependency: a pending/empty postcode
+    must not stall the chain, so ``_get_active_deps`` excludes it until
+    it carries a value, and compute falls back to the best location for
+    the drive-time estimate.  When the postcode later resolves, the
+    static-dep signal re-schedules this node and the estimate upgrades
+    to the postcode-based one.
     """
 
     def __init__(
@@ -51,11 +58,27 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         self._car_park_name: str = ""
         self._station_registry = station_registry
         self._car_park_registry = car_park_registry
+        # Static deps include postcode so its changed signal re-schedules
+        # this node when a postcode arrives later; _get_active_deps gates
+        # whether a PENDING postcode can block refresh.
         deps = (transit_node, max_walk_node)
         if has_car:
             deps = deps + (best_location, postcode_node)
         super().__init__(node_id, Commute, deps)
         self.display_name = "Park & Ride"
+
+    def _get_active_deps(self):
+        """The postcode is only an active dep once it has a value — a
+        pending/empty postcode must not stall refresh (a permanently
+        pending UserInputNode with no producer would freeze every
+        has-car commute chain forever)."""
+        deps: list[Node] = [self.transit_node, self._max_walk_node]
+        if self._has_car:
+            deps.append(self.best_location)
+            pc = self.postcode_node.latest_attempt()
+            if pc.succeeded and pc.value_or_none():
+                deps.append(self.postcode_node)
+        return tuple(deps)
 
     async def compute(
         self,
@@ -92,20 +115,27 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         if not self._has_car:
             return transit
 
-        # Need postcode for drive time estimation
-        postcode = postcode_attempt.value_or_none() if postcode_attempt and postcode_attempt.succeeded else None
-        if not postcode:
-            return transit
-
         # Find the station at the end of the walk leg
         station_name = commute.details[0].legs[0].end_station
         if not station_name:
             return transit
 
-        # Get actual drive time via the drive time service
+        # Drive time needs either a postcode or the best location.
+        # With neither, the walk stays — park-and-ride is skipped, but
+        # the commute itself is still valid.
+        postcode = postcode_attempt.value_or_none() if postcode_attempt and postcode_attempt.succeeded else None
+        origin = location.value_or_none() if location and location.succeeded else None
+        if not postcode and origin is None:
+            return transit
+
+        # Get actual drive time via the drive time service — postcode
+        # first, best-location fallback when the property has none.
         from houses.services_provider import get_services
 
-        drive_minutes = await get_services().drive_time_service.estimate(postcode, station_name)
+        if postcode:
+            drive_minutes = await get_services().drive_time_service.estimate(postcode, station_name)
+        else:
+            drive_minutes = await get_services().drive_time_service.estimate_from_location(origin, station_name)
         if drive_minutes is None:
             return transit
 

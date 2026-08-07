@@ -197,7 +197,7 @@ async def list_properties(tab: str = Query(description="Tab: 'view' or 'data'"))
     return {"tab": tab, "properties": props}
 
 
-@app.post("/properties", response_model=None)
+@app.post("/api/properties", response_model=None)
 async def upsert_property(
     payload: Property | None = None,
     no_write: bool = Query(default=False),
@@ -284,6 +284,7 @@ async def upsert_property(
                         "rightmove_bedrooms": prop.rightmove_bedrooms,
                         "rightmove_price": prop.rightmove_price,
                         "rightmove_location": prop.rightmove_location,
+                        "postcode": prop.postcode,
                     },
                 )
                 register_property(rid2, prop)

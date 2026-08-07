@@ -181,13 +181,15 @@ describe('CostsSection blocked-state copy (C1/C2)', () => {
 })
 
 describe('CostsSection explanatory copy (C5/C6/C10)', () => {
-  it('explains the sinking fund ⅔ split', () => {
+  it('explains the sinking fund is the yearly fund split across 12 months', () => {
     const wrapper = mountCosts({
       affordability: {
         monthly_sinking_fund: { succeeded: true, value: { amount: '433', currency: 'GBP' }, error: null, provenance: {} },
       },
     })
-    expect(wrapper.text()).toContain('⅔ of the yearly fund')
+    expect(wrapper.text()).toContain('is the yearly fund')
+    expect(wrapper.text()).toContain('split across 12 months')
+    expect(wrapper.text()).not.toContain('⅔')  // the ×⅔ fudge is gone
   })
 
   it('explains what Total Monthly includes', () => {
@@ -209,9 +211,13 @@ describe('CostsSection explanatory copy (C5/C6/C10)', () => {
     expect(wrapper.text()).toContain("The joint owners' monthly cost")
   })
 
-  it('explains that renovation costs are added to the mortgage', () => {
+  it('does NOT claim renovation costs are part of the mortgage', () => {
+    // Regression: the old copy said "Renovation costs are added to the
+    // amount you borrow — they're part of the mortgage". Build costs do
+    // NOT come from the mortgage — the fictional sentence is gone.
     const wrapper = mountCosts()
-    expect(wrapper.text()).toContain('added to the amount you borrow')
+    expect(wrapper.text()).not.toContain('added to the amount you borrow')
+    expect(wrapper.text()).not.toContain('part of the mortgage')
   })
 
   it('names the missing piece when the total cannot be calculated', () => {
@@ -235,9 +241,9 @@ describe('CostsSection explanatory copy (C5/C6/C10)', () => {
         monthly_sinking_fund: { succeeded: true, value: { amount: '361.11', currency: 'GBP' }, error: null, provenance: {} },
       },
     })
-    // 361.11/mo × 18 ≈ £6,500/yr
-    expect(wrapper.text()).toContain('£361.11/mo is ⅔ of the yearly fund')
-    expect(wrapper.text()).toContain('£6,500/yr')
+    // 361.11/mo × 12 ≈ £4,333/yr (no ×⅔)
+    expect(wrapper.text()).toContain('£361.11/mo is the yearly fund')
+    expect(wrapper.text()).toContain('£4,333/yr')
   })
 })
 

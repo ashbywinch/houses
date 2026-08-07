@@ -23,9 +23,11 @@ const open = ref(false)
       class="provenance-toggle__trigger"
       type="button"
       :aria-expanded="open"
+      title="How is this calculated?"
       @click="open = !open"
     >
-      {{ open ? 'Hide calculation' : 'How is this calculated?' }}
+      <span class="provenance-toggle__icon" aria-hidden="true">ⓘ</span>
+      <span class="provenance-toggle__label">{{ open ? 'Hide calculation' : 'How is this calculated?' }}</span>
     </button>
     <p v-if="hint" class="provenance-toggle__hint">{{ hint }}</p>
     <div v-if="open" class="provenance-toggle__body">
@@ -40,9 +42,18 @@ const open = ref(false)
   border: none;
   color: var(--blue);
   cursor: pointer;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
   font-size: 0.85rem;
   padding: 0;
+}
+.provenance-toggle__icon {
+  font-size: 0.95rem;
+}
+.provenance-toggle__label {
   text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .provenance-toggle__hint {
   color: var(--text-muted);

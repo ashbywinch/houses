@@ -124,9 +124,17 @@ class RailFareService(Protocol):
 
 
 class DriveTimeService(Protocol):
-    """Estimate driving time from an origin postcode to a station."""
+    """Estimate driving time from an origin to a station.
+
+    Two entry points: a postcode (geocoded by the implementation) or
+    known coordinates — park-and-ride falls back to the location-based
+    estimate when a property has no postcode but does have a best
+    location.
+    """
 
     async def estimate(self, origin_postcode: str, station_name: str) -> int | None: ...
+
+    async def estimate_from_location(self, origin, station_name: str) -> int | None: ...
 
 
 class _DefaultDriveTimeService:
@@ -134,6 +142,11 @@ class _DefaultDriveTimeService:
         from houses.transit_route import _get_drive_minutes
 
         return await _get_drive_minutes(origin_postcode, station_name)
+
+    async def estimate_from_location(self, origin, station_name: str) -> int | None:
+        from houses.transit_route import _get_drive_minutes_from_location
+
+        return await _get_drive_minutes_from_location(origin, station_name)
 
 
 class _DefaultOAuthService:

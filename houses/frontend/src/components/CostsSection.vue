@@ -51,15 +51,16 @@ const totalMonthlyApprox = computed(() => {
   return !!m?.succeeded && ((m.value?.couple?.stddev ?? 0) > 0)
 })
 
-/** Sinking fund note using THIS property's actual figures: the monthly
- *  shown is ⅔ of the yearly fund split across 12 months. */
+/** Sinking fund note: the monthly shown is the yearly fund split across
+ *  12 months (the old ×⅔ fudge is gone — per-person shares are applied
+ *  by the headline's group node, not here). */
 const sinkingFundNote = computed(() => {
   const m = props.affordability?.monthly_sinking_fund
   if (!m?.succeeded || !m.value) return ''
   const monthly = parseFloat(m.value.amount)
   if (!Number.isFinite(monthly) || monthly <= 0) return ''
-  const yearly = Math.round(monthly * 18) // monthly = yearly ÷ 12 × ⅔
-  return `£${monthly.toLocaleString()}/mo is ⅔ of the yearly fund (about £${yearly.toLocaleString()}/yr) split across 12 months.`
+  const yearly = Math.round(monthly * 12)
+  return `£${monthly.toLocaleString()}/mo is the yearly fund (about £${yearly.toLocaleString()}/yr) split across 12 months.`
 })
 
 /** When the total can't be calculated, name the leaf reason the UI
@@ -239,9 +240,6 @@ function canEdit(personName: string): boolean {
         <span v-else-if="isImpossible(affordability?.total_works)" class="costs-value costs-value--impossible">£? — required</span>
         <span v-else class="costs-value">?</span>
       </div>
-      <p v-if="affordability?.total_works?.succeeded" class="costs-note">
-        Renovation costs are added to the amount you borrow — they're part of the mortgage, not a monthly bill.
-      </p>
       <!-- Per-person works breakdown -->
       <div v-if="affordability?.works_estimates?.succeeded" class="costs-subsection">
         <div

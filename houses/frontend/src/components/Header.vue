@@ -47,9 +47,9 @@ onMounted(fetchPersons)
             class="header__su-toggle"
             :class="{ 'header__su-toggle--active': auth.superuserMode }"
             @click="auth.toggleSuperuser()"
-            title="Admin: switch between your view and acting as someone else"
+            title="Switch between your view and acting as another family member"
           >
-            Admin
+            <span aria-hidden="true">👤</span> {{ auth.superuserMode ? 'Stop impersonating' : 'Switch person' }}
           </button>
           <button class="header__auth-btn" @click="auth.logout()">Logout</button>
         </template>
@@ -116,10 +116,12 @@ onMounted(fetchPersons)
   transition: background 0.15s;
   text-decoration: none;
 }
-.header__auth-btn:hover,
-.header__su-toggle:hover,
-.header__settings-link:hover {
-  background: var(--pill-bg);
+.header__su-toggle {
+  border: 1px solid var(--amber-text);
+  color: var(--amber-text);
+}
+.header__su-toggle:hover {
+  background: var(--amber-bg);
 }
 .header__su-toggle--active {
   background: var(--amber-bg);
