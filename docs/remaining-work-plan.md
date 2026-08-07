@@ -628,6 +628,26 @@ PARK leg because Reading's car-park cost was unknown.
   MapView key behaviour; user-language sweep stays green (template
   comments must not use "isochrone").
 
+## Part E — TfL fare regression (2026-08-07)
+
+88275093 Simon/Pimlico showed "Could not calculate — no fare STL→EAL".
+
+- The route (Southall → Ealing Broadway → tube → Pimlico) is entirely
+  TfL-priced, but `TflClient._build_cost_groups` DROPPED the fare: a
+  dangling `round(fare["totalCost"]…)` expression computed the return
+  cost and discarded it, so every transit CostGroup had cost=None and
+  daily_cost was £0.
+- A £0 transit route made the National Rail fare node run; the
+  Elizabeth-line leg has no NR fare (STL→EAL absent, STL→LON absent),
+  so the commute was killed. (It "worked recently" because TfL used to
+  route this commute via Paddington, whose STL→PAD fare exists.)
+- Fix: `_build_cost_groups` now applies TfL's fare to the transit
+  groups — per-mode `fare.fares` costs (×2 return) when present, else
+  the whole-journey `totalCost` on the first transit group. A priced
+  TfL route carries its cost, so the NR fare node never runs.
+- Verified live: Simon/Pimlico 1h14 £7.20 with walk → train (Ealing
+  Broadway, £7.20) → tube → Pimlico.
+
 ## Verification
 
 - `make test` green; ruff + basedpyright clean; language sweep green.
