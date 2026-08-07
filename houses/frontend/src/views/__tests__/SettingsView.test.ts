@@ -7,6 +7,10 @@ import SettingsView from '../SettingsView.vue'
 
 vi.mock('../../services/api', () => ({
   fetchSettings: vi.fn(),
+  fetchCurrentHomes: vi.fn().mockResolvedValue([
+    { rid: 'home1', address: '10 Old Lane, Maidenhead' },
+    { rid: 'home2', address: '20 Old Lane, Maidenhead' },
+  ]),
   patchPerson: vi.fn().mockResolvedValue({ status: 'ok' }),
   patchFinancial: vi.fn().mockResolvedValue({ status: 'ok' }),
 }))
@@ -32,6 +36,7 @@ function makeSettings() {
           cash_contribution: { amount: '0.00', currency: 'GBP' },
           petrol_mpg: 45,
           bus_walk_penalty: { value: 20, unit: 'minute' },
+          home_co_owners: [{ name: 'Lorena', share: 50 }],
           places_of_interest: [
             {
               label: 'Pimlico',
@@ -178,8 +183,9 @@ describe('SettingsView — family sections', () => {
     const sections = wrapper.findAll('.settings-panel .settings-person')
     expect(sections.length).toBe(1)
     expect(strip(wrapper).text()).toContain('Simon')
-    expect(sections[0].text()).not.toContain('Lorena')
-    expect(sections[0].text()).not.toContain('George')
+    // one person section, headed by the session person (the co-owner
+    // dropdown legitimately lists other people's names)
+    expect(sections[0].find('.card-heading').text()).toContain('Simon')
     // the deposit breakdown still shows the whole household
     expect(wrapper.text()).toContain('Total deposit from everyone')
   })
@@ -252,6 +258,61 @@ describe('SettingsView — ownership rendering', () => {
     await showCommutes(simon.wrapper)
     const simonSection = personSection(simon.wrapper)
     expect(simonSection.find('.mode-pill[data-mode="car"]').classes()).not.toContain('mode-pill--hidden')
+  })
+})
+
+describe('SettingsView — home co-owners and the house link', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('adds a co-owner with a share and saves it with the person', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = personSection(wrapper)
+    const addRow = simon.find('.co-owner-add')
+    await addRow.find('select').setValue('Ashby')
+    await addRow.find('input').setValue(25)
+    await addRow.find('button').trigger('click')
+    expect(simon.text()).toContain('Ashby — 25%')
+    await simon.trigger('focusout')
+    await flush()
+    const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(body.home_co_owners).toContainEqual({ name: 'Ashby', share: 25 })
+  })
+
+  it('refuses a co-owner when the shares would exceed 100%', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = personSection(wrapper)
+    // Lorena already co-owns 50% — a share that would push the total
+    // past 100% must be refused
+    const addRow = simon.find('.co-owner-add')
+    await addRow.find('select').setValue('Ashby')
+    await addRow.find('input').setValue(60)
+    await addRow.find('button').trigger('click')
+    expect(simon.text()).not.toContain('Ashby — 60%')
+    await addRow.find('input').setValue(40)
+    await addRow.find('button').trigger('click')
+    expect(simon.text()).toContain('Ashby — 40%')
+  })
+
+  it('shows a read-only co-owner note on the co-owner\'s own settings', async () => {
+    const { wrapper, flush } = await mountView('', 'Lorena')
+    await flush()
+    expect(wrapper.text()).toContain("You co-own Simon's home")
+    expect(wrapper.text()).toContain("don't add this house as your own")
+  })
+
+  it('saves the linked current house with the person', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = personSection(wrapper)
+    await simon.find('select#home-property').setValue('home1')
+    await simon.trigger('focusout')
+    await flush()
+    const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(body.home_property_rid).toBe('home1')
   })
 })
 

@@ -102,6 +102,13 @@ export async function postWhatIf(persons: Record<string, unknown>[]): Promise<Re
   return data.results
 }
 
+export async function fetchCurrentHomes(): Promise<{ rid: string; address: string }[]> {
+  const r = await fetch(`${BASE}/properties/current-homes`, { headers: authHeaders() })
+  if (!r.ok) return []
+  const data = (await parseJson<{ homes: { rid: string; address: string }[] }>(r))
+  return data.homes ?? []
+}
+
 export function patchFinancial(financial: Record<string, unknown>): Promise<Response> {
   return fetch(`${BASE}/settings/financial`, {
     method: 'PATCH',

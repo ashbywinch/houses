@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from houses.geo import GeoPoint
 from houses.model.domain import (
+    HomeCoOwner,
     Person,
     PlaceOfInterest,
     effective_acceptable_modes,
@@ -412,6 +413,20 @@ async def get_settings(request: Request):
             for poi_item, poi in zip(item.get("places_of_interest") or (), person.places_of_interest, strict=False):
                 if isinstance(poi_item, dict):
                     poi_item["acceptable_modes"] = list(effective_acceptable_modes(poi))
+            # Optional link to the current house in the DB — show its
+            # address first line so the family knows WHICH house this is.
+            linked_rid = getattr(person, "home_property_rid", "")
+            if linked_rid:
+                from houses.property_registry import get_property as _get_prop
+
+                prop = _get_prop(linked_rid)
+                addr = ""
+                if prop is not None:
+                    att = prop.best_address.latest_attempt()
+                    if att.succeeded and att.value_or_none():
+                        addr = str(att.value_or_none())
+                if addr:
+                    item["home_property_address"] = addr.split("\n")[0].split(",")[0]
 
     # The family deposit as ONE number (P4): per person, sale proceeds −
     # remaining mortgage + extra money, plus the household total —
@@ -436,36 +451,55 @@ async def get_settings(request: Request):
 
 
 def _deposit_breakdown(persons: list) -> tuple[dict, Money, list[dict]]:
-    """Per-person deposit (sale − mortgage + cash, or cash alone) and the
-    household total. Children never contribute and never appear. Pure —
-    unit-testable without the request context (P4)."""
+    """Per-person deposit (distributed home equity + cash) and the
+    household total. Home equity splits by co-owner shares; children
+    never contribute. Pure — unit-testable without the request (P4)."""
     from decimal import Decimal as _Decimal
 
     from money import Money as _Money
 
+    from houses.model.domain import home_equity_contributions
+
+    contributions = home_equity_contributions(persons)
+    by_name = {p.name: p for p in persons if not p.is_child}
     deposit_persons: dict[str, dict] = {}
     deposit_total = _Money("0", "GBP")
     deposit_lines: list[dict] = []
-    for person in persons:
-        # Children never contribute to the deposit — they don't sell homes
-        # and shouldn't carry money fields; listing them adds noise.
-        if person.is_child:
-            continue
-        sale = person.home_sale_price.amount
-        mortgage = person.outstanding_mortgage.amount
+    for name, person in by_name.items():
         cash = person.cash_contribution.amount
-        if effective_selling_home(person):
-            value = max(_Decimal("0"), sale - mortgage) + cash
-            line = (
-                f"£{sale:,.2f} sale − £{mortgage:,.2f} mortgage + £{cash:,.2f} cash "
-                f"= £{value:,.2f}"
-            )
-        else:
-            value = cash
-            line = f"£0 home + £{cash:,.2f} cash = £{value:,.2f}"
-        deposit_persons[person.name] = {"amount": f"{value:.2f}", "currency": "GBP"}
+        home_share = contributions.get(name, _Decimal("0"))
+        value = home_share + cash
+        deposit_persons[name] = {"amount": f"{value:.2f}", "currency": "GBP"}
         deposit_total = deposit_total + _Money(str(value), "GBP")
-        deposit_lines.append({"label": person.name, "value": line})
+        if home_share > 0 and effective_selling_home(person):
+            gross = max(_Decimal("0"), person.home_sale_price.amount - person.outstanding_mortgage.amount)
+            co_sum = sum(co.share for co in person.home_co_owners)
+            if co_sum == 0:
+                line = (
+                    f"£{person.home_sale_price.amount:,.2f} sale − "
+                    f"£{person.outstanding_mortgage.amount:,.2f} mortgage + "
+                    f"£{cash:,.2f} cash = £{value:,.2f}"
+                )
+            else:
+                holder_part = f"£{gross:,.2f} home ({100 - co_sum}% yours) + "
+                line = f"{holder_part}£{home_share:,.2f} home share + £{cash:,.2f} cash = £{value:,.2f}"
+        elif home_share > 0:
+            # this person's share came from co-owning someone else's home
+            source = ""
+            for other in by_name.values():
+                if other.name == name:
+                    continue
+                for co in other.home_co_owners:
+                    if co.name == name:
+                        gross_other = max(
+                            _Decimal("0"),
+                            other.home_sale_price.amount - other.outstanding_mortgage.amount,
+                        )
+                        source = f"{co.share}% of {other.name}'s home (£{gross_other:,.2f}) "
+            line = f"{source}+ £{cash:,.2f} cash = £{value:,.2f}"
+        else:
+            line = f"£0 home + £{cash:,.2f} cash = £{value:,.2f}"
+        deposit_lines.append({"label": name, "value": line})
     return deposit_persons, deposit_total, deposit_lines
 
 
@@ -551,6 +585,28 @@ def _person_from_dict(d: dict, target: Person) -> Person:
         if not isinstance(mpg, (int, float)) or mpg <= 0:
             raise ValueError(f"petrol_mpg must be a positive number, got {mpg!r}")
         updates["petrol_mpg"] = int(mpg)
+    if "home_co_owners" in updates:
+        co = updates["home_co_owners"]
+        if not isinstance(co, list):
+            raise ValueError(f"home_co_owners must be a list, got {type(co).__name__}")
+        parsed = []
+        total_share = 0
+        for item in co:
+            if not isinstance(item, dict) or "name" not in item or "share" not in item:
+                raise ValueError(f"invalid co-owner {item!r} — expected {{'name', 'share'}}")
+            share = item["share"]
+            if not isinstance(share, int) or not 1 <= share <= 100:
+                raise ValueError(f"co-owner share must be a whole percent 1-100, got {share!r}")
+            parsed.append(HomeCoOwner(name=str(item["name"]), share=share))
+            total_share += share
+        if total_share > 100:
+            raise ValueError(f"co-owner shares total {total_share}% — cannot exceed 100%")
+        updates["home_co_owners"] = tuple(parsed)
+    if "home_property_rid" in updates:
+        rid = updates["home_property_rid"]
+        if rid is not None and not isinstance(rid, str):
+            raise ValueError("home_property_rid must be a string or null")
+        updates["home_property_rid"] = rid or ""
     if "editable_by" in updates and updates["editable_by"] is not None:
         updates["editable_by"] = tuple(updates["editable_by"])
     pois = updates.get("places_of_interest")
@@ -729,6 +785,24 @@ async def patch_works_estimate(
     return {"status": "ok"}
 
 
+@api_router.get("/properties/current-homes")
+async def list_current_homes():
+    """The family's CURRENT house(s) — properties marked status=current —
+    so a person can link their settings home fields to the right one."""
+    result: list[dict[str, str]] = []
+    for rid in list_registry_properties():
+        prop = get_registry_property(rid)
+        if prop is None:
+            continue
+        status = prop.comment_status.latest_attempt()
+        if not status.succeeded or (status.value_or_none() or "").strip().lower() != "current":
+            continue
+        att = prop.best_address.latest_attempt()
+        address = str(att.value_or_none()) if att.succeeded and att.value_or_none() else ""
+        result.append({"rid": str(rid), "address": address})
+    return {"homes": result}
+
+
 @api_router.get("/persons")
 async def list_persons():
     """Return ALL persons (name, email when present, is_child).
@@ -740,7 +814,7 @@ async def list_persons():
     """
     svc = get_services()
     persons_attempt = svc.persons_source.latest_attempt()
-    result: list[dict[str, str]] = []
+    result: list[dict[str, object]] = []
     if persons_attempt.succeeded:
         for p in persons_attempt.value_or_none() or []:
             if isinstance(p, dict):

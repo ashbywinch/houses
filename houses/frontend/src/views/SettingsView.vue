@@ -39,6 +39,9 @@ interface PersonSettings {
   life_insurance_monthly?: MoneyValue
   petrol_mpg?: number
   bus_walk_penalty?: { value: number; unit: string }
+  home_co_owners?: { name: string; share: number }[]
+  home_property_rid?: string
+  home_property_address?: string
 }
 
 interface Thresholds {
@@ -91,6 +94,8 @@ const error = ref('')
 const persons = ref<PersonSettings[]>([])
 const thresholds = ref<Record<string, Thresholds>>({})
 const deposit = ref<HouseholdDeposit | null>(null)
+const currentHomes = ref<{ rid: string; address: string }[]>([])
+const coOwnerDraft = ref<{ name: string; share: number }>({ name: '', share: 50 })
 const financial = ref<FinancialSettings | null>(null)
 
 // Display-form copies of the finance fields (rates shown as
@@ -156,6 +161,8 @@ function buildSaveBody(person: PersonSettings): Record<string, unknown> {
   }
   if (person.petrol_mpg != null) body.petrol_mpg = person.petrol_mpg
   if (person.bus_walk_penalty) body.bus_walk_penalty = { ...person.bus_walk_penalty }
+  if (person.home_co_owners?.length) body.home_co_owners = person.home_co_owners
+  if (person.home_property_rid) body.home_property_rid = person.home_property_rid
   const t = thresholds.value[person.name]
   if (t) body.thresholds = { ...t }
   return body
@@ -247,6 +254,7 @@ async function load() {
     thresholds.value = data.commute_thresholds?.value ?? {}
     deposit.value = data.household_deposit ?? null
     loadFinancial(data.financial?.value ?? null)
+    currentHomes.value = await api.fetchCurrentHomes()
   } catch {
     error.value = 'Could not load the family settings.'
   } finally {
@@ -279,6 +287,37 @@ function penceInput(money: MoneyValue | undefined, event: Event) {
   const el = event.target as HTMLInputElement
   el.value = normalizePence(el.value)
 }
+
+function coOwnerCandidates(person: PersonSettings): PersonSettings[] {
+  const taken = new Set((person.home_co_owners ?? []).map(co => co.name))
+  return persons.value.filter(p => p.name !== person.name && !taken.has(p.name) && !p.is_child)
+}
+
+function addCoOwner(person: PersonSettings) {
+  const name = coOwnerDraft.value.name
+  if (!name) return
+  if (!person.home_co_owners) person.home_co_owners = []
+  if (person.home_co_owners.some(co => co.name === name)) return
+  const existing = person.home_co_owners.reduce((sum, co) => sum + co.share, 0)
+  if (existing + coOwnerDraft.value.share > 100) return
+  person.home_co_owners.push({ name, share: coOwnerDraft.value.share })
+  coOwnerDraft.value = { name: '', share: 50 }
+}
+
+function removeCoOwner(person: PersonSettings, index: number) {
+  person.home_co_owners?.splice(index, 1)
+}
+
+/** The session person co-owns someone else's declared home → read-only note. */
+const coOwnerInfo = computed(() => {
+  if (!me.value) return null
+  for (const p of persons.value) {
+    if (p.name === me.value) continue
+    const co = (p.home_co_owners ?? []).find(c => c.name === me.value)
+    if (co) return { owner: p.name, share: co.share }
+  }
+  return null
+})
 
 function walkMinutes(person: PersonSettings): number {
   return person.bus_walk_penalty?.value ?? 20
@@ -432,6 +471,10 @@ const depositRows = computed(() => {
               {{ person.name }}
               <span v-if="isOwn(person)" class="settings-person__badge">you</span>
             </div>
+            <p v-if="coOwnerInfo" class="settings-person__note">
+              You co-own {{ coOwnerInfo.owner }}'s home ({{ coOwnerInfo.share }}%) — its sale already
+              counts toward your deposit contribution, so don't add this house as your own.
+            </p>
             <label class="toggle-row">
               <span class="toggle-row__label">Selling a home to fund this purchase</span>
               <ToggleSwitch v-model="person.selling_home" :disabled="!isOwn(person)" @change="scheduleSave(person)" />
@@ -478,6 +521,38 @@ const depositRows = computed(() => {
                 @input="moneyInput(person.life_insurance_monthly!, $event)"
                 @blur="penceInput(person.life_insurance_monthly!, $event)"
               />
+            </div>
+
+            <hr class="divider" />
+            <div class="stack-field">
+              <label for="home-property">Which house is this?</label>
+              <select
+                id="home-property"
+                v-model="person.home_property_rid"
+                :disabled="!isOwn(person)"
+              >
+                <option value="" disabled>Choose a current house…</option>
+                <option v-for="h in currentHomes" :key="h.rid" :value="h.rid">{{ h.address }}</option>
+              </select>
+              <span v-if="person.home_property_address" class="band-helper">
+                This home: {{ person.home_property_address }}
+              </span>
+            </div>
+
+            <div v-if="isOwn(person)" class="stack-field">
+              <span class="toggle-row__label" style="font-size: var(--fs-sm)">Co-owners of this home</span>
+              <div v-for="(co, coIdx) in person.home_co_owners ?? []" :key="co.name" class="co-owner-row">
+                <span>{{ co.name }} — {{ co.share }}%</span>
+                <button type="button" class="co-owner-remove" aria-label="Remove {{ co.name }} as co-owner" @click="removeCoOwner(person, coIdx)">×</button>
+              </div>
+              <div class="co-owner-add">
+                <select v-model="coOwnerDraft.name" aria-label="Add a co-owner">
+                  <option value="" disabled>Choose…</option>
+                  <option v-for="p in coOwnerCandidates(person)" :key="p.name" :value="p.name">{{ p.name }}</option>
+                </select>
+                <input type="number" min="1" max="100" v-model.number="coOwnerDraft.share" aria-label="Co-owner share (%)" />
+                <button type="button" class="btn-add-sm" @click="addCoOwner(person)">Add</button>
+              </div>
             </div>
           </section>
           <!-- Household finances -->
@@ -723,6 +798,52 @@ const depositRows = computed(() => {
 
 <style scoped>
 .settings-person__strip { margin: var(--sp-2) 0 0; }
+.co-owner-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-1) 0;
+  border-bottom: 1px solid var(--divider);
+  font-size: var(--fs-sm);
+}
+.co-owner-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: var(--fs-lg);
+  cursor: pointer;
+  min-width: 40px;
+  min-height: 40px;
+}
+.co-owner-add {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.co-owner-add select,
+.co-owner-add input {
+  flex: 1;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2);
+  font-size: var(--fs-base);
+  font-family: inherit;
+  min-height: 44px;
+  background: var(--card-bg);
+  color: var(--text);
+}
+.co-owner-add input { max-width: 72px; text-align: center; }
+.btn-add-sm {
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--green);
+  color: #fff;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  min-height: 44px;
+  padding: 0 var(--sp-4);
+  cursor: pointer;
+}
 
 .settings__main {
   max-width: 860px;

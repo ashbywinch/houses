@@ -617,6 +617,47 @@ class TestSettingsPropagationApi:
         assert lines["Ashby"] == "£0 home + £300,000.00 cash = £300,000.00"
         assert prov["formula"]["result"] == "£477,000.00"
 
+    def test_deposit_splits_home_equity_by_co_owner_shares(self):
+        """A declared home splits by home_co_owners: the holder keeps
+        the remainder, each co-owner gets their share — total unchanged,
+        attribution honest."""
+        from decimal import Decimal as _Decimal
+
+        from money import Money
+
+        from houses.model.domain import HomeCoOwner, Person
+        from houses.web.api_router import _deposit_breakdown
+
+        persons = [
+            Person(
+                name="Simon",
+                has_car=True,
+                home_sale_price=Money("550000", "GBP"),
+                outstanding_mortgage=Money("373000", "GBP"),
+                cash_contribution=Money("0", "GBP"),
+                home_co_owners=(HomeCoOwner(name="Lorena", share=50),),
+            ),
+            Person(
+                name="Lorena",
+                has_car=False,
+                cash_contribution=Money("0", "GBP"),
+            ),
+            Person(
+                name="Ashby",
+                has_car=True,
+                cash_contribution=Money("300000", "GBP"),
+            ),
+        ]
+        deposit_persons, total, lines = _deposit_breakdown(persons)
+        assert deposit_persons["Simon"] == {"amount": "88500.00", "currency": "GBP"}
+        assert deposit_persons["Lorena"] == {"amount": "88500.00", "currency": "GBP"}
+        assert deposit_persons["Ashby"] == {"amount": "300000.00", "currency": "GBP"}
+        # the total is unchanged: 177000 + 300000
+        assert total.amount == _Decimal("477000.00")
+        lines_by_label = {v["label"]: v["value"] for v in lines}
+        assert "50% yours" in lines_by_label["Simon"]
+        assert "50% of Simon's" in lines_by_label["Lorena"]
+
     def test_deposit_excludes_children_completely(self):
         """Children never appear in the deposit breakdown, provenance
         lines, or the total — even one with a stray cash contribution."""
