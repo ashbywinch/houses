@@ -124,8 +124,11 @@ describe('WhatIfPanel', () => {
     await settle()
     await expand(wrapper)
 
-    const cashInputs = wrapper.findAll('.whatif-person__field input')
-    const ashbyCash = cashInputs[cashInputs.length - 1] // last field = Ashby's cash
+    // Ashby is not selling → her cash field carries the 'Cash available' label
+    const ashbyCash = wrapper
+      .findAll('.whatif-person__field')
+      .find(l => l.text().includes('Cash available for the deposit'))!
+      .find('input')
     await ashbyCash.setValue('400000')
 
     await runDebouncedEval()

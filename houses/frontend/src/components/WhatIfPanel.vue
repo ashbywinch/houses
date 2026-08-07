@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import * as api from '../services/api'
 import { usePropertiesStore } from '../stores/properties'
-import { integerPounds } from '../formatters/money'
+import { blockPenceKey, integerPounds, normalizePence } from '../formatters/money'
 import ToggleSwitch from './ToggleSwitch.vue'
 import WholePoundsField from './WholePoundsField.vue'
 
@@ -25,6 +25,7 @@ interface PersonEdit {
   home_sale_price: string
   outstanding_mortgage: string
   cash_contribution: string
+  life_insurance_monthly: string
   places_of_interest: PoiEdit[]
 }
 
@@ -66,6 +67,7 @@ async function load() {
         home_sale_price: integerPounds((p.home_sale_price as { amount?: string } | undefined)?.amount),
         outstanding_mortgage: integerPounds((p.outstanding_mortgage as { amount?: string } | undefined)?.amount),
         cash_contribution: integerPounds((p.cash_contribution as { amount?: string } | undefined)?.amount),
+        life_insurance_monthly: String((p.life_insurance_monthly as { amount?: string } | undefined)?.amount ?? ''),
         places_of_interest: ((p.places_of_interest as PoiEdit[] | undefined) ?? []).map(poi => ({
           label: poi.label,
           address: poi.address,
@@ -99,6 +101,7 @@ function payload() {
       body.outstanding_mortgage = money(p.outstanding_mortgage)
     }
     body.cash_contribution = money(p.cash_contribution)
+    body.life_insurance_monthly = money(p.life_insurance_monthly || '0')
     body.places_of_interest = p.places_of_interest.map(poi => ({ ...poi }))
     return body
   })
@@ -161,6 +164,7 @@ async function useTheseNumbers() {
         body.outstanding_mortgage = money(p.outstanding_mortgage)
       }
       body.cash_contribution = money(p.cash_contribution)
+      body.life_insurance_monthly = money(p.life_insurance_monthly || '0')
       body.places_of_interest = p.places_of_interest.map(poi => ({ ...poi }))
       await api.patchPerson(p.name, body)
     }
@@ -240,6 +244,18 @@ function backToReal() {
             {{ p.selling_home ? 'Other money toward the deposit (£)' : 'Cash available for the deposit (£)' }}
             <WholePoundsField v-model="p.cash_contribution" @input="scheduleEval" />
             <span class="band-helper">{{ p.selling_home ? 'Savings or gifts, on top of the sale proceeds.' : 'Savings, gifts, or the proceeds of a sale.' }}</span>
+          </label>
+          <label class="whatif-person__field">
+            Life insurance (£/month)
+            <input
+              type="text"
+              inputmode="decimal"
+              :value="p.life_insurance_monthly"
+              @keydown="blockPenceKey"
+              @input="(e) => { p.life_insurance_monthly = (e.target as HTMLInputElement).value; scheduleEval() }"
+              @blur="(e) => { p.life_insurance_monthly = normalizePence((e.target as HTMLInputElement).value) }"
+            />
+            <span class="band-helper">Pence allowed.</span>
           </label>
         </div>
       </div>
