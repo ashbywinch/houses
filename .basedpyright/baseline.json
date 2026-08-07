@@ -688,22 +688,6 @@
             {
                 "code": "reportArgumentType",
                 "range": {
-                    "startColumn": 71,
-                    "endColumn": 75,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 110,
-                    "endColumn": 114,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportArgumentType",
-                "range": {
                     "startColumn": 57,
                     "endColumn": 78,
                     "lineCount": 1
@@ -960,6 +944,14 @@
                 "range": {
                     "startColumn": 21,
                     "endColumn": 42,
+                    "lineCount": 1
+                }
+            },
+            {
+                "code": "reportIncompatibleMethodOverride",
+                "range": {
+                    "startColumn": 8,
+                    "endColumn": 15,
                     "lineCount": 1
                 }
             },
@@ -2126,6 +2118,14 @@
                 "range": {
                     "startColumn": 16,
                     "endColumn": 23,
+                    "lineCount": 1
+                }
+            },
+            {
+                "code": "reportArgumentType",
+                "range": {
+                    "startColumn": 75,
+                    "endColumn": 78,
                     "lineCount": 1
                 }
             }

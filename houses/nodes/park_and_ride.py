@@ -38,7 +38,7 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         best_location: Node,
         postcode_node: Node,
         has_car: bool,
-        max_walk: int,
+        max_walk_node,
         station_registry: StationRegistry | None = None,
         car_park_registry: CarParkRegistry | None = None,
     ):
@@ -46,19 +46,27 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         self.best_location = best_location
         self.postcode_node = postcode_node
         self._has_car = has_car
-        self._max_walk = max_walk
+        self._max_walk = 30
+        self._max_walk_node = max_walk_node
         self._car_park_name: str = ""
         self._station_registry = station_registry
         self._car_park_registry = car_park_registry
-        deps = (transit_node,)
+        deps = (transit_node, max_walk_node)
         if has_car:
             deps = deps + (best_location, postcode_node)
         super().__init__(node_id, Commute, deps)
         self.display_name = "Park & Ride"
 
     async def compute(
-        self, transit: Attempt[Commute], location: Attempt[GeoPoint] = None, postcode_attempt: Attempt[str] = None
+        self,
+        transit: Attempt[Commute],
+        max_walk: Attempt[int] | None = None,
+        location: Attempt[GeoPoint] | None = None,
+        postcode_attempt: Attempt[str] | None = None,
     ) -> Attempt[Commute]:
+        mw_val = max_walk.value_or_none() if max_walk is not None else None
+        if mw_val is not None:
+            self._max_walk = int(mw_val)
 
         commute = transit.value_or_none()
         if commute is None:

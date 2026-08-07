@@ -8,6 +8,15 @@ from dag.user_input_node import UserInputNode
 from houses.model.domain import Commute, Person, PlaceOfInterest
 
 
+def _mw(value: int):
+    """A fixed max-walk input node."""
+    from dag.user_input_node import UserInputNode
+
+    node = UserInputNode("_mw", int)
+    node.push(value, "test")
+    return node
+
+
 class TestEpcNode:
     @pytest.mark.asyncio
     async def test_impossible_without_address(self):
@@ -228,7 +237,7 @@ class TestParkAndRideAugmentNode:
         loc = UserInputNode[GeoPoint]("loc_pr3", GeoPoint)
         pc = UserInputNode[str]("pc_pr3", str)
         node = ParkAndRideAugmentNode(
-            "pr3", transit_node=transit, best_location=loc, postcode_node=pc, has_car=True, max_walk=20
+            "pr3", transit_node=transit, best_location=loc, postcode_node=pc, has_car=True, max_walk_node=_mw(20)
         )
         a = await node.attempt()
         assert not a.succeeded
@@ -261,6 +270,10 @@ class TestParkAndRideAugmentNode:
         max_walk: int = 20,
         pc_node: UserInputNode | None = None,
     ):
+        from dag.user_input_node import UserInputNode
+
+        mw = UserInputNode("mw_dummy", int)
+        mw.push(max_walk, "test")
         if pc_node is None:
             pc_node = UserInputNode[str]("pc_dummy", str)
             pc_node.push("SW1V 2QQ", "test")
@@ -272,7 +285,7 @@ class TestParkAndRideAugmentNode:
             best_location=loc,
             postcode_node=pc_node,
             has_car=has_car,
-            max_walk=max_walk,
+            max_walk_node=mw,
         )
 
     @pytest.mark.asyncio
@@ -393,7 +406,7 @@ class TestParkAndRideAugmentNode:
                 best_location=loc,
                 postcode_node=pc_node,
                 has_car=True,
-                max_walk=20,
+                max_walk_node=_mw(20),
                 station_registry=_FakeStationRegistry(),
                 car_park_registry=_FakeCarParkRegistry(),
             )
@@ -594,7 +607,7 @@ class TestTransitCostAttribution:
                 best_location=loc,
                 postcode_node=pc,
                 has_car=True,
-                max_walk=20,
+                max_walk_node=_mw(20),
             )
 
             # Call refresh directly — no global queue dependency
@@ -671,7 +684,7 @@ class TestTransitCostAttribution:
                 best_location=loc,
                 postcode_node=pc,
                 has_car=True,
-                max_walk=20,
+                max_walk_node=_mw(20),
             )
 
             await node.refresh()

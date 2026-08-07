@@ -15,6 +15,14 @@ from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.model.domain import Commute, Person, PlaceOfInterest
 
 
+def _mw(value: int):
+    """A fixed max-walk input node."""
+    from dag.user_input_node import UserInputNode
+
+    node = UserInputNode("_mw", int)
+    node.push(value, "test")
+    return node
+
 def _make_commute(
     duration_min: int = 32,
     cost_gbp: float = 4.50,
@@ -51,20 +59,17 @@ def _make_commute(
         _details=details,
     )
 
-
 def _petrol_mpg_node(value: int = 45) -> UserInputNode:
     """Create a petrol MPG setting node with a value."""
     node = UserInputNode("_mpg", int)
     node.push(value, "test")
     return node
 
-
 def _petrol_cost_node(value: Decimal = Decimal("1.45")) -> UserInputNode:
     """Create a petrol cost-per-litre setting node with a value."""
     node = UserInputNode("_cost", Decimal)
     node.push(value, "test")
     return node
-
 
 class TestPetrolCostAugmentNode:
     @pytest.mark.asyncio
@@ -208,7 +213,6 @@ class TestPetrolCostAugmentNode:
             f"Expected daily_cost {expected}, got {float(val.daily_cost.amount)}"
         )
 
-
 class TestDriveCommuteAlwaysHasCost:
     """A drive commute with a length must always carry petrol cost.
     A succeeded drive-mode commute with daily_cost £0.00 is a bug — the
@@ -288,7 +292,7 @@ class TestDriveCommuteAlwaysHasCost:
             walk_result=walk,
             drive_result=drive,
             is_child=False,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
         merge = MergeRailFareNode(
             "dcc/merge", commute_result=selector, rail_fare_result=_Fixed("dcc_fare", Attempt.succeeded(None))
@@ -311,7 +315,6 @@ class TestDriveCommuteAlwaysHasCost:
         assert val.daily_cost.amount > 0, (
             f"a {val.duration.magnitude}-minute drive must have petrol cost, got £{val.daily_cost.amount}"
         )
-
 
 class TestPetrolProvenanceFormula:
     """Petrol Cost calc cards must show the fuel maths, not just a value."""
@@ -337,7 +340,6 @@ class TestPetrolProvenanceFormula:
         assert any("Drive distance" in lab for lab in labels), labels
         assert any(lab.startswith("Fuel:") for lab in labels), labels
         assert prov.formula.result == "GBP 2.91"
-
 
 def test_person_mpg_node_reads_the_owner_s_own_economy():
     """PersonPetrolMpgNode resolves MPG from the persons node by name —

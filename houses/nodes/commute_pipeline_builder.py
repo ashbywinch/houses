@@ -9,7 +9,7 @@ from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 from houses.nodes.park_and_ride import ParkAndRideAugmentNode
 from houses.nodes.petrol import PersonPetrolMpgNode, PetrolCostAugmentNode
 from houses.nodes.schools import SchoolLocationNode
-from houses.nodes.transit import DriveNode, TflTransitNode, TransitNode, WalkNode
+from houses.nodes.transit import DriveNode, PersonMaxWalkNode, TflTransitNode, TransitNode, WalkNode
 from houses.routing import CommuteRouter
 
 _router = CommuteRouter()
@@ -64,6 +64,15 @@ def build_commute_pipeline(prop) -> None:
                 poi=poi_src,
                 max_walk=int(p_info.bus_walk_penalty.magnitude),
             )
+            # The walking TOLERANCE is a node read (like MPG): the gate
+            # nodes depend on it so a settings/what-if change re-scores
+            # the planned routes — the route-planning nodes (WalkNode,
+            # TflTransitNode) deliberately do NOT, so no re-planning.
+            max_walk_node = PersonMaxWalkNode(
+                f"{prop.rid}/{key}/max_walk",
+                persons_source=prop._svc.persons_source,
+                person_name=p_info.name,
+            )
 
             # Only create a DriveNode for persons who have a car.
             # If the destination is in the congestion zone, omit drive too
@@ -96,7 +105,6 @@ def build_commute_pipeline(prop) -> None:
                 best_location=prop.best_location,
                 poi=poi_src,
                 has_car=p_info.has_car,
-                max_walk=int(p_info.bus_walk_penalty.magnitude),
                 no_bus_node=no_bus_node,
                 with_bus_node=with_bus_node,
             )
@@ -108,7 +116,7 @@ def build_commute_pipeline(prop) -> None:
                 best_location=prop.best_location,
                 postcode_node=prop.postcode,
                 has_car=p_info.has_car,
-                max_walk=int(p_info.bus_walk_penalty.magnitude),
+                max_walk_node=max_walk_node,
             )
 
             bus_route_node = BusRouteNode(
@@ -128,7 +136,7 @@ def build_commute_pipeline(prop) -> None:
                 transit_input=park_and_ride,
                 bus_route_node=bus_route_node,
                 bods_fare_node=bods_fare_node,
-                max_walk=int(p_info.bus_walk_penalty.magnitude),
+                max_walk_node=max_walk_node,
             )
 
             # Omit drive entirely when the destination is in the London
@@ -144,7 +152,7 @@ def build_commute_pipeline(prop) -> None:
                 transit_result=bus_augment,
                 drive_result=None if in_zone else drive_node,
                 is_child=is_child,
-                max_walk=int(p_info.bus_walk_penalty.magnitude),
+                max_walk_node=max_walk_node,
                 acceptable_modes=effective_acceptable_modes(poi),
             )
 

@@ -147,18 +147,31 @@ class BusLegAugmentNode(DerivedNode[Commute]):
         transit_input,  # park_and_ride result or raw transit
         bus_route_node,
         bods_fare_node,
-        max_walk: int = 30,
+        max_walk_node=None,
     ):
         self._transit_input = transit_input
         self._bus_route_node = bus_route_node
         self._bods_fare_node = bods_fare_node
-        self._max_walk = max_walk
-        super().__init__(node_id, Commute, (transit_input, bus_route_node, bods_fare_node))
+        self._max_walk_node = max_walk_node
+        deps = [transit_input]
+        if max_walk_node is not None:
+            deps.append(max_walk_node)
+        super().__init__(node_id, Commute, tuple(deps))
+
+    def _current_max_walk(self) -> int:
+        """The effective walk tolerance — staging-aware, so a what-if
+        max-walk change re-gates the bus augmentation with the candidate
+        value even though the planned routes are unchanged."""
+        att = self._max_walk_node.latest_attempt() if self._max_walk_node else None
+        val = att.value_or_none() if att is not None else None
+        return int(val) if val is not None else 30
 
     def _get_active_deps(self):
         """Only need bus route and fare when the walk is too long, or when
         TfL found no route at all (the Google Routes bus is the fallback)."""
         deps = [self._transit_input]
+        if self._max_walk_node is not None:
+            deps.append(self._max_walk_node)
         transit_attempt = self._transit_input.latest_attempt()
         if transit_attempt.succeeded:
             val = transit_attempt.value_or_none()
@@ -179,11 +192,12 @@ class BusLegAugmentNode(DerivedNode[Commute]):
             return False
         if first_legs[0].mode != LegMode.WALK:
             return False
-        return int(first_legs[0].duration.magnitude) > self._max_walk
+        return int(first_legs[0].duration.magnitude) > self._current_max_walk()
 
     def compute(
         self,
         transit_attempt: Attempt[Commute],
+        max_walk: Attempt[int] | None = None,
         bus_route_attempt: Attempt[dict] | None = None,
         bods_fare_attempt: Attempt[dict] | None = None,
     ) -> Attempt[Commute]:
