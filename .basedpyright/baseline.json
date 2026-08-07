@@ -1304,6 +1304,30 @@
         ],
         "./houses/web/api_router.py": [
             {
+                "code": "reportAttributeAccessIssue",
+                "range": {
+                    "startColumn": 49,
+                    "endColumn": 55,
+                    "lineCount": 1
+                }
+            },
+            {
+                "code": "reportAttributeAccessIssue",
+                "range": {
+                    "startColumn": 43,
+                    "endColumn": 49,
+                    "lineCount": 1
+                }
+            },
+            {
+                "code": "reportAttributeAccessIssue",
+                "range": {
+                    "startColumn": 80,
+                    "endColumn": 86,
+                    "lineCount": 1
+                }
+            },
+            {
                 "code": "reportOptionalIterable",
                 "range": {
                     "startColumn": 98,
@@ -1840,6 +1864,16 @@
                 "range": {
                     "startColumn": 24,
                     "endColumn": 28,
+                    "lineCount": 1
+                }
+            }
+        ],
+        "./tests/unit/nodes/test_api.py": [
+            {
+                "code": "reportAttributeAccessIssue",
+                "range": {
+                    "startColumn": 21,
+                    "endColumn": 27,
                     "lineCount": 1
                 }
             }
