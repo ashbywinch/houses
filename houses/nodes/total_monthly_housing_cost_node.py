@@ -209,7 +209,7 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
             {
                 "couple": {"value": f"{couple_val:.2f}", "stddev": couple_std},
                 "others": {"value": f"{others_val:.2f}", "stddev": others_std},
-                "couple_label": " & ".join(p.name for p in adults if p.name in owners),
-                "others_label": " & ".join(p.name for p in others),
+                "couple_label": "+".join(p.name[0].upper() for p in adults if p.name in owners),
+                "others_label": "+".join(p.name[0].upper() for p in others),
             }
         )
