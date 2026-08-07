@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import * as api from '../services/api'
 import { usePropertiesStore } from '../stores/properties'
 import { integerPounds } from '../formatters/money'
+import ToggleSwitch from './ToggleSwitch.vue'
 import WholePoundsField from './WholePoundsField.vue'
 
 // ── Editable person shape (a question, not a form) ─────────────
@@ -213,12 +214,12 @@ function backToReal() {
       </nav>
 
       <div v-if="activeTab === 'finances'" class="settings-panel" role="tabpanel">
-        <div v-for="p in persons" :key="p.name" class="whatif-person">
-          <div class="whatif-person__head">
-            <strong>{{ p.name }}</strong>
-            <label class="whatif-person__toggle">
-              <input v-model="p.selling_home" type="checkbox" @change="scheduleEval" />
-              Selling a home to fund this purchase
+        <div v-for="p in persons" :key="p.name" class="settings-card whatif-person">
+          <div class="card-heading">
+            {{ p.name }}
+            <label class="toggle-row" style="margin-top: var(--sp-2)">
+              <span class="toggle-row__label">Selling a home to fund this purchase</span>
+              <ToggleSwitch v-model="p.selling_home" @change="scheduleEval" />
             </label>
           </div>
 
@@ -241,10 +242,10 @@ function backToReal() {
       </div>
 
       <div v-else class="settings-panel" role="tabpanel">
-        <div v-for="p in persons" :key="p.name" class="whatif-person">
-          <label class="whatif-person__field">
-            Has a car
-            <input v-model="p.has_car" type="checkbox" @change="scheduleEval" />
+        <div v-for="p in persons" :key="p.name" class="settings-card whatif-person">
+          <label class="toggle-row">
+            <span class="toggle-row__label">Has a car</span>
+            <ToggleSwitch v-model="p.has_car" @change="scheduleEval" />
           </label>
           <label v-if="p.has_car" class="whatif-person__field">
             Your car's petrol economy (MPG)

@@ -226,7 +226,7 @@ describe('SettingsView — ownership rendering', () => {
     await showCommutes(wrapper)
     const simonSection = personSection(wrapper)
     expect(simonSection.find('button.save').exists()).toBe(false)
-    expect(simonSection.find('input[type="checkbox"][data-mode="walk"]').attributes('disabled')).toBeUndefined()
+    expect(simonSection.find('.mode-pill[data-mode="walk"]').attributes('disabled')).toBeUndefined()
   })
 
   it('shows a person without edit rights as read-only — no save button', async () => {
@@ -242,16 +242,16 @@ describe('SettingsView — ownership rendering', () => {
     await showCommutes(lorena.wrapper)
     const lorenaSection = personSection(lorena.wrapper)
     // the checkbox is present but hidden and disabled — car is not an option
-    const carInput = lorenaSection.find('input[type="checkbox"][data-mode="car"]')
-    expect(carInput.exists()).toBe(true)
-    expect(carInput.attributes('disabled')).toBeDefined()
-    expect(lorenaSection.find('.settings-poi__mode--hidden input[data-mode="car"]').exists()).toBe(true)
+    const carPill = lorenaSection.find('.mode-pill[data-mode="car"]')
+    expect(carPill.exists()).toBe(true)
+    expect(carPill.attributes('disabled')).toBeDefined()
+    expect(carPill.classes()).toContain('mode-pill--hidden')
 
     const simon = await mountView()
     await simon.flush()
     await showCommutes(simon.wrapper)
     const simonSection = personSection(simon.wrapper)
-    expect(simonSection.find('.settings-poi__mode--hidden input[data-mode="car"]').exists()).toBe(false)
+    expect(simonSection.find('.mode-pill[data-mode="car"]').classes()).not.toContain('mode-pill--hidden')
   })
 })
 
@@ -326,9 +326,9 @@ describe('SettingsView — saving', () => {
     await flush()
     await showCommutes(wrapper)
     const simonSection = personSection(wrapper)
-    // tick a mode checkbox — blurring the section autosaves
-    const walk = simonSection.find('input[type="checkbox"][data-mode="walk"]')
-    await walk.setValue(true)
+    // tick a mode pill — blurring the section autosaves
+    const walk = simonSection.find('.mode-pill[data-mode="walk"]')
+    await walk.trigger('click')
     await simonSection.trigger('focusout')
     await flush()
     expect(api.patchPerson).toHaveBeenCalledTimes(1)
@@ -469,9 +469,9 @@ describe('SettingsView — commute destination CRUD (A7)', () => {
     await flush()
     await showCommutes(wrapper)
     const simon = personSection(wrapper)
-    await simon.find('button.poi-add').trigger('click')
+    await simon.find('button.btn-add').trigger('click')
     await flush()
-    const rows = simon.findAll('.settings-poi')
+    const rows = simon.findAll('.dest-card')
     expect(rows.length).toBe(3)  // Pimlico, Bracknell + the new blank row
     await simon.trigger('focusout')  // blur autosaves the added row
     await flush()
@@ -486,7 +486,7 @@ describe('SettingsView — commute destination CRUD (A7)', () => {
     await flush()
     await showCommutes(wrapper)
     const simon = personSection(wrapper)
-    await simon.find('button.poi-add').trigger('click')
+    await simon.find('button.btn-add').trigger('click')
     await simon.trigger('focusout')
     await flush()
     const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
@@ -499,10 +499,10 @@ describe('SettingsView — commute destination CRUD (A7)', () => {
     await flush()
     await showCommutes(wrapper)
     const simon = personSection(wrapper)
-    expect(simon.findAll('.settings-poi').length).toBe(2)
+    expect(simon.findAll('.dest-card').length).toBe(2)
     await simon.findAll('button.poi-remove')[0].trigger('click')
     await flush()
-    expect(simon.findAll('.settings-poi').length).toBe(1)
+    expect(simon.findAll('.dest-card').length).toBe(1)
   })
 })
 
@@ -515,7 +515,7 @@ describe('SettingsView — selling-home persists on save (B7)', () => {
     const { wrapper, flush } = await mountView('', 'Ashby')
     await flush()
     const ashby = personSection(wrapper)
-    await ashby.find('input#selling-home').setValue(true)
+    await ashby.find('.toggle-row .switch').trigger('click')
     await ashby.trigger('focusout')
     await flush()
     const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
@@ -536,8 +536,8 @@ describe('SettingsView — acceptable modes keep at least one (P7)', () => {
     const simon = personSection(wrapper)
     // Pimlico has only ['transit'] — unchecking it must not remove the last
     // mode (an empty set would be reinterpreted by the server migration)
-    const transit = simon.find('input[type="checkbox"][data-mode="transit"]')
-    await transit.setValue(false)
+    const transit = simon.find('.mode-pill[data-mode="transit"]')
+    await transit.trigger('click')
     await simon.trigger('focusout')
     await flush()
     const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
@@ -560,7 +560,7 @@ describe('SettingsView — autosave status and undo (C2/C3)', () => {
     await simon.trigger('focusout')
     await flush()
     expect(wrapper.text()).toContain('Saved ✓')
-    expect(strip(wrapper).find('.settings-person__undo').text()).toContain('Undo')
+    expect(wrapper.find('.save-footer .settings-person__undo').text()).toContain('Undo')
   })
 
   it('undo re-patches the previous snapshot', async () => {
@@ -571,7 +571,7 @@ describe('SettingsView — autosave status and undo (C2/C3)', () => {
     await simon.trigger('focusout')
     await flush()
     const savedBody = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0][1]
-    await strip(wrapper).find('.settings-person__undo').trigger('click')
+    await wrapper.find('.save-footer .settings-person__undo').trigger('click')
     await flush()
     expect(api.patchPerson).toHaveBeenCalledTimes(2)
     expect((api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[1][1]).toEqual(savedBody)
@@ -598,7 +598,7 @@ describe('SettingsView — autosave status and undo (C2/C3)', () => {
     await simon.trigger('focusout')
     await flush()
     expect(wrapper.text()).toContain("Couldn't save")
-    expect(strip(wrapper).find('.settings-person__undo').text()).toContain('Retry')
+    expect(wrapper.find('.save-footer .settings-person__undo').text()).toContain('Retry')
   })
 })
 

@@ -6,6 +6,7 @@ import Header from '../components/Header.vue'
 import ProvenanceToggle from '../components/ProvenanceToggle.vue'
 import * as api from '../services/api'
 import { blockPenceKey, integerPounds, normalizePence } from '../formatters/money'
+import ToggleSwitch from '../components/ToggleSwitch.vue'
 import WholePoundsField from '../components/WholePoundsField.vue'
 import type { Provenance } from '../types'
 
@@ -84,6 +85,7 @@ const visiblePersons = computed(() => {
   if (!me.value) return persons.value // unlinked session — show everyone read-only
   return persons.value.filter(p => p.name === me.value)
 })
+const ownPerson = computed(() => visiblePersons.value.find(isOwn) ?? null)
 const loading = ref(true)
 const error = ref('')
 const persons = ref<PersonSettings[]>([])
@@ -364,19 +366,6 @@ const depositRows = computed(() => {
           <span v-if="isOwn(person)" class="settings-person__badge">you</span>
           <span v-if="person.is_child" class="settings-person__badge settings-person__badge--child">child</span>
           <span v-if="!isOwn(person)" class="settings-person__locked-note">read-only</span>
-          <span v-if="isOwn(person) && saveState[person.name] === 'saving'" class="settings-person__status">Saving…</span>
-          <span
-            v-else-if="isOwn(person) && saveState[person.name] === 'saved'"
-            class="settings-person__status settings-person__status--saved"
-          >Saved ✓
-            <button class="settings-person__undo" type="button" @mousedown.prevent @click="undo(person)">Undo</button>
-          </span>
-          <span
-            v-else-if="isOwn(person) && saveState[person.name] === 'error'"
-            class="settings-person__status settings-person__status--error"
-          >Couldn't save —
-            <button class="settings-person__undo" type="button" @mousedown.prevent @click="retry(person)">Retry</button>
-          </span>
         </header>
 
         <!-- Tabs: Finances (default, left) | Commutes -->
@@ -399,16 +388,20 @@ const depositRows = computed(() => {
 
         <!-- ═══════ FINANCES ═══════ -->
         <div v-if="activeTab === 'finances'" class="settings-panel" role="tabpanel">
-          <div v-if="deposit" class="settings-deposit">
-            <h2 class="settings-deposit__title">Total deposit from everyone: {{ pounds(deposit.total) }}</h2>
-            <p class="settings-deposit__note">
-              What you'll have for the next house: expected sale price minus what's owed, plus any
-              extra money — added up across the family.
-            </p>
-            <ul class="settings-deposit__rows">
-              <li v-for="row in depositRows" :key="row.name" class="settings-deposit__row">
+          <!-- Deposit — the one hero number on this screen -->
+          <div v-if="deposit" class="settings-deposit settings-card">
+            <div class="deposit-hero">
+              <span class="deposit-hero__label">Total deposit from everyone</span>
+              <span class="deposit-hero__number">{{ pounds(deposit.total) }}</span>
+            </div>
+            <ul class="deposit-rows">
+              <li
+                v-for="row in depositRows"
+                :key="row.name"
+                :class="{ 'deposit-rows__zero': Number(row.amount?.amount ?? 0) === 0 }"
+              >
                 <span>{{ row.name }}</span>
-                <span>{{ pounds(row.amount) }}</span>
+                <span class="amount">{{ pounds(row.amount) }}</span>
               </li>
             </ul>
             <ProvenanceToggle
@@ -418,70 +411,73 @@ const depositRows = computed(() => {
             />
           </div>
 
+          <!-- Household finances -->
           <section
             v-if="financial"
-            class="settings-finances"
+            class="settings-finances settings-card"
             @input="scheduleFinancialSave"
             @change="scheduleFinancialSave"
             @focusout="flushFinancialSave"
           >
-            <h2 class="settings-person__name">Household finances</h2>
-            <p class="settings-person__note">
-              Shared assumptions every property's monthly cost is built from.
-            </p>
-            <div class="settings-person__field">
-              <label class="settings-person__label" for="mortgage-rate">Mortgage rate (%)</label>
+            <div class="card-heading">Household finances</div>
+            <div class="stack-field">
+              <label for="mortgage-rate">Mortgage rate (%)</label>
               <input id="mortgage-rate" type="text" inputmode="decimal" v-model="fin['mortgage-rate']" />
             </div>
-            <div class="settings-person__field">
-              <label class="settings-person__label" for="mortgage-term">Mortgage term (years)</label>
+            <div class="stack-field">
+              <label for="mortgage-term">Mortgage term (years)</label>
               <input id="mortgage-term" type="text" inputmode="numeric" v-model="fin['mortgage-term']" />
             </div>
-            <div class="settings-person__field">
-              <label class="settings-person__label" for="sinking-fund">Sinking fund (% of value per year)</label>
+            <div class="stack-field">
+              <label for="sinking-fund">Sinking fund (% of value per year)</label>
               <input id="sinking-fund" type="text" inputmode="decimal" v-model="fin['sinking-fund']" />
             </div>
-            <div class="settings-person__field">
-              <label class="settings-person__label" for="petrol-cost">Petrol cost (£ per litre)</label>
+            <div class="stack-field">
+              <label for="petrol-cost">Petrol cost (£ per litre)</label>
               <input id="petrol-cost" type="text" inputmode="decimal" v-model="fin['petrol-cost']" />
             </div>
           </section>
 
+          <!-- The person's money -->
           <section
             v-for="person in visiblePersons"
             :key="'money-' + person.name"
-            class="settings-person"
+            class="settings-card settings-person"
             :class="{ 'settings-person--locked': !isOwn(person) }"
             @input="scheduleSave(person)"
             @change="scheduleSave(person)"
             @focusout="flushSave(person)"
           >
-            <h3 class="settings-person__subtitle">Your money</h3>
-            <div v-if="isOwn(person)" class="settings-person__money">
-              <div class="settings-person__field">
-                <input id="selling-home" type="checkbox" v-model="person.selling_home" />
-                <label class="settings-person__label settings-person__label--inline" for="selling-home">
-                  I am selling a home to fund this purchase
-                </label>
-              </div>
-              <template v-if="person.selling_home">
-                <label class="settings-person__label" for="home-sale">Expected sale price of current home (£)</label>
+            <div class="card-heading">
+              {{ person.name }}
+              <span v-if="isOwn(person)" class="settings-person__badge">you</span>
+            </div>
+            <label class="toggle-row">
+              <span class="toggle-row__label">I am selling a home to fund this purchase</span>
+              <ToggleSwitch v-model="person.selling_home" :disabled="!isOwn(person)" @change="scheduleSave(person)" />
+            </label>
+            <template v-if="person.selling_home">
+              <div class="stack-field">
+                <label for="home-sale">Expected sale price of current home (£)</label>
                 <WholePoundsField
                   id="home-sale"
                   :model-value="person.home_sale_price ? integerPounds(person.home_sale_price.amount) : ''"
                   @update:model-value="(v) => { if (person.home_sale_price) person.home_sale_price.amount = v }"
                 />
-                <p class="settings-person__helper">What you expect to get when you sell it. Whole pounds only.</p>
-                <label class="settings-person__label" for="mortgage">Mortgage remaining on current home (£)</label>
+              </div>
+              <div class="stack-field">
+                <label for="mortgage">Mortgage remaining on current home (£)</label>
                 <WholePoundsField
                   id="mortgage"
                   :model-value="person.outstanding_mortgage ? integerPounds(person.outstanding_mortgage.amount) : ''"
                   @update:model-value="(v) => { if (person.outstanding_mortgage) person.outstanding_mortgage.amount = v }"
                 />
-                <p class="settings-person__helper">What you still owe on the house you're selling. Whole pounds only.</p>
-              </template>
-              <p v-else class="settings-person__helper">Deposit is cash — no current home.</p>
-              <label class="settings-person__label" for="cash">
+              </div>
+              <p class="band-helper">What you expect to get and still owe on the home you're selling. Whole pounds only.</p>
+            </template>
+            <p v-else class="band-helper">Deposit is cash — no current home.</p>
+            <div class="stack-field">
+              <label for="cash">
                 {{ person.selling_home ? 'Other money toward the deposit (£)' : 'Cash available for the deposit (£)' }}
               </label>
               <WholePoundsField
@@ -489,15 +485,15 @@ const depositRows = computed(() => {
                 :model-value="person.cash_contribution ? integerPounds(person.cash_contribution.amount) : ''"
                 @update:model-value="(v) => { if (person.cash_contribution) person.cash_contribution.amount = v }"
               />
-              <p class="settings-person__helper">
-                {{ person.selling_home ? 'Savings or gifts, on top of the sale proceeds.' : 'Savings, gifts, or the proceeds of a sale.' }}
-              </p>
-              <label class="settings-person__label" for="life-insurance">Life insurance (£/month)</label>
+            </div>
+            <div class="stack-field">
+              <label for="life-insurance">Life insurance (£/month)</label>
               <input
                 id="life-insurance"
                 type="text"
                 inputmode="decimal"
                 :value="person.life_insurance_monthly?.amount"
+                :disabled="!isOwn(person)"
                 @keydown="blockPenceKey"
                 @input="moneyInput(person.life_insurance_monthly!, $event)"
                 @blur="penceInput(person.life_insurance_monthly!, $event)"
@@ -521,69 +517,94 @@ const depositRows = computed(() => {
               Goes to school near the house, so school runs are worked out per property.
             </p>
 
-            <div class="settings-person__field">
-              <label class="settings-person__label" for="has-car">Has a car</label>
-              <input
-                id="has-car"
-                type="checkbox"
-                v-model="person.has_car"
-                :disabled="!isOwn(person)"
-              />
-            </div>
-            <div v-if="person.has_car" class="settings-person__field">
-              <label class="settings-person__label" for="petrol-mpg">Your car's petrol economy (MPG)</label>
-              <input
-                id="petrol-mpg"
-                type="text"
-                inputmode="numeric"
-                :value="person.petrol_mpg ?? 45"
-                :disabled="!isOwn(person)"
-                @input="(e) => { const v = Number((e.target as HTMLInputElement).value); if (Number.isFinite(v) && v > 0) person.petrol_mpg = v }"
-              />
+            <!-- Has a car + the car's own MPG -->
+            <div class="settings-card">
+              <label class="toggle-row">
+                <span class="toggle-row__label">Has a car</span>
+                <ToggleSwitch v-model="person.has_car" :disabled="!isOwn(person)" @change="scheduleSave(person)" />
+              </label>
+              <div v-if="person.has_car" class="stack-field">
+                <label for="petrol-mpg">Your car's petrol economy (MPG)</label>
+                <input
+                  id="petrol-mpg"
+                  type="text"
+                  inputmode="numeric"
+                  :value="person.petrol_mpg ?? 45"
+                  :disabled="!isOwn(person)"
+                  @input="(e) => { const v = Number((e.target as HTMLInputElement).value); if (Number.isFinite(v) && v > 0) person.petrol_mpg = v }"
+                />
+              </div>
             </div>
 
-            <div class="settings-person__thresholds">
-              <label class="settings-person__label" for="good-max">Commute is easy up to (minutes)</label>
-              <input
-                id="good-max"
-                type="number"
-                :value="thresholds[person.name]?.good_max_minutes"
-                :disabled="!isOwn(person)"
-                @input="(e) => { const t = thresholds[person.name]; if (t) t.good_max_minutes = Number((e.target as HTMLInputElement).value) }"
-              />
-              <label class="settings-person__label" for="fine-max">Worst acceptable commute (minutes)</label>
-              <input
-                id="fine-max"
-                type="number"
-                :value="thresholds[person.name]?.fine_max_minutes"
-                :disabled="!isOwn(person)"
-                @input="(e) => { const t = thresholds[person.name]; if (t) t.fine_max_minutes = Number((e.target as HTMLInputElement).value) }"
-              />
-              <label class="settings-person__label" for="max-walk">Willing to walk up to (minutes)</label>
-              <input
-                id="max-walk"
-                type="number"
-                :value="walkMinutes(person)"
-                :disabled="!isOwn(person)"
-                @input="setWalkMinutes(person, $event)"
-              />
-              <p class="settings-person__helper">
+            <!-- Commute colour bands -->
+            <div class="settings-card">
+              <div class="card-heading">Commute colour bands</div>
+              <div class="band-row">
+                <input
+                  id="good-max"
+                  class="input-half"
+                  type="number"
+                  :value="thresholds[person.name]?.good_max_minutes"
+                  :disabled="!isOwn(person)"
+                  aria-label="Commute is easy up to (minutes)"
+                  @input="(e) => { const t = thresholds[person.name]; if (t) t.good_max_minutes = Number((e.target as HTMLInputElement).value) }"
+                />
+                <div class="band" role="img" aria-label="Easy to hard: green to red">
+                  <span class="band__good"></span><span class="band__warn"></span><span class="band__bad"></span>
+                </div>
+                <input
+                  id="fine-max"
+                  class="input-half"
+                  type="number"
+                  :value="thresholds[person.name]?.fine_max_minutes"
+                  :disabled="!isOwn(person)"
+                  aria-label="Worst acceptable commute (minutes)"
+                  @input="(e) => { const t = thresholds[person.name]; if (t) t.fine_max_minutes = Number((e.target as HTMLInputElement).value) }"
+                />
+              </div>
+              <div class="band-caption"><span>easy</span><span>tight</span><span>yikes</span></div>
+              <div class="band-preview">
+                <span class="band-preview__item">
+                  <span class="band-preview__pill band-preview__pill--good">22 min</span>
+                  under {{ thresholds[person.name]?.good_max_minutes ?? 30 }} = fine
+                </span>
+                <span class="band-preview__item">
+                  <span class="band-preview__pill band-preview__pill--warn">38 min</span>
+                  {{ thresholds[person.name]?.good_max_minutes ?? 30 }}–{{ thresholds[person.name]?.fine_max_minutes ?? 45 }} = tight
+                </span>
+                <span class="band-preview__item">
+                  <span class="band-preview__pill band-preview__pill--bad">52 min</span>
+                  over {{ thresholds[person.name]?.fine_max_minutes ?? 45 }} = yikes
+                </span>
+              </div>
+              <div class="stack-field">
+                <label for="max-walk">Willing to walk up to (minutes)</label>
+                <input
+                  id="max-walk"
+                  type="number"
+                  :value="walkMinutes(person)"
+                  :disabled="!isOwn(person)"
+                  @input="setWalkMinutes(person, $event)"
+                />
+              </div>
+              <p class="band-helper">
                 These colour the commute pills on the cards: up to the first is 'fine', between the two
                 is 'getting tight', over the worst is 'yikes'. Walking is only offered for shorter trips.
               </p>
             </div>
 
-            <h3 class="settings-person__subtitle">Destinations</h3>
+            <!-- Destinations: one card each -->
+            <div class="card-heading">Destinations</div>
             <button
               v-if="isOwn(person)"
-              class="poi-add"
+              class="btn-add"
               type="button"
               @click="addDestination(person); scheduleSave(person)"
             >+ Add destination</button>
             <div
               v-for="(poi, poiIndex) in person.places_of_interest"
               :key="poiIndex"
-              class="settings-poi"
+              class="settings-card dest-card"
             >
               <button
                 v-if="isOwn(person)"
@@ -592,8 +613,12 @@ const depositRows = computed(() => {
                 :aria-label="'Remove ' + (poi.label || 'destination')"
                 @click="removeDestination(person, poiIndex); scheduleSave(person)"
               >×</button>
-              <div class="settings-poi__row">
-                <label class="settings-person__label" :for="`label-${person.name}-${poi.label}`">Destination name</label>
+              <div class="dest-card__header">
+                <div class="dest-card__name">{{ person.name }} → {{ poi.label || 'unnamed' }}</div>
+                <span class="dest-card__meta">{{ poi.trips_per_week }} trip/wk</span>
+              </div>
+              <div class="stack-field">
+                <label :for="`label-${person.name}-${poi.label}`">Destination name</label>
                 <input
                   :id="`label-${person.name}-${poi.label}`"
                   type="text"
@@ -601,19 +626,22 @@ const depositRows = computed(() => {
                   :disabled="!isOwn(person)"
                 />
               </div>
-              <p class="settings-person__helper">Shown on cards as '{{ person.name }} → &lt;name&gt;'.</p>
-              <div class="settings-poi__row">
-                <label class="settings-person__label" :for="`address-${person.name}-${poi.label}`">Address</label>
-                <input
-                  :id="`address-${person.name}-${poi.label}`"
-                  type="text"
-                  v-model="poi.address"
-                  :disabled="!isOwn(person)"
-                />
+              <div class="stack-field">
+                <label :for="`address-${person.name}-${poi.label}`">Address</label>
+                <div class="address-group">
+                  <input
+                    :id="`address-${person.name}-${poi.label}`"
+                    class="address-input"
+                    type="text"
+                    v-model="poi.address"
+                    :disabled="!isOwn(person)"
+                    placeholder="Start typing a postcode or street…"
+                  />
+                  <button class="address-lookup" type="button" aria-label="Look up address" tabindex="-1">🔍</button>
+                </div>
               </div>
-              <p class="settings-person__helper">Used to calculate the commute.</p>
-              <div class="settings-poi__row">
-                <label class="settings-person__label" :for="`trips-${person.name}-${poi.label}`">Trips per week</label>
+              <div class="stack-field">
+                <label :for="`trips-${person.name}-${poi.label}`">Trips per week</label>
                 <input
                   :id="`trips-${person.name}-${poi.label}`"
                   type="number"
@@ -621,8 +649,8 @@ const depositRows = computed(() => {
                   :disabled="!isOwn(person)"
                 />
               </div>
-              <div class="settings-poi__row">
-                <label class="settings-person__label" :for="`weeks-${person.name}-${poi.label}`">Weeks per year</label>
+              <div class="stack-field">
+                <label :for="`weeks-${person.name}-${poi.label}`">Weeks per year</label>
                 <input
                   :id="`weeks-${person.name}-${poi.label}`"
                   type="number"
@@ -630,24 +658,23 @@ const depositRows = computed(() => {
                   :disabled="!isOwn(person)"
                 />
               </div>
-              <div class="settings-poi__modes">
-                <span class="settings-person__label">Transport modes you'd accept</span>
-                <label
-                  v-for="mode in MODE_OPTIONS"
-                  :key="mode.value"
-                  class="settings-poi__mode"
-                  :class="{ 'settings-poi__mode--hidden': mode.value === 'car' && !person.has_car }"
-                >
-                  <input
-                    type="checkbox"
+              <div class="stack-field">
+                <span class="toggle-row__label" style="font-size: var(--fs-sm)">Transport modes you'd accept</span>
+                <div class="mode-pills">
+                  <button
+                    v-for="mode in MODE_OPTIONS"
+                    :key="mode.value"
+                    type="button"
+                    class="mode-pill"
+                    :class="{
+                      'mode-pill--active': poi.acceptable_modes.includes(mode.value),
+                      'mode-pill--hidden': mode.value === 'car' && !person.has_car,
+                    }"
                     :data-mode="mode.value"
-                    :checked="poi.acceptable_modes.includes(mode.value)"
                     :disabled="!isOwn(person) || (mode.value === 'car' && !person.has_car)"
-                    @change="isOwn(person) && toggleMode(poi, mode.value)"
-                  />
-                  {{ mode.label }}
-                </label>
-                <p class="settings-person__helper">The app plans routes using only these.</p>
+                    @click="isOwn(person) && toggleMode(poi, mode.value)"
+                  >{{ mode.label }}</button>
+                </div>
               </div>
             </div>
             <p v-if="person.places_of_interest.length === 0" class="settings-poi__empty">
@@ -655,6 +682,21 @@ const depositRows = computed(() => {
             </p>
           </section>
         </div>
+
+        <!-- Autosave status — fixed footer, visible on both tabs -->
+        <footer v-if="ownPerson && isOwn(ownPerson)" class="save-footer">
+          <template v-if="saveState[ownPerson.name] === 'saving'">
+            Saving…
+          </template>
+          <template v-else-if="saveState[ownPerson.name] === 'saved'">
+            <span class="save-dot"></span> Saved ✓
+            <button class="settings-person__undo" type="button" @click="undo(ownPerson)">Undo</button>
+          </template>
+          <template v-else-if="saveState[ownPerson.name] === 'error'">
+            Couldn't save —
+            <button class="settings-person__undo" type="button" @click="retry(ownPerson)">Retry</button>
+          </template>
+        </footer>
 
         <p v-if="!anyEditable" class="settings__note">
           Your account isn't linked to a person yet — ask the family's superuser to add your email in
@@ -671,7 +713,7 @@ const depositRows = computed(() => {
 .settings__main {
   max-width: 860px;
   margin: 0 auto;
-  padding: 1rem;
+  padding: 1rem 1rem 80px;
 }
 .settings__intro,
 .settings__note,
