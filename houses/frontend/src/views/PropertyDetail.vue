@@ -42,14 +42,14 @@ const bedrooms = computed(() => detail.value?.rightmove_bedrooms?.succeeded
   ? detail.value.rightmove_bedrooms.value : null)
 
 const monthlyCost = computed(() => {
-  const g = detail.value?.group_monthly_cost
+  const g = detail.value?.affordability?.group_monthly_cost
   if (!g?.succeeded || !g.value?.couple) return null
   return Number(g.value.couple.value)
 })
 
 // Part A: an approximate total (stddev > 0) renders as "≈ £X/mo".
 const monthlyCostApprox = computed(() => {
-  const g = detail.value?.group_monthly_cost
+  const g = detail.value?.affordability?.group_monthly_cost
   return !!g?.succeeded && ((g.value?.couple?.stddev ?? 0) > 0)
 })
 

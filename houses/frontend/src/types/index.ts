@@ -199,8 +199,8 @@ export interface PropertyDetail {
     monthly_commute_cost: AttemptValue<CommuteBreakdown>
     stamp_duty: AttemptValue<MoneyValue>
     rental_income: AttemptValue<MoneyValue>
+    group_monthly_cost: AttemptValue<GroupMonthlyCost>
   }
-  group_monthly_cost: AttemptValue<GroupMonthlyCost>
   area: {
     walkability: AttemptValue<Record<string, unknown>>
     town_description: AttemptValue<string>

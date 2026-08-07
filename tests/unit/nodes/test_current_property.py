@@ -11,7 +11,7 @@ from dag.measurement import Measurement
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.council_tax_info import CouncilTaxInfo
-from houses.model.domain import Person
+from houses.model.domain import HomeCoOwner, Person
 
 
 class TestCurrentPropertyGating:
@@ -263,3 +263,102 @@ class TestCurrentPropertyGating:
         assert float(total.value.amount) == pytest.approx(expected, abs=0.01), (
             f"Expected ~{expected}, got {total}"
         )
+
+
+class TestGroupMonthlyCostNode:
+    """The headline's two numbers must include council tax — a
+    regression: the node read getattr(council, 'value'/'stddev') but
+    CouncilTaxInfo keeps the data at yearly_cost.value/stddev, so
+    council tax silently contributed zero and the '≈' flag could never
+    appear."""
+
+    def _node(self, node_id: str):
+        from houses.nodes.total_monthly_housing_cost_node import GroupMonthlyCostNode
+
+        mg = UserInputNode[Money]("g_" + node_id + "_mg", Money)
+        sf = UserInputNode[Money]("g_" + node_id + "_sf", Money)
+        li = UserInputNode[Money]("g_" + node_id + "_li", Money)
+        ri = UserInputNode[Money]("g_" + node_id + "_ri", Money)
+        st = UserInputNode[str]("g_" + node_id + "_st", str)
+        cb = UserInputNode[dict]("g_" + node_id + "_cb", dict)
+        ct = UserInputNode[CouncilTaxInfo]("g_" + node_id + "_ct", CouncilTaxInfo)
+        ps = UserInputNode[list]("g_" + node_id + "_ps", list)
+        node = GroupMonthlyCostNode(
+            node_id,
+            monthly_mortgage_node=mg,
+            yearly_sinking_fund_node=sf,
+            life_insurance_node=li,
+            rental_income_node=ri,
+            status_node=st,
+            commute_breakdown_node=cb,
+            council_tax_node=ct,
+            persons_source=ps,
+        )
+        return node, mg, sf, li, ri, st, cb, ct, ps
+
+    @pytest.mark.asyncio
+    async def test_couple_figure_includes_council_tax(self):
+        """Council tax flows into the couple/others headline: the exact
+        value when the lookup succeeded, and the stddev when the Band-D
+        fallback estimated it."""
+        node, mg, sf, li, ri, st, cb, ct, ps = self._node("ctax1")
+        mg.push(Money("1000", "GBP"), "test")
+        sf.push(Money("0", "GBP"), "test")
+        li.push(Money("0", "GBP"), "test")
+        ri.push(Money("0", "GBP"), "test")
+        st.push("", "test")
+        cb.push({}, "test")
+        ps.push([Person("Simon", True), Person("Lorena", False), Person("Ashby", False)], "test")
+        # Band-D fallback: an ESTIMATE with a spread
+        ct.push(
+            CouncilTaxInfo(
+                band="D",
+                yearly_cost=Measurement(Money("1800", "GBP"), 120.0),
+            ),
+            "test",
+        )
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded
+        val = a.value_or_none()
+        assert val is not None
+        # All three are adults; joint owners = all adults (no current
+        # home linked) → the couple figure carries the full council tax.
+        # Without the fix, council contributes 0 and stddev is 0.
+        couple = val["couple"]
+        assert float(couple["value"]) == pytest.approx(1000 + 1800 / 12, abs=0.01), (
+            f"council tax should add 150/mo, got couple={couple}"
+        )
+        assert couple["stddev"] == pytest.approx(120 / 12, abs=0.01), (
+            f"council stddev should flow into the headline, got {couple['stddev']}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_split_share_scales_council_contribution(self):
+        """When owners and others split the shared costs, each group's
+        council-tax share is proportional to its headcount."""
+        node, mg, sf, li, ri, st, cb, ct, ps = self._node("ctax2")
+        mg.push(Money("0", "GBP"), "test")
+        sf.push(Money("0", "GBP"), "test")
+        li.push(Money("0", "GBP"), "test")
+        ri.push(Money("0", "GBP"), "test")
+        st.push("", "test")
+        cb.push({}, "test")
+        # joint owners = Simon+Lorena (from home_co_owners); Ashby the other
+        simon = Person("Simon", True, home_co_owners=(HomeCoOwner(name="Lorena", share=50),))
+        ps.push([simon, Person("Lorena", False), Person("Ashby", False)], "test")
+        ct.push(
+            CouncilTaxInfo(
+                band="D",
+                yearly_cost=Measurement(Money("1800", "GBP"), 0.0),
+            ),
+            "test",
+        )
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded
+        val = a.value_or_none()
+        assert val is not None
+        # owners 2/3, others 1/3 → council share 100/mo vs 50/mo
+        assert float(val["couple"]["value"]) == pytest.approx(1800 / 12 * 2 / 3, abs=0.01)
+        assert float(val["others"]["value"]) == pytest.approx(1800 / 12 * 1 / 3, abs=0.01)

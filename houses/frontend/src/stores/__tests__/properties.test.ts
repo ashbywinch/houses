@@ -42,8 +42,8 @@ function mockDetail(rid: string): PropertyDetail {
       monthly_sinking_fund: { succeeded: true, value: {amount: "0", currency: "GBP"}, error: null, provenance: { label: 'test' } },
       monthly_commute_cost: { succeeded: true, value: { persons: {}, yearly_total_gbp: 0, formula_explanation: '' }, error: null, provenance: { label: 'test' } },
       rental_income: { succeeded: true, value: {amount: "0", currency: "GBP"}, error: null, provenance: { label: 'test' } },
+      group_monthly_cost: { succeeded: true, value: { couple: { value: '0', stddev: 0 }, others: { value: '0', stddev: 0 }, couple_label: 'S&L', others_label: 'A' }, error: null, provenance: { label: 'test' } },
     },
-    group_monthly_cost: { succeeded: true, value: { couple: { value: '0', stddev: 0 }, others: { value: '0', stddev: 0 }, couple_label: 'S&L', others_label: 'A' }, error: null, provenance: { label: 'test' } },
     area: {
       walkability: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },
       town_description: { succeeded: false, value: null, error: null, provenance: { label: 'test' } },

@@ -47,8 +47,8 @@ const councilTaxLabel = computed(() => {
 
 /** True when the total is approximate (stddev > 0). */
 const totalMonthlyApprox = computed(() => {
-  const m = props.affordability?.total_monthly_housing_cost
-  return !!m?.succeeded && (m.value?.stddev ?? 0) > 0
+  const m = props.affordability?.group_monthly_cost
+  return !!m?.succeeded && ((m.value?.couple?.stddev ?? 0) > 0)
 })
 
 /** Sinking fund note using THIS property's actual figures: the monthly
@@ -65,7 +65,7 @@ const sinkingFundNote = computed(() => {
 /** When the total can't be calculated, name the leaf reason the UI
  *  knows (e.g. "Works estimate required for: Ashby"). */
 const totalBlockedReason = computed(() => {
-  const t = props.affordability?.total_monthly_housing_cost
+  const t = props.affordability?.group_monthly_cost
   if (!t || t.succeeded || t.error == null) return ''
   const detail = (t as { error_detail?: { user_message?: string } }).error_detail
   return detail?.user_message || t.error || ''
@@ -344,22 +344,22 @@ function canEdit(personName: string): boolean {
               </div>
       <ProvenanceToggle v-if="affordability?.rental_income?.provenance" :provenance="affordability?.rental_income?.provenance" title="Rental income" />
 
-      <!-- Total Monthly -->
-      <div class="costs-row costs-row--total" :class="{ 'costs-row--impossible': isImpossible(affordability?.total_monthly_housing_cost) }">
+      <!-- Total Monthly — the couple's headline figure -->
+      <div class="costs-row costs-row--total" :class="{ 'costs-row--impossible': isImpossible(affordability?.group_monthly_cost) }">
         <span class="costs-label">Total Monthly</span>
         <span
-          v-if="affordability?.total_monthly_housing_cost?.succeeded && affordability?.total_monthly_housing_cost?.value"
+          v-if="affordability?.group_monthly_cost?.succeeded && affordability?.group_monthly_cost?.value?.couple"
           class="costs-value"
           :title="totalMonthlyApprox ? 'Council tax estimated — total is approximate' : undefined"
-        >{{ totalMonthlyApprox ? '≈ ' : '' }}£{{ affordability.total_monthly_housing_cost.value.value.amount }}</span>
-        <span v-else-if="isImpossible(affordability?.total_monthly_housing_cost)" class="costs-value costs-value--impossible">Can't calculate</span>
+        >{{ totalMonthlyApprox ? '≈ ' : '' }}£{{ affordability.group_monthly_cost.value.couple.value }}</span>
+        <span v-else-if="isImpossible(affordability?.group_monthly_cost)" class="costs-value costs-value--impossible">Can't calculate</span>
         <span v-else class="costs-value">?</span>
               </div>
       <p v-if="totalBlockedReason" class="costs-note costs-note--blocked">{{ totalBlockedReason }}</p>
-      <p v-if="affordability?.total_monthly_housing_cost?.succeeded" class="costs-note">
-        Everything above added together: mortgage + sinking fund + life insurance + commutes + council tax − rental income.
+      <p v-if="affordability?.group_monthly_cost?.succeeded" class="costs-note">
+        The joint owners' monthly cost: mortgage + sinking fund + life insurance + commutes + council tax − rental income.
       </p>
-      <ProvenanceToggle v-if="affordability?.total_monthly_housing_cost?.provenance" :provenance="affordability?.total_monthly_housing_cost?.provenance" title="Total monthly housing cost" />
+      <ProvenanceToggle v-if="affordability?.group_monthly_cost?.provenance" :provenance="affordability?.group_monthly_cost?.provenance" title="Total monthly housing cost" />
     </div>
 
     <!-- EPC scale -->

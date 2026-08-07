@@ -18,7 +18,7 @@ function mountCosts(overrides?: Record<string, unknown>) {
         monthly_mortgage: { succeeded: false, value: null, error: null, provenance: {} },
         monthly_sinking_fund: { succeeded: false, value: null, error: null, provenance: {} },
         monthly_commute_cost: { succeeded: false, value: null, error: null, provenance: {} },
-        total_monthly_housing_cost: { succeeded: false, value: null, error: null, provenance: {} },
+        group_monthly_cost: { succeeded: false, value: null, error: null, provenance: {} },
         works_estimates: { succeeded: true, value: {}, error: null, provenance: {} },
         total_works: { succeeded: true, value: { amount: '0', currency: 'GBP' }, error: null, provenance: {} },
         rental_income: { succeeded: true, value: { amount: '500', currency: 'GBP' }, error: null, provenance: { label: 'user' } },

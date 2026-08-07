@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "npm run gen-vars && vite --host",
     "build": "vue-tsc -b && vite build",
-    "test": "vue-tsc -b --noEmit && vitest run && vite build && npm run lint:css",
+    "test": "vitest run && vite build && npm run lint:css",
     "preview": "vite preview",
     "gen-vars": "sed -n '/^:root {/,/^}/p' src/App.vue > src/_variables.css",
     "lint:css": "npm run gen-vars && stylelint --config .stylelintrc.json 'src/**/*.vue'"

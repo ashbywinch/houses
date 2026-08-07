@@ -178,8 +178,17 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
 
         is_current = status.succeeded and (status.value_or_none() or "").strip().lower() == "current"
         council = council_tax.value_or_none()
-        council_stddev = getattr(council, "stddev", 0) or 0
-        council_monthly = Decimal(str(getattr(council, "value", Decimal(0)))) / Decimal(12)
+        # CouncilTaxInfo carries the cost as a Measurement at
+        # yearly_cost (exact when looked up, a spread when the Band-D
+        # fallback estimated it) — read the real fields, never a
+        # getattr-with-default that silently zeroes the contribution.
+        council_yearly = council.yearly_cost if council is not None else None
+        council_stddev = float(council_yearly.stddev) if council_yearly is not None else 0.0
+        council_monthly = (
+            Decimal(str(council_yearly.value.amount)) / Decimal(12)
+            if council_yearly is not None
+            else Decimal(0)
+        )
         # For a Current property the sinking fund and life insurance are
         # excluded (the family's current living cost, not the purchase).
         sinking_monthly = Decimal(0) if is_current else (sinking.value_or_none() or Money("0", "GBP")).amount / Decimal(12)  # noqa: E501

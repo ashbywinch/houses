@@ -18,7 +18,7 @@ function mountCosts(overrides?: Record<string, unknown>, pinia?: ReturnType<type
         monthly_mortgage: { succeeded: false, value: null, error: null, provenance: {} },
         monthly_sinking_fund: { succeeded: false, value: null, error: null, provenance: {} },
         monthly_commute_cost: { succeeded: false, value: null, error: null, provenance: {} },
-        total_monthly_housing_cost: { succeeded: false, value: null, error: null, provenance: {} },
+        group_monthly_cost: { succeeded: false, value: null, error: null, provenance: {} },
         works_estimates: { succeeded: true, value: { Ashby: 20000 }, error: null, provenance: {} },
         total_works: { succeeded: true, value: { amount: '20000', currency: 'GBP' }, error: null, provenance: {} },
         rental_income: { succeeded: true, value: { amount: '500', currency: 'GBP' }, error: null, provenance: { label: 'user' } },
@@ -171,7 +171,7 @@ describe('CostsSection blocked-state copy (C1/C2)', () => {
     const wrapper = mountCosts({
       affordability: {
         monthly_mortgage: { succeeded: false, value: null, error: 'dep failed', provenance: {} },
-        total_monthly_housing_cost: { succeeded: false, value: null, error: 'dep failed', provenance: {} },
+        group_monthly_cost: { succeeded: false, value: null, error: 'dep failed', provenance: {} },
       },
     })
     const text = wrapper.text()
@@ -193,15 +193,20 @@ describe('CostsSection explanatory copy (C5/C6/C10)', () => {
   it('explains what Total Monthly includes', () => {
     const wrapper = mountCosts({
       affordability: {
-        total_monthly_housing_cost: {
+        group_monthly_cost: {
           succeeded: true,
-          value: { value: { amount: '1100', currency: 'GBP' }, stddev: 0 },
+          value: {
+            couple: { value: '1100', stddev: 0 },
+            others: { value: '200', stddev: 0 },
+            couple_label: 'S',
+            others_label: 'A',
+          },
           error: null,
           provenance: {},
         },
       },
     })
-    expect(wrapper.text()).toContain('Everything above added together')
+    expect(wrapper.text()).toContain("The joint owners' monthly cost")
   })
 
   it('explains that renovation costs are added to the mortgage', () => {
@@ -212,7 +217,7 @@ describe('CostsSection explanatory copy (C5/C6/C10)', () => {
   it('names the missing piece when the total cannot be calculated', () => {
     const wrapper = mountCosts({
       affordability: {
-        total_monthly_housing_cost: {
+        group_monthly_cost: {
           succeeded: false,
           value: null,
           error: '77777777/total_monthly_cost: dep failed (Works estimate required for: Ashby)',
@@ -268,9 +273,14 @@ describe('CostsSection uncertainty rendering (Part A)', () => {
   it('renders ≈ on the Total Monthly row when approximate', () => {
     const wrapper = mountCosts({
       affordability: {
-        total_monthly_housing_cost: {
+        group_monthly_cost: {
           succeeded: true,
-          value: { value: { amount: '1100', currency: 'GBP' }, stddev: 4.17 },
+          value: {
+            couple: { value: '1100', stddev: 4.17 },
+            others: { value: '200', stddev: 0 },
+            couple_label: 'S',
+            others_label: 'A',
+          },
           error: null,
           provenance: {},
         },
@@ -278,6 +288,30 @@ describe('CostsSection uncertainty rendering (Part A)', () => {
     })
     const totalRow = wrapper.find('.costs-row--total')
     expect(totalRow.text()).toContain('≈ £1100')
+  })
+
+  it('renders the couple figure on the Total Monthly row', () => {
+    // Regression: the row read the removed total_monthly_housing_cost
+    // key, so it always fell through to '?' — the couple's headline
+    // figure from group_monthly_cost must render instead.
+    const wrapper = mountCosts({
+      affordability: {
+        group_monthly_cost: {
+          succeeded: true,
+          value: {
+            couple: { value: '1548.67', stddev: 0 },
+            others: { value: '322.5', stddev: 0 },
+            couple_label: 'S+L',
+            others_label: 'A',
+          },
+          error: null,
+          provenance: {},
+        },
+      },
+    })
+    const totalRow = wrapper.find('.costs-row--total')
+    expect(totalRow.text()).toContain('£1548.67')
+    expect(totalRow.text()).not.toContain('?')
   })
 })
 

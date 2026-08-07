@@ -239,3 +239,62 @@ describe('WhatIfPanel — commute tab (MPG + max walk)', () => {
     expect(ashbyBody?.bus_walk_penalty).toEqual({ value: 15, unit: 'minute' })
   })
 })
+
+describe('WhatIfPanel — has_car and empty money (reviewer findings)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.mocked(api.fetchSettings).mockResolvedValue(settingsPersons as unknown as Record<string, unknown>)
+    vi.mocked(api.postWhatIf).mockResolvedValue({
+      'prop-a': { succeeded: true, group: { couple: { value: '900', stddev: 0 }, others: { value: '200', stddev: 0 }, couple_label: 'S&L', others_label: 'A' } },
+    })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('sends has_car in the what-if payload so the toggle is not dead UI', async () => {
+    const { wrapper } = mountPanel()
+    await settle()
+    await expand(wrapper)
+    await wrapper.findAll('.settings-tabs button')[1].trigger('click')
+    await wrapper.vm.$nextTick()
+    // Simon starts has_car=true; flip it off and run the evaluation
+    const simon = wrapper.findAll('.whatif-person')[0]
+    await simon.find('.switch').trigger('click')
+    await runDebouncedEval()
+    const body = (api.postWhatIf as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as Array<Record<string, unknown>>
+    const simonBody = body.find((b: Record<string, unknown>) => b.name === 'Simon')
+    expect(simonBody?.has_car).toBe(false)
+    const ashbyBody = body.find((b: Record<string, unknown>) => b.name === 'Ashby')
+    expect(ashbyBody?.has_car).toBe(false)
+  })
+
+  it('sends has_car when committing the numbers', async () => {
+    const { wrapper } = mountPanel()
+    await settle()
+    await expand(wrapper)
+    await wrapper.findAll('button').find(b => b.text().includes('Use these numbers'))!.trigger('click')
+    await settle()
+    const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(name).toBe('Simon')
+    expect(body.has_car).toBe(true)
+  })
+
+  it('normalises cleared whole-pound fields to 0 instead of sending empty', async () => {
+    const { wrapper } = mountPanel()
+    await settle()
+    await expand(wrapper)
+    // Ashby's cash field is cleared → the payload must send '0', not ''
+    // (the server rejects empty amounts with 400)
+    const ashbyCash = wrapper
+      .findAll('.whatif-person__field')
+      .find(l => l.text().includes('Cash available for the deposit'))!
+      .find('input')
+    await ashbyCash.setValue('')
+    await runDebouncedEval()
+    const body = (api.postWhatIf as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as Array<Record<string, unknown>>
+    const ashbyBody = body.find((b: Record<string, unknown>) => b.name === 'Ashby')
+    expect(ashbyBody?.cash_contribution).toEqual({ amount: '0', currency: 'GBP' })
+  })
+})

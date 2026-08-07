@@ -93,14 +93,15 @@ function payload() {
     const body: Record<string, unknown> = {
       name: p.name,
       selling_home: p.selling_home,
+      has_car: p.has_car,
       petrol_mpg: p.petrol_mpg,
       bus_walk_penalty: { ...p.bus_walk_penalty },
     }
     if (p.selling_home) {
-      body.home_sale_price = money(p.home_sale_price)
-      body.outstanding_mortgage = money(p.outstanding_mortgage)
+      body.home_sale_price = money(p.home_sale_price || '0')
+      body.outstanding_mortgage = money(p.outstanding_mortgage || '0')
     }
-    body.cash_contribution = money(p.cash_contribution)
+    body.cash_contribution = money(p.cash_contribution || '0')
     body.life_insurance_monthly = money(p.life_insurance_monthly || '0')
     body.places_of_interest = p.places_of_interest.map(poi => ({ ...poi }))
     return body
@@ -157,14 +158,15 @@ async function useTheseNumbers() {
       const body: Record<string, unknown> = {
         name: p.name,
         selling_home: p.selling_home,
+        has_car: p.has_car,
         petrol_mpg: p.petrol_mpg,
         bus_walk_penalty: { ...p.bus_walk_penalty },
       }
       if (p.selling_home) {
-        body.home_sale_price = money(p.home_sale_price)
-        body.outstanding_mortgage = money(p.outstanding_mortgage)
+        body.home_sale_price = money(p.home_sale_price || '0')
+        body.outstanding_mortgage = money(p.outstanding_mortgage || '0')
       }
-      body.cash_contribution = money(p.cash_contribution)
+      body.cash_contribution = money(p.cash_contribution || '0')
       body.life_insurance_monthly = money(p.life_insurance_monthly || '0')
       body.places_of_interest = p.places_of_interest.map(poi => ({ ...poi }))
       await api.patchPerson(p.name, body)

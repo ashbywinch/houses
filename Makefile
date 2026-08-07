@@ -131,6 +131,13 @@ lint-github: setup   # CI only: findings surface as PR annotations
 
 typecheck: setup
 	@$(BASEDPYRIGHT)
+	# Frontend typecheck MUST be build-mode (-b): the root tsconfig is a
+	# solution file (files: [], references), so bare `vue-tsc --noEmit`
+	# checks an empty program and passes vacuously. -b builds the
+	# referenced projects and typechecks tests too. This target is the
+	# ONLY invocation of the frontend typecheck — npm test no longer
+	# runs it, so every path (make test, CI, a dev) funnels through here.
+	cd houses/frontend && npx vue-tsc -b --noEmit
 
 .PHONY: typecheck
 
