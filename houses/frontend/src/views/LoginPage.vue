@@ -33,7 +33,7 @@ async function signIn() {
 <template>
   <main class="login-page">
     <div class="login-card">
-      <h1 class="login-card__title">Houses</h1>
+      <h1 class="login-card__title">House Hunt</h1>
       <p class="login-card__desc">Sign in to continue</p>
       <button
         class="login-card__btn"
