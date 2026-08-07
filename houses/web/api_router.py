@@ -235,6 +235,24 @@ async def get_all_properties():
     return dict(scored)
 
 
+@api_router.get("/properties/current-homes")
+async def list_current_homes():
+    """The family's CURRENT house(s) — properties marked status=current —
+    so a person can link their settings home fields to the right one."""
+    result: list[dict[str, str]] = []
+    for rid in list_registry_properties():
+        prop = get_registry_property(rid)
+        if prop is None:
+            continue
+        status = prop.comment_status.latest_attempt()
+        if not status.succeeded or (status.value_or_none() or "").strip().lower() != "current":
+            continue
+        att = prop.best_address.latest_attempt()
+        address = str(att.value_or_none()) if att.succeeded and att.value_or_none() else ""
+        result.append({"rid": str(rid), "address": address})
+    return {"homes": result}
+
+
 @api_router.get("/properties/{rid}")
 async def get_property(rid: str):
     prop = get_registry_property(rid)
@@ -779,24 +797,6 @@ async def patch_works_estimate(
     prop.works_estimates.push(current, "user")
 
     return {"status": "ok"}
-
-
-@api_router.get("/properties/current-homes")
-async def list_current_homes():
-    """The family's CURRENT house(s) — properties marked status=current —
-    so a person can link their settings home fields to the right one."""
-    result: list[dict[str, str]] = []
-    for rid in list_registry_properties():
-        prop = get_registry_property(rid)
-        if prop is None:
-            continue
-        status = prop.comment_status.latest_attempt()
-        if not status.succeeded or (status.value_or_none() or "").strip().lower() != "current":
-            continue
-        att = prop.best_address.latest_attempt()
-        address = str(att.value_or_none()) if att.succeeded and att.value_or_none() else ""
-        result.append({"rid": str(rid), "address": address})
-    return {"homes": result}
 
 
 @api_router.get("/persons")

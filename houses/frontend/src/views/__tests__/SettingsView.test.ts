@@ -271,14 +271,26 @@ describe('SettingsView — home co-owners and the house link', () => {
     await flush()
     const simon = personSection(wrapper)
     const addRow = simon.find('.co-owner-add')
-    await addRow.find('select').setValue('Ashby')
+    // Set the share first, then pick the person — the pick is the commit
     await addRow.find('input').setValue(25)
-    await addRow.find('button').trigger('click')
+    await addRow.find('select').setValue('Ashby')
     expect(simon.text()).toContain('Ashby — 25%')
     await simon.trigger('focusout')
     await flush()
     const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
     expect(body.home_co_owners).toContainEqual({ name: 'Ashby', share: 25 })
+  })
+
+  it('adds a co-owner at the default 50% when only the name is picked', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = personSection(wrapper)
+    const addRow = simon.find('.co-owner-add')
+    await addRow.find('select').setValue('Ashby')
+    expect(simon.text()).toContain('Ashby — 50%')
+    // flush the pending autosave so no stray timer leaks into later tests
+    await simon.trigger('focusout')
+    await flush()
   })
 
   it('refuses a co-owner when the shares would exceed 100%', async () => {
@@ -288,13 +300,15 @@ describe('SettingsView — home co-owners and the house link', () => {
     // Lorena already co-owns 50% — a share that would push the total
     // past 100% must be refused
     const addRow = simon.find('.co-owner-add')
-    await addRow.find('select').setValue('Ashby')
     await addRow.find('input').setValue(60)
-    await addRow.find('button').trigger('click')
+    await addRow.find('select').setValue('Ashby')
     expect(simon.text()).not.toContain('Ashby — 60%')
     await addRow.find('input').setValue(40)
-    await addRow.find('button').trigger('click')
+    await addRow.find('select').setValue('Ashby')
     expect(simon.text()).toContain('Ashby — 40%')
+    // flush the pending autosave so no stray timer leaks into later tests
+    await simon.trigger('focusout')
+    await flush()
   })
 
   it('shows a read-only co-owner note on the co-owner\'s own settings', async () => {
@@ -500,6 +514,41 @@ describe('SettingsView — selling-home toggle (P7, B7)', () => {
     expect(ashby.text()).not.toContain('Mortgage remaining on current home')
     expect(ashby.text()).toContain('Cash available for the deposit')
     expect(ashby.text()).toContain('Deposit is cash')
+  })
+
+  it('gates rent-paid, the house link and co-owners behind the selling-home toggle', async () => {
+    // Simon sells a home → the whole current-home section shows
+    const simon = await mountView()
+    await simon.flush()
+    const simonSection = personSection(simon.wrapper)
+    expect(simonSection.find('input#rent-paid').exists()).toBe(true)
+    expect(simonSection.find('select#home-property').exists()).toBe(true)
+    expect(simonSection.find('.co-owner-add').exists()).toBe(true)
+
+    // Ashby does not sell a home → rent-paid, house link and co-owners
+    // must NOT appear (there is no current home to pay rent against)
+    const ashby = await mountView('', 'Ashby')
+    await ashby.flush()
+    const ashbySection = personSection(ashby.wrapper)
+    expect(ashbySection.find('input#rent-paid').exists()).toBe(false)
+    expect(ashbySection.find('select#home-property').exists()).toBe(false)
+    expect(ashbySection.find('.co-owner-add').exists()).toBe(false)
+  })
+
+  it('hides the rent-paid and house-link fields when the toggle is switched off', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = personSection(wrapper)
+    expect(simon.find('input#rent-paid').exists()).toBe(true)
+    // Flip the selling-home switch off
+    await simon.find('.toggle-row .switch').trigger('click')
+    await flush()
+    expect(simon.find('input#rent-paid').exists()).toBe(false)
+    expect(simon.find('select#home-property').exists()).toBe(false)
+    expect(simon.find('.co-owner-add').exists()).toBe(false)
+    // flush the pending autosave so no stray timer leaks into later tests
+    await simon.trigger('focusout')
+    await flush()
   })
 })
 

@@ -85,11 +85,11 @@ function toggleProvenance(key: string) {
         <span class="commute-accordion__chevron" :class="{ 'commute-accordion__chevron--open': expandedCommutes.has(key as string) }">▼</span>
       </button>
       <div v-if="expandedCommutes.has(key as string)" class="commute-accordion__body">
-        <p v-if="!c?.value?.details?.length && !c?.provenance" class="commute-accordion__empty">
+        <p v-if="!c?.value?._details?.length && !c?.provenance" class="commute-accordion__empty">
           No route found for this destination — check the address in Settings.
         </p>
-        <div v-if="c?.value?.details?.length" class="commute-legs">
-          <template v-for="(group, gi) in c.value.details" :key="gi">
+        <div v-if="c?.value?._details?.length" class="commute-legs">
+          <template v-for="(group, gi) in c.value._details" :key="gi">
             <div v-for="(leg, li) in group.legs" :key="`${gi}-${li}`" class="commute-leg">
               <span class="commute-leg__mode">{{ leg.mode }}</span>
               <span class="commute-leg__duration">{{ leg.duration.value }} min</span>

@@ -56,7 +56,8 @@ button { font: inherit; cursor: pointer; border: none; background: none; }
   margin-bottom: var(--sp-2);
 }
 .stack-field > label { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-secondary); }
-.stack-field > input {
+.stack-field > input,
+.stack-field > select {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: var(--sp-2) var(--sp-3);

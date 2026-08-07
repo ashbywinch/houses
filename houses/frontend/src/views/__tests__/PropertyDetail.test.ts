@@ -33,7 +33,7 @@ function makeDetail(): PropertyDetailType {
     commutes: {
       'Simon/Office': {
         succeeded: true,
-        value: { label: 'Office', duration: { value: 45, unit: 'minute' }, daily_cost: { amount: "12.5", currency: 'GBP' }, mode: 'transit', details: [{ legs: [{ mode: 'walk', duration: {value: 5, unit: 'minute'}, end_station: 'Station' }, { mode: 'train', duration: {value: 30, unit: 'minute'}, end_station: 'London Paddington', line_name: 'Great Western' }], cost: null }, { legs: [{ mode: 'tube', duration: {value: 10, unit: 'minute'}, end_station: 'Oxford Circus', line_name: 'Bakerloo' }], cost: null }], is_child: false, route_description: 'Walk to Station → Train 30m → Tube 10m' },
+        value: { label: 'Office', duration: { value: 45, unit: 'minute' }, daily_cost: { amount: "12.5", currency: 'GBP' }, mode: 'transit', _details: [{ legs: [{ mode: 'walk', duration: {value: 5, unit: 'minute'}, end_station: 'Station' }, { mode: 'train', duration: {value: 30, unit: 'minute'}, end_station: 'London Paddington', line_name: 'Great Western' }], cost: null }, { legs: [{ mode: 'tube', duration: {value: 10, unit: 'minute'}, end_station: 'Oxford Circus', line_name: 'Bakerloo' }], cost: null }], is_child: false, route_description: 'Walk to Station → Train 30m → Tube 10m' },
         is_child: false,
         error: null,
         provenance: { label: 'commute' },
@@ -133,7 +133,7 @@ describe('PropertyDetail renders commute legs from CostGroups', () => {
     const commute = store.details['123'].commutes['Simon/Office']
     commute.value = {
       ...commute.value,
-      details: [
+      _details: [
         {
           legs: [{ mode: 'train', duration: {value: 30, unit: 'minute'}, end_station: 'London Paddington' }],
           operator: 'GWR',

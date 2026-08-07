@@ -546,52 +546,53 @@ const depositRows = computed(() => {
                 @blur="penceInput(person.life_insurance_monthly!, $event)"
               />
             </div>
-            <div class="stack-field">
-              <label for="rent-paid">Rent paid to the joint owners (£/month)</label>
-              <input
-                id="rent-paid"
-                type="text"
-                inputmode="decimal"
-                :value="person.rent_paid_monthly?.amount"
-                :disabled="!isOwn(person)"
-                @keydown="blockPenceKey"
-                @input="moneyInput(person.rent_paid_monthly!, $event)"
-                @blur="penceInput(person.rent_paid_monthly!, $event)"
-              />
-              <span class="band-helper">What you pay the joint owners for your share of the current home.</span>
-            </div>
-
-            <hr class="divider" />
-            <div class="stack-field">
-              <label for="home-property">Which house is this?</label>
-              <select
-                id="home-property"
-                v-model="person.home_property_rid"
-                :disabled="!isOwn(person)"
-              >
-                <option value="" disabled>Choose a current house…</option>
-                <option v-for="h in currentHomes" :key="h.rid" :value="h.rid">{{ h.address }}</option>
-              </select>
-              <span v-if="person.home_property_address" class="band-helper">
-                This home: {{ person.home_property_address }}
-              </span>
-            </div>
-
-            <div v-if="isOwn(person)" class="stack-field">
-              <span class="toggle-row__label" style="font-size: var(--fs-sm)">Co-owners of this home</span>
-              <div v-for="(co, coIdx) in person.home_co_owners ?? []" :key="co.name" class="co-owner-row">
-                <span>{{ co.name }} — {{ co.share }}%</span>
-                <button type="button" class="co-owner-remove" aria-label="Remove {{ co.name }} as co-owner" @click="removeCoOwner(person, coIdx)">×</button>
+            <template v-if="person.selling_home">
+              <div class="stack-field">
+                <label for="rent-paid">Rent paid to the joint owners (£/month)</label>
+                <input
+                  id="rent-paid"
+                  type="text"
+                  inputmode="decimal"
+                  :value="person.rent_paid_monthly?.amount"
+                  :disabled="!isOwn(person)"
+                  @keydown="blockPenceKey"
+                  @input="moneyInput(person.rent_paid_monthly!, $event)"
+                  @blur="penceInput(person.rent_paid_monthly!, $event)"
+                />
+                <span class="band-helper">What you pay the joint owners for your share of the current home.</span>
               </div>
-              <div class="co-owner-add">
-                <select v-model="coOwnerDraft.name" aria-label="Add a co-owner">
-                  <option value="" disabled>Choose…</option>
-                  <option v-for="p in coOwnerCandidates(person)" :key="p.name" :value="p.name">{{ p.name }}</option>
+
+              <hr class="divider" />
+              <div class="stack-field">
+                <label for="home-property">Which house is this?</label>
+                <select
+                  id="home-property"
+                  v-model="person.home_property_rid"
+                  :disabled="!isOwn(person)"
+                >
+                  <option value="" disabled>Choose a current house…</option>
+                  <option v-for="h in currentHomes" :key="h.rid" :value="h.rid">{{ h.address }}</option>
                 </select>
-                <input type="number" min="1" max="100" v-model.number="coOwnerDraft.share" aria-label="Co-owner share (%)" />
-                <button type="button" class="btn-add-sm" @click="addCoOwner(person)">Add</button>
+                <span v-if="person.home_property_address" class="band-helper">
+                  This home: {{ person.home_property_address }}
+                </span>
               </div>
-            </div>
+
+              <div v-if="isOwn(person)" class="stack-field">
+                <span class="toggle-row__label" style="font-size: var(--fs-sm)">Co-owners of this home</span>
+                <div v-for="(co, coIdx) in person.home_co_owners ?? []" :key="co.name" class="co-owner-row">
+                  <span>{{ co.name }} — {{ co.share }}%</span>
+                  <button type="button" class="co-owner-remove" aria-label="Remove {{ co.name }} as co-owner" @click="removeCoOwner(person, coIdx); scheduleSave(person)">×</button>
+                </div>
+                <div class="co-owner-add">
+                  <select v-model="coOwnerDraft.name" aria-label="Add a co-owner" @change="if (coOwnerDraft.name && coOwnerDraft.share >= 1) { addCoOwner(person); scheduleSave(person); }">
+                    <option value="" disabled>Choose…</option>
+                    <option v-for="p in coOwnerCandidates(person)" :key="p.name" :value="p.name">{{ p.name }}</option>
+                  </select>
+                  <input type="number" min="1" max="100" v-model.number="coOwnerDraft.share" aria-label="Co-owner share (%)" @change="if (coOwnerDraft.name && coOwnerDraft.share >= 1) { addCoOwner(person); scheduleSave(person); }" />
+                </div>
+              </div>
+            </template>
           </section>
           <!-- Household finances -->
           <section
