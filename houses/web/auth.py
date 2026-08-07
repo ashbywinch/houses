@@ -161,14 +161,6 @@ def _build_session(id_info: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
                 break
 
     cookie_value = _make_session_cookie(folded_email, name, picture, is_superuser)
-    # TEMP-DEBUG superuser trace (2026-08-07): what a fresh login bakes
-    # into the cookie vs what the settings say. Remove after diagnosis.
-    logger.info(
-        "SUPERUSER-LOGIN-TRACE email=%s baked_is_superuser=%s persons_succeeded=%s",
-        folded_email,
-        is_superuser,
-        persons_attempt.succeeded,
-    )
     payload = {
         "email": folded_email,
         "name": name,
@@ -403,7 +395,6 @@ async def me(request: Request):
 
     # Look up associated Person by email
     person_name = None
-    person_is_superuser: bool | None = None
     from houses.services_provider import get_services
 
     svc = get_services()
@@ -411,30 +402,8 @@ async def me(request: Request):
         persons_attempt = svc.persons_source.latest_attempt()
         if persons_attempt.succeeded:
             person_name = _lookup_person_by_email(session["email"], persons_attempt.value_or_none())
-            for p in persons_attempt.value_or_none() or []:
-                pe = p.get("email") if isinstance(p, dict) else getattr(p, "email", None)
-                if pe is not None and pe.casefold() == session["email"]:
-                    person_is_superuser = (
-                        p.get("is_superuser") if isinstance(p, dict) else getattr(p, "is_superuser", None)
-                    )
-                    break
     except Exception:
         logger.exception("Failed to look up person name")
-
-    # TEMP-DEBUG superuser trace (2026-08-07): surface what the server
-    # sees for THIS session vs the live settings, so we can see why the
-    # user's device shows no superuser dropdown. Remove after diagnosis.
-    logger.info(
-        "SUPERUSER-TRACE email=%s cookie_is_superuser=%s matched_person=%s "
-        "settings_is_superuser=%s impersonating=%s client_host=%s forwarded=%s",
-        session["email"],
-        session.get("is_superuser", False),
-        person_name,
-        person_is_superuser,
-        session.get("impersonating"),
-        request.client.host if request.client else "?",
-        request.headers.get("x-forwarded-for", request.headers.get("x-real-ip", "?")),
-    )
 
     return {
         "authenticated": True,

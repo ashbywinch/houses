@@ -48,4 +48,25 @@ describe('Header — settings link (P9, D2)', () => {
     // the su-bar only renders in superuser mode; the fetch itself must not throw
     expect(wrapper.find('.header__settings-link').exists()).toBe(true)
   })
+
+  it('does not render an empty left-actions container when the slot is empty', () => {
+    // Regression: the list page passed no #actions slot, but the flex
+    // container still rendered as an invisible child — with
+    // justify-content: space-between the title drifted right of the
+    // content margin by half the right-actions width.
+    const wrapper = mountHeader()
+    expect(wrapper.find('.header__actions--left').exists()).toBe(false)
+    expect(wrapper.find('.header__title').text()).toBe('Test')
+  })
+
+  it('renders the left-actions container when the slot has content', () => {
+    const wrapper = mount(Header, {
+      props: { title: 'Test' },
+      slots: { actions: '<button class="back">←</button>' },
+      global: { plugins: [createPinia(), makeRouter()] },
+    })
+    const left = wrapper.find('.header__actions--left')
+    expect(left.exists()).toBe(true)
+    expect(left.find('.back').exists()).toBe(true)
+  })
 })

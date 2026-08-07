@@ -520,8 +520,8 @@ PARK leg because Reading's car-park cost was unknown.
   is_superuser flag is baked at LOGIN (30-day validity); Ashby was
   promoted in settings AFTER her last login, so her device cookie still
   says false → no 👤 button. Reproduced exactly with a stale cookie
-  (cookie=false, settings=true, button hidden). Fix = log out / back in;
-  remove the trace after the user confirms.
+  (cookie=false, settings=true, button hidden). Trace REMOVED after the
+  fix (live-superuser re-derivation) shipped.
 
 ## Part E — New houses, common CSS, impossible-card rows, live superuser (2026-08-07)
 

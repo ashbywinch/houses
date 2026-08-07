@@ -31,7 +31,7 @@ onMounted(fetchPersons)
 <template>
   <header class="header">
     <div class="header__inner">
-      <div class="header__actions header__actions--left">
+      <div v-if="$slots.actions" class="header__actions header__actions--left">
         <slot name="actions" />
       </div>
       <h1 class="header__title">{{ title }}</h1>
