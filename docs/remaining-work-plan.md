@@ -567,6 +567,24 @@ PARK leg because Reading's car-park cost was unknown.
   PropertyList/PropertyDetail map tests assert the MapView marker/layer
   props (Leaflet mocked — jsdom can't size a map).
 
+## Part E — Map polish: price pins, layer key, SVG icons (2026-08-07)
+
+- Detail-page back button removed — browsers and phones provide
+  navigation; the header title now sits at the left margin (the empty
+  left-actions slot no longer renders).
+- Map-page house pins are price LABELS (chip divIcons, like the old
+  absolute pin labels): `£650,000`, etc., linking to the detail page.
+- The checkbox layer key (Leaflet `control.layers`, as the toolchain
+  map) toggles each isochrone: "Train: Pimlico & Aldgate",
+  "Drive to Dad", "Drive to Bracknell", "Where we could live".
+  Verified: unchecking Train drops 34 → 9 polygons.
+- Starting view is property-centred again (fit to markers, not the
+  polygon extent) — matches the old iframe bbox behaviour; the
+  isochrones are overlays you pan to.
+- Detail map markers are simple SVG icons: blue house for the property,
+  green/amber graduation-cap for primary/secondary schools.
+- Tests updated for the new marker kinds + leaflet control mock.
+
 ## Verification
 
 - `make test` green; ruff + basedpyright clean; language sweep green.

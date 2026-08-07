@@ -74,7 +74,7 @@ const rightmoveUrl = computed(() =>
 const bestLocation = computed(() =>
   detail.value?.location?.best_location?.succeeded ? detail.value.location.best_location.value : null)
 
-// ── Map markers: the property + the two schools ─────
+// ── Map markers: the property (house icon) + the two schools ─────
 const mapMarkers = computed<MapMarker[]>(() => {
   const markers: MapMarker[] = []
   if (bestLocation.value) {
@@ -83,6 +83,7 @@ const mapMarkers = computed<MapMarker[]>(() => {
       lon: bestLocation.value.lon,
       label: address.value,
       color: '#2563eb',
+      kind: 'house',
     })
   }
   for (const key of ['primary', 'secondary'] as const) {
@@ -93,6 +94,7 @@ const mapMarkers = computed<MapMarker[]>(() => {
         lon: school.value.lon,
         label: `${school.value.name} (${key === 'primary' ? 'Primary' : 'Secondary'})`,
         color: key === 'primary' ? '#16a34a' : '#d97706',
+        kind: 'school',
       })
     }
   }
@@ -158,11 +160,8 @@ async function saveAddress() {
 </script>
 
 <template>
-  <!-- Header -->
+  <!-- Header — no back button: browsers and phones provide navigation -->
   <Header title="House Hunt">
-    <template #actions>
-      <button class="btn--icon" aria-label="Back to property list" @click="router.push('/')">←</button>
-    </template>
     <template #actions-right>
       <button class="btn--icon" aria-label="Share property" @click="shareProperty">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

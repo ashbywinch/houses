@@ -34,6 +34,9 @@ vi.mock('leaflet', () => ({
     layerGroup: vi.fn(() => ({ addTo: vi.fn(), clearLayers: vi.fn() })),
     polygon: vi.fn(() => ({ bindPopup: vi.fn(), addTo: vi.fn() })),
     circleMarker: vi.fn(() => ({ bindPopup: vi.fn(), addTo: vi.fn() })),
+    marker: vi.fn(() => ({ bindPopup: vi.fn(), addTo: vi.fn() })),
+    divIcon: vi.fn(() => ({})),
+    control: { layers: vi.fn(() => ({ addTo: vi.fn() })) },
     latLngBounds: vi.fn(() => ({ pad: vi.fn(() => ({})) })),
   },
 }))

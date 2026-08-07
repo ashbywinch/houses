@@ -3,12 +3,16 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
+export type MapMarkerKind = 'price' | 'house' | 'school'
+
 export interface MapMarker {
   lat: number
   lon: number
   label: string
   url?: string
   color?: string
+  /** How the pin renders: a price chip, a house icon, or a school icon. */
+  kind?: MapMarkerKind
 }
 
 export interface MapPolygon {
@@ -37,13 +41,15 @@ const emit = defineEmits<{ error: [] }>()
 
 const container = ref<HTMLDivElement | null>(null)
 let map: L.Map | null = null
-const overlayGroups: L.LayerGroup[] = []
+let overlayControl: L.Control.Layers | null = null
+const overlayGroups = new Map<string, L.LayerGroup>()
+
+const HOUSE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9.5 21v-6h5v6"/></svg>`
+const SCHOOL_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24" aria-hidden="true"><path d="M22 9 12 4 2 9l10 5 10-5z"/><path d="M6 11.5V17c0 1.5 2.7 3 6 3s6-1.5 6-3v-5.5"/><path d="M22 9v6"/></svg>`
 
 function buildLayers() {
-  for (const g of overlayGroups) {
-    g.clearLayers()
-  }
-  while (overlayGroups.length) overlayGroups.pop()
+  for (const g of overlayGroups.values()) g.clearLayers()
+  overlayGroups.clear()
 
   for (const layer of props.layers) {
     const group = L.layerGroup()
@@ -62,21 +68,60 @@ function buildLayers() {
       if (popupParts.length) polygon.bindPopup(popupParts.join('<br>'))
       polygon.addTo(group)
     }
-    group.addTo(map!)
-    overlayGroups.push(group)
+    overlayGroups.set(layer.name, group)
   }
+
+  // The checkbox key (like the toolchain map): one checkbox per layer.
+  if (overlayControl) {
+    map!.removeControl(overlayControl)
+  }
+  const overlays: Record<string, L.LayerGroup> = {}
+  for (const [name, group] of overlayGroups) {
+    overlays[name] = group
+    group.addTo(map!)
+  }
+  overlayControl = L.control.layers({}, overlays, { collapsed: false }).addTo(map!)
+}
+
+function markerIcon(m: MapMarker): L.DivIcon {
+  const kind = m.kind ?? 'price'
+  const color = m.color ?? '#2563eb'
+  if (kind === 'house') {
+    return L.divIcon({
+      className: 'mapview-icon',
+      html: `<span class="mapview-icon__svg" style="color:${color}">${HOUSE_ICON}</span>`,
+      iconSize: [28, 28],
+      iconAnchor: [14, 24],
+      popupAnchor: [0, -24],
+    })
+  }
+  if (kind === 'school') {
+    return L.divIcon({
+      className: 'mapview-icon',
+      html: `<span class="mapview-icon__svg" style="color:${color}">${SCHOOL_ICON}</span>`,
+      iconSize: [26, 26],
+      iconAnchor: [13, 23],
+      popupAnchor: [0, -23],
+    })
+  }
+  // price chip — the label sits above the point, centered (as the old
+  // absolute-positioned pin labels did)
+  const label = escapeHtml(m.label)
+  const inner = m.url
+    ? `<a class="mapview-price" href="${escapeAttr(m.url)}" style="border-color:${color}">${label}</a>`
+    : `<span class="mapview-price" style="border-color:${color}">${label}</span>`
+  return L.divIcon({
+    className: 'mapview-price-wrap',
+    html: inner,
+    iconSize: [0, 0],
+    iconAnchor: [0, 0],
+  })
 }
 
 function buildMarkers() {
   const group = L.layerGroup()
   for (const m of props.markers) {
-    const marker = L.circleMarker([m.lat, m.lon], {
-      radius: 8,
-      color: '#fff',
-      weight: 2,
-      fillColor: m.color ?? '#2563eb',
-      fillOpacity: 1,
-    })
+    const marker = L.marker([m.lat, m.lon], { icon: markerIcon(m) })
     const label = escapeHtml(m.label)
     const content = m.url
       ? `<a href="${escapeAttr(m.url)}">${label}</a>`
@@ -85,20 +130,17 @@ function buildMarkers() {
     marker.addTo(group)
   }
   group.addTo(map!)
-  overlayGroups.push(group)
+  overlayGroups.set('__markers__', group)
 }
 
 function fitBounds() {
-  const points: [number, number][] = []
-  for (const m of props.markers) points.push([m.lat, m.lon])
-  for (const layer of props.layers) {
-    for (const poly of layer.polygons) {
-      for (const [lat, lon] of poly.coords) points.push([lat, lon])
-    }
-  }
+  // Starting view = the properties (markers), as the old iframe bbox was
+  // property-centred. The isochrones are overlays — the user pans/zooms
+  // to them via the key or the zoom controls.
+  const points: [number, number][] = props.markers.map(m => [m.lat, m.lon])
   if (!points.length) return
   const bounds = L.latLngBounds(points)
-  map!.fitBounds(bounds.pad(0.08))
+  map!.fitBounds(bounds.pad(0.2))
 }
 
 function escapeHtml(s: string): string {
@@ -132,7 +174,6 @@ watch(
     if (!map) return
     buildLayers()
     buildMarkers()
-    fitBounds()
   },
   { deep: true },
 )
@@ -158,5 +199,32 @@ onBeforeUnmount(() => {
   width: 100%;
   border-radius: 12px;
   z-index: 0;
+}
+.map-view :deep(.mapview-price-wrap) {
+  background: none;
+  border: none;
+}
+.map-view :deep(.mapview-price) {
+  display: block;
+  background: var(--card-bg);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 2px solid var(--blue);
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  line-height: 1.4;
+  text-decoration: none;
+  transform: translate(-50%, -100%);
+}
+.map-view :deep(.mapview-icon__svg) {
+  display: block;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+}
+.map-view :deep(.leaflet-control-layers) {
+  border-radius: 8px;
+  font-size: var(--fs-xs);
 }
 </style>
