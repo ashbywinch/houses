@@ -77,14 +77,16 @@ class TestPropertyApi:
         assert isinstance(resp.json(), dict)
 
     def test_current_homes_and_rid_routes_both_resolve(self):
-        """/api/properties/current-homes and /api/properties/{rid} must
-        EACH resolve to their own handler — a shadowing bug in either
-        direction breaks one of them, so the routing contract is tested
-        from both callers' perspectives: the literal route returns the
-        homes list, and a real property RID still returns that property.
-        (Regression: the literal route was declared after the
-        parameterised one, so current-homes returned 'Property
-        current-homes not found' and the settings dropdown was empty.)"""
+        """Regression: the 'choose a current house' dropdown was always
+        empty on the settings page — /api/properties/current-homes was
+        captured by the /api/properties/{rid} route (declared earlier),
+        returning 'Property current-homes not found'.
+
+        Contract: the two routes EACH resolve to their own handler — a
+        shadowing bug in either direction breaks one of them, so the
+        routing contract is tested from both callers' perspectives: the
+        literal route returns the homes list, and a real property RID
+        still returns that property."""
         from money import Money
 
         from houses.nodes.property import PropertyNodes

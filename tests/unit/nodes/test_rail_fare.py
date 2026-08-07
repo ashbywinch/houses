@@ -38,10 +38,15 @@ def _make_commute(
 
 @pytest.mark.asyncio
 async def test_rail_fare_graceful_when_no_train_legs():
-    """When the transit route has no train/tube legs (bus-only), the
-    rail fare node must NOT make the commute impossible — it should
-    return the original transit commute without the fare, so the
-    commute is still available on the property card."""
+    """Regression: two commutes (Simon/Pimlico, Lorena/Aldgate) had
+    disappeared from the property page — the rail fare node returned
+    'terminal station not found in route legs' for bus-only transit
+    routes (no train/tube leg), and the impossible result cascaded into
+    the whole commute being dropped from the card.
+
+    Contract: a transit commute with cost=0 and no train/tube legs must
+    stay AVAILABLE on the property card — the rail fare node returns
+    the original commute without the fare instead of impossible."""
     from houses.nodes.rail_fare_node import RailFareNode
 
     transit = UserInputNode("tr_grace", Commute)
