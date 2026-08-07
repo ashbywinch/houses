@@ -149,7 +149,9 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         car_park = parking.find_car_park(station)
         # The drive leg is added whenever driving beats walking — a
         # missing car-park COST must not leave a 76-minute walk in place.
-        # The parking-cost leg is only added when a cost is known.
+        # The PARK leg is shown whenever a car park exists (its name
+        # identifies the park-and-ride); the cost is only attached when
+        # known.
         parking_cost = car_park.daily_cost if car_park is not None else None
         existing_cost = commute.daily_cost
         if existing_cost is None:
@@ -168,13 +170,13 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         # Remaining transit legs (train/tube) stay in their own CostGroup
         # with the original operator and cost.
         transit_legs = first_cg.legs[1:]
-        if parking_cost is not None:
+        if car_park is not None:
             new_parking_group = CostGroup(
                 legs=(JourneyLeg(mode=LegMode.PARK, duration=Quantity(0, "minute")),),
                 operator=car_park.name,
                 cost=parking_cost,
             )
-            new_cost = existing_cost + parking_cost
+            new_cost = existing_cost + parking_cost if parking_cost is not None else existing_cost
         else:
             new_parking_group = None
             new_cost = existing_cost

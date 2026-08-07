@@ -112,10 +112,14 @@ class SchoolLocationNode(DerivedNode[str]):
             return Attempt.impossible("school has no details")
         # The address captured when the school was first found from the
         # data — the destination the legs display, never a bare lat/lon.
+        # The school name leads, joined with a comma: the leg info shows
+        # "School Name, Street, Town, Postcode".
+        name = (val.get("name") or "").strip()
         full = (val.get("full_address") or "").strip()
+        if name and full:
+            return Attempt.succeeded(f"{name}, {full}")
         if full:
             return Attempt.succeeded(full)
-        name = val.get("name") or ""
         postcode = val.get("postcode") or ""
         if name and postcode:
             return Attempt.succeeded(f"{name}, {postcode}")

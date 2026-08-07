@@ -106,6 +106,28 @@ class TestInjectProperty:
         finally:
             settings.sheet_id = original_sheet_id
 
+    def test_rejects_property_already_in_database(self):
+        """Re-adding a Rightmove property whose RID already has DAG rows
+        in the database must be rejected even when the sheet is
+        unreachable — the DB is the source of truth for duplicates."""
+        from dag.persistence import save_node_result
+
+        rid = "88375570"
+        save_node_result(
+            f"{rid}/rightmove_address",
+            {"status": "succeeded", "value": "12 Test Street, Testown RG1 1AA", "succeeded": True},
+        )
+        # No sheet client at all — dedupe must come from the DB, not the sheet.
+        with patch("houses.server.get_client", return_value=None):
+            resp = client.post(
+                "/api/properties",
+                json={"url": f"https://www.rightmove.co.uk/properties/{rid}"},
+            )
+        assert resp.status_code == 400, f"Expected 400, got {resp.status_code}: {resp.text[:100]}"
+        body = resp.json()
+        assert "already exists" in body.get("error", ""), f"Missing 'already exists' message: {body}"
+        assert "fields=" in body.get("error", ""), f"Missing fields= hint: {body}"
+
     @pytest.mark.integration
     def test_enrichment_fields_present(self):
         resp = client.post("/api/properties", json=self.VALID_PAYLOAD)

@@ -478,6 +478,32 @@ the troubleshooting screenshot representative of the user's own view.
   `*/secondary_school`, `*/walk`, `*/drive`, transit/rail/park-and-ride
   chain) so persisted legs carry the destinations.
 
+## Part E — School names, DB dedupe, park-and-ride leg (2026-08-07)
+
+Follow-up round: (1) the school walk/drive leg destination must carry
+the school NAME joined with the address; (2) re-adding a Rightmove
+property that already exists in the DATABASE must be rejected (no
+duplicate) — the sheet check alone silently created duplicates when
+the sheet was unreachable; (3) the Pimlico park-and-ride lost its
+PARK leg because Reading's car-park cost was unknown.
+
+- `SchoolLocationNode` now emits `"{name}, {full_address}"` (name-led,
+  comma-joined) — live legs read "The Heights Primary School, 129
+  Upper Woodcote Road, Reading, RG4 7LB". Falls back to name+postcode,
+  then coordinates.
+- `upsert_property` checks the DATABASE first (`property_rids()` from
+  node_results) before the sheet; a matching RID → 400 "already
+  exists. Use fields= …" even with no sheet client. Verified live:
+  re-POSTing 173677193 → 400.
+- `ParkAndRideAugmentNode` emits the PARK leg whenever a car park
+  exists — the car-park NAME shows the park-and-ride; the cost is
+  attached only when known. Frontend hides the synthetic "0 min"
+  duration on park legs. Live Pimlico: drive → "park · Reading
+  Station Car Park" → train.
+- Tests (TDD): school location joins name+address; PARK leg survives an
+  unknown cost (operator present, cost null); DB-level dedupe rejects
+  a seeded rid with no sheet client.
+
 ## Verification
 
 - `make test` green; ruff + basedpyright clean; language sweep green.

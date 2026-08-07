@@ -688,14 +688,6 @@
             {
                 "code": "reportOptionalMemberAccess",
                 "range": {
-                    "startColumn": 34,
-                    "endColumn": 38,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportOptionalMemberAccess",
-                "range": {
                     "startColumn": 39,
                     "endColumn": 43,
                     "lineCount": 1

@@ -96,9 +96,8 @@ async def test_school_location_node_fails_without_school():
 @pytest.mark.asyncio
 async def test_school_location_node_prefers_full_address_over_latlon():
     """Regression: the school walk destination was a bare 'lat,lon'.
-    The address captured when the school was first found must be the
-    leg destination — full_address first, then name+postcode, only
-    falling back to coordinates."""
+    The destination must be the school NAME joined with the address
+    captured when the school was first found — never coordinates."""
     from houses.nodes.schools import SchoolLocationNode
 
     school = UserInputNode[dict]("sn_addr", dict)
@@ -107,7 +106,7 @@ async def test_school_location_node_prefers_full_address_over_latlon():
         {
             "name": "Larchfield Primary School",
             "postcode": "SL6 4ET",
-            "full_address": "Larchfield Primary School, Bargeman Road, Maidenhead SL6 4ET",
+            "full_address": "Bargeman Road, Maidenhead SL6 4ET",
             "lat": 51.52,
             "lon": -0.72,
         },

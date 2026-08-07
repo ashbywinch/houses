@@ -210,8 +210,9 @@ class TestParkAndRideAugmentNode:
         """Regression: a station with NO known parking cost made the node
         bail entirely, leaving a 76-minute walk to the station.  Driving
         is still better than walking — the walk must become a drive leg
-        even when the parking cost is unknown; the parking-cost leg is
-        only added when a cost exists."""
+        even when the parking cost is unknown, and the PARK leg must
+        still be shown (with the car-park name; cost omitted when
+        unknown) so the user can see the park-and-ride."""
         from houses.car_park import CarPark
         from houses.services_provider import _request_services
         from tests.helpers import FakeDriveTime, make_services
@@ -250,9 +251,12 @@ class TestParkAndRideAugmentNode:
             # The long walk became a drive leg, even though parking cost is unknown
             assert val.details[0].legs[0].mode == LegMode.DRIVE
             assert val.details[0].legs[0].duration.magnitude == 11
-            # No PARK leg when the cost is unknown
-            modes = [leg.mode for g in val.details for leg in g.legs]
-            assert LegMode.PARK not in modes
+            # The PARK leg is STILL present — the car-park name shows the
+            # park-and-ride; only the cost is omitted when unknown.
+            park_groups = [g for g in val.details if any(leg.mode == LegMode.PARK for leg in g.legs)]
+            assert len(park_groups) == 1, "park-and-ride leg must survive an unknown parking cost"
+            assert park_groups[0].operator == "Reading Station Car Park"
+            assert park_groups[0].cost is None
         finally:
             _request_services.reset(token)
 
