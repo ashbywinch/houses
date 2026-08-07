@@ -408,6 +408,32 @@ user-approved order → walkthrough re-run after each batch → full suite
 `Measurement` gives what-if range rendering, and the `evaluate` primitive
 builds on the same pure-evaluation path (settled 2026-08-06).
 
+## Part E — Settings implementation (2026-08-07, approved model changes)
+
+The tabbed prototype (Finances | Commutes) is implemented in the real
+app with all the approved model changes:
+
+- Transit rename ('train' -> 'transit' everywhere: value, label, API,
+  migration rule, selector; persisted persons migrated live via
+  tools/migrate_train_to_transit.py). Journey-LEG mode names
+  (train/tube/bus...) deliberately untouched.
+- Petrol MPG is per-person (Person.petrol_mpg, PersonPetrolMpgNode);
+  petrol cost/litre stays a household finance.
+- Max walk exposed: bus_walk_penalty was already in the model + API —
+  now a 'Willing to walk up to (minutes)' field on the Commutes tab.
+- Deposit excludes children completely (pure _deposit_breakdown helper,
+  unit-tested; EquityTotalNode skips children too).
+- Settings page: Finances tab (default, left) = deposit + household
+  finances + money fields; Commutes tab = has-car + MPG + bands +
+  max-walk + destinations. Shared WholePoundsField component extracted
+  from the what-if panel. Copy: 'Transit', 'Transport modes you'd
+  accept', no 'office', no leave-address-blank labels, future-house
+  framing intro.
+
+Verified live at 375px (tabs switch, MPG under has-car, max-walk,
+modes labelled Transit/Driving/Walking, trips+weeks present).
+234 frontend + 1410 python green.
+
 ## Verification
 
 - `make test` green; ruff + basedpyright clean; language sweep green.
