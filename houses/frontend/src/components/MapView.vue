@@ -26,6 +26,9 @@ export interface MapLayer {
   color: string
   fillOpacity?: number
   weight?: number
+  /** Shown on the map when the page loads (the intersection is; the
+   *  three isochrones start hidden behind the key). */
+  visibleByDefault?: boolean
   polygons: MapPolygon[]
 }
 
@@ -41,8 +44,9 @@ const emit = defineEmits<{ error: [] }>()
 
 const container = ref<HTMLDivElement | null>(null)
 let map: L.Map | null = null
-let overlayControl: L.Control.Layers | null = null
 const overlayGroups = new Map<string, L.LayerGroup>()
+/** Which layers are currently on the map — the key's checkbox state. */
+const layerVisible = ref<Record<string, boolean>>({})
 
 const HOUSE_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9.5 21v-6h5v6"/></svg>`
 const SCHOOL_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24" aria-hidden="true"><path d="M22 9 12 4 2 9l10 5 10-5z"/><path d="M6 11.5V17c0 1.5 2.7 3 6 3s6-1.5 6-3v-5.5"/><path d="M22 9v6"/></svg>`
@@ -71,16 +75,23 @@ function buildLayers() {
     overlayGroups.set(layer.name, group)
   }
 
-  // The checkbox key (like the toolchain map): one checkbox per layer.
-  if (overlayControl) {
-    map!.removeControl(overlayControl)
-  }
-  const overlays: Record<string, L.LayerGroup> = {}
+  syncLayerVisibility()
+}
+
+/** Apply the checkbox state to the map: only the layers the user has
+ *  on (or that default on) are added. */
+function syncLayerVisibility() {
   for (const [name, group] of overlayGroups) {
-    overlays[name] = group
-    group.addTo(map!)
+    const want = layerVisible.value[name]
+    const on = map!.hasLayer(group)
+    if (want && !on) group.addTo(map!)
+    if (!want && on) map!.removeLayer(group)
   }
-  overlayControl = L.control.layers({}, overlays, { collapsed: false }).addTo(map!)
+}
+
+function toggleLayer(name: string) {
+  layerVisible.value = { ...layerVisible.value, [name]: !layerVisible.value[name] }
+  syncLayerVisibility()
 }
 
 function markerIcon(m: MapMarker): L.DivIcon {
@@ -105,7 +116,9 @@ function markerIcon(m: MapMarker): L.DivIcon {
     })
   }
   // price chip — the label sits above the point, centered (as the old
-  // absolute-positioned pin labels did)
+  // absolute-positioned pin labels did). iconSize left undefined lets
+  // Leaflet size the icon to the chip's own content (a 0×0 size clipped
+  // every label to ~20px).
   const label = escapeHtml(m.label)
   const inner = m.url
     ? `<a class="mapview-price" href="${escapeAttr(m.url)}" style="border-color:${color}">${label}</a>`
@@ -113,7 +126,6 @@ function markerIcon(m: MapMarker): L.DivIcon {
   return L.divIcon({
     className: 'mapview-price-wrap',
     html: inner,
-    iconSize: [0, 0],
     iconAnchor: [0, 0],
   })
 }
@@ -158,6 +170,8 @@ onMounted(() => {
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(map)
+    // Default checkbox state: visibleByDefault layers on, the rest off.
+    layerVisible.value = Object.fromEntries(props.layers.map(l => [l.name, l.visibleByDefault ?? false]))
     buildLayers()
     buildMarkers()
     fitBounds()
@@ -172,6 +186,13 @@ watch(
   () => [props.markers, props.layers],
   () => {
     if (!map) return
+    // New layers arrive: keep the user's toggles by name, default new
+    // names to their visibleByDefault flag.
+    for (const l of props.layers) {
+      if (layerVisible.value[l.name] === undefined) {
+        layerVisible.value[l.name] = l.visibleByDefault ?? false
+      }
+    }
     buildLayers()
     buildMarkers()
   },
@@ -187,25 +208,74 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div
-    ref="container"
-    class="map-view"
-    :style="props.height ? { height: props.height + 'px' } : undefined"
-  />
+  <div class="mapview-wrap" :style="props.height ? { height: props.height + 'px' } : undefined">
+    <div ref="container" class="map-view" />
+    <!-- The layer key: a checkbox + opaque colour swatch per map layer
+         (the polygon fill itself is deliberately faint). -->
+    <div v-if="layers.length" class="mapview-key" role="group" aria-label="Map layers">
+      <label v-for="layer in layers" :key="layer.name" class="mapview-key__row">
+        <input
+          type="checkbox"
+          :checked="layerVisible[layer.name] ?? false"
+          @change="toggleLayer(layer.name)"
+        />
+        <span class="mapview-key__swatch" :style="{ background: layer.color }" aria-hidden="true" />
+        <span class="mapview-key__name">{{ layer.name }}</span>
+      </label>
+    </div>
+  </div>
 </template>
 
 <style scoped>
+.mapview-wrap {
+  position: relative;
+  width: 100%;
+}
 .map-view {
   width: 100%;
+  height: 100%;
   border-radius: 12px;
   z-index: 0;
+}
+.mapview-key {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 500;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: var(--fs-xs);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: auto;
+}
+.mapview-key__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.mapview-key__swatch {
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+.mapview-key__name {
+  white-space: nowrap;
+  color: var(--text);
 }
 .map-view :deep(.mapview-price-wrap) {
   background: none;
   border: none;
 }
 .map-view :deep(.mapview-price) {
-  display: block;
+  display: inline-block;
   background: var(--card-bg);
   color: var(--text);
   font-size: var(--fs-xs);
@@ -222,9 +292,5 @@ onBeforeUnmount(() => {
 .map-view :deep(.mapview-icon__svg) {
   display: block;
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
-}
-.map-view :deep(.leaflet-control-layers) {
-  border-radius: 8px;
-  font-size: var(--fs-xs);
 }
 </style>

@@ -308,6 +308,68 @@ describe('PropertyDetail town description', () => {
     expect(text).not.toContain('{"description"')
     expect(text).not.toContain('"description"')
   })
+
+  it('renders nearby amenities under the town description', async () => {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/property/:rid', component: PropertyDetail }],
+    })
+    router.push('/property/123')
+    await router.isReady()
+
+    const wrapper = mount(PropertyDetail, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+
+    const store = usePropertiesStore()
+    const detail = makeDetail()
+    detail.area.town_description = {
+      succeeded: true,
+      value: { description: 'Quiet village.' },
+      error: null,
+      provenance: { label: 'llm' },
+    } as any
+    detail.area.walkability = {
+      succeeded: true,
+      value: { walk_to_town: { value: 10, unit: 'minute' }, amenities: 'Village Shop (2m) | Recreation Ground (5m)' },
+      error: null,
+      provenance: { label: 'api' },
+    } as any
+    store.details['123'] = detail
+    store.loading = false
+
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    const text = wrapper.text()
+    expect(text).toContain('Village Shop (2m) | Recreation Ground (5m)')
+  })
+
+  it('omits the amenities paragraph when none are known', async () => {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/property/:rid', component: PropertyDetail }],
+    })
+    router.push('/property/123')
+    await router.isReady()
+
+    const wrapper = mount(PropertyDetail, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+
+    const store = usePropertiesStore()
+    store.details['123'] = makeDetail()
+    store.loading = false
+
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.text()).not.toContain('Nearby amenities')
+  })
 })
 
 describe('PropertyDetail notes', () => {

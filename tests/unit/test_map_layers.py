@@ -75,6 +75,11 @@ def test_layers_build_transit_drive_and_intersection(tmp_path, monkeypatch):
     assert inter["color"] == "#c90"
     assert inter["fillOpacity"] == 0.25
     assert inter["polygons"][0]["name"] == "All commutes"
+    # Only the intersection ("where we could live") shows by default —
+    # the three isochrones start hidden behind the key.
+    assert inter["visibleByDefault"] is True
+    assert "visibleByDefault" not in layers[0]
+    assert "visibleByDefault" not in layers[1]
 
 
 def test_endpoint_returns_layers(tmp_path, monkeypatch):

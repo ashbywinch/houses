@@ -69,6 +69,14 @@ const townDescription = computed(() => {
 })
 const walkability = computed(() =>
   detail.value?.area?.walkability?.succeeded ? detail.value.area.walkability.value : null)
+
+/** Nearby amenities list (the sheet's 'Walkable Amenities' column) —
+ *  a pipe-joined string from the walkability DAG node. */
+const amenities = computed(() => {
+  const w = walkability.value as Record<string, unknown> | null
+  const a = w?.amenities
+  return typeof a === 'string' && a.trim() ? a.trim() : null
+})
 const rightmoveUrl = computed(() =>
   detail.value?.rightmove_url?.succeeded ? detail.value.rightmove_url.value : null)
 const bestLocation = computed(() =>
@@ -290,6 +298,13 @@ async function saveAddress() {
         <!-- Town description -->
         <div v-if="townDescription" class="detail-field detail-field--block">
           <p class="detail-town-desc">{{ townDescription }}</p>
+        </div>
+
+        <!-- Nearby amenities (the spreadsheet's 'Walkable Amenities'
+             column — carried live by the walkability DAG node) -->
+        <div v-if="amenities" class="detail-field detail-field--block">
+          <span class="detail-field__label">Nearby amenities</span>
+          <p class="detail-town-desc">{{ amenities }}</p>
         </div>
 
         <!-- Action buttons -->

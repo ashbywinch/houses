@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { onBeforeUnmount, onMounted, ref, computed } from 'vue'
 import { usePropertiesStore } from '../stores/properties'
 import type { PropertySummary } from '../types'
 import Header from '../components/Header.vue'
@@ -23,9 +23,24 @@ const maxCommuteFilter = ref<number | null>(null)
 const mapFailed = ref(false)
 const isochroneLayers = ref<MapLayer[]>([])
 
-onMounted(() => {
-  store.loadAll()
+onMounted(async () => {
+  // Returning from a detail page: restore where the list was (the store
+  // resets on a full reload, so a fresh load starts at the top).
+  const saved = store.listScrollY
+  await store.loadAll()
   fetchIsochrones()
+  if (saved > 0) {
+    await new Promise(resolve => requestAnimationFrame(resolve))
+    window.scrollTo(0, saved)
+    store.listScrollY = 0
+  }
+})
+
+onBeforeUnmount(() => {
+  // Remember where the list was so back-navigation lands in the same
+  // place. (window.scrollY at unmount — the user left via a card or the
+  // tab bar; a reload never runs this.)
+  store.listScrollY = window.scrollY
 })
 
 /** The isochrone polygons for the Map page — the committed toolchain
@@ -247,7 +262,6 @@ const ceilingLimitText = computed(() => {
       v-if="!mapFailed"
       :markers="mapMarkers"
       :layers="isochroneLayers"
-      class="map-full__leaflet"
       @error="mapFailed = true"
     />
     <p v-if="mapFailed" class="map-fallback-note">
@@ -500,7 +514,7 @@ const ceilingLimitText = computed(() => {
 @media (min-width:960px) { .card-list { grid-template-columns:1fr 1fr 1fr; } }
 
 .map-full { position:fixed; top:56px; left:0; right:0; bottom:56px; z-index:1; }
-.map-full__leaflet { height: 100%; width: 100%; }
+.map-full .mapview-wrap { height: 100%; }
 
 .sheet-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:90; }
 .sheet {

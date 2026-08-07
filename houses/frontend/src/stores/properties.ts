@@ -23,6 +23,12 @@ export const usePropertiesStore = defineStore('properties', () => {
   // user opts in — persisted here so the choice survives navigation.
   const showOverCeiling = ref(false)
 
+  // Where the list page was scrolled to when the user left for a detail
+  // page — restored on back-navigation. Lives in the store so it
+  // survives SPA navigation but resets on a full page reload (a reload
+  // starts the list at the top).
+  const listScrollY = ref(0)
+
   // The two headline labels ("S+L", "Ashby") derived from the settings
   // persons (joint owners = current-home holders + co-owners; everyone
   // else is an other adult). Used when a property's group_monthly_cost
@@ -191,7 +197,7 @@ export const usePropertiesStore = defineStore('properties', () => {
 
   return {
     rids, summaries, details, triage, settings, loading, error,
-    commuteCeilings, commuteGoods, poiLabels, showOverCeiling, groupLabels,
+    commuteCeilings, commuteGoods, poiLabels, showOverCeiling, groupLabels, listScrollY,
     whatIfTotals, applyWhatIf, clearWhatIf, coupleTotalFor, groupCostFor,
     loadAll, loadSettings, loadDetail, updateSummary, updateDetail, toggleTriage,
   }

@@ -86,6 +86,9 @@ def isochrone_layers() -> list[dict]:
                 "color": "#c90",
                 "fillOpacity": 0.25,
                 "weight": 4,
+                # The headline layer — shown by default; the three
+                # isochrone layers start hidden behind the key.
+                "visibleByDefault": True,
                 "polygons": [
                     {"coords": s["polygon"], "name": s.get("name", ""), "url": s.get("rightmove_url", "")}
                     for s in intersection["searches"]

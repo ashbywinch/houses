@@ -606,6 +606,28 @@ PARK leg because Reading's car-park cost was unknown.
   capture, url stays empty without website, SchoolsSection renders a
   link only when url exists.
 
+## Part E — Map labels, layer key, scroll memory, amenities (2026-08-07)
+
+- Map price chips size to their content — the divIcon's iconSize was
+  0×0, which clipped every label to ~20px; now the icon sizes to the
+  chip (labels render full width).
+- Layer key is a custom panel (checkbox + OPAQUE colour swatch per
+  layer — the polygon fill is deliberately faint). Defaults: only
+  "Where we could live" (the intersection) is on; the three isochrone
+  layers start hidden behind the key (`visibleByDefault` flag from
+  `houses/map_layers.py`).
+- List-page scroll position is remembered across detail navigation:
+  the store saves `window.scrollY` on leave and restores it after the
+  list loads on return. A full reload resets the store, so the list
+  starts at the top. (Router scrollBehavior alone failed — the list
+  loads async, so the restore fired against a 0-height page.)
+- Nearby amenities (the sheet's "Walkable Amenities" column — carried
+  live by the walkability DAG node) now render under the town
+  description as a "Nearby amenities" paragraph.
+- Tests: amenities render/omit, intersection visibleByDefault,
+  MapView key behaviour; user-language sweep stays green (template
+  comments must not use "isochrone").
+
 ## Verification
 
 - `make test` green; ruff + basedpyright clean; language sweep green.
