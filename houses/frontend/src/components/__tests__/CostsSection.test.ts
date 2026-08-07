@@ -154,7 +154,9 @@ describe('CostsSection rental income', () => {
     const wrapper = mountCosts()
     const trigger = wrapper.find('.provenance-toggle__trigger')
     expect(trigger.exists()).toBe(true)
-    expect(trigger.text()).toContain('How is this calculated?')
+    // Icon-only affordance — the sentence must not render as a link
+    expect(trigger.find('.provenance-toggle__icon').text()).toBe('ⓘ')
+    expect(trigger.text()).not.toContain('How is this calculated?')
   })
 })
 
