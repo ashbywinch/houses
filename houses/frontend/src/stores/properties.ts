@@ -76,10 +76,6 @@ export const usePropertiesStore = defineStore('properties', () => {
     } finally {
       loading.value = false
     }
-    // Settings (commute colour bands, ceilings, MPG, max walk) may have
-    // changed since the store was created — refresh so the pills and the
-    // over-ceiling filter are never stale after a settings edit.
-    await loadSettings()
   }
 
   interface PersonEntry {
@@ -160,6 +156,6 @@ export const usePropertiesStore = defineStore('properties', () => {
     rids, summaries, details, triage, settings, loading, error,
     commuteCeilings, commuteGoods, poiLabels, showOverCeiling,
     whatIfTotals, applyWhatIf, clearWhatIf, monthlyTotalFor,
-    loadAll, loadDetail, updateSummary, updateDetail, toggleTriage,
+    loadAll, loadSettings, loadDetail, updateSummary, updateDetail, toggleTriage,
   }
 })

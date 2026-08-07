@@ -161,3 +161,81 @@ describe('loadAll data flow', () => {
     expect(store.summaries['prop-2']?.schools?.primary?.school?.value?.ofsted).toBe('')
   })
 })
+
+describe('WebSocket settings broadcast', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('refreshes cached settings when the DAG broadcasts a settings node update', () => {
+    const store = usePropertiesStore()
+    store.commuteGoods = { Simon: 30 }
+    store.commuteCeilings = { Simon: { fine: 45, isChild: false } }
+
+    // The settings node changes server-side (e.g. a PATCH from another
+    // device); the next fetchSettings returns the new bands.
+    vi.mocked(fetchSettings).mockResolvedValue({
+      persons: { value: [] },
+      commute_thresholds: {
+        value: { Simon: { good_max_minutes: 35, fine_max_minutes: 50 } },
+      },
+    } as unknown as Record<string, unknown>)
+
+    const { connect, disconnect } = useWebSocket((_url: string) => {
+      const ws = {
+        onopen: null as any,
+        onclose: null as any,
+        onmessage: null as any,
+        close() { this.onclose?.() },
+      }
+      setTimeout(() => {
+        ws.onmessage?.({
+          data: JSON.stringify({ type: 'node_updated', node_id: 'commute_thresholds', data: {} }),
+        })
+      }, 0)
+      return ws as any
+    })
+
+    connect('ws://localhost/api/ws')
+
+    return new Promise<void>((resolve) => {
+      setTimeout(() => {
+        expect(store.commuteGoods['Simon']).toBe(35)
+        expect(store.commuteCeilings['Simon'].fine).toBe(50)
+        disconnect()
+        resolve()
+      }, 10)
+    })
+  })
+
+  it('ignores node_updated messages for property nodes', () => {
+    const fetchSpy = vi.mocked(fetchSettings)
+
+    const { connect, disconnect } = useWebSocket((_url: string) => {
+      const ws = {
+        onopen: null as any,
+        onclose: null as any,
+        onmessage: null as any,
+        close() { this.onclose?.() },
+      }
+      setTimeout(() => {
+        ws.onmessage?.({
+          data: JSON.stringify({ type: 'node_updated', node_id: 'some-rid/commute/total_monthly', data: {} }),
+        })
+      }, 0)
+      return ws as any
+    })
+
+    connect('ws://localhost/api/ws')
+    // the store loaded settings at init — count from here
+    const callsBefore = fetchSpy.mock.calls.length
+
+    return new Promise<void>((resolve) => {
+      setTimeout(() => {
+        expect(fetchSpy.mock.calls.length).toBe(callsBefore)
+        disconnect()
+        resolve()
+      }, 10)
+    })
+  })
+})

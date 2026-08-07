@@ -46,10 +46,24 @@ export function useWebSocket(factory?: (url: string) => WebSocket) {
             store.rids.push(msg.rid)
           }
         }
+        // The DAG broadcast already fires for settings nodes (the
+        // after-refresh hook covers every node) — refresh the cached
+        // settings (commute bands, ceilings, MPG, max walk) when a
+        // settings edit lands, so pills and filters stay live without
+        // polling or navigation.
+        if (msg.type === 'node_updated' && isSettingsNode(msg.node_id)) {
+          store.loadSettings()
+        }
       } catch {
         // ignore parse errors
       }
     }
+  }
+
+  /** Settings nodes: persons, commute_thresholds, and the individual
+   *  settings/* finance nodes. */
+  function isSettingsNode(nodeId: string): boolean {
+    return nodeId === 'persons' || nodeId === 'commute_thresholds' || nodeId.startsWith('settings/')
   }
 
   function disconnect() {
