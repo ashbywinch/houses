@@ -41,20 +41,31 @@ onMounted(fetchPersons)
           <span class="header__auth-status">…</span>
         </template>
         <template v-else-if="auth.user">
-          <router-link class="header__settings-link" to="/settings">Settings</router-link>
+          <router-link class="header__settings-link" to="/settings" aria-label="Settings">
+            <span class="header__action-icon" aria-hidden="true">⚙</span>
+            <span class="header__action-text">Settings</span>
+          </router-link>
           <button
             v-if="auth.user.is_superuser"
             class="header__su-toggle"
             :class="{ 'header__su-toggle--active': auth.superuserMode }"
             @click="auth.toggleSuperuser()"
-            title="Switch between your view and acting as another family member"
+            :title="auth.superuserMode ? 'Stop impersonating' : 'Switch between your view and acting as another family member'"
+            :aria-label="auth.superuserMode ? 'Stop impersonating' : 'Switch person'"
           >
-            <span aria-hidden="true">👤</span> {{ auth.superuserMode ? 'Stop impersonating' : 'Switch person' }}
+            <span class="header__action-icon" aria-hidden="true">👤</span>
+            <span class="header__action-text">{{ auth.superuserMode ? 'Stop impersonating' : 'Switch person' }}</span>
           </button>
-          <button class="header__auth-btn" @click="auth.logout()">Logout</button>
+          <button class="header__auth-btn" @click="auth.logout()" aria-label="Log out">
+            <span class="header__action-icon" aria-hidden="true">⎋</span>
+            <span class="header__action-text">Logout</span>
+          </button>
         </template>
         <template v-else>
-          <button class="header__auth-btn" @click="auth.login()">Login</button>
+          <button class="header__auth-btn" @click="auth.login()" aria-label="Log in">
+            <span class="header__action-icon" aria-hidden="true">→</span>
+            <span class="header__action-text">Login</span>
+          </button>
         </template>
       </div>
     </div>
@@ -82,6 +93,7 @@ onMounted(fetchPersons)
   position: sticky;
   top: 0;
   z-index: 10;
+  overflow-x: hidden;
 }
 .header__inner {
   display: flex;
@@ -90,17 +102,52 @@ onMounted(fetchPersons)
   padding: 10px 16px;
   max-width: 1200px;
   margin: 0 auto;
+  gap: 8px;
 }
 .header__title {
   font-size: 1.125rem;
   font-weight: var(--fw-bold);
   letter-spacing: -0.01em;
   color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+/* Mobile header pattern: ONE row. The title truncates and the text
+   actions collapse to icon-only (label stays in the accessible
+   name/tooltip), so nothing wraps and every action stays reachable. */
+@media (max-width: 560px) {
+  .header__inner {
+    padding: 8px 10px;
+    gap: 4px;
+  }
+  .header__title {
+    font-size: 1rem;
+  }
+  .header__action-text {
+    display: none;
+  }
+  .header__auth-btn,
+  .header__su-toggle,
+  .header__settings-link {
+    padding: 6px 4px;
+    font-size: 1rem;
+    line-height: 1;
+  }
+  .header__action-icon {
+    font-size: 1.15rem;
+  }
+  .header__actions {
+    gap: 2px;
+  }
 }
 .header__actions {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
 }
 .header__auth-btn,
 .header__su-toggle,
@@ -115,6 +162,21 @@ onMounted(fetchPersons)
   cursor: pointer;
   transition: background 0.15s;
   text-decoration: none;
+  white-space: nowrap;
+}
+.header__action-icon {
+  display: inline-block;
+}
+.header__settings-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.header__auth-btn,
+.header__su-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 .header__su-toggle {
   border: 1px solid var(--amber-text);

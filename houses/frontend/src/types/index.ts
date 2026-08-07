@@ -66,11 +66,25 @@ export interface GroupCostValue {
   value: string
   stddev: number
 }
+/** Per-component monthly cost for one group (S+L vs the others) so the
+ *  detail page can render the two groups' costs as separate blocks
+ *  instead of mixing household rows. */
+export interface GroupCostBreakdown {
+  commutes: number
+  insurance: number
+  shared: number
+  mortgage?: number
+  rental_income?: number
+  rent_received?: number
+  rent_paid?: number
+}
 export interface GroupMonthlyCost {
   couple: GroupCostValue | null
   others: GroupCostValue | null
   couple_label: string
   others_label: string
+  couple_breakdown?: GroupCostBreakdown
+  others_breakdown?: GroupCostBreakdown
 }
 export interface MeasurementValue {
   value: MoneyValue

@@ -194,15 +194,25 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         sinking_monthly = Decimal(0) if is_current else (sinking.value_or_none() or Money("0", "GBP")).amount / Decimal(12)  # noqa: E501
         insurance_scale = 0 if is_current else 1
 
-        def group_figure(group: list, owner_share: float, rent: Decimal) -> tuple[Decimal, float]:
+        def group_figure(group: list, owner_share: float, rent: Decimal) -> tuple[Decimal, float, dict]:
             commutes = sum((commute_monthly(p.name) for p in group), Decimal(0))
             insurance = insurance_scale * sum((money_of(p, "life_insurance_monthly") for p in group), Decimal(0))
             shared = Decimal(str(round(owner_share, 4))) * (council_monthly + sinking_monthly)
             value = commutes + insurance + shared + rent
             stddev = owner_share * float(council_stddev) / 12.0
-            return value, round(stddev, 2)
+            breakdown = {
+                "commutes": round(float(commutes), 2),
+                "insurance": round(float(insurance), 2),
+                "shared": round(float(shared), 2),
+            }
+            return value, round(stddev, 2), breakdown
 
         others_rent = sum((money_of(p, "rent_paid_monthly") for p in others), Decimal(0))
+        # The rent the others pay to the couple is the CURRENT-home
+        # arrangement — it only applies when THIS property is the current
+        # home.  A new purchase has no rent transfer in either direction.
+        rent_scale = 1 if is_current else 0
+        others_rent = rent_scale * others_rent
         couple_rent = others_rent  # the rent the others pay goes to the couple
         mortgage_val = (mortgage.value_or_none() or Money("0", "GBP")).amount
         rental_val = (rental_income.value_or_none() or Money("0", "GBP")).amount
@@ -210,9 +220,17 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         owner_share = len(owners) / n_adults
         others_share = len(others) / n_adults
 
-        couple_val, couple_std = group_figure([p for p in adults if p.name in owners], owner_share, -couple_rent)
+        couple_val, couple_std, couple_breakdown = group_figure(
+            [p for p in adults if p.name in owners], owner_share, -couple_rent
+        )
         couple_val += mortgage_val - rental_val
-        others_val, others_std = group_figure(others, others_share, others_rent)
+        couple_breakdown["mortgage"] = round(float(mortgage_val), 2)
+        couple_breakdown["rental_income"] = round(-float(rental_val), 2)
+        if is_current:
+            couple_breakdown["rent_received"] = round(-float(couple_rent), 2)
+        others_val, others_std, others_breakdown = group_figure(others, others_share, others_rent)
+        if is_current:
+            others_breakdown["rent_paid"] = round(float(others_rent), 2)
 
         return Attempt.succeeded(
             {
@@ -220,5 +238,7 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
                 "others": {"value": f"{others_val:.2f}", "stddev": others_std},
                 "couple_label": "+".join(p.name[0].upper() for p in adults if p.name in owners),
                 "others_label": "+".join(p.name[0].upper() for p in others),
+                "couple_breakdown": couple_breakdown,
+                "others_breakdown": others_breakdown,
             }
         )

@@ -129,7 +129,7 @@ async function saveAddress() {
 
 <template>
   <!-- Header -->
-  <Header title="Property Detail">
+  <Header title="House Hunt">
     <template #actions>
       <button class="btn--icon" aria-label="Back to property list" @click="router.push('/')">←</button>
     </template>

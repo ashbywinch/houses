@@ -210,7 +210,7 @@ describe('CostsSection explanatory copy (C5/C6/C10)', () => {
         },
       },
     })
-    expect(wrapper.text()).toContain("The joint owners' monthly cost")
+    expect(wrapper.text()).toContain("Each group's monthly cost")
   })
 
   it('does NOT claim renovation costs are part of the mortgage', () => {
@@ -278,7 +278,7 @@ describe('CostsSection uncertainty rendering (Part A)', () => {
     expect(wrapper.text()).toContain('D · £1,800/yr')
   })
 
-  it('renders ≈ on the Total Monthly row when approximate', () => {
+  it('renders ≈ on the group figures when approximate', () => {
     const wrapper = mountCosts({
       affordability: {
         group_monthly_cost: {
@@ -294,14 +294,14 @@ describe('CostsSection uncertainty rendering (Part A)', () => {
         },
       },
     })
-    const totalRow = wrapper.find('.costs-row--total')
-    expect(totalRow.text()).toContain('≈ £1100')
+    const groupRows = wrapper.findAll('.costs-row--group')
+    expect(groupRows[0].text()).toContain('≈ £1100/mo')
   })
 
-  it('renders the couple figure on the Total Monthly row', () => {
-    // Regression: the row read the removed total_monthly_housing_cost
-    // key, so it always fell through to '?' — the couple's headline
-    // figure from group_monthly_cost must render instead.
+  it('renders the couple and others as SEPARATE blocks', () => {
+    // Regression: household rows were mixed together with a single
+    // couple headline. The two groups' figures must render as separate
+    // labelled blocks, each with its own breakdown rows from the DAG.
     const wrapper = mountCosts({
       affordability: {
         group_monthly_cost: {
@@ -311,15 +311,36 @@ describe('CostsSection uncertainty rendering (Part A)', () => {
             others: { value: '322.5', stddev: 0 },
             couple_label: 'S+L',
             others_label: 'A',
+            couple_breakdown: {
+              mortgage: 3000,
+              shared: 433.36,
+              commutes: 300,
+              insurance: 150,
+              rental_income: -800,
+              rent_received: -600,
+            },
+            others_breakdown: {
+              shared: 216.65,
+              commutes: 50,
+              insurance: 30,
+              rent_paid: 600,
+            },
           },
           error: null,
           provenance: {},
         },
       },
     })
-    const totalRow = wrapper.find('.costs-row--total')
-    expect(totalRow.text()).toContain('£1548.67')
-    expect(totalRow.text()).not.toContain('?')
+    const text = wrapper.text()
+    expect(text).toContain('S+L — the joint owners')
+    expect(text).toContain('A — the other adults')
+    expect(text).toContain('£1548.67/mo')
+    expect(text).toContain('£322.5/mo')
+    // The S+L breakdown is separate from the A breakdown
+    expect(text).toContain('Mortgage')
+    expect(text).toContain('Rent received')
+    expect(text).toContain('Rent paid')
+    expect(wrapper.find('.costs-row--total').exists()).toBe(false)
   })
 })
 

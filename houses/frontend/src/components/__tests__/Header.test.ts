@@ -29,8 +29,9 @@ describe('Header — settings link (P9, D2)', () => {
     const wrapper = mountHeader()
     const link = wrapper.find('a.header__settings-link')
     expect(link.exists()).toBe(true)
-    expect(link.text()).toBe('Settings')
+    expect(link.text()).toContain('Settings')
     expect(link.attributes('href')).toContain('/settings')
+    expect(link.attributes('aria-label')).toBe('Settings')
     // the confusing per-person menu is gone
     expect(wrapper.find('button.header__settings-menu').exists()).toBe(false)
     expect(wrapper.find('.header__menu-item--person').exists()).toBe(false)

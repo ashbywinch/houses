@@ -240,7 +240,7 @@ const ceilingLimitText = computed(() => {
 </script>
 
 <template>
-  <Header title="Properties" />
+  <Header title="House Hunt" />
 
   <!-- Map tab -->
   <div v-if="activeTab === 'map'" class="map-full">

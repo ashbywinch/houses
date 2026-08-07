@@ -63,6 +63,37 @@ const sinkingFundNote = computed(() => {
   return `£${monthly.toLocaleString()}/mo is the yearly fund (about £${yearly.toLocaleString()}/yr) split across 12 months.`
 })
 
+const fmt = (n: number | undefined): string =>
+  n == null ? '' : `${n < 0 ? '−' : ''}£${Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+
+/** Row labels for the joint-owners' breakdown — mortgage and rental
+ *  income belong to them; shared bills and commutes split by group. */
+function coupleRows() {
+  const b = props.affordability?.group_monthly_cost?.value?.couple_breakdown
+  if (!b) return []
+  return [
+    { label: 'Mortgage', value: fmt(b.mortgage) },
+    { label: 'Shared bills (council tax + sinking fund)', value: fmt(b.shared) },
+    { label: 'Commutes', value: fmt(b.commutes) },
+    { label: 'Life insurance', value: fmt(b.insurance) },
+    { label: 'Rental income', value: fmt(b.rental_income) },
+    { label: 'Rent received', value: fmt(b.rent_received) },
+  ].filter(r => r.value !== '')
+}
+
+/** Row labels for the other adults' breakdown — their rent paid is their
+ *  own cost; shared bills and commutes split by group. */
+function othersRows() {
+  const b = props.affordability?.group_monthly_cost?.value?.others_breakdown
+  if (!b) return []
+  return [
+    { label: 'Shared bills (council tax + sinking fund)', value: fmt(b.shared) },
+    { label: 'Commutes', value: fmt(b.commutes) },
+    { label: 'Life insurance', value: fmt(b.insurance) },
+    { label: 'Rent paid', value: fmt(b.rent_paid) },
+  ].filter(r => r.value !== '')
+}
+
 /** When the total can't be calculated, name the leaf reason the UI
  *  knows (e.g. "Works estimate required for: Ashby"). */
 const totalBlockedReason = computed(() => {
@@ -342,20 +373,45 @@ function canEdit(personName: string): boolean {
               </div>
       <ProvenanceToggle v-if="affordability?.rental_income?.provenance" :provenance="affordability?.rental_income?.provenance" title="Rental income" />
 
-      <!-- Total Monthly — the couple's headline figure -->
-      <div class="costs-row costs-row--total" :class="{ 'costs-row--impossible': isImpossible(affordability?.group_monthly_cost) }">
-        <span class="costs-label">Total Monthly</span>
-        <span
-          v-if="affordability?.group_monthly_cost?.succeeded && affordability?.group_monthly_cost?.value?.couple"
-          class="costs-value"
-          :title="totalMonthlyApprox ? 'Council tax estimated — total is approximate' : undefined"
-        >{{ totalMonthlyApprox ? '≈ ' : '' }}£{{ affordability.group_monthly_cost.value.couple.value }}</span>
-        <span v-else-if="isImpossible(affordability?.group_monthly_cost)" class="costs-value costs-value--impossible">Can't calculate</span>
-        <span v-else class="costs-value">?</span>
-              </div>
+      <!-- Monthly cost by group — S+L (the joint owners) and the others
+           are shown as SEPARATE blocks; the per-group components come
+           from the DAG node so the split is never recomputed here. -->
+      <template v-if="affordability?.group_monthly_cost?.succeeded && affordability?.group_monthly_cost?.value?.couple">
+        <div class="costs-row costs-row--group">
+          <span class="costs-label">{{ affordability.group_monthly_cost.value.couple_label }} — the joint owners</span>
+          <span class="costs-value" :title="totalMonthlyApprox ? 'Council tax estimated — total is approximate' : undefined">
+            {{ totalMonthlyApprox ? '≈ ' : '' }}£{{ affordability.group_monthly_cost.value.couple.value }}/mo
+          </span>
+        </div>
+        <div v-if="affordability.group_monthly_cost.value.couple_breakdown" class="costs-group-breakdown">
+          <div v-for="(row, key) in coupleRows()" :key="key" class="costs-row costs-row--sub">
+            <span class="costs-label">{{ row.label }}</span>
+            <span class="costs-value">{{ row.value }}</span>
+          </div>
+        </div>
+        <div v-if="affordability?.group_monthly_cost?.value?.others" class="costs-row costs-row--group costs-row--group-others">
+          <span class="costs-label">{{ affordability.group_monthly_cost.value.others_label }} — the other adults</span>
+          <span class="costs-value">
+            {{ totalMonthlyApprox ? '≈ ' : '' }}£{{ affordability.group_monthly_cost.value.others.value }}/mo
+          </span>
+        </div>
+        <div v-if="affordability.group_monthly_cost.value.others_breakdown" class="costs-group-breakdown">
+          <div v-for="(row, key) in othersRows()" :key="key" class="costs-row costs-row--sub">
+            <span class="costs-label">{{ row.label }}</span>
+            <span class="costs-value">{{ row.value }}</span>
+          </div>
+        </div>
+      </template>
+      <template v-else>
+        <div class="costs-row costs-row--total" :class="{ 'costs-row--impossible': isImpossible(affordability?.group_monthly_cost) }">
+          <span class="costs-label">Total Monthly</span>
+          <span v-if="isImpossible(affordability?.group_monthly_cost)" class="costs-value costs-value--impossible">Can't calculate</span>
+          <span v-else class="costs-value">?</span>
+                </div>
+      </template>
       <p v-if="totalBlockedReason" class="costs-note costs-note--blocked">{{ totalBlockedReason }}</p>
       <p v-if="affordability?.group_monthly_cost?.succeeded" class="costs-note">
-        The joint owners' monthly cost: mortgage + sinking fund + life insurance + commutes + council tax − rental income.
+        Each group's monthly cost: mortgage, shared bills and commutes split by the adults in that group.
       </p>
       <ProvenanceToggle v-if="affordability?.group_monthly_cost?.provenance" :provenance="affordability?.group_monthly_cost?.provenance" title="Total monthly housing cost" />
     </div>
@@ -401,6 +457,9 @@ function canEdit(personName: string): boolean {
 }
 .costs-row--sub { padding-left: var(--sp-5); border-bottom: none; }
 .costs-row--total { font-weight: var(--fw-bold); border-bottom: none; border-top: 2px solid var(--slate-200); margin-top: var(--sp-2); padding-top: var(--sp-3); }
+.costs-row--group { font-weight: var(--fw-bold); border-bottom: none; border-top: 2px solid var(--slate-200); margin-top: var(--sp-3); padding-top: var(--sp-3); }
+.costs-row--group-others { margin-top: var(--sp-4); }
+.costs-group-breakdown { margin-top: var(--sp-1); }
 .costs-row--impossible { opacity: 0.5; }
 .costs-label { font-size: var(--fs-sm); color: var(--text); }
 .costs-value { font-size: var(--fs-sm); font-weight: var(--fw-semibold); margin-left: auto; margin-right: var(--sp-2); }
