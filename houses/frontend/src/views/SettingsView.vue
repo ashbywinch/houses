@@ -168,6 +168,27 @@ function buildSaveBody(person: PersonSettings): Record<string, unknown> {
   return body
 }
 
+async function refresh() {
+  // Re-fetch without the loading flash: deposit breakdown, thresholds,
+  // financials and current-homes are server-computed and can change with
+  // any save (e.g. co-owner shares re-split the deposit).
+  try {
+    const data = (await api.fetchSettings()) as {
+      persons?: { value?: PersonSettings[] }
+      commute_thresholds?: { value?: Record<string, Thresholds> }
+      household_deposit?: HouseholdDeposit
+      financial?: { value?: FinancialSettings }
+    }
+    persons.value = data.persons?.value ?? []
+    thresholds.value = data.commute_thresholds?.value ?? {}
+    deposit.value = data.household_deposit ?? null
+    loadFinancial(data.financial?.value ?? null)
+    currentHomes.value = await api.fetchCurrentHomes()
+  } catch {
+    // keep the current state — the save still succeeded
+  }
+}
+
 async function save(person: PersonSettings) {
   const body = buildSaveBody(person)
   saveState.value[person.name] = 'saving'
@@ -175,6 +196,7 @@ async function save(person: PersonSettings) {
     await api.patchPerson(person.name, body)
     undoSnap.value[person.name] = body
     saveState.value[person.name] = 'saved'
+    await refresh()
     const name = person.name
     setTimeout(() => {
       if (saveState.value[name] === 'saved') saveState.value[name] = 'idle'
