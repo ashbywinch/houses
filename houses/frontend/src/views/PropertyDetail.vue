@@ -168,8 +168,16 @@ async function saveAddress() {
       <!-- Summary bar (sticky) -->
       <div class="summary-bar">
         <div class="summary-address-row">
-          <h1 class="summary-address">{{ address }}</h1>
-          <button v-if="!editingAddress" class="summary-address-edit" @click="startAddressEdit">Edit address</button>
+          <h1 class="summary-address">
+            {{ address }}
+            <button
+              v-if="!editingAddress"
+              class="summary-address-edit"
+              @click="startAddressEdit"
+            >
+              Edit address
+            </button>
+          </h1>
           <span v-if="addressSaved" class="summary-address-saved">Saved — updating…</span>
         </div>
         <div v-if="editingAddress" class="address-editor">
@@ -184,19 +192,29 @@ async function saveAddress() {
           <button class="address-edit-cancel" @click="cancelAddressEdit">Cancel</button>
           <p v-if="addressError" class="address-edit-error">{{ addressError }}</p>
         </div>
-        <div class="summary-row">
-          <span v-if="price" class="summary-price">£{{ price.toLocaleString() }}</span>
-          <span
-            v-if="monthlyGroups"
-            class="summary-monthly"
-            :title="monthlyGroups.approx ? 'Council tax estimated — total is approximate' : undefined"
-          >
-            {{ monthlyGroups.coupleLabel }} {{ monthlyGroups.approx ? '≈' : '' }}£{{ monthlyGroups.couple.toLocaleString() }}/mo
-            <template v-if="monthlyGroups.others !== null">
-              · {{ monthlyGroups.othersLabel }} {{ monthlyGroups.approx ? '≈' : '' }}£{{ monthlyGroups.others.toLocaleString() }}/mo
-            </template>
-          </span>
-          <span v-if="bedrooms" class="summary-bedrooms">{{ bedrooms }} bed</span>
+        <!-- Price + monthly figures: the two monthly costs sit on the
+             right, each on its own row; beds follow on the left. -->
+        <div class="summary-facts">
+          <div class="summary-facts__left">
+            <span v-if="price" class="summary-price">£{{ price.toLocaleString() }}</span>
+            <span v-if="bedrooms" class="summary-bedrooms">{{ bedrooms }} bed</span>
+          </div>
+          <div class="summary-facts__right">
+            <span
+              v-if="monthlyGroups"
+              class="summary-monthly"
+              :title="monthlyGroups.approx ? 'Council tax estimated — total is approximate' : undefined"
+            >
+              {{ monthlyGroups.coupleLabel }} {{ monthlyGroups.approx ? '≈' : '' }}£{{ monthlyGroups.couple.toLocaleString() }}/mo
+            </span>
+            <span
+              v-if="monthlyGroups?.others !== null && monthlyGroups?.others !== undefined"
+              class="summary-monthly"
+              :title="monthlyGroups?.approx ? 'Council tax estimated — total is approximate' : undefined"
+            >
+              {{ monthlyGroups.othersLabel }} {{ monthlyGroups.approx ? '≈' : '' }}£{{ monthlyGroups.others.toLocaleString() }}/mo
+            </span>
+          </div>
         </div>
       </div>
 
@@ -352,10 +370,15 @@ async function saveAddress() {
   border-bottom: 1px solid var(--border);
 }
 .summary-address-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  flex-wrap: wrap;
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border);
+}
+.summary-address {
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+  margin: 0;
+  color: var(--slate-900);
+  line-height: var(--lh-tight);
 }
 .summary-address-edit {
   color: var(--blue);
@@ -364,6 +387,9 @@ async function saveAddress() {
   cursor: pointer;
   font-size: 0.85rem;
   padding: 0;
+  margin-left: 0.4rem;
+  vertical-align: baseline;
+  white-space: nowrap;
 }
 .summary-address-saved {
   color: var(--green);
@@ -404,21 +430,32 @@ async function saveAddress() {
   width: 100%;
   margin: 0.25rem 0 0;
 }
-.summary-address {
-  font-size: var(--fs-xl);
-  font-weight: var(--fw-bold);
-  margin: 0 0 var(--sp-2);
-  color: var(--slate-900);
-  line-height: var(--lh-tight);
+/* Price + beds on the left; the two monthly figures on the right, each
+   on its own row (grid rows align: price↔couple, beds↔others). */
+.summary-facts {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: var(--sp-4);
+  row-gap: 0;
+  align-items: baseline;
+  margin-top: var(--sp-3);
 }
-.summary-row {
+.summary-facts__left {
   display: flex;
-  align-items: center;
-  gap: var(--sp-3);
+  flex-direction: column;
+  gap: 0.15rem;
+  justify-self: start;
+}
+.summary-facts__right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+  justify-self: end;
 }
 .summary-price { font-size: var(--fs-base); font-weight: var(--fw-bold); color: var(--slate-800); }
-.summary-monthly { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--green); margin-left: auto; }
 .summary-bedrooms { font-size: var(--fs-sm); color: var(--text-secondary); }
+.summary-monthly { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--green); white-space: nowrap; }
 
 /* Section nav */
 .section-nav-wrap {

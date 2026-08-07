@@ -94,6 +94,46 @@ async def test_school_location_node_fails_without_school():
 
 
 @pytest.mark.asyncio
+async def test_school_location_node_prefers_full_address_over_latlon():
+    """Regression: the school walk destination was a bare 'lat,lon'.
+    The address captured when the school was first found must be the
+    leg destination — full_address first, then name+postcode, only
+    falling back to coordinates."""
+    from houses.nodes.schools import SchoolLocationNode
+
+    school = UserInputNode[dict]("sn_addr", dict)
+    node = SchoolLocationNode("sln_addr", school_node=school)
+    school.push(
+        {
+            "name": "Larchfield Primary School",
+            "postcode": "SL6 4ET",
+            "full_address": "Larchfield Primary School, Bargeman Road, Maidenhead SL6 4ET",
+            "lat": 51.52,
+            "lon": -0.72,
+        },
+        "test",
+    )
+    await flush_processor()
+    a = await node.attempt()
+    assert a.succeeded
+    assert a.value_or_none() == "Larchfield Primary School, Bargeman Road, Maidenhead SL6 4ET"
+
+
+@pytest.mark.asyncio
+async def test_school_location_node_falls_back_to_name_postcode():
+    """No full_address → name + postcode (still readable, not lat/lon)."""
+    from houses.nodes.schools import SchoolLocationNode
+
+    school = UserInputNode[dict]("sn_np", dict)
+    node = SchoolLocationNode("sln_np", school_node=school)
+    school.push({"name": "Larchfield Primary School", "postcode": "SL6 4ET", "lat": 51.52, "lon": -0.72}, "test")
+    await flush_processor()
+    a = await node.attempt()
+    assert a.succeeded
+    assert a.value_or_none() == "Larchfield Primary School, SL6 4ET"
+
+
+@pytest.mark.asyncio
 async def test_secondary_school_returns_impossible_when_no_school_found():
     """When school lookup returns None, secondary school must return
     Attempt.impossible (not crash with AttributeError)."""

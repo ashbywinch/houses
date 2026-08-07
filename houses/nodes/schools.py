@@ -42,6 +42,8 @@ class PrimarySchoolNode(DerivedNode[dict]):
             "ofsted": school.ofsted_rating,
             "walk": None,
             "url": school.url,
+            "postcode": school.postcode,
+            "full_address": school.full_address,
         }
         if school.coords:
             result["lat"] = school.coords.lat
@@ -79,6 +81,8 @@ class SecondarySchoolNode(DerivedNode[dict]):
             "ofsted": school.ofsted_rating,
             "walk": None,
             "url": school.url,
+            "postcode": school.postcode,
+            "full_address": school.full_address,
         }
         if school.coords:
             result["lat"] = school.coords.lat
@@ -91,6 +95,12 @@ class SecondarySchoolNode(DerivedNode[dict]):
 
 
 class SchoolLocationNode(DerivedNode[str]):
+    """The school's ADDRESS (name + postcode) as the route destination.
+
+    The walk/transit route planners need a geocodable destination string;
+    the address is what the legs should display — never a bare lat/lon.
+    """
+
     def __init__(self, node_id: str, *, school_node):
         super().__init__(node_id, str, (school_node,))
 
@@ -98,6 +108,17 @@ class SchoolLocationNode(DerivedNode[str]):
         if not school.succeeded:
             return self._impossible({"school_node": school})
         val = school.value_or_none()
-        if val and "lat" in val and "lon" in val:
+        if not val:
+            return Attempt.impossible("school has no details")
+        # The address captured when the school was first found from the
+        # data — the destination the legs display, never a bare lat/lon.
+        full = (val.get("full_address") or "").strip()
+        if full:
+            return Attempt.succeeded(full)
+        name = val.get("name") or ""
+        postcode = val.get("postcode") or ""
+        if name and postcode:
+            return Attempt.succeeded(f"{name}, {postcode}")
+        if "lat" in val and "lon" in val:
             return Attempt.succeeded(f"{val['lat']},{val['lon']}")
-        return Attempt.impossible("school has no coordinates")
+        return Attempt.impossible("school has no address or coordinates")

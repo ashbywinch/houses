@@ -300,12 +300,19 @@ class CommuteRouter:
 
         dest_str = dest if isinstance(dest, str) else f"{dest.lat},{dest.lon}"
         if mode == "WALK":
-            leg = JourneyLeg(mode=LegMode.WALK, duration=Quantity(duration_min, "minute"))
+            leg = JourneyLeg(
+                mode=LegMode.WALK,
+                duration=Quantity(duration_min, "minute"),
+                end_station=dest_str,
+            )
             daily = Money("0", "GBP")
         else:
             distance_km = distance_meters / 1000
             leg = JourneyLeg(
-                mode=LegMode.DRIVE, duration=Quantity(duration_min, "minute"), distance=Quantity(distance_km, "km")
+                mode=LegMode.DRIVE,
+                duration=Quantity(duration_min, "minute"),
+                distance=Quantity(distance_km, "km"),
+                end_station=dest_str,
             )
             daily = Money("0", "GBP")
         return Attempt.succeeded(

@@ -435,6 +435,49 @@ Verified live at 375px (tabs switch, MPG under has-car, max-walk,
 modes labelled Transit/Driving/Walking, trips+weeks present).
 234 frontend + 1410 python green.
 
+## Part E — Destination-in-legs + detail summary bar (2026-08-07)
+
+User report round (P13 loop): (1) the walk/drive destination belongs
+IN THE DAG LEGS, not rendered on the commute accordion header; (2) the
+school walk destination must be the school's ADDRESS, never a bare
+lat/lon; (3) the two monthly costs sit on the right, each on its own
+row; (4) "3 bed" goes on the line below the price, left-aligned;
+(5) the edit-address link must look grouped with the address, using the
+standard classes; (6) verify the user is actually a superuser; (7) make
+the troubleshooting screenshot representative of the user's own view.
+
+- School address captured at load: `School.from_GIAS_row` now joins
+  Street/Locality/Address3/Town/County/Postcode into `full_address`;
+  Primary/SecondarySchoolNode emit `postcode` + `full_address`;
+  `SchoolLocationNode` prefers `full_address` → `"{name}, {postcode}"`
+  → `lat,lon` (last resort). Live school legs now read
+  "129 Upper Woodcote Road, Reading, RG4 7LB" / "Surley Row, Emmer
+  Green, Reading, Berkshire, RG4 8LR".
+- `_google_route_commute` sets `end_station=dest_str` on walk/drive
+  JourneyLegs; the travel planner owns the destination, not the UI.
+  `CommuteSection.vue` dropped the accordion-header destination overlay
+  and its CSS.
+- Detail summary bar: `.summary-address-row` is a plain block with a
+  bottom border; the "Edit address" button now flows inline at the end
+  of the address heading (wraps with it — a flex row could never put a
+  button on the last line of a wrapping h1). `.summary-facts` is a
+  `1fr auto` grid: left column stacks price over "N bed"; right column
+  stacks the couple and others monthly figures, each on its own row,
+  right-aligned (both right edges measured at the same x).
+- **Superuser truth**: the user's account (Ashby, emily.winch@gmail.com)
+  was NOT a superuser — the live persons config had `is_superuser:
+  false` for everyone. The headless check used a dev-minted cookie
+  (simon@example.com, superuser) — not representative. Ashby is now
+  `is_superuser: true` via the merge PATCH (other fields untouched);
+  because the flag is baked into the session cookie at login, she must
+  log out and back in for the 👤 "Switch person" button to appear.
+- `public/header-check.png` re-taken from Ashby's OWN session
+  (emily.winch@gmail.com → Ashby, superuser, impersonation bar open) —
+  the troubleshooting screenshot now matches what the user will see.
+- Commute chains regenerated live (`*/poi`, `*/primary_school`,
+  `*/secondary_school`, `*/walk`, `*/drive`, transit/rail/park-and-ride
+  chain) so persisted legs carry the destinations.
+
 ## Verification
 
 - `make test` green; ruff + basedpyright clean; language sweep green.

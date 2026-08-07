@@ -73,6 +73,30 @@ def test_school_defaults() -> None:
     assert school.gender == SchoolGender.UNKNOWN
     assert not school.fee_paying
     assert school.coords is None
+    assert school.full_address == ""
+
+
+def test_school_from_gias_row_captures_full_address() -> None:
+    """The school's full address must be captured from the GIAS columns
+    when the school is first loaded — the walk/drive leg destination
+    comes from here, never from a lat/lon."""
+    school = School.from_GIAS_row(
+        {
+            "EstablishmentName": "Larchfield Primary School",
+            "Street": "Bargeman Road",
+            "Locality": "Maidenhead",
+            "Town": "Maidenhead",
+            "County (name)": "Windsor and Maidenhead",
+            "Postcode": "SL6 4ET",
+            "Latitude": "51.52",
+            "Longitude": "-0.72",
+        }
+    )
+    assert school.name == "Larchfield Primary School"
+    assert school.postcode == "SL6 4ET"
+    assert school.full_address == (
+        "Bargeman Road, Maidenhead, Maidenhead, Windsor and Maidenhead, SL6 4ET"
+    )
 
 
 def test_bracknell_commute_defaults() -> None:
