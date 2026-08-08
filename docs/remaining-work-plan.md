@@ -672,6 +672,35 @@ PARK leg because Reading's car-park cost was unknown.
   - Speed matters less than the invariant: the gate must fail when the
     baseline and code disagree. Keep basedpyright.
 
+## Part E — pyrefly baseline LOCK (2026-08-07, follow-up)
+
+The research said "keep basedpyright", but the user asked to build the
+missing piece on pyrefly instead — and it works:
+
+- **`scripts/pyrefly-lock.py`**: a wrapper that restores the both-
+  direction baseline contract on top of pyrefly's fast engine. It runs
+  `pyrefly check --output-format json` (NO baseline — we want every
+  error) and diffs against `.pyrefly-baseline.json`:
+  - errors in current but not baseline → fail "NEW error(s)"
+  - errors in baseline but not current → fail "STALE baseline entry"
+  - identical → exit 0
+  Error key = (path, line, column, name) — the same schema pyrefly's
+  own baseline uses, so `update-baseline` output is directly reusable.
+- **`make typecheck`** now runs the wrapper: ~1s vs basedpyright's
+  ~13s (measured). Full `make check` ~6s (was ~30s).
+- **pyrefly.toml** (committed): `preset = "default"` ≈ basedpyright
+  standard. The `reportUnknown*` family is absent — pyrefly checks
+  unannotated code more eagerly, so those rules would add noise.
+- **`.pyrefly-baseline.json`** (committed, 312 errors): the contract.
+  Regenerate with `make typecheck-update-baseline` /
+  `scripts/pyrefly-lock.py update-baseline`.
+- basedpyright stays as a dev dependency + `[tool.basedpyright]` config
+  for the EDITOR LSP only; its baseline file (dead once the gate
+  switched) was removed.
+- Verified both directions through `make typecheck` AND the pre-push
+  hook: clean → exit 0; new error → exit 2 with message; stale
+  baseline → exit 2 with "STALE baseline entry … run update-baseline".
+
 ## Verification
 
 - `make test` green; ruff + basedpyright clean; language sweep green.

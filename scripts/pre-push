@@ -17,12 +17,13 @@
 
 set -e
 
-# Only run when the push actually touches Python/TS/Vue sources — a pure
-# docs push shouldn't pay the check cost. Covers staged, unstaged, and
-# untracked sources (the gate must not silently skip a broken file).
-if [ -z "$(git diff --cached --name-only -- '*.py' '*.ts' '*.vue' '*.js')" ] && \
-   [ -z "$(git diff --name-only -- '*.py' '*.ts' '*.vue' '*.js')" ] && \
-   [ -z "$(git ls-files --others --exclude-standard -- '*.py' '*.ts' '*.vue' '*.js')" ]; then
+# Only run when the push actually touches Python/TS/Vue sources or the
+# typecheck config — a pure docs push shouldn't pay the check cost.
+# Covers staged, unstaged, and untracked sources (the gate must not
+# silently skip a broken file).
+if [ -z "$(git diff --cached --name-only -- '*.py' '*.ts' '*.vue' '*.js' 'pyrefly.toml')" ] && \
+   [ -z "$(git diff --name-only -- '*.py' '*.ts' '*.vue' '*.js' 'pyrefly.toml')" ] && \
+   [ -z "$(git ls-files --others --exclude-standard -- '*.py' '*.ts' '*.vue' '*.js' 'pyrefly.toml')" ]; then
     exit 0
 fi
 

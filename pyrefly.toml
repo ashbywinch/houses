@@ -1,0 +1,13 @@
+# Pyrefly type-checker config — the engine behind `make typecheck` /
+# `make check` (via scripts/pyrefly-lock.py, which enforces the baseline
+# lock in BOTH directions: new errors fail, and a stale baseline entry
+# fails — the contract basedpyright lock mode had).
+#
+# `default` preset ≈ basedpyright's `standard` mode. The `reportUnknown*`
+# family from the old basedpyright config is deliberately absent: pyrefly
+# checks unannotated code more eagerly, so those rules would add noise
+# without catching real bugs. The baseline (`.pyrefly-baseline.json`) is
+# the project's committed contract — regenerate with:
+#   scripts/pyrefly-lock.py update-baseline
+[pyrefly]
+preset = "default"

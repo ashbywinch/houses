@@ -32,7 +32,8 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.25.0",
     "ruff>=0.11.0",
-    "basedpyright>=1.20.0",
+    "basedpyright>=1.20.0",  # editor LSP (the CI/hook gate uses pyrefly)
+    "pyrefly>=1.2.0",
     "coverage>=7.0.0",
     "httpx>=0.28.0",
 ]  # Architecture testing (ArchUnit-style rules for Python imports)
