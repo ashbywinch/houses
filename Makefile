@@ -1,4 +1,10 @@
 # Makefile for houses — Browser-to-Spreadsheet Ingestion Engine
+# Pin the recipe shell to bash: make's default is /bin/sh, which is dash on
+# Debian/Ubuntu (and the CI runners) — dash lacks pipefail and other bash
+# features, so `set -o pipefail` in a recipe fails CI but not macOS. Always
+# bash, everywhere.
+SHELL := /bin/bash
+.SHELLFLAGS := -eu -o pipefail -c
 .PHONY: help setup deps uv-sync install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e check lint format clean reset-db commute-shed commute-searches commute-validate commute-drive commute-drive-validate commute-map commute-intersection commute-serve
 
 # Variables

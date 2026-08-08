@@ -701,6 +701,39 @@ missing piece on pyrefly instead — and it works:
   hook: clean → exit 0; new error → exit 2 with message; stale
   baseline → exit 2 with "STALE baseline entry … run update-baseline".
 
+## Part E — Strict pyrefly + HTTPS dev (2026-08-07)
+
+- **pyrefly strictness**: discovered the standalone pyrefly.toml uses
+  TOP-LEVEL keys (no `[pyrefly]` wrapper — that's for pyproject's
+  `[tool.pyrefly]`; the wrapper silently ignored preset + errors, which
+  is why default/strict/all all measured identical). Enabled two
+  default-off rules that ARE meaningful:
+  - `missing-override-decorator` (241 findings) — every DAG node
+    override must carry `@override`; structural typing makes this a
+    real correctness guard (the lock prevents NEW overrides without it)
+  - `missing-super-call` (1 finding) — `__init__` must call
+    `super().__init__()` (caught a real test-stub bug)
+  Baseline regrown 312 → 554 errors; the lock now enforces both
+  directions at that strictness. Verified: a new override without
+  `@override` fails the gate. `make check` 7.7s; `make test` green.
+  (pyrefly's `--check-all` = 4,224 errors of unannotated-internals
+  noise — rejected.)
+- **Dev-server scheme: plain HTTP on :5173 — the HTTPS experiment was
+  reverted.** The saga: the phone browser's HTTPS-First mode auto-upgraded
+  `http://192.168.1.251.sslip.io:5173` to https against the plain-http
+  vite server → `ERR_SSL_PROTOCOL_ERROR`. The attempted fix — a
+  self-signed cert served via `vite server.https` — made vite
+  **HTTPS-ONLY** on :5173, so every http bookmark/URL (what `make run`
+  prints) got `ERR_EMPTY_RESPONSE` (browser connects, vite doesn't speak
+  HTTP on that port, connection closed). Lesson: `server.https` REPLACES
+  http, it doesn't add https. Reverted to plain HTTP: vite.config.ts has
+  no `server.https`, `make run` prints http URLs, `make gen-certs` and
+  the certs dir removed. HTTPS-First browsers fall back to http against
+  a plain-http server (the designed behavior). If a phone hard-fails,
+  the switch is the browser's "Always use secure connections" — not the
+  app. Real HTTPS for the dev box would need a reverse proxy (Caddy/
+  nginx) with a trusted cert — not worth it for dev.
+
 ## Verification
 
 - `make test` green; ruff + basedpyright clean; language sweep green.

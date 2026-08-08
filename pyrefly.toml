@@ -1,13 +1,19 @@
 # Pyrefly type-checker config — the engine behind `make typecheck` /
 # `make check` (via scripts/pyrefly-lock.py, which enforces the baseline
-# lock in BOTH directions: new errors fail, and a stale baseline entry
-# fails — the contract basedpyright lock mode had).
+# lock in BOTH directions).
 #
-# `default` preset ≈ basedpyright's `standard` mode. The `reportUnknown*`
-# family from the old basedpyright config is deliberately absent: pyrefly
-# checks unannotated code more eagerly, so those rules would add noise
-# without catching real bugs. The baseline (`.pyrefly-baseline.json`) is
-# the project's committed contract — regenerate with:
-#   scripts/pyrefly-lock.py update-baseline
-[pyrefly]
+# Standalone pyrefly.toml: keys are TOP-LEVEL (no [pyrefly] wrapper —
+# that header belongs in pyproject.toml's [tool.pyrefly]).
+#
+# Strictness: `default` preset + two extra default-off rules enabled:
+#   - missing-override-decorator — enforces @override on every DAG node
+#     compute/attempt/... override (structural typing makes this a real
+#     correctness guard; the lock prevents NEW overrides without it)
+#   - missing-super-call — __init__ must call super().__init__()
+# The 554-error baseline (`.pyrefly-baseline.json`) is the committed
+# contract — regenerate with: scripts/pyrefly-lock.py update-baseline
 preset = "default"
+
+[errors]
+missing-override-decorator = true
+missing-super-call = true

@@ -21,6 +21,8 @@ make frontend-dev  # Vite dev server only (backend must be running separately)
 
 `make run` starts FastAPI (uvicorn `--reload`) + Vite; frontend proxies `/api/*` to :8765. Extra backend logging: `DBG=1 make run`.
 
+**Phone access**: `make run` prints `http://<LAN_IP>.sslip.io:5173` for the phone. The dev server is plain HTTP — do NOT add `server.https` to vite.config.ts: it makes vite HTTPS-ONLY, breaking every http bookmark with `ERR_EMPTY_RESPONSE` (the browser connects, vite doesn't speak HTTP, connection closed). If the phone's browser (HTTPS-First / "Always use secure connections") auto-upgrades and hard-fails, the fix is the browser setting, not the app — HTTPS-First normally falls back to http against a plain-http server. A real trusted-cert HTTPS setup for the dev box needs a reverse proxy (Caddy/nginx); not worth it for dev.
+
 ## Testing
 
 ```bash
