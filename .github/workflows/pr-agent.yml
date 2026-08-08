@@ -48,6 +48,15 @@ jobs:
             echo "Manual trigger — skipping review check (no PR number)"
             exit 0
           fi
+          # A human "/skip" comment opts this PR out of the AI review
+          # (config skip_commands in .pr_agent.toml) — pr-agent then posts
+          # nothing, which must NOT fail the PR. Deliberate opt-out only.
+          if gh api --paginate "repos/${{ github.repository }}/issues/$PR_NUM/comments" \
+            --jq '[.[] | select(.user.login != "github-actions[bot]") | select(.body | test("(^|\\s)/skip(\\s|$)"))] | length' \
+            | grep -q '[1-9]'; then
+            echo "Review check passed — AI review skipped via /skip comment"
+            exit 0
+          fi
           # All bot comments for this PR. --paginate with a per-page --jq filter
           # concatenates page results (invalid JSON on multi-page PRs), so stream
           # the matches and slurp them into one array with jq -s. A failed
