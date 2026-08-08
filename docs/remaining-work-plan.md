@@ -718,15 +718,21 @@ missing piece on pyrefly instead — and it works:
   `@override` fails the gate. `make check` 7.7s; `make test` green.
   (pyrefly's `--check-all` = 4,224 errors of unannotated-internals
   noise — rejected.)
-- **ERR_SSL_PROTOCOL_ERROR fix**: the browser auto-upgraded to
-  `https://192.168.1.251.sslip.io:5173` (HTTPS-First mode) but vite
-  served plain HTTP. Added a self-signed dev cert (SAN:
-  `192.168.1.251.sslip.io`, `*.sslip.io`, LAN IP) served by vite
-  (`server.https`); `make gen-certs` regenerates (gitignored); `make
-  run` now prints the https URL and passes https public/frontend URLs.
-  The phone accepts the self-signed cert once, then https works — no
-  more protocol error. Verified: https://localhost:5173 loads "House
-  Hunt" over TLS.
+- **Dev-server scheme: plain HTTP on :5173 — the HTTPS experiment was
+  reverted.** The saga: the phone browser's HTTPS-First mode auto-upgraded
+  `http://192.168.1.251.sslip.io:5173` to https against the plain-http
+  vite server → `ERR_SSL_PROTOCOL_ERROR`. The attempted fix — a
+  self-signed cert served via `vite server.https` — made vite
+  **HTTPS-ONLY** on :5173, so every http bookmark/URL (what `make run`
+  prints) got `ERR_EMPTY_RESPONSE` (browser connects, vite doesn't speak
+  HTTP on that port, connection closed). Lesson: `server.https` REPLACES
+  http, it doesn't add https. Reverted to plain HTTP: vite.config.ts has
+  no `server.https`, `make run` prints http URLs, `make gen-certs` and
+  the certs dir removed. HTTPS-First browsers fall back to http against
+  a plain-http server (the designed behavior). If a phone hard-fails,
+  the switch is the browser's "Always use secure connections" — not the
+  app. Real HTTPS for the dev box would need a reverse proxy (Caddy/
+  nginx) with a trusted cert — not worth it for dev.
 
 ## Verification
 
