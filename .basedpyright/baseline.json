@@ -1292,14 +1292,6 @@
                     "endColumn": 78,
                     "lineCount": 1
                 }
-            },
-            {
-                "code": "reportAssignmentType",
-                "range": {
-                    "startColumn": 37,
-                    "endColumn": 89,
-                    "lineCount": 1
-                }
             }
         ],
         "./houses/web/api_router.py": [
