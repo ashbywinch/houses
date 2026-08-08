@@ -1,5 +1,5 @@
 # Makefile for houses — Browser-to-Spreadsheet Ingestion Engine
-.PHONY: help setup install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e lint format clean reset-db commute-shed commute-searches commute-validate commute-drive commute-drive-validate commute-map commute-intersection commute-serve
+.PHONY: help setup deps uv-sync install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e check lint format clean reset-db commute-shed commute-searches commute-validate commute-drive commute-drive-validate commute-map commute-intersection commute-serve
 
 # Variables
 PYTHON := .venv/bin/python
@@ -18,7 +18,8 @@ NC := \033[0m
 
 help:
 	@echo "Available commands:"
-	@echo "  ${GREEN}make setup${NC}              Create venv and install dependencies"
+	@echo "  ${GREEN}make setup${NC}              Create venv + install deps + install hooks"
+	@echo "  ${GREEN}make check${NC}              Lint + typecheck — the gate CI and the pre-push hook run"
 	@echo "  ${GREEN}make run-prod${NC}           Serve backend + built frontend (no Vite)"
 	@echo "  ${GREEN}make run${NC}                Start backend + frontend dev server (local + LAN)"
 	@echo "  ${GREEN}make login${NC}              Google sign-in (device flow); saves auth state for captures"
@@ -40,10 +41,17 @@ help:
 	@echo "  ${GREEN}make commute-intersection${NC}  Offline: the all-commutes shed (where to buy a house)"
 	@echo "  ${GREEN}make commute-serve${NC}      Serve the maps on your LAN (open the printed URL on your phone)"
 
-setup: frontend-setup install-hooks
+setup: deps install-hooks
+	@echo "${GREEN}✓ Setup complete${NC}"
+
+# What the CHECK targets actually need — no hook machinery. A check must
+# never depend on install-hooks (it would re-copy/refuse the very hook
+# file that runs it — the pre-push deadlock).
+deps: uv-sync frontend-setup
+
+uv-sync:
 	@$(UV) --version >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
 	@$(UV) sync --all-extras
-	@echo "${GREEN}✓ Setup complete${NC}"
 
 install-hooks:
 	@mkdir -p .git/hooks
@@ -109,34 +117,39 @@ frontend-build: frontend-setup
 	@cd $(FRONTEND) && $(NPM) run build
 	@echo "${GREEN}✓ Frontend build complete${NC}"
 
-test: setup lint typecheck
+test: deps lint-check typecheck
 	$(PYTEST) tests/unit/ -q --tb=short
 	$(PYTEST) tests/integration/ -q --tb=short
 	cd houses/frontend && npm test
 
-test-e2e: setup lint
+# The exact gate a push must pass — run identically by CI and the
+# pre-push hook (single source of truth; no test run — too slow for a
+# hook, and CI's `make test` already includes these).
+check: lint-check typecheck
+
+test-e2e: deps lint-check
 	@$(PYTEST) tests/e2e/ -m e2e -q
 
 e2e: test-e2e
 
-coverage: setup
+coverage: deps
 	@$(UV) run coverage run -m pytest tests/ -q --tb=short
 	@$(UV) run coverage report -m
 	@$(UV) run coverage xml
 	@$(UV) run coverage html
 	@echo "${GREEN}Coverage report: htmlcov/index.html${NC}"
 
-lint: setup lint-check
+lint: deps lint-check
 
 lint-check:  # Shared with the pre-commit hook — single source of truth for the lint scope
 	@$(RUFF) check houses/ tests/ tools/ dag/
 	cd houses/frontend && npm run lint:css
 
-lint-github: setup   # CI only: findings surface as PR annotations
+lint-github: deps   # CI only: findings surface as PR annotations
 	@$(RUFF) check houses/ tests/ tools/ dag/ --output-format=github
 	cd houses/frontend && npm run lint:css   # keep the same coverage as `make lint`
 
-typecheck: setup
+typecheck: deps
 	@set -o pipefail; $(BASEDPYRIGHT) 2>&1 | tee /tmp/basedpyright.log; bp_status=$$?; \
 	if grep -q "baselined errors changed" /tmp/basedpyright.log; then \
 		echo "${RED}BASELINE DRIFT: basedpyright lock mode failed — a code change altered the diagnostic set without refreshing .basedpyright/baseline.json${NC}"; \

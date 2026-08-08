@@ -648,6 +648,30 @@ PARK leg because Reading's car-park cost was unknown.
 - Verified live: Simon/Pimlico 1h14 £7.20 with walk → train (Ealing
   Broadway, £7.20) → tube → Pimlico.
 
+## Part E — Shared check gate + typechecker research (2026-08-07)
+
+- **Makefile restructure**: `setup` = `deps` + `install-hooks`;
+  `deps` = `uv-sync` + `frontend-setup`. Check targets (`lint-check`,
+  `typecheck`, `test`) depend on `deps`, never `install-hooks` — the
+  pre-push deadlock (hook → make typecheck → setup → install-hooks →
+  refused to copy the differing hook) is gone.
+- **`make check`** = `lint-check` + `typecheck` — the single gate both
+  CI and the pre-push hook run. CI's `make test` already includes both.
+- **pre-push hook** now just delegates to `make check` (like pre-commit
+  delegates to `make lint-check`) — no duplicated tool invocations, no
+  drift between hook and CI.
+- **Typechecker research**: measured basedpyright 13.4s vs pyrefly
+  0.89s and ty 0.69s on this repo. Verdict — NOT switching:
+  - ty has NO baseline feature (astral-sh/ty#1074, unfixed) — its
+    drift-prevention is `--add-ignore`, which mutates source files.
+  - pyrefly has baselines + fails on NEW errors, but a STALE baseline
+    (entries for no-longer-produced diagnostics) exits 0 silently —
+    exactly the failure that broke PR #54's CI would NOT be caught.
+  - basedpyright lock mode fails on drift in BOTH directions (new error
+    OR stale baseline) — the property that caught the CI bug.
+  - Speed matters less than the invariant: the gate must fail when the
+    baseline and code disagree. Keep basedpyright.
+
 ## Verification
 
 - `make test` green; ruff + basedpyright clean; language sweep green.
