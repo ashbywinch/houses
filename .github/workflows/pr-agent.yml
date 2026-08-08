@@ -7,6 +7,10 @@ on:
 jobs:
   pr-review:
     runs-on: ubuntu-latest
+    # Dependabot bumps are mechanical and already covered by build-and-test;
+    # the AI review adds noise (and dependabot PRs lack a ticket, which the
+    # ticket-compliance step chokes on). Skip the whole job for them.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     permissions:
       contents: read
       pull-requests: write
