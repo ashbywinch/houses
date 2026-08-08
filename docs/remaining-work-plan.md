@@ -701,6 +701,33 @@ missing piece on pyrefly instead — and it works:
   hook: clean → exit 0; new error → exit 2 with message; stale
   baseline → exit 2 with "STALE baseline entry … run update-baseline".
 
+## Part E — Strict pyrefly + HTTPS dev (2026-08-07)
+
+- **pyrefly strictness**: discovered the standalone pyrefly.toml uses
+  TOP-LEVEL keys (no `[pyrefly]` wrapper — that's for pyproject's
+  `[tool.pyrefly]`; the wrapper silently ignored preset + errors, which
+  is why default/strict/all all measured identical). Enabled two
+  default-off rules that ARE meaningful:
+  - `missing-override-decorator` (241 findings) — every DAG node
+    override must carry `@override`; structural typing makes this a
+    real correctness guard (the lock prevents NEW overrides without it)
+  - `missing-super-call` (1 finding) — `__init__` must call
+    `super().__init__()` (caught a real test-stub bug)
+  Baseline regrown 312 → 554 errors; the lock now enforces both
+  directions at that strictness. Verified: a new override without
+  `@override` fails the gate. `make check` 7.7s; `make test` green.
+  (pyrefly's `--check-all` = 4,224 errors of unannotated-internals
+  noise — rejected.)
+- **ERR_SSL_PROTOCOL_ERROR fix**: the browser auto-upgraded to
+  `https://192.168.1.251.sslip.io:5173` (HTTPS-First mode) but vite
+  served plain HTTP. Added a self-signed dev cert (SAN:
+  `192.168.1.251.sslip.io`, `*.sslip.io`, LAN IP) served by vite
+  (`server.https`); `make gen-certs` regenerates (gitignored); `make
+  run` now prints the https URL and passes https public/frontend URLs.
+  The phone accepts the self-signed cert once, then https works — no
+  more protocol error. Verified: https://localhost:5173 loads "House
+  Hunt" over TLS.
+
 ## Verification
 
 - `make test` green; ruff + basedpyright clean; language sweep green.
