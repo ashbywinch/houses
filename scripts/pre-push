@@ -1,0 +1,63 @@
+#!/usr/bin/env sh
+# Pre-push hook: run the typecheck gate (Python basedpyright baseline +
+# frontend vue-tsc) before anything reaches the remote.
+#
+# Install: `make install-hooks` (copies this file to .git/hooks/pre-push).
+# Re-run `make install-hooks` after pulling updates.
+#
+# Why: basedpyright runs in LOCK mode — a code change that removes a
+# diagnostic makes the committed baseline stale, and lock mode treats
+# that as a failure (exit 3). CI catches it; this hook catches it before
+# the push so the CI run stays green. The baseline drift message is easy
+# to miss in a piped tail ("0 errors …" reads as success), so the hook
+# prints the explicit fix when it detects drift.
+#
+# The hook runs the tools directly (not `make typecheck`): that target
+# depends on `setup` → `install-hooks`, which would re-check this very
+# hook file and refuse when it differs — a self-referential deadlock.
+#
+# Skips on: no .py/.ts/.vue changes in the push, or when the venv isn't
+# set up (run `make setup` first).
+
+set -e
+
+# Only run when the push actually touches Python/TS/Vue sources — a pure
+# docs push shouldn't pay the typecheck cost. Covers staged, unstaged,
+# and untracked sources (the typecheck gate must not silently skip a
+# push that carries a broken file).
+if [ -z "$(git diff --cached --name-only -- '*.py' '*.ts' '*.vue' '*.js')" ] && \
+   [ -z "$(git diff --name-only -- '*.py' '*.ts' '*.vue' '*.js')" ] && \
+   [ -z "$(git ls-files --others --exclude-standard -- '*.py' '*.ts' '*.vue' '*.js')" ]; then
+    exit 0
+fi
+
+if [ ! -x .venv/bin/basedpyright ]; then
+    echo "pre-push: .venv/bin/basedpyright not found — run 'make setup' first" >&2
+    exit 1
+fi
+
+LOG=/tmp/pre-push-typecheck.log
+set -o pipefail
+# Guarded (not bare) so `set -e` can't abort before the message below.
+if .venv/bin/basedpyright 2>&1 | tee "$LOG" >/dev/null; then
+    bp_status=0
+else
+    bp_status=$?
+fi
+
+if grep -q "baselined errors changed" "$LOG"; then
+    echo "pre-push: BASELINE DRIFT — a code change altered the diagnostic set without refreshing .basedpyright/baseline.json" >&2
+    echo "  Fix: .venv/bin/basedpyright --baselinemode=auto && git add .basedpyright/baseline.json && git commit" >&2
+    exit 1
+fi
+if [ "$bp_status" -ne 0 ]; then
+    echo "pre-push: basedpyright reported errors (see $LOG)" >&2
+    exit 1
+fi
+
+# Frontend typecheck — build-mode (-b): the root tsconfig is a solution
+# file, so bare vue-tsc checks an empty program and passes vacuously.
+if ! (cd houses/frontend && npx vue-tsc -b --noEmit) >"$LOG" 2>&1; then
+    echo "pre-push: frontend typecheck failed (see $LOG)" >&2
+    exit 1
+fi

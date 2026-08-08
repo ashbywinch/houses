@@ -53,7 +53,14 @@ install-hooks:
 	fi
 	@cp scripts/pre-commit .git/hooks/pre-commit
 	@chmod +x .git/hooks/pre-commit
+	@if [ -f .git/hooks/pre-push ] && ! cmp -s scripts/pre-push .git/hooks/pre-push; then \
+		echo "${YELLOW}An existing pre-push hook differs — move it aside and re-run 'make install-hooks'${NC}"; \
+		exit 1; \
+	fi
+	@cp scripts/pre-push .git/hooks/pre-push
+	@chmod +x .git/hooks/pre-push
 	@echo "${GREEN}✓ Pre-commit hook installed (ruff on staged Python files)${NC}"
+	@echo "${GREEN}✓ Pre-push hook installed (typecheck gate — basedpyright baseline + vue-tsc)${NC}"
 
 omp-config-install:
 	$(MAKE) -C $(OMP_CONFIG_DIR) install
@@ -130,7 +137,13 @@ lint-github: setup   # CI only: findings surface as PR annotations
 	cd houses/frontend && npm run lint:css   # keep the same coverage as `make lint`
 
 typecheck: setup
-	@$(BASEDPYRIGHT)
+	@set -o pipefail; $(BASEDPYRIGHT) 2>&1 | tee /tmp/basedpyright.log; bp_status=$$?; \
+	if grep -q "baselined errors changed" /tmp/basedpyright.log; then \
+		echo "${RED}BASELINE DRIFT: basedpyright lock mode failed — a code change altered the diagnostic set without refreshing .basedpyright/baseline.json${NC}"; \
+		echo "${YELLOW}  Fix: .venv/bin/basedpyright --baselinemode=auto && git add .basedpyright/baseline.json${NC}"; \
+		exit 1; \
+	fi; \
+	exit $$bp_status
 	# Frontend typecheck MUST be build-mode (-b): the root tsconfig is a
 	# solution file (files: [], references), so bare `vue-tsc --noEmit`
 	# checks an empty program and passes vacuously. -b builds the
