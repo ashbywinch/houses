@@ -74,7 +74,7 @@ class AttemptError:
     source: str = ""  # node id or service that produced the error
     exc: BaseException | None = None  # the actual exception object (in-memory only)
     traceback: str = ""
-    causes: tuple["AttemptError", ...] = ()
+    causes: tuple[AttemptError, ...] = ()
 
     @property
     def display_message(self) -> str:
@@ -104,7 +104,7 @@ class AttemptError:
         }
 
     @classmethod
-    def from_exception(cls, message: str, exc: BaseException | None, *, source: str = "") -> "AttemptError":
+    def from_exception(cls, message: str, exc: BaseException | None, *, source: str = "") -> AttemptError:
         """Build an AttemptError from a caught exception, deriving code,
         retryable, and traceback from the exception's shape.
 
@@ -127,7 +127,7 @@ class AttemptError:
         )
 
     @classmethod
-    def from_dict(cls, d: dict) -> "AttemptError":
+    def from_dict(cls, d: dict) -> AttemptError:
         """Reconstruct an AttemptError from its JSON-safe projection.
 
         Used when loading a persisted node result: the structured error
@@ -389,6 +389,15 @@ class Attempt[T](metaclass=_AttemptMeta):
     @property
     def created_at(self) -> datetime:
         return self._created_at
+
+    @property
+    def metadata(self) -> dict:
+        """Arbitrary metadata attached at construction (JSON-safe).
+
+        Scenario evaluations mark hypothetical inputs with
+        ``{"hypothetical": True}`` so provenance can render "not saved".
+        """
+        return self._metadata
 
     # ── Equality ───────────────────────────────────────────────────────
 

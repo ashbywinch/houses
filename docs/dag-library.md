@@ -122,7 +122,7 @@ Every financial setting has its own `UserInputNode`, created by `Services.__post
 
 ### Bumping node_id
 
-When `compute()` changes such that old persisted results are semantically invalid, bump the node_id (`"{rid}/town_desc_v2"`). New node_id has no persisted data → `pending()` → recomputes. Old results orphan harmlessly.
+When `compute()` changes such that old persisted results are semantically invalid, bump the node_id (`"{rid}/town_desc_v2"`). New node_id has no persisted data → `pending()` → recomputes. Old results orphan harmlessly. When old results are merely *wrong* (not meaningless), prefer `POST /api/admin/regenerate` — see `docs/development.md` → Fixing Bugs That Produced Wrong Persisted Data.
 
 **When NOT to bump:** cosmetic refactors, adding logging, changing error messages, any change producing the same output for the same inputs.
 

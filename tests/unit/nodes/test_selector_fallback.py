@@ -17,6 +17,14 @@ from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.nodes.commute import CommuteSelectorNode
 
 
+def _mw(value: int):
+    """A fixed max-walk input node."""
+    from dag.user_input_node import UserInputNode
+
+    node = UserInputNode("_mw", int)
+    node.push(value, "test")
+    return node
+
 class _FixedNode(DerivedNode[Commute]):
     def __init__(self, node_id: str, attempt: Attempt[Commute]):
         super().__init__(node_id, Commute, ())
@@ -31,7 +39,6 @@ class _FixedNode(DerivedNode[Commute]):
     def compute(self, *dep_attempts: Attempt) -> Attempt[Commute]:
         raise AssertionError("fixed node should not compute")
 
-
 def _commute(duration_min: int, cost_gbp: float, *, infeasible: bool = False) -> Commute:
     return Commute(
         person=Person(name="Simon", has_car=True),
@@ -42,7 +49,6 @@ def _commute(duration_min: int, cost_gbp: float, *, infeasible: bool = False) ->
         mode="transit",
         infeasible=infeasible,
     )
-
 
 def _selector(node_id: str, transit: Attempt, walk: Attempt | None, drive: Attempt | None):
     origin = UserInputNode[GeoPoint](f"{node_id}_origin", GeoPoint)
@@ -57,9 +63,8 @@ def _selector(node_id: str, transit: Attempt, walk: Attempt | None, drive: Attem
         walk_result=None if walk is None else _FixedNode(f"{node_id}_walk", walk),
         drive_result=None if drive is None else _FixedNode(f"{node_id}_drive", drive),
         is_child=False,
-        max_walk=30,
+        max_walk_node=_mw(30),
     )
-
 
 @pytest.mark.asyncio
 async def test_selector_picks_drive_when_transit_has_no_route():
@@ -80,7 +85,6 @@ async def test_selector_picks_drive_when_transit_has_no_route():
     assert val.duration.magnitude == 35
     assert not val.infeasible
 
-
 @pytest.mark.asyncio
 async def test_selector_picks_walk_when_transit_has_no_route():
     """Transit no-route + walk succeeded → walk wins (fastest feasible)."""
@@ -98,7 +102,6 @@ async def test_selector_picks_walk_when_transit_has_no_route():
     assert val is not None
     assert val.duration.magnitude == 15
 
-
 @pytest.mark.asyncio
 async def test_selector_impossible_when_all_routes_infeasible():
     """Every alternative infeasible → selector impossible (Choose finds
@@ -113,7 +116,6 @@ async def test_selector_impossible_when_all_routes_infeasible():
     a = await selector.attempt()
     assert a.impossible
 
-
 @pytest.mark.asyncio
 async def test_selector_impossible_when_transit_api_fails():
     """A genuinely failed transit call (impossible attempt) propagates
@@ -127,7 +129,6 @@ async def test_selector_impossible_when_transit_api_fails():
     await flush_processor()
     a = await selector.attempt()
     assert a.impossible, "genuine transit failure must propagate, not fall back"
-
 
 @pytest.mark.asyncio
 async def test_selector_keeps_walk_when_it_is_the_only_option():
@@ -149,7 +150,7 @@ async def test_selector_keeps_walk_when_it_is_the_only_option():
         walk_result=walk,
         drive_result=None,  # child — no car
         is_child=True,
-        max_walk=30,
+        max_walk_node=_mw(30),
     )
     await flush_processor()
     a = await selector.attempt()

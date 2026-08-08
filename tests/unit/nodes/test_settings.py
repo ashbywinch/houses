@@ -78,12 +78,12 @@ def test_default_persons_carry_explicit_modes_and_guardians():
     persons = make_default_persons()
     simon = next(p for p in persons if p.name == "Simon")
     assert {poi.label: poi.acceptable_modes for poi in simon.places_of_interest} == {
-        "Pimlico": ("train",),
+        "Pimlico": ("transit",),
         "Bracknell": ("car",),
         "Dad": ("car",),
     }
     lorena = next(p for p in persons if p.name == "Lorena")
-    assert {poi.label: poi.acceptable_modes for poi in lorena.places_of_interest} == {"Aldgate": ("train",)}
+    assert {poi.label: poi.acceptable_modes for poi in lorena.places_of_interest} == {"Aldgate": ("transit",)}
     george = next(p for p in persons if p.name == "George")
     assert set(george.editable_by) == {"Simon", "Lorena", "Ashby"}
     assert all(poi.acceptable_modes == ("walk",) for poi in george.places_of_interest)
@@ -96,11 +96,11 @@ def test_effective_acceptable_modes_migration_rule():
     from houses.model.domain import PlaceOfInterest, effective_acceptable_modes
 
     assert effective_acceptable_modes(PlaceOfInterest("Pimlico", "1 Drummond Gate, Pimlico, London SW1V 2QQ")) == (
-        "train",
+        "transit",
     )
     assert effective_acceptable_modes(
         PlaceOfInterest("Aldgate", "Eastgate House, 40 Dukes Place, London EC3A 7LP")
-    ) == ("train",)
+    ) == ("transit",)
     assert effective_acceptable_modes(
         PlaceOfInterest("Bracknell", "Waite House, Doncastle Road, Bracknell RG12 8YA")
     ) == ("car",)
@@ -108,11 +108,11 @@ def test_effective_acceptable_modes_migration_rule():
         "car",
     )
     assert effective_acceptable_modes(PlaceOfInterest("Primary School", "")) == ("walk",)
-    assert effective_acceptable_modes(PlaceOfInterest("Gym", "High Street")) == ("train", "car", "walk")
+    assert effective_acceptable_modes(PlaceOfInterest("Gym", "High Street")) == ("transit", "car", "walk")
     # explicit modes always win — never overridden by the rule
-    assert effective_acceptable_modes(PlaceOfInterest("Pimlico", "x", acceptable_modes=("walk", "train"))) == (
+    assert effective_acceptable_modes(PlaceOfInterest("Pimlico", "x", acceptable_modes=("walk", "transit"))) == (
         "walk",
-        "train",
+        "transit",
     )
 
 

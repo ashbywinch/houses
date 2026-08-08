@@ -17,6 +17,16 @@ from houses.model.domain import Commute, Person, PlaceOfInterest
 from tests.helpers import FixedCommuteNode
 
 
+def _mw(value: int):
+    """A fixed max-walk input node (what the pipeline would wire per person)."""
+    from dag.user_input_node import UserInputNode
+
+    node = UserInputNode("_mw", int)
+    node.push(value, "test")
+    return node
+
+
+
 def _succeeded_walk_check(val: bool = False) -> DerivedNode:
     """Build a minimal walk-check node whose ``_attempt`` is already resolved."""
     from houses.nodes.transit import WalkLegCheckNode
@@ -25,7 +35,6 @@ def _succeeded_walk_check(val: bool = False) -> DerivedNode:
     w = WalkLegCheckNode("_wc", transit_node=t)
     w._attempt = Attempt.succeeded(val)
     return w
-
 
 class TestCommuteSelectorNode:
     @pytest.mark.asyncio
@@ -48,7 +57,7 @@ class TestCommuteSelectorNode:
             transit_result=transit,
             walk_result=walk,
             drive_result=drive,
-            max_walk=30,
+            max_walk_node=_mw(30),
             acceptable_modes=("car",),
         )
         dep_ids = {d._id for d in node._get_active_deps()}
@@ -58,7 +67,7 @@ class TestCommuteSelectorNode:
 
     @pytest.mark.asyncio
     async def test_train_only_poi_never_picks_drive(self):
-        """acceptable_modes=('train',) excludes the drive alternative even
+        """acceptable_modes=('transit',) excludes the drive alternative even
         when driving is fastest — a train-only POI is never scored by a
         car route."""
         from houses.nodes.commute import CommuteSelectorNode
@@ -77,8 +86,8 @@ class TestCommuteSelectorNode:
             transit_result=transit,
             walk_result=walk,
             drive_result=drive,
-            max_walk=30,
-            acceptable_modes=("train",),
+            max_walk_node=_mw(30),
+            acceptable_modes=("transit",),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -115,7 +124,7 @@ class TestCommuteSelectorNode:
             transit_result=transit,
             walk_result=walk,
             drive_result=drive,
-            max_walk=30,
+            max_walk_node=_mw(30),
             acceptable_modes=("car",),
         )
 
@@ -153,7 +162,7 @@ class TestCommuteSelectorNode:
             transit_result=transit,
             walk_result=walk,
             drive_result=drive,
-            max_walk=30,
+            max_walk_node=_mw(30),
             acceptable_modes=("walk",),
         )
 
@@ -191,7 +200,7 @@ class TestCommuteSelectorNode:
             transit_result=transit,
             walk_result=walk,
             drive_result=drive,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -228,7 +237,7 @@ class TestCommuteSelectorNode:
             transit_result=transit,
             walk_result=walk,
             drive_result=_impossible_commute("drive"),
-            max_walk=30,
+            max_walk_node=_mw(30),
             acceptable_modes=("car",),
         )
 
@@ -262,7 +271,7 @@ class TestCommuteSelectorNode:
             transit_result=transit,
             walk_result=walk,
             drive_result=drive,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -299,7 +308,7 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -327,7 +336,7 @@ class TestCommuteSelectorNode:
             transit_result=transit,
             walk_result=_impossible_commute("walk"),
             drive_result=_impossible_commute("drive"),
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -354,7 +363,7 @@ class TestCommuteSelectorNode:
             origin=origin,
             poi=poi,
             transit_result=transit,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
 
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -384,7 +393,7 @@ class TestCommuteSelectorNode:
             transit_result=transit,
             walk_result=walk,
             drive_result=drive,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -423,7 +432,7 @@ class TestCommuteSelectorNode:
             transit_result=transit,
             walk_result=walk,
             drive_result=drive,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -463,7 +472,7 @@ class TestCommuteSelectorNode:
             poi=poi,
             transit_result=transit,
             is_child=True,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -487,7 +496,6 @@ class TestCommuteSelectorNode:
             f"The CommuteSelectorNode must override the transit node's "
             f"hardcoded is_child=False."
         )
-
 
 class TestMergeRailFareNode:
     """MergeRailFareNode — applies NR fare to transit CostGroup."""
@@ -660,7 +668,6 @@ class TestMergeRailFareNode:
         # Walk cost should remain £0 (no transit legs to replace)
         assert float(val.daily_cost.amount) == 0, f"Expected £0, got £{val.daily_cost.amount}"
 
-
 class TestWalkLegCheckNode:
     """Direct WalkLegCheckNode tests."""
 
@@ -714,15 +721,12 @@ class TestWalkLegCheckNode:
         assert a.succeeded
         assert a.value is True
 
-
 # ── helpers ────────────────────────────────────────────────────────────────
-
 
 def _make_person(bus_walk_penalty: int = 30, name: str = "Simon"):
     """Create a minimal Person-like object with the attributes WalkLegCheckNode reads."""
     office = PlaceOfInterest("Office", "SW1V 2QQ")
     return Person(name, True, places_of_interest=(office,), bus_walk_penalty=Quantity(bus_walk_penalty, "minute"))
-
 
 def _make_commute(duration_min=32, cost_gbp=4.50):
     from pint import Quantity
@@ -742,7 +746,6 @@ def _make_commute(duration_min=32, cost_gbp=4.50):
         _details=(CostGroup(legs=(leg,), operator="TfL", cost=Money(str(cost_gbp), "GBP")),),
     )
 
-
 def _drive_commute(duration_min=16, cost_gbp=5.0) -> Commute:
     """A real driving commute — no transit legs, so NR fares never apply."""
     office = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -759,10 +762,8 @@ def _drive_commute(duration_min=16, cost_gbp=5.0) -> Commute:
         _details=(CostGroup(legs=(leg,), cost=Money(str(cost_gbp), "GBP")),),
     )
 
-
 def _bus_condition(walk_check):
     return walk_check.succeeded and bool(walk_check.value)
-
 
 def _bus_if(walk_check: DerivedNode, bus_node: Node) -> IfThenElseNode:
     """Wrap a bus node in IfThenElseNode activated when walk check is True."""
@@ -773,7 +774,6 @@ def _bus_if(walk_check: DerivedNode, bus_node: Node) -> IfThenElseNode:
         condition_fn=_bus_condition,
         then_branch=bus_node,
     )
-
 
 def _rail_fare_if(transit_node: Node, rail_fare_node: Node) -> IfThenElseNode:
     """Wrap a rail_fare node in IfThenElseNode activated when NR fare is needed."""
@@ -787,7 +787,6 @@ def _rail_fare_if(transit_node: Node, rail_fare_node: Node) -> IfThenElseNode:
         then_branch=rail_fare_node,
     )
 
-
 class _ImpossibleCommuteNode(DerivedNode[Commute]):
     """A node that always returns Attempt.impossible for Commute."""
 
@@ -797,11 +796,9 @@ class _ImpossibleCommuteNode(DerivedNode[Commute]):
     def compute(self):
         return Attempt.impossible("not available")
 
-
 def _impossible_commute(name: str = "walk") -> DerivedNode[Commute]:
     """Return a DerivedNode that always returns Attempt.impossible for Commute."""
     return _ImpossibleCommuteNode(f"_impl_{name}")
-
 
 @pytest.mark.asyncio
 async def test_commute_selector_init_with_persisted_result():
@@ -840,10 +837,9 @@ async def test_commute_selector_init_with_persisted_result():
         transit_result=transit,
         walk_result=_impossible_commute("walk"),
         drive_result=_impossible_commute("drive"),
-        max_walk=30,
+        max_walk_node=_mw(30),
     )
     node.disconnect()
-
 
 class TestFareBetween:
     """RailFareRegistry.fare_between — exact pair lookup."""
@@ -899,7 +895,6 @@ class TestFareBetween:
         assert fare is not None
         assert float(fare.amount) == 16.40
 
-
 class TestDerivedNodeProvenance:
     """DerivedNode.build_provenance uses last path segment as label."""
 
@@ -925,7 +920,6 @@ class TestDerivedNodeProvenance:
         prov = await node.build_provenance()
         assert prov.label == "Test Node", f"Expected 'Test Node', got '{prov.label}'"
         assert "dep" in prov.sources
-
 
 class TestRailFareNode:
     """RailFareNode — fare enrichment, pass-through, and missing-dependency behavior."""
@@ -1132,7 +1126,6 @@ class TestRailFareNode:
         assert transit_cg.cost is not None, "TfL CostGroup should have cost attributed"
         assert float(transit_cg.cost.amount) == 39.60, f"Expected TfL CostGroup cost £39.60, got {transit_cg.cost}"
 
-
 @pytest.mark.asyncio
 async def test_commute_selector_impossible_without_bus():
     """When transit fails and bus_result is not an active dep
@@ -1154,7 +1147,7 @@ async def test_commute_selector_impossible_without_bus():
         origin=origin,
         poi=poi,
         transit_result=transit,
-        max_walk=30,
+        max_walk_node=_mw(30),
     )
 
     origin.push(GeoPoint(51.5, -0.1), "user")
@@ -1165,7 +1158,6 @@ async def test_commute_selector_impossible_without_bus():
 
     a = await node.attempt()
     assert a.pending, f"Expected pending, got {a.status}: {a.error}"
-
 
 @pytest.mark.asyncio
 async def test_walk_selected_when_fastest():
@@ -1189,7 +1181,7 @@ async def test_walk_selected_when_fastest():
         poi=poi,
         transit_result=transit,
         walk_result=walk,
-        max_walk=30,
+        max_walk_node=_mw(30),
     )
 
     origin.push(GeoPoint(51.5, -0.1), "user")
@@ -1211,7 +1203,6 @@ async def test_walk_selected_when_fastest():
     # Walk (10 min) is faster than transit (40 min), so walk should be selected
     assert val.duration.magnitude == 10, f"Expected 10 min (walk), got {val.duration}"
     assert float(val.daily_cost.amount) == 0, f"Expected £0, got £{val.daily_cost.amount}"
-
 
 class TestRailFareNodeErrorPropagation:
     """RailFareNode.compute must propagate the transit error reason.
@@ -1255,7 +1246,6 @@ class TestRailFareNodeErrorPropagation:
         )
         assert result.impossible
         assert "409" in result.error, f"Expected 409 in error, got: {result.error}"
-
 
 class TestNoRouteCommuteChain:
     """Drive-only destinations: a transit "no route" answer is a
@@ -1382,7 +1372,7 @@ class TestNoRouteCommuteChain:
             walk_result=walk_no_route,
             drive_result=drive_src,
             is_child=False,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
         rail_fare_if = IfThenElseNode(
             "chain/rail_fare_if",
@@ -1397,7 +1387,6 @@ class TestNoRouteCommuteChain:
         assert a.succeeded, f"chain should end in drive commute, got: {a.status}: {a.error}"
         val = a.value_or_none()
         assert val is not None and val.duration.magnitude == 35
-
 
 class TestFareConditionalDependency:
     """The rail-fare input of MergeRailFareNode is a CONDITIONAL dependency:
@@ -1474,7 +1463,7 @@ class TestFareConditionalDependency:
             walk_result=walk,
             drive_result=drive_src,
             is_child=False,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
         class _WouldFailFare(DerivedNode[Commute]):
             def __init__(self, node_id: str):
@@ -1570,7 +1559,7 @@ class TestFareConditionalDependency:
             walk_result=walk,
             drive_result=drive_src,
             is_child=False,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
         # A fare node that returns a priced transit group
         from houses.nodes.rail_fare_node import RailFareNode  # noqa: F401  (import for side effects)
@@ -1624,7 +1613,6 @@ class TestFareConditionalDependency:
         _v = a.value_or_none()
         assert _v is not None
         assert _v.daily_cost == Money("9.90", "GBP")
-
 
 class TestCommuteChainProvenanceFormula:
     """The merge and breakdown calc cards must carry formula visualisations."""
@@ -1695,3 +1683,74 @@ class TestCommuteChainProvenanceFormula:
         prov = await node.build_provenance()
         assert prov.formula is not None
         assert [line.label for line in prov.formula.lines] == ["Simon’s commute (yearly)"]
+
+class _CountingWalkNode(DerivedNode[Commute]):
+    """A stand-in route-planning node: counts how many times it
+    recomputes, so a test can prove the what-if does NOT re-plan."""
+
+    def __init__(self, node_id: str, value: Commute):
+        super().__init__(node_id, Commute, ())
+        self._value = value
+        self.calls = 0
+
+    def compute(self, *dep_attempts: Attempt) -> Attempt[Commute]:
+        self.calls += 1
+        return Attempt.succeeded(self._value)
+
+async def test_max_walk_what_if_rescores_without_replanning():
+    """A what-if max-walk change must re-score the commute SELECTION
+    without re-running the route-planning nodes (their inputs are
+    unchanged — the incremental evaluator keeps their real attempts)."""
+    from pint import Quantity as _Quantity
+
+    from dag.evaluate import evaluate
+    from dag.user_input_node import UserInputNode
+    from houses.model.domain import Person
+    from houses.nodes.commute import CommuteSelectorNode
+    from houses.nodes.transit import PersonMaxWalkNode
+
+    persons = UserInputNode("mwp_persons", list)
+    origin = UserInputNode("mwp_origin", object)
+    poi = UserInputNode("mwp_poi", object)
+    transit = UserInputNode("mwp_transit", Commute)
+    walk = _CountingWalkNode("mwp_walk_plan", _make_commute(duration_min=25))
+
+    origin.push("O", "test")
+    poi.push("P", "test")
+    transit.push(_make_commute(duration_min=40), "test")  # 40-min transit
+    await walk.refresh(force=True)
+    assert walk.calls == 1  # route planned once
+
+    def build(penalty_minutes: int) -> CommuteSelectorNode:
+        pen = _Quantity(penalty_minutes, "minute")  # type: ignore[arg-type]
+        persons.push([Person(name="Simon", has_car=False, bus_walk_penalty=pen)], "test")
+        max_walk = PersonMaxWalkNode("mwp_mw", persons_source=persons, person_name="Simon")
+        return CommuteSelectorNode(
+            "mwp_sel",
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            walk_result=walk,
+            max_walk_node=max_walk,
+        )
+
+    # max_walk 30: the 25-min walk is acceptable and beats the 40-min transit
+    selector = build(30)
+    staged30 = [Person(name="Simon", has_car=False, bus_walk_penalty=_Quantity(30, "minute"))]  # type: ignore[arg-type]
+    r = await evaluate(selector, overrides={persons._id: staged30})
+    assert r[selector._id].succeeded
+    val = r[selector._id].value_or_none()
+    assert val is not None
+    assert val.duration.magnitude == 25
+
+    # max_walk 15: the same 25-min walk is over the limit → transit wins
+    selector = build(15)
+    staged15 = [Person(name="Simon", has_car=False, bus_walk_penalty=_Quantity(15, "minute"))]  # type: ignore[arg-type]
+    r = await evaluate(selector, overrides={persons._id: staged15})
+    assert r[selector._id].succeeded
+    val = r[selector._id].value_or_none()
+    assert val is not None
+    assert val.duration.magnitude == 40
+
+    # The route-planning node never re-ran: one plan, two re-scores.
+    assert walk.calls == 1

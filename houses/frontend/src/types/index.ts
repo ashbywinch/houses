@@ -61,6 +61,38 @@ export interface MoneyValue {
   currency: string
 }
 
+/** A value with an uncertainty — exact when stddev is absent/0 (Part A). */
+export interface GroupCostValue {
+  value: string
+  stddev: number
+}
+/** Per-component monthly cost for one group (S+L vs the others) so the
+ *  detail page can render the two groups' costs as separate blocks
+ *  instead of mixing household rows. */
+export interface GroupCostBreakdown {
+  commutes: number
+  insurance: number
+  council_tax: number
+  sinking_fund: number
+  mortgage?: number
+  rental_income?: number
+  rent_received?: number
+  rent_paid?: number
+}
+export interface GroupMonthlyCost {
+  couple: GroupCostValue | null
+  others: GroupCostValue | null
+  couple_label: string
+  others_label: string
+  couple_names?: string
+  couple_breakdown?: GroupCostBreakdown
+  others_breakdown?: GroupCostBreakdown
+}
+export interface MeasurementValue {
+  value: MoneyValue
+  stddev?: number
+}
+
 export interface JourneyLeg {
   mode: string
   duration: { value: number; unit: string }
@@ -78,7 +110,9 @@ export interface CommuteValue {
   mode?: string
   duration?: { value: number; unit: string }
   daily_cost?: { amount: string; currency: string }
-  details?: CostGroup[]
+  // The API serializes the Commute model's stored field (_details), not
+  // the guarded `details` property (which raises for infeasible commutes).
+  _details?: CostGroup[]
   route_description?: string
   is_child?: boolean
   person?: { name?: string }
@@ -90,6 +124,10 @@ export interface SchoolValue {
   ofsted: string
   distance: { value: number; unit: string }
   url: string
+  lat?: number
+  lon?: number
+  postcode?: string
+  full_address?: string
 }
 
 export interface MonthlyCostSummary {
@@ -139,7 +177,8 @@ export interface PropertySummary {
     secondary: { school: AttemptValue<SchoolValue> }
   }
   town_name?: AttemptValue<string>
-  total_monthly_cost: AttemptValue<MoneyValue>
+  total_monthly_cost?: AttemptValue<MeasurementValue>
+  group_monthly_cost: AttemptValue<GroupMonthlyCost>
   walkability: AttemptValue<Record<string, unknown>>
   epc?: AttemptValue<{ band: string; potential?: string }>
   triage?: TriageResponse
@@ -180,7 +219,7 @@ export interface PropertyDetail {
     monthly_commute_cost: AttemptValue<CommuteBreakdown>
     stamp_duty: AttemptValue<MoneyValue>
     rental_income: AttemptValue<MoneyValue>
-    total_monthly_housing_cost: AttemptValue<MoneyValue>
+    group_monthly_cost: AttemptValue<GroupMonthlyCost>
   }
   area: {
     walkability: AttemptValue<Record<string, unknown>>

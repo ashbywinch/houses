@@ -20,12 +20,24 @@ function mountHeader() {
   return mount(Header, { props: { title: 'Test' }, global: { plugins: [pinia, makeRouter()] } })
 }
 
-describe('Header — person/settings drop-down (P9, D2)', () => {
+describe('Header — settings link (P9, D2)', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('renders the settings menu with the household people', async () => {
+  it('is a direct Settings link, not a per-person drop-down', () => {
+    const wrapper = mountHeader()
+    const link = wrapper.find('a.header__settings-link')
+    expect(link.exists()).toBe(true)
+    expect(link.text()).toContain('Settings')
+    expect(link.attributes('href')).toContain('/settings')
+    expect(link.attributes('aria-label')).toBe('Settings')
+    // the confusing per-person menu is gone
+    expect(wrapper.find('button.header__settings-menu').exists()).toBe(false)
+    expect(wrapper.find('.header__menu-item--person').exists()).toBe(false)
+  })
+
+  it('still loads the household people for the superuser impersonation bar', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ persons: [{ name: 'Simon', email: 'smwinch@gmail.com' }, { name: 'Ashby', email: 'emily.winch@gmail.com' }] }),
@@ -33,27 +45,28 @@ describe('Header — person/settings drop-down (P9, D2)', () => {
     const wrapper = mountHeader()
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
-
-    await wrapper.find('button.header__settings-menu').trigger('click')
-    await wrapper.vm.$nextTick()
-    const text = wrapper.text()
-    expect(text).toContain('Simon')
-    expect(text).toContain('Ashby')
+    // the su-bar only renders in superuser mode; the fetch itself must not throw
+    expect(wrapper.find('.header__settings-link').exists()).toBe(true)
   })
 
-  it('links each person to their settings section', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ persons: [{ name: 'Simon', email: 'smwinch@gmail.com' }] }),
-    }))
+  it('does not render an empty left-actions container when the slot is empty', () => {
+    // Regression: the list page passed no #actions slot, but the flex
+    // container still rendered as an invisible child — with
+    // justify-content: space-between the title drifted right of the
+    // content margin by half the right-actions width.
     const wrapper = mountHeader()
-    await wrapper.vm.$nextTick()
-    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.header__actions--left').exists()).toBe(false)
+    expect(wrapper.find('.header__title').text()).toBe('Test')
+  })
 
-    await wrapper.find('button.header__settings-menu').trigger('click')
-    await wrapper.vm.$nextTick()
-    const link = wrapper.findAll('a.header__menu-item--person').find(a => a.text() === 'Simon')
-    expect(link?.exists()).toBe(true)
-    expect(link?.attributes('href') ?? '').toContain('settings?person=Simon')
+  it('renders the left-actions container when the slot has content', () => {
+    const wrapper = mount(Header, {
+      props: { title: 'Test' },
+      slots: { actions: '<button class="back">←</button>' },
+      global: { plugins: [createPinia(), makeRouter()] },
+    })
+    const left = wrapper.find('.header__actions--left')
+    expect(left.exists()).toBe(true)
+    expect(left.find('.back').exists()).toBe(true)
   })
 })

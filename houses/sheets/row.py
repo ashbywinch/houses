@@ -16,6 +16,7 @@ import gspread
 from money import Money
 from pint import Quantity
 
+from dag.measurement import Measurement
 from houses.commute import LegMode, _render_leg_description
 from houses.model.domain import Commute
 from houses.property import EnrichedProperty
@@ -153,10 +154,12 @@ class Row:
         return ""
 
     @classmethod
-    def _fmt_cost(cls, val: Money | None) -> str:
+    def _fmt_cost(cls, val: Money | Measurement[Money] | None) -> str:
         """String representation for a cost value."""
         if val is None:
             return ""
+        if isinstance(val, Measurement):
+            val = val.value
         return str(val.amount)
 
     @classmethod

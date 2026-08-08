@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { usePropertiesStore } from '../stores/properties'
 import Header from '../components/Header.vue'
+import MapView, { type MapMarker } from '../components/MapView.vue'
 import * as api from '../services/api'
 import CommuteSection from '../components/CommuteSection.vue'
 import CostsSection from '../components/CostsSection.vue'
@@ -41,8 +42,20 @@ const price = computed(() => detail.value?.rightmove_price?.succeeded
 const bedrooms = computed(() => detail.value?.rightmove_bedrooms?.succeeded
   ? detail.value.rightmove_bedrooms.value : null)
 
-const monthlyCost = computed(() => detail.value?.affordability?.total_monthly_housing_cost?.succeeded
-  ? parseFloat(detail.value.affordability.total_monthly_housing_cost.value?.amount ?? '0') || null : null)
+const monthlyGroups = computed(() => {
+  const g = detail.value?.affordability?.group_monthly_cost
+  if (!g?.succeeded || !g.value?.couple) return null
+  const couple = Number(g.value.couple.value)
+  const others = g.value.others ? Number(g.value.others.value) : null
+  const approx = (g.value.couple.stddev ?? 0) > 0
+  return {
+    coupleLabel: g.value.couple_label || 'S+L',
+    couple,
+    othersLabel: g.value.others_label || 'A',
+    others,
+    approx,
+  }
+})
 
 // ── Surface existing data ────────────────────────────
 const townDescription = computed(() => {
@@ -56,10 +69,46 @@ const townDescription = computed(() => {
 })
 const walkability = computed(() =>
   detail.value?.area?.walkability?.succeeded ? detail.value.area.walkability.value : null)
+
+/** Nearby amenities list (the sheet's 'Walkable Amenities' column) —
+ *  a pipe-joined string from the walkability DAG node. */
+const amenities = computed(() => {
+  const w = walkability.value as Record<string, unknown> | null
+  const a = w?.amenities
+  return typeof a === 'string' && a.trim() ? a.trim() : null
+})
 const rightmoveUrl = computed(() =>
   detail.value?.rightmove_url?.succeeded ? detail.value.rightmove_url.value : null)
 const bestLocation = computed(() =>
   detail.value?.location?.best_location?.succeeded ? detail.value.location.best_location.value : null)
+
+// ── Map markers: the property (house icon) + the two schools ─────
+const mapMarkers = computed<MapMarker[]>(() => {
+  const markers: MapMarker[] = []
+  if (bestLocation.value) {
+    markers.push({
+      lat: bestLocation.value.lat,
+      lon: bestLocation.value.lon,
+      label: address.value,
+      color: '#2563eb',
+      kind: 'house',
+    })
+  }
+  for (const key of ['primary', 'secondary'] as const) {
+    const school = detail.value?.schools?.[key]?.school
+    if (school?.succeeded && school.value?.lat != null && school.value?.lon != null) {
+      markers.push({
+        lat: school.value.lat,
+        lon: school.value.lon,
+        label: `${school.value.name} (${key === 'primary' ? 'Primary' : 'Secondary'})`,
+        color: key === 'primary' ? '#16a34a' : '#d97706',
+        kind: 'school',
+      })
+    }
+  }
+  return markers
+})
+const detailMapFailed = ref(false)
 
 // ── Share / Favourite ────────────────────────────────
 async function shareProperty() {
@@ -119,11 +168,8 @@ async function saveAddress() {
 </script>
 
 <template>
-  <!-- Header -->
-  <Header title="Property Detail">
-    <template #actions>
-      <button class="btn--icon" aria-label="Back to property list" @click="router.push('/')">←</button>
-    </template>
+  <!-- Header — no back button: browsers and phones provide navigation -->
+  <Header title="House Hunt">
     <template #actions-right>
       <button class="btn--icon" aria-label="Share property" @click="shareProperty">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -156,8 +202,16 @@ async function saveAddress() {
       <!-- Summary bar (sticky) -->
       <div class="summary-bar">
         <div class="summary-address-row">
-          <h1 class="summary-address">{{ address }}</h1>
-          <button v-if="!editingAddress" class="summary-address-edit" @click="startAddressEdit">Edit address</button>
+          <h1 class="summary-address">
+            {{ address }}
+            <button
+              v-if="!editingAddress"
+              class="summary-address-edit"
+              @click="startAddressEdit"
+            >
+              Edit address
+            </button>
+          </h1>
           <span v-if="addressSaved" class="summary-address-saved">Saved — updating…</span>
         </div>
         <div v-if="editingAddress" class="address-editor">
@@ -172,10 +226,29 @@ async function saveAddress() {
           <button class="address-edit-cancel" @click="cancelAddressEdit">Cancel</button>
           <p v-if="addressError" class="address-edit-error">{{ addressError }}</p>
         </div>
-        <div class="summary-row">
-          <span v-if="price" class="summary-price">£{{ price.toLocaleString() }}</span>
-          <span v-if="monthlyCost !== null" class="summary-monthly">£{{ monthlyCost.toLocaleString() }}/mo</span>
-          <span v-if="bedrooms" class="summary-bedrooms">{{ bedrooms }} bed</span>
+        <!-- Price + monthly figures: the two monthly costs sit on the
+             right, each on its own row; beds follow on the left. -->
+        <div class="summary-facts">
+          <div class="summary-facts__left">
+            <span v-if="price" class="summary-price">£{{ price.toLocaleString() }}</span>
+            <span v-if="bedrooms" class="summary-bedrooms">{{ bedrooms }} bed</span>
+          </div>
+          <div class="summary-facts__right">
+            <span
+              v-if="monthlyGroups"
+              class="summary-monthly"
+              :title="monthlyGroups.approx ? 'Council tax estimated — total is approximate' : undefined"
+            >
+              {{ monthlyGroups.coupleLabel }} {{ monthlyGroups.approx ? '≈' : '' }}£{{ monthlyGroups.couple.toLocaleString() }}/mo
+            </span>
+            <span
+              v-if="monthlyGroups?.others !== null && monthlyGroups?.others !== undefined"
+              class="summary-monthly"
+              :title="monthlyGroups?.approx ? 'Council tax estimated — total is approximate' : undefined"
+            >
+              {{ monthlyGroups.othersLabel }} {{ monthlyGroups.approx ? '≈' : '' }}£{{ monthlyGroups.others.toLocaleString() }}/mo
+            </span>
+          </div>
         </div>
       </div>
 
@@ -194,17 +267,17 @@ async function saveAddress() {
       <section id="section-summary" class="detail-section">
         <h2 class="detail-section__title">Summary</h2>
 
-        <!-- Embedded map -->
+        <!-- Map: the property + the two schools -->
         <div v-if="bestLocation" class="map-embed">
-          <iframe
-            :src="'https://www.openstreetmap.org/export/embed.html?bbox=' + (bestLocation.lon - 0.02) + '%2C' + (bestLocation.lat - 0.02) + '%2C' + (bestLocation.lon + 0.02) + '%2C' + (bestLocation.lat + 0.02) + '&amp;layer=mapnik&amp;marker=' + bestLocation.lat + '%2C' + bestLocation.lon"
-            width="100%"
-            height="180"
-            style="border: 0; border-radius: 12px;"
-            loading="lazy"
-            referrerpolicy="no-referrer"
-            title="Property location on OpenStreetMap"
-          ></iframe>
+          <MapView
+            v-if="!detailMapFailed"
+            :markers="mapMarkers"
+            :height="180"
+            @error="detailMapFailed = true"
+          />
+          <p v-else class="map-fallback-note">
+            The map didn't load — your browser may block embedded maps.
+          </p>
         </div>
         <div v-else class="map-placeholder">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
@@ -227,6 +300,13 @@ async function saveAddress() {
           <p class="detail-town-desc">{{ townDescription }}</p>
         </div>
 
+        <!-- Nearby amenities (the spreadsheet's 'Walkable Amenities'
+             column — carried live by the walkability DAG node) -->
+        <div v-if="amenities" class="detail-field detail-field--block">
+          <span class="detail-field__label">Nearby amenities</span>
+          <p class="detail-town-desc">{{ amenities }}</p>
+        </div>
+
         <!-- Action buttons -->
         <div class="detail-actions">
           <a v-if="rightmoveUrl" :href="rightmoveUrl" target="_blank" class="btn--primary" rel="noopener">View on Rightmove</a>
@@ -237,8 +317,6 @@ async function saveAddress() {
       <!-- ═══════════ COMMUTE ═══════════ -->
       <CommuteSection
         :commutes="detail.commutes"
-        :good-threshold="store.settings.commute_thresholds?.good ?? 45"
-        :warn-threshold="store.settings.commute_thresholds?.warn ?? 75"
         :current-person="currentPerson"
       />
 
@@ -333,10 +411,15 @@ async function saveAddress() {
   border-bottom: 1px solid var(--border);
 }
 .summary-address-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  flex-wrap: wrap;
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--border);
+}
+.summary-address {
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+  margin: 0;
+  color: var(--slate-900);
+  line-height: var(--lh-tight);
 }
 .summary-address-edit {
   color: var(--blue);
@@ -345,6 +428,9 @@ async function saveAddress() {
   cursor: pointer;
   font-size: 0.85rem;
   padding: 0;
+  margin-left: 0.4rem;
+  vertical-align: baseline;
+  white-space: nowrap;
 }
 .summary-address-saved {
   color: var(--green);
@@ -385,21 +471,32 @@ async function saveAddress() {
   width: 100%;
   margin: 0.25rem 0 0;
 }
-.summary-address {
-  font-size: var(--fs-xl);
-  font-weight: var(--fw-bold);
-  margin: 0 0 var(--sp-2);
-  color: var(--slate-900);
-  line-height: var(--lh-tight);
+/* Price + beds on the left; the two monthly figures on the right, each
+   on its own row (grid rows align: price↔couple, beds↔others). */
+.summary-facts {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: var(--sp-4);
+  row-gap: 0;
+  align-items: baseline;
+  margin-top: var(--sp-3);
 }
-.summary-row {
+.summary-facts__left {
   display: flex;
-  align-items: center;
-  gap: var(--sp-3);
+  flex-direction: column;
+  gap: 0.15rem;
+  justify-self: start;
+}
+.summary-facts__right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+  justify-self: end;
 }
 .summary-price { font-size: var(--fs-base); font-weight: var(--fw-bold); color: var(--slate-800); }
-.summary-monthly { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--green); margin-left: auto; }
 .summary-bedrooms { font-size: var(--fs-sm); color: var(--text-secondary); }
+.summary-monthly { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--green); white-space: nowrap; }
 
 /* Section nav */
 .section-nav-wrap {
@@ -444,7 +541,7 @@ async function saveAddress() {
   border-radius: var(--radius-full);
   background: rgba(255,255,255,0.12);
   color: #fff;
-  font-size: 20px;
+  font-size: var(--fs-xl);
   line-height: 1;
   display: flex;
   align-items: center;
@@ -486,6 +583,21 @@ async function saveAddress() {
 .detail-field__value a:hover { text-decoration: underline; }
 
 /* Map */
+.map-embed {
+  margin-bottom: var(--sp-3);
+}
+.map-embed .map-view {
+  overflow: hidden;
+}
+.map-fallback-note {
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--slate-100);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
 .map-placeholder {
   display: flex;
   flex-direction: column;
@@ -513,7 +625,7 @@ async function saveAddress() {
   color: var(--text);
   resize: vertical;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   box-sizing: border-box;
 }
 .notes-actions {
@@ -552,7 +664,7 @@ async function saveAddress() {
 
 
 .tab-bar__tab--active svg { stroke: var(--blue); }
-.tab-bar__label { font-size: 10px; font-weight: var(--fw-semibold); }
+.tab-bar__label { font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
 
 @media (max-width: 767px) {
   .summary-bar { padding: var(--sp-3) var(--sp-4); }

@@ -18,8 +18,8 @@ from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNod
 from houses.nodes.monthly_sinking_fund_node import MonthlySinkingFundNode
 from houses.nodes.mortgage_required_node import MortgageRequiredNode
 from houses.nodes.schools import PrimarySchoolNode, SecondarySchoolNode
+from houses.nodes.settings_node import aggregate_dict
 from houses.nodes.stamp_duty_node import StampDutyNode
-from houses.nodes.total_monthly_housing_cost_node import TotalMonthlyHousingCostNode
 from houses.nodes.total_works_node import TotalWorksNode
 from houses.nodes.yearly_sinking_fund_node import YearlySinkingFundNode
 from houses.services_provider import get_services
@@ -193,8 +193,12 @@ class PropertyNodes:
             f"{rid}/monthly_sinking_fund",
             yearly_sinking_fund_node=self.yearly_sinking_fund,
         )
-        self.total_monthly_cost = TotalMonthlyHousingCostNode(
-            f"{rid}/total_monthly_cost",
+        from houses.nodes.total_monthly_housing_cost_node import GroupMonthlyCostNode
+
+        # The headline has NO family total — only the joint owners'
+        # (couple) figure and the other adults' figure, labelled by name.
+        self.group_monthly_cost = GroupMonthlyCostNode(
+            f"{rid}/group_monthly_cost",
             monthly_mortgage_node=self.monthly_mortgage,
             yearly_sinking_fund_node=self.yearly_sinking_fund,
             life_insurance_node=self.life_insurance_total,
@@ -202,6 +206,7 @@ class PropertyNodes:
             status_node=self.comment_status,
             commute_breakdown_node=self.commute_breakdown,
             council_tax_node=self.council_tax,
+            persons_source=self._svc.persons_source,
         )
 
         # ── Signal wiring ──────────────────────────────────────────────
@@ -244,7 +249,7 @@ class PropertyNodes:
             "best_location": await self.best_location.to_json_value(),
             "rightmove_price": await self.rightmove_price.to_json_value(),
             "rightmove_bedrooms": await self.rightmove_bedrooms.to_json_value(),
-            "total_monthly_cost": await self.total_monthly_cost.to_json_value(),
+            "group_monthly_cost": await self.group_monthly_cost.to_json_value(),
             "town_name": await self.town_name.to_json_value(),
             "commutes": {k: {"commute": await v.to_json_value()} for k, v in self.commute_selectors.items()},
             "schools": {
@@ -307,7 +312,7 @@ class PropertyNodes:
                 "monthly_sinking_fund": await self.monthly_sinking_fund.to_json(),
                 "monthly_commute_cost": await self.commute_breakdown.to_json(),
                 "rental_income": await self.rental_income.to_json(),
-                "total_monthly_housing_cost": await self.total_monthly_cost.to_json(),
+                "group_monthly_cost": await self.group_monthly_cost.to_json(),
             },
             "area": {
                 "walkability": await self.walkability.to_json(),
@@ -330,6 +335,6 @@ class PropertyNodes:
             },
             "settings": {
                 "persons": await self._svc.persons_source.to_json(),
-                "financial": await self._svc.financial_source.to_json(),
+                "financial": {"status": "succeeded", "value": aggregate_dict(self._svc.setting_nodes)},
             },
         }

@@ -102,8 +102,8 @@ onMounted(loadComments)
 }
 
 .detail-section__title {
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--slate-500, #64748b);
@@ -153,22 +153,22 @@ onMounted(loadComments)
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
 }
 
 .note-card__name {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
 }
 
 .note-card__time {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--slate-400, #94a3b8);
 }
 
 .note-card__body {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   line-height: 1.4;
   color: var(--text);
   white-space: pre-wrap;
@@ -187,7 +187,7 @@ onMounted(loadComments)
   color: var(--text);
   resize: vertical;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   box-sizing: border-box;
 }
 
@@ -203,8 +203,8 @@ onMounted(loadComments)
   border: none;
   background: var(--blue, #1a73e8);
   color: #fff;
-  font-weight: 600;
-  font-size: 13px;
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 
@@ -215,7 +215,7 @@ onMounted(loadComments)
 
 .note-input__error {
   margin-top: 8px;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   color: var(--red, #dc2626);
 }
 </style>

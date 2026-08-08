@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from money import Money
+
 import contextlib
 import logging
 
@@ -8,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from houses.geo import GeoPoint
 from houses.model.domain import (
+    HomeCoOwner,
     Person,
     PlaceOfInterest,
     effective_acceptable_modes,
@@ -17,7 +23,7 @@ from houses.model.domain import (
 from houses.property_registry import get_property as get_registry_property
 from houses.property_registry import list_properties as list_registry_properties
 from houses.services_provider import get_services
-from houses.web.auth import get_session_user
+from houses.web.auth import effective_session_user
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +63,66 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     from houses.web.broadcaster import register_client
 
     await register_client(websocket)
+
+
+@api_router.post("/what-if")
+async def post_what_if(body: dict):
+    """Pure what-if: evaluate every property's total monthly cost under
+    candidate person settings (Part D).
+
+    The body carries per-person updates in the same shape as
+    ``PATCH /settings/person/{name}``; each is merged into the current
+    person. Nothing is persisted — the DAG is evaluated with the
+    candidate values staged and discarded (``dag.evaluate``), so the
+    real scheduler, database, and node state are untouched.
+
+    Response: ``{"results": {rid: {"succeeded": bool,
+    "monthly_total": {"value": {"amount", "currency"}, "stddev"} | None,
+    "error"?: str}}}``.
+    """
+    updates = body.get("persons")
+    if not isinstance(updates, list) or not updates:
+        raise HTTPException(status_code=422, detail="persons required")
+
+    svc = get_services()
+    current = list(svc.persons_source.latest_attempt().value_or_none() or [])
+    by_name = {p.name: p for p in current}
+    merged: list = []
+    merged_names: set[str] = set()
+    for d in updates:
+        if not isinstance(d, dict) or not d.get("name"):
+            raise HTTPException(status_code=422, detail="each person update needs a name")
+        target = by_name.get(d["name"])
+        if target is None:
+            raise HTTPException(status_code=422, detail=f"unknown person {d['name']!r}")
+        try:
+            merged.append(_person_from_dict(d, target))
+        except (ValueError, TypeError) as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        merged_names.add(d["name"])
+    # Unmentioned persons keep their current values — the what-if only
+    # changes what the client edited.
+    merged.extend(p for p in current if p.name not in merged_names)
+
+    from dag.evaluate import evaluate
+
+    results: dict[str, dict] = {}
+    for rid in list_registry_properties():
+        prop = get_registry_property(rid)
+        if prop is None:
+            continue
+        group_node = getattr(prop, "group_monthly_cost", None)
+        if group_node is None:
+            continue
+        attempts = await evaluate(group_node, overrides={"persons": merged})
+        group_att = attempts[group_node._id]
+        if group_att.succeeded and group_att.value is not None:
+            results[rid] = {"succeeded": True, "group": group_att.value_or_none()}
+        elif group_att.impossible:
+            results[rid] = {"succeeded": False, "error": group_att.error}
+        else:
+            results[rid] = {"succeeded": False, "error": "pending"}
+    return {"results": results}
 
 
 @api_router.get("/properties/{rid}/staleness")
@@ -169,6 +235,24 @@ async def get_all_properties():
     return dict(scored)
 
 
+@api_router.get("/properties/current-homes")
+async def list_current_homes():
+    """The family's CURRENT house(s) — properties marked status=current —
+    so a person can link their settings home fields to the right one."""
+    result: list[dict[str, str]] = []
+    for rid in list_registry_properties():
+        prop = get_registry_property(rid)
+        if prop is None:
+            continue
+        status = prop.comment_status.latest_attempt()
+        if not status.succeeded or (status.value_or_none() or "").strip().lower() != "current":
+            continue
+        att = prop.best_address.latest_attempt()
+        address = str(att.value_or_none()) if att.succeeded and att.value_or_none() else ""
+        result.append({"rid": str(rid), "address": address})
+    return {"homes": result}
+
+
 @api_router.get("/properties/{rid}")
 async def get_property(rid: str):
     prop = get_registry_property(rid)
@@ -268,13 +352,13 @@ async def add_property_comment(rid: str, body: CommentBody, request: Request):
     """
     from houses.comments import add_comment
     from houses.services_provider import get_services
-    from houses.web.auth import get_session_user
+    from houses.web.auth import effective_session_user
 
     prop = get_registry_property(rid)
     if prop is None:
         raise HTTPException(status_code=404, detail="Property not found")
 
-    session_user = get_session_user(request)
+    session_user = effective_session_user(request)
     if not session_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
@@ -312,6 +396,8 @@ async def add_property_comment(rid: str, body: CommentBody, request: Request):
 
 @api_router.get("/settings")
 async def get_settings(request: Request):
+    from houses.nodes.settings_node import aggregate_dict
+
     svc = get_services()
     persons_json = await svc.persons_source.to_json()
     # Enrich each person with the EFFECTIVE per-POI modes, the effective
@@ -319,7 +405,7 @@ async def get_settings(request: Request):
     # server decides ownership; the UI only renders it.
     attempt = svc.persons_source.latest_attempt()
     persons = [p for p in (attempt.value_or_none() or []) if isinstance(p, Person)]
-    session_user = get_session_user(request)
+    session_user = effective_session_user(request)
     session_name = _session_person_name(session_user, persons)
     dumped = persons_json.get("value")
     if isinstance(dumped, list):
@@ -339,40 +425,29 @@ async def get_settings(request: Request):
             for poi_item, poi in zip(item.get("places_of_interest") or (), person.places_of_interest, strict=False):
                 if isinstance(poi_item, dict):
                     poi_item["acceptable_modes"] = list(effective_acceptable_modes(poi))
+            # Optional link to the current house in the DB — show its
+            # address first line so the family knows WHICH house this is.
+            linked_rid = getattr(person, "home_property_rid", "")
+            if linked_rid:
+                from houses.property_registry import get_property as _get_prop
 
-    # The family deposit as ONE number (P4: the household is the unit, not
-    # four person records): per person, sale proceeds − remaining mortgage +
-    # extra money; plus the household total.  Computed server-side from the
-    # settings inputs — the client never derives money from parts.  The
-    # toggle gate matches EquityTotalNode: a person not selling a home
-    # contributes cash only (P7).
-    from decimal import Decimal as _Decimal
+                prop = _get_prop(linked_rid)
+                addr = ""
+                if prop is not None:
+                    att = prop.best_address.latest_attempt()
+                    if att.succeeded and att.value_or_none():
+                        addr = str(att.value_or_none())
+                if addr:
+                    item["home_property_address"] = addr.split("\n")[0].split(",")[0]
 
-    from money import Money as _Money
-
-    deposit_persons: dict[str, dict] = {}
-    deposit_total = _Money("0", "GBP")
-    deposit_lines: list[dict] = []
-    for person in persons:
-        sale = person.home_sale_price.amount
-        mortgage = person.outstanding_mortgage.amount
-        cash = person.cash_contribution.amount
-        if effective_selling_home(person):
-            value = max(_Decimal("0"), sale - mortgage) + cash
-            line = (
-                f"£{sale:,.2f} sale − £{mortgage:,.2f} mortgage + £{cash:,.2f} cash "
-                f"= £{value:,.2f}"
-            )
-        else:
-            value = cash
-            line = f"£0 home + £{cash:,.2f} cash = £{value:,.2f}"
-        deposit_persons[person.name] = {"amount": f"{value:.2f}", "currency": "GBP"}
-        deposit_total = deposit_total + _Money(str(value), "GBP")
-        deposit_lines.append({"label": person.name, "value": line})
+    # The family deposit as ONE number (P4): per person, sale proceeds −
+    # remaining mortgage + extra money, plus the household total —
+    # computed server-side, never derived from parts by the client.
+    deposit_persons, deposit_total, deposit_lines = _deposit_breakdown(persons)
 
     return {
         "persons": persons_json,
-        "financial": await svc.financial_source.to_json(),
+        "financial": {"status": "succeeded", "value": aggregate_dict(svc.setting_nodes)},
         "commute_thresholds": await svc.commute_thresholds_source.to_json(),
         "household_deposit": {
             "total": {"amount": f"{deposit_total.amount:.2f}", "currency": "GBP"},
@@ -385,6 +460,59 @@ async def get_settings(request: Request):
             },
         },
     }
+
+
+def _deposit_breakdown(persons: list) -> tuple[dict, Money, list[dict]]:
+    """Per-person deposit (distributed home equity + cash) and the
+    household total. Home equity splits by co-owner shares; children
+    never contribute. Pure — unit-testable without the request (P4)."""
+    from decimal import Decimal as _Decimal
+
+    from money import Money as _Money
+
+    from houses.model.domain import home_equity_contributions
+
+    contributions = home_equity_contributions(persons)
+    by_name = {p.name: p for p in persons if not p.is_child}
+    deposit_persons: dict[str, dict] = {}
+    deposit_total = _Money("0", "GBP")
+    deposit_lines: list[dict] = []
+    for name, person in by_name.items():
+        cash = person.cash_contribution.amount
+        home_share = contributions.get(name, _Decimal("0"))
+        value = home_share + cash
+        deposit_persons[name] = {"amount": f"{value:.2f}", "currency": "GBP"}
+        deposit_total = deposit_total + _Money(str(value), "GBP")
+        if home_share > 0 and effective_selling_home(person):
+            gross = max(_Decimal("0"), person.home_sale_price.amount - person.outstanding_mortgage.amount)
+            co_sum = sum(co.share for co in person.home_co_owners)
+            if co_sum == 0:
+                line = (
+                    f"£{person.home_sale_price.amount:,.2f} sale − "
+                    f"£{person.outstanding_mortgage.amount:,.2f} mortgage + "
+                    f"£{cash:,.2f} cash = £{value:,.2f}"
+                )
+            else:
+                holder_part = f"£{gross:,.2f} home ({100 - co_sum}% yours) + "
+                line = f"{holder_part}£{home_share:,.2f} home share + £{cash:,.2f} cash = £{value:,.2f}"
+        elif home_share > 0:
+            # this person's share came from co-owning someone else's home
+            source = ""
+            for other in by_name.values():
+                if other.name == name:
+                    continue
+                for co in other.home_co_owners:
+                    if co.name == name:
+                        gross_other = max(
+                            _Decimal("0"),
+                            other.home_sale_price.amount - other.outstanding_mortgage.amount,
+                        )
+                        source = f"{co.share}% of {other.name}'s home (£{gross_other:,.2f}) "
+            line = f"{source}+ £{cash:,.2f} cash = £{value:,.2f}"
+        else:
+            line = f"£0 home + £{cash:,.2f} cash = £{value:,.2f}"
+        deposit_lines.append({"label": name, "value": line})
+    return deposit_persons, deposit_total, deposit_lines
 
 
 def _session_person_name(session_user: dict | None, persons: list) -> str:
@@ -426,20 +554,28 @@ def _person_from_dict(d: dict, target: Person) -> Person:
     from money import Money as _Money
     from pint import Quantity as _Quantity
 
-    def _money(v):
+    # Large house-purchase / deposit amounts are whole pounds — never
+    # pence (the UI enforces this too; this is the hard guarantee).
+    whole_pound_fields = {"home_sale_price", "outstanding_mortgage", "cash_contribution"}
+
+    def _money(v, *, whole_pounds: bool = False, field: str = "amount"):
         """Validate the money shape: a number or {amount, currency}.  A
         malformed value must raise (→ 400) — storing it would poison every
         downstream read (.amount crashes) and freeze the equity cascade."""
         if isinstance(v, (int, float)):
-            return _Money(str(v), "GBP")
-        if isinstance(v, dict):
+            m = _Money(str(v), "GBP")
+        elif isinstance(v, dict):
             if "amount" not in v:
                 raise ValueError(f"money value missing 'amount': {v!r}")
             try:
-                return _Money(v["amount"], v.get("currency", "GBP"))
+                m = _Money(v["amount"], v.get("currency", "GBP"))
             except Exception as e:
                 raise ValueError(f"invalid money value {v!r}: {e}") from e
-        raise ValueError(f"invalid money value {v!r} — expected a number or {{'amount': ...}}")
+        else:
+            raise ValueError(f"invalid money value {v!r} — expected a number or {{'amount': ...}}")
+        if whole_pounds and m.amount != m.amount.to_integral_value():
+            raise ValueError(f"{field} must be a whole number of pounds — no pence")
+        return m
 
     def _penalty(v):
         """Validate bus_walk_penalty: the {value, unit} serialization."""
@@ -453,9 +589,38 @@ def _person_from_dict(d: dict, target: Person) -> Person:
     updates = {k: v for k, v in d.items() if k != "thresholds"}
     for f in _PERSON_MONEY_FIELDS:
         if f in updates:
-            updates[f] = _money(updates[f])
+            updates[f] = _money(updates[f], whole_pounds=f in whole_pound_fields, field=f)
     if "bus_walk_penalty" in updates:
         updates["bus_walk_penalty"] = _penalty(updates["bus_walk_penalty"])
+    if "petrol_mpg" in updates:
+        mpg = updates["petrol_mpg"]
+        if not isinstance(mpg, (int, float)) or mpg <= 0:
+            raise ValueError(f"petrol_mpg must be a positive number, got {mpg!r}")
+        updates["petrol_mpg"] = int(mpg)
+    if "home_co_owners" in updates:
+        co = updates["home_co_owners"]
+        if not isinstance(co, list):
+            raise ValueError(f"home_co_owners must be a list, got {type(co).__name__}")
+        parsed = []
+        total_share = 0
+        for item in co:
+            if not isinstance(item, dict) or "name" not in item or "share" not in item:
+                raise ValueError(f"invalid co-owner {item!r} — expected {{'name', 'share'}}")
+            share = item["share"]
+            if not isinstance(share, int) or not 1 <= share <= 100:
+                raise ValueError(f"co-owner share must be a whole percent 1-100, got {share!r}")
+            parsed.append(HomeCoOwner(name=str(item["name"]), share=share))
+            total_share += share
+        if total_share > 100:
+            raise ValueError(f"co-owner shares total {total_share}% — cannot exceed 100%")
+        updates["home_co_owners"] = tuple(parsed)
+    if "home_property_rid" in updates:
+        rid = updates["home_property_rid"]
+        if rid is not None and not isinstance(rid, str):
+            raise ValueError("home_property_rid must be a string or null")
+        updates["home_property_rid"] = rid or ""
+    if "rent_paid_monthly" in updates:
+        updates["rent_paid_monthly"] = _money(updates["rent_paid_monthly"], field="rent_paid_monthly")
     if "editable_by" in updates and updates["editable_by"] is not None:
         updates["editable_by"] = tuple(updates["editable_by"])
     pois = updates.get("places_of_interest")
@@ -475,6 +640,18 @@ def _person_from_dict(d: dict, target: Person) -> Person:
     return replace(target, **updates)
 
 
+@api_router.get("/map/isochrones")
+async def get_isochrone_layers():
+    """The isochrone polygons for the Map page (transit shed, drive sheds,
+    all-commutes intersection) from the committed toolchain artifacts.
+
+    Returns ``{"layers": [...]}``; empty layers when no artifacts exist.
+    """
+    from houses.map_layers import isochrone_layers
+
+    return {"layers": isochrone_layers()}
+
+
 @api_router.patch("/settings/person/{name}")
 async def patch_person(name: str, body: dict, request: Request):
     """Update one person's settings — own person / superuser / guardian.
@@ -487,7 +664,7 @@ async def patch_person(name: str, body: dict, request: Request):
     """
     from fastapi import HTTPException
 
-    session_user = get_session_user(request)
+    session_user = effective_session_user(request)
     if not session_user:
         raise HTTPException(status_code=401, detail="Authentication required")
 
@@ -616,6 +793,13 @@ async def patch_works_estimate(
             status_code=400,
             detail="value must be a number",
         )
+    # Works estimates are large house-purchase amounts — whole pounds
+    # only. Pence fail fast (400), never silently rounded.
+    if value is not None and value != int(value):
+        raise HTTPException(
+            status_code=400,
+            detail="value must be a whole number of pounds — no pence",
+        )
 
     current = prop.works_estimates.latest_attempt().value_or_none() or {}
     # Store as Money — the Money rule applies to all monetary values.
@@ -629,22 +813,30 @@ async def patch_works_estimate(
 
 @api_router.get("/persons")
 async def list_persons():
-    """Return the list of persons with non-empty email addresses.
+    """Return ALL persons (name, email when present, is_child).
 
-    Used by the frontend superuser impersonation dropdown.
-    Requires authentication via the /api/ middleware.
+    Used by the frontend superuser impersonation dropdown. The email
+    filter is gone — callers that need only email-linked persons (or
+    only adults) must filter themselves; the impersonate endpoint
+    enforces the no-children rule server-side.
     """
     svc = get_services()
     persons_attempt = svc.persons_source.latest_attempt()
-    result: list[dict[str, str]] = []
+    result: list[dict[str, object]] = []
     if persons_attempt.succeeded:
         for p in persons_attempt.value_or_none() or []:
             if isinstance(p, dict):
-                email = p.get("email", "")
-                if email:
-                    result.append({"name": p.get("name", ""), "email": email})
-            elif hasattr(p, "email") and p.email:
-                result.append({"name": getattr(p, "name", ""), "email": p.email})
+                result.append(
+                    {"name": p.get("name", ""), "email": p.get("email", ""), "is_child": bool(p.get("is_child"))}
+                )
+            else:
+                result.append(
+                    {
+                        "name": getattr(p, "name", ""),
+                        "email": getattr(p, "email", ""),
+                        "is_child": bool(getattr(p, "is_child", False)),
+                    }
+                )
     return {"persons": result}
 
 

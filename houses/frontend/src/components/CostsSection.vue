@@ -2,6 +2,12 @@
 import { computed, ref } from 'vue'
 import ProvenanceToggle from './ProvenanceToggle.vue'
 import { epcClass } from '../formatters/format'
+import type { Provenance } from '../types'
+import {
+  blockWholePoundsKey,
+  rejectWholePoundsPaste,
+  wholePoundsValue,
+} from '../formatters/money'
 import { patchRentalIncome, patchWorksEstimate } from '../services/api'
 import { usePropertiesStore } from '../stores/properties'
 
@@ -23,6 +29,71 @@ function epcStepClass(band: string): string {
 function isImpossible(val: any): boolean {
   return val && !val.succeeded && val.error != null
 }
+
+// ── Part A: uncertainty rendering ──────────────────────
+
+/** True when the total is approximate (stddev > 0). */
+const totalMonthlyApprox = computed(() => {
+  const m = props.affordability?.group_monthly_cost
+  return !!m?.succeeded && ((m.value?.couple?.stddev ?? 0) > 0)
+})
+
+const fmt = (n: number | undefined): string =>
+  n == null ? '' : `${n < 0 ? '−' : ''}£${Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+
+/** Zero values are omitted — a row only appears when the number is
+ *  non-zero. */
+function row(
+  label: string,
+  value: number | undefined,
+  provenance?: Provenance,
+): { label: string; value: string; provenance?: Provenance } | null {
+  if (value == null || value === 0) return null
+  return { label, value: fmt(value), provenance }
+}
+
+/** Row labels for the joint-owners' breakdown — mortgage and rental
+ *  income belong to them; council tax, sinking fund and commutes split
+ *  by group. Each row carries the provenance of its DAG component so
+ *  the ⓘ explains exactly that figure. */
+function coupleRows() {
+  const b = props.affordability?.group_monthly_cost?.value?.couple_breakdown
+  if (!b) return []
+  const a = props.affordability ?? {}
+  return [
+    row('Mortgage', b.mortgage, a.monthly_mortgage?.provenance),
+    row('Council tax', b.council_tax, a.council_tax?.provenance),
+    row('Sinking fund', b.sinking_fund, a.monthly_sinking_fund?.provenance),
+    row('Commutes', b.commutes, a.monthly_commute_cost?.provenance),
+    row('Life insurance', b.insurance, a.life_insurance_total?.provenance),
+    row('Rental income', b.rental_income, a.rental_income?.provenance),
+    row('Rent received', b.rent_received, a.group_monthly_cost?.provenance),
+  ].filter((r): r is { label: string; value: string; provenance?: Provenance } => r !== null)
+}
+
+/** Row labels for the other adults' breakdown — their rent paid is their
+ *  own cost; council tax, sinking fund and commutes split by group. */
+function othersRows() {
+  const b = props.affordability?.group_monthly_cost?.value?.others_breakdown
+  if (!b) return []
+  const a = props.affordability ?? {}
+  return [
+    row('Council tax', b.council_tax, a.council_tax?.provenance),
+    row('Sinking fund', b.sinking_fund, a.monthly_sinking_fund?.provenance),
+    row('Commutes', b.commutes, a.monthly_commute_cost?.provenance),
+    row('Life insurance', b.insurance, a.life_insurance_total?.provenance),
+    row('Rent paid', b.rent_paid, a.group_monthly_cost?.provenance),
+  ].filter((r): r is { label: string; value: string; provenance?: Provenance } => r !== null)
+}
+
+/** When the total can't be calculated, name the leaf reason the UI
+ *  knows (e.g. "Works estimate required for: Ashby"). */
+const totalBlockedReason = computed(() => {
+  const t = props.affordability?.group_monthly_cost
+  if (!t || t.succeeded || t.error == null) return ''
+  const detail = (t as { error_detail?: { user_message?: string } }).error_detail
+  return detail?.user_message || t.error || ''
+})
 
 // ── Works estimate inline editing ─────────────────────
 const editingPerson = ref<string | null>(null)
@@ -51,6 +122,8 @@ async function saveEdit(person: string) {
 }
 
 function handleKeydown(e: KeyboardEvent, person: string) {
+  // Whole-pounds rule first (blocks '.'/'e'/sign), then Enter/Escape.
+  blockWholePoundsKey(e)
   if (e.key === 'Enter') saveEdit(person)
   else if (e.key === 'Escape') cancelEdit()
 }
@@ -105,18 +178,6 @@ const worksEstimates = (): Record<string, number> => {
   return out
 }
 
-// B8: when the deposit covers most of the price, say plainly that the
-// remaining balance is a mortgage on the new home (it stays — it's
-// Simon's mortgage; the deposit only reduces it).
-const depositDominates = computed(() => {
-  const eq = props.affordability?.total_equity
-  const mr = props.affordability?.mortgage_required
-  if (!eq?.succeeded || !mr?.succeeded) return false
-  const eqAmt = parseFloat(eq.value?.amount ?? '0')
-  const mrAmt = parseFloat(mr.value?.amount ?? '0')
-  return mrAmt > 0 && mrAmt < eqAmt
-})
-
 const buyerList = () =>
   props.persons?.value
     ? (props.persons.value as any[]).filter((p: any) => !p.is_child)
@@ -132,46 +193,8 @@ function canEdit(personName: string): boolean {
     <h2 class="detail-section__title">Costs</h2>
 
     <div class="costs-table">
-      <div class="costs-row" :class="{ 'costs-row--impossible': isImpossible(affordability?.monthly_mortgage) }">
-        <span class="costs-label">Mortgage</span>
-        <span v-if="affordability?.monthly_mortgage?.succeeded && affordability?.monthly_mortgage?.value" class="costs-value">£{{ affordability.monthly_mortgage.value.amount }}</span>
-        <span v-else-if="isImpossible(affordability?.monthly_mortgage)" class="costs-value costs-value--impossible">Can't calculate</span>
-        <span v-else class="costs-value">?</span>
-              </div>
-      <ProvenanceToggle
-        v-if="affordability?.monthly_mortgage?.provenance"
-        :provenance="affordability?.monthly_mortgage?.provenance"
-        title="Monthly mortgage"
-        hint="The deposit reduces the mortgage — raise the deposit in Settings."
-      />
-      <p v-if="depositDominates" class="costs-note">
-        The deposit covers most of the price — the remaining balance is a mortgage on the new home.
-      </p>
-
-      <div class="costs-row">
-        <span class="costs-label">Council Tax</span>
-        <span class="costs-value">{{ affordability?.council_tax?.value?.band ?? '?' }} · £{{ affordability?.council_tax?.value?.yearly_cost?.amount ?? '?' }}/yr</span>
-              </div>
-      <ProvenanceToggle v-if="affordability?.council_tax?.provenance" :provenance="affordability?.council_tax?.provenance" title="Council Tax" />
-      <p v-if="!affordability?.council_tax?.succeeded" class="costs-note">
-        Couldn't look up Council Tax — make sure the property's address is complete and correct
-        (Edit address above).
-      </p>
-
-      <div class="costs-row">
-        <span class="costs-label">Sinking Fund</span>
-        <span class="costs-value">£{{ affordability?.monthly_sinking_fund?.value?.amount ?? '?' }}</span>
-              </div>
-      <ProvenanceToggle v-if="affordability?.monthly_sinking_fund?.provenance" :provenance="affordability?.monthly_sinking_fund?.provenance" title="Sinking fund" />
-
-      <!-- Life Insurance -->
-      <div class="costs-row">
-        <span class="costs-label">Life Insurance</span>
-        <span class="costs-value">£{{ affordability?.life_insurance_total?.value?.amount ?? '?' }}</span>
-              </div>
-      <ProvenanceToggle v-if="affordability?.life_insurance_total?.provenance" :provenance="affordability?.life_insurance_total?.provenance" title="Life insurance" />
-
-      <!-- Cost of Works -->
+      <!-- Cost of Works (editable per-person input — not part of the
+           monthly group breakdown) -->
       <div class="costs-row" :class="{ 'costs-row--impossible': isImpossible(affordability?.total_works) }">
         <span class="costs-label">Cost of Works</span>
         <span v-if="affordability?.total_works?.succeeded && affordability?.total_works?.value" class="costs-value">£{{ affordability.total_works.value.amount }}</span>
@@ -190,11 +213,14 @@ function canEdit(personName: string): boolean {
           <div v-if="editingPerson === p.name" class="costs-edit-group">
             <span class="costs-edit-prefix">£</span>
             <input
-              v-model="editValue"
-              type="number"
+              :value="editValue"
+              type="text"
+              inputmode="numeric"
               class="costs-edit-input"
               autofocus
               @keydown="handleKeydown($event, p.name as string)"
+              @paste="rejectWholePoundsPaste"
+              @input="editValue = wholePoundsValue($event.target as HTMLInputElement, editValue)"
               @blur="saveEdit(p.name as string)"
             />
           </div>
@@ -234,18 +260,6 @@ function canEdit(personName: string): boolean {
       </div>
       <ProvenanceToggle v-if="affordability?.total_works?.provenance" :provenance="affordability?.total_works?.provenance" title="Cost of works" />
 
-      <div class="costs-row">
-        <span class="costs-label">Commute Cost</span>
-        <span class="costs-value">£{{ affordability?.monthly_commute_cost?.value?.yearly_total_gbp != null ? (parseFloat(affordability.monthly_commute_cost.value.yearly_total_gbp ?? '0') / 12).toFixed(2) : '?' }}</span>
-      </div>
-      <div v-if="affordability?.monthly_commute_cost?.succeeded && affordability?.monthly_commute_cost?.value?.persons" class="costs-subsection">
-        <div v-for="(cost, name) in affordability.monthly_commute_cost.value.persons" :key="name" class="costs-row costs-row--sub">
-          <span class="costs-label">{{ name }}</span>
-          <span class="costs-value">£{{ (parseFloat(cost.yearly_gbp ?? '0') / 12).toFixed(2) }}/mo</span>
-        </div>
-      </div>
-      <ProvenanceToggle v-if="affordability?.monthly_commute_cost?.provenance" :provenance="affordability?.monthly_commute_cost?.provenance" title="Monthly commute cost" />
-
       <!-- Rental Income (editable by current person) -->
       <div class="costs-row">
         <span class="costs-label">Rental Income</span>
@@ -274,14 +288,64 @@ function canEdit(personName: string): boolean {
               </div>
       <ProvenanceToggle v-if="affordability?.rental_income?.provenance" :provenance="affordability?.rental_income?.provenance" title="Rental income" />
 
-      <!-- Total Monthly -->
-      <div class="costs-row costs-row--total" :class="{ 'costs-row--impossible': isImpossible(affordability?.total_monthly_housing_cost) }">
-        <span class="costs-label">Total Monthly</span>
-        <span v-if="affordability?.total_monthly_housing_cost?.succeeded && affordability?.total_monthly_housing_cost?.value" class="costs-value">£{{ affordability.total_monthly_housing_cost.value.amount }}</span>
-        <span v-else-if="isImpossible(affordability?.total_monthly_housing_cost)" class="costs-value costs-value--impossible">Can't calculate</span>
-        <span v-else class="costs-value">?</span>
-              </div>
-      <ProvenanceToggle v-if="affordability?.total_monthly_housing_cost?.provenance" :provenance="affordability?.total_monthly_housing_cost?.provenance" title="Total monthly housing cost" />
+      <!-- Monthly cost by group — S+L (the joint owners) and the other
+           adults are shown as SEPARATE blocks; the per-group components
+           come from the DAG node so the split is never recomputed here. -->
+      <template v-if="affordability?.group_monthly_cost?.succeeded && affordability?.group_monthly_cost?.value?.couple">
+        <div class="costs-row costs-row--group">
+          <span class="costs-label">
+            {{ affordability.group_monthly_cost.value.couple_names || affordability.group_monthly_cost.value.couple_label }} — the joint owners
+            <ProvenanceToggle v-if="affordability?.group_monthly_cost?.provenance" :provenance="affordability?.group_monthly_cost?.provenance" title="Total monthly cost" />
+          </span>
+          <span class="costs-value" :title="totalMonthlyApprox ? 'Council tax estimated — total is approximate' : undefined">
+            {{ totalMonthlyApprox ? '≈ ' : '' }}£{{ affordability.group_monthly_cost.value.couple.value }}/mo
+          </span>
+        </div>
+        <div v-if="affordability.group_monthly_cost.value.couple_breakdown" class="costs-group-breakdown">
+          <div v-for="(row, key) in coupleRows()" :key="key" class="costs-row costs-row--sub">
+            <span class="costs-label">{{ row.label }}</span>
+            <span class="costs-value">{{ row.value }}</span>
+            <ProvenanceToggle
+              v-if="row.provenance"
+              :provenance="row.provenance"
+              :title="row.label"
+            />
+          </div>
+        </div>
+        <div v-if="affordability?.group_monthly_cost?.value?.others" class="costs-row costs-row--group costs-row--group-others">
+          <span class="costs-label">
+            {{ affordability.group_monthly_cost.value.others_label }}
+            <ProvenanceToggle v-if="affordability?.group_monthly_cost?.provenance" :provenance="affordability?.group_monthly_cost?.provenance" title="Total monthly cost" />
+          </span>
+          <span class="costs-value">
+            {{ totalMonthlyApprox ? '≈ ' : '' }}£{{ affordability.group_monthly_cost.value.others.value }}/mo
+          </span>
+        </div>
+        <div v-if="affordability.group_monthly_cost.value.others_breakdown" class="costs-group-breakdown">
+          <div v-for="(row, key) in othersRows()" :key="key" class="costs-row costs-row--sub">
+            <span class="costs-label">{{ row.label }}</span>
+            <span class="costs-value">{{ row.value }}</span>
+            <ProvenanceToggle
+              v-if="row.provenance"
+              :provenance="row.provenance"
+              :title="row.label"
+            />
+          </div>
+        </div>
+      </template>
+      <template v-else>
+        <div class="costs-row costs-row--total" :class="{ 'costs-row--impossible': isImpossible(affordability?.group_monthly_cost) }">
+          <span class="costs-label">Total Monthly</span>
+          <span v-if="isImpossible(affordability?.group_monthly_cost)" class="costs-value costs-value--impossible">Can't calculate</span>
+          <span v-else class="costs-value">?</span>
+                </div>
+      </template>
+      <p v-if="totalBlockedReason" class="costs-note costs-note--blocked">{{ totalBlockedReason }}</p>
+      <p v-if="!affordability?.council_tax?.succeeded" class="costs-note">
+        Couldn't look up Council Tax — make sure the property's address is complete and correct
+        (Edit address above).
+      </p>
+      <ProvenanceToggle v-if="affordability?.group_monthly_cost?.provenance" :provenance="affordability?.group_monthly_cost?.provenance" title="Total monthly housing cost" />
     </div>
 
     <!-- EPC scale -->
@@ -289,7 +353,7 @@ function canEdit(personName: string): boolean {
       <h3 class="epc-title">EPC Rating</h3>
       <div class="epc-scale">
         <div v-for="band in ['A','B','C','D','E','F','G']" :key="band"
-          class="epc-step" :class="epcStepClass(epc.value?.band ?? '')">
+          class="epc-step" :class="epcStepClass(band)">
           {{ band }}
           <span v-if="(epc.value?.band ?? '').toUpperCase() === band" class="epc-step__marker">▲</span>
         </div>
@@ -325,6 +389,18 @@ function canEdit(personName: string): boolean {
 }
 .costs-row--sub { padding-left: var(--sp-5); border-bottom: none; }
 .costs-row--total { font-weight: var(--fw-bold); border-bottom: none; border-top: 2px solid var(--slate-200); margin-top: var(--sp-2); padding-top: var(--sp-3); }
+.costs-row--group { font-weight: var(--fw-bold); border-bottom: none; border-top: 2px solid var(--slate-200); margin-top: var(--sp-3); padding-top: var(--sp-3); }
+.costs-row--group-others { margin-top: var(--sp-4); }
+.costs-row--group .costs-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.costs-row--group .costs-label .provenance-toggle__trigger {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+.costs-group-breakdown { margin-top: var(--sp-1); }
 .costs-row--impossible { opacity: 0.5; }
 .costs-label { font-size: var(--fs-sm); color: var(--text); }
 .costs-value { font-size: var(--fs-sm); font-weight: var(--fw-semibold); margin-left: auto; margin-right: var(--sp-2); }
@@ -346,6 +422,9 @@ function canEdit(personName: string): boolean {
   color: var(--text-muted);
   font-size: 0.85rem;
   margin: 0.25rem 0 0.75rem;
+}
+.costs-note--blocked {
+  color: var(--red);
 }
 .costs-provenance { margin: var(--sp-2) 0; }
 .costs-edit-group { display: flex; align-items: center; gap: 2px; margin-left: auto; margin-right: var(--sp-2); }
@@ -377,7 +456,7 @@ function canEdit(personName: string): boolean {
   background: var(--slate-100);
   position: relative;
 }
-.epc-step__marker { position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%); font-size: 12px; }
+.epc-step__marker { position: absolute; bottom: -6px; left: 50%; transform: translateX(-50%); font-size: var(--fs-sm); }
 .epc-step--a { background: var(--epc-a); color: #fff; }
 .epc-step--b { background: var(--epc-b); color: #fff; }
 .epc-step--c { background: var(--epc-c); color: #fff; }

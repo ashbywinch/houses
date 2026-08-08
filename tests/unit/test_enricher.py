@@ -23,10 +23,18 @@ from houses.tfl_client import TflClient
 from houses.transit_route import _apply_park_and_ride_to_journeys
 from tests.helpers import FixedCommuteNode
 
+
+def _mw(value: int):
+    """A fixed max-walk input node."""
+    from dag.user_input_node import UserInputNode
+
+    node = UserInputNode("_mw", int)
+    node.push(value, "test")
+    return node
+
 # ======================================================================
 # DAG-based commute computation (replaces old houses.enricher tests)
 # ======================================================================
-
 
 def _make_commute(duration_min: int = 32, cost_gbp: str | float = "10.0") -> Commute:
     """Build a Commute suitable for feeding into a TransitNode / FakeCommuteRouter."""
@@ -46,7 +54,6 @@ def _make_commute(duration_min: int = 32, cost_gbp: str | float = "10.0") -> Com
         _details=(CostGroup(legs=(), operator="TfL", cost=Money(str(cost_gbp), "GBP")),),
     )
 
-
 def _serialize_commute(duration_min: int, cost_gbp: float, label: str = "Office", mode: str = "transit") -> Commute:
     """Return a Commute matching the shape TransitNode/CommuteSelectorNode produce."""
     from houses.model.domain import Commute as CommuteObj
@@ -61,9 +68,7 @@ def _serialize_commute(duration_min: int, cost_gbp: float, label: str = "Office"
         mode=mode,
     )
 
-
 # ── TransitNode ──────────────────────────────────────────────────────
-
 
 class TestTransitCommute:
     """TransitNode — produces a serialised commute dict from TflTransitNode deps."""
@@ -88,7 +93,7 @@ class TestTransitCommute:
         no_bus = TflTransitNode("tr1_nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
         with_bus = TflTransitNode("tr1_wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
         node = TransitNode(
-            "tr1", best_location=loc, poi=poi, has_car=False, max_walk=30, no_bus_node=no_bus, with_bus_node=with_bus
+            "tr1", best_location=loc, poi=poi, has_car=False, no_bus_node=no_bus, with_bus_node=with_bus
         )
         a = await node.attempt()
         assert a.pending, "Should be pending when location isn't set"
@@ -106,7 +111,7 @@ class TestTransitCommute:
         no_bus = TflTransitNode("tr2_nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
         with_bus = TflTransitNode("tr2_wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
         node = TransitNode(
-            "tr2", best_location=loc, poi=poi, has_car=False, max_walk=30, no_bus_node=no_bus, with_bus_node=with_bus
+            "tr2", best_location=loc, poi=poi, has_car=False, no_bus_node=no_bus, with_bus_node=with_bus
         )
         a = await node.attempt()
         assert a.pending, "Should be pending when POI isn't set"
@@ -138,7 +143,6 @@ class TestTransitCommute:
             best_location=loc,
             poi=poi,
             has_car=False,
-            max_walk=30,
             no_bus_node=no_bus,
             with_bus_node=with_bus,
         )
@@ -175,7 +179,6 @@ class TestTransitCommute:
             best_location=loc,
             poi=poi,
             has_car=False,
-            max_walk=30,
             no_bus_node=no_bus,
             with_bus_node=with_bus,
         )
@@ -196,7 +199,7 @@ class TestTransitCommute:
         no_bus = TflTransitNode("tr5_nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
         with_bus = TflTransitNode("tr5_wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
         node = TransitNode(
-            "tr5", best_location=loc, poi=poi, has_car=False, max_walk=30, no_bus_node=no_bus, with_bus_node=with_bus
+            "tr5", best_location=loc, poi=poi, has_car=False, no_bus_node=no_bus, with_bus_node=with_bus
         )
         j = await node.to_json()
         assert "succeeded" in j
@@ -234,7 +237,6 @@ class TestTransitCommute:
             best_location=loc,
             poi=poi,
             has_car=True,
-            max_walk=15,
             no_bus_node=no_bus,
             with_bus_node=with_bus,
         )
@@ -269,7 +271,6 @@ class TestTransitCommute:
             best_location=loc,
             poi=poi,
             has_car=False,
-            max_walk=30,
             no_bus_node=no_bus,
             with_bus_node=with_bus,
         )
@@ -279,7 +280,6 @@ class TestTransitCommute:
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none().person.is_child is False
-
 
 class TestCommuteSelectorPipeline:
     @staticmethod
@@ -320,6 +320,7 @@ class TestCommuteSelectorPipeline:
             walk_result=self._dummy_commute_node(),
             transit_result=transit,
             drive_result=self._dummy_commute_node(),
+            max_walk_node=_mw(30),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
@@ -353,6 +354,7 @@ class TestCommuteSelectorPipeline:
             walk_result=self._dummy_commute_node(),
             transit_result=transit,
             drive_result=self._dummy_commute_node(),
+            max_walk_node=_mw(30),
         )
         origin.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -376,6 +378,7 @@ class TestCommuteSelectorPipeline:
             origin=origin,
             poi=poi,
             transit_result=transit,
+            max_walk_node=_mw(30),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
@@ -405,6 +408,7 @@ class TestCommuteSelectorPipeline:
             walk_result=self._dummy_commute_node(),
             transit_result=transit,
             drive_result=self._dummy_commute_node(),
+            max_walk_node=_mw(30),
         )
 
         poi.push(PlaceOfInterest("Office", "SW1V 2QQ"), "config")
@@ -433,6 +437,7 @@ class TestCommuteSelectorPipeline:
             walk_result=self._dummy_commute_node(),
             transit_result=transit,
             drive_result=self._dummy_commute_node(),
+            max_walk_node=_mw(30),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
@@ -470,6 +475,7 @@ class TestCommuteSelectorPipeline:
             walk_result=self._dummy_commute_node(),
             transit_result=transit,
             drive_result=self._dummy_commute_node(),
+            max_walk_node=_mw(30),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "test")
@@ -488,9 +494,7 @@ class TestCommuteSelectorPipeline:
         assert float(val.daily_cost.amount) == 8.50
         assert val.label == "Office"
 
-
 # ── CommuteBreakdownNode ─────────────────────────────────────────────
-
 
 class TestCommuteBreakdown:
     """CommuteBreakdownNode — sums yearly commute costs."""
@@ -686,12 +690,10 @@ class TestCommuteBreakdown:
         assert a.succeeded
         assert a.value_or_none()["yearly_total_gbp"] == "0"
 
-
 # ======================================================================
 # Imports needed by TestParkAndRide (kept at module bottom to avoid
 # shadowing the test classes above)
 # ======================================================================
-
 
 class TestParkAndRide:
     """_apply_park_and_ride_to_journeys — replaces long walks with driving.
@@ -804,7 +806,6 @@ class TestParkAndRide:
         assert "Drive to Maidenhead (10m)" in summary
         assert "Train to Paddington (20m)" in summary
         assert "walk 7m" in summary
-
 
 def _succeeded_walk_check(val: bool = False) -> DerivedNode:
     """Build a minimal walk-check node whose ``_attempt`` is already resolved."""

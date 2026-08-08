@@ -306,7 +306,7 @@ class TestCommuteDetailsRoundTrip:
             poi=UserInputNode("rt_poi", object),
             transit_result=UserInputNode("rt_transit", object),
             is_child=False,
-            max_walk=30,
+            max_walk_node=UserInputNode("rt_mw", int),
         )
         a = node.latest_attempt()
         assert a.succeeded, f"reload must succeed, got: {a.status}: {a.error}"

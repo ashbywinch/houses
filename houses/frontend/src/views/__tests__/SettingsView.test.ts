@@ -1,13 +1,30 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import { flushPromises, mount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import SettingsView from '../SettingsView.vue'
 
+// Determinism guarantees:
+// - unmount every mounted component after each test so SettingsView's
+//   onBeforeUnmount clears pending debounce timers (otherwise a test that
+//   schedules a save without flushing leaks an 800ms timer into later
+//   tests and corrupts their mock.calls)
+// - restore real timers after each test so a failing fake-timer test
+//   cannot leak fake timers into the rest of the file
+enableAutoUnmount(afterEach)
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 vi.mock('../../services/api', () => ({
   fetchSettings: vi.fn(),
+  fetchCurrentHomes: vi.fn().mockResolvedValue([
+    { rid: 'home1', address: '10 Old Lane, Maidenhead' },
+    { rid: 'home2', address: '20 Old Lane, Maidenhead' },
+  ]),
   patchPerson: vi.fn().mockResolvedValue({ status: 'ok' }),
+  patchFinancial: vi.fn().mockResolvedValue({ status: 'ok' }),
 }))
 
 import * as api from '../../services/api'
@@ -29,13 +46,16 @@ function makeSettings() {
           home_sale_price: { amount: '550000.00', currency: 'GBP' },
           outstanding_mortgage: { amount: '373000.00', currency: 'GBP' },
           cash_contribution: { amount: '0.00', currency: 'GBP' },
+          petrol_mpg: 45,
+          bus_walk_penalty: { value: 20, unit: 'minute' },
+          home_co_owners: [{ name: 'Lorena', share: 50 }],
           places_of_interest: [
             {
               label: 'Pimlico',
               address: '1 Drummond Gate, Pimlico, London SW1V 2QQ',
               trips_per_week: 1,
               weeks_per_year: 46,
-              acceptable_modes: ['train'],
+              acceptable_modes: ['transit'],
             },
             {
               label: 'Bracknell',
@@ -60,7 +80,7 @@ function makeSettings() {
               address: 'Eastgate House, 40 Dukes Place, London EC3A 7LP',
               trips_per_week: 2,
               weeks_per_year: 46,
-              acceptable_modes: ['train'],
+              acceptable_modes: ['transit'],
             },
           ],
         },
@@ -103,6 +123,16 @@ function makeSettings() {
         Lorena: { good_max_minutes: 40, fine_max_minutes: 60 },
       },
     },
+    financial: {
+      status: 'succeeded',
+      value: {
+        mortgage_rate: 0.0495,
+        mortgage_term_years: 27,
+        sinking_fund_rate: 0.01,
+        petrol_mpg: 45,
+        petrol_cost_per_litre: 1.45,
+      },
+    },
     household_deposit: {
       total: { amount: '477000.00', currency: 'GBP' },
       persons: {
@@ -126,10 +156,10 @@ function makeSettings() {
   }
 }
 
-async function mountView(query = '') {
+async function mountView(query = '', personName = 'Simon') {
   setActivePinia(createPinia())
   const auth = useAuthStore()
-  auth.user = { email: 'simon@example.com', name: 'Simon', picture: '', person: 'Simon', is_superuser: true } as any
+  auth.user = { email: `${personName.toLowerCase()}@example.com`, name: personName, picture: '', person: personName, is_superuser: personName === 'Simon' } as any
   ;(api.fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValue(makeSettings())
   const router = createRouter({
     history: createMemoryHistory(),
@@ -140,30 +170,65 @@ async function mountView(query = '') {
   return { wrapper: mount(SettingsView, { global: { plugins: [router] } }), flush: flushPromises, router }
 }
 
+import type { VueWrapper } from '@vue/test-utils'
+
+/** The person identity strip (name, badges, autosave status) — visible on both tabs. */
+const strip = (wrapper: VueWrapper) => wrapper.find('.settings-person__strip')
+
+/** The visible panel's person section (money on Finances, commutes on Commutes). */
+const personSection = (wrapper: VueWrapper) => wrapper.find('.settings-panel .settings-person')
+
+/** Switch to the Commutes tab (destinations, bands, has-car live there). */
+async function showCommutes(wrapper: VueWrapper) {
+  await wrapper.findAll('.settings-tabs button')[1].trigger('click')
+  await wrapper.vm.$nextTick()
+}
+
 describe('SettingsView — family sections', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
-  it('renders a section per person', async () => {
+  it("renders ONLY the session person's settings — not the whole family's", async () => {
     const { wrapper, flush } = await mountView()
     await flush()
-    const text = wrapper.text()
-    expect(text).toContain('Simon')
-    expect(text).toContain('Lorena')
-    expect(text).toContain('George')
+    const sections = wrapper.findAll('.settings-panel .settings-person')
+    expect(sections.length).toBe(1)
+    expect(strip(wrapper).text()).toContain('Simon')
+    // one person section, headed by the session person (the co-owner
+    // dropdown legitimately lists other people's names)
+    expect(sections[0].find('.card-heading').text()).toContain('Simon')
+    // the deposit breakdown still shows the whole household
+    expect(wrapper.text()).toContain('Total deposit from everyone')
   })
 
-  it('marks the session person with a "you" badge and the child with a child badge', async () => {
+  it('opens on the Finances tab (left) by default', async () => {
     const { wrapper, flush } = await mountView()
     await flush()
-    expect(wrapper.text()).toContain('you')
-    expect(wrapper.text()).toContain('child')
+    const tabs = wrapper.findAll('.settings-tabs button')
+    expect(tabs[0].text()).toBe('Finances')
+    expect(tabs[1].text()).toBe('Commutes')
+    expect(tabs[0].attributes('aria-selected')).toBe('true')
+    expect(wrapper.text()).toContain('Total deposit from everyone')
+    // commutes content is not rendered until the tab is opened
+    expect(wrapper.find('input#has-car').exists()).toBe(false)
+  })
+
+  it('marks the session person with a "you" badge, or "child" for a child user', async () => {
+    const simon = await mountView()
+    await simon.flush()
+    expect(strip(simon.wrapper).text()).toContain('you')
+    expect(strip(simon.wrapper).text()).not.toContain('child')
+
+    const george = await mountView('', 'George')
+    await george.flush()
+    expect(strip(george.wrapper).text()).toContain('child')
   })
 
   it('renders the school note for a child with no-address POIs', async () => {
-    const { wrapper, flush } = await mountView()
+    const { wrapper, flush } = await mountView('', 'George')
     await flush()
+    await showCommutes(wrapper)
     expect(wrapper.text()).toContain('Goes to school near the house')
   })
 })
@@ -173,33 +238,138 @@ describe('SettingsView — ownership rendering', () => {
     vi.clearAllMocks()
   })
 
-  it('makes the own person editable with a save button', async () => {
+  it('makes the own person editable — autosave, no save button', async () => {
     const { wrapper, flush } = await mountView()
     await flush()
-    const simonSection = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
-    expect(simonSection.find('button.save').exists()).toBe(true)
-    expect(simonSection.find('input[type="checkbox"][data-mode="walk"]').attributes('disabled')).toBeUndefined()
+    await showCommutes(wrapper)
+    const simonSection = personSection(wrapper)
+    expect(simonSection.find('button.save').exists()).toBe(false)
+    expect(simonSection.find('.mode-pill[data-mode="walk"]').attributes('disabled')).toBeUndefined()
   })
 
-  it('locks other people — read-only, no save button', async () => {
-    const { wrapper, flush } = await mountView()
+  it('shows a person without edit rights as read-only — no save button', async () => {
+    const { wrapper, flush } = await mountView('', 'Lorena')
     await flush()
-    const lorenaSection = wrapper.findAll('.settings-person').find(s => s.text().includes('Lorena'))!
-    expect(lorenaSection.text()).toContain('read-only')
-    expect(lorenaSection.find('button.save').exists()).toBe(false)
+    expect(strip(wrapper).text()).toContain('read-only')
+    expect(wrapper.find('button.save').exists()).toBe(false)
   })
 
   it('does not offer the car mode to people without a car', async () => {
+    const lorena = await mountView('', 'Lorena')
+    await lorena.flush()
+    await showCommutes(lorena.wrapper)
+    const lorenaSection = personSection(lorena.wrapper)
+    // the checkbox is present but hidden and disabled — car is not an option
+    const carPill = lorenaSection.find('.mode-pill[data-mode="car"]')
+    expect(carPill.exists()).toBe(true)
+    expect(carPill.attributes('disabled')).toBeDefined()
+    expect(carPill.classes()).toContain('mode-pill--hidden')
+
+    const simon = await mountView()
+    await simon.flush()
+    await showCommutes(simon.wrapper)
+    const simonSection = personSection(simon.wrapper)
+    expect(simonSection.find('.mode-pill[data-mode="car"]').classes()).not.toContain('mode-pill--hidden')
+  })
+})
+
+describe('SettingsView — home co-owners and the house link', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('adds a co-owner with a share and saves it with the person', async () => {
     const { wrapper, flush } = await mountView()
     await flush()
-    const lorenaSection = wrapper.findAll('.settings-person').find(s => s.text().includes('Lorena'))!
-    // the checkbox is present but hidden and disabled — car is not an option
-    const carInput = lorenaSection.find('input[type="checkbox"][data-mode="car"]')
-    expect(carInput.exists()).toBe(true)
-    expect(carInput.attributes('disabled')).toBeDefined()
-    expect(lorenaSection.find('.settings-poi__mode--hidden input[data-mode="car"]').exists()).toBe(true)
-    const simonSection = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
-    expect(simonSection.find('.settings-poi__mode--hidden input[data-mode="car"]').exists()).toBe(false)
+    const simon = personSection(wrapper)
+    const addRow = simon.find('.co-owner-add')
+    // Set the share first, then pick the person — the pick is the commit
+    await addRow.find('input').setValue(25)
+    await addRow.find('select').setValue('Ashby')
+    expect(simon.text()).toContain('Ashby — 25%')
+    await simon.trigger('focusout')
+    await flush()
+    const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(body.home_co_owners).toContainEqual({ name: 'Ashby', share: 25 })
+  })
+
+  it('adds a co-owner at the default 50% when only the name is picked', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = personSection(wrapper)
+    const addRow = simon.find('.co-owner-add')
+    await addRow.find('select').setValue('Ashby')
+    expect(simon.text()).toContain('Ashby — 50%')
+  })
+
+  it('refuses a co-owner when the shares would exceed 100%', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = personSection(wrapper)
+    // Lorena already co-owns 50% — a share that would push the total
+    // past 100% must be refused
+    const addRow = simon.find('.co-owner-add')
+    await addRow.find('input').setValue(60)
+    await addRow.find('select').setValue('Ashby')
+    expect(simon.text()).not.toContain('Ashby — 60%')
+    await addRow.find('input').setValue(40)
+    await addRow.find('select').setValue('Ashby')
+    expect(simon.text()).toContain('Ashby — 40%')
+  })
+
+  it('shows a read-only co-owner note on the co-owner\'s own settings', async () => {
+    const { wrapper, flush } = await mountView('', 'Lorena')
+    await flush()
+    expect(wrapper.text()).toContain("You co-own Simon's home")
+    expect(wrapper.text()).toContain("don't add this house as your own")
+  })
+
+  it('saves the linked current house with the person', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = personSection(wrapper)
+    await simon.find('select#home-property').setValue('home1')
+    await simon.trigger('focusout')
+    await flush()
+    const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(body.home_property_rid).toBe('home1')
+  })
+})
+
+describe('SettingsView — household finances', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('renders the live household-finance assumptions with converted display values', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const text = wrapper.text()
+    expect(text).toContain('Household finances')
+    // stored rates (0.0495, 0.01) display as percentages (4.95, 1)
+    expect((wrapper.find('input#mortgage-rate').element as HTMLInputElement).value).toBe('4.95')
+    expect((wrapper.find('input#mortgage-term').element as HTMLInputElement).value).toBe('27')
+    expect((wrapper.find('input#sinking-fund').element as HTMLInputElement).value).toBe('1')
+    expect((wrapper.find('input#petrol-cost').element as HTMLInputElement).value).toBe('1.45')
+    // MPG moved out of the household finances — it's the car owner's own, on the Commutes tab
+    expect(wrapper.find('input#petrol-mpg').exists()).toBe(false)
+  })
+
+  it('saves financial edits back as stored values (percent → fraction)', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    await wrapper.find('input#mortgage-rate').setValue('6')
+    await wrapper.find('input#sinking-fund').setValue('1.5')
+    await wrapper.find('input#petrol-cost').setValue('1.50')
+    await wrapper.find('.settings-finances').trigger('focusout')
+    await flush()
+    expect(api.patchFinancial).toHaveBeenCalledTimes(1)
+    const body = (api.patchFinancial as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(body.mortgage_rate).toBe(0.06)
+    expect(body.sinking_fund_rate).toBe(0.015)
+    expect(body.petrol_cost_per_litre).toBe(1.5)
+    expect(body.petrol_mpg).toBeUndefined()
+    expect(body.mortgage_term_years).toBe(27)
   })
 })
 
@@ -221,8 +391,8 @@ describe('SettingsView — deposit summary and money labels', () => {
     const { wrapper, flush } = await mountView()
     await flush()
     const text = wrapper.text()
-    expect(text).toContain('Expected sale price of current home')
-    expect(text).toContain('Mortgage remaining on current home')
+    expect(text).toContain('Expected sale price (£)')
+    expect(text).toContain('Mortgage remaining (£)')
     expect(text).toContain('Other money toward the deposit')
   })
 })
@@ -232,20 +402,76 @@ describe('SettingsView — saving', () => {
     vi.clearAllMocks()
   })
 
-  it('saves the edited person and their thresholds via PATCH', async () => {
+  it('saves the edited person and their thresholds via autosave', async () => {
     const { wrapper, flush } = await mountView()
     await flush()
-    const simonSection = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
-    // tick a mode checkbox, then save
-    const walk = simonSection.find('input[type="checkbox"][data-mode="walk"]')
-    await walk.setValue(true)
-    await simonSection.find('button.save').trigger('click')
+    await showCommutes(wrapper)
+    const simonSection = personSection(wrapper)
+    // tick a mode pill — blurring the section autosaves
+    const walk = simonSection.find('.mode-pill[data-mode="walk"]')
+    await walk.trigger('click')
+    await simonSection.trigger('focusout')
+    await flush()
     expect(api.patchPerson).toHaveBeenCalledTimes(1)
     const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
     expect(name).toBe('Simon')
     const pimlico = body.places_of_interest.find((p: { label: string }) => p.label === 'Pimlico')
     expect(pimlico.acceptable_modes).toContain('walk')
     expect(body.thresholds).toEqual({ good_max_minutes: 30, fine_max_minutes: 45 })
+  })
+
+  it('saves the commute colour bands — good AND fine — when they change', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    await showCommutes(wrapper)
+    const simon = personSection(wrapper)
+    expect(simon.find('input#good-max').exists()).toBe(true)
+    await simon.find('input#good-max').setValue(35)
+    await simon.find('input#fine-max').setValue(50)
+    await simon.trigger('focusout')
+    await flush()
+    const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(body.thresholds).toEqual({ good_max_minutes: 35, fine_max_minutes: 50 })
+  })
+
+  it('saves the max-walk setting with the person', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    await showCommutes(wrapper)
+    const simon = personSection(wrapper)
+    expect((simon.find('input#max-walk').element as HTMLInputElement).value).toBe('20')
+    await simon.find('input#max-walk').setValue(25)
+    await simon.trigger('focusout')
+    await flush()
+    const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(body.bus_walk_penalty).toEqual({ value: 25, unit: 'minute' })
+  })
+
+  it('shows the car MPG under has-a-car on the Commutes tab and saves it', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    await showCommutes(wrapper)
+    const simon = personSection(wrapper)
+    expect((simon.find('input#petrol-mpg').element as HTMLInputElement).value).toBe('45')
+    await simon.find('input#petrol-mpg').setValue(38)
+    await simon.trigger('focusout')
+    await flush()
+    const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(body.petrol_mpg).toBe(38)
+  })
+
+  it('saves the destination weeks per year', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    await showCommutes(wrapper)
+    const simon = personSection(wrapper)
+    const weeks = simon.findAll('input[id^="weeks-"]')[0]
+    expect(weeks.exists()).toBe(true)
+    await weeks.setValue(48)
+    await simon.trigger('focusout')
+    await flush()
+    const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(body.places_of_interest[0].weeks_per_year).toBe(48)
   })
 })
 
@@ -257,16 +483,18 @@ describe('SettingsView — destination fields and person-scroll (A6, D2)', () =>
   it('distinguishes the destination name from its address', async () => {
     const { wrapper, flush } = await mountView()
     await flush()
+    await showCommutes(wrapper)
     const text = wrapper.text()
     expect(text).toContain('Destination name')
-    expect(text).toContain('Office / location address')
+    expect(text).toContain('Address')
+    // the 'office' wording is gone — destinations aren't necessarily offices
+    expect(text).not.toContain('Office / location address')
   })
 
-  it('highlights and scrolls to the person named in the URL', async () => {
-    const { wrapper, flush } = await mountView('?person=George')
+  it('highlights and scrolls to the session person named in the URL', async () => {
+    const { wrapper, flush } = await mountView('?person=Simon')
     await flush()
-    const george = wrapper.findAll('.settings-person').find(s => s.text().includes('George'))!
-    expect(george.classes()).toContain('settings-person--target')
+    expect(strip(wrapper).classes()).toContain('settings-person--target')
   })
 })
 
@@ -278,20 +506,52 @@ describe('SettingsView — selling-home toggle (P7, B7)', () => {
   it('shows the current-home fields when a home is being sold', async () => {
     const { wrapper, flush } = await mountView()
     await flush()
-    const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
-    expect(simon.text()).toContain('I am selling a home to fund this purchase')
-    expect(simon.text()).toContain('Expected sale price of current home')
-    expect(simon.text()).toContain('Mortgage remaining on current home')
+    const simon = personSection(wrapper)
+    expect(simon.text()).toContain('Selling a home to fund this purchase')
+    expect(simon.text()).toContain('Expected sale price (£)')
+    expect(simon.text()).toContain('Mortgage remaining (£)')
   })
 
   it('hides the current-home fields for a cash-only person and relabels the deposit', async () => {
-    const { wrapper, flush } = await mountView()
+    const { wrapper, flush } = await mountView('', 'Ashby')
     await flush()
-    const ashby = wrapper.findAll('.settings-person').find(s => s.text().includes('Ashby'))!
+    const ashby = personSection(wrapper)
     expect(ashby.text()).not.toContain('Expected sale price of current home')
     expect(ashby.text()).not.toContain('Mortgage remaining on current home')
     expect(ashby.text()).toContain('Cash available for the deposit')
     expect(ashby.text()).toContain('Deposit is cash')
+  })
+
+  it('gates rent-paid, the house link and co-owners behind the selling-home toggle', async () => {
+    // Simon sells a home → the whole current-home section shows
+    const simon = await mountView()
+    await simon.flush()
+    const simonSection = personSection(simon.wrapper)
+    expect(simonSection.find('input#rent-paid').exists()).toBe(true)
+    expect(simonSection.find('select#home-property').exists()).toBe(true)
+    expect(simonSection.find('.co-owner-add').exists()).toBe(true)
+
+    // Ashby does not sell a home → rent-paid, house link and co-owners
+    // must NOT appear (there is no current home to pay rent against)
+    const ashby = await mountView('', 'Ashby')
+    await ashby.flush()
+    const ashbySection = personSection(ashby.wrapper)
+    expect(ashbySection.find('input#rent-paid').exists()).toBe(false)
+    expect(ashbySection.find('select#home-property').exists()).toBe(false)
+    expect(ashbySection.find('.co-owner-add').exists()).toBe(false)
+  })
+
+  it('hides the rent-paid and house-link fields when the toggle is switched off', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = personSection(wrapper)
+    expect(simon.find('input#rent-paid').exists()).toBe(true)
+    // Flip the selling-home switch off
+    await simon.find('.toggle-row .switch').trigger('click')
+    await flush()
+    expect(simon.find('input#rent-paid').exists()).toBe(false)
+    expect(simon.find('select#home-property').exists()).toBe(false)
+    expect(simon.find('.co-owner-add').exists()).toBe(false)
   })
 })
 
@@ -305,7 +565,8 @@ describe('SettingsView — deposit provenance through the standard toggle (P8)',
     await flush()
     const toggle = wrapper.find('.settings-deposit .provenance-toggle__trigger')
     expect(toggle.exists()).toBe(true)
-    expect(toggle.text()).toContain('How is this calculated?')
+    expect(toggle.find('.provenance-toggle__icon').text()).toBe('ⓘ')
+    expect(toggle.text()).not.toContain('How is this calculated?')
     await toggle.trigger('click')
     expect(wrapper.text()).toContain('£0 home + £300,000.00 cash')
     expect(wrapper.text()).toContain('£550,000.00 sale')
@@ -320,12 +581,14 @@ describe('SettingsView — commute destination CRUD (A7)', () => {
   it('adds a blank destination row and saves it with the list', async () => {
     const { wrapper, flush } = await mountView()
     await flush()
-    const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
-    await simon.find('button.poi-add').trigger('click')
+    await showCommutes(wrapper)
+    const simon = personSection(wrapper)
+    await simon.find('button.btn-add').trigger('click')
     await flush()
-    const rows = simon.findAll('.settings-poi')
+    const rows = simon.findAll('.dest-card')
     expect(rows.length).toBe(3)  // Pimlico, Bracknell + the new blank row
-    await simon.find('button.save').trigger('click')
+    await simon.trigger('focusout')  // blur autosaves the added row
+    await flush()
     const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
     expect(name).toBe('Simon')
     expect(body.places_of_interest.length).toBe(3)
@@ -335,23 +598,25 @@ describe('SettingsView — commute destination CRUD (A7)', () => {
   it('defaults a new destination to explicit modes matching the person', async () => {
     const { wrapper, flush } = await mountView()
     await flush()
-    // Simon has a car -> train+car+walk; Lorena does not -> train+walk
-    const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
-    await simon.find('button.poi-add').trigger('click')
-    await simon.find('button.save').trigger('click')
+    await showCommutes(wrapper)
+    const simon = personSection(wrapper)
+    await simon.find('button.btn-add').trigger('click')
+    await simon.trigger('focusout')
+    await flush()
     const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
     const added = body.places_of_interest[body.places_of_interest.length - 1]
-    expect(added.acceptable_modes).toEqual(['train', 'car', 'walk'])
+    expect(added.acceptable_modes).toEqual(['transit', 'car', 'walk'])
   })
 
   it('removes a destination row', async () => {
     const { wrapper, flush } = await mountView()
     await flush()
-    const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
-    expect(simon.findAll('.settings-poi').length).toBe(2)
+    await showCommutes(wrapper)
+    const simon = personSection(wrapper)
+    expect(simon.findAll('.dest-card').length).toBe(2)
     await simon.findAll('button.poi-remove')[0].trigger('click')
     await flush()
-    expect(simon.findAll('.settings-poi').length).toBe(1)
+    expect(simon.findAll('.dest-card').length).toBe(1)
   })
 })
 
@@ -361,11 +626,12 @@ describe('SettingsView — selling-home persists on save (B7)', () => {
   })
 
   it('sends the selling-home toggle in the save body', async () => {
-    const { wrapper, flush } = await mountView()
+    const { wrapper, flush } = await mountView('', 'Ashby')
     await flush()
-    const ashby = wrapper.findAll('.settings-person').find(s => s.text().includes('Ashby'))!
-    await ashby.find('input#selling-home').setValue(true)
-    await ashby.find('button.save').trigger('click')
+    const ashby = personSection(wrapper)
+    await ashby.find('.toggle-row .switch').trigger('click')
+    await ashby.trigger('focusout')
+    await flush()
     const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
     expect(name).toBe('Ashby')
     expect(body.selling_home).toBe(true)
@@ -380,16 +646,72 @@ describe('SettingsView — acceptable modes keep at least one (P7)', () => {
   it('cannot uncheck the last remaining mode', async () => {
     const { wrapper, flush } = await mountView()
     await flush()
-    const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
-    // Pimlico has only ['train'] — unchecking it must not remove the last
+    await showCommutes(wrapper)
+    const simon = personSection(wrapper)
+    // Pimlico has only ['transit'] — unchecking it must not remove the last
     // mode (an empty set would be reinterpreted by the server migration)
-    const train = simon.find('input[type="checkbox"][data-mode="train"]')
-    await train.setValue(false)
-    await simon.find('button.save').trigger('click')
+    const transit = simon.find('.mode-pill[data-mode="transit"]')
+    await transit.trigger('click')
+    await simon.trigger('focusout')
+    await flush()
     const [name, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
     expect(name).toBe('Simon')
     const pimlico = body.places_of_interest.find((p: { label: string }) => p.label === 'Pimlico')
-    expect(pimlico.acceptable_modes).toContain('train')
+    expect(pimlico.acceptable_modes).toContain('transit')
+  })
+})
+
+describe('SettingsView — autosave status and undo (C2/C3)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('shows "Saved ✓" with an Undo action after an autosave', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = personSection(wrapper)
+    await simon.find('input#cash').setValue('5000')
+    await simon.trigger('focusout')
+    await flush()
+    expect(wrapper.text()).toContain('Saved ✓')
+    expect(wrapper.find('.save-footer .settings-person__undo').text()).toContain('Undo')
+  })
+
+  it('undo re-patches the previous snapshot', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = personSection(wrapper)
+    await simon.find('input#cash').setValue('5000')
+    await simon.trigger('focusout')
+    await flush()
+    const savedBody = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0][1]
+    await wrapper.find('.save-footer .settings-person__undo').trigger('click')
+    await flush()
+    expect(api.patchPerson).toHaveBeenCalledTimes(2)
+    expect((api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[1][1]).toEqual(savedBody)
+  })
+
+  it('autosaves on the debounce without waiting for blur', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    vi.useFakeTimers()
+    const simon = personSection(wrapper)
+    await simon.find('input#cash').setValue('5000')
+    await vi.advanceTimersByTimeAsync(900)
+    await flush()
+    expect(api.patchPerson).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows an error state with Retry when the save fails', async () => {
+    vi.mocked(api.patchPerson).mockRejectedValueOnce(new Error('boom'))
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = personSection(wrapper)
+    await simon.find('input#cash').setValue('5000')
+    await simon.trigger('focusout')
+    await flush()
+    expect(wrapper.text()).toContain("Couldn't save")
+    expect(wrapper.find('.save-footer .settings-person__undo').text()).toContain('Retry')
   })
 })
 
@@ -401,11 +723,37 @@ describe('SettingsView — empty money inputs normalize on save', () => {
   it('sends "0" for a cleared money field instead of failing the save', async () => {
     const { wrapper, flush } = await mountView()
     await flush()
-    const simon = wrapper.findAll('.settings-person').find(s => s.text().includes('Simon'))!
+    const simon = personSection(wrapper)
     const sale = simon.find('input#home-sale')
     await sale.setValue('')
-    await simon.find('button.save').trigger('click')
+    await simon.trigger('focusout')
+    await flush()
     const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
     expect(body.home_sale_price.amount).toBe('0')
+  })
+
+  it('rejects pence in the large money fields (whole pounds only)', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = personSection(wrapper)
+    const sale = simon.find('input#home-sale')
+    await sale.setValue('550000.99')
+    expect((sale.element as HTMLInputElement).value).toBe('550000')
+    await simon.trigger('focusout')
+    await flush()
+    const [, body] = (api.patchPerson as ReturnType<typeof vi.fn>).mock.calls[0]
+    expect(body.home_sale_price.amount).toBe('550000')
+  })
+
+  it('blocks the decimal key outright on whole-pound fields', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = personSection(wrapper)
+    const sale = simon.find('input#home-sale')
+    await sale.setValue('550000')
+    const evt = new KeyboardEvent('keydown', { key: '.', cancelable: true })
+    sale.element.dispatchEvent(evt)
+    expect(evt.defaultPrevented).toBe(true)
+    expect((sale.element as HTMLInputElement).value).toBe('550000')
   })
 })

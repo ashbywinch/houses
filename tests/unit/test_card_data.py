@@ -256,7 +256,7 @@ class TestSummaryShape:
             "best_location",
             "rightmove_price",
             "rightmove_bedrooms",
-            "total_monthly_cost",
+            "group_monthly_cost",
             "town_name",
             "commutes",
             "schools",
@@ -276,7 +276,7 @@ class TestSummaryShape:
             "best_location",
             "rightmove_price",
             "rightmove_bedrooms",
-            "total_monthly_cost",
+            "group_monthly_cost",
             "town_name",
             "walkability",
         )

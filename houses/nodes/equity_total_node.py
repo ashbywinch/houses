@@ -6,8 +6,6 @@ from money import Money
 
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
-from houses.model.domain import Person
-from houses.model.domain import effective_selling_home as _selling_home
 
 _ZERO = Decimal("0")
 
@@ -56,28 +54,18 @@ class EquityTotalNode(DerivedNode[Money]):
 
         is_current = status is not None and status.value_or_none().strip().lower() == "current"
 
-        zero = Money("0", "GBP")
-        ps = persons.value_or_none()
+        from houses.model.domain import home_equity_contributions
+
+        ps = persons.value_or_none() or []
+        contributions = home_equity_contributions(ps)
         total = _ZERO
         for p in ps:
-            sale = getattr(p, "home_sale_price", zero)
-            mortgage = getattr(p, "outstanding_mortgage", zero)
-            cash = getattr(p, "cash_contribution", zero)
-            sale_amt = sale.amount if isinstance(sale, Money) else Decimal(str(sale))
-            mortgage_amt = mortgage.amount if isinstance(mortgage, Money) else Decimal(str(mortgage))
-            cash_amt = cash.amount if isinstance(cash, Money) else Decimal(str(cash))
-            # Home equity counts ONLY when the person is selling a home —
-            # otherwise the deposit is cash alone (a person with no home
-            # must not leak stale home fields into the deposit).  Legacy
-            # dict entries (tolerated by the getattr reads above) fall
-            # back to the cash path rather than crashing the node.
-            equity = (
-                max(_ZERO, sale_amt - mortgage_amt)
-                if isinstance(p, Person) and _selling_home(p)
-                else _ZERO
-            )
-            # Cash contributions excluded for Current (owner-occupied) properties
+            name = getattr(p, "name", None)
+            if not name or name not in contributions:
+                continue  # children / legacy entries never contribute
+            share = contributions[name]
             if not is_current:
-                equity += cash_amt
-            total += equity
+                cash = getattr(p, "cash_contribution", Money("0", "GBP"))
+                share += cash.amount if isinstance(cash, Money) else Decimal(str(cash))
+            total += share
         return Attempt.succeeded(Money(str(total), "GBP"))

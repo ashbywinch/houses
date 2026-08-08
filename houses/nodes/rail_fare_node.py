@@ -99,7 +99,10 @@ class RailFareNode(DerivedNode[Commute]):
 
         terminal_station = self._find_terminal_station(registry, commute)
         if terminal_station is None:
-            return Attempt.impossible("terminal station not found in route legs")
+            # No train/tube leg in the route (bus-only or walking-heavy
+            # transit).  The commute is still valid — return it without
+            # the rail fare rather than failing the whole commute.
+            return Attempt.succeeded(commute)
 
         fare = registry.fare_between(origin, terminal_station)
         if fare is None:

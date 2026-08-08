@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { PropertyDetail, PropertySummary, TriageEntry } from '../types'
+import type { GroupMonthlyCost, PropertyDetail, PropertySummary, TriageEntry } from '../types'
 import { fetchAllSummaries, fetchPropertyDetail, fetchSettings, patchTriage } from '../services/api'
 
 export const usePropertiesStore = defineStore('properties', () => {
@@ -11,6 +11,65 @@ export const usePropertiesStore = defineStore('properties', () => {
   const error = ref<string | null>(null)
   const settings = ref<{ commute_thresholds?: { good: number; warn: number } }>({})
   const triage = ref<Record<string, TriageEntry>>({})
+  // Per-person commute ceilings (fine_max_minutes) + current POI labels
+  // (C4/C9): captured from /api/settings so cards can flag stale offices
+  // and the list can hide houses over the family's ceiling.
+  const commuteCeilings = ref<Record<string, { fine: number; isChild: boolean }>>({})
+  // The green→amber boundary (good_max_minutes) — the 'commute colour
+  // bands' — set per person in Settings and read by the card pills.
+  const commuteGoods = ref<Record<string, number>>({})
+  const poiLabels = ref<Record<string, string[]>>({})
+  // C9: houses over the family commute ceiling are hidden only when the
+  // user opts in — persisted here so the choice survives navigation.
+  const showOverCeiling = ref(false)
+
+  // Where the list page was scrolled to when the user left for a detail
+  // page — restored on back-navigation. Lives in the store so it
+  // survives SPA navigation but resets on a full page reload (a reload
+  // starts the list at the top).
+  const listScrollY = ref(0)
+
+  // The two headline labels ("S+L", "Ashby") derived from the settings
+  // persons (joint owners = current-home holders + co-owners; everyone
+  // else is an other adult). Used when a property's group_monthly_cost
+  // is impossible — the card still shows BOTH labelled rows, each with
+  // the unknown marker, instead of collapsing to one.
+  const groupLabels = ref<{ coupleLabel: string; othersLabel: string }>({ coupleLabel: '', othersLabel: '' })
+
+  // ── What-if (Part D) ──────────────────────────────────────────
+  // Hypothetical monthly totals per property while the "What if…"
+  // panel is active; null when showing real numbers.
+  const whatIfTotals = ref<Record<string, GroupMonthlyCost> | null>(null)
+
+  function applyWhatIf(results: Record<string, { succeeded: boolean; group?: GroupMonthlyCost | null }>) {
+    const totals: Record<string, GroupMonthlyCost> = {}
+    for (const [rid, r] of Object.entries(results)) {
+      if (r.succeeded && r.group) totals[rid] = r.group
+    }
+    whatIfTotals.value = Object.keys(totals).length > 0 ? totals : null
+  }
+
+  function clearWhatIf() {
+    whatIfTotals.value = null
+  }
+
+  /** The monthly total to show/filter/sort by for a property: the
+   * hypothetical value when the what-if is active, else the real one. */
+  /** The couple's monthly figure (the deal-breaker) — what-if overlay
+   *  when active, else the real summary value. */
+  function coupleTotalFor(rid: string): number | null {
+    const wt = whatIfTotals.value?.[rid]
+    const g = wt ?? (summaries.value[rid]?.group_monthly_cost?.succeeded ? summaries.value[rid]?.group_monthly_cost?.value : null)
+    if (!g?.couple) return null
+    return Number(g.couple.value)
+  }
+
+  function groupCostFor(rid: string): GroupMonthlyCost | null {
+    const wt = whatIfTotals.value?.[rid]
+    if (wt) return wt
+    const s = summaries.value[rid]?.group_monthly_cost
+    return s?.succeeded && s.value ? s.value : null
+  }
 
   async function loadAll() {
     loading.value = true
@@ -33,7 +92,7 @@ export const usePropertiesStore = defineStore('properties', () => {
           }
         }
       }
-    } catch (e) {
+      } catch (e) {
       console.error('Failed to load properties:', e)
       error.value = 'Something went wrong loading properties. Please try again.'
     } finally {
@@ -41,9 +100,57 @@ export const usePropertiesStore = defineStore('properties', () => {
     }
   }
 
+  interface PersonEntry {
+    name: string
+    is_child?: boolean
+    places_of_interest?: { label: string }[]
+    home_sale_price?: { amount: string }
+    outstanding_mortgage?: { amount: string }
+    home_co_owners?: { name: string; share?: number }[]
+  }
+  interface SettingsPayload {
+    persons?: { value?: PersonEntry[] }
+    commute_thresholds?: { value?: Record<string, { good_max_minutes?: number; fine_max_minutes?: number }> }
+  }
+
   async function loadSettings() {
     try {
-      settings.value = await fetchSettings()
+      const data = (await fetchSettings()) as SettingsPayload
+      settings.value = data as unknown as { commute_thresholds?: { good: number; warn: number } }
+      const thresholds = data.commute_thresholds?.value ?? {}
+      const persons = data.persons?.value ?? []
+      const byName = new Map(persons.map(p => [p.name, p]))
+      const ceilings: Record<string, { fine: number; isChild: boolean }> = {}
+      const labels: Record<string, string[]> = {}
+      for (const [name, t] of Object.entries(thresholds)) {
+        const p = byName.get(name)
+        ceilings[name] = {
+          fine: t.fine_max_minutes ?? 75,
+          isChild: Boolean(p?.is_child),
+        }
+        commuteGoods.value[name] = t.good_max_minutes ?? 45
+        labels[name] = (p?.places_of_interest ?? []).map(poi => poi.label)
+      }
+      commuteCeilings.value = ceilings
+      poiLabels.value = labels
+      // Mirror the DAG's joint_owner_names: current-home holders +
+      // co-owners form the couple; every other adult is an other.
+      const adults = persons.filter(p => !p.is_child)
+      const money = (v?: { amount: string }) => Number(v?.amount ?? 0) > 0
+      const owners = new Set<string>()
+      for (const p of adults) {
+        if (money(p.home_sale_price) || money(p.outstanding_mortgage) || (p.home_co_owners?.length ?? 0) > 0) {
+          owners.add(p.name)
+        }
+        for (const co of p.home_co_owners ?? []) owners.add(co.name)
+      }
+      if (owners.size === 0) {
+        for (const p of adults) owners.add(p.name)
+      }
+      groupLabels.value = {
+        coupleLabel: [...adults.filter(p => owners.has(p.name))].map(p => p.name[0]?.toUpperCase() ?? '').join('+'),
+        othersLabel: adults.filter(p => !owners.has(p.name)).map(p => p.name).join('+'),
+      }
     } catch {
       // defaults used
     }
@@ -88,5 +195,10 @@ export const usePropertiesStore = defineStore('properties', () => {
     details.value[rid] = data
   }
 
-  return { rids, summaries, details, triage, settings, loading, error, loadAll, loadDetail, updateSummary, updateDetail, toggleTriage }
+  return {
+    rids, summaries, details, triage, settings, loading, error,
+    commuteCeilings, commuteGoods, poiLabels, showOverCeiling, groupLabels, listScrollY,
+    whatIfTotals, applyWhatIf, clearWhatIf, coupleTotalFor, groupCostFor,
+    loadAll, loadSettings, loadDetail, updateSummary, updateDetail, toggleTriage,
+  }
 })

@@ -28,9 +28,16 @@ const colour = computed(() => {
 const displayText = computed(() => {
   const durStr = formatDuration(props.duration)
   const modeStr = props.mode ? ` ${props.mode}` : ''
-  const costStr = props.cost != null ? ` · £${props.cost.toFixed(2)}` : ''
+  const cap = props.cost != null && props.cost >= 100
+  const costStr = props.cost != null ? ` · £${props.cost.toFixed(2)}${cap ? ' (max)' : ''}` : ''
   if (props.label) return `${props.label} ${durStr}${modeStr}${costStr}`
   return `${durStr}${modeStr}${costStr}`
+})
+
+const titleText = computed(() => {
+  if (props.duration === null) return 'No route found for this commute'
+  if (props.cost != null && props.cost >= 100) return '£100.00 is the TfL daily maximum, not the actual fare'
+  return undefined
 })
 
 function formatDuration(minutes: number | null): string {
@@ -44,7 +51,7 @@ function formatDuration(minutes: number | null): string {
 </script>
 
 <template>
-  <span class="pill" :class="colour" :title="duration === null ? 'No route found for this commute' : undefined">
+  <span class="pill" :class="colour" :title="titleText">
     {{ displayText }}
   </span>
 </template>
@@ -53,16 +60,16 @@ function formatDuration(minutes: number | null): string {
 .pill {
   display: inline-flex;
   align-items: center;
-  padding: 6px 12px;
-  border-radius: 999px;
-  font-size: 14px;
-  font-weight: 700;
-  line-height: 1.6;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  line-height: 1.4;
   white-space: nowrap;
-  min-height: 44px;
 }
-.pill--good { background: var(--green-bg); color: var(--green); }
-.pill--warn { background: var(--orange-bg); color: var(--orange); }
-.pill--bad { background: var(--red-bg); color: var(--red); }
-.pill--muted { background: var(--slate-100); color: var(--text-muted); }
+.pill--good { background: var(--green); color: #fff; }
+.pill--warn { background: var(--orange); color: #fff; }
+.pill--bad { background: var(--red); color: #fff; }
+.pill--muted { background: var(--commute-none); color: #fff; }
 </style>

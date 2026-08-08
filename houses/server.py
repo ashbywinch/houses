@@ -197,7 +197,7 @@ async def list_properties(tab: str = Query(description="Tab: 'view' or 'data'"))
     return {"tab": tab, "properties": props}
 
 
-@app.post("/properties", response_model=None)
+@app.post("/api/properties", response_model=None)
 async def upsert_property(
     payload: Property | None = None,
     no_write: bool = Query(default=False),
@@ -220,9 +220,21 @@ async def upsert_property(
         payload.address if is_outcode(postcode) else postcode
         address = payload.address
 
-        # Check for existing
+        # Check for existing — the DATABASE is the source of truth for
+        # duplicates (a re-added Rightmove URL must not create a second
+        # property), with the sheet as a secondary guard.
         rid = payload.rid or RightmoveProperty.rid_from_url(payload.url)
         if not fields and rid:
+            from dag.persistence import property_rids
+
+            if rid in property_rids():
+                return JSONResponse(
+                    content={
+                        "status": "error",
+                        "error": f"Property {rid} already exists. Use fields= to re-enrich specific fields.",
+                    },
+                    status_code=400,
+                )
             gclient = get_client()
             if gclient and settings.sheet_id:
                 try:
@@ -284,6 +296,7 @@ async def upsert_property(
                         "rightmove_bedrooms": prop.rightmove_bedrooms,
                         "rightmove_price": prop.rightmove_price,
                         "rightmove_location": prop.rightmove_location,
+                        "postcode": prop.postcode,
                     },
                 )
                 register_property(rid2, prop)

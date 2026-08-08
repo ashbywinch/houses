@@ -51,6 +51,33 @@ No-arg `make_services()` = working environment for most tests. Default behaviour
 - `pytest.raises` for errors; verify the message when it's part of the contract.
 - `in` checks for partial error-message matches, not hardcoded full strings.
 
+## Regression tests assert the contract, not the fix
+
+A test written for a bug fix asserts the user-visible invariant the bug violated — the outcome a caller relies on — never the mechanism you changed:
+
+- **Derived from the symptom, not the code.** If writing the test requires the buggy code open, it's testing the mechanism. The bug report states the contract.
+- **Mechanism-independent.** It must fail today, pass after the fix, and still fail if the same symptom returns through a different root cause.
+- **Interaction-spanning.** Where two things can shadow or override each other (literal vs parameterised routes, default vs specific, toggle states), assert both sides — a precedence bug in either direction must fail loudly.
+- **Outcome-level.** "The commute is available on the card" over "the node returned succeeded"; "both routes resolve to their own handlers" over "route X is declared before route Y".
+
+A regression test that only passes because of the specific lines changed is testing the edit, not the bug.
+
+### A regression test declares itself
+
+Nothing in a test's code says it is a regression test, or what the user saw — the intent must be written where reviewers read. Every regression test carries both in its docstring, opening with the symptom:
+
+```python
+def test_x_...():
+    """Regression: <what the user saw, in user language> — ...
+    Contract: <the invariant the bug violated — what must be true>"""
+```
+
+- The **function name** states the *contract* (the outcome), never the mechanism.
+- The **docstring's first line names the symptom** — the bug report's words ("the dropdown was empty", "the commute disappeared"), not the root cause.
+- The root cause may follow, one line, for archaeology — it explains the fix, it does not define the test.
+
+A docstring that only describes the scenario without the symptom is an ordinary behaviour test, and the reviewer cannot tell it pins a real bug.
+
 ## Deterministic fixtures
 
 Integration tests needing a real SQLite DB use in-memory, shared between the app and DAG connection paths — see `tests/unit/isolation_fixtures.py`.

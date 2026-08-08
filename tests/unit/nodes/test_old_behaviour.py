@@ -110,9 +110,12 @@ class TestCouncilTaxNode:
                 from money import Money
 
                 from dag.attempt import Attempt
+                from dag.measurement import Measurement
                 from houses.council_tax_info import CouncilTaxInfo
 
-                return Attempt.succeeded(CouncilTaxInfo(band="D", yearly_cost=Money("1800", "GBP")))
+                return Attempt.succeeded(
+                    CouncilTaxInfo(band="D", yearly_cost=Measurement(Money("1800", "GBP"), 0.0))
+                )
 
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services

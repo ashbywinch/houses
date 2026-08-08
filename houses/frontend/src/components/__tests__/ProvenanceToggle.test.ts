@@ -13,9 +13,14 @@ const fakeProvenance = {
 }
 
 describe('ProvenanceToggle — the single standard provenance affordance (P8)', () => {
-  it('renders the standard trigger', () => {
+  it('renders an ICON trigger, not a text link', () => {
     const wrapper = mount(ProvenanceToggle, { props: { provenance: fakeProvenance, title: 'Household Deposit' } })
-    expect(wrapper.text()).toContain('How is this calculated?')
+    const btn = wrapper.find('button.provenance-toggle__trigger')
+    expect(btn.find('.provenance-toggle__icon').text()).toBe('ⓘ')
+    // The sentence must NOT be visible as a link — it lives in the
+    // accessible name/tooltip only.
+    expect(wrapper.text()).not.toContain('How is this calculated?')
+    expect(btn.attributes('aria-label')).toBe('How is this calculated?')
   })
 
   it('reveals the provenance on click', async () => {
@@ -26,13 +31,14 @@ describe('ProvenanceToggle — the single standard provenance affordance (P8)', 
     expect(wrapper.text()).toContain('£550,000.00 sale')
   })
 
-  it('toggles aria-expanded and the label', async () => {
+  it('toggles aria-expanded and the accessible name', async () => {
     const wrapper = mount(ProvenanceToggle, { props: { provenance: fakeProvenance } })
     const btn = wrapper.find('button.provenance-toggle__trigger')
     expect(btn.attributes('aria-expanded')).toBe('false')
+    expect(btn.attributes('aria-label')).toBe('How is this calculated?')
     await btn.trigger('click')
     expect(btn.attributes('aria-expanded')).toBe('true')
-    expect(btn.text()).toContain('Hide calculation')
+    expect(btn.attributes('aria-label')).toBe('Hide calculation')
   })
 
   it('renders an optional hint under the trigger', () => {

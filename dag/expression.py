@@ -22,6 +22,7 @@ from typing import Any, Generic, TypeVar
 from money import Money
 
 from dag.attempt import Attempt, Formula, FormulaLine
+from dag.measurement import Measurement
 
 T = TypeVar("T")
 
@@ -45,6 +46,8 @@ class Expression(ABC, Generic[T]):
         """Format a Python value for formula display."""
         if isinstance(v, Money):
             return f"£{v.amount:,.2f}"
+        if isinstance(v, Measurement):
+            return f"{self._format_value(v.value)} ± {v.stddev:g}"
         if isinstance(v, Decimal):
             if v < Decimal("0.01"):
                 return f"{v:.2%}"
@@ -186,8 +189,15 @@ class Add(Expression):
             else:
                 try:
                     total = total + result.value
-                except TypeError as e:
-                    return Attempt.impossible(f"Cannot add: {e}")
+                except TypeError:
+                    # Addition is commutative — a left operand whose
+                    # __add__ raises (instead of returning NotImplemented)
+                    # may still accept the reversed order (e.g. Money +
+                    # Measurement). Fall back before declaring failure.
+                    try:
+                        total = result.value + total
+                    except TypeError as e:
+                        return Attempt.impossible(f"Cannot add: {e}")
         if total is None:
             return Attempt.impossible("No terms to add")
         return Attempt.succeeded(total)

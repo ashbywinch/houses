@@ -27,7 +27,6 @@ LIFE_INSURANCE_MONTHLY = "settings/life_insurance_monthly"
 WORKING_WEEKS = "settings/working_weeks"
 CURRENT_HOME_SALE = "settings/current_home_sale_price"
 CURRENT_HOME_MORTGAGE = "settings/current_home_outstanding_mortgage"
-PETROL_MPG = "settings/petrol_mpg"
 PETROL_COST_PER_LITRE = "settings/petrol_cost_per_litre"
 RENTAL_INCOME_MONTHLY = "settings/rental_income_monthly"
 
@@ -42,7 +41,6 @@ SETTING_DEFAULTS: dict[str, tuple[type, callable]] = {
     WORKING_WEEKS: (int, lambda: 46),
     CURRENT_HOME_SALE: (Money, lambda: Money("0", "GBP")),
     CURRENT_HOME_MORTGAGE: (Money, lambda: Money("0", "GBP")),
-    PETROL_MPG: (int, lambda: 45),
     PETROL_COST_PER_LITRE: (Decimal, lambda: Decimal("1.45")),
     RENTAL_INCOME_MONTHLY: (Money, lambda: Money("0", "GBP")),
 }
@@ -56,7 +54,6 @@ API_KEY_TO_NODE: dict[str, str] = {
     "working_weeks_per_year": WORKING_WEEKS,
     "current_home_sale_price": CURRENT_HOME_SALE,
     "current_home_outstanding_mortgage": CURRENT_HOME_MORTGAGE,
-    "petrol_mpg": PETROL_MPG,
     "petrol_cost_per_litre": PETROL_COST_PER_LITRE,
     "rental_income_monthly": RENTAL_INCOME_MONTHLY,
 }
@@ -74,7 +71,28 @@ def _serialize_for_api(val):
     return val
 
 
+
+
+def aggregate_dict(setting_nodes: dict[str, UserInputNode]) -> dict:
+    """Build the API-key financial dict from the individual setting
+    nodes — a synchronous read for API serialization (no scheduler
+    needed). Falls back to the defaults for nodes never written."""
+    result: dict = {}
+    for node_id, node in setting_nodes.items():
+        api_key = NODE_TO_API_KEY.get(node_id)
+        if api_key is None:
+            continue
+        attempt = node.latest_attempt()
+        val = attempt.value_or_none() if attempt and attempt.succeeded else None
+        if val is None:
+            default = SETTING_DEFAULTS.get(node_id)
+            val = default[1]() if default else None
+        if val is not None:
+            result[api_key] = _serialize_for_api(val)
+    return result
+
 # ── SettingsNode Aggregate ───────────────────────────────
+
 
 
 class SettingsNode(DerivedNode[dict]):

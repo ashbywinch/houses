@@ -5,6 +5,7 @@ from decimal import Decimal
 import pytest
 from money import Money
 
+from dag.measurement import Measurement
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.council_tax_info import CouncilTaxInfo
@@ -120,12 +121,15 @@ class TestTotalMonthlyHousingCostNode:
         ri.push(Money("0", "GBP"), "test")
         st.push("", "test")
         cb.push({"yearly_total_gbp": "0"}, "test")
-        ct.push(CouncilTaxInfo(yearly_cost=Money("0", "GBP")), "test")
+        ct.push(CouncilTaxInfo(yearly_cost=Measurement(Money("0", "GBP"), 0.0)), "test")
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded, f"node failed: {a.status}: {a.error}"
-        assert isinstance(a.value_or_none(), Money)
-        assert float(a.value_or_none().amount) == 0
+        total = a.value_or_none()
+        assert total is not None
+        assert isinstance(total.value, Money)
+        assert float(total.value.amount) == 0
+        assert total.stddev == 0.0
 
     @pytest.mark.asyncio
     async def test_computes_total_from_components(self):
@@ -154,13 +158,17 @@ class TestTotalMonthlyHousingCostNode:
         ri.push(Money("0", "GBP"), "test")
         st.push("", "test")
         cb.push({"yearly_total_gbp": "1200"}, "test")
-        ct.push(CouncilTaxInfo(yearly_cost=Money("2400", "GBP")), "test")
+        ct.push(CouncilTaxInfo(yearly_cost=Measurement(Money("2400", "GBP"), 0.0)), "test")
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
-        # 2000 + (6000/12*2/3) + 50 + (1200/12) + (2400/12) - 0
-        expected = 2000 + 333.33 + 50 + 100 + 200
-        assert float(a.value_or_none().amount) == pytest.approx(expected, abs=0.01)
+        total = a.value_or_none()
+        assert total is not None
+        # the sinking fund is the FULL monthly share (no ⅔ fudge — every
+        # adult is a buyer, so all shares count): 2000 + 500 + 50 + 100 + 200
+        expected = 2000 + 500 + 50 + 100 + 200
+        assert float(total.value.amount) == pytest.approx(expected, abs=0.01)
+        assert total.stddev == 0.0
 
 
 class TestMonthlySinkingFundProvenance:
@@ -178,7 +186,9 @@ class TestMonthlySinkingFundProvenance:
 
         a = await node.attempt()
         assert a.succeeded, f"expected succeeded, got: {a.status}: {a.error}"
-        assert a.value_or_none() == Money("416.67", "GBP")
+        # The ⅔ fudge is gone: monthly = yearly ÷ 12 (the per-person
+        # share is applied separately by the headline's group node).
+        assert a.value_or_none() == Money("625.00", "GBP")
 
         prov = await node.build_provenance()
         assert prov.formula is not None, "monthly sinking must expose a formula"

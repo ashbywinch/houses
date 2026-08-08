@@ -26,14 +26,6 @@
                     "endColumn": 37,
                     "lineCount": 1
                 }
-            },
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 62,
-                    "endColumn": 70,
-                    "lineCount": 1
-                }
             }
         ],
         "./dag/expression.py": [
@@ -592,14 +584,6 @@
                     "endColumn": 72,
                     "lineCount": 1
                 }
-            },
-            {
-                "code": "reportOptionalIterable",
-                "range": {
-                    "startColumn": 17,
-                    "endColumn": 19,
-                    "lineCount": 1
-                }
             }
         ],
         "./houses/nodes/geocode.py": [
@@ -696,29 +680,29 @@
             {
                 "code": "reportArgumentType",
                 "range": {
-                    "startColumn": 71,
-                    "endColumn": 75,
+                    "startColumn": 61,
+                    "endColumn": 82,
                     "lineCount": 1
                 }
             },
             {
-                "code": "reportArgumentType",
+                "code": "reportOptionalMemberAccess",
                 "range": {
-                    "startColumn": 110,
-                    "endColumn": 114,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 57,
-                    "endColumn": 78,
+                    "startColumn": 39,
+                    "endColumn": 43,
                     "lineCount": 1
                 }
             }
         ],
         "./houses/nodes/petrol.py": [
+            {
+                "code": "reportIncompatibleMethodOverride",
+                "range": {
+                    "startColumn": 8,
+                    "endColumn": 15,
+                    "lineCount": 1
+                }
+            },
             {
                 "code": "reportIncompatibleMethodOverride",
                 "range": {
@@ -934,6 +918,14 @@
                     "endColumn": 15,
                     "lineCount": 1
                 }
+            },
+            {
+                "code": "reportIncompatibleMethodOverride",
+                "range": {
+                    "startColumn": 8,
+                    "endColumn": 15,
+                    "lineCount": 1
+                }
             }
         ],
         "./houses/nodes/total_works_node.py": [
@@ -960,6 +952,14 @@
                 "range": {
                     "startColumn": 21,
                     "endColumn": 42,
+                    "lineCount": 1
+                }
+            },
+            {
+                "code": "reportIncompatibleMethodOverride",
+                "range": {
+                    "startColumn": 8,
+                    "endColumn": 15,
                     "lineCount": 1
                 }
             },
@@ -1052,24 +1052,24 @@
             {
                 "code": "reportArgumentType",
                 "range": {
-                    "startColumn": 57,
-                    "endColumn": 89,
+                    "startColumn": 25,
+                    "endColumn": 57,
                     "lineCount": 1
                 }
             },
             {
                 "code": "reportArgumentType",
                 "range": {
-                    "startColumn": 45,
-                    "endColumn": 77,
+                    "startColumn": 25,
+                    "endColumn": 57,
                     "lineCount": 1
                 }
             },
             {
                 "code": "reportArgumentType",
                 "range": {
-                    "startColumn": 88,
-                    "endColumn": 115,
+                    "startColumn": 25,
+                    "endColumn": 52,
                     "lineCount": 1
                 }
             },
@@ -1290,14 +1290,6 @@
                 "range": {
                     "startColumn": 57,
                     "endColumn": 78,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportAssignmentType",
-                "range": {
-                    "startColumn": 37,
-                    "endColumn": 89,
                     "lineCount": 1
                 }
             }
@@ -2128,6 +2120,14 @@
                     "endColumn": 23,
                     "lineCount": 1
                 }
+            },
+            {
+                "code": "reportArgumentType",
+                "range": {
+                    "startColumn": 75,
+                    "endColumn": 78,
+                    "lineCount": 1
+                }
             }
         ],
         "./tests/unit/nodes/test_commute_pipeline.py": [
@@ -2248,16 +2248,6 @@
                 "range": {
                     "startColumn": 12,
                     "endColumn": 26,
-                    "lineCount": 1
-                }
-            }
-        ],
-        "./tests/unit/nodes/test_current_property.py": [
-            {
-                "code": "reportOptionalMemberAccess",
-                "range": {
-                    "startColumn": 39,
-                    "endColumn": 45,
                     "lineCount": 1
                 }
             }
@@ -2512,24 +2502,6 @@
                 }
             }
         ],
-        "./tests/unit/nodes/test_monthly_costs.py": [
-            {
-                "code": "reportOptionalMemberAccess",
-                "range": {
-                    "startColumn": 39,
-                    "endColumn": 45,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportOptionalMemberAccess",
-                "range": {
-                    "startColumn": 39,
-                    "endColumn": 45,
-                    "lineCount": 1
-                }
-            }
-        ],
         "./tests/unit/nodes/test_old_behaviour.py": [
             {
                 "code": "reportArgumentType",
@@ -2568,6 +2540,32 @@
                 "range": {
                     "startColumn": 45,
                     "endColumn": 66,
+                    "lineCount": 1
+                }
+            }
+        ],
+        "./tests/unit/nodes/test_park_and_ride.py": [
+            {
+                "code": "reportArgumentType",
+                "range": {
+                    "startColumn": 17,
+                    "endColumn": 50,
+                    "lineCount": 1
+                }
+            },
+            {
+                "code": "reportArgumentType",
+                "range": {
+                    "startColumn": 33,
+                    "endColumn": 61,
+                    "lineCount": 1
+                }
+            },
+            {
+                "code": "reportArgumentType",
+                "range": {
+                    "startColumn": 68,
+                    "endColumn": 90,
                     "lineCount": 1
                 }
             }
@@ -2655,6 +2653,56 @@
                     "startColumn": 12,
                     "endColumn": 13,
                     "lineCount": 3
+                }
+            }
+        ],
+        "./tests/unit/nodes/test_rail_fare.py": [
+            {
+                "code": "reportArgumentType",
+                "range": {
+                    "startColumn": 56,
+                    "endColumn": 78,
+                    "lineCount": 1
+                }
+            },
+            {
+                "code": "reportArgumentType",
+                "range": {
+                    "startColumn": 17,
+                    "endColumn": 49,
+                    "lineCount": 1
+                }
+            },
+            {
+                "code": "reportArgumentType",
+                "range": {
+                    "startColumn": 51,
+                    "endColumn": 72,
+                    "lineCount": 1
+                }
+            },
+            {
+                "code": "reportArgumentType",
+                "range": {
+                    "startColumn": 50,
+                    "endColumn": 72,
+                    "lineCount": 1
+                }
+            },
+            {
+                "code": "reportArgumentType",
+                "range": {
+                    "startColumn": 51,
+                    "endColumn": 72,
+                    "lineCount": 1
+                }
+            },
+            {
+                "code": "reportOptionalMemberAccess",
+                "range": {
+                    "startColumn": 29,
+                    "endColumn": 37,
+                    "lineCount": 1
                 }
             }
         ],

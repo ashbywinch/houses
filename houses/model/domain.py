@@ -13,6 +13,7 @@ Existing classes imported for convenience:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 
 from money import Money
 from pint import Quantity as _Quantity
@@ -32,7 +33,7 @@ class PlaceOfInterest:
     address: str = ""
     trips_per_week: int = 1
     weeks_per_year: int = 46
-    # Modes the person accepts for this commute: "train" | "car" | "walk",
+    # Modes the person accepts for this commute: "transit" | "car" | "walk",
     # any combination.  Empty means unset (legacy) — the effective value is
     # derived by ``effective_acceptable_modes`` and is what routing uses.
     acceptable_modes: tuple[str, ...] = ()
@@ -40,6 +41,19 @@ class PlaceOfInterest:
     def to_provenance_value(self) -> dict:
         """JSON-safe projection for provenance display."""
         return {"label": self.label, "address": self.address, "acceptable_modes": list(self.acceptable_modes)}
+
+
+@dataclass(frozen=True)
+class HomeCoOwner:
+    """Another person's share (%) of THIS person's declared home.
+
+    The holder declares co-owners; the holder keeps the remainder. The
+    co-owner sees it read-only on their own settings so they understand
+    the sale counts toward their deposit and don't add the house again.
+    """
+
+    name: str
+    share: int
 
 
 @dataclass(frozen=True)
@@ -51,6 +65,10 @@ class Person:
     is_child: bool = False
     bus_walk_penalty: _Quantity = _Quantity(30, "minute")
     acceptable_schools: tuple[str, ...] = ("mixed",)
+    petrol_mpg: int = 45
+    home_co_owners: tuple[HomeCoOwner, ...] = ()
+    home_property_rid: str = ""
+    rent_paid_monthly: Money = Money("0", "GBP")
     home_sale_price: Money = Money("0", "GBP")
     outstanding_mortgage: Money = Money("0", "GBP")
     cash_contribution: Money = Money("0", "GBP")
@@ -83,7 +101,7 @@ class Person:
 
 
 # Canonical order for the all-modes set (also the UI checkbox order).
-ALL_ACCEPTABLE_MODES: tuple[str, ...] = ("train", "car", "walk")
+ALL_ACCEPTABLE_MODES: tuple[str, ...] = ("transit", "car", "walk")
 
 
 def effective_acceptable_modes(poi: PlaceOfInterest) -> tuple[str, ...]:
@@ -103,7 +121,7 @@ def effective_acceptable_modes(poi: PlaceOfInterest) -> tuple[str, ...]:
     if "bracknell" in label or "dad" in label:
         return ("car",)
     if label in ("pimlico", "aldgate"):
-        return ("train",)
+        return ("transit",)
     return ALL_ACCEPTABLE_MODES
 
 
@@ -248,3 +266,62 @@ class Walkability:
     walk_to_town: _Quantity | None = None
     amenities: str = ""
     town_description: str = ""
+
+
+def joint_owner_names(persons: list) -> set[str]:
+    """The people who will jointly own the new house — derived from
+    current-home ownership: the holder plus everyone named as a
+    co-owner (children never count). Their expenses form the headline
+    monthly figure; everyone else is still a buyer (their cash counts
+    in the deposit) but their monthly costs aren't the deal-breaker.
+
+    Falls back to ALL adults when nobody holds a home (e.g. all-cash
+    first-time buyers) so the figure never collapses to zero.
+    """
+    adults = [p for p in persons if isinstance(p, Person) and not p.is_child]
+    owners = {
+        p.name
+        for p in adults
+        if (p.home_sale_price and p.home_sale_price.amount > 0)
+        or (p.outstanding_mortgage and p.outstanding_mortgage.amount > 0)
+        or p.home_co_owners
+    }
+    for p in adults:
+        owners.update(co.name for co in p.home_co_owners)
+    if not owners:
+        return {p.name for p in adults}
+    return owners
+
+
+def home_equity_contributions(persons: list) -> dict[str, Decimal]:
+    """Each adult's deposit contribution from home equity, distributed by
+    co-owner shares.
+
+    Every home-holder's equity (sale − mortgage, when selling) splits by
+    their ``home_co_owners`` — each co-owner gets their share, the holder
+    keeps the remainder. A person can hold a home AND co-own another's;
+    both count. Children never contribute. The TOTAL is unchanged —
+    only the attribution is honest.
+    """
+    by_name = {p.name: p for p in persons if isinstance(p, Person) and not p.is_child}
+    gross: dict[str, Decimal] = {}
+    for p in by_name.values():
+        if not effective_selling_home(p):
+            continue
+        sale = p.home_sale_price.amount
+        mortgage = p.outstanding_mortgage.amount
+        gross[p.name] = max(Decimal(0), sale - mortgage)
+    out: dict[str, Decimal] = {}
+    for name, p in by_name.items():
+        mine = Decimal(0)
+        if name in gross:
+            co_sum = Decimal(sum(co.share for co in p.home_co_owners))
+            mine += gross[name] * (Decimal(100) - co_sum) / Decimal(100)
+        for holder, equity in gross.items():
+            if holder == name:
+                continue
+            for co in by_name[holder].home_co_owners:
+                if co.name == name:
+                    mine += equity * Decimal(co.share) / Decimal(100)
+        out[name] = mine
+    return out

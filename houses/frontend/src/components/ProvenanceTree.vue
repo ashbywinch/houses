@@ -161,7 +161,7 @@ function sourceLabel(st: string | undefined): string {
   display: flex;
   gap: var(--sp-1);
   padding: var(--sp-2) 0;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--slate-500);
   border-bottom: 1px solid var(--slate-200);
   margin-bottom: var(--sp-2);
@@ -176,7 +176,7 @@ function sourceLabel(st: string | undefined): string {
   margin-bottom: var(--sp-2);
 }
 .prov-controls__btn {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--slate-500);
   background: var(--slate-100);
   border: 1px solid var(--slate-200);
@@ -200,7 +200,7 @@ function sourceLabel(st: string | undefined): string {
 .prov-details > .prov-node__head::marker { display: none; content: ''; }
 .prov-details > .prov-node__head::before {
   content: '▶';
-  font-size: 7px;
+  font-size: var(--fs-xs);
   color: var(--slate-400);
   width: 12px;
   text-align: center;
@@ -232,7 +232,7 @@ function sourceLabel(st: string | undefined): string {
 
 /* Source badge */
 .prov-node__source-badge {
-  font-size: 9px;
+  font-size: var(--fs-xs);
   font-weight: var(--fw-bold);
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -255,7 +255,7 @@ function sourceLabel(st: string | undefined): string {
 }
 .prov-node__desc {
   color: var(--slate-500);
-  font-size: 10px;
+  font-size: var(--fs-xs);
 }
 
 /* Freshness dot */
@@ -292,7 +292,7 @@ function sourceLabel(st: string | undefined): string {
   border-radius: var(--radius-sm);
   border: 1px solid var(--slate-200);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-xs);
 }
 .prov-formula__line {
   display: flex;

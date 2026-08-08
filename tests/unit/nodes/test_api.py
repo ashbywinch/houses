@@ -76,6 +76,61 @@ class TestPropertyApi:
         assert resp.status_code == 200
         assert isinstance(resp.json(), dict)
 
+    def test_current_homes_and_rid_routes_both_resolve(self):
+        """Regression: the 'choose a current house' dropdown was always
+        empty on the settings page — /api/properties/current-homes was
+        captured by the /api/properties/{rid} route (declared earlier),
+        returning 'Property current-homes not found'.
+
+        Contract: the two routes EACH resolve to their own handler — a
+        shadowing bug in either direction breaks one of them, so the
+        routing contract is tested from both callers' perspectives: the
+        literal route returns the homes list, and a real property RID
+        still returns that property."""
+        from money import Money
+
+        from houses.nodes.property import PropertyNodes
+        from houses.property_registry import register_property
+
+        client, _ = self._setup()
+        prop = PropertyNodes("88275093")
+        prop.rightmove_price.push(Money("500000", "GBP"), "test")
+        prop.rightmove_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        prop.rightmove_bedrooms.push("3", "test")
+        prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.corrected_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.postcode.push("UB2 4GN", "test")
+        prop.user_entered_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
+        prop.works_estimates.push({}, "test")
+        prop.rental_income.push(Money("0", "GBP"), "test")
+        prop.comment_status.push("current", "test")
+        register_property("88275093", prop)
+        # A non-current property must not appear in the homes list
+        other = PropertyNodes("99999999")
+        other.comment_status.push("", "test")
+        register_property("99999999", other)
+        flush_all()
+
+        # The literal route resolves to the homes list (not a {rid} lookup)
+        resp = client.get("/api/properties/current-homes")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["homes"] == [
+            {"rid": "88275093", "address": "31 Isambard Road, Southall, UB2 4GN"}
+        ]
+
+        # AND the parameterised route still resolves to its own property
+        # (a reorder that shadows {rid} would fail here)
+        resp = client.get("/api/properties/88275093")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["rid"] == "88275093"
+
+        # A non-current RID is still a valid property lookup — only the
+        # homes FILTER excluded it, not the routing
+        resp = client.get("/api/properties/99999999")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["rid"] == "99999999"
+
     def test_detail_subroute_not_caught_by_rid(self):
         """Detail sub-route should not be caught by {rid}."""
         client, _ = self._setup()
@@ -111,6 +166,34 @@ class TestSettingsApi:
         )
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
+
+    def test_get_settings_financial_reflects_patch(self):
+        """GET /settings financial must return the LIVE node values —
+        a patched rate shows up on the next read (regression: the old
+        aggregate blob went stale after PATCH)."""
+        from houses.nodes.settings_node import SETTING_DEFAULTS, aggregate_dict
+        from houses.services_provider import get_services
+
+        client = self._setup()
+        before = client.get("/api/settings").json()["financial"]
+        # sanity: the endpoint returns the API-key shape with defaults
+        assert "mortgage_rate" in before["value"]
+        assert "petrol_cost_per_litre" in before["value"]
+
+        resp = client.patch(
+            "/api/settings/financial",
+            json={"mortgage_rate": 0.06, "petrol_cost_per_litre": 1.60},
+        )
+        assert resp.status_code == 200
+
+        after = client.get("/api/settings").json()["financial"]
+        assert after["value"]["mortgage_rate"] == 0.06
+        assert after["value"]["petrol_cost_per_litre"] == 1.60
+        # MPG is per-person now, not a household finance
+        assert "petrol_mpg" not in after["value"]
+        # untouched nodes keep their defaults (serialized to float)
+        assert after["value"]["sinking_fund_rate"] == float(SETTING_DEFAULTS["settings/sinking_fund_rate"][1]())
+        assert aggregate_dict(get_services().setting_nodes) == after["value"]
 
     def test_put_persons_removed(self):
         """PUT /settings/persons (whole-list, no authz) must be gone."""
@@ -155,6 +238,7 @@ class TestPatchPersonApi:
                 name="Simon",
                 has_car=True,
                 email="simon@example.com",
+                is_superuser=superuser,  # live settings are authoritative
                 places_of_interest=(PlaceOfInterest("Pimlico", "1 Drummond Gate, Pimlico, London SW1V 2QQ"),),
             ),
             Person(name="Lorena", has_car=False, email="lorena@example.com"),
@@ -234,7 +318,7 @@ class TestPatchPersonApi:
                         "address": "1 Drummond Gate, Pimlico, London SW1V 2QQ",
                         "trips_per_week": 3,
                         "weeks_per_year": 46,
-                        "acceptable_modes": ["train", "car"],
+                        "acceptable_modes": ["transit", "car"],
                     }
                 ],
                 "thresholds": {"good_max_minutes": 25, "fine_max_minutes": 40},
@@ -243,7 +327,7 @@ class TestPatchPersonApi:
         assert resp.status_code == 200, resp.text[:300]
         simon = self._person(client, "Simon")
         poi = simon["places_of_interest"][0]
-        assert poi["acceptable_modes"] == ["train", "car"]
+        assert poi["acceptable_modes"] == ["transit", "car"]
         assert poi["trips_per_week"] == 3
         thresholds = client.get("/api/settings").json()["commute_thresholds"]["value"]["Simon"]
         assert thresholds == {"good_max_minutes": 25, "fine_max_minutes": 40}
@@ -259,12 +343,14 @@ class TestPatchPersonApi:
                 "name": "Simon",
                 "has_car": True,
                 "bus_walk_penalty": {"value": 20, "unit": "minute"},
+                "petrol_mpg": 40,
                 "home_sale_price": {"amount": "550000", "currency": "GBP"},
             },
         )
         assert resp.status_code == 200, resp.text[:300]
         simon = self._person(client, "Simon")
         assert simon["bus_walk_penalty"] == {"value": 20, "unit": "minute"}
+        assert simon["petrol_mpg"] == 40
         assert simon["home_sale_price"] == {"amount": "550000.00", "currency": "GBP"}
 
 
@@ -440,7 +526,7 @@ class TestPatchPersonApi:
         assert simon["editable_by"] == ["Simon"]
         assert simon["editable_by_me"] is True
         # unset modes migrate by rule: Pimlico → train
-        assert simon["places_of_interest"][0]["acceptable_modes"] == ["train"]
+        assert simon["places_of_interest"][0]["acceptable_modes"] == ["transit"]
         lorena = self._person(client, "Lorena")
         assert lorena["editable_by_me"] is False
         george = self._person(client, "George")
@@ -465,6 +551,7 @@ class TestSettingsPropagationApi:
                 name="Simon",
                 has_car=True,
                 email="simon@example.com",
+                is_superuser=True,  # live settings are authoritative
                 home_sale_price=Money("550000", "GBP"),
                 outstanding_mortgage=Money("373000", "GBP"),
             ),
@@ -501,6 +588,29 @@ class TestSettingsPropagationApi:
         register_property(rid, prop)
         return rid
 
+    def test_whole_pounds_large_money_fields_reject_pence(self):
+        """House-purchase amounts (sale/mortgage/cash) are whole pounds —
+        the server REJECTS pence (400) rather than silently rounding;
+        small monthly amounts still allow pence."""
+        client = self._setup()
+        for field in ("home_sale_price", "outstanding_mortgage", "cash_contribution"):
+            resp = client.patch(
+                "/api/settings/person/Ashby",
+                json={"name": "Ashby", "has_car": True, field: {"amount": "300000.50", "currency": "GBP"}},
+            )
+            assert resp.status_code == 400, f"{field}: expected 400, got {resp.status_code}: {resp.text}"
+            assert "whole number of pounds" in resp.json()["detail"], f"{field}: {resp.json()['detail']}"
+
+        # pence are fine on the small monthly field
+        resp = client.patch(
+            "/api/settings/person/Ashby",
+            json={"name": "Ashby", "has_car": True, "life_insurance_monthly": {"amount": "150.50", "currency": "GBP"}},
+        )
+        assert resp.status_code == 200, resp.text
+        value = client.get("/api/settings").json()["persons"]["value"]
+        ashby = next(p for p in value if p["name"] == "Ashby")
+        assert ashby["life_insurance_monthly"]["amount"] == "150.50"
+
     def test_get_settings_carries_effective_selling_home(self):
         """GET /settings reports the EFFECTIVE selling-home state per
         person (inferred where unset) so the toggle renders correctly."""
@@ -523,6 +633,21 @@ class TestSettingsPropagationApi:
         value = client.get("/api/settings").json()["persons"]["value"]
         ashby = next(p for p in value if p["name"] == "Ashby")
         assert ashby["selling_home"] is True
+
+    def test_list_persons_returns_everyone_including_email_less(self):
+        """The impersonation dropdown lists ALL persons — no email
+        filter; callers that need only email-linked persons filter
+        themselves (the server's no-children rule lives in the
+        impersonate endpoint)."""
+        client = self._setup()
+        persons = client.get("/api/persons").json()["persons"]
+        names = {p["name"]: p for p in persons}
+        # email-less persons are present (Ashby has no email in defaults)
+        assert "Ashby" in names
+        assert names["Ashby"]["email"] == ""
+        assert names["Ashby"]["is_child"] is False
+        assert "Simon" in names
+        assert "email" in names["Simon"]
 
     def test_get_settings_carries_household_deposit(self):
         """GET /settings reports the household deposit as one number —
@@ -549,6 +674,78 @@ class TestSettingsPropagationApi:
         assert lines["Ashby"] == "£0 home + £300,000.00 cash = £300,000.00"
         assert prov["formula"]["result"] == "£477,000.00"
 
+    def test_deposit_splits_home_equity_by_co_owner_shares(self):
+        """A declared home splits by home_co_owners: the holder keeps
+        the remainder, each co-owner gets their share — total unchanged,
+        attribution honest."""
+        from decimal import Decimal as _Decimal
+
+        from money import Money
+
+        from houses.model.domain import HomeCoOwner, Person
+        from houses.web.api_router import _deposit_breakdown
+
+        persons = [
+            Person(
+                name="Simon",
+                has_car=True,
+                home_sale_price=Money("550000", "GBP"),
+                outstanding_mortgage=Money("373000", "GBP"),
+                cash_contribution=Money("0", "GBP"),
+                home_co_owners=(HomeCoOwner(name="Lorena", share=50),),
+            ),
+            Person(
+                name="Lorena",
+                has_car=False,
+                cash_contribution=Money("0", "GBP"),
+            ),
+            Person(
+                name="Ashby",
+                has_car=True,
+                cash_contribution=Money("300000", "GBP"),
+            ),
+        ]
+        deposit_persons, total, lines = _deposit_breakdown(persons)
+        assert deposit_persons["Simon"] == {"amount": "88500.00", "currency": "GBP"}
+        assert deposit_persons["Lorena"] == {"amount": "88500.00", "currency": "GBP"}
+        assert deposit_persons["Ashby"] == {"amount": "300000.00", "currency": "GBP"}
+        # the total is unchanged: 177000 + 300000
+        assert total.amount == _Decimal("477000.00")
+        lines_by_label = {v["label"]: v["value"] for v in lines}
+        assert "50% yours" in lines_by_label["Simon"]
+        assert "50% of Simon's" in lines_by_label["Lorena"]
+
+    def test_deposit_excludes_children_completely(self):
+        """Children never appear in the deposit breakdown, provenance
+        lines, or the total — even one with a stray cash contribution."""
+        from decimal import Decimal as _Decimal
+
+        from money import Money
+
+        from houses.model.domain import Person
+        from houses.web.api_router import _deposit_breakdown
+
+        persons = [
+            Person(
+                name="Simon",
+                has_car=True,
+                home_sale_price=Money("550000", "GBP"),
+                outstanding_mortgage=Money("373000", "GBP"),
+                cash_contribution=Money("50000", "GBP"),
+            ),
+            Person(
+                name="George",
+                has_car=False,
+                is_child=True,
+                cash_contribution=Money("999999", "GBP"),  # must be ignored
+            ),
+        ]
+        deposit_persons, total, lines = _deposit_breakdown(persons)
+        assert "George" not in deposit_persons
+        assert "George" not in [line["label"] for line in lines]
+        assert total.amount == _Decimal("227000.00")
+        assert deposit_persons["Simon"] == {"amount": "227000.00", "currency": "GBP"}
+
     def test_settings_change_updates_property_totals(self):
         """PATCH a person's cash contribution → mortgage_required drops by
         exactly the delta and the list total follows — automatically, via
@@ -566,8 +763,8 @@ class TestSettingsPropagationApi:
         assert baseline_mortgage is not None
         # capture the list baseline BEFORE the change (the summary and
         # detail read the same node — compare unwrapped values)
-        baseline_total = _money_amount(
-            client.get("/api/properties/all").json()[rid]["total_monthly_cost"]["value"]
+        baseline_total = Decimal(
+            client.get("/api/properties/all").json()[rid]["group_monthly_cost"]["value"]["couple"]["value"]
         )
 
         resp = client.patch(
@@ -593,24 +790,26 @@ class TestSettingsPropagationApi:
 
         # the property list summary follows automatically too — same node,
         # same drain, and the drop equals the mortgage-payment drop
-        updated_total = _money_amount(
-            client.get("/api/properties/all").json()[rid]["total_monthly_cost"]["value"]
-        )
+        updated_group = client.get("/api/properties/all").json()[rid]["group_monthly_cost"]["value"]
+        updated_total = Decimal(updated_group["couple"]["value"])
         assert updated_total < baseline_total, "list total did not decrease after the settings change"
-        assert baseline_total - updated_total == _amount_of(
-            baseline["affordability"]["monthly_mortgage"]
-        ) - _amount_of(updated["affordability"]["monthly_mortgage"]), (
-            "list total moved by exactly the monthly-payment delta"
+        bm = _amount_of(baseline["affordability"]["monthly_mortgage"])
+        um = _amount_of(updated["affordability"]["monthly_mortgage"])
+        assert abs((baseline_total - updated_total) - (bm - um)) <= Decimal("0.01"), (
+            "list total moved by the monthly-payment delta (within 0.01 rounding)"
         )
 
 
 def _money_amount(v) -> Decimal:
-    """Money amount from a raw value dict: {amount, currency}.
+    """Money amount from a raw value dict.
 
-    Money rule: amounts are Decimal-backed strings on the wire — never
-    float, which introduces representation noise into exact assertions.
+    Handles both Money ``{amount, currency}`` and Measurement
+    ``{value: {amount, currency}, stddev}`` shapes (the total monthly
+    cost became a Measurement in Part A).
     """
     if isinstance(v, dict):
+        if "value" in v and isinstance(v["value"], dict):
+            v = v["value"]
         return Decimal(v.get("amount") or "0")
     return Decimal(str(v))
 
@@ -621,6 +820,220 @@ def _amount_of(attempt: dict) -> Decimal:
     if isinstance(val, dict):
         return Decimal(val.get("amount") or "0")
     return Decimal(str(val))
+
+
+class TestWhatIfApi:
+    """POST /api/what-if — pure evaluation, nothing persisted."""
+
+    def _setup(self):
+        from fastapi.testclient import TestClient
+        from money import Money
+
+        from houses.model.domain import Person
+        from houses.property_registry import _registry
+        from houses.server import app
+
+        _push_persons(
+            Person(
+                name="Simon",
+                has_car=True,
+                email="simon@example.com",
+                is_superuser=True,  # live settings are authoritative
+                home_sale_price=Money("550000", "GBP"),
+                outstanding_mortgage=Money("373000", "GBP"),
+            ),
+            Person(name="Lorena", has_car=False, email="lorena@example.com"),
+            Person(name="Ashby", has_car=True, cash_contribution=Money("300000", "GBP")),
+        )
+        _registry.clear()
+        client = TestClient(app)
+        _inject_session(client)
+        return client, _registry
+
+    def _seed(self, reg):
+        from money import Money
+
+        from houses.geo import GeoPoint
+        from houses.nodes.property import PropertyNodes
+
+        prop = PropertyNodes("whatif1")
+        prop.rightmove_price.push(Money("500000", "GBP"), "test")
+        prop.rightmove_address.push("1 Test St", "test")
+        prop.rightmove_bedrooms.push("3", "test")
+        prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.postcode.push("SW1V 2QQ", "test")
+        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.works_estimates.push({}, "test")
+        prop.rental_income.push(Money("0", "GBP"), "test")
+        prop.comment_status.push("", "test")
+        reg["whatif1"] = prop
+        return prop
+
+    def test_what_if_changes_totals_without_persisting(self):
+        client, reg = self._setup()
+        self._seed(reg)
+        flush_all()
+
+        baseline = client.get("/api/properties/all").json()["whatif1"]["group_monthly_cost"]
+        base_couple = Decimal(baseline["value"]["couple"]["value"])
+
+        # What-if: Ashby's cash contribution up £100k → equity up → the
+        # mortgage (and so the couple's monthly total) must drop.
+        resp = client.post(
+            "/api/what-if",
+            json={"persons": [{"name": "Ashby", "cash_contribution": {"amount": "400000", "currency": "GBP"}}]},
+        )
+        assert resp.status_code == 200
+        result = resp.json()["results"]["whatif1"]
+        assert result["succeeded"], result.get("error")
+        hypothetical = Decimal(result["group"]["couple"]["value"])
+
+        assert hypothetical < base_couple, "extra cash must lower the couple's monthly total"
+
+        # Nothing persisted: the summary (and the real persons) are unchanged.
+        after = client.get("/api/properties/all").json()["whatif1"]["group_monthly_cost"]
+        assert after == baseline
+
+    def test_what_if_requires_persons_and_known_names(self):
+        client, reg = self._setup()
+        self._seed(reg)
+        flush_all()
+
+        assert client.post("/api/what-if", json={}).status_code == 422
+        assert client.post("/api/what-if", json={"persons": []}).status_code == 422
+        resp = client.post("/api/what-if", json={"persons": [{"name": "Nobody"}]})
+        assert resp.status_code == 422
+        assert "unknown person" in resp.json()["detail"]
+
+    def test_what_if_rejects_malformed_money(self):
+        client, reg = self._setup()
+        self._seed(reg)
+        flush_all()
+
+        resp = client.post(
+            "/api/what-if",
+            json={"persons": [{"name": "Ashby", "cash_contribution": "not-money"}]},
+        )
+        assert resp.status_code == 400
+
+    def test_what_if_rejects_pence_on_whole_pound_fields(self):
+        """What-if uses the same money rules as settings: pence on
+        sale/mortgage/cash fail fast (400), never rounded."""
+        client, reg = self._setup()
+        self._seed(reg)
+        flush_all()
+
+        for field in ("home_sale_price", "outstanding_mortgage", "cash_contribution"):
+            resp = client.post(
+                "/api/what-if",
+                json={"persons": [{"name": "Ashby", field: {"amount": "300000.50", "currency": "GBP"}}]},
+            )
+            assert resp.status_code == 400, f"{field}: expected 400, got {resp.status_code}: {resp.text}"
+            assert "whole number of pounds" in resp.json()["detail"], f"{field}: {resp.json()['detail']}"
+
+
+class TestRegenerateApi:
+    """POST /api/admin/regenerate — force recompute of non-stale nodes."""
+
+    def _setup(self):
+        from fastapi.testclient import TestClient
+
+        from houses.property_registry import _registry
+        from houses.server import app
+
+        _registry.clear()
+        client = TestClient(app)
+        return client, _registry
+
+    def _seed(self, reg):
+        from money import Money
+
+        from houses.geo import GeoPoint
+        from houses.nodes.property import PropertyNodes
+
+        prop = PropertyNodes("77777777")
+        prop.rightmove_price.push(Money("500000", "GBP"), "test")
+        prop.rightmove_address.push("1 Test St", "test")
+        prop.rightmove_bedrooms.push("3", "test")
+        prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
+        prop.postcode.push("SW1V 2QQ", "test")
+        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+        prop.works_estimates.push({}, "test")
+        prop.rental_income.push(Money("0", "GBP"), "test")
+        prop.comment_status.push("", "test")
+        reg["77777777"] = prop
+        return prop
+
+    def test_requires_superuser(self):
+        client, _ = self._setup()
+        resp = client.post("/api/admin/regenerate", json={"patterns": ["*"]})
+        # app-level auth answers first for an anonymous call
+        assert resp.status_code in (401, 403)
+
+    def test_requires_patterns(self):
+        client, _ = self._setup()
+        _inject_session(client)
+        assert client.post("/api/admin/regenerate", json={}).status_code == 422
+        assert client.post("/api/admin/regenerate", json={"patterns": []}).status_code == 422
+
+    def test_regenerates_council_tax_stale_in_code(self):
+        from money import Money
+
+        from dag.attempt import Attempt
+        from dag.persistence import save_node_result
+        from houses.model.domain import Person
+
+        _push_persons(
+            Person(name="Simon", has_car=True, email="simon@example.com", is_superuser=True),
+            Person(name="Ashby", has_car=True, cash_contribution=Money("300000", "GBP")),
+        )
+        client, reg = self._setup()
+        _inject_session(client)
+        prop = self._seed(reg)
+        flush_all()
+
+        # Simulate a pre-A3 persisted state: council tax impossible and
+        # NOT stale (dep timestamps older than the compute).
+        nid = prop.council_tax._id
+        save_node_result(
+            nid,
+            {"status": "impossible", "value": None, "error": "pre-A3 state", "succeeded": False, "provenance": {}},
+        )
+        prop.council_tax._attempt = Attempt.impossible("pre-A3 state")
+
+        # A plain flush does NOT regenerate it — timestamps say fresh.
+        flush_all()
+        assert prop.council_tax.latest_attempt().impossible
+
+        resp = client.post("/api/admin/regenerate", json={"patterns": ["*/council_tax"]})
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["matched"] >= 1
+        entry = next(r for r in data["regenerated"] if r["node"] == nid)
+        assert entry["status"] == "succeeded"
+
+        # Live node is regenerated (real lookup succeeds here — cached
+        # VOA data; the fallback only fires when the lookup fails); the
+        # downstream total is recomputed too (cascade drained).
+        ct = prop.council_tax.latest_attempt()
+        assert ct.succeeded
+        info = ct.value_or_none()
+        assert info is not None and info.band
+        total = prop.group_monthly_cost.latest_attempt()
+        assert total.succeeded
+
+    def test_non_matching_pattern_regenerates_nothing(self):
+        client, reg = self._setup()
+        _inject_session(client)
+        self._seed(reg)
+        flush_all()
+        resp = client.post("/api/admin/regenerate", json={"patterns": ["no-such-nodes/*"]})
+        assert resp.status_code == 200
+        assert resp.json()["matched"] == 0
 
 
 class TestWorksEstimateApi:
@@ -654,6 +1067,29 @@ class TestWorksEstimateApi:
         )
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text[:500]}"
         assert resp.json() == {"status": "ok"}
+
+    def test_works_estimate_rejects_pence(self):
+        """Works estimates are whole pounds — pence fail fast (400)."""
+        from houses.nodes.property import PropertyNodes
+        from houses.property_registry import register_property
+
+        rid = "12345679"
+        client = self._setup()
+        register_property(rid, PropertyNodes(rid))
+
+        resp = client.patch(
+            f"/api/properties/{rid}/works-estimate",
+            json={"person": "Ashby", "value": 15000.50},
+        )
+        assert resp.status_code == 400, f"Expected 400, got {resp.status_code}: {resp.text[:300]}"
+        assert "whole number" in resp.json()["detail"]
+
+        # nothing was stored
+        from houses.property_registry import get_property
+
+        prop = get_property(rid)
+        assert prop is not None
+        assert prop.works_estimates.latest_attempt().value_or_none() is None
 
     def test_works_estimate_propagates_to_detail(self):
         """After PATCH, GET detail must show updated mortgage

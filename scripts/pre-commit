@@ -38,7 +38,7 @@ if [ ! -x .venv/bin/ruff ]; then
     exit 1
 fi
 
-# Staged paths come from git's index (no spaces in this repo's tree);
-# word-splitting is intentional.
-# shellcheck disable=SC2086
-.venv/bin/ruff check $files
+# Delegate to the shared make target (lint-check) so the hook and CI lint
+# can never drift apart — same scope (houses/ tests/ tools/ dag/), same
+# config, same frontend CSS lint.
+make lint-check

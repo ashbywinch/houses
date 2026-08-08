@@ -673,3 +673,68 @@ class TestGoogleRouteCommuteErrorReason:
             result = await router._google_route_commute("51.5,-0.1", "51.6,-0.2", "WALK", max_walk_minutes=30)
         assert result.impossible
         assert "LatLng cannot be specified" in result.error, f"Got: {result.error}"
+
+
+class TestGoogleRouteCommuteLegDestination:
+    """The walk/drive leg must carry its destination in end_station —
+    the DAG is the source of the destination, not the interface."""
+
+    @pytest.mark.asyncio
+    async def test_walk_leg_has_destination(self):
+        from unittest.mock import patch
+
+        from houses.commute import LegMode
+        from houses.routing import CommuteRouter
+
+        async def fake_routes(body, mask, timeout=10.0):
+            return {
+                "routes": [
+                    {
+                        "duration": "900s",
+                        "distanceMeters": 1200,
+                        "legs": [],
+                    }
+                ]
+            }
+
+        router = CommuteRouter()
+        with patch.object(router, "_google_routes_post", side_effect=fake_routes):
+            result = await router._google_route_commute(
+                "51.5,-0.1", "Larchfield Primary School, Bargeman Road, Maidenhead SL6 4ET", "WALK", max_walk_minutes=60
+            )
+        assert result.succeeded
+        commute = result.value_or_none()
+        assert commute is not None
+        leg = commute.details[0].legs[0]
+        assert leg.mode == LegMode.WALK
+        assert leg.end_station == "Larchfield Primary School, Bargeman Road, Maidenhead SL6 4ET"
+
+    @pytest.mark.asyncio
+    async def test_drive_leg_has_destination(self):
+        from unittest.mock import patch
+
+        from houses.commute import LegMode
+        from houses.routing import CommuteRouter
+
+        async def fake_routes(body, mask, timeout=10.0):
+            return {
+                "routes": [
+                    {
+                        "duration": "1800s",
+                        "distanceMeters": 15000,
+                        "legs": [],
+                    }
+                ]
+            }
+
+        router = CommuteRouter()
+        with patch.object(router, "_google_routes_post", side_effect=fake_routes):
+            result = await router._google_route_commute(
+                "51.5,-0.1", "Waite House, Doncastle Road, Bracknell RG12 8YA", "DRIVE"
+            )
+        assert result.succeeded
+        commute = result.value_or_none()
+        assert commute is not None
+        leg = commute.details[0].legs[0]
+        assert leg.mode == LegMode.DRIVE
+        assert leg.end_station == "Waite House, Doncastle Road, Bracknell RG12 8YA"

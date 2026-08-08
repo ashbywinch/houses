@@ -25,7 +25,7 @@ class TestTransitNode:
         no_bus = TflTransitNode("t1nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
         with_bus = TflTransitNode("t1wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
         node = TransitNode(
-            "tn", best_location=loc, poi=poi, has_car=False, max_walk=30, no_bus_node=no_bus, with_bus_node=with_bus
+            "tn", best_location=loc, poi=poi, has_car=False, no_bus_node=no_bus, with_bus_node=with_bus
         )
         a = await node.attempt()
         assert a.pending
@@ -42,10 +42,40 @@ class TestTransitNode:
         no_bus = TflTransitNode("t2nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
         with_bus = TflTransitNode("t2wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
         node = TransitNode(
-            "tn2", best_location=loc, poi=poi, has_car=False, max_walk=30, no_bus_node=no_bus, with_bus_node=with_bus
+            "tn2", best_location=loc, poi=poi, has_car=False, no_bus_node=no_bus, with_bus_node=with_bus
         )
         a = await node.attempt()
         assert a.pending
+
+
+    async def test_route_failure_has_friendly_user_message(self):
+        """A raw TfL error must never reach the UI: the internal message
+        keeps it for logs, display_message is the friendly leaf (walkthrough
+        run 3 — a raw 'HTTP 404: {$type: ...}' blob was rendered)."""
+        from houses.geo import GeoPoint
+        from houses.model.domain import Commute, PlaceOfInterest
+        from houses.nodes.transit import TransitNode
+
+        loc = UserInputNode[GeoPoint]("loc_msg", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("poi_msg", PlaceOfInterest)
+        nb = UserInputNode[Commute]("nb_msg", Commute)
+        wb = UserInputNode[Commute]("wb_msg", Commute)
+        node = TransitNode(
+            "tn_msg", best_location=loc, poi=poi, has_car=False,
+            no_bus_node=nb,  # type: ignore[arg-type]  # placeholders — compute() is called directly
+            with_bus_node=wb,  # type: ignore[arg-type]
+        )
+        raw = "HTTP 404: {'$type': 'Tfl.Api.Presentation.Entities.ApiError', 'timestampUtc': '...'}"
+        a = await node.compute(
+            Attempt.succeeded(GeoPoint(51.5, -0.1)),
+            Attempt.succeeded(PlaceOfInterest(label="Office", address="1 New Office, London")),
+            Attempt.impossible(raw),
+            Attempt.impossible(raw),
+        )
+        assert a.impossible
+        assert a.error_info is not None
+        assert a.error_info.display_message == "Couldn't find a route to this destination — check the address."
+        assert "HTTP 404" in a.error_info.message  # internal message keeps the raw error for logs
 
 
 class TestWalkLegCheckNode:
@@ -87,7 +117,6 @@ class TestTransitNodeJson:
             best_location=loc,
             poi=poi,
             has_car=False,
-            max_walk=30,
             no_bus_node=no_bus,
             with_bus_node=with_bus,
         )
@@ -123,7 +152,6 @@ class TestTransitNodeJson:
             best_location=loc,
             poi=poi,
             has_car=False,
-            max_walk=30,
             no_bus_node=no_bus,
             with_bus_node=with_bus,
         )
@@ -167,7 +195,7 @@ class TestTransitNodeNoRoute:
         loc = UserInputNode[GeoPoint]("nrl_loc", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("nrl_poi", PlaceOfInterest)
         node = TransitNode(
-            "nrl", best_location=loc, poi=poi, has_car=has_car, max_walk=30,
+            "nrl", best_location=loc, poi=poi, has_car=has_car,
             no_bus_node=_dummy("nrl_nb"),
             with_bus_node=_dummy("nrl_wb"),
         )

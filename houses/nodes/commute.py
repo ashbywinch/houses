@@ -158,7 +158,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         walk_result=None,
         drive_result=None,
         is_child: bool = False,
-        max_walk: int = 30,
+        max_walk_node: Node | None = None,
         acceptable_modes: tuple[str, ...] = (),
     ):
         self.origin = origin
@@ -167,16 +167,21 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         self.transit_result = transit_result
         self.drive_result = drive_result
         self.is_child = is_child
-        self._max_walk = max_walk
+        self._max_walk = 30
+        self._max_walk_node = max_walk_node
         # Empty (unset/legacy) means every mode is acceptable — the old
         # behaviour.  An explicit set EXCLUDES the modes the person won't
         # accept: a train-only POI is never scored by a car route.
         self._acceptable_modes = tuple(acceptable_modes)
         # deps mirror the alternatives: an excluded mode is not a
         # dependency — a permanently pending excluded node must not stall
-        # the selector's refresh (same freeze the bootstrap fix addresses)
+        # the selector's refresh (same freeze the bootstrap fix addresses).
+        # max_walk sits BEFORE the conditional alternatives so positional
+        # compute matching stays stable whether walk/drive are present.
         deps = [origin, poi]
-        if self._mode_acceptable("train"):
+        if max_walk_node is not None:
+            deps.append(max_walk_node)
+        if self._mode_acceptable("transit"):
             deps.append(transit_result)
         if walk_result is not None and self._mode_acceptable("walk"):
             deps.append(walk_result)
@@ -188,7 +193,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         alts: dict[str, Expression] = {}
         if self.walk_result is not None and self._mode_acceptable("walk"):
             alts["walk"] = Ref(self.walk_result)
-        if self._mode_acceptable("train"):
+        if self._mode_acceptable("transit"):
             alts["transit"] = Ref(self.transit_result)
         if self.drive_result is not None and self._mode_acceptable("car"):
             alts["drive"] = Ref(self.drive_result)
@@ -204,7 +209,9 @@ class CommuteSelectorNode(DerivedNode[Commute]):
 
     def _get_active_deps(self) -> tuple[Node, ...]:
         deps = [self.origin, self.poi]
-        if self._mode_acceptable("train"):
+        if self._max_walk_node is not None:
+            deps.append(self._max_walk_node)
+        if self._mode_acceptable("transit"):
             deps.append(self.transit_result)
         if self.walk_result is not None and self._mode_acceptable("walk"):
             deps.append(self.walk_result)
@@ -250,10 +257,14 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         self,
         origin: Attempt[GeoPoint],
         poi: Attempt[str],
-        transit: Attempt[Commute],
+        max_walk: Attempt[int] | None = None,
+        transit: Attempt[Commute] | None = None,
         walk: Attempt[Commute] | None = None,
         drive: Attempt[Commute] | None = None,
     ) -> Attempt[Commute]:
+        mw_val = max_walk.value_or_none() if max_walk is not None else None
+        if mw_val is not None:
+            self._max_walk = int(mw_val)
         result = self.expression.evaluate()
         if result.succeeded and result.value is not None:
             val = replace(result.value, is_child=self.is_child)

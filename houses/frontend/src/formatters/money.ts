@@ -1,35 +1,61 @@
-/**
- * Money formatting helpers.
+/** Large house-purchase amounts (sale price, mortgage, deposit, works
+ *  estimates) are whole pounds — never pence. Entry is PREVENTED, never
+ *  transformed: non-digit keys are blocked, non-digit pastes are
+ *  rejected whole, and any leak (IME, drag-drop) reverts the field to
+ *  its last valid value. Nothing is ever truncated or stripped.
  *
- * The backend serialises all monetary ``amount`` values as **strings** with
- * 2 decimal places (e.g. ``"1800.00"``).  These helpers parse them back to
- * numbers for display formatting without losing precision.
- */
+ *  Small recurring amounts (life insurance, rental income, commute
+ *  costs) allow pence — max 2dp, per GOV.UK/HMRC money input guidance. */
 
-/** Parse a money amount string to a number suitable for display formatting. */
-export function parseAmount(amount: string | number | undefined | null): number {
-  if (amount == null) return 0
-  if (typeof amount === 'number') return amount
-  return parseFloat(amount)
+/** Display form only: a stored amount like "550000.00" renders as
+ *  "550000". This never touches user entry. */
+export function integerPounds(value: string | undefined): string {
+  if (value == null) return ''
+  const dot = value.indexOf('.')
+  return dot === -1 ? value : value.slice(0, dot)
 }
 
-/** Format a money amount string as a display string (e.g. ``"£4.50"``). */
-export function formatMoney(amount: string | number | undefined | null, _currency = 'GBP'): string {
-  const n = parseAmount(amount)
-  if (n === 0 && amount == null) return ''
-  return `£${n.toFixed(2)}`
+/** Block any printable non-digit key (letters, '.', ',', symbols,
+ *  space) on whole-pound fields. Named keys (Backspace, Tab, arrows,
+ *  Enter) and shortcuts pass through. */
+export function blockWholePoundsKey(e: KeyboardEvent): void {
+  if (e.ctrlKey || e.metaKey || e.altKey) return
+  if (e.key.length === 1 && !/\d/.test(e.key)) e.preventDefault()
 }
 
-/** Format a money amount string with locale formatting (e.g. ``"£500,000"``). */
-export function formatMoneyLocale(amount: string | number | undefined | null, _currency = 'GBP'): string {
-  const n = parseAmount(amount)
-  if (n === 0 && amount == null) return ''
-  return `£${n.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
+/** Reject a paste unless it is PURE digits — never strip, never
+ *  truncate. "£550,000" and "550000.99" are refused outright. */
+export function rejectWholePoundsPaste(e: ClipboardEvent): void {
+  const text = e.clipboardData?.getData('text') ?? ''
+  if (!/^\d+$/.test(text)) e.preventDefault()
 }
 
-/** Extract the numeric amount from a ``{amount, currency}`` object or raw number. */
-export function extractAmount(val: { amount: string | number; currency?: string } | number | undefined | null): number {
-  if (val == null) return 0
-  if (typeof val === 'number') return val
-  return parseAmount(val.amount)
+/** Backstop for leaks (IME composition, drag-drop): if the field's
+ *  value is not pure digits, revert it to the last valid value whole —
+ *  the invalid change is rejected, never edited into shape. */
+export function wholePoundsValue(el: HTMLInputElement, fallback: string): string {
+  if (!/^\d*$/.test(el.value)) {
+    el.value = fallback
+    return fallback
+  }
+  return el.value
+}
+
+/** Block keystrokes that can't produce a valid pence amount (0–2dp):
+ *  exponent notation and sign; the decimal point is allowed. */
+export function blockPenceKey(e: KeyboardEvent): void {
+  if (['e', 'E', '+', '-'].includes(e.key)) e.preventDefault()
+}
+
+/** Normalize a pence-allowed money string to at most 2dp on blur —
+ *  "150.5" stays, "150.505" rounds to "150.51" (GOV.UK: pounds and
+ *  pence only). */
+export function normalizePence(value: string): string {
+  const dot = value.indexOf('.')
+  if (dot === -1) return value
+  const whole = value.slice(0, dot)
+  let frac = value.slice(dot + 1)
+  if (frac.length <= 2) return value
+  frac = String(Math.round(Number(`0.${frac}`) * 100) / 100).slice(2)
+  return `${whole}.${frac}`
 }

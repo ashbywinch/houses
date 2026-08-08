@@ -7,7 +7,7 @@ from enum import Enum
 from money import Money
 from pint import Quantity
 
-from dag.attempt import Attempt
+from dag.attempt import Attempt, AttemptError
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.commute import LegMode
@@ -110,6 +110,33 @@ def _route_description(legs: tuple[CommuteLeg, ...]) -> str:
             part += f" to {leg.destination}"
         parts.append(part)
     return " → ".join(parts)
+
+
+class PersonMaxWalkNode(DerivedNode[int]):
+    """The person's own walking tolerance (bus_walk_penalty minutes).
+
+    Reads the person from the settings persons node by name. Route
+    PLANNING nodes (WalkNode/TflTransitNode) deliberately do NOT depend
+    on it — their routes don't change with the tolerance, and a what-if
+    must never re-plan. Only the gate/selection nodes depend on it, so
+    the incremental evaluator re-scores the same planned routes.
+    """
+
+    def __init__(self, node_id: str, *, persons_source, person_name: str):
+        self._person_name = person_name
+        super().__init__(node_id, int, (persons_source,))
+        self.display_name = "Max walk"
+
+    def compute(self, persons: Attempt[list]) -> Attempt[int]:
+        if not persons.succeeded:
+            return Attempt.impossible(persons.error)
+        for p in persons.value_or_none() or []:
+            if getattr(p, "name", None) == self._person_name:
+                penalty = getattr(p, "bus_walk_penalty", None)
+                if penalty is not None:
+                    return Attempt.succeeded(int(penalty.magnitude))
+                return Attempt.succeeded(30)
+        return Attempt.succeeded(30)
 
 
 class WalkLegCheckNode(DerivedNode[bool]):
@@ -232,7 +259,6 @@ class TransitNode(DerivedNode[Commute]):
         best_location,
         poi,
         has_car: bool,
-        max_walk: int,
         best_address=None,
         no_bus_node: TflTransitNode,
         with_bus_node: TflTransitNode,
@@ -243,7 +269,6 @@ class TransitNode(DerivedNode[Commute]):
         super().__init__(node_id, Commute, deps)
         self.display_name = "TfL API"
         self._has_car = has_car
-        self._max_walk = max_walk
         self._best_address = best_address
 
     async def compute(
@@ -261,7 +286,19 @@ class TransitNode(DerivedNode[Commute]):
             best_val = no_bus_val
         elif no_bus_val is None and with_bus_val is None:
             errors = [e for e in (no_bus.error, with_bus.error) if e]
-            return Attempt.impossible("; ".join(errors) if errors else "no transit route available")
+            message = "; ".join(errors) if errors else "no transit route available"
+            # Keep the raw client errors in the internal message (logs),
+            # but never surface them: display_message resolves to this
+            # friendly user_message (walkthrough run 3 — a raw TfL 404
+            # blob was rendered to the user).
+            return Attempt.impossible(
+                message,
+                error_info=AttemptError(
+                    code="no_data",
+                    message=message,
+                    user_message="Couldn't find a route to this destination — check the address.",
+                ),
+            )
         else:
             empty = Commute(
                 person=Person(name="", has_car=self._has_car),

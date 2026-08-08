@@ -30,20 +30,34 @@ const bedrooms = computed(() => props.data.rightmove_bedrooms.succeeded
   ? props.data.rightmove_bedrooms.value
   : null)
 
-const monthlyCost = computed(() => props.data.total_monthly_cost.succeeded
-  ? parseFloat(props.data.total_monthly_cost.value?.amount ?? '0') || null
-  : null)
-
-// Border color based on triage state
-const borderClass = computed(() => {
-  const t = triage.value
-  if (!t) return 'card__border--active'
-  if (t.dismissed) return 'card__border--dismissed'
-  if (t.favourite) return 'card__border--favourite'
-  if (t.is_viewed) return 'card__border--viewed'
-  return 'card__border--active'
+// Part A: an approximate total (stddev > 0) renders as "≈ £X/mo".
+const monthlyCostApprox = computed(() => {
+  const g = props.data.group_monthly_cost
+  return g.succeeded && ((g.value?.couple?.stddev ?? 0) > 0 || (g.value?.others?.stddev ?? 0) > 0)
 })
 
+// Part D: a hypothetical total from the "What if…" panel (overlaid by
+// PropertyList) is marked so it is never mistaken for a real number.
+const isWhatIf = computed(() => props.data.group_monthly_cost.provenance?.label === 'what-if')
+
+// The headline's TWO numbers: the joint owners (the couple) and the
+// other adults, labelled dynamically — overlaid by the what-if.
+const groupCost = computed(() => {
+  const wt = store.whatIfTotals?.[props.rid]
+  if (wt) return wt
+  const g = props.data.group_monthly_cost
+  return g?.succeeded && g.value ? g.value : null
+})
+const coupleLabel = computed(() => groupCost.value?.couple_label || '')
+const othersLabel = computed(() => groupCost.value?.others_label || '')
+const coupleCost = computed(() => {
+  const c = groupCost.value?.couple
+  return c ? Number(c.value) : null
+})
+const othersCost = computed(() => {
+  const c = groupCost.value?.others
+  return c ? Number(c.value) : null
+})
 
 // Freshness badge — how many days ago the property was added
 const freshnessDays = computed(() => {
@@ -129,13 +143,6 @@ function commuteAddress(c: unknown, key: string): string {
   return typeof address === 'string' && address ? address : commuteLabel(c, key)
 }
 
-function commuteCostTitle(c: unknown): string | undefined {
-  // £100.00 is the TfL daily fare cap, not the actual ticket price —
-  // say so instead of letting it read as a real fare (P2).
-  if (commuteCost(c) === 100) return '£100.00 is the TfL daily maximum, not the actual fare'
-  return undefined
-}
-
 const adultCommutes = computed(() => {
   if (!props.data.commutes) return {}
   return Object.fromEntries(
@@ -145,6 +152,28 @@ const adultCommutes = computed(() => {
 
 function isChildCommute(c: unknown): boolean {
   return (c as Record<string, unknown> | undefined)?.is_child === true
+}
+
+/** C4: a commute whose destination label is no longer among the
+ *  person's current POIs (renamed/removed in Settings) is stale. */
+function isStaleOffice(key: string): boolean {
+  const person = key.split('/')[0]
+  const label = key.split('/').slice(1).join('/')
+  const current = store.poiLabels[person]
+  if (!current) return false
+  return !current.includes(label)
+}
+
+/** C?: the commute colour bands are the person's own thresholds
+ *  (Settings → 'commute bands'), not a global constant: good = the
+ *  green→amber boundary, fine = amber→red. Falls back to the walk /
+ *  non-walk scales when the person has no thresholds set. */
+function pillThresholds(key: string, isWalk: boolean): { goodMax: number; fineMax: number } {
+  const person = key.split('/')[0]
+  const good = store.commuteGoods[person]
+  const fine = store.commuteCeilings[person]?.fine
+  if (good != null && fine != null) return { goodMax: good, fineMax: fine }
+  return isWalk ? { goodMax: 15, fineMax: 30 } : { goodMax: 45, fineMax: 75 }
 }
 
 async function toggleFavourite() {
@@ -162,36 +191,48 @@ async function toggleViewed() {
 
 <template>
   <article class="card" :class="{ 'card--dismissed': triage?.dismissed }">
-    <!-- Accent border -->
-    <div class="card__border" :class="borderClass" />
-
     <div class="card__body">
       <!-- Top row: Address | Monthly cost -->
       <div class="card__top">
+        <span v-if="triage?.favourite" class="card__fav-icon" role="img" aria-label="Favourite">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2">
+            <path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z" />
+          </svg>
+        </span>
         <a :href="'#/property/' + rid" class="card__address" :aria-label="'View details for ' + address">
           <h3 class="card__address-text">{{ address }}</h3>
         </a>
-        <span v-if="monthlyCost !== null" class="card__monthly-cost">
-          £{{ monthlyCost.toLocaleString() }}/mo
+        <span v-if="coupleCost !== null || store.groupLabels.coupleLabel" class="card__monthly-cost">
+          <span class="card__cost-line" :title="monthlyCostApprox ? 'Council tax estimated — total is approximate' : undefined">
+            <strong>{{ coupleLabel || store.groupLabels.coupleLabel }}</strong>
+            {{ monthlyCostApprox ? '≈' : '' }}{{ coupleCost !== null ? '£' + coupleCost.toLocaleString() + '/mo' : '£—/mo' }}
+          </span>
+          <span v-if="othersCost !== null || store.groupLabels.othersLabel" class="card__cost-line card__cost-line--others">
+            <strong>{{ othersLabel || store.groupLabels.othersLabel }}</strong>
+            {{ othersCost !== null ? '£' + othersCost.toLocaleString() + '/mo' : '£—/mo' }}
+          </span>
+          <span v-if="isWhatIf" class="card__whatif">what-if</span>
         </span>
         <span
           v-else
           class="card__monthly-cost card__monthly-cost--unknown"
           title="Can't calculate yet — see the property page (often Council Tax)"
-        >£?/mo</span>
+        >£—/mo</span>
       </div>
 
-      <!-- Specs row: price · bedrooms · freshness -->
-      <div class="card__specs">
-        <span v-if="price" class="card__price">£{{ price.toLocaleString() }}</span>
-        <span v-if="bedrooms">{{ bedrooms }} bed</span>
-        <span v-if="freshnessLabel" class="pill pill--sm" :class="freshnessClass">{{ freshnessLabel }}</span>
+      <!-- Meta tags: price · bedrooms · freshness -->
+      <div class="card__meta">
+        <span v-if="price" class="card__tag card__tag--price">£{{ price.toLocaleString() }}</span>
+        <span v-if="bedrooms" class="card__tag">{{ bedrooms }} bed</span>
+        <span v-if="freshnessLabel" class="card__tag" :class="freshnessClass">{{ freshnessLabel }}</span>
+        <span v-if="triage?.is_viewed" class="card__tag card__tag--seen">Seen</span>
       </div>
 
       <!-- Commute rows: per-person -->
       <div v-if="data.commutes" class="card__commutes">
         <div v-for="(c, key) in adultCommutes" :key="key" class="card__commute-row">
           <span class="card__commute-person">{{ commutePerson(c.commute, key) }} → {{ commuteLabel(c.commute, key) }}</span>
+          <span v-if="isStaleOffice(key)" class="card__commute-stale" title="This office was renamed or removed in Settings — the commute shown is from an old version">old office</span>
           <div class="card__commute-data">
             <a
               v-if="location"
@@ -205,19 +246,13 @@ async function toggleViewed() {
                 :duration="commuteDuration(c.commute)"
                 :mode="commuteMode(c.commute)"
                 :cost="commuteCost(c.commute)"
-                :goodMax="commuteMode(c.commute) === 'walk' ? 15 : 45"
-                :fineMax="commuteMode(c.commute) === 'walk' ? 30 : 75"
+                :goodMax="pillThresholds(key, commuteMode(c.commute) === 'walk').goodMax"
+                :fineMax="pillThresholds(key, commuteMode(c.commute) === 'walk').fineMax"
               />
             </a>
-            <span
-              v-if="commuteCost(c.commute) !== null"
-              class="card__commute-cost"
-              :title="commuteCostTitle(c.commute)"
-            >
-              £{{ commuteCost(c.commute)!.toFixed(2) }}/day
-            </span>
           </div>
         </div>
+        <a v-if="Object.keys(adultCommutes).length > 0" href="#/settings" class="card__change-dest">Change destinations →</a>
       </div>
 
       <!-- Schools / EPC -->
@@ -270,7 +305,7 @@ async function toggleViewed() {
 .card {
   position: relative;
   background: var(--card-bg);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
   border: 1px solid var(--border);
   overflow: hidden;
@@ -287,22 +322,11 @@ async function toggleViewed() {
 }
 .card--dismissed { opacity: 0.6; }
 
-.card__border {
-  position: absolute;
-  top: 0; left: 0;
-  width: 4px; height: 100%;
-  border-radius: var(--radius) 0 0 var(--radius);
-}
-.card__border--active { background: var(--green); }
-.card__border--favourite { background: var(--amber); }
-.card__border--dismissed { background: var(--red); }
-.card__border--viewed { background: var(--blue); }
-
 .card__body {
-  padding: var(--sp-4);
+  padding: 14px 14px 12px;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
+  gap: 8px;
 }
 
 /* Top row */
@@ -311,6 +335,16 @@ async function toggleViewed() {
   align-items: flex-start;
   gap: var(--sp-3);
 }
+/* Favourite heart — the visible marker on favourited cards (no hover needed) */
+.card__fav-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 2px;
+  color: var(--blue);
+  flex-shrink: 0;
+}
+.card__fav-icon svg { display: block; }
+
 .card__address {
   flex: 1;
   min-width: 0;
@@ -318,52 +352,108 @@ async function toggleViewed() {
   color: var(--slate-800);
 }
 .card__address-text {
-  font-size: var(--fs-base);
+  font-size: var(--fs-lg);
   font-weight: var(--fw-semibold);
   margin: 0;
   word-break: break-word;
-  line-height: var(--lh-tight);
+  line-height: 1.3;
+  color: var(--text);
 }
 .card__address:hover .card__address-text { color: var(--blue); text-decoration: underline; }
 
+.card__cost-line { display: block; }
+.card__cost-line strong { font-weight: var(--fw-semibold); }
+.card__cost-line--others { font-size: var(--fs-xs); color: var(--text-secondary); margin-top: 2px; }
 .card__monthly-cost--unknown {
   color: var(--text-muted);
 }
 .card__monthly-cost {
   flex-shrink: 0;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-lg);
   font-weight: var(--fw-bold);
   color: var(--green);
   white-space: nowrap;
 }
+.card__whatif {
+  display: inline-block;
+  margin-left: 0.3rem;
+  font-size: 0.65rem;
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--blue);
+  border: 1px solid var(--blue);
+  border-radius: var(--radius-full);
+  padding: 0.05rem 0.4rem;
+  vertical-align: middle;
+}
 
 /* Specs row */
-.card__specs {
+.card__meta {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--fs-sm);
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.card__tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  background: var(--pill-bg);
   color: var(--text-secondary);
 }
-.card__price { font-weight: var(--fw-semibold); color: var(--slate-700); }
+.card__tag--price { font-weight: var(--fw-semibold); color: var(--text); }
+.card__tag--seen { background: var(--slate-100); color: var(--slate-600); }
+.card__tag.pill--good { background: var(--green-bg); color: var(--green-text); }
+.card__tag.pill--warn { background: var(--orange-bg); color: var(--orange-text); }
+.card__tag.pill--bad { background: var(--red-bg); color: var(--red-text); }
+.card__tag.pill--muted { background: var(--pill-bg); color: var(--text-secondary); }
 
 /* Commute rows */
 .card__commutes {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-1);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.card__commute-stale {
+  font-size: 0.65rem;
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--orange);
+  border: 1px solid var(--orange);
+  border-radius: var(--radius-full);
+  padding: 0.05rem 0.4rem;
+  white-space: nowrap;
+}
+.card__change-dest {
+  display: inline-block;
+  margin-top: 0.3rem;
+  font-size: 0.75rem;
+  color: var(--blue);
+  text-decoration: none;
+}
+.card__change-dest:hover {
+  text-decoration: underline;
 }
 .card__commute-row {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--fs-sm);
+  gap: 6px;
+  font-size: var(--fs-md);
 }
 .card__commute-person {
-  font-weight: var(--fw-medium);
-  color: var(--slate-700);
-  min-width: 70px;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-normal);
+  color: var(--text-secondary);
+  min-width: 0;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .card__commute-data {
   display: flex;
@@ -371,7 +461,6 @@ async function toggleViewed() {
   gap: var(--sp-2);
   color: var(--text-secondary);
 }
-.card__commute-cost { color: var(--slate-500); font-size: var(--fs-xs); }
 .pill-link { text-decoration: none; }
 
 /* School rows */
@@ -385,16 +474,16 @@ async function toggleViewed() {
 .card__school-row {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  gap: 6px;
   font-size: var(--fs-sm);
 }
 .card__school-type {
-  font-weight: var(--fw-medium);
-  color: var(--slate-500);
+  font-weight: var(--fw-semibold);
+  color: var(--text-muted);
   min-width: 70px;
-  font-size: var(--fs-xs);
+  font-size: var(--fs-2xs);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
 }
 .card__school-name {
   color: var(--blue);
@@ -430,7 +519,7 @@ async function toggleViewed() {
   background: var(--card-bg);
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: var(--fw-medium);
   transition: all var(--transition);
 }
@@ -438,10 +527,12 @@ async function toggleViewed() {
 .triage-btn--active { border-color: var(--blue); color: var(--blue); background: var(--blue-bg); }
 .triage-btn--danger.triage-btn--active { border-color: var(--red); color: var(--red); background: var(--red-bg); }
 .triage-btn--confirm.triage-btn--active { border-color: var(--green); color: var(--green); background: var(--green-bg); }
-.triage-btn__label { font-size: 10px; }
+.triage-btn__label { font-size: var(--fs-xs); }
 
-/* Pill system */
-.pill {
+/* Pill system — scoped to the SCHOOL rows so it never overrides the
+ * shared CommutePill classes (which are solid; the mockup's school
+ * rating chips stay light). */
+.card__school-row .pill {
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -452,10 +543,10 @@ async function toggleViewed() {
   line-height: 1.6;
   white-space: nowrap;
 }
-.pill--xs { font-size: 10px; padding: 1px 5px; }
-.pill--sm { font-size: 11px; padding: 1px 7px; }
-.pill--good { background: var(--green-bg); color: var(--green-text); }
-.pill--warn { background: var(--orange-bg); color: var(--orange-text); }
-.pill--bad { background: var(--red-bg); color: var(--red-text); }
-.pill--slate { background: var(--slate-100); color: var(--slate-600); }
+.card__school-row .pill--xs { font-size: var(--fs-xs); padding: 1px 5px; }
+.card__school-row .pill--sm { font-size: var(--fs-xs); padding: 1px 7px; }
+.card__school-row .pill--good { background: var(--green-bg); color: var(--green); }
+.card__school-row .pill--warn { background: var(--orange-bg); color: var(--orange-text); }
+.card__school-row .pill--bad { background: var(--red-bg); color: var(--red-text); }
+.card__school-row .pill--slate { background: var(--slate-100); color: var(--slate-600); margin-left: auto; }
 </style>

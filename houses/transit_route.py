@@ -20,12 +20,20 @@ NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 
 
 async def _get_drive_minutes(origin_postcode: str, station_name: str) -> int | None:
+    """Drive time from a postcode to a station.  The postcode is
+    geocoded first — callers that already hold coordinates should use
+    ``_get_drive_minutes_from_location`` and skip the lookup."""
     origin_coords = (await geocode(origin_postcode)).value_or_none()
     if origin_coords is None:
         origin_coords = (await _geocode_address(origin_postcode)).value_or_none()
     if origin_coords is None:
         return None
+    return await _get_drive_minutes_from_location(origin_coords, station_name)
 
+
+async def _get_drive_minutes_from_location(origin_coords, station_name: str) -> int | None:
+    """Drive time from known coordinates to a station — the fallback
+    when a property has no postcode but does have a best location."""
     station = find_station(station_name)
     dest_coords = station.location if station else None
     if dest_coords is None:
@@ -57,7 +65,7 @@ async def _get_drive_minutes(origin_postcode: str, station_name: str) -> int | N
     except Exception:
         logger.warning(
             "Park-and-ride ORS lookup failed for %s \u2192 %s (url=%s)",
-            origin_postcode,
+            origin_coords,
             station_name,
             ORS_DIRECTIONS_URL,
         )

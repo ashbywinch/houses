@@ -12,15 +12,6 @@ interface PersonEntry {
 }
 
 const persons = ref<PersonEntry[]>([])
-const settingsOpen = ref(false)
-
-function toggleSettingsMenu() {
-  settingsOpen.value = !settingsOpen.value
-}
-
-function closeSettingsMenu() {
-  settingsOpen.value = false
-}
 
 async function fetchPersons() {
   try {
@@ -40,7 +31,7 @@ onMounted(fetchPersons)
 <template>
   <header class="header">
     <div class="header__inner">
-      <div class="header__actions header__actions--left">
+      <div v-if="$slots.actions" class="header__actions header__actions--left">
         <slot name="actions" />
       </div>
       <h1 class="header__title">{{ title }}</h1>
@@ -50,38 +41,31 @@ onMounted(fetchPersons)
           <span class="header__auth-status">…</span>
         </template>
         <template v-else-if="auth.user">
-          <div class="header__menu">
-            <button
-              class="header__settings-menu"
-              :aria-expanded="settingsOpen"
-              @click="toggleSettingsMenu"
-            >Settings ▾</button>
-            <div v-if="settingsOpen" class="header__menu-list">
-              <router-link class="header__menu-item" to="/settings" @click="closeSettingsMenu">
-                Family settings
-              </router-link>
-              <router-link
-                v-for="p in persons"
-                :key="p.name"
-                class="header__menu-item header__menu-item--person"
-                :to="'/settings?person=' + encodeURIComponent(p.name)"
-                @click="closeSettingsMenu"
-              >{{ p.name }}</router-link>
-            </div>
-          </div>
+          <router-link class="header__settings-link" to="/settings" aria-label="Settings">
+            <span class="header__action-icon" aria-hidden="true">⚙</span>
+            <span class="header__action-text">Settings</span>
+          </router-link>
           <button
             v-if="auth.user.is_superuser"
             class="header__su-toggle"
             :class="{ 'header__su-toggle--active': auth.superuserMode }"
             @click="auth.toggleSuperuser()"
-            title="Admin: switch between your view and acting as someone else"
+            :title="auth.superuserMode ? 'Stop impersonating' : 'Switch between your view and acting as another family member'"
+            :aria-label="auth.superuserMode ? 'Stop impersonating' : 'Switch person'"
           >
-            Admin
+            <span class="header__action-icon" aria-hidden="true">👤</span>
+            <span class="header__action-text">{{ auth.superuserMode ? 'Stop impersonating' : 'Switch person' }}</span>
           </button>
-          <button class="header__auth-btn" @click="auth.logout()">Logout</button>
+          <button class="header__auth-btn" @click="auth.logout()" aria-label="Log out">
+            <span class="header__action-icon" aria-hidden="true">⎋</span>
+            <span class="header__action-text">Logout</span>
+          </button>
         </template>
         <template v-else>
-          <button class="header__auth-btn" @click="auth.login()">Login</button>
+          <button class="header__auth-btn" @click="auth.login()" aria-label="Log in">
+            <span class="header__action-icon" aria-hidden="true">→</span>
+            <span class="header__action-text">Login</span>
+          </button>
         </template>
       </div>
     </div>
@@ -104,46 +88,110 @@ onMounted(fetchPersons)
 <style scoped>
 .header {
   background: var(--header-bg);
-  color: #fff;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
   z-index: 10;
+  overflow-x: hidden;
 }
 .header__inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px;
+  padding: 10px 16px;
   max-width: 1200px;
   margin: 0 auto;
+  gap: 8px;
 }
 .header__title {
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 1.125rem;
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.01em;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+/* Mobile header pattern: ONE row. The title truncates and the text
+   actions collapse to icon-only (label stays in the accessible
+   name/tooltip), so nothing wraps and every action stays reachable. */
+@media (max-width: 560px) {
+  .header__inner {
+    padding: 8px 10px;
+    gap: 4px;
+  }
+  .header__title {
+    font-size: 1rem;
+  }
+  .header__action-text {
+    display: none;
+  }
+  .header__auth-btn,
+  .header__su-toggle,
+  .header__settings-link {
+    padding: 6px 4px;
+    font-size: 1rem;
+    line-height: 1;
+  }
+  .header__action-icon {
+    font-size: 1.15rem;
+  }
+  .header__actions {
+    gap: 2px;
+  }
 }
 .header__actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.header__auth-btn,
+.header__su-toggle,
+.header__settings-link {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 0.8125rem;
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  transition: background 0.15s;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.header__action-icon {
+  display: inline-block;
+}
+.header__settings-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 .header__auth-btn,
 .header__su-toggle {
-  background: rgba(255, 255, 255, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: #fff;
-  border-radius: 4px;
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.header__su-toggle {
+  border: 1px solid var(--amber-text);
+  color: var(--amber-text);
+}
+.header__su-toggle:hover {
+  background: var(--amber-bg);
 }
 .header__su-toggle--active {
-  background: var(--amber-bg, #f59e0b);
-  color: #1a1a1a;
-  font-weight: 700;
-  border-color: var(--amber-bg, #f59e0b);
+  background: var(--amber-bg);
+  color: var(--amber-text);
+  font-weight: var(--fw-bold);
 }
 .header__auth-status {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   opacity: 0.6;
 }
 /* Superuser bar */
@@ -152,32 +200,32 @@ onMounted(fetchPersons)
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  background: var(--amber-bg, #f59e0b);
-  color: #1a1a1a;
-  font-size: 13px;
+  background: var(--amber-bg);
+  color: var(--amber-text);
+  font-size: var(--fs-sm);
   max-width: 1200px;
   margin: 0 auto;
 }
 .su-bar__label {
   white-space: nowrap;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 .su-bar__select {
   padding: 3px 8px;
   border-radius: 4px;
-  border: 1px solid rgba(0, 0, 0, 0.2);
-  font-size: 13px;
+  border: 1px solid var(--border);
+  font-size: var(--fs-sm);
   background: #fff;
-  color: #1a1a1a;
+  color: var(--text);
 }
 .su-bar__exit {
   margin-left: auto;
   background: rgba(0, 0, 0, 0.1);
-  border: 1px solid rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 3px 10px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   cursor: pointer;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 </style>

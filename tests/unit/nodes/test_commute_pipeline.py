@@ -28,8 +28,16 @@ from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.stations import Station
 from tests.helpers import FixedCommuteNode
 
-# ── Commute fixtures ---------------------------------------------------------
 
+def _mw(value: int):
+    """A fixed max-walk input node (what the pipeline wires per person)."""
+    from dag.user_input_node import UserInputNode
+
+    node = UserInputNode("_mw", int)
+    node.push(value, "test")
+    return node
+
+# ── Commute fixtures ---------------------------------------------------------
 
 def _person(name: str, has_car: bool) -> Person:
     return Person(
@@ -38,7 +46,6 @@ def _person(name: str, has_car: bool) -> Person:
         places_of_interest=(PlaceOfInterest("Office", "SW1V 2QQ"),),
         bus_walk_penalty=Quantity(30, "minute"),
     )
-
 
 def _pimlico_commute() -> Commute:
     """Simon/Pimlico: train Clapham Junction → Wandsworth Town.
@@ -62,7 +69,6 @@ def _pimlico_commute() -> Commute:
             ),
         ),
     )
-
 
 def _maidenhead_commute() -> Commute:
     """Simon/Dad: train Maidenhead → Paddington.
@@ -90,9 +96,7 @@ def _maidenhead_commute() -> Commute:
         ),
     )
 
-
 # ── Fakes --------------------------------------------------------------------
-
 
 class _FakeStationRegistry:
     """Station registry that returns preset stations by name or by GPS proximity."""
@@ -126,7 +130,6 @@ class _FakeStationRegistry:
                 best = s
         return best
 
-
 class _FakeCarParkRegistry:
     """CarParkRegistry that returns a predetermined car park cost."""
 
@@ -135,7 +138,6 @@ class _FakeCarParkRegistry:
 
     def find_car_park(self, station: Station) -> CarPark | None:
         return self._car_park
-
 
 class _FakeRailFareRegistry:
     """RailFareRegistry that returns canned station/fare lookups."""
@@ -152,7 +154,6 @@ class _FakeRailFareRegistry:
 
     def fare_between(self, origin: Station, destination: Station) -> Money | None:
         return self._fares.get(frozenset({origin.crs, destination.crs}))
-
 
 class _CannedPlanner:
     """Fake route planner that returns a predetermined Commute per postcode."""
@@ -172,7 +173,6 @@ class _CannedPlanner:
             return Attempt.impossible(f"no canned route for {destination}")
         return Attempt.succeeded(commute)
 
-
 @pytest.fixture(autouse=True)
 def _services():
     """Set up mock services so the commute pipeline makes no real API calls."""
@@ -188,7 +188,6 @@ def _services():
     token = _sp.set(svc)
     yield planner
     _sp.reset(token)
-
 
 class TestFullCommutePipeline:
     """Exercises the commute DAG from transit router → selector for
@@ -252,7 +251,6 @@ class TestFullCommutePipeline:
             best_location=loc,
             poi=poi_src,
             has_car=False,
-            max_walk=30,
             no_bus_node=no_bus,
             with_bus_node=with_bus,
         )
@@ -273,6 +271,7 @@ class TestFullCommutePipeline:
             origin=loc,
             poi=poi_src,
             transit_result=transit_node,
+            max_walk_node=_mw(30),
             is_child=False,
         )
 
@@ -321,7 +320,6 @@ class TestFullCommutePipeline:
         )
         get_services().rail_fare_registry = registry
         svc = get_services()
-        svc.setting_nodes["settings/petrol_mpg"].push(45, "test")
         svc.setting_nodes["settings/petrol_cost_per_litre"].push(Decimal("1.45"), "test")
         poi_src = UserInputNode[str]("poi_mh", str)
         poi_src.push("RG12 8YA", "persons_source")
@@ -346,7 +344,6 @@ class TestFullCommutePipeline:
             best_location=loc,
             poi=poi_src,
             has_car=True,
-            max_walk=10,
             no_bus_node=no_bus,
             with_bus_node=with_bus,
         )
@@ -356,7 +353,7 @@ class TestFullCommutePipeline:
             best_location=loc,
             postcode_node=postcode,
             has_car=True,
-            max_walk=10,
+            max_walk_node=_mw(10),
             station_registry=_FakeStationRegistry(
                 [
                     Station("Maidenhead Rail Station", "MAI", GeoPoint(51.518, -0.722)),
@@ -367,10 +364,12 @@ class TestFullCommutePipeline:
                 CarPark(name="Test Car Park", daily_cost=Money("10.00", "GBP")),
             ),
         )
+        mpg_node = UserInputNode("test/dad/petrol_mpg", int)
+        mpg_node.push(45, "test")
         petrol_cost = PetrolCostAugmentNode(
             "test/dad/petrol_cost",
             commute_node=park_and_ride,
-            petrol_mpg_node=svc.setting_nodes.get("settings/petrol_mpg"),
+            petrol_mpg_node=mpg_node,
             petrol_cost_per_litre_node=svc.setting_nodes.get("settings/petrol_cost_per_litre"),
         )
         # Bus is slower than transit so transit wins
@@ -393,6 +392,7 @@ class TestFullCommutePipeline:
             origin=loc,
             poi=poi_src,
             transit_result=petrol_cost,
+            max_walk_node=_mw(30),
             is_child=False,
         )
 
@@ -456,7 +456,6 @@ class TestFullCommutePipeline:
         pc_src = UserInputNode[str]("pc_dr", str)
         pc_src.push("RG12 8YA", "test")
 
-        svc.setting_nodes["settings/petrol_mpg"].push(45, "test")
         svc.setting_nodes["settings/petrol_cost_per_litre"].push(Decimal("1.45"), "test")
 
         drive = Commute(
@@ -486,7 +485,6 @@ class TestFullCommutePipeline:
             best_location=loc,
             poi=poi_src,
             has_car=True,
-            max_walk=30,
             no_bus_node=no_bus,
             with_bus_node=with_bus,
         )
@@ -496,7 +494,7 @@ class TestFullCommutePipeline:
             best_location=loc,
             postcode_node=pc_src,
             has_car=True,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
         rf_dummy = FixedCommuteNode("test/dr/rf_dummy")
         rf_if = IfThenElseNode(
@@ -511,6 +509,7 @@ class TestFullCommutePipeline:
             origin=loc,
             poi=poi_src,
             transit_result=park_and_ride,
+            max_walk_node=_mw(30),
             is_child=False,
         )
         merge_node = MergeRailFareNode(
@@ -518,10 +517,12 @@ class TestFullCommutePipeline:
             commute_result=selector,
             rail_fare_result=rf_if,
         )
+        mpg_node = UserInputNode("test/dr/petrol_mpg", int)
+        mpg_node.push(45, "test")
         final_fuel = PetrolCostAugmentNode(
             "test/dr/final_fuel",
             commute_node=merge_node,
-            petrol_mpg_node=svc.setting_nodes.get("settings/petrol_mpg"),
+            petrol_mpg_node=mpg_node,
             petrol_cost_per_litre_node=svc.setting_nodes.get("settings/petrol_cost_per_litre"),
         )
 

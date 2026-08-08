@@ -1,14 +1,45 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { commuteDuration, commuteCost, pillColour } from '../formatters/commute'
+import { usePropertiesStore } from '../stores/properties'
 import ProvenanceView from './ProvenanceView.vue'
+import type { Provenance } from '../types'
+
+const store = usePropertiesStore()
 
 const props = defineProps<{
   commutes: any
-  goodThreshold?: number
-  warnThreshold?: number
   currentPerson?: string | null
 }>()
+
+/** The colour bands are the person's own thresholds from Settings
+ *  (same rule as the house cards), not a global constant. */
+function thresholdsFor(key: string): { good: number; fine: number } {
+  const person = key.split('/')[0]
+  const good = store.commuteGoods[person]
+  const fine = store.commuteCeilings[person]?.fine
+  if (good != null && fine != null) return { good, fine }
+  return { good: 45, fine: 75 }
+}
+
+/** A commute's "how is this calculated?" must not list fuel sources the
+ *  route doesn't use — the provenance walks every mode branch, so a
+ *  train route shows petrol inputs. Drop petrol-labelled sources unless
+ *  the winning mode is car/drive. */
+function provenanceForMode(p: Provenance, mode?: string): Provenance {
+  const isCar = mode === 'car' || mode === 'drive'
+  const keep = (label: string): boolean => isCar || !/petrol/i.test(label)
+  const walk = (node: Provenance): Provenance | null => {
+    if (!keep(node.label)) return null
+    const sources: Record<string, Provenance> = {}
+    for (const [key, child] of Object.entries(node.sources ?? {})) {
+      const filtered = walk(child)
+      if (filtered) sources[key] = filtered
+    }
+    return { ...node, sources }
+  }
+  return walk(p) ?? p
+}
 
 // ── Accordion state ────────────────────────────────────
 const expandedCommutes = ref<Set<string>>(new Set())
@@ -40,18 +71,28 @@ function toggleProvenance(key: string) {
     <div v-for="(c, key) in commutes" :key="key" class="commute-accordion">
       <button class="commute-accordion__header" @click="toggleCommute(key as string)">
         <span class="commute-accordion__label">{{ key }}</span>
-        <span class="pill" :class="pillColour(c, goodThreshold ?? 45, warnThreshold ?? 75)">
-          {{ commuteDuration(c?.value?.duration) }}
-          {{ commuteCost(c?.value?.daily_cost) }}
+        <span
+          class="pill"
+          :class="pillColour(c, thresholdsFor(String(key)).good, thresholdsFor(String(key)).fine)"
+          :title="c?.value?.duration ? undefined : 'No route found for this commute'"
+        >
+          <template v-if="c?.value?.duration">
+            {{ commuteDuration(c?.value?.duration) }}
+            {{ commuteCost(c?.value?.daily_cost) }}
+          </template>
+          <template v-else>No route</template>
         </span>
         <span class="commute-accordion__chevron" :class="{ 'commute-accordion__chevron--open': expandedCommutes.has(key as string) }">▼</span>
       </button>
       <div v-if="expandedCommutes.has(key as string)" class="commute-accordion__body">
-        <div v-if="c?.value?.details?.length" class="commute-legs">
-          <template v-for="(group, gi) in c.value.details" :key="gi">
+        <p v-if="!c?.value?._details?.length && !c?.provenance" class="commute-accordion__empty">
+          No route found for this destination — check the address in Settings.
+        </p>
+        <div v-if="c?.value?._details?.length" class="commute-legs">
+          <template v-for="(group, gi) in c.value._details" :key="gi">
             <div v-for="(leg, li) in group.legs" :key="`${gi}-${li}`" class="commute-leg">
               <span class="commute-leg__mode">{{ leg.mode }}</span>
-              <span class="commute-leg__duration">{{ leg.duration.value }} min</span>
+              <span v-if="leg.duration.value > 0" class="commute-leg__duration">{{ leg.duration.value }} min</span>
               <span v-if="li === 0 && group.cost != null" class="commute-leg__cost">
                 £{{ (typeof group.cost === 'number' ? group.cost : parseFloat(group.cost?.amount ?? '0')).toFixed(2) }}
               </span>
@@ -75,7 +116,10 @@ function toggleProvenance(key: string) {
           </button>
         </div>
         <div v-if="showProvenance === key && c?.provenance" class="commute-provenance-tree">
-          <ProvenanceView :provenance="c.provenance" title="Commute" />
+          <ProvenanceView
+            :provenance="provenanceForMode(c.provenance, c?.value?.mode)"
+            title="Commute"
+          />
         </div>
       </div>
     </div>
@@ -127,9 +171,14 @@ function toggleProvenance(key: string) {
   min-height: 44px;
 }
 .commute-accordion__header:hover { background: var(--slate-50); }
-.commute-accordion__label { font-weight: var(--fw-semibold); font-size: var(--fs-sm); flex: 1; }
-.commute-accordion__chevron { font-size: 10px; color: var(--text-muted); transition: transform var(--transition); }
+.commute-accordion__label { font-weight: var(--fw-semibold); font-size: var(--fs-sm); flex: 1; min-width: 0; }
+.commute-accordion__chevron { font-size: var(--fs-xs); color: var(--text-muted); transition: transform var(--transition); }
 .commute-accordion__chevron--open { transform: rotate(180deg); }
+.commute-accordion__empty {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 0.5rem 0;
+}
 .commute-accordion__body {
   padding: var(--sp-3) var(--sp-4);
   border-top: 1px solid var(--border);
@@ -160,7 +209,7 @@ function toggleProvenance(key: string) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--slate-400);
   background: none;
   border: 1px solid var(--slate-200);
@@ -184,7 +233,8 @@ function toggleProvenance(key: string) {
   line-height: 1.6;
   white-space: nowrap;
 }
-.pill--good { background: var(--green-bg); color: var(--green-text); }
-.pill--warn { background: var(--orange-bg); color: var(--orange-text); }
-.pill--bad { background: var(--red-bg); color: var(--red-text); }
+.pill--good { background: var(--green); color: #fff; }
+.pill--warn { background: var(--orange); color: #fff; }
+.pill--bad { background: var(--red); color: #fff; }
+.pill--muted { background: var(--commute-none); color: #fff; }
 </style>

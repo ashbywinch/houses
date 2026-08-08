@@ -88,8 +88,9 @@ Workstreams (each red/green):
     adjust; the DAG propagates correctly after save).
   - C3 — no unsaved-changes indicator; edits silently revert on refresh.
   - C4 — old-office commute on cards has no staleness signal.
-  - C5 — sinking fund £7,800/yr vs £433/mo looks inconsistent (the ⅔ split
-    is never explained) — provenance/copy fix.
+  - C5 — ~~sinking fund £7,800/yr vs £433/mo looks inconsistent (the ⅔ split
+    is never explained)~~ DONE: the ×⅔ fudge is removed (monthly = yearly ÷ 12)
+    and the note now reads "£X/mo is the yearly fund split across 12 months".
   - C6 — no plain-language sentence for what "Total Monthly" includes.
   - C7 — commute pill colours have no legend.
   - C8 — Map tab renders a bare price list, not a map.
@@ -117,11 +118,535 @@ Workstreams (each red/green):
 - `dag/` must stay houses-agnostic: new domain expressions belong in
   `houses/nodes/expressions.py`, not `dag/expression.py`.
 
-## Sequencing
+## Part D — What-if / scenario evaluation (IMPLEMENTED 2026-08-06)
 
-A (library first: A1 → A2 → A3 → A4) → B backlog items in user-approved
-order → walkthrough re-run after each batch → full suite
-(`make test` + language sweep) before every push.
+D1 (library `dag/evaluate.py` — task-local staged evaluation,
+node-keyed overrides, incremental recompute of only the changed
+subtree) and D2 (houses `POST /api/what-if` + the "What if…" panel on
+the property list; override catalog = the `persons` settings node,
+which carries every editable field: money, selling-home toggle,
+`trips_per_week`) are implemented and tested. What remains open: the
+library's original redesign ambition (full structure/state separation
+for forking graphs) is NOT needed for the current catalog — `evaluate`
+stages overrides through a ContextVar read-hook instead. Revisit only
+if a what-if needs to fork a graph mid-session.
+
+Why the current design isn't conducive (grounded in `dag/`):
+
+1. **Push, not pull.** The runtime is a reactive scheduler
+   (`AsyncQueueScheduler`): input change → invalidate → recompute →
+   persist → signal → downstream invalidation. There is no "evaluate
+   node X under inputs with override δ, throwaway" path.
+2. **Identity is global persisted state.** Nodes are keyed by ids
+   (`settings/…`, per-rid nodes) and values live in `node_results`; a
+   candidate value has no representation. Mutating a real input node
+   fires real invalidation + persistence and needs rollback — the
+   "delete state" antipattern.
+3. **Provenance is a persistence record** (timestamped `Attempt`s).
+   What-if provenance must say "hypothetical input, not saved" — the
+   `SourceType` enum doesn't model that.
+4. **No snapshot/fork.** The graph is a live object; there is no cheap
+   "same structure, different inputs" instantiation.
+
+Redesign sketch (library work, houses-agnostic — mirrors Part A's rule):
+
+- Separate graph **structure** (edges + compute) from **state** (values)
+  so a scenario = same structure + input overrides.
+- Add a synchronous, memoized, side-effect-free pull evaluation of the
+  dependency closure (`evaluate(graph, targets, overrides)`), reusing
+  `DerivedNode.compute`, producing throwaway `Attempt`s. Persistence
+  stays entirely out of this path; the existing scheduler/persistence is
+  unchanged for the real path. Overrides are keyed by node id
+  (`node_id → candidate value`); which nodes are override-able is
+  registered per project (houses side), keeping the library generic.
+- Provenance marks overridden inputs so the UI can render "hypothetical".
+- **Synergy with Part A**: a `Measurement` wrapper flows through the same
+  pure evaluation, so a what-if over an uncertain input yields a range
+  ("if we sell around £600k, monthly cost lands £1,200–£1,400") — the
+  honest way to present a hypothetical. Tests also gain a DB-free
+  evaluation path.
+
+UX direction (settled 2026-08-06):
+
+- A what-if is a QUESTION; settings is the FACTS form. Live-preview
+  inside the settings form blurs "is this number true or hypothetical?"
+  and the interesting consequences are house-shaped (which houses fall
+  under £X/mo), not settings-shaped. Financial what-if tools (Relm,
+  ifso, calculators) keep "play" separate from committed state and
+  emphasize deltas over absolutes.
+- The what-if lives in a "What if…" panel on the property list (where
+  the consequences are). Ephemeral by design (refresh → gone), single
+  clear exit + "apply to settings" escape hatch (existing PATCH path),
+  delta framing ("3 more houses under £1,500/mo") over new totals,
+  provenance shows the hypothetical input through the existing
+  `ProvenanceToggle`.
+- The panel's input catalog is DECLARATIVE and extensible — driven by
+  a list of override-able DAG inputs (node id + label + unit + current
+  value), not hardcoded fields. v1 ships: selling-home toggle + money
+  fields (sale price / mortgage / cash) + commute frequency
+  (trips_per_week per person/POI). Later additions must slot in without
+  redesign: life insurance, the works estimate, and any other spend
+  the user could choose not to make. Mechanics for per-property
+  derived spends (e.g. zeroing the works estimate) are open — the
+  catalog requirement is that they must be representable.
+- Excluded by design: destination/address changes ("what if I worked
+  somewhere else") — they trigger routing API calls. The commute
+  what-if is frequency-only ("what if I went in one day a week").
+
+## Part E — Walkthrough run 4 (2026-08-06)
+
+Two-phase walkthrough re-run (P13) against the live app: participant
+`UxParticipant2` (16m walk, 22 screenshots), evaluator `UxEvaluator`
+(report in agent://UxEvaluator). Confusions by severity: two blockers
+(old-office commutes + "Can't calculate" totals), three highs, five
+mediums/lows.
+
+Fixed in PR #54 (this session):
+
+- Commute-ceiling filter: default OFF (it hid ALL houses on first
+  visit), store-persisted toggle (no longer silently re-applies on
+  navigation), plain-language chip showing the hidden count.
+- Detail-page bare "?" commute pills → "No route" with a tooltip.
+- Card "£?/mo" → "£—/mo" (the "?" read as "£7/mo" at a glance).
+- Favourites view gets a heading + "N saved houses" count.
+- "What if…" panel collapsed by default (was a wall of family
+  numbers above the houses on first visit).
+- Cards get a "Change destinations →" link (the only path was buried
+  on the detail page).
+- Costs page explains very high commute figures (TfL daily maximum).
+
+Deferred / needs a user decision:
+
+- ~~Run-4 blocker "Total Monthly — Can't calculate" everywhere~~ —
+  RESOLVED 2026-08-06 via `POST /api/admin/regenerate` (force
+  recompute of code-stale nodes; `{"patterns": ["*/council_tax"]}`):
+  all 40 council-tax nodes regenerated, 16 totals unblocked. The
+  remaining 24 impossible totals are "Works estimate required for:
+  Ashby" — real settings data the family hasn't entered, not
+  staleness (enter per-property works estimates in Settings).
+- "Max Monthly Outgoings" offered while totals are unavailable (same
+  works-estimate data gap).
+- Optional polish: favourites distinctness beyond the heading.
+
+## Part E — Walkthrough run 5 (2026-08-06, P13 loop after run-4 fixes)
+
+Re-run after the run-4 fixes + the council-tax regeneration: participant
+`UxParticipantRun2` (19m walk, screenshots in /tmp/ux-houses-run2/),
+evaluator `UxEvaluatorRun2` (report in agent://UxEvaluatorRun2). 13
+confusions; triaged:
+
+Fixed in PR #54:
+
+- Commute-limit chip: no longer offers to hide when it would hide EVERY
+  house (info chip "All N houses are over the family's commute
+  limit — change the limit in Settings"); empty state guides the user
+  back to the chip.
+- "Total Monthly — Can't calculate" now names the missing piece (leaf
+  reason, e.g. "Works estimate required for: Ashby").
+- Council Tax estimate label: "? · (£1,200 ± £50)/yr" → "Band unknown ·
+  (£1,200 ± £50)/yr".
+- Sinking-fund note now uses THIS property's actual figures (was a
+  static £7,800/£433 example that never matched).
+- Commute "how is this calculated?" drops petrol sources for non-car
+  routes (the provenance walks every mode branch).
+- Cap fares show inline "(max)"; school walks say "min walk" not "m
+  walk"; filter label "Max Monthly Outgoings" → "Max monthly cost".
+
+Verified NOT reproducible — CONFIRMED against the run-2 screenshots and
+the live DOM (screenshot-first, per the walkthrough protocol):
+
+- "Mortgage missing from Costs tab" — refuted: the row is the FIRST
+  costs row and renders "Mortgage £1,080.94"; a fresh Costs-tab click
+  lands it at the top of the viewport (verified live in the DOM).
+  Screenshot 04/05 captured scrolled positions.
+- "Pimlico missing from Commute tab" — refuted: the DOM renders
+  Simon/Pimlico as the first accordion item (all 6 commutes present).
+  Screenshot 06 captured a scrolled position.
+- "Red wavy underline on monthly cost" — refuted: screenshot 01 shows
+  plain green figures (`≈£2,244.59/mo`, `£—/mo`) with no underline,
+  and no such style exists in the code (likely a browser-spellcheck
+  artifact in the participant's viewport).
+
+Residual UX kernel (no code bug): the participant scrolled past the
+top rows without noticing them — the mortgage (largest cost) and
+Pimlico (first commute) don't stand out visually. Prominence polish
+only; both are already the first rows.
+
+Deferred (data/scope): Summary tab describes the town, not the house
+(no photos/bathroom data in the DAG); map marker clustering + legend;
+favourites distinctness beyond the heading.
+
+## Part E — Walkthrough run 6 (2026-08-06, P13 loop after run-5 fixes)
+
+Re-run after the run-5 fixes: participant `UxParticipantRun3` (13m walk,
+screenshots in /tmp/ux-houses-run3/), evaluator `UxEvaluatorRun3` (report
+in agent://UxEvaluatorRun3). 8 confusions; triaged:
+
+Fixed in PR #54:
+
+- Raw TfL "HTTP 404: {$type: ...}" blob was rendered on a "Can't
+  calculate" total — a regression from the run-5 leaf-reason fix. The
+  route-merge node (TransitNode) now attaches a friendly user_message
+  ("Couldn't find a route to this destination — check the address.")
+  while keeping the raw error in the internal message for logs.
+- Commute-limit chip: the all-hidden info chip no longer renders a
+  dead "×" (clicking it did nothing); copy now explains the worst-
+  commute judgement ("All N houses have a commute over the 45-minute
+  limit — the worst commute counts").
+- Map pins: enlarged hit target (padding + negative margin).
+- Commute accordion: an expanded no-route row shows "No route found
+  for this destination — check the address in Settings." instead of
+  an apparently-empty body.
+
+Not code-fixable / inherent:
+
+- "Commute is to the old office" — the app cannot know a destination
+  is stale until the family updates it in Settings (protocol-
+  constrained walk: the participant was told not to edit inputs).
+- "Who is Ashby?" — real family data; the settings page shows names
+  and badges but not relationships.
+- Works-estimate blocker names the missing person (C1 satisfied) but
+  only that person can enter it (ownership) — no inline path for
+  others, by design.
+
+## Part E — Card-band snag (2026-08-06, user report)
+
+"House cards have the coloured band on two sides and they're not all
+the same colour on the same card — I don't know what either one
+represents."
+
+Root cause: the card had TWO silent colour axes. (1) Top status bar =
+worst-commute severity (green ok / orange tight / red far — the palette
+the list-header legend already documents, but nothing connected the bar
+to it). (2) Left accent border = triage state — and it was broken in
+three ways: the default "active" state painted EVERY untouched card
+green (a second band with no meaning); the palette collided with the
+status axis (amber favourite ≈ orange tight, red dismissed = red far);
+and favourite was amber while the favourite BUTTON was blue — the
+border didn't even match its own axis.
+
+Fixed:
+
+- Border appears only for real triage states (favourite/dismissed/seen);
+  untouched cards have no border. One meaningful band per card max.
+- Border colours now match the triage buttons exactly (favourite=blue
+  accent, dismissed=red, seen=green) — one axis, one palette, and the
+  favourite border is no longer confused with the commute palette.
+- Both bars carry a hover title ("A commute is too far", "Favourite",
+  …) so a colour is never unexplained.
+- Status bar bug: a card whose commutes ALL had no route showed GREEN
+  (the worst-severity loop initialised at 0); now muted gray
+  (`--commute-none`), matching the legend's "no route" dot.
+
+Verified: computed styles on the live app (favourite border =
+rgb(45,106,79) = --blue accent; default border = transparent; status
+bars red/orange), plus 3 new PropertyCard tests (default has no
+border, triage borders + titles, severity classes + titles) — 221
+frontend green.
+
+## Part E — Settings overhaul + settable-audit (2026-08-06, user report)
+
+"Clicking Settings is highly confusing. It should just show you your
+settings. … What's left that should be user settable somehow but isn't?
+Either user nodes in the dag or things like those commute colour bands."
+
+### Settings page
+
+- The page showed EVERY family member's full settings (read-only for
+  others) plus the deposit. Now it shows ONLY the session person's
+  settings: impersonated person (superuser mode) → session person
+  (server email linkage) → session display name (the DAG keys people by
+  NAME, so the Google/device profile name is the identity when the
+  email isn't linked — the dev login email simon@example.com doesn't
+  match the person record's smwinch@gmail.com). Truly-unlinked sessions
+  still see everyone read-only.
+- The header "Settings ▾" drop-down (which confusingly listed every
+  family member) is now a direct Settings link. The per-person
+  ?person= deep-links from the old menu are gone; the property page's
+  "Change destinations →" still works (it links the session person).
+- The deposit summary stays (it is the readout of the money fields).
+- NEW settable fields: "Commute is easy up to (minutes)"
+  (good_max_minutes — the green→amber band) and per-destination
+  "Weeks per year" (was silently defaulting to 46).
+
+### Settable-audit (user DAG nodes vs UI)
+
+| Node | Fields | UI |
+|---|---|---|
+| persons | has_car, selling_home, sale/mortgage/cash (whole £), life insurance, destinations (label/address/trips/weeks/modes) | Settings ✓ (what-if overrides sale/mortgage/cash) |
+| commute_thresholds | fine_max_minutes ✓ ("worst acceptable") · good_max_minutes (NEW) | both now in Settings ✓ |
+| financial | mortgage_rate, mortgage_term_years, sinking_fund_rate, petrol_mpg, petrol_cost_per_litre, working_weeks_per_year, rental_income_monthly (legacy dupes: current_home_*, gross_ashby_contribution) | **NO UI** — live in the DAG (feed the monthly total) but only PATCHable via API. Candidate for a household-finances section; NOT built (changes the monthly-total math — needs sign-off). |
+
+Built 2026-08-06 (second pass): the 5 LIVE financial fields now have a
+"Household finances" section on the settings page (mortgage rate %,
+term, sinking-fund %, petrol MPG, petrol cost £/l), autosaved via
+PATCH /settings/financial with percent↔fraction conversion. The GET
+/settings financial blob previously came from a legacy dict node that
+went STALE after any PATCH (the DAG always read the individual
+setting nodes) — it now serializes the live nodes
+(settings_node.aggregate_dict); the legacy `financial_source` field
+and `make_default_financials` are removed. The remaining financial
+keys (working_weeks_per_year, rental_income_monthly,
+current_home_*, gross_ashby_contribution) have NO DAG consumers —
+dead defaults, deliberately not surfaced.
+
+### Colour bands now actually work
+
+The card and detail-page pills previously used hardcoded thresholds
+(15/45 walk, 45/75 non-walk) — even the "worst acceptable commute" in
+Settings did NOT change the pill colours (only the hide-over-ceiling
+filter used it). Now pills resolve per person from the settings node
+(good = green→amber, fine = amber→red), so the bands are real: Simon
+30/45, Lorena 40/60.
+
+Verified live: settings page shows only Simon's section; good/fine
+bands + weeks inputs present; 229 frontend tests green.
+
+A (library first: A1 → A2 → A3 → A4) → D (library `evaluate` primitive,
+then the houses override catalog + "What if…" panel) → B backlog items in
+user-approved order → walkthrough re-run after each batch → full suite
+(`make test` + language sweep) before every push. A before D: Part A's
+`Measurement` gives what-if range rendering, and the `evaluate` primitive
+builds on the same pure-evaluation path (settled 2026-08-06).
+
+## Part E — Settings implementation (2026-08-07, approved model changes)
+
+The tabbed prototype (Finances | Commutes) is implemented in the real
+app with all the approved model changes:
+
+- Transit rename ('train' -> 'transit' everywhere: value, label, API,
+  migration rule, selector; persisted persons migrated live via
+  tools/migrate_train_to_transit.py). Journey-LEG mode names
+  (train/tube/bus...) deliberately untouched.
+- Petrol MPG is per-person (Person.petrol_mpg, PersonPetrolMpgNode);
+  petrol cost/litre stays a household finance.
+- Max walk exposed: bus_walk_penalty was already in the model + API —
+  now a 'Willing to walk up to (minutes)' field on the Commutes tab.
+- Deposit excludes children completely (pure _deposit_breakdown helper,
+  unit-tested; EquityTotalNode skips children too).
+- Settings page: Finances tab (default, left) = deposit + household
+  finances + money fields; Commutes tab = has-car + MPG + bands +
+  max-walk + destinations. Shared WholePoundsField component extracted
+  from the what-if panel. Copy: 'Transit', 'Transport modes you'd
+  accept', no 'office', no leave-address-blank labels, future-house
+  framing intro.
+
+Verified live at 375px (tabs switch, MPG under has-car, max-walk,
+modes labelled Transit/Driving/Walking, trips+weeks present).
+234 frontend + 1410 python green.
+
+## Part E — Destination-in-legs + detail summary bar (2026-08-07)
+
+User report round (P13 loop): (1) the walk/drive destination belongs
+IN THE DAG LEGS, not rendered on the commute accordion header; (2) the
+school walk destination must be the school's ADDRESS, never a bare
+lat/lon; (3) the two monthly costs sit on the right, each on its own
+row; (4) "3 bed" goes on the line below the price, left-aligned;
+(5) the edit-address link must look grouped with the address, using the
+standard classes; (6) verify the user is actually a superuser; (7) make
+the troubleshooting screenshot representative of the user's own view.
+
+- School address captured at load: `School.from_GIAS_row` now joins
+  Street/Locality/Address3/Town/County/Postcode into `full_address`;
+  Primary/SecondarySchoolNode emit `postcode` + `full_address`;
+  `SchoolLocationNode` prefers `full_address` → `"{name}, {postcode}"`
+  → `lat,lon` (last resort). Live school legs now read
+  "129 Upper Woodcote Road, Reading, RG4 7LB" / "Surley Row, Emmer
+  Green, Reading, Berkshire, RG4 8LR".
+- `_google_route_commute` sets `end_station=dest_str` on walk/drive
+  JourneyLegs; the travel planner owns the destination, not the UI.
+  `CommuteSection.vue` dropped the accordion-header destination overlay
+  and its CSS.
+- Detail summary bar: `.summary-address-row` is a plain block with a
+  bottom border; the "Edit address" button now flows inline at the end
+  of the address heading (wraps with it — a flex row could never put a
+  button on the last line of a wrapping h1). `.summary-facts` is a
+  `1fr auto` grid: left column stacks price over "N bed"; right column
+  stacks the couple and others monthly figures, each on its own row,
+  right-aligned (both right edges measured at the same x).
+- **Superuser truth**: the user's account (Ashby, emily.winch@gmail.com)
+  was NOT a superuser — the live persons config had `is_superuser:
+  false` for everyone. The headless check used a dev-minted cookie
+  (simon@example.com, superuser) — not representative. Ashby is now
+  `is_superuser: true` via the merge PATCH (other fields untouched);
+  because the flag is baked into the session cookie at login, she must
+  log out and back in for the 👤 "Switch person" button to appear.
+- `public/header-check.png` re-taken from Ashby's OWN session
+  (emily.winch@gmail.com → Ashby, superuser, impersonation bar open) —
+  the troubleshooting screenshot now matches what the user will see.
+- Commute chains regenerated live (`*/poi`, `*/primary_school`,
+  `*/secondary_school`, `*/walk`, `*/drive`, transit/rail/park-and-ride
+  chain) so persisted legs carry the destinations.
+
+## Part E — School names, DB dedupe, park-and-ride leg (2026-08-07)
+
+Follow-up round: (1) the school walk/drive leg destination must carry
+the school NAME joined with the address; (2) re-adding a Rightmove
+property that already exists in the DATABASE must be rejected (no
+duplicate) — the sheet check alone silently created duplicates when
+the sheet was unreachable; (3) the Pimlico park-and-ride lost its
+PARK leg because Reading's car-park cost was unknown.
+
+- `SchoolLocationNode` now emits `"{name}, {full_address}"` (name-led,
+  comma-joined) — live legs read "The Heights Primary School, 129
+  Upper Woodcote Road, Reading, RG4 7LB". Falls back to name+postcode,
+  then coordinates.
+- `upsert_property` checks the DATABASE first (`property_rids()` from
+  node_results) before the sheet; a matching RID → 400 "already
+  exists. Use fields= …" even with no sheet client. Verified live:
+  re-POSTing 173677193 → 400.
+- `ParkAndRideAugmentNode` emits the PARK leg whenever a car park
+  exists — the car-park NAME shows the park-and-ride; the cost is
+  attached only when known. Frontend hides the synthetic "0 min"
+  duration on park legs. Live Pimlico: drive → "park · Reading
+  Station Car Park" → train.
+- Tests (TDD): school location joins name+address; PARK leg survives an
+  unknown cost (operator present, cost null); DB-level dedupe rejects
+  a seeded rid with no sheet client.
+
+## Part E — Zero-min durations, per-row provenance, superuser trace (2026-08-07)
+
+- Frontend hides the duration on ANY zero-minute leg (park legs were
+  the visible case, but the rule is "0 min" not "park").
+- CostsSection renders a ⓘ on every financial breakdown row (Mortgage,
+  Council tax, Sinking fund, Commutes, Life insurance — both the couple
+  and others blocks) wired to each component's own DAG provenance;
+  previously only the group totals had toggles while the 5–7 component
+  rows sat unannotated.
+- TEMP-DEBUG superuser trace in `houses/web/auth.py`: `/me` logs
+  `SUPERUSER-TRACE email=… cookie_is_superuser=… matched_person=…
+  settings_is_superuser=… client_host=…` and `_build_session` logs
+  `SUPERUSER-LOGIN-TRACE baked_is_superuser=…`. Diagnosis: the cookie's
+  is_superuser flag is baked at LOGIN (30-day validity); Ashby was
+  promoted in settings AFTER her last login, so her device cookie still
+  says false → no 👤 button. Reproduced exactly with a stale cookie
+  (cookie=false, settings=true, button hidden). Trace REMOVED after the
+  fix (live-superuser re-derivation) shipped.
+
+## Part E — New houses, common CSS, impossible-card rows, live superuser (2026-08-07)
+
+- Added 174910202 (Willowmead Gardens, Marlow SL7 1HW, £899k, 5 bed)
+  and 90427107 (Rupert Avenue, High Wycombe HP12 3NL, £775k, 5 bed);
+  both fully enriched (commutes, schools, town, group monthly cost).
+- What If person cards now use the common `.settings-card` /
+  `.card-heading` / `.toggle-row` pattern — the toggle-row is a SIBLING
+  of the heading (was an inline-styled child), and the bespoke
+  `.whatif-person { padding: 0.6rem 0 }` override (zero horizontal
+  padding) is gone. Verified: 16px side padding, no inline style.
+- PropertyCard renders BOTH per-month rows when group_monthly_cost is
+  impossible: the two labels ("S+L", "Ashby") come from the settings
+  persons (store `groupLabels`, mirroring `joint_owner_names`), each
+  row showing `£—/mo`. Previously an impossible total collapsed the
+  card to a single unlabelled `£—/mo`.
+- **Live superuser, no re-login**: `effective_session_user` re-derives
+  `is_superuser` from LIVE settings on every request (cookie snapshot
+  is the fallback), so a Settings promotion applies to an existing
+  session immediately. Used in `/me`, `/impersonate`, the settings
+  PATCH + triage endpoints, and both admin routes. Tests updated to
+  push `is_superuser=True` persons where they exercise superuser paths
+  (settings are now authoritative both ways).
+
+## Part E — Leaflet maps: isochrones + schools (2026-08-07)
+
+- The Map page tab and the detail-page map are now real Leaflet maps
+  (npm leaflet, shared `MapView.vue` component) instead of OSM embed
+  iframes.
+- `GET /api/map/isochrones` serves the committed toolchain artifacts
+  (`union.json` transit shed → "Train: Pimlico & Aldgate",
+  `drive_searches.json` → one "Drive to <label>" layer per destination,
+  `intersection.json` → "Where we could live") via `houses/map_layers.py`
+  — the same shape the toolchain's own map renders.
+- Map page: property pins (blue circle markers linking to detail) over
+  the isochrone polygons; the old absolute-positioned pin overlay and
+  iframe are gone.
+- Detail page: the summary map shows the property (blue) plus the two
+  schools (primary green, secondary amber) when they carry coordinates;
+  `SchoolValue` type gained `lat`/`lon`/`postcode`/`full_address`.
+- Both maps fall back to a "map didn't load" note on init failure.
+- Tests: `test_map_layers.py` (artifact→layers shape + endpoint);
+  PropertyList/PropertyDetail map tests assert the MapView marker/layer
+  props (Leaflet mocked — jsdom can't size a map).
+
+## Part E — Map polish: price pins, layer key, SVG icons (2026-08-07)
+
+- Detail-page back button removed — browsers and phones provide
+  navigation; the header title now sits at the left margin (the empty
+  left-actions slot no longer renders).
+- Map-page house pins are price LABELS (chip divIcons, like the old
+  absolute pin labels): `£650,000`, etc., linking to the detail page.
+- The checkbox layer key (Leaflet `control.layers`, as the toolchain
+  map) toggles each isochrone: "Train: Pimlico & Aldgate",
+  "Drive to Dad", "Drive to Bracknell", "Where we could live".
+  Verified: unchecking Train drops 34 → 9 polygons.
+- Starting view is property-centred again (fit to markers, not the
+  polygon extent) — matches the old iframe bbox behaviour; the
+  isochrones are overlays you pan to.
+- Detail map markers are simple SVG icons: blue house for the property,
+  green/amber graduation-cap for primary/secondary schools.
+- Tests updated for the new marker kinds + leaflet control mock.
+
+## Part E — School links + special-school filter (2026-08-07)
+
+- **School link bug**: `School.url` was never populated — `from_GIAS_row`
+  captured `website` but left `url=""`, so the detail page rendered
+  `href=""` and "clicking the school" opened the CURRENT property page
+  in a new tab. `url` is now derived from the GIAS SchoolWebsite column
+  (scheme-prefixed: `www.school.sch.uk` → `https://www.school.sch.uk`),
+  and the frontend renders a link ONLY when a url exists (plain text
+  otherwise).
+- **Same primary+secondary**: 90427107's nearest school for both age 4
+  and age 12 was Chiltern Wood — a community SPECIAL school (ages
+  3-19) at the property's own coordinates, so primary and secondary
+  collapsed to the same school. Special schools are now excluded from
+  the mainstream nearest-school search (alongside fee-paying and
+  blank-name filters). 90427107 now shows St Michael's Catholic School
+  (primary, Good) and John Hampden Grammar School (secondary,
+  Outstanding) — distinct, real, both with working website links.
+- Tests: special-school exclusion (strictly-closest fixture), website→url
+  capture, url stays empty without website, SchoolsSection renders a
+  link only when url exists.
+
+## Part E — Map labels, layer key, scroll memory, amenities (2026-08-07)
+
+- Map price chips size to their content — the divIcon's iconSize was
+  0×0, which clipped every label to ~20px; now the icon sizes to the
+  chip (labels render full width).
+- Layer key is a custom panel (checkbox + OPAQUE colour swatch per
+  layer — the polygon fill is deliberately faint). Defaults: only
+  "Where we could live" (the intersection) is on; the three isochrone
+  layers start hidden behind the key (`visibleByDefault` flag from
+  `houses/map_layers.py`).
+- List-page scroll position is remembered across detail navigation:
+  the store saves `window.scrollY` on leave and restores it after the
+  list loads on return. A full reload resets the store, so the list
+  starts at the top. (Router scrollBehavior alone failed — the list
+  loads async, so the restore fired against a 0-height page.)
+- Nearby amenities (the sheet's "Walkable Amenities" column — carried
+  live by the walkability DAG node) now render under the town
+  description as a "Nearby amenities" paragraph.
+- Tests: amenities render/omit, intersection visibleByDefault,
+  MapView key behaviour; user-language sweep stays green (template
+  comments must not use "isochrone").
+
+## Part E — TfL fare regression (2026-08-07)
+
+88275093 Simon/Pimlico showed "Could not calculate — no fare STL→EAL".
+
+- The route (Southall → Ealing Broadway → tube → Pimlico) is entirely
+  TfL-priced, but `TflClient._build_cost_groups` DROPPED the fare: a
+  dangling `round(fare["totalCost"]…)` expression computed the return
+  cost and discarded it, so every transit CostGroup had cost=None and
+  daily_cost was £0.
+- A £0 transit route made the National Rail fare node run; the
+  Elizabeth-line leg has no NR fare (STL→EAL absent, STL→LON absent),
+  so the commute was killed. (It "worked recently" because TfL used to
+  route this commute via Paddington, whose STL→PAD fare exists.)
+- Fix: `_build_cost_groups` now applies TfL's fare to the transit
+  groups — per-mode `fare.fares` costs (×2 return) when present, else
+  the whole-journey `totalCost` on the first transit group. A priced
+  TfL route carries its cost, so the NR fare node never runs.
+- Verified live: Simon/Pimlico 1h14 £7.20 with walk → train (Ealing
+  Broadway, £7.20) → tube → Pimlico.
 
 ## Verification
 

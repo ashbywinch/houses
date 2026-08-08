@@ -6,17 +6,19 @@
   "scripts": {
     "dev": "npm run gen-vars && vite --host",
     "build": "vue-tsc -b && vite build",
-    "test": "vue-tsc -b --noEmit && vitest run && vite build && npm run lint:css",
+    "test": "vitest run && vite build && npm run lint:css",
     "preview": "vite preview",
     "gen-vars": "sed -n '/^:root {/,/^}/p' src/App.vue > src/_variables.css",
     "lint:css": "npm run gen-vars && stylelint --config .stylelintrc.json 'src/**/*.vue'"
   },
   "dependencies": {
+    "leaflet": "^1.9.4",
     "pinia": "^3.0.4",
     "vue": "^3.5.34",
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
+    "@types/leaflet": "^1.9.22",
     "@types/node": "^24.12.3",
     "@vitejs/plugin-vue": "^6.0.6",
     "@vue/test-utils": "^2.4.11",

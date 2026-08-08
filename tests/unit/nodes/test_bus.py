@@ -12,6 +12,15 @@ from houses.bus_journey import BusJourneyRegistry
 from houses.geo import GeoPoint
 
 
+def _mw(value: int):
+    """A fixed max-walk input node."""
+    from dag.user_input_node import UserInputNode
+
+    node = UserInputNode("_mw", int)
+    node.push(value, "test")
+    return node
+
+
 class TestBusRouteNode:
     @pytest.mark.asyncio
     async def test_returns_dict_when_location_ok(self):
@@ -167,7 +176,7 @@ class TestBusLegAugmentNode:
             transit_input=transit,
             bus_route_node=route,
             bods_fare_node=fare,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
         commute = Commute(
             person=Person(name="", has_car=False),
@@ -206,7 +215,7 @@ class TestBusLegAugmentNode:
             transit_input=transit,
             bus_route_node=route,
             bods_fare_node=fare,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
         commute = Commute(
             person=Person(name="", has_car=False),
@@ -249,7 +258,7 @@ class TestBusLegAugmentNode:
             transit_input=transit,
             bus_route_node=route,
             bods_fare_node=fare,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
         commute = Commute(
             person=Person(name="", has_car=False),
@@ -328,7 +337,7 @@ class TestBusLegAugmentNode:
             transit_input=transit,
             bus_route_node=route,
             bods_fare_node=fare,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
         commute = Commute(
             person=Person(name="", has_car=False),
@@ -398,7 +407,7 @@ class TestBusLegAugmentNode:
             transit_input=transit,
             bus_route_node=route,
             bods_fare_node=fare,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
         commute = Commute(
             person=Person(name="", has_car=False),
@@ -483,7 +492,7 @@ class TestBusLegAugmentInfeasible:
             transit_input=transit,
             bus_route_node=route,
             bods_fare_node=fare,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
         await flush_processor()
         a = await node.attempt()
@@ -555,7 +564,7 @@ class TestBusFallbackForNoTflRoute:
             transit_input=transit,
             bus_route_node=route,
             bods_fare_node=fare,
-            max_walk=30,
+            max_walk_node=_mw(30),
         )
         await flush_processor()
         a = await node.attempt()

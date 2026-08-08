@@ -1,4 +1,4 @@
-"""Monthly sinking fund node — yearly sinking ÷ 12 × ⅔."""
+"""Monthly sinking fund node — yearly sinking ÷ 12."""
 
 from __future__ import annotations
 
@@ -9,7 +9,11 @@ from dag.derived_node import DerivedNode
 
 
 class MonthlySinkingFundNode(DerivedNode[Money]):
-    """Monthly sinking fund = yearly sinking fund ÷ 12 × ⅔."""
+    """Monthly sinking fund = yearly sinking fund ÷ 12.
+
+    The shared-cost split (each person's share) is applied by the
+    headline's group node, not here — the old ×⅔ fudge is gone.
+    """
 
     def __init__(self, node_id: str, *, yearly_sinking_fund_node):
         self._yearly_node = yearly_sinking_fund_node
@@ -23,7 +27,7 @@ class MonthlySinkingFundNode(DerivedNode[Money]):
         yearly = self._yearly_node.latest_attempt().value_or_none()
         lines: list[FormulaLine] = [
             FormulaLine(label="Yearly sinking fund", value=str(yearly) if yearly is not None else "—"),
-            FormulaLine(label="÷ 12 × ⅔ (monthly share)", value=str(val)),
+            FormulaLine(label="÷ 12 (monthly)", value=str(val)),
         ]
         return Formula(lines=lines, result=str(val))
 
@@ -34,5 +38,5 @@ class MonthlySinkingFundNode(DerivedNode[Money]):
         y = yearly.value_or_none()
         if y is None:
             return yearly
-        monthly = round(y.amount / 12 * 2 / 3, 2)
+        monthly = round(y.amount / 12, 2)
         return Attempt.succeeded(Money(str(monthly), "GBP"))

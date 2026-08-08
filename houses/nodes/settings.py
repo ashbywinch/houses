@@ -84,7 +84,7 @@ def make_default_persons() -> list[Person]:
                     address=settings.simon_destination,
                     trips_per_week=1,
                     weeks_per_year=46,
-                    acceptable_modes=("train",),
+                    acceptable_modes=("transit",),
                 ),
                 PlaceOfInterest(
                     label="Bracknell",
@@ -115,7 +115,7 @@ def make_default_persons() -> list[Person]:
                     address=settings.lorena_destination,
                     trips_per_week=2,
                     weeks_per_year=46,
-                    acceptable_modes=("train",),
+                    acceptable_modes=("transit",),
                 ),
             ),
         ),
@@ -153,22 +153,6 @@ def make_default_persons() -> list[Person]:
             ),
         ),
     ]
-
-
-def make_default_financials() -> dict[str, Any]:
-    return {
-        "petrol_mpg": 45,
-        "petrol_cost_per_litre": 1.45,
-        "current_home_sale_price": 0,
-        "current_home_outstanding_mortgage": 0,
-        "gross_ashby_contribution": 0,
-        "mortgage_rate": 0.0495,
-        "mortgage_term_years": 27,
-        "sinking_fund_rate": 0.01,
-        "rental_income_monthly": 0,
-        "life_insurance_monthly": 150,
-        "working_weeks_per_year": 46,
-    }
 
 
 def make_default_thresholds() -> dict[str, dict[str, int]]:

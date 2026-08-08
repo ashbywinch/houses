@@ -27,7 +27,14 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
     """Augments a transit commute with park-and-ride (drive to station, park, ride transit).
 
     Depends on the transit result, the property's location (for station lookups),
-    and the property's postcode (for drive time estimation).
+    and — when known — the property's postcode (for drive time estimation).
+
+    The postcode is a CONDITIONAL dependency: a pending/empty postcode
+    must not stall the chain, so ``_get_active_deps`` excludes it until
+    it carries a value, and compute falls back to the best location for
+    the drive-time estimate.  When the postcode later resolves, the
+    static-dep signal re-schedules this node and the estimate upgrades
+    to the postcode-based one.
     """
 
     def __init__(
@@ -38,7 +45,7 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         best_location: Node,
         postcode_node: Node,
         has_car: bool,
-        max_walk: int,
+        max_walk_node,
         station_registry: StationRegistry | None = None,
         car_park_registry: CarParkRegistry | None = None,
     ):
@@ -46,19 +53,43 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         self.best_location = best_location
         self.postcode_node = postcode_node
         self._has_car = has_car
-        self._max_walk = max_walk
+        self._max_walk = 30
+        self._max_walk_node = max_walk_node
         self._car_park_name: str = ""
         self._station_registry = station_registry
         self._car_park_registry = car_park_registry
-        deps = (transit_node,)
+        # Static deps include postcode so its changed signal re-schedules
+        # this node when a postcode arrives later; _get_active_deps gates
+        # whether a PENDING postcode can block refresh.
+        deps = (transit_node, max_walk_node)
         if has_car:
             deps = deps + (best_location, postcode_node)
         super().__init__(node_id, Commute, deps)
         self.display_name = "Park & Ride"
 
+    def _get_active_deps(self):
+        """The postcode is only an active dep once it has a value — a
+        pending/empty postcode must not stall refresh (a permanently
+        pending UserInputNode with no producer would freeze every
+        has-car commute chain forever)."""
+        deps: list[Node] = [self.transit_node, self._max_walk_node]
+        if self._has_car:
+            deps.append(self.best_location)
+            pc = self.postcode_node.latest_attempt()
+            if pc.succeeded and pc.value_or_none():
+                deps.append(self.postcode_node)
+        return tuple(deps)
+
     async def compute(
-        self, transit: Attempt[Commute], location: Attempt[GeoPoint] = None, postcode_attempt: Attempt[str] = None
+        self,
+        transit: Attempt[Commute],
+        max_walk: Attempt[int] | None = None,
+        location: Attempt[GeoPoint] | None = None,
+        postcode_attempt: Attempt[str] | None = None,
     ) -> Attempt[Commute]:
+        mw_val = max_walk.value_or_none() if max_walk is not None else None
+        if mw_val is not None:
+            self._max_walk = int(mw_val)
 
         commute = transit.value_or_none()
         if commute is None:
@@ -84,20 +115,27 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         if not self._has_car:
             return transit
 
-        # Need postcode for drive time estimation
-        postcode = postcode_attempt.value_or_none() if postcode_attempt and postcode_attempt.succeeded else None
-        if not postcode:
-            return transit
-
         # Find the station at the end of the walk leg
         station_name = commute.details[0].legs[0].end_station
         if not station_name:
             return transit
 
-        # Get actual drive time via the drive time service
+        # Drive time needs either a postcode or the best location.
+        # With neither, the walk stays — park-and-ride is skipped, but
+        # the commute itself is still valid.
+        postcode = postcode_attempt.value_or_none() if postcode_attempt and postcode_attempt.succeeded else None
+        origin = location.value_or_none() if location and location.succeeded else None
+        if not postcode and origin is None:
+            return transit
+
+        # Get actual drive time via the drive time service — postcode
+        # first, best-location fallback when the property has none.
         from houses.services_provider import get_services
 
-        drive_minutes = await get_services().drive_time_service.estimate(postcode, station_name)
+        if postcode:
+            drive_minutes = await get_services().drive_time_service.estimate(postcode, station_name)
+        else:
+            drive_minutes = await get_services().drive_time_service.estimate_from_location(origin, station_name)
         if drive_minutes is None:
             return transit
 
@@ -109,13 +147,15 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
 
         parking = self._car_park_registry or CarParkRegistry()
         car_park = parking.find_car_park(station)
-        if car_park is None or car_park.daily_cost is None:
-            return transit
-        parking_cost = car_park.daily_cost
+        # The drive leg is added whenever driving beats walking — a
+        # missing car-park COST must not leave a 76-minute walk in place.
+        # The PARK leg is shown whenever a car park exists (its name
+        # identifies the park-and-ride); the cost is only attached when
+        # known.
+        parking_cost = car_park.daily_cost if car_park is not None else None
         existing_cost = commute.daily_cost
         if existing_cost is None:
             existing_cost = Money("0", "GBP")
-        new_cost = existing_cost + parking_cost
 
         # Replace the walk leg with a drive leg (actual drive time).
         # The drive leg goes in its OWN CostGroup so that fuel cost and
@@ -130,11 +170,16 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         # Remaining transit legs (train/tube) stay in their own CostGroup
         # with the original operator and cost.
         transit_legs = first_cg.legs[1:]
-        new_parking_group = CostGroup(
-            legs=(JourneyLeg(mode=LegMode.PARK, duration=Quantity(0, "minute")),),
-            operator=car_park.name,
-            cost=car_park.daily_cost,
-        )
+        if car_park is not None:
+            new_parking_group = CostGroup(
+                legs=(JourneyLeg(mode=LegMode.PARK, duration=Quantity(0, "minute")),),
+                operator=car_park.name,
+                cost=parking_cost,
+            )
+            new_cost = existing_cost + parking_cost if parking_cost is not None else existing_cost
+        else:
+            new_parking_group = None
+            new_cost = existing_cost
         # If the first CostGroup had transit legs after the walk, keep them in
         # their own group; otherwise there's only the drive group + parking.
         if transit_legs:
@@ -144,9 +189,17 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
                 has_transit = any(leg.mode in (LegMode.TRAIN, LegMode.TUBE, LegMode.BUS) for leg in transit_legs)
                 if has_transit:
                     new_transit_group = replace(new_transit_group, cost=existing_cost)
-            new_details = (new_drive_group, new_parking_group, new_transit_group) + commute.details[1:]
+            tail = commute.details[1:]
+            if new_parking_group is not None:
+                new_details = (new_drive_group, new_parking_group, new_transit_group) + tail
+            else:
+                new_details = (new_drive_group, new_transit_group) + tail
         else:
-            new_details = (new_drive_group, new_parking_group) + commute.details[1:]
+            tail = commute.details[1:]
+            if new_parking_group is not None:
+                new_details = (new_drive_group, new_parking_group) + tail
+            else:
+                new_details = (new_drive_group,) + tail
         # Recalculate duration from replaced legs
         new_duration = Quantity(sum(int(leg.duration.magnitude) for cg in new_details for leg in cg.legs), "minute")
         new_commute = replace(

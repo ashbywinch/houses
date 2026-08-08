@@ -587,6 +587,12 @@ class TflClient:
         are boring (no cost).  Transit legs are grouped by the fare
         structure in the API response — if ``fare.fares`` provides
         separate costs per mode, each mode gets its own CostGroup.
+
+        The TfL fare MUST land on the transit groups: the total
+        daily_cost is derived by summing CostGroup costs, and a £0
+        transit route wrongly triggers the National Rail fare node
+        (which then kills commutes whose rail leg has no NR fare, e.g.
+        Elizabeth-line legs — "no fare STL→EAL").
         """
         journeys = data.get("journeys", [])
         if not journeys:
@@ -598,16 +604,45 @@ class TflClient:
 
         fare = best.get("fare", {})
         fare_fares: list[dict] = fare.get("fares", []) if fare else []
-        modes_with_fares: set[str] = {f.get("mode") for f in fare_fares if f.get("cost")}
-        if fare and fare.get("totalCost") is not None:
-            round(fare["totalCost"] / 100.0 * 2, 2)
+        # Per-mode single fares in pence (e.g. national-rail + tube).
+        mode_single_pence: dict[str, int] = {
+            f["mode"]: int(f["cost"]) for f in fare_fares if f.get("cost") is not None and f.get("mode")
+        }
+        # Whole-journey single fare in pence — the fallback when the API
+        # gives one totalCost instead of per-mode fares.
+        total_single_pence = fare.get("totalCost") if fare else None
 
         groups: list[CostGroup] = []
         current_legs: list[JourneyLeg] = []
         current_mode: str | None = None
         in_transit = False
+        total_applied = False
 
         parsed = TflClient._parse_tfl_legs(tfl_legs)
+
+        def _flush_transit() -> None:
+            """Emit the accumulated transit legs as a CostGroup carrying
+            its TfL fare (per-mode cost × 2 for the return trip)."""
+            nonlocal current_legs, current_mode, total_applied
+            if not current_legs:
+                return
+            cost: Money | None = None
+            if current_mode is not None and current_mode in mode_single_pence:
+                cost = Money(str(round(mode_single_pence[current_mode] / 100.0 * 2, 2)), "GBP")
+            elif total_single_pence is not None and not total_applied:
+                # No per-mode split — the whole-journey fare goes on the
+                # FIRST transit group so the sum equals the total exactly.
+                cost = Money(str(round(total_single_pence / 100.0 * 2, 2)), "GBP")
+                total_applied = True
+            groups.append(
+                CostGroup(
+                    legs=tuple(current_legs),
+                    operator="TfL",
+                    cost=cost,
+                )
+            )
+            current_legs = []
+            current_mode = None
 
         for jl, mode_name in parsed:
             if mode_name == "walking":
@@ -618,14 +653,8 @@ class TflClient:
                 continue
 
             # Transit leg — check if we need a new CostGroup
-            if current_mode is not None and current_mode != mode_name and (modes_with_fares or in_transit):
-                groups.append(
-                    CostGroup(
-                        legs=tuple(current_legs),
-                        operator="TfL",
-                    )
-                )
-                current_legs = []
+            if current_mode is not None and current_mode != mode_name and (mode_single_pence or in_transit):
+                _flush_transit()
 
             if not in_transit and current_legs:
                 groups.append(CostGroup(legs=tuple(current_legs)))
@@ -634,12 +663,6 @@ class TflClient:
             current_mode = mode_name
             current_legs.append(jl)
 
-        if current_legs:
-            groups.append(
-                CostGroup(
-                    legs=tuple(current_legs),
-                    operator="TfL",
-                )
-            )
+        _flush_transit()
 
         return groups

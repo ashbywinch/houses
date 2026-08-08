@@ -95,7 +95,7 @@ class TestSummaryShape:
         assert "best_location" in s
         assert "rightmove_price" in s
         assert "rightmove_bedrooms" in s
-        assert "total_monthly_cost" in s
+        assert "group_monthly_cost" in s
         assert "commutes" in s
         assert "schools" in s
         assert "walkability" in s
@@ -110,7 +110,7 @@ class TestSummaryShape:
             "best_location",
             "rightmove_price",
             "rightmove_bedrooms",
-            "total_monthly_cost",
+            "group_monthly_cost",
             "walkability",
             "epc",
         ):
@@ -154,7 +154,7 @@ class TestDetailShape:
             "monthly_sinking_fund",
             "monthly_commute_cost",
             "rental_income",
-            "total_monthly_housing_cost",
+            "group_monthly_cost",
         )
         for key in expected:
             assert key in af, f"missing affordability key: {key}"
@@ -299,8 +299,7 @@ class TestFinancialSettingsPropagation:
         # Push new financial settings via the shared Services instance
         new_financials = dict(fin1)
         new_financials["mortgage_rate"] = 0.99
-        get_services().financial_source.push(new_financials, "user")
-        # Also push to individual setting nodes for the expression system
+        # Push to individual setting nodes (the canonical financial source)
         from houses.nodes.settings_node import API_KEY_TO_NODE
 
         svc = get_services()

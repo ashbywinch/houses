@@ -888,7 +888,7 @@ const sharedRefsList = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
+  font-size: var(--fs-lg);
   flex-shrink: 0;
 }
 .flow-card__icon--api { background: var(--orange-bg); color: var(--orange); }
@@ -903,7 +903,7 @@ const sharedRefsList = computed(() => {
 .flow-card--expandable { position: relative; }
 .flow-card__expand {
   display: inline-block;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   margin-left: var(--sp-2);
   transition: transform 0.15s;
@@ -950,7 +950,7 @@ const sharedRefsList = computed(() => {
 }
 .flow-card__link:hover { text-decoration: underline; }
 .flow-card__freshness {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   white-space: nowrap;
   flex-shrink: 0;
@@ -1011,7 +1011,7 @@ const sharedRefsList = computed(() => {
   border-radius: var(--radius-full);
   background: var(--slate-200);
   color: var(--slate-600);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: var(--fw-bold);
   display: flex;
   align-items: center;
@@ -1082,10 +1082,10 @@ const sharedRefsList = computed(() => {
 }
 .detail-node__desc {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--fs-xs);
 }
 .detail-node__ref {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--blue);
   background: var(--blue-bg);
   padding: 1px 6px;
@@ -1095,7 +1095,7 @@ const sharedRefsList = computed(() => {
 }
 .detail-node__freshness {
   margin-left: auto;
-  font-size: 10px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -1155,7 +1155,7 @@ const sharedRefsList = computed(() => {
 }
 .shared-ref__freshness {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
 }
 
@@ -1172,7 +1172,7 @@ const sharedRefsList = computed(() => {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
 }
 .legend__dot {
@@ -1220,13 +1220,13 @@ const sharedRefsList = computed(() => {
   display: inline-block;
   margin-left: var(--sp-1, 4px);
   padding: 0 var(--sp-2, 8px);
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: var(--fw-semibold, 600);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   border-radius: var(--radius-full, 999px);
-  background: #f0f0ff;
-  color: #5b42b8;
+  background: var(--green-bg);
+  color: var(--green-text);
   vertical-align: middle;
 }
 
@@ -1256,23 +1256,23 @@ const sharedRefsList = computed(() => {
 }
 
 .formula-explain__step-expr {
-  font-size: 9px;
-  color: #5b42b8;
-  font-weight: 400;
+  font-size: var(--fs-xs);
+  color: var(--green-text);
+  font-weight: var(--fw-normal);
   margin-right: var(--sp-1, 4px);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
 .detail-node__expr {
-  font-size: 10px;
+  font-size: var(--fs-xs);
   font-weight: var(--fw-semibold, 600);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding: 0 var(--sp-1, 4px);
   border-radius: var(--radius-full, 999px);
-  background: #f0f0ff;
-  color: #5b42b8;
+  background: var(--green-bg);
+  color: var(--green-text);
   vertical-align: middle;
 }
 .detail-node__value {
