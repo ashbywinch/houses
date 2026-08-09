@@ -585,6 +585,7 @@ const depositRows = computed(() => {
                 :value="person.rent_paid_monthly?.amount"
                 :disabled="!isOwn(person)"
                 @keydown="blockPenceKey"
+                @focus="person.rent_paid_monthly = person.rent_paid_monthly ?? { amount: '', currency: 'GBP' }"
                 @input="moneyInput(person.rent_paid_monthly!, $event)"
                 @blur="penceInput(person.rent_paid_monthly!, $event)"
               />
@@ -842,9 +843,8 @@ const depositRows = computed(() => {
   color: var(--slate-500);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  margin: var(--sp-5) 0 var(--sp-3);
+  margin: var(--sp-4) 0 var(--sp-3);
 }
-.settings-subheading:first-of-type { margin-top: var(--sp-3); }
 .co-owner-row {
   display: flex;
   align-items: center;
