@@ -1682,7 +1682,35 @@ class TestCommuteChainProvenanceFormula:
         await flush_processor()
         prov = await node.build_provenance()
         assert prov.formula is not None
-        assert [line.label for line in prov.formula.lines] == ["Simon’s commute (yearly)"]
+        assert [line.label for line in prov.formula.lines] == ["Simon → Bracknell · 1x/wk · 46 wks/yr"]
+
+    @pytest.mark.asyncio
+    async def test_breakdown_provenance_value_is_human(self):
+        """The commute-aggregate provenance value must be a human total,
+        never the {persons: {daily_gbp…}, yearly_total_gbp…} dict dump."""
+        from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
+
+        persons_src = UserInputNode("bf_persons2", list)
+        persons_src.push(
+            [
+                {
+                    "name": "Simon",
+                    "places_of_interest": [
+                        PlaceOfInterest(label="Bracknell", address="", trips_per_week=1, weeks_per_year=46)
+                    ],
+                }
+            ],
+            "test",
+        )
+        commute_src = FixedCommuteNode("bf_commute2")
+        commute_src.set(_drive_commute(duration_min=16, cost_gbp=5.0))
+        node = CommuteBreakdownNode(
+            "bf_node2", commute_selectors={"Simon/Bracknell": commute_src}, persons_source=persons_src
+        )
+        await flush_processor()
+        prov = await node.build_provenance()
+        # 46wk × 1 trip/wk × £5.00 = £230.00
+        assert prov.value == "£230.00/yr", f"human total expected, got {prov.value!r}"
 
 class _CountingWalkNode(DerivedNode[Commute]):
     """A stand-in route-planning node: counts how many times it

@@ -340,12 +340,7 @@ class TestValueProjection:
         prov = Provenance(label="Commute", value=project_value(commute))
         d = prov.to_dict()
         assert "Commute(person=" not in json.dumps(d)
-        assert d["value"] == {
-            "mode": "transit",
-            "duration": "68 minute",
-            "daily_cost": "GBP 27.00",
-            "destination": "Pimlico",
-        }
+        assert d["value"] == "Transit · 68 min · £27.00/day to Pimlico · 1x/wk · 46 wks/yr"
 
     def test_person_list_projected(self):
         from houses.model.domain import Person
@@ -360,6 +355,23 @@ class TestValueProjection:
         prov = Provenance(label="Works", value=project_value({"Ashby": Money("20000", "GBP")}))
         d = prov.to_dict()
         assert json.loads(json.dumps(d))["value"] == {"Ashby": "GBP 20,000.00"}
+
+    def test_council_tax_projected_human_not_machine_dict(self):
+        """Council tax provenance must read as a human summary — the old
+        projection dumped {"band", "yearly_cost": "GBP 2,500.00",
+        "uncertainty", "evidence_url"} into the detail tree."""
+        from dag.measurement import Measurement
+        from houses.council_tax_info import CouncilTaxInfo
+
+        info = CouncilTaxInfo(
+            band="D",
+            yearly_cost=Measurement(Money("2500", "GBP"), 0.0),
+            evidence_url="https://gov.uk/council-tax-bands",
+        )
+        prov = Provenance(label="Council Tax", value=project_value(info))
+        d = prov.to_dict()
+        assert d["value"] == "Band D · £2,500.00/yr"
+        assert "evidence_url" not in d["value"] and "uncertainty" not in d["value"]
 
     def test_unprojectable_value_fails_fast(self):
         class Opaque:
@@ -391,7 +403,9 @@ class TestValueProjection:
         node = UserInputNode("proj_test", Commute)
         node._value = commute
         p = asyncio.run(node.build_provenance())
-        assert json.loads(json.dumps(p.to_dict()))["value"]["mode"] == "transit"
+        assert json.loads(json.dumps(p.to_dict()))["value"] == (
+            "Transit · 68 min · £27.00/day to Pimlico · 1x/wk · 46 wks/yr"
+        )
 
 
 class TestEmptySourceLabel:

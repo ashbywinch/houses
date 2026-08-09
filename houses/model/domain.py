@@ -24,6 +24,13 @@ from houses.commute import (
 )
 from houses.school import School  # noqa: F401 — re-export
 
+_MODE_LABELS = {
+    "transit": "Transit",
+    "car": "Driving",
+    "drive": "Driving",
+    "walk": "Walking",
+}
+
 
 @dataclass(frozen=True)
 class PlaceOfInterest:
@@ -190,19 +197,26 @@ class Commute:
     is_child: bool = False
     infeasible: bool = False
 
-    def to_provenance_value(self) -> dict:
-        """JSON-safe projection for provenance display.
-
-        Duration and cost render as their canonical string forms; the
-        destination keeps its label. Full leg-by-leg details live in
-        the formula, not here.
+    def to_provenance_value(self) -> str:
+        """Human summary for provenance display — ONE canonical structure
+        for every commute: mode · duration · cost to destination ·
+        frequency.  Every DAG node that builds a Commute patches the full
+        destination PlaceOfInterest (label + trips/weeks) so the tree
+        always shows where and how often (guarded by
+        test_commute_provenance_values_all_carry_destination_and_frequency).
+        Full leg-by-leg details live in the formula, not here.
         """
-        return {
-            "mode": self.mode,
-            "duration": str(self.duration),
-            "daily_cost": str(self.daily_cost),
-            "destination": self.destination.label,
-        }
+        if self.infeasible:
+            return "Infeasible route"
+        mode_label = _MODE_LABELS.get(self.mode, self.mode.title())
+        cost = f"£{self.daily_cost.amount:,.2f}/day"
+        poi = self.destination
+        if poi.label:
+            cost += f" to {poi.label}"
+        parts = [mode_label, f"{self.duration.magnitude:g} min", cost]
+        if poi.label:
+            parts.append(f"{poi.trips_per_week}x/wk · {poi.weeks_per_year} wks/yr")
+        return " · ".join(parts)
 
     @property
     def details(self) -> tuple[CostGroup, ...]:

@@ -145,6 +145,104 @@ class TestPropertyApi:
         assert isinstance(data, dict)
 
 
+def _provenance_walk(node, path, out) -> None:
+    """Collect every (path, value) leaf of a provenance dict."""
+    out.append((path, node.get("value")))
+    for key, child in (node.get("sources") or {}).items():
+        _provenance_walk(child, f"{path}/{key.split('/')[-1]}", out)
+
+
+class TestProvenanceUserFriendly:
+    """The FAIL-FAST guard: provenance values must be human, never raw
+    machine dumps. A future node whose projection returns a dict that
+    isn't one of the allowlisted friendly shapes fails here instead of
+    shipping machine text to the provenance tree."""
+
+    def _setup(self):
+        from fastapi.testclient import TestClient
+
+        from houses.property_registry import _registry
+        from houses.server import app
+
+        _registry.clear()
+        client = TestClient(app)
+        _inject_session(client)
+        return client, _registry
+
+    def _seed(self):
+        client, reg = self._setup()
+        # TestSettingsPropagationApi is defined later in this module —
+        # resolvable at call time without a self-import.
+        rid = TestSettingsPropagationApi._seed_property(self)
+        from tests.unit.conftest import flush_all
+
+        flush_all()
+        return client, rid
+
+    @staticmethod
+    def _friendly(v) -> bool:
+        if v is None or isinstance(v, (str, int, float, bool)):
+            return True
+        if isinstance(v, dict):
+            # allowlisted: per-person money maps {"Ashby": "GBP 25,000.00"}
+            # render as "Ashby: £25,000.00"; an empty dict renders nothing.
+            if not v:
+                return True
+            return all(
+                isinstance(k, str) and isinstance(val, str) and val.startswith("GBP ")
+                for k, val in v.items()
+            )
+        if isinstance(v, list):
+            # allowlisted: named-object lists (persons) — the UI renders names.
+            return all(isinstance(i, dict) and "name" in i for i in v)
+        return False
+
+    def test_all_provenance_values_are_user_friendly(self):
+        """Every provenance value in a full property detail must be scalar
+        or an allowlisted friendly shape — never a raw machine dict."""
+        client, rid = self._seed()
+        detail = client.get(f"/api/properties/{rid}/detail").json()
+
+        bad: list[tuple[str, object]] = []
+        for key, node in detail["affordability"].items():
+            if not isinstance(node, dict) or not node.get("provenance"):
+                continue
+            leaves: list[tuple[str, object]] = []
+            _provenance_walk(node["provenance"], key, leaves)
+            for path, value in leaves:
+                if not self._friendly(value):
+                    bad.append((path, value))
+        assert not bad, "non-user-friendly provenance values:\n" + "\n".join(
+            f"{path}: {value!r}" for path, value in bad
+        )
+
+    def test_commute_provenance_values_all_carry_destination_and_frequency(self):
+        """Every commute in the provenance must use the ONE canonical
+        structure — mode · duration · cost to <destination> · Nx/wk ·
+        M wks/yr. A commute without a destination or frequency fails here."""
+        client, rid = self._seed()
+        detail = client.get(f"/api/properties/{rid}/detail").json()
+
+        mode_prefix = ("Transit ", "Driving ", "Walking ", "Drive ", "Car ")
+        bad: list[tuple[str, str]] = []
+        seen = 0
+        for key, node in detail["affordability"].items():
+            if not isinstance(node, dict) or not node.get("provenance"):
+                continue
+            leaves: list[tuple[str, object]] = []
+            _provenance_walk(node["provenance"], key, leaves)
+            for path, value in leaves:
+                if not isinstance(value, str) or not value.startswith(mode_prefix):
+                    continue
+                seen += 1
+                if " to " not in value or "x/wk" not in value or "wks/yr" not in value:
+                    bad.append((path, value))
+        assert seen > 0, "no commute values found — the guard is not exercising the tree"
+        assert not bad, "commute provenance values missing destination/frequency:\n" + "\n".join(
+            f"{path}: {value!r}" for path, value in bad
+        )
+
+
 class TestSettingsApi:
     """Settings endpoints: /api/settings/* — must work with Body() annotation."""
 

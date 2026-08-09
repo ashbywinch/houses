@@ -1417,9 +1417,9 @@
    "severity": "error"
   },
   {
-   "line": 20,
+   "line": 22,
    "column": 9,
-   "stop_line": 20,
+   "stop_line": 22,
    "stop_column": 27,
    "path": "houses/nodes/commute_breakdown_node.py",
    "code": -2,
@@ -1429,9 +1429,9 @@
    "severity": "error"
   },
   {
-   "line": 33,
+   "line": 44,
    "column": 9,
-   "stop_line": 33,
+   "stop_line": 44,
    "stop_column": 16,
    "path": "houses/nodes/commute_breakdown_node.py",
    "code": -2,
@@ -1441,9 +1441,9 @@
    "severity": "error"
   },
   {
-   "line": 75,
+   "line": 95,
    "column": 24,
-   "stop_line": 75,
+   "stop_line": 95,
    "stop_column": 28,
    "path": "houses/nodes/commute_breakdown_node.py",
    "code": -2,
@@ -1453,9 +1453,21 @@
    "severity": "error"
   },
   {
-   "line": 167,
+   "line": 108,
+   "column": 15,
+   "stop_line": 108,
+   "stop_column": 31,
+   "path": "houses/nodes/commute_breakdown_node.py",
+   "code": -2,
+   "name": "missing-override-decorator",
+   "description": "Class member `CommuteBreakdownNode.build_provenance` overrides a member in a parent class but is missing an `@override` decorator",
+   "concise_description": "Class member `CommuteBreakdownNode.build_provenance` overrides a member in a parent class but is missing an `@override` decorator",
+   "severity": "error"
+  },
+  {
+   "line": 172,
    "column": 33,
-   "stop_line": 167,
+   "stop_line": 172,
    "stop_column": 39,
    "path": "houses/nodes/commute_pipeline_builder.py",
    "code": -2,
@@ -1465,9 +1477,9 @@
    "severity": "error"
   },
   {
-   "line": 192,
+   "line": 197,
    "column": 33,
-   "stop_line": 192,
+   "stop_line": 197,
    "stop_column": 47,
    "path": "houses/nodes/commute_pipeline_builder.py",
    "code": -2,
@@ -2653,6 +2665,18 @@
    "severity": "error"
   },
   {
+   "line": 252,
+   "column": 15,
+   "stop_line": 252,
+   "stop_column": 31,
+   "path": "houses/nodes/total_monthly_housing_cost_node.py",
+   "code": -2,
+   "name": "missing-override-decorator",
+   "description": "Class member `GroupMonthlyCostNode.build_provenance` overrides a member in a parent class but is missing an `@override` decorator",
+   "concise_description": "Class member `GroupMonthlyCostNode.build_provenance` overrides a member in a parent class but is missing an `@override` decorator",
+   "severity": "error"
+  },
+  {
    "line": 17,
    "column": 9,
    "stop_line": 17,
@@ -2701,9 +2725,9 @@
    "severity": "error"
   },
   {
-   "line": 130,
+   "line": 145,
    "column": 9,
-   "stop_line": 130,
+   "stop_line": 145,
    "stop_column": 16,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2713,9 +2737,9 @@
    "severity": "error"
   },
   {
-   "line": 130,
+   "line": 145,
    "column": 9,
-   "stop_line": 130,
+   "stop_line": 145,
    "stop_column": 16,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2725,9 +2749,9 @@
    "severity": "error"
   },
   {
-   "line": 147,
+   "line": 162,
    "column": 9,
-   "stop_line": 147,
+   "stop_line": 162,
    "stop_column": 16,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2737,9 +2761,9 @@
    "severity": "error"
   },
   {
-   "line": 147,
+   "line": 162,
    "column": 9,
-   "stop_line": 147,
+   "stop_line": 162,
    "stop_column": 16,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2749,9 +2773,9 @@
    "severity": "error"
   },
   {
-   "line": 170,
+   "line": 198,
    "column": 15,
-   "stop_line": 170,
+   "stop_line": 198,
    "stop_column": 22,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2761,9 +2785,9 @@
    "severity": "error"
   },
   {
-   "line": 170,
+   "line": 198,
    "column": 15,
-   "stop_line": 170,
+   "stop_line": 198,
    "stop_column": 22,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2773,9 +2797,9 @@
    "severity": "error"
   },
   {
-   "line": 194,
+   "line": 234,
    "column": 15,
-   "stop_line": 194,
+   "stop_line": 234,
    "stop_column": 22,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2785,9 +2809,9 @@
    "severity": "error"
   },
   {
-   "line": 194,
+   "line": 234,
    "column": 15,
-   "stop_line": 194,
+   "stop_line": 234,
    "stop_column": 22,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2797,9 +2821,9 @@
    "severity": "error"
   },
   {
-   "line": 224,
+   "line": 276,
    "column": 15,
-   "stop_line": 224,
+   "stop_line": 276,
    "stop_column": 22,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2809,9 +2833,9 @@
    "severity": "error"
   },
   {
-   "line": 224,
+   "line": 276,
    "column": 15,
-   "stop_line": 224,
+   "stop_line": 276,
    "stop_column": 22,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2821,9 +2845,9 @@
    "severity": "error"
   },
   {
-   "line": 274,
+   "line": 329,
    "column": 15,
-   "stop_line": 274,
+   "stop_line": 329,
    "stop_column": 22,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2833,9 +2857,9 @@
    "severity": "error"
   },
   {
-   "line": 274,
+   "line": 329,
    "column": 15,
-   "stop_line": 274,
+   "stop_line": 329,
    "stop_column": 22,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2845,9 +2869,9 @@
    "severity": "error"
   },
   {
-   "line": 280,
+   "line": 335,
    "column": 38,
-   "stop_line": 280,
+   "stop_line": 335,
    "stop_column": 42,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -3565,9 +3589,9 @@
    "severity": "error"
   },
   {
-   "line": 118,
+   "line": 147,
    "column": 20,
-   "stop_line": 118,
+   "stop_line": 147,
    "stop_column": 47,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3577,9 +3601,9 @@
    "severity": "error"
   },
   {
-   "line": 141,
+   "line": 170,
    "column": 20,
-   "stop_line": 141,
+   "stop_line": 170,
    "stop_column": 47,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3589,9 +3613,21 @@
    "severity": "error"
   },
   {
-   "line": 153,
+   "line": 193,
    "column": 20,
-   "stop_line": 153,
+   "stop_line": 193,
+   "stop_column": 47,
+   "path": "tests/integration/test_council_tax.py",
+   "code": -2,
+   "name": "missing-attribute",
+   "description": "Object of class `NoneType` has no attribute `band`",
+   "concise_description": "Object of class `NoneType` has no attribute `band`",
+   "severity": "error"
+  },
+  {
+   "line": 205,
+   "column": 20,
+   "stop_line": 205,
    "stop_column": 27,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3601,9 +3637,9 @@
    "severity": "error"
   },
   {
-   "line": 154,
+   "line": 206,
    "column": 20,
-   "stop_line": 154,
+   "stop_line": 206,
    "stop_column": 34,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3613,9 +3649,9 @@
    "severity": "error"
   },
   {
-   "line": 155,
+   "line": 207,
    "column": 20,
-   "stop_line": 155,
+   "stop_line": 207,
    "stop_column": 35,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3625,9 +3661,9 @@
    "severity": "error"
   },
   {
-   "line": 196,
+   "line": 248,
    "column": 20,
-   "stop_line": 196,
+   "stop_line": 248,
    "stop_column": 47,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -4417,6 +4453,18 @@
    "severity": "error"
   },
   {
+   "line": 176,
+   "column": 57,
+   "stop_line": 176,
+   "stop_column": 61,
+   "path": "tests/unit/nodes/test_api.py",
+   "code": -2,
+   "name": "bad-argument-type",
+   "description": "Argument `Self@TestProvenanceUserFriendly` is not assignable to parameter `self` with type `TestSettingsPropagationApi` in function `TestSettingsPropagationApi._seed_property`",
+   "concise_description": "Argument `Self@TestProvenanceUserFriendly` is not assignable to parameter `self` with type `TestSettingsPropagationApi` in function `TestSettingsPropagationApi._seed_property`",
+   "severity": "error"
+  },
+  {
    "line": 139,
    "column": 16,
    "stop_line": 139,
@@ -5029,9 +5077,9 @@
    "severity": "error"
   },
   {
-   "line": 1696,
+   "line": 1724,
    "column": 9,
-   "stop_line": 1696,
+   "stop_line": 1724,
    "stop_column": 16,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,

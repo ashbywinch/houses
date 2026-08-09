@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
 from money import Money
@@ -14,6 +14,21 @@ from houses.commute import LegMode
 from houses.geo import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.routing import CommuteRouter as _CommuteRouter
+
+
+def _with_destination(
+    result: Attempt[Commute],
+    poi: PlaceOfInterest | None,
+) -> Attempt[Commute]:
+    """Patch the full destination POI (label + trips/weeks) onto a route
+    result — the route planners only know the address, so without this
+    the provenance would lose the destination entirely."""
+    if poi is None or not result.succeeded:
+        return result
+    val = result.value_or_none()
+    if val is None:
+        return result
+    return Attempt.succeeded(replace(val, destination=poi))
 
 
 def _infeasible_commute(label: str = "") -> Attempt[Commute]:
@@ -161,11 +176,24 @@ class WalkLegCheckNode(DerivedNode[bool]):
 class WalkNode(DerivedNode[Commute]):
     """Walking commute — uses the route service from Services DI."""
 
-    def __init__(self, node_id: str, *, best_location, poi, max_walk: int, route_fn=None):
+    def __init__(
+        self,
+        node_id: str,
+        *,
+        best_location,
+        poi,
+        max_walk: int,
+        route_fn=None,
+        poi_info: PlaceOfInterest | None = None,
+    ):
         super().__init__(node_id, Commute, (best_location, poi))
         self.display_name = "Walk"
         self._max_walk = max_walk
         self._route_fn = route_fn
+        # The full destination POI (label + trips/weeks) — the route
+        # planner only knows the address, so the provenance would lose
+        # the destination without this patch.
+        self._poi_info = poi_info
 
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
         loc = location.value_or_none()
@@ -176,20 +204,32 @@ class WalkNode(DerivedNode[Commute]):
         if not dest:
             return _infeasible_commute("empty destination")
         if self._route_fn is not None:
-            return await self._route_fn(loc, dest, self._max_walk)
-        from houses.services_provider import get_services
+            result = await self._route_fn(loc, dest, self._max_walk)
+        else:
+            from houses.services_provider import get_services
 
-        return await get_services().route_planner.walk_route(loc, dest, self._max_walk)
+            result = await get_services().route_planner.walk_route(loc, dest, self._max_walk)
+        return _with_destination(result, self._poi_info)
 
 
 class DriveNode(DerivedNode[Commute]):
     """Driving commute — uses the route service from Services DI."""
 
-    def __init__(self, node_id: str, *, best_location, poi, has_car: bool, route_fn=None):
+    def __init__(
+        self,
+        node_id: str,
+        *,
+        best_location,
+        poi,
+        has_car: bool,
+        route_fn=None,
+        poi_info: PlaceOfInterest | None = None,
+    ):
         super().__init__(node_id, Commute, (best_location, poi))
         self.display_name = "Drive"
         self._has_car = has_car
         self._route_fn = route_fn
+        self._poi_info = poi_info
 
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
         if not self._has_car:
@@ -202,10 +242,12 @@ class DriveNode(DerivedNode[Commute]):
         if not dest:
             return _infeasible_commute("empty destination")
         if self._route_fn is not None:
-            return await self._route_fn(loc, dest)
-        from houses.services_provider import get_services
+            result = await self._route_fn(loc, dest)
+        else:
+            from houses.services_provider import get_services
 
-        return await get_services().route_planner.drive_route(loc, dest)
+            result = await get_services().route_planner.drive_route(loc, dest)
+        return _with_destination(result, self._poi_info)
 
 
 class TflTransitNode(DerivedNode[Commute]):
@@ -215,10 +257,20 @@ class TflTransitNode(DerivedNode[Commute]):
     of these and picks the best result.
     """
 
-    def __init__(self, node_id: str, *, best_location: Node, poi: Node, has_car: bool, allow_bus: bool = False):
+    def __init__(
+        self,
+        node_id: str,
+        *,
+        best_location: Node,
+        poi: Node,
+        has_car: bool,
+        allow_bus: bool = False,
+        poi_info: PlaceOfInterest | None = None,
+    ):
         super().__init__(node_id, Commute, (best_location, poi))
         self._has_car = has_car
         self._allow_bus = allow_bus
+        self._poi_info = poi_info
         self.display_name = "TfL"
 
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
@@ -235,13 +287,14 @@ class TflTransitNode(DerivedNode[Commute]):
 
         from houses.tfl_client import TflClient
 
-        return await TflClient(
+        result = await TflClient(
             origin_str,
             dest_str,
             poi_val.label if isinstance(poi_val, PlaceOfInterest) else "",
             park_and_ride=self._has_car,
             allow_bus=self._allow_bus,
         ).plan()
+        return _with_destination(result, self._poi_info)
 
 
 class TransitNode(DerivedNode[Commute]):
@@ -262,6 +315,7 @@ class TransitNode(DerivedNode[Commute]):
         best_address=None,
         no_bus_node: TflTransitNode,
         with_bus_node: TflTransitNode,
+        poi_info: PlaceOfInterest | None = None,
     ):
         deps: tuple[Node, ...] = (best_location, poi, no_bus_node, with_bus_node)
         if best_address is not None:
@@ -270,6 +324,7 @@ class TransitNode(DerivedNode[Commute]):
         self.display_name = "TfL API"
         self._has_car = has_car
         self._best_address = best_address
+        self._poi_info = poi_info
 
     async def compute(
         self,
@@ -335,4 +390,6 @@ class TransitNode(DerivedNode[Commute]):
             mode=mode,
             _details=val.details,
         )
+        if self._poi_info is not None:
+            result = replace(result, destination=self._poi_info)
         return Attempt.succeeded(result)

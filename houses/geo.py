@@ -24,6 +24,7 @@ class GeoPoint:
         )
         return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-    def to_provenance_value(self) -> dict:
-        """JSON-safe projection for provenance display."""
-        return {"lat": self.lat, "lon": self.lon}
+    def to_provenance_value(self) -> str:
+        """Human summary for provenance display — the old {lat, lon} dict
+        dumped as "lat: 51.48, lon: -1.09" machine text."""
+        return f"{self.lat:.4f}, {self.lon:.4f}"

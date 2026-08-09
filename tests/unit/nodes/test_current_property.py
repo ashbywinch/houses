@@ -336,6 +336,42 @@ class TestGroupMonthlyCostNode:
         )
 
     @pytest.mark.asyncio
+    async def test_provenance_value_is_human_summary_not_dict_dump(self):
+        """The monthly-figure provenance must read as a human summary,
+        never the raw breakdown dict.
+
+        Regression: the provenance value was the whole node dict, so the
+        provenance trust bar led with "couple: value: 3753.21, stddev:
+        0, others: value: 290.39, ..." — machine noise as the first text.
+        """
+        node, mg, sf, li, ri, st, cb, ct, ps = self._node("prov1")
+        mg.push(Money("1000", "GBP"), "test")
+        sf.push(Money("0", "GBP"), "test")
+        li.push(Money("0", "GBP"), "test")
+        ri.push(Money("0", "GBP"), "test")
+        st.push("", "test")
+        cb.push({}, "test")
+        simon = Person("Simon", True, home_co_owners=(HomeCoOwner(name="Lorena", share=50),))
+        ps.push([simon, Person("Lorena", False), Person("Ashby", False)], "test")
+        ct.push(
+            CouncilTaxInfo(
+                band="D",
+                yearly_cost=Measurement(Money("1800", "GBP"), 120.0),
+            ),
+            "test",
+        )
+        await flush_processor()
+        prov = await node.build_provenance()
+        # Human figures, not the serialized breakdown dict.
+        assert isinstance(prov.value, str), f"provenance value should be text, got {type(prov.value)}"
+        assert "couple" not in prov.value and "stddev" not in prov.value, (
+            f"provenance must not dump the raw dict: {prov.value!r}"
+        )
+        # 1000 mortgage + 1800/12 council (owners' 2/3 share) = 1100/mo
+        # for the owners; 1800/12 * 1/3 = 50/mo for Ashby.
+        assert "£1,100.00" in prov.value and "£50.00" in prov.value, f"figures missing: {prov.value!r}"
+
+    @pytest.mark.asyncio
     async def test_split_share_scales_council_contribution(self):
         """When owners and others split the shared costs, each group's
         council-tax share is proportional to its headcount."""

@@ -63,6 +63,7 @@ def build_commute_pipeline(prop) -> None:
                 best_location=prop.best_location,
                 poi=poi_src,
                 max_walk=int(p_info.bus_walk_penalty.magnitude),
+                poi_info=poi,
             )
             # The walking TOLERANCE is a node read (like MPG): the gate
             # nodes depend on it so a settings/what-if change re-scores
@@ -83,6 +84,7 @@ def build_commute_pipeline(prop) -> None:
                     best_location=prop.best_location,
                     poi=poi_src,
                     has_car=True,
+                    poi_info=poi,
                 )
             else:
                 drive_node = None
@@ -92,6 +94,7 @@ def build_commute_pipeline(prop) -> None:
                 poi=poi_src,
                 has_car=p_info.has_car,
                 allow_bus=False,
+                poi_info=poi,
             )
             with_bus_node = TflTransitNode(
                 f"{prop.rid}/{key}/tfl_with_bus",
@@ -99,6 +102,7 @@ def build_commute_pipeline(prop) -> None:
                 poi=poi_src,
                 has_car=p_info.has_car,
                 allow_bus=True,
+                poi_info=poi,
             )
             transit_node = TransitNode(
                 f"{prop.rid}/{key}/computed_transit",
@@ -107,6 +111,7 @@ def build_commute_pipeline(prop) -> None:
                 has_car=p_info.has_car,
                 no_bus_node=no_bus_node,
                 with_bus_node=with_bus_node,
+                poi_info=poi,
             )
             prop._transit_nodes.append(transit_node)
 
