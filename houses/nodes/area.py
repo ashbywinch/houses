@@ -30,10 +30,12 @@ class WalkabilityNode(DerivedNode[dict]):
             wt = val.get("walk_to_town")
             if isinstance(wt, dict) and wt.get("value") is not None:
                 parts.append(f"{wt['value']} min walk to town")
-            if val.get("amenities"):
-                parts.append(val["amenities"])
-            if parts:
-                prov.value = " · ".join(parts)
+            amenities = val.get("amenities")
+            # Type-guarded: a non-string amenities must never crash the
+            # join, nor leak a container repr into the value.
+            if isinstance(amenities, str) and amenities:
+                parts.append(amenities)
+            prov.value = " · ".join(parts) or "Walkability summary unavailable"
         return prov
 
     @property

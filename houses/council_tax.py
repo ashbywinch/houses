@@ -282,7 +282,11 @@ async def lookup_council_tax(
         # "15 HIGH STREET" (whole-token), nor "110 DOWNING STREET"
         # (digit-prefixed substring).
         addr_tokens = _normalise(address).split()
-        street_first = addr_tokens[1] if len(addr_tokens) > 1 else ""
+        try:
+            house_idx = addr_tokens.index(norm_id)
+        except ValueError:
+            house_idx = 0
+        street_first = addr_tokens[house_idx + 1] if house_idx + 1 < len(addr_tokens) else ""
         if street_first:
             pattern = rf"(?<!\d){re.escape(norm_id)}\s+{re.escape(street_first)}"
         else:
