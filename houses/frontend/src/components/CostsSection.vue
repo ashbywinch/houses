@@ -294,7 +294,7 @@ function canEdit(personName: string): boolean {
       <template v-if="affordability?.group_monthly_cost?.succeeded && affordability?.group_monthly_cost?.value?.couple">
         <div class="costs-row costs-row--group">
           <span class="costs-label">
-            {{ affordability.group_monthly_cost.value.couple_names || affordability.group_monthly_cost.value.couple_label }} — the joint owners
+            {{ affordability.group_monthly_cost.value.couple_names || affordability.group_monthly_cost.value.couple_label }}
             <ProvenanceToggle v-if="affordability?.group_monthly_cost?.provenance" :provenance="affordability?.group_monthly_cost?.provenance" title="Total monthly cost" />
           </span>
           <span class="costs-value" :title="totalMonthlyApprox ? 'Council tax estimated — total is approximate' : undefined">
