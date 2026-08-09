@@ -233,10 +233,10 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         couple_val += mortgage_val - rental_val
         couple_breakdown["mortgage"] = round(float(mortgage_val), 2)
         couple_breakdown["rental_income"] = round(-float(rental_val), 2)
-        if is_current and couple_rent_paid:
+        if couple_rent_paid:
             couple_breakdown["rent_paid"] = round(float(couple_rent_paid), 2)
         others_val, others_std, others_breakdown = group_figure(others, others_share, others_rent_paid)
-        if is_current and others_rent_paid:
+        if others_rent_paid:
             others_breakdown["rent_paid"] = round(float(others_rent_paid), 2)
 
         return Attempt.succeeded(
