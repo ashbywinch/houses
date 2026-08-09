@@ -158,7 +158,7 @@ function buildSaveBody(person: PersonSettings): Record<string, unknown> {
     // a cleared input serializes as {amount: ''} — normalize to 0 so a
     // momentarily-empty field can't fail the whole save (the server
     // rejects malformed money shapes)
-    body[f] = person[f].amount === '' ? { amount: '0', currency: person[f].currency } : person[f]
+    body[f] = person[f].amount === '' ? { amount: '0', currency: person[f].currency } : { ...person[f] }
   }
   if (person.petrol_mpg != null) body.petrol_mpg = person.petrol_mpg
   if (person.bus_walk_penalty) body.bus_walk_penalty = { ...person.bus_walk_penalty }
@@ -577,9 +577,9 @@ const depositRows = computed(() => {
               />
             </div>
             <div class="stack-field">
-              <label for="rent-paid">Rent paid (£/month)</label>
+              <label :for="'rent-paid-' + person.name">Rent paid (£/month)</label>
               <input
-                id="rent-paid"
+                :id="'rent-paid-' + person.name"
                 type="text"
                 inputmode="decimal"
                 :value="person.rent_paid_monthly?.amount"
