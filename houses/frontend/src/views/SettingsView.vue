@@ -546,22 +546,22 @@ const depositRows = computed(() => {
                 @blur="penceInput(person.life_insurance_monthly!, $event)"
               />
             </div>
-            <template v-if="person.selling_home">
-              <div class="stack-field">
-                <label for="rent-paid">Rent paid to the joint owners (£/month)</label>
-                <input
-                  id="rent-paid"
-                  type="text"
-                  inputmode="decimal"
-                  :value="person.rent_paid_monthly?.amount"
-                  :disabled="!isOwn(person)"
-                  @keydown="blockPenceKey"
-                  @input="moneyInput(person.rent_paid_monthly!, $event)"
-                  @blur="penceInput(person.rent_paid_monthly!, $event)"
-                />
-                <span class="band-helper">What you pay the joint owners for your share of the current home.</span>
-              </div>
+            <div class="stack-field">
+              <label for="rent-paid">Rent paid (£/month)</label>
+              <input
+                id="rent-paid"
+                type="text"
+                inputmode="decimal"
+                :value="person.rent_paid_monthly?.amount"
+                :disabled="!isOwn(person)"
+                @keydown="blockPenceKey"
+                @input="moneyInput(person.rent_paid_monthly!, $event)"
+                @blur="penceInput(person.rent_paid_monthly!, $event)"
+              />
+              <span class="band-helper">What you pay in rent for the current home.</span>
+            </div>
 
+            <template v-if="person.selling_home">
               <hr class="divider" />
               <div class="stack-field">
                 <label for="home-property">Which house is this?</label>
