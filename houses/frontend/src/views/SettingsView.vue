@@ -585,9 +585,8 @@ const depositRows = computed(() => {
                 :value="person.rent_paid_monthly?.amount"
                 :disabled="!isOwn(person)"
                 @keydown="blockPenceKey"
-                @focus="person.rent_paid_monthly = person.rent_paid_monthly ?? { amount: '', currency: 'GBP' }"
-                @input="moneyInput(person.rent_paid_monthly!, $event)"
-                @blur="penceInput(person.rent_paid_monthly!, $event)"
+                @input="moneyInput(person.rent_paid_monthly ??= { amount: '', currency: 'GBP' }, $event)"
+                @blur="person.rent_paid_monthly && penceInput(person.rent_paid_monthly, $event)"
               />
               <span class="band-helper">What you pay in rent for the current home.</span>
             </div>

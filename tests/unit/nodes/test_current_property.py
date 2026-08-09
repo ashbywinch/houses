@@ -543,5 +543,5 @@ class TestGroupMonthlyCostNode:
         val = a.value_or_none()
         assert val is not None
         couple = val["couple_breakdown"]
-        assert float(couple["rent_paid"]) == pytest.approx(200, abs=0.01)
-        assert float(val["couple"]["value"]) == pytest.approx(100 + 200, abs=0.01)
+        assert Decimal(couple["rent_paid"]) == Decimal("200.00")
+        assert Decimal(val["couple"]["value"]) == Decimal("300.00")
