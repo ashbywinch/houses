@@ -153,7 +153,7 @@ function buildSaveBody(person: PersonSettings): Record<string, unknown> {
     selling_home: person.selling_home,
     places_of_interest: person.places_of_interest,
   }
-  for (const f of ['home_sale_price', 'outstanding_mortgage', 'cash_contribution', 'life_insurance_monthly'] as const) {
+  for (const f of ['home_sale_price', 'outstanding_mortgage', 'cash_contribution', 'life_insurance_monthly', 'rent_paid_monthly'] as const) {
     if (!person[f]) continue
     // a cleared input serializes as {amount: ''} — normalize to 0 so a
     // momentarily-empty field can't fail the whole save (the server
@@ -164,7 +164,6 @@ function buildSaveBody(person: PersonSettings): Record<string, unknown> {
   if (person.bus_walk_penalty) body.bus_walk_penalty = { ...person.bus_walk_penalty }
   if (person.home_co_owners?.length) body.home_co_owners = person.home_co_owners
   if (person.home_property_rid) body.home_property_rid = person.home_property_rid
-  if (person.rent_paid_monthly) body.rent_paid_monthly = { ...person.rent_paid_monthly }
   const t = thresholds.value[person.name]
   if (t) body.thresholds = { ...t }
   return body
