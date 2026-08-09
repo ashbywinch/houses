@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import override
 
 from money import Money
 
@@ -39,6 +40,14 @@ class EpcNode(DerivedNode[dict]):
     @property
     def provenance_source_type(self) -> SourceType:
         return SourceType.API
+
+    @override
+    async def build_provenance(self) -> Provenance:
+        prov = await super().build_provenance()
+        val = self._attempt.value_or_none()
+        if self._attempt.succeeded and isinstance(val, dict) and val.get("band"):
+            prov.value = f"Band {val['band']}"
+        return prov
 
 
 class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):

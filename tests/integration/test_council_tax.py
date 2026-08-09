@@ -121,6 +121,29 @@ class TestLookupCouncilTax:
             assert result.impossible, f"street-only address must not claim a band, got {result.value_or_none()!r}"
 
     @pytest.mark.asyncio
+    async def test_building_name_does_not_claim_a_longer_named_property(self):
+        """"The Old Rectory" must not match the VOA row "THE OLD RECTORY
+        COTTAGE" — the name has to be followed by a comma or the end of
+        the address, or a partial name claims a different property's
+        band (the same wrong-band class as the street-only bug)."""
+        with patch("uk_property_apis.voa.VOAClient") as mock_voa:
+            instance = AsyncMock()
+            mock_voa.return_value = instance
+            instance.fetch_page = AsyncMock(
+                return_value=_make_page(
+                    _make_bands(
+                        [
+                            ("F", "THE OLD RECTORY COTTAGE, HIGH WYCOMBE, HP12 3NL"),
+                            ("E", "2 RUPERT AVE, HIGH WYCOMBE, HP12 3NL"),
+                        ],
+                        la="Wycombe",
+                    )
+                )
+            )
+            result = await lookup_council_tax("HP12 3NL", "The Old Rectory, High Wycombe")
+            assert result.impossible, f"partial building name must not claim a band, got {result.value_or_none()!r}"
+
+    @pytest.mark.asyncio
     async def test_building_name_without_number_still_matches(self):
         """A genuine no-house-number address (a named building) must still
         resolve — the start-of-address rule must not break named

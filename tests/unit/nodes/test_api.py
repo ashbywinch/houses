@@ -152,6 +152,51 @@ def _provenance_walk(node, path, out) -> None:
         _provenance_walk(child, f"{path}/{key.split('/')[-1]}", out)
 
 
+def _seed_property() -> str:
+    """Seed a fully-populated property (default persons + commutes +
+    council tax + works) and return its rid. Module-level so the
+    fail-fast guard tests and the settings-propagation tests share it
+    without cross-class self reuse."""
+    from money import Money
+
+    from houses.geo import GeoPoint
+    from houses.nodes.property import PropertyNodes
+    from houses.property_registry import register_property
+
+    rid = "42345678"
+    prop = PropertyNodes(rid)
+    prop.rightmove_price.push(Money("500000", "GBP"), "test")
+    prop.rightmove_address.push("1 Test St", "test")
+    prop.rightmove_bedrooms.push("3", "test")
+    prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
+    prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
+    prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
+    prop.postcode.push("SW1V 2QQ", "test")
+    prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
+    prop.works_estimates.push({}, "test")
+    prop.rental_income.push(Money("0", "GBP"), "test")
+    prop.comment_status.push("", "test")
+    register_property(rid, prop)
+    return rid
+
+
+def _iter_provenance(value, path, out) -> None:
+    """Collect every (path, provenance-dict) in a JSON response — any
+    object carrying a ``provenance`` key, at any depth. The guard walks
+    the WHOLE detail response (epc, commutes, area, location, ...), not
+    just the affordability block."""
+    if isinstance(value, dict):
+        if isinstance(value.get("provenance"), dict):
+            out.append((path, value["provenance"]))
+        for key, child in value.items():
+            if key == "provenance":
+                continue
+            _iter_provenance(child, f"{path}/{key}", out)
+    elif isinstance(value, list):
+        for i, child in enumerate(value):
+            _iter_provenance(child, f"{path}[{i}]", out)
+
+
 class TestProvenanceUserFriendly:
     """The FAIL-FAST guard: provenance values must be human, never raw
     machine dumps. A future node whose projection returns a dict that
@@ -171,9 +216,7 @@ class TestProvenanceUserFriendly:
 
     def _seed(self):
         client, reg = self._setup()
-        # TestSettingsPropagationApi is defined later in this module —
-        # resolvable at call time without a self-import.
-        rid = TestSettingsPropagationApi._seed_property(self)
+        rid = _seed_property()
         from tests.unit.conftest import flush_all
 
         flush_all()
@@ -204,14 +247,15 @@ class TestProvenanceUserFriendly:
         detail = client.get(f"/api/properties/{rid}/detail").json()
 
         bad: list[tuple[str, object]] = []
-        for key, node in detail["affordability"].items():
-            if not isinstance(node, dict) or not node.get("provenance"):
-                continue
+        provenances: list[tuple[str, dict]] = []
+        _iter_provenance(detail, "detail", provenances)
+        for section, prov in provenances:
             leaves: list[tuple[str, object]] = []
-            _provenance_walk(node["provenance"], key, leaves)
+            _provenance_walk(prov, section, leaves)
             for path, value in leaves:
                 if not self._friendly(value):
                     bad.append((path, value))
+        assert provenances, "no provenance found — the guard is not exercising the response"
         assert not bad, "non-user-friendly provenance values:\n" + "\n".join(
             f"{path}: {value!r}" for path, value in bad
         )
@@ -226,11 +270,11 @@ class TestProvenanceUserFriendly:
         mode_prefix = ("Transit ", "Driving ", "Walking ", "Drive ", "Car ")
         bad: list[tuple[str, str]] = []
         seen = 0
-        for key, node in detail["affordability"].items():
-            if not isinstance(node, dict) or not node.get("provenance"):
-                continue
+        provenances: list[tuple[str, dict]] = []
+        _iter_provenance(detail, "detail", provenances)
+        for section, prov in provenances:
             leaves: list[tuple[str, object]] = []
-            _provenance_walk(node["provenance"], key, leaves)
+            _provenance_walk(prov, section, leaves)
             for path, value in leaves:
                 if not isinstance(value, str) or not value.startswith(mode_prefix):
                     continue
@@ -663,29 +707,6 @@ class TestSettingsPropagationApi:
         )
         return client
 
-    def _seed_property(self) -> str:
-        from money import Money
-
-        from houses.geo import GeoPoint
-        from houses.nodes.property import PropertyNodes
-        from houses.property_registry import register_property
-
-        rid = "42345678"
-        prop = PropertyNodes(rid)
-        prop.rightmove_price.push(Money("500000", "GBP"), "test")
-        prop.rightmove_address.push("1 Test St", "test")
-        prop.rightmove_bedrooms.push("3", "test")
-        prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
-        prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.postcode.push("SW1V 2QQ", "test")
-        prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
-        prop.works_estimates.push({}, "test")
-        prop.rental_income.push(Money("0", "GBP"), "test")
-        prop.comment_status.push("", "test")
-        register_property(rid, prop)
-        return rid
-
     def test_whole_pounds_large_money_fields_reject_pence(self):
         """House-purchase amounts (sale/mortgage/cash) are whole pounds —
         the server REJECTS pence (400) rather than silently rounding;
@@ -853,7 +874,7 @@ class TestSettingsPropagationApi:
         from tests.unit.conftest import flush_all
 
         client = self._setup()
-        rid = self._seed_property()
+        rid = _seed_property()
         flush_all()  # one drain cascades the whole wave (see coding-standards)
 
         baseline = client.get(f"/api/properties/{rid}/detail").json()

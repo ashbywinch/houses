@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import override
 
 from money import Money
 
@@ -249,6 +250,7 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
             }
         )
 
+    @override
     async def build_provenance(self) -> Provenance:
         """The monthly figures as a human summary, never the raw dict.
 

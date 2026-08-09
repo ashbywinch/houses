@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import override
 
 from money import Money
 
@@ -105,6 +106,7 @@ class CommuteBreakdownNode(DerivedNode[dict]):
             }
         )
 
+    @override
     async def build_provenance(self):
         """The aggregate as a human total, never the dict dump.
 

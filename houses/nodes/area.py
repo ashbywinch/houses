@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dag.attempt import Attempt, SourceType
+from typing import override
+
+from dag.attempt import Attempt, Provenance, SourceType
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.geo import GeoPoint
@@ -18,6 +20,21 @@ class WalkabilityNode(DerivedNode[dict]):
         svc = get_services()
         result = await svc.walkability_service.enrich(loc.lat, loc.lon, address.value_or_none() or "")
         return Attempt.succeeded(result)
+
+    @override
+    async def build_provenance(self) -> Provenance:
+        prov = await super().build_provenance()
+        val = self._attempt.value_or_none()
+        if self._attempt.succeeded and isinstance(val, dict):
+            parts: list[str] = []
+            wt = val.get("walk_to_town")
+            if isinstance(wt, dict) and wt.get("value") is not None:
+                parts.append(f"{wt['value']} min walk to town")
+            if val.get("amenities"):
+                parts.append(str(val["amenities"]))
+            if parts:
+                prov.value = " · ".join(parts)
+        return prov
 
     @property
     def provenance_source_type(self) -> SourceType:
@@ -91,6 +108,14 @@ class TownDescNode(DerivedNode[dict]):
             # frontend can show it.
             return Attempt.impossible(result.error or "town description unavailable")
         return Attempt.succeeded({"description": result.value_or_none() or ""})
+
+    @override
+    async def build_provenance(self) -> Provenance:
+        prov = await super().build_provenance()
+        val = self._attempt.value_or_none()
+        if self._attempt.succeeded and isinstance(val, dict) and val.get("description"):
+            prov.value = val["description"]
+        return prov
 
     @property
     def provenance_source_type(self) -> SourceType:

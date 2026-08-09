@@ -83,6 +83,13 @@ def _normalise(text: str) -> str:
     return re.sub(r"[^A-Z0-9 ]", "", text.upper().strip())
 
 
+def _normalise_keep_commas(text: str) -> str:
+    """Uppercase, collapse whitespace, drop punctuation EXCEPT commas —
+    the comma is the boundary marker between a building name and the
+    rest of a VOA address ("THE OLD RECTORY, HIGH WYCOMBE")."""
+    return re.sub(r"\s+", " ", re.sub(r"[^A-Z0-9,]", " ", text.upper())).strip()
+
+
 def _lookup_yearly_cost(band: str, local_authority: str) -> Money | None:
     """Fetch the Band D rate from CivAccount, falling back to the CSV.
 
@@ -259,14 +266,21 @@ async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[Counci
         matches = [r for r in active if norm_id in _normalise(r["address"])]
     else:
         # A NAME identifier only identifies the property when it is the
-        # building descriptor at the START of the VOA address ("The Old
-        # Rectory, …"). Substring matching lets a street-level address
-        # claim a numbered property's band: "Rupert Avenue" matched the
-        # row "1 RUPERT AVENUE" (the one row spelling the street in
-        # full) and the app showed that house's Band F. When the name
-        # only appears after a unit number ("1 PADDOCK HEIGHTS",
-        # "1 RUPERT AVENUE") we cannot know which unit — not a match.
-        matches = [r for r in active if _normalise(r["address"]).startswith(norm_id)]
+        # building descriptor at the START of the VOA address AND is
+        # followed by a comma or the end of the address — "The Old
+        # Rectory" must not claim "The Old Rectory Cottage". The comma
+        # survives in _normalise_keep_commas (plain _normalise strips
+        # punctuation). Substring matching is never used: a street-level
+        # address must not claim a numbered property ("Rupert Avenue"
+        # matched the row "1 RUPERT AVENUE" and took its band).
+        name_norm = _normalise_keep_commas(building_id)
+        matches = []
+        for r in active:
+            addr = _normalise_keep_commas(r["address"])
+            if addr.startswith(name_norm):
+                tail = addr[len(name_norm):].lstrip()
+                if tail == "" or tail.startswith(","):
+                    matches.append(r)
         if not matches:
             # The name is present but never identifies a unit on its own.
             near = [r for r in active if norm_id in _normalise(r["address"])]
