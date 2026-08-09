@@ -18,7 +18,7 @@ class TestExtractBuilding:
 
     def test_flat_format(self):
         result = _extract_building("Flat 3, 123 High Street, Maidenhead, SL6 1AA")
-        assert result == {"postcode": "SL6 1AA", "building_name": "Flat 3"}
+        assert result == {"postcode": "SL6 1AA", "unit": "Flat 3", "building_name": "123 High Street"}
 
     def test_no_postcode_in_address(self):
         result = _extract_building("10 Downing Street, London")

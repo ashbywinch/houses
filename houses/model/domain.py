@@ -215,7 +215,7 @@ class Commute:
             cost += f" to {poi.label}"
         duration = self.duration.to("minute")
         parts = [mode_label, f"{duration.magnitude:g} min", cost]
-        if poi.label:
+        if poi.trips_per_week and poi.weeks_per_year:
             parts.append(f"{poi.trips_per_week}x/wk · {poi.weeks_per_year} wks/yr")
         return " · ".join(parts)
 

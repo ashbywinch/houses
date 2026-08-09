@@ -949,9 +949,9 @@
    "severity": "error"
   },
   {
-   "line": 205,
+   "line": 210,
    "column": 19,
-   "stop_line": 205,
+   "stop_line": 210,
    "stop_column": 40,
    "path": "houses/council_tax.py",
    "code": -2,
@@ -961,9 +961,9 @@
    "severity": "error"
   },
   {
-   "line": 218,
+   "line": 223,
    "column": 24,
-   "stop_line": 218,
+   "stop_line": 223,
    "stop_column": 46,
    "path": "houses/council_tax.py",
    "code": -2,
@@ -3565,18 +3565,6 @@
    "severity": "error"
   },
   {
-   "line": 228,
-   "column": 20,
-   "stop_line": 228,
-   "stop_column": 47,
-   "path": "tests/integration/test_council_tax.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `band`",
-   "concise_description": "Object of class `NoneType` has no attribute `band`",
-   "severity": "error"
-  },
-  {
    "line": 251,
    "column": 20,
    "stop_line": 251,
@@ -3589,9 +3577,21 @@
    "severity": "error"
   },
   {
-   "line": 263,
+   "line": 274,
    "column": 20,
-   "stop_line": 263,
+   "stop_line": 274,
+   "stop_column": 47,
+   "path": "tests/integration/test_council_tax.py",
+   "code": -2,
+   "name": "missing-attribute",
+   "description": "Object of class `NoneType` has no attribute `band`",
+   "concise_description": "Object of class `NoneType` has no attribute `band`",
+   "severity": "error"
+  },
+  {
+   "line": 286,
+   "column": 20,
+   "stop_line": 286,
    "stop_column": 27,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3601,9 +3601,9 @@
    "severity": "error"
   },
   {
-   "line": 264,
+   "line": 287,
    "column": 20,
-   "stop_line": 264,
+   "stop_line": 287,
    "stop_column": 34,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3613,9 +3613,9 @@
    "severity": "error"
   },
   {
-   "line": 265,
+   "line": 288,
    "column": 20,
-   "stop_line": 265,
+   "stop_line": 288,
    "stop_column": 35,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3625,9 +3625,9 @@
    "severity": "error"
   },
   {
-   "line": 306,
+   "line": 329,
    "column": 20,
-   "stop_line": 306,
+   "stop_line": 329,
    "stop_column": 47,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,

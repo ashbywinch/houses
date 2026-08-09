@@ -182,6 +182,29 @@ class TestLookupCouncilTax:
         assert info.band == "H"
 
     @pytest.mark.asyncio
+    async def test_flat_inside_named_building_resolves(self):
+        """"Flat 3, The Old Rectory" must resolve its own VOA row
+        ("THE OLD RECTORY, FLAT 3, ...") — the query's unit descriptor
+        is matched against the unit named in the row, not rejected."""
+        result = await lookup_council_tax(
+            "HP12 3NL",
+            "Flat 3, The Old Rectory, High Wycombe",
+            page_fetcher=lambda pc, page: _make_page(
+                _make_bands(
+                    [
+                        ("E", "THE OLD RECTORY, FLAT 3, HIGH WYCOMBE, HP12 3NL"),
+                        ("F", "THE OLD RECTORY, HIGH WYCOMBE, HP12 3NL"),
+                    ],
+                    la="Wycombe",
+                )
+            ),
+        )
+        assert result.succeeded, f"flat inside a named building must resolve, got {result.error!r}"
+        info = result.value_or_none()
+        assert info is not None
+        assert info.band == "E"
+
+    @pytest.mark.asyncio
     async def test_building_name_without_number_still_matches(self):
         """A genuine no-house-number address (a named building) must still
         resolve — the start-of-address rule must not break named

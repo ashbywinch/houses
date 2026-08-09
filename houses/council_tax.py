@@ -77,6 +77,11 @@ def _extract_building(address: str) -> dict:
     num_match = re.match(r"^(\d+[A-Z]?)\s", building)
     if num_match:
         return {"postcode": postcode, "building_number": num_match.group(1)}
+    # A unit descriptor ("Flat 3") names a unit INSIDE a building — the
+    # building descriptor is the next part of the address.
+    unit_match = re.match(r"^(flat|unit|apartment|maisonette)\s+\d+[A-Z]?$", building, re.IGNORECASE)
+    if unit_match and len(parts) > 1:
+        return {"postcode": postcode, "unit": building, "building_name": parts[1]}
     return {"postcode": postcode, "building_name": building}
 
 
@@ -244,6 +249,8 @@ async def lookup_council_tax(
     try:
         if page_fetcher is not None:
             page = page_fetcher(postcode, 0)
+            if hasattr(page, "__await__"):
+                page = await page
         else:
             async with CachedVOAClient() as client:
                 page = await client.fetch_page(postcode)
@@ -279,8 +286,8 @@ async def lookup_council_tax(
         # by the street name — "10" matches "FLAT 2ND FLR 10 DOWNING
         # STREET" (that flat IS at 10 Downing Street) but "5" must not
         # match "FLAT 5, 15 HIGH STREET" (that flat is at 15), nor
-        # "15 HIGH STREET" (whole-token), nor "110 DOWNING STREET"
-        # (digit-prefixed substring).
+        # "15 HIGH STREET" (whole-token), nor "110 DOWNING STREET" nor
+        # "A5 HIGH STREET" (letter- or digit-prefixed substrings).
         addr_tokens = _normalise(address).split()
         try:
             house_idx = addr_tokens.index(norm_id)
@@ -291,10 +298,7 @@ async def lookup_council_tax(
             # guessing; fail closed.
             return Attempt.impossible("address does not identify a single property")
         street_first = addr_tokens[house_idx + 1]
-        if street_first:
-            pattern = rf"(?<!\d){re.escape(norm_id)}\s+{re.escape(street_first)}"
-        else:
-            pattern = rf"(?<!\d){re.escape(norm_id)}(?=\s|$)"
+        pattern = rf"(?<![A-Z0-9]){re.escape(norm_id)}\s+{re.escape(street_first)}"
         matches = [r for r in active if re.search(pattern, _normalise(r["address"]))]
     else:
         # A NAME identifier only identifies the property when it is the
@@ -306,6 +310,7 @@ async def lookup_council_tax(
         # address must not claim a numbered property ("Rupert Avenue"
         # matched the row "1 RUPERT AVENUE" and took its band).
         name_norm = _normalise_keep_commas(building_id)
+        unit_norm = _normalise_keep_commas(building.get("unit") or "")
         unit_prefixes = ("FLAT", "UNIT", "APARTMENT", "MAISONETTE")
         matches = []
         for r in active:
@@ -321,13 +326,16 @@ async def lookup_council_tax(
                     matches.append(r)
                     continue
                 first = tokens[0].rstrip(",")
-                # A row naming a UNIT inside the building ("…, FLAT 3" or
-                # a lone "…, 5") does not identify the building itself —
-                # but "…, 5 HIGH STREET" (a full street position) still
-                # belongs to the building.
-                is_unit = first.upper() in unit_prefixes or (len(tokens) == 1 and first.isdigit())
-                if not is_unit:
-                    matches.append(r)
+                if unit_norm:
+                    # The query names a specific unit ("Flat 3, The Old
+                    # Rectory") — accept rows carrying that unit.
+                    rest_upper = " ".join(t.strip(",") for t in tokens).upper()
+                    if rest_upper == unit_norm or rest_upper.startswith(unit_norm + " "):
+                        matches.append(r)
+                else:
+                    is_unit = first.upper() in unit_prefixes or (len(tokens) == 1 and first.isdigit())
+                    if not is_unit:
+                        matches.append(r)
         if not matches:
             # The name is present but never identifies a unit on its own.
             near = [r for r in active if norm_id in _normalise(r["address"])]
