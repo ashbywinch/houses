@@ -9,6 +9,7 @@ import pytest
 from money import Money
 
 from dag.measurement import Measurement
+from houses import council_tax
 from houses.council_tax import lookup_council_tax
 
 MockBand = namedtuple("MockBand", ["band", "address", "postcode", "local_authority", "local_authority_url"])
@@ -103,22 +104,20 @@ class TestLookupCouncilTax:
         street-level address must never be matched to a numbered row —
         it cannot identify the property, so the lookup must fail and the
         DAG falls back to the estimated figure."""
-        with patch("uk_property_apis.voa.VOAClient") as mock_voa:
-            instance = AsyncMock()
-            mock_voa.return_value = instance
-            instance.fetch_page = AsyncMock(
-                return_value=_make_page(
-                    _make_bands(
-                        [
-                            ("F", "1 RUPERT AVENUE, HIGH WYCOMBE, HP12 3NL"),
-                            ("E", "2 RUPERT AVE, HIGH WYCOMBE, HP12 3NL"),
-                            ("E", "4 RUPERT AVE, HIGH WYCOMBE, HP12 3NL"),
-                        ]
-                    )
-                )
+        council_tax._page_fetcher = lambda pc, page: _make_page(
+            _make_bands(
+                [
+                    ("F", "1 RUPERT AVENUE, HIGH WYCOMBE, HP12 3NL"),
+                    ("E", "2 RUPERT AVE, HIGH WYCOMBE, HP12 3NL"),
+                    ("E", "4 RUPERT AVE, HIGH WYCOMBE, HP12 3NL"),
+                ]
             )
+        )
+        try:
             result = await lookup_council_tax("HP12 3NL", "Rupert Avenue, High Wycombe")
             assert result.impossible, f"street-only address must not claim a band, got {result.value_or_none()!r}"
+        finally:
+            council_tax._page_fetcher = None
 
     @pytest.mark.asyncio
     async def test_building_name_does_not_claim_a_longer_named_property(self):
@@ -126,48 +125,43 @@ class TestLookupCouncilTax:
         COTTAGE" — the name has to be followed by a comma or the end of
         the address, or a partial name claims a different property's
         band (the same wrong-band class as the street-only bug)."""
-        with patch("uk_property_apis.voa.VOAClient") as mock_voa:
-            instance = AsyncMock()
-            mock_voa.return_value = instance
-            instance.fetch_page = AsyncMock(
-                return_value=_make_page(
-                    _make_bands(
-                        [
-                            ("F", "THE OLD RECTORY COTTAGE, HIGH WYCOMBE, HP12 3NL"),
-                            ("E", "2 RUPERT AVE, HIGH WYCOMBE, HP12 3NL"),
-                        ],
-                        la="Wycombe",
-                    )
-                )
+        council_tax._page_fetcher = lambda pc, page: _make_page(
+            _make_bands(
+                [
+                    ("F", "THE OLD RECTORY COTTAGE, HIGH WYCOMBE, HP12 3NL"),
+                    ("E", "2 RUPERT AVE, HIGH WYCOMBE, HP12 3NL"),
+                ],
+                la="Wycombe",
             )
+        )
+        try:
             result = await lookup_council_tax("HP12 3NL", "The Old Rectory, High Wycombe")
             assert result.impossible, f"partial building name must not claim a band, got {result.value_or_none()!r}"
+        finally:
+            council_tax._page_fetcher = None
 
     @pytest.mark.asyncio
     async def test_building_name_without_number_still_matches(self):
         """A genuine no-house-number address (a named building) must still
         resolve — the start-of-address rule must not break named
         properties like "The Old Rectory"."""
-        with (
-            patch("uk_property_apis.voa.VOAClient") as mock_voa,
-            patch("houses.council_tax._lookup_yearly_cost", return_value=Money("1600", "GBP")),
-        ):
-            instance = AsyncMock()
-            mock_voa.return_value = instance
-            instance.fetch_page = AsyncMock(
-                return_value=_make_page(
-                    _make_bands(
-                        [
-                            ("E", "THE OLD RECTORY, HIGH WYCOMBE, HP12 3NL"),
-                            ("F", "1 RUPERT AVENUE, HIGH WYCOMBE, HP12 3NL"),
-                        ],
-                        la="Wycombe",
-                    )
-                )
+        council_tax._page_fetcher = lambda pc, page: _make_page(
+            _make_bands(
+                [
+                    ("E", "THE OLD RECTORY, HIGH WYCOMBE, HP12 3NL"),
+                    ("F", "1 RUPERT AVENUE, HIGH WYCOMBE, HP12 3NL"),
+                ],
+                la="Wycombe",
             )
+        )
+        try:
             result = await lookup_council_tax("HP12 3NL", "The Old Rectory, High Wycombe")
             assert result.succeeded
-            assert result.value_or_none().band == "E"
+            info = result.value_or_none()
+            assert info is not None
+            assert info.band == "E"
+        finally:
+            council_tax._page_fetcher = None
 
     @pytest.mark.asyncio
     async def test_match_among_deleted_and_active(self):

@@ -6,7 +6,9 @@ import csv
 import logging
 import re
 from collections import namedtuple
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import httpx
 from money import Money
@@ -222,6 +224,13 @@ class CachedVOAClient:
         return result
 
 
+# Test seam — the VOA page fetch is injectable so tests never mock
+# uk_property_apis (the standards forbid unittest.mock.patch in new
+# tests). A callable(postcode, page) -> object with `.rows` replaces the
+# CachedVOAClient when set.
+_page_fetcher: Callable[[str, int], Any] | None = None
+
+
 async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[CouncilTaxInfo]:
     """Look up council tax band via VOA website scraper.
 
@@ -233,8 +242,11 @@ async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[Counci
     ``""`` on the EnrichedProperty for failures.
     """
     try:
-        async with CachedVOAClient() as client:
-            page = await client.fetch_page(postcode)
+        if _page_fetcher is not None:
+            page = _page_fetcher(postcode, 0)
+        else:
+            async with CachedVOAClient() as client:
+                page = await client.fetch_page(postcode)
         results_raw = [{"address": r.address, "band": r.band, "local_authority": r.local_authority} for r in page.rows]
     except ImportError:
         logger.warning("uk-property-apis not installed; skipping council tax lookup")
@@ -263,7 +275,13 @@ async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[Counci
         return Attempt.impossible("could not extract building identifier")
 
     if building.get("building_number"):
-        matches = [r for r in active if norm_id in _normalise(r["address"])]
+        # A house number must match a WHOLE token — "5" must not match
+        # "15 HIGH STREET" (the ambiguity check would catch two rows, but
+        # a single "15" row would silently claim the wrong band).
+        matches = [
+            r for r in active
+            if any(token == norm_id for token in _normalise(r["address"]).split())
+        ]
     else:
         # A NAME identifier only identifies the property when it is the
         # building descriptor at the START of the VOA address AND is
@@ -274,12 +292,20 @@ async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[Counci
         # address must not claim a numbered property ("Rupert Avenue"
         # matched the row "1 RUPERT AVENUE" and took its band).
         name_norm = _normalise_keep_commas(building_id)
+        unit_prefixes = ("FLAT", "UNIT", "APARTMENT", "MAISONETTE")
         matches = []
         for r in active:
             addr = _normalise_keep_commas(r["address"])
-            if addr.startswith(name_norm):
-                tail = addr[len(name_norm):].lstrip()
-                if tail == "" or tail.startswith(","):
+            if not addr.startswith(name_norm):
+                continue
+            tail = addr[len(name_norm):].lstrip()
+            if tail == "":
+                matches.append(r)
+            elif tail.startswith(","):
+                rest = tail[1:].lstrip()
+                # A row naming a UNIT inside the building ("…, FLAT 3" or
+                # "…, 5") does not identify the building itself.
+                if rest and not rest[0].isdigit() and rest.split()[0].upper() not in unit_prefixes:
                     matches.append(r)
         if not matches:
             # The name is present but never identifies a unit on its own.

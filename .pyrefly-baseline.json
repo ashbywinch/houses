@@ -949,9 +949,9 @@
    "severity": "error"
   },
   {
-   "line": 203,
+   "line": 205,
    "column": 19,
-   "stop_line": 203,
+   "stop_line": 205,
    "stop_column": 40,
    "path": "houses/council_tax.py",
    "code": -2,
@@ -961,9 +961,9 @@
    "severity": "error"
   },
   {
-   "line": 216,
+   "line": 218,
    "column": 24,
-   "stop_line": 216,
+   "stop_line": 218,
    "stop_column": 46,
    "path": "houses/council_tax.py",
    "code": -2,
@@ -3529,9 +3529,9 @@
    "severity": "error"
   },
   {
-   "line": 93,
+   "line": 94,
    "column": 20,
-   "stop_line": 93,
+   "stop_line": 94,
    "stop_column": 27,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3541,9 +3541,9 @@
    "severity": "error"
   },
   {
-   "line": 94,
+   "line": 95,
    "column": 20,
-   "stop_line": 94,
+   "stop_line": 95,
    "stop_column": 34,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3553,9 +3553,9 @@
    "severity": "error"
   },
   {
-   "line": 95,
+   "line": 96,
    "column": 40,
-   "stop_line": 95,
+   "stop_line": 96,
    "stop_column": 55,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3565,9 +3565,9 @@
    "severity": "error"
   },
   {
-   "line": 170,
+   "line": 187,
    "column": 20,
-   "stop_line": 170,
+   "stop_line": 187,
    "stop_column": 47,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3577,9 +3577,9 @@
    "severity": "error"
   },
   {
-   "line": 193,
+   "line": 210,
    "column": 20,
-   "stop_line": 193,
+   "stop_line": 210,
    "stop_column": 47,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3589,21 +3589,9 @@
    "severity": "error"
   },
   {
-   "line": 216,
+   "line": 222,
    "column": 20,
-   "stop_line": 216,
-   "stop_column": 47,
-   "path": "tests/integration/test_council_tax.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `band`",
-   "concise_description": "Object of class `NoneType` has no attribute `band`",
-   "severity": "error"
-  },
-  {
-   "line": 228,
-   "column": 20,
-   "stop_line": 228,
+   "stop_line": 222,
    "stop_column": 27,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3613,9 +3601,9 @@
    "severity": "error"
   },
   {
-   "line": 229,
+   "line": 223,
    "column": 20,
-   "stop_line": 229,
+   "stop_line": 223,
    "stop_column": 34,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3625,9 +3613,9 @@
    "severity": "error"
   },
   {
-   "line": 230,
+   "line": 224,
    "column": 20,
-   "stop_line": 230,
+   "stop_line": 224,
    "stop_column": 35,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3637,9 +3625,9 @@
    "severity": "error"
   },
   {
-   "line": 271,
+   "line": 265,
    "column": 20,
-   "stop_line": 271,
+   "stop_line": 265,
    "stop_column": 47,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
