@@ -298,7 +298,7 @@ async def lookup_council_tax(
             # guessing; fail closed.
             return Attempt.impossible("address does not identify a single property")
         street_first = addr_tokens[house_idx + 1]
-        pattern = rf"(?<![A-Z0-9]){re.escape(norm_id)}\s+{re.escape(street_first)}"
+        pattern = rf"(?<![A-Z0-9]){re.escape(norm_id)}\s+{re.escape(street_first)}(?![A-Z0-9])"
         matches = [r for r in active if re.search(pattern, _normalise(r["address"]))]
     else:
         # A NAME identifier only identifies the property when it is the
@@ -315,6 +315,12 @@ async def lookup_council_tax(
         matches = []
         for r in active:
             addr = _normalise_keep_commas(r["address"])
+            if unit_norm and addr.startswith(unit_norm + ", " + name_norm):
+                # VOA rows for a flat at a numbered building put the unit
+                # first — "FLAT 3, 123 HIGH STREET" — the query's unit
+                # plus building identifies the row.
+                matches.append(r)
+                continue
             if not addr.startswith(name_norm):
                 continue
             tail = addr[len(name_norm):].lstrip()

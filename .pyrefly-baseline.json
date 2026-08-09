@@ -3565,18 +3565,6 @@
    "severity": "error"
   },
   {
-   "line": 251,
-   "column": 20,
-   "stop_line": 251,
-   "stop_column": 47,
-   "path": "tests/integration/test_council_tax.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `band`",
-   "concise_description": "Object of class `NoneType` has no attribute `band`",
-   "severity": "error"
-  },
-  {
    "line": 274,
    "column": 20,
    "stop_line": 274,
@@ -3589,9 +3577,21 @@
    "severity": "error"
   },
   {
-   "line": 286,
+   "line": 297,
    "column": 20,
-   "stop_line": 286,
+   "stop_line": 297,
+   "stop_column": 47,
+   "path": "tests/integration/test_council_tax.py",
+   "code": -2,
+   "name": "missing-attribute",
+   "description": "Object of class `NoneType` has no attribute `band`",
+   "concise_description": "Object of class `NoneType` has no attribute `band`",
+   "severity": "error"
+  },
+  {
+   "line": 309,
+   "column": 20,
+   "stop_line": 309,
    "stop_column": 27,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3601,9 +3601,9 @@
    "severity": "error"
   },
   {
-   "line": 287,
+   "line": 310,
    "column": 20,
-   "stop_line": 287,
+   "stop_line": 310,
    "stop_column": 34,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3613,9 +3613,9 @@
    "severity": "error"
   },
   {
-   "line": 288,
+   "line": 311,
    "column": 20,
-   "stop_line": 288,
+   "stop_line": 311,
    "stop_column": 35,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3625,9 +3625,9 @@
    "severity": "error"
   },
   {
-   "line": 329,
+   "line": 352,
    "column": 20,
-   "stop_line": 329,
+   "stop_line": 352,
    "stop_column": 47,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,

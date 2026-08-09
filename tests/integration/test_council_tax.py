@@ -205,6 +205,29 @@ class TestLookupCouncilTax:
         assert info.band == "E"
 
     @pytest.mark.asyncio
+    async def test_flat_at_numbered_building_resolves(self):
+        """"Flat 3, 123 High Street" must resolve its own VOA row — the
+        standard row format puts the unit FIRST: "FLAT 3, 123 HIGH
+        STREET, MAIDENHEAD"."""
+        result = await lookup_council_tax(
+            "SL6 1AA",
+            "Flat 3, 123 High Street, Maidenhead, SL6 1AA",
+            page_fetcher=lambda pc, page: _make_page(
+                _make_bands(
+                    [
+                        ("C", "FLAT 3, 123 HIGH STREET, MAIDENHEAD, SL6 1AA"),
+                        ("D", "123 HIGH STREET, MAIDENHEAD, SL6 1AA"),
+                    ],
+                    la="Windsor and Maidenhead",
+                )
+            ),
+        )
+        assert result.succeeded, f"flat at a numbered building must resolve, got {result.error!r}"
+        info = result.value_or_none()
+        assert info is not None
+        assert info.band == "C"
+
+    @pytest.mark.asyncio
     async def test_building_name_without_number_still_matches(self):
         """A genuine no-house-number address (a named building) must still
         resolve — the start-of-address rule must not break named
