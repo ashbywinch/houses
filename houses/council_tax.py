@@ -224,14 +224,12 @@ class CachedVOAClient:
         return result
 
 
-# Test seam — the VOA page fetch is injectable so tests never mock
-# uk_property_apis (the standards forbid unittest.mock.patch in new
-# tests). A callable(postcode, page) -> object with `.rows` replaces the
-# CachedVOAClient when set.
-_page_fetcher: Callable[[str, int], Any] | None = None
-
-
-async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[CouncilTaxInfo]:
+async def lookup_council_tax(
+    postcode: str,
+    address: str = "",
+    *,
+    page_fetcher: Callable[[str, int], Any] | None = None,
+) -> Attempt[CouncilTaxInfo]:
     """Look up council tax band via VOA website scraper.
 
     Returns an ``Attempt[CouncilTaxInfo]``. When the address is ambiguous
@@ -239,11 +237,13 @@ async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[Counci
     attempt carries the reason (e.g. ``"address matched multiple properties"``).
 
     Server callers extract the value with ``.value_or_none()`` and store
-    ``""`` on the EnrichedProperty for failures.
+    ``""`` on the EnrichedProperty for failures.  ``page_fetcher`` is a
+    test seam (callable(postcode, page) -> object with ``.rows``) so
+    tests never mock uk_property_apis.
     """
     try:
-        if _page_fetcher is not None:
-            page = _page_fetcher(postcode, 0)
+        if page_fetcher is not None:
+            page = page_fetcher(postcode, 0)
         else:
             async with CachedVOAClient() as client:
                 page = await client.fetch_page(postcode)
@@ -275,13 +275,19 @@ async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[Counci
         return Attempt.impossible("could not extract building identifier")
 
     if building.get("building_number"):
-        # A house number must match a WHOLE token — "5" must not match
-        # "15 HIGH STREET" (the ambiguity check would catch two rows, but
-        # a single "15" row would silently claim the wrong band).
-        matches = [
-            r for r in active
-            if any(token == norm_id for token in _normalise(r["address"]).split())
-        ]
+        # A house number identifies the property only when it is followed
+        # by the street name — "10" matches "FLAT 2ND FLR 10 DOWNING
+        # STREET" (that flat IS at 10 Downing Street) but "5" must not
+        # match "FLAT 5, 15 HIGH STREET" (that flat is at 15), nor
+        # "15 HIGH STREET" (whole-token), nor "110 DOWNING STREET"
+        # (digit-prefixed substring).
+        addr_tokens = _normalise(address).split()
+        street_first = addr_tokens[1] if len(addr_tokens) > 1 else ""
+        if street_first:
+            pattern = rf"(?<!\d){re.escape(norm_id)}\s+{re.escape(street_first)}"
+        else:
+            pattern = rf"(?<!\d){re.escape(norm_id)}(?=\s|$)"
+        matches = [r for r in active if re.search(pattern, _normalise(r["address"]))]
     else:
         # A NAME identifier only identifies the property when it is the
         # building descriptor at the START of the VOA address AND is
@@ -302,10 +308,17 @@ async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[Counci
             if tail == "":
                 matches.append(r)
             elif tail.startswith(","):
-                rest = tail[1:].lstrip()
+                tokens = tail[1:].lstrip().split()
+                if not tokens:
+                    matches.append(r)
+                    continue
+                first = tokens[0].rstrip(",")
                 # A row naming a UNIT inside the building ("…, FLAT 3" or
-                # "…, 5") does not identify the building itself.
-                if rest and not rest[0].isdigit() and rest.split()[0].upper() not in unit_prefixes:
+                # a lone "…, 5") does not identify the building itself —
+                # but "…, 5 HIGH STREET" (a full street position) still
+                # belongs to the building.
+                is_unit = first.upper() in unit_prefixes or (len(tokens) == 1 and first.isdigit())
+                if not is_unit:
                     matches.append(r)
         if not matches:
             # The name is present but never identifies a unit on its own.

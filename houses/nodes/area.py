@@ -31,7 +31,7 @@ class WalkabilityNode(DerivedNode[dict]):
             if isinstance(wt, dict) and wt.get("value") is not None:
                 parts.append(f"{wt['value']} min walk to town")
             if val.get("amenities"):
-                parts.append(str(val["amenities"]))
+                parts.append(val["amenities"])
             if parts:
                 prov.value = " · ".join(parts)
         return prov

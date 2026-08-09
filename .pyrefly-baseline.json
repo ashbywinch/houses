@@ -3529,9 +3529,9 @@
    "severity": "error"
   },
   {
-   "line": 94,
+   "line": 93,
    "column": 20,
-   "stop_line": 94,
+   "stop_line": 93,
    "stop_column": 27,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3541,9 +3541,9 @@
    "severity": "error"
   },
   {
-   "line": 95,
+   "line": 94,
    "column": 20,
-   "stop_line": 95,
+   "stop_line": 94,
    "stop_column": 34,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3553,9 +3553,9 @@
    "severity": "error"
   },
   {
-   "line": 96,
+   "line": 95,
    "column": 40,
-   "stop_line": 96,
+   "stop_line": 95,
    "stop_column": 55,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3565,9 +3565,9 @@
    "severity": "error"
   },
   {
-   "line": 187,
+   "line": 228,
    "column": 20,
-   "stop_line": 187,
+   "stop_line": 228,
    "stop_column": 47,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3577,9 +3577,9 @@
    "severity": "error"
   },
   {
-   "line": 210,
+   "line": 251,
    "column": 20,
-   "stop_line": 210,
+   "stop_line": 251,
    "stop_column": 47,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3589,9 +3589,9 @@
    "severity": "error"
   },
   {
-   "line": 222,
+   "line": 263,
    "column": 20,
-   "stop_line": 222,
+   "stop_line": 263,
    "stop_column": 27,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3601,9 +3601,9 @@
    "severity": "error"
   },
   {
-   "line": 223,
+   "line": 264,
    "column": 20,
-   "stop_line": 223,
+   "stop_line": 264,
    "stop_column": 34,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3613,9 +3613,9 @@
    "severity": "error"
   },
   {
-   "line": 224,
+   "line": 265,
    "column": 20,
-   "stop_line": 224,
+   "stop_line": 265,
    "stop_column": 35,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3625,9 +3625,9 @@
    "severity": "error"
   },
   {
-   "line": 265,
+   "line": 306,
    "column": 20,
-   "stop_line": 265,
+   "stop_line": 306,
    "stop_column": 47,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,

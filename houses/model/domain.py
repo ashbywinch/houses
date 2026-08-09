@@ -213,7 +213,8 @@ class Commute:
         poi = self.destination
         if poi.label:
             cost += f" to {poi.label}"
-        parts = [mode_label, f"{self.duration.magnitude:g} min", cost]
+        duration = self.duration.to("minute")
+        parts = [mode_label, f"{duration.magnitude:g} min", cost]
         if poi.label:
             parts.append(f"{poi.trips_per_week}x/wk · {poi.weeks_per_year} wks/yr")
         return " · ".join(parts)
