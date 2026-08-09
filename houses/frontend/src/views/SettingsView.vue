@@ -588,7 +588,7 @@ const depositRows = computed(() => {
                 @input="moneyInput(person.rent_paid_monthly ??= { amount: '', currency: 'GBP' }, $event)"
                 @blur="person.rent_paid_monthly && penceInput(person.rent_paid_monthly, $event)"
               />
-              <span class="band-helper">What you pay in rent for the current home.</span>
+              <span class="band-helper">What you pay in rent for your current home — it counts toward the monthly cost of whichever property is marked as your current home.</span>
             </div>
           </section>
           <!-- Household finances -->
