@@ -499,6 +499,7 @@ const depositRows = computed(() => {
               You co-own {{ coOwnerInfo.owner }}'s home ({{ coOwnerInfo.share }}%) — its sale already
               counts toward your deposit contribution, so don't add this house as your own.
             </p>
+            <div class="settings-subheading">Deposit toward the new home</div>
             <label class="toggle-row">
               <span class="toggle-row__label">Selling a home to fund this purchase</span>
               <ToggleSwitch v-model="person.selling_home" :disabled="!isOwn(person)" @change="scheduleSave(person)" />
@@ -521,48 +522,6 @@ const depositRows = computed(() => {
                 />
               </div>
               <p class="band-helper">What you expect to get and still owe on the home you're selling. Whole pounds only.</p>
-            </template>
-            <p v-else class="band-helper">Deposit is cash — no current home.</p>
-            <div class="stack-field">
-              <label for="cash">
-                {{ person.selling_home ? 'Other money toward the deposit (£)' : 'Cash available for the deposit (£)' }}
-              </label>
-              <WholePoundsField
-                id="cash"
-                :model-value="person.cash_contribution ? integerPounds(person.cash_contribution.amount) : ''"
-                @update:model-value="(v) => { if (person.cash_contribution) person.cash_contribution.amount = v }"
-              />
-            </div>
-            <div class="stack-field">
-              <label for="life-insurance">Life insurance (£/month)</label>
-              <input
-                id="life-insurance"
-                type="text"
-                inputmode="decimal"
-                :value="person.life_insurance_monthly?.amount"
-                :disabled="!isOwn(person)"
-                @keydown="blockPenceKey"
-                @input="moneyInput(person.life_insurance_monthly!, $event)"
-                @blur="penceInput(person.life_insurance_monthly!, $event)"
-              />
-            </div>
-            <div class="stack-field">
-              <label for="rent-paid">Rent paid (£/month)</label>
-              <input
-                id="rent-paid"
-                type="text"
-                inputmode="decimal"
-                :value="person.rent_paid_monthly?.amount"
-                :disabled="!isOwn(person)"
-                @keydown="blockPenceKey"
-                @input="moneyInput(person.rent_paid_monthly!, $event)"
-                @blur="penceInput(person.rent_paid_monthly!, $event)"
-              />
-              <span class="band-helper">What you pay in rent for the current home.</span>
-            </div>
-
-            <template v-if="person.selling_home">
-              <hr class="divider" />
               <div class="stack-field">
                 <label for="home-property">Which house is this?</label>
                 <select
@@ -593,6 +552,45 @@ const depositRows = computed(() => {
                 </div>
               </div>
             </template>
+            <p v-else class="band-helper">Deposit is cash — no current home.</p>
+            <div class="stack-field">
+              <label for="cash">
+                {{ person.selling_home ? 'Other money toward the deposit (£)' : 'Cash available for the deposit (£)' }}
+              </label>
+              <WholePoundsField
+                id="cash"
+                :model-value="person.cash_contribution ? integerPounds(person.cash_contribution.amount) : ''"
+                @update:model-value="(v) => { if (person.cash_contribution) person.cash_contribution.amount = v }"
+              />
+            </div>
+            <div class="settings-subheading">Your monthly costs</div>
+            <div class="stack-field">
+              <label for="life-insurance">Life insurance (£/month)</label>
+              <input
+                id="life-insurance"
+                type="text"
+                inputmode="decimal"
+                :value="person.life_insurance_monthly?.amount"
+                :disabled="!isOwn(person)"
+                @keydown="blockPenceKey"
+                @input="moneyInput(person.life_insurance_monthly!, $event)"
+                @blur="penceInput(person.life_insurance_monthly!, $event)"
+              />
+            </div>
+            <div class="stack-field">
+              <label for="rent-paid">Rent paid (£/month)</label>
+              <input
+                id="rent-paid"
+                type="text"
+                inputmode="decimal"
+                :value="person.rent_paid_monthly?.amount"
+                :disabled="!isOwn(person)"
+                @keydown="blockPenceKey"
+                @input="moneyInput(person.rent_paid_monthly!, $event)"
+                @blur="penceInput(person.rent_paid_monthly!, $event)"
+              />
+              <span class="band-helper">What you pay in rent for the current home.</span>
+            </div>
           </section>
           <!-- Household finances -->
           <section
@@ -603,6 +601,7 @@ const depositRows = computed(() => {
             @focusout="flushFinancialSave"
           >
             <div class="card-heading">Household finances</div>
+            <div class="settings-subheading">New home purchase</div>
             <div class="stack-field">
               <label for="mortgage-rate">Mortgage rate (%)</label>
               <input id="mortgage-rate" type="text" inputmode="decimal" v-model="fin['mortgage-rate']" />
@@ -615,6 +614,7 @@ const depositRows = computed(() => {
               <label for="sinking-fund">Sinking fund (% of value per year)</label>
               <input id="sinking-fund" type="text" inputmode="decimal" v-model="fin['sinking-fund']" />
             </div>
+            <div class="settings-subheading">Commute running costs</div>
             <div class="stack-field">
               <label for="petrol-cost">Petrol cost (£ per litre)</label>
               <input id="petrol-cost" type="text" inputmode="decimal" v-model="fin['petrol-cost']" />
@@ -837,6 +837,15 @@ const depositRows = computed(() => {
 
 <style scoped>
 .settings-person__strip { margin: var(--sp-2) 0 0; }
+.settings-subheading {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  color: var(--slate-500);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: var(--sp-5) 0 var(--sp-3);
+}
+.settings-subheading:first-of-type { margin-top: var(--sp-3); }
 .co-owner-row {
   display: flex;
   align-items: center;
