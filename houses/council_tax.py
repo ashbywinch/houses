@@ -255,7 +255,24 @@ async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[Counci
         logger.debug("Could not extract building identifier from address %r", address)
         return Attempt.impossible("could not extract building identifier")
 
-    matches = [r for r in active if norm_id in _normalise(r["address"])]
+    if building.get("building_number"):
+        matches = [r for r in active if norm_id in _normalise(r["address"])]
+    else:
+        # A NAME identifier only identifies the property when it is the
+        # building descriptor at the START of the VOA address ("The Old
+        # Rectory, …"). Substring matching lets a street-level address
+        # claim a numbered property's band: "Rupert Avenue" matched the
+        # row "1 RUPERT AVENUE" (the one row spelling the street in
+        # full) and the app showed that house's Band F. When the name
+        # only appears after a unit number ("1 PADDOCK HEIGHTS",
+        # "1 RUPERT AVENUE") we cannot know which unit — not a match.
+        matches = [r for r in active if _normalise(r["address"]).startswith(norm_id)]
+        if not matches:
+            # The name is present but never identifies a unit on its own.
+            near = [r for r in active if norm_id in _normalise(r["address"])]
+            if near:
+                logger.debug("Address %r names a building/street but no specific unit in %s", building_id, postcode)
+                return Attempt.impossible("address does not identify a single property")
 
     if not matches:
         logger.debug("Could not match building %r in VOA results for %s", building_id, postcode)

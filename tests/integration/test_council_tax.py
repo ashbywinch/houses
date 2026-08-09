@@ -95,6 +95,58 @@ class TestLookupCouncilTax:
             assert "west-berkshire" in ct.evidence_url
 
     @pytest.mark.asyncio
+    async def test_street_only_address_never_matches_numbered_property(self):
+        """Regression: house 90427107 showed Band F for a street-only
+        address. "Rupert Avenue" was substring-matched to the VOA row
+        "1 RUPERT AVENUE" (the one row that spells the street in full)
+        and that house's band was presented as the property's band. A
+        street-level address must never be matched to a numbered row —
+        it cannot identify the property, so the lookup must fail and the
+        DAG falls back to the estimated figure."""
+        with patch("uk_property_apis.voa.VOAClient") as mock_voa:
+            instance = AsyncMock()
+            mock_voa.return_value = instance
+            instance.fetch_page = AsyncMock(
+                return_value=_make_page(
+                    _make_bands(
+                        [
+                            ("F", "1 RUPERT AVENUE, HIGH WYCOMBE, HP12 3NL"),
+                            ("E", "2 RUPERT AVE, HIGH WYCOMBE, HP12 3NL"),
+                            ("E", "4 RUPERT AVE, HIGH WYCOMBE, HP12 3NL"),
+                        ]
+                    )
+                )
+            )
+            result = await lookup_council_tax("HP12 3NL", "Rupert Avenue, High Wycombe")
+            assert result.impossible, f"street-only address must not claim a band, got {result.value_or_none()!r}"
+
+    @pytest.mark.asyncio
+    async def test_building_name_without_number_still_matches(self):
+        """A genuine no-house-number address (a named building) must still
+        resolve — the start-of-address rule must not break named
+        properties like "The Old Rectory"."""
+        with (
+            patch("uk_property_apis.voa.VOAClient") as mock_voa,
+            patch("houses.council_tax._lookup_yearly_cost", return_value=Money("1600", "GBP")),
+        ):
+            instance = AsyncMock()
+            mock_voa.return_value = instance
+            instance.fetch_page = AsyncMock(
+                return_value=_make_page(
+                    _make_bands(
+                        [
+                            ("E", "THE OLD RECTORY, HIGH WYCOMBE, HP12 3NL"),
+                            ("F", "1 RUPERT AVENUE, HIGH WYCOMBE, HP12 3NL"),
+                        ],
+                        la="Wycombe",
+                    )
+                )
+            )
+            result = await lookup_council_tax("HP12 3NL", "The Old Rectory, High Wycombe")
+            assert result.succeeded
+            assert result.value_or_none().band == "E"
+
+    @pytest.mark.asyncio
     async def test_match_among_deleted_and_active(self):
         with (
             patch("uk_property_apis.voa.VOAClient") as mock_voa,
@@ -226,7 +278,7 @@ class TestLookupCouncilTax:
             )
             result = await lookup_council_tax("RG10 0AP", "Paddock Heights, Twyford, RG10")
             assert result.impossible
-            assert result.error == "address matched multiple properties"
+            assert result.error == "address does not identify a single property"
 
 
 class TestLookupYearlyCost:
