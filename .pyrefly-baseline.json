@@ -1429,9 +1429,9 @@
    "severity": "error"
   },
   {
-   "line": 45,
+   "line": 47,
    "column": 9,
-   "stop_line": 45,
+   "stop_line": 47,
    "stop_column": 16,
    "path": "houses/nodes/commute_breakdown_node.py",
    "code": -2,
@@ -1441,9 +1441,9 @@
    "severity": "error"
   },
   {
-   "line": 96,
+   "line": 98,
    "column": 24,
-   "stop_line": 96,
+   "stop_line": 98,
    "stop_column": 28,
    "path": "houses/nodes/commute_breakdown_node.py",
    "code": -2,

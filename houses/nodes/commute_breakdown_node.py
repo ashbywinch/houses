@@ -29,12 +29,14 @@ class CommuteBreakdownNode(DerivedNode[dict]):
         lines: list[FormulaLine] = []
         for name, pv in (v.get("persons") or {}).items():
             for c in pv.get("commutes") or ():
-                yearly = Decimal(c["yearly_gbp"])
+                yearly = Decimal(str(c.get("yearly_gbp") or 0))
                 if yearly <= 0:
                     # Zero-cost commutes contribute nothing to the total —
                     # "how the total is calculated" skips them.
                     continue
-                freq = f"{c['trips_per_week']}x/wk · {c['weeks_per_year']} wks/yr"
+                trips = c.get("trips_per_week", 0)
+                weeks = c.get("weeks_per_year", 0)
+                freq = f"{trips}x/wk · {weeks} wks/yr"
                 lines.append(
                     FormulaLine(label=f"{name} → {c['label']} · {freq}", value=f"£{yearly:,.2f}/yr")
                 )

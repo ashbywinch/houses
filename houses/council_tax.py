@@ -285,8 +285,12 @@ async def lookup_council_tax(
         try:
             house_idx = addr_tokens.index(norm_id)
         except ValueError:
-            house_idx = 0
-        street_first = addr_tokens[house_idx + 1] if house_idx + 1 < len(addr_tokens) else ""
+            house_idx = -1
+        if house_idx < 0 or house_idx + 1 >= len(addr_tokens):
+            # No street token follows the number — pairing it would be
+            # guessing; fail closed.
+            return Attempt.impossible("address does not identify a single property")
+        street_first = addr_tokens[house_idx + 1]
         if street_first:
             pattern = rf"(?<!\d){re.escape(norm_id)}\s+{re.escape(street_first)}"
         else:
