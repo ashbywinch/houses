@@ -144,10 +144,11 @@ curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 || { echo "Ch
   # /opt/houses/.env. Nothing secret stays in the repo tree.
   # Stream the LAN .env straight into the conversion — no /tmp copy, so
   # an interrupted cutover can never leave a world-readable plaintext
-  # secrets file behind. The conversion runs python-dotenv (the repo's
-  # own parser), double-quotes any value containing whitespace, and
-  # installs the result root-only.
-  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; [print(f'{k}={v}') for k, v in dotenv_values(stream=sys.stdin, interpolate=False).items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
+  # secrets file behind. Values are written PLAIN KEY=VALUE (systemd's
+  # EnvironmentFile keeps everything after '=' — no quotes needed, and
+  # a quoted value would be mangled); values containing a literal
+  # newline are rejected (they would split into a malformed line).
+  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; vals = dotenv_values(stream=sys.stdin, interpolate=False); assert all('\\n' not in (v or '') for v in vals.values()); [print(f'{k}={v}') for k, v in vals.items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
   # values are written PLAIN KEY=VALUE — no quotes (the doc's own rule,
   # and systemd's EnvironmentFile keeps everything after the '='), so
   # nothing mangled reaches the app; interpolate=False prevents a \$VAR
@@ -292,10 +293,14 @@ property detail opens → the WebSocket stays connected.
   # /etc/systemd/system/houses-backup.service
   [Unit]
   Description=Nightly houses backup (on-box snapshot)
+  Wants=houses-backup-push.service
 
   [Service]
   Type=oneshot
   ExecStart=/bin/sh -c 'ts=$(date +%%F-%%H%%M%%S); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && chmod 600 /var/backups/houses-${ts}.db && cp /etc/houses.env /var/backups/houses-${ts}.env && chmod 600 /var/backups/houses-${ts}.env && ls -1t /var/backups/houses-*.db | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env | tail -n +31 | xargs -r rm'
+
+  [Install]
+  WantedBy=timers.target
 
   # /etc/systemd/system/houses-backup-push.service  (off-box push)
   [Unit]
@@ -313,7 +318,7 @@ property detail opens → the WebSocket stays connected.
   [Timer]
   OnCalendar=*-*-* 03:00:00
   Persistent=true
-  Unit=houses-backup-push.service
+  Unit=houses-backup.service
 
   [Install]
   WantedBy=timers.target
@@ -327,10 +332,11 @@ property detail opens → the WebSocket stays connected.
      `uv sync`, the `houses` / `houses-chrome` units, and
      `/etc/houses.env`) — a Phases 1–2 box has no `houses.service` yet —
      then stop its app: `sudo systemctl stop houses`.
-  2. Pull the newest snapshot + its `.age` ciphertexts from wherever the
-     push unit sent them, decrypt with `umask 077` (the shell redirect
-     would otherwise write the plaintext world-readable before any
-     chmod): `umask 077; age -d -i <key> houses-<ts>.db.age > houses-<ts>.db`,
+  2. Stop the app, clear any stale SQLite sidecar files (a leftover WAL
+     would merge with the restored DB), then decrypt with `umask 077`
+     (the shell redirect would otherwise write the plaintext
+     world-readable before any chmod):
+     `sudo systemctl stop houses; rm -f /opt/houses/data/houses.db-wal /opt/houses/data/houses.db-shm; umask 077; age -d -i <key> houses-<ts>.db.age > houses-<ts>.db`,
      place the DB at `/opt/houses/data/houses.db`, then `chmod 600` and
      `sudo chown ubuntu:ubuntu` it — the backup unit runs as root, so
      the snapshot is root-owned and the app could not write it.
