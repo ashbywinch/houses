@@ -57,8 +57,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Ubuntu's apt; Cloudflare publishes a per-arch .deb on GitHub
 # releases. Sanity-checked like the Chrome download (file(1) + dpkg
 # fails loudly on a bad payload).
-curl -Lo /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb
-file /tmp/cloudflared.deb | grep -q "Debian binary package" && sudo dpkg -i /tmp/cloudflared.deb
+curl -fL --retry 3 -o /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb || { echo "cloudflared download failed"; exit 1; }
+file /tmp/cloudflared.deb | grep -q "Debian binary package" || { echo "cloudflared.deb is not a valid package"; exit 1; }
+sudo dpkg -i /tmp/cloudflared.deb
 
 # Chrome for the scraper — Google ships an arm64 Linux .deb (the URL was
 # verified resolving with a binary payload at plan-write time, 2026-08).
@@ -224,8 +225,8 @@ Put `HOUSES_HOST=0.0.0.0` in `/etc/houses.env` (the unit's
 `EnvironmentFile` — process env wins over the repo `.env`), start and
 enable the app: `sudo systemctl daemon-reload && sudo systemctl enable
 --now houses.service`, and after start verify the listener answers
-externally: `curl -s http://<public-ip>:8765/api/auth/me` and
-`ssh ubuntu@<ip> 'ss -tlnp | grep 8765'`. Expect a short boot before
+externally: `curl -s --max-time 10 -o /dev/null -w 'listener answered with HTTP %{http_code}\n' http://<public-ip>:8765/api/auth/me || { echo 'app unreachable externally — check HOUSES_HOST and the security list'; exit 1; }` and
+`ssh ubuntu@<ip> "ss -tlnp | grep -E '(0\.0\.0\.0|\[::\]):8765' || { echo 'houses bound to loopback — HOUSES_HOST=0.0.0.0 not applied'; exit 1; }"`. Expect a short boot before
 the port answers.
 
 **Negative check — the ingress rule must be verified, not assumed.**
@@ -333,7 +334,7 @@ the WebSocket stays connected.
   # Complete example (rclone remote "houses:" configured once via
   # `rclone config` with an authenticated S3-compatible/R2 bucket; the
   # age recipient is the operator's public key).
-  ExecStart=/bin/sh -c 'ts=$(cat /var/backups/last-backup-ts); newest=/var/backups/houses-${ts}.db; envfile=${newest%%.db}.env; [ -f "$newest" ] || { echo "no snapshot from tonight (${ts}) — backup failed"; exit 1; }; age -e -r age1<recipient> -o "${newest}.age" "$newest" && age -e -r age1<recipient> -o "${envfile}.age" "$envfile" && rclone copyto "${newest}.age" houses:backups/ && rclone copyto "${envfile}.age" houses:backups/ && rclone lsl houses:backups/ | grep -q "$(basename ${newest}).age" && rclone delete houses:backups/ --min-age 31d && ls -1t /var/backups/houses-*.db.age | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env.age | tail -n +31 | xargs -r rm'
+  ExecStart=/bin/sh -c 'ts=$(cat /var/backups/last-backup-ts); newest=/var/backups/houses-${ts}.db; envfile=${newest%%.db}.env; [ "${ts%%-*}" = "$(date +%F)" ] || { echo "no snapshot from tonight (last: ${ts}) — backup failed"; exit 1; }; [ -f "$newest" ] || { echo "snapshot ${ts} missing"; exit 1; }; age -e -r age1<recipient> -o "${newest}.age" "$newest" && age -e -r age1<recipient> -o "${envfile}.age" "$envfile" && rclone copyto "${newest}.age" houses:backups/ && rclone copyto "${envfile}.age" houses:backups/ && rclone lsl houses:backups/ | grep -q "$(basename ${newest}).age" && rclone delete houses:backups/ --min-age 31d && ls -1t /var/backups/houses-*.db.age | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env.age | tail -n +31 | xargs -r rm'
 
   # /etc/systemd/system/houses-backup.timer
   [Unit]
