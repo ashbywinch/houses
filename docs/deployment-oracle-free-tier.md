@@ -40,7 +40,7 @@ production, which is why the free ARM shape (24 GB RAM) is the host — no free
 
 ```bash
 # deps
-sudo apt update && sudo apt install -y python3-venv unzip curl ca-certificates \
+sudo apt update && sudo apt install -y python3-venv unzip curl ca-certificates sqlite3 rsync \
   fonts-liberation libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 \
   libxcomposite1 libxdamage1 libgbm1 libasound2
 
@@ -129,8 +129,12 @@ chmod +x /opt/houses/run_prod.sh
 `Restart=always`):
 
 ```ini
+[Service]
+User=ubuntu
+WorkingDirectory=/opt/houses
 EnvironmentFile=/opt/houses/.env
 ExecStart=/bin/sh /opt/houses/run_prod.sh
+Restart=always
 ```
 
 ## Phase 5 — OAuth + no-domain launch
@@ -181,7 +185,7 @@ the WebSocket stays connected.
 
   [Service]
   Type=oneshot
-  ExecStart=/bin/sh -c 'ts=$(date +%F); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && cp /opt/houses/.env /var/backups/houses-${ts}.env && find /var/backups -name "houses-*.db" -mtime +30 -delete && find /var/backups -name "houses-*.env" -mtime +30 -delete'
+  ExecStart=/bin/sh -c 'ts=$(date +%F); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && cp /opt/houses/.env /var/backups/houses-${ts}.env && chmod 600 /var/backups/houses-${ts}.env && find /var/backups -name "houses-*.db" -mtime +30 -delete && find /var/backups -name "houses-*.env" -mtime +30 -delete'
 
   # /etc/systemd/system/houses-backup.timer
   [Unit]
