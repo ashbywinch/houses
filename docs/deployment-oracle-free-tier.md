@@ -53,10 +53,22 @@ sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
 ```
 
 - Launch headless Chrome with remote debugging as a **systemd service**
-  (`houses-chrome.service`):
-  `google-chrome --headless=new --no-sandbox --disable-dev-shm-usage --remote-debugging-port=9222 --user-data-dir=/var/lib/houses-chrome about:blank`
-  The scraper connects to it via `rightmove_chrome_port` (default 9222 ✓).
-- Verify: `curl -s localhost:9222/json/version` returns the browser version.
+  (`houses-chrome.service`) — as an **unprivileged user** (a root Chrome
+  with `--no-sandbox` would be a host compromise if the scraper ever
+  loads a malicious page; Ubuntu's user-namespace kernel config lets a
+  normal user run Chrome with its sandbox on):
+
+  ```ini
+  [Service]
+  User=ubuntu
+  ExecStart=/usr/bin/google-chrome --headless=new --disable-dev-shm-usage --remote-debugging-port=9222 --user-data-dir=/var/lib/houses-chrome about:blank
+  Restart=always
+  [Install]
+  WantedBy=multi-user.target
+  ```
+
+  (Give the user the data dir: `sudo mkdir -p /var/lib/houses-chrome && sudo chown ubuntu:ubuntu /var/lib/houses-chrome`.)
+  Verify: `curl -s localhost:9222/json/version` returns the browser version.
 
 ## Phase 3 — app deploy
 
@@ -75,6 +87,7 @@ sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
   ```bash
   # consistent snapshot of the DB while the app runs
   sqlite3 data/houses.db ".backup '/tmp/houses-backup.db'"
+  ssh ubuntu@<ip> "mkdir -p /opt/houses/data"   # a fresh clone has no data/
   scp /tmp/houses-backup.db ubuntu@<ip>:/opt/houses/data/houses.db
   # every other runtime file — the disk API cache, the commute toolchain
   # outputs, the council-tax/rail/fare/Ofsted CSVs, bus/parking data —
@@ -162,11 +175,27 @@ the WebSocket stays connected.
   does not expand `$(date …)` in `ExecStart`, so wrap it in a shell:
 
   ```ini
+  # /etc/systemd/system/houses-backup.service
+  [Unit]
+  Description=Nightly houses backup
+
   [Service]
   Type=oneshot
   ExecStart=/bin/sh -c 'ts=$(date +%F); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && cp /opt/houses/.env /var/backups/houses-${ts}.env && find /var/backups -name "houses-*.db" -mtime +30 -delete && find /var/backups -name "houses-*.env" -mtime +30 -delete'
+
+  # /etc/systemd/system/houses-backup.timer
+  [Unit]
+  Description=Run the houses backup nightly
+
+  [Timer]
+  OnCalendar=*-*-* 03:00:00
+  Persistent=true
+
+  [Install]
+  WantedBy=timers.target
   ```
 
+  Enable with `sudo systemctl enable --now houses-backup.timer`.
   Optionally `rclone` the backup dir to object storage later — the DB is
   the only copy of the family's finances; treat backups like the repo
   rules treat the DB.
@@ -177,13 +206,28 @@ the WebSocket stays connected.
 
 ## Phase 7 — domain cutover (later, ~15 min)
 
-A record `houses.<yourdomain> → <public-ip>`. With Cloudflare proxy in front:
-enable WebSockets, and use **Flexible** TLS — the origin stays plain http on
-8765, and "Full (strict)" would fail with 526 (it requires a valid
-certificate on the origin itself). Register `https://houses.<yourdomain>/api/auth/callback`
-in Google, update the two env vars to `https://houses.<yourdomain>`, restart.
-This is also the step that restores the normal "Sign in with Google" button
-(the Phase 5 device flow can be retired). Nothing else changes.
+A record `houses.<yourdomain> → <public-ip>`. With Cloudflare proxy in
+front, **the origin port must be one Cloudflare forwards to** — its
+supported plain-HTTP origin ports are 80/8080/8880/2052/2082/2086/2095
+(8765 is not among them). Two clean options:
+
+- **Cloudflare Tunnel** (`cloudflared tunnel route dns houses …`): reaches
+  any origin port, so 8765 keeps working untouched.
+- **Proxied record**: move the app to a supported port first — set
+  `HOUSES_PORT=8080` in `.env`, change `run_prod.sh` to `port=settings.port`
+  (it already does), update the security list for 8080 — and use
+  **Flexible** TLS with a plain-HTTP origin ("Full (strict)" fails with
+  526 because it requires a certificate on the origin itself).
+
+Either way, at cutover **restrict the OCI security list for the app port
+to Cloudflare's published IP ranges** (`https://www.cloudflare.com/ips/`)
+instead of `0.0.0.0/0` — otherwise the origin IP stays directly
+reachable over plain HTTP and the TLS you just added is bypassable.
+
+Register `https://houses.<yourdomain>/api/auth/callback` in Google, update
+the two env vars to `https://houses.<yourdomain>`, restart. This is also
+the step that restores the normal "Sign in with Google" button (the
+Phase 5 device flow can be retired). Nothing else changes.
 
 ---
 
