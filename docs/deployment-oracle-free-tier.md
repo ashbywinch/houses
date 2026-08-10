@@ -43,7 +43,7 @@ production, which is why the free ARM shape (24 GB RAM) is the host — no free
 
 ```bash
 # deps
-sudo apt update && sudo apt install -y python3-venv unzip curl ca-certificates sqlite3 rsync age rclone nodejs npm git make \
+sudo apt update && sudo apt install -y python3-venv unzip curl ca-certificates sqlite3 rsync age rclone file nodejs npm git make \
   fonts-liberation libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 \
   libxcomposite1 libxdamage1 libgbm1 libasound2
 # Ubuntu 24.04's nodejs is 22 via noble-updates (checked against a 24.04
@@ -90,7 +90,8 @@ echo "houses-chrome.service ExecStart must use: $CHROME_BIN"
   ```
 
   (Give the user the data dir: `sudo mkdir -p /var/lib/houses-chrome && sudo chown ubuntu:ubuntu /var/lib/houses-chrome`.)
-  Verify: `curl -s localhost:9222/json/version` returns the browser version.
+  Start and enable it, then verify: `sudo systemctl daemon-reload && sudo systemctl enable --now houses-chrome.service` and
+  `curl -s localhost:9222/json/version` returns the browser version.
 
 ## Phase 3 — app deploy
 
@@ -174,9 +175,10 @@ Two things `make run-prod` needs from the environment on a server:
 `make run-prod` binds `settings.host` (127.0.0.1 by default) and
 re-runs `setup` + `frontend-build` (a few seconds on a warmed cache).
 Put `HOUSES_HOST=0.0.0.0` in `/etc/houses.env` (the unit's
-`EnvironmentFile` — process env wins over the repo `.env`), and after
-start verify the listener answers externally:
-`curl -s http://<public-ip>:8765/api/auth/me` and
+`EnvironmentFile` — process env wins over the repo `.env`), start and
+enable the app: `sudo systemctl daemon-reload && sudo systemctl enable
+--now houses.service`, and after start verify the listener answers
+externally: `curl -s http://<public-ip>:8765/api/auth/me` and
 `ssh ubuntu@<ip> 'ss -tlnp | grep 8765'`. Expect a short boot before
 the port answers.
 
@@ -260,7 +262,7 @@ property detail opens → the WebSocket stays connected.
 
   [Service]
   Type=oneshot
-  ExecStart=/bin/sh -c 'ts=$(date +%F); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && chmod 600 /var/backups/houses-${ts}.db && cp /etc/houses.env /var/backups/houses-${ts}.env && chmod 600 /var/backups/houses-${ts}.env && ls -1t /var/backups/houses-*.db | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env | tail -n +31 | xargs -r rm'
+  ExecStart=/bin/sh -c 'ts=$(date +%F-%H%M%S); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && chmod 600 /var/backups/houses-${ts}.db && cp /etc/houses.env /var/backups/houses-${ts}.env && chmod 600 /var/backups/houses-${ts}.env && ls -1t /var/backups/houses-*.db | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.age | tail -n +31 | xargs -r rm'
 
   # /etc/systemd/system/houses-backup-push.service  (off-box push)
   [Unit]
