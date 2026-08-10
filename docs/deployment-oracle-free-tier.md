@@ -127,7 +127,9 @@ curl -fsS localhost:9222/json/version >/dev/null 2>&1 || { echo "Chrome CDP endp
   sqlite3 data/houses.db ".backup '/tmp/houses-backup.db'"
   ssh ubuntu@<ip> "mkdir -p /opt/houses/data"   # a fresh clone has no data/
   scp /tmp/houses-backup.db ubuntu@<ip>:/opt/houses/data/houses.db
-  ssh ubuntu@<ip> "chmod 600 /opt/houses/data/houses.db"
+  ssh ubuntu@<ip> "chmod 600 /opt/houses/data/houses.db && sqlite3 /opt/houses/data/houses.db 'PRAGMA integrity_check;' | grep -q '^ok$'"
+  # confirm the copy is byte-identical to the snapshot
+  test "$(sha256sum /tmp/houses-backup.db | cut -d' ' -f1)" = "$(ssh ubuntu@<ip> sha256sum /opt/houses/data/houses.db | cut -d' ' -f1)"
   rm -f /tmp/houses-backup.db
   # every other runtime file — the disk API cache, the commute toolchain
   # outputs, the council-tax/rail/fare/Ofsted CSVs, bus/parking data —
@@ -145,7 +147,12 @@ curl -fsS localhost:9222/json/version >/dev/null 2>&1 || { echo "Chrome CDP endp
   # secrets file behind. The conversion runs python-dotenv (the repo's
   # own parser), double-quotes any value containing whitespace, and
   # installs the result root-only.
-  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; [print(f'{k}=\\\"{v.replace(chr(34), chr(92)+chr(34))}\\\"' if any(c.isspace() for c in v) else f'{k}={v}') for k, v in dotenv_values(stream=sys.stdin).items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
+  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; [print(f'{k}=\\\"{v.replace(chr(34), chr(92)+chr(34))}\\\"' if any(c.isspace() for c in v) else f'{k}={v}') for k, v in dotenv_values(stream=sys.stdin, interpolate=False).items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
+  # interpolate=False is deliberate: with the default, a \$VAR in any
+  # value would be silently rewritten during the cutover, mangling a
+  # secret undetected while the LAN app is already stopped. The check
+  # below also compares VALUES for the critical keys, not just presence.
+  ssh ubuntu@<ip> "for k in HOUSES_SESSION_SECRET HOUSES_GOOGLE_WEB_CLIENT_SECRET; do src=\$(grep -m1 '^'\$k'=' .env | cut -d= -f2-); got=\$(sudo grep -m1 '^'\$k'=' /etc/houses.env | cut -d= -f2-); [ \"\$src\" = \"\$got\" ] || { echo \"value mismatch for \$k\"; exit 1; }; done && echo 'critical values match'"
   # force the deployment host/port — the LAN .env's values (or their
   # absence) would otherwise leave the app bound to loopback and the
   # firewall would never see a listener
@@ -337,7 +344,9 @@ property detail opens → the WebSocket stays connected.
   Storage bucket via `rclone` with access keys (never a
   pre-authenticated request URL — anyone holding the URL can read it),
   a second VM, or the LAN machine
-  (`rsync -a /var/backups/ user@lan-host:/backups/houses/`).
+  (`rsync -a /var/backups/*.age user@lan-host:/backups/houses/` — only
+  the age-encrypted ciphertexts ever leave the box, never the plaintext
+  snapshots).
   The `.env` snapshot is secrets — **encrypt it before any off-box
   transfer** (`age -e -r <key> /var/backups/houses-${ts}.env`) so the
   copy that leaves the box is ciphertext, not the Google client
