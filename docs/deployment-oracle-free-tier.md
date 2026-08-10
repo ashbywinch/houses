@@ -133,8 +133,7 @@ curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 || { echo "Ch
   umask 077
   sqlite3 data/houses.db ".backup '/tmp/houses-backup.db'"
   ssh ubuntu@<ip> "mkdir -p /opt/houses/data"   # a fresh clone has no data/
-  scp /tmp/houses-backup.db ubuntu@<ip>:/opt/houses/data/houses.db
-  ssh ubuntu@<ip> "chmod 600 /opt/houses/data/houses.db && sqlite3 /opt/houses/data/houses.db 'PRAGMA integrity_check;' | grep -q '^ok$'"
+  cat /tmp/houses-backup.db | ssh ubuntu@<ip> "umask 077; cat > /opt/houses/data/houses.db && chmod 600 /opt/houses/data/houses.db && sqlite3 /opt/houses/data/houses.db 'PRAGMA integrity_check;' | grep -q '^ok$'"
   # confirm the copy is byte-identical to the snapshot
   test "$(sha256sum /tmp/houses-backup.db | cut -d' ' -f1)" = "$(ssh ubuntu@<ip> sha256sum /opt/houses/data/houses.db | cut -d' ' -f1)"
   rm -f /tmp/houses-backup.db
@@ -154,22 +153,28 @@ curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 || { echo "Ch
   # secrets file behind. Values are written PLAIN KEY=VALUE (systemd's
   # EnvironmentFile keeps everything after '=' — no quotes needed, and
   # a quoted value would be mangled); values containing a literal
-  # newline are rejected (they would split into a malformed line).
-  cat .env | ssh ubuntu@<ip> "set -o pipefail && sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; vals = dotenv_values(stream=sys.stdin, interpolate=False); bad = [k for k, v in vals.items() if v is not None and chr(10) in v]; assert not bad, 'newline in value: ' + ', '.join(bad); [print(f'{k}={v}') for k, v in vals.items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
+  # newline / backslash / quote are rejected (they would split or
+  # re-quote into a malformed line — systemd's EnvironmentFile parser
+  # differs from dotenv's, so round-tripping them is not safe).
+  cat .env | ssh ubuntu@<ip> "set -o pipefail && sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; vals = dotenv_values(stream=sys.stdin, interpolate=False); bad = [k for k, v in vals.items() if v is not None and any(c in v for c in (chr(10), chr(92), chr(34), chr(39)))]; assert not bad, 'unsafe character (newline/backslash/quote) in value: ' + ', '.join(bad); [print(f'{k}={v}') for k, v in vals.items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
   # values are written PLAIN KEY=VALUE — no quotes (the doc's own rule,
   # and systemd's EnvironmentFile keeps everything after the '='), so
   # nothing mangled reaches the app; interpolate=False prevents a \$VAR
   # in any value from being silently rewritten mid-cutover.
-  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; src = dotenv_values(stream=sys.stdin, interpolate=False); got = dotenv_values('/etc/houses.env', interpolate=False); ok = all(src.get(k) == got.get(k) for k in ('HOUSES_SESSION_SECRET', 'HOUSES_GOOGLE_WEB_CLIENT_SECRET')); print('critical values match' if ok else 'value mismatch'); exit(0 if ok else 1)\""
+  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; src = dotenv_values(stream=sys.stdin, interpolate=False); got = dotenv_values('/etc/houses.env', interpolate=False); keys = ('HOUSES_SESSION_SECRET', 'HOUSES_GOOGLE_WEB_CLIENT_ID', 'HOUSES_GOOGLE_WEB_CLIENT_SECRET', 'HOUSES_GOOGLE_DEVICE_CLIENT_ID', 'HOUSES_GOOGLE_DEVICE_CLIENT_SECRET', 'HOUSES_SHEET_ID'); ok = all(src.get(k) == got.get(k) for k in keys); print('all critical values match' if ok else 'value mismatch'); exit(0 if ok else 1)\""
   # force the deployment host/port — the LAN .env's values (or their
   # absence) would otherwise leave the app bound to loopback and the
   # firewall would never see a listener
   ssh ubuntu@<ip> "sudo sh -c 'grep -q \"^HOUSES_HOST=\" /etc/houses.env && sed -i \"s/^HOUSES_HOST=.*/HOUSES_HOST=0.0.0.0/\" /etc/houses.env || echo HOUSES_HOST=0.0.0.0 >> /etc/houses.env'"
   ssh ubuntu@<ip> "sudo sh -c 'grep -q \"^HOUSES_PORT=\" /etc/houses.env && sed -i \"s/^HOUSES_PORT=.*/HOUSES_PORT=8765/\" /etc/houses.env || echo HOUSES_PORT=8765 >> /etc/houses.env'"
   # the LAN .env's public URLs point at the dev host — force them to the
-  # VM hostname or every link the app generates goes back to the LAN
-  ssh ubuntu@<ip> "sudo sh -c 'grep -q \"^HOUSES_PUBLIC_URL=\" /etc/houses.env && sed -i \"s|^HOUSES_PUBLIC_URL=.*|HOUSES_PUBLIC_URL=http://<public-ip>.sslip.io:8765|\" /etc/houses.env || echo HOUSES_PUBLIC_URL=http://<public-ip>.sslip.io:8765 >> /etc/houses.env'"
-  ssh ubuntu@<ip> "sudo sh -c 'grep -q \"^HOUSES_FRONTEND_URL=\" /etc/houses.env && sed -i \"s|^HOUSES_FRONTEND_URL=.*|HOUSES_FRONTEND_URL=http://<public-ip>.sslip.io:8765|\" /etc/houses.env || echo HOUSES_FRONTEND_URL=http://<public-ip>.sslip.io:8765 >> /etc/houses.env'"
+  # VM hostname or every link the app generates goes back to the LAN.
+  # The public IP is defined ONCE here; the sslip.io default is what the
+  # no-domain fallback needs (Phase 5's tunnel path replaces these with
+  # https://houses.<yourdomain>).
+  PUBIP=<public-ip>
+  ssh ubuntu@<ip> "sudo sh -c 'grep -q \"^HOUSES_PUBLIC_URL=\" /etc/houses.env && sed -i \"s|^HOUSES_PUBLIC_URL=.*|HOUSES_PUBLIC_URL=http://${PUBIP}.sslip.io:8765|\" /etc/houses.env || echo HOUSES_PUBLIC_URL=http://${PUBIP}.sslip.io:8765 >> /etc/houses.env'"
+  ssh ubuntu@<ip> "sudo sh -c 'grep -q \"^HOUSES_FRONTEND_URL=\" /etc/houses.env && sed -i \"s|^HOUSES_FRONTEND_URL=.*|HOUSES_FRONTEND_URL=http://${PUBIP}.sslip.io:8765|\" /etc/houses.env || echo HOUSES_FRONTEND_URL=http://${PUBIP}.sslip.io:8765 >> /etc/houses.env'"
   # the <public-ip> placeholder must be substituted — a literal one
   # would make every app link point at a hostname that resolves nowhere
   ssh ubuntu@<ip> "sudo grep -q '<public-ip>' /etc/houses.env && { echo 'substitute <public-ip> with the VM address first'; exit 1; } || echo 'URLs OK'"
@@ -222,6 +227,16 @@ enable the app: `sudo systemctl daemon-reload && sudo systemctl enable
 externally: `curl -s http://<public-ip>:8765/api/auth/me` and
 `ssh ubuntu@<ip> 'ss -tlnp | grep 8765'`. Expect a short boot before
 the port answers.
+
+**Negative check — the ingress rule must be verified, not assumed.**
+The positive curl above succeeds whether the security list is restricted
+to the family's egress IPs or mistakenly left `0.0.0.0/0`, and a
+wide-open rule serves the family's financial data over sniffable HTTP
+to anyone who scans the port. Before the app is used, confirm from a
+network that is NOT allowlisted (e.g. the phone on cellular) that
+`curl -s --max-time 5 http://<public-ip>:8765/` is refused or times
+out; if it answers, fix the VCN security-list ingress for 8765/tcp
+before proceeding.
 
 `houses.service` (env from `.env`, WorkingDirectory `/opt/houses`,
 `Restart=always`):
@@ -297,7 +312,7 @@ the WebSocket stays connected.
 
   [Service]
   Type=oneshot
-  ExecStart=/bin/sh -c 'ts=$(date +%%F-%%H%%M%%S); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && chmod 600 /var/backups/houses-${ts}.db && cp /etc/houses.env /var/backups/houses-${ts}.env && chmod 600 /var/backups/houses-${ts}.env && ls -1t /var/backups/houses-*.db | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env | tail -n +31 | xargs -r rm'
+  ExecStart=/bin/sh -c 'ts=$(date +%%F-%%H%%M%%S); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && chmod 600 /var/backups/houses-${ts}.db && cp /etc/houses.env /var/backups/houses-${ts}.env && chmod 600 /var/backups/houses-${ts}.env && echo ${ts} > /var/backups/last-backup-ts && ls -1t /var/backups/houses-*.db | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env | tail -n +31 | xargs -r rm'
 
   [Install]
   WantedBy=timers.target
@@ -309,12 +324,16 @@ the WebSocket stays connected.
 
   [Service]
   Type=oneshot
+  # The push requires the snapshot produced by TONIGHT'S run: the
+  # backup unit writes /var/backups/last-backup-ts only on success, and
+  # a failed snapshot must not silently re-push yesterday's stale copy
+  # (Wants= does not gate on the dependee's exit status). Remote
+  # retention: the lsl verifies the landing, then rclone deletes
+  # ciphertexts older than 31 days so the bucket does not grow forever.
   # Complete example (rclone remote "houses:" configured once via
   # `rclone config` with an authenticated S3-compatible/R2 bucket; the
-  # age recipient is the operator's public key). The trailing lsl
-  # verifies the payload actually landed — an unverified off-box copy
-  # is the plan's one silent-failure risk.
-  ExecStart=/bin/sh -c 'newest=$(ls -1t /var/backups/houses-*.db | head -1); envfile=${newest%%.db}.env; age -e -r age1<recipient> -o "${newest}.age" "$newest" && age -e -r age1<recipient> -o "${envfile}.age" "$envfile" && rclone copyto "${newest}.age" houses:backups/ && rclone copyto "${envfile}.age" houses:backups/ && rclone lsl houses:backups/ | grep -q "$(basename ${newest}).age" && ls -1t /var/backups/houses-*.db.age | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env.age | tail -n +31 | xargs -r rm'
+  # age recipient is the operator's public key).
+  ExecStart=/bin/sh -c 'ts=$(cat /var/backups/last-backup-ts); newest=/var/backups/houses-${ts}.db; envfile=${newest%%.db}.env; [ -f "$newest" ] || { echo "no snapshot from tonight (${ts}) — backup failed"; exit 1; }; age -e -r age1<recipient> -o "${newest}.age" "$newest" && age -e -r age1<recipient> -o "${envfile}.age" "$envfile" && rclone copyto "${newest}.age" houses:backups/ && rclone copyto "${envfile}.age" houses:backups/ && rclone lsl houses:backups/ | grep -q "$(basename ${newest}).age" && rclone delete houses:backups/ --min-age 31d && ls -1t /var/backups/houses-*.db.age | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env.age | tail -n +31 | xargs -r rm'
 
   # /etc/systemd/system/houses-backup.timer
   [Unit]
