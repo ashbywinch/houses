@@ -118,8 +118,9 @@ from houses.server import app
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 build = Path('/opt/houses/houses/frontend/dist')
-if build.exists():
-    app.mount('/', StaticFiles(directory=str(build), html=True), name='frontend')
+if not build.exists():
+    raise SystemExit(f'frontend build not found at {build} — check the committed dist path')
+app.mount('/', StaticFiles(directory=str(build), html=True), name='frontend')
 uvicorn.run(app, host='0.0.0.0', port=settings.port, reload=False)"
 EOF
 chmod +x /opt/houses/run_prod.sh
@@ -129,12 +130,21 @@ chmod +x /opt/houses/run_prod.sh
 `Restart=always`):
 
 ```ini
+# /etc/systemd/system/houses.service
+[Unit]
+Description=Houses app (FastAPI + Vue + scraper)
+After=network-online.target
+Wants=network-online.target
+
 [Service]
 User=ubuntu
 WorkingDirectory=/opt/houses
 EnvironmentFile=/opt/houses/.env
 ExecStart=/bin/sh /opt/houses/run_prod.sh
 Restart=always
+
+[Install]
+WantedBy=multi-user.target
 ```
 
 ## Phase 5 — OAuth + no-domain launch
@@ -218,10 +228,11 @@ supported plain-HTTP origin ports are 80/8080/8880/2052/2082/2086/2095
 - **Cloudflare Tunnel** (`cloudflared tunnel route dns houses …`): reaches
   any origin port, so 8765 keeps working untouched.
 - **Proxied record**: move the app to a supported port first — set
-  `HOUSES_PORT=8080` in `.env`, change `run_prod.sh` to `port=settings.port`
-  (it already does), update the security list for 8080 — and use
-  **Flexible** TLS with a plain-HTTP origin ("Full (strict)" fails with
-  526 because it requires a certificate on the origin itself).
+  `HOUSES_PORT=8080` in `/opt/houses/.env` (the launcher already runs
+  `uvicorn … port=settings.port`, so no code change is needed — just
+  restart `houses.service`), update the OCI security list for 8080 — and
+  use **Flexible** TLS with a plain-HTTP origin ("Full (strict)" fails
+  with 526 because it requires a certificate on the origin itself).
 
 Either way, at cutover **restrict the OCI security list for the app port
 to Cloudflare's published IP ranges** (`https://www.cloudflare.com/ips/`)
