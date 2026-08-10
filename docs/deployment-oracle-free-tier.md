@@ -62,12 +62,15 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 curl -Lo /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_arm64.deb
 if file /tmp/chrome.deb | grep -q "Debian binary package"; then
   sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
+  CHROME_BIN=/usr/bin/google-chrome
 else
   echo "chrome deb unavailable — installing chromium instead"
   sudo apt install -y chromium-browser
+  CHROME_BIN=/usr/bin/chromium-browser
 fi
-# if the fallback ran, point houses-chrome.service's ExecStart at the
-# chromium binary (/usr/bin/chromium-browser)
+echo "houses-chrome.service ExecStart must use: $CHROME_BIN"
+# paste that binary into the unit's ExecStart below — a mismatch
+# (fallback installed but the unit still says google-chrome) crash-loops
 ```
 
 - Launch headless Chrome with remote debugging as a **systemd service**
@@ -129,7 +132,7 @@ fi
   # HOUSES_PORT / the public URLs belong here too, not in
   # /opt/houses/.env. Nothing secret stays in the repo tree.
   scp .env ubuntu@<ip>:/tmp/houses.env
-  ssh ubuntu@<ip> "sed -E -e 's/^[[:space:]]*export[[:space:]]+//' -e 's/^([^=]+)=\"(.*)\"/\1=\2/' -e 's/^([^=]+)='\''(.*)'\''/\1=\2/' -e '/^[[:space:]]*#/d' /tmp/houses.env | sudo tee /etc/houses.env >/dev/null && sudo chown root:root /etc/houses.env && sudo chmod 600 /etc/houses.env; rm -f /tmp/houses.env"
+  ssh ubuntu@<ip> "/opt/houses/.venv/bin/python -c \"from dotenv import dotenv_values; [print(f'{k}={v}') for k, v in dotenv_values('/tmp/houses.env').items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env; rm -f /tmp/houses.env"
   # `;` not `&&` — the /tmp copy is removed even on failure, so a failed
   # cutover never leaves secrets in /tmp; the verification makes a
   # failed install visible
@@ -237,17 +240,30 @@ property detail opens → the WebSocket stays connected.
 
 ## Phase 6 — safety net (the part that matters)
 
-- **Nightly backup timer** (`houses-backup.service` + `.timer`): systemd
-  does not expand `$(date …)` in `ExecStart`, so wrap it in a shell:
+- **Nightly backup** — two decoupled units: the on-box snapshot (a
+  failure stops it loudly; the `&&` chain is deliberate) and a separate
+  off-box push that runs after it, so a push problem never blocks the
+  snapshot and vice versa. Trim keeps the newest 30 copies by COUNT
+  (age-based trimming silently shrinks history after a gap):
 
   ```ini
   # /etc/systemd/system/houses-backup.service
   [Unit]
-  Description=Nightly houses backup
+  Description=Nightly houses backup (on-box snapshot)
 
   [Service]
   Type=oneshot
-  ExecStart=/bin/sh -c 'ts=$(date +%F); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && chmod 600 /var/backups/houses-${ts}.db && cp /etc/houses.env /var/backups/houses-${ts}.env && chmod 600 /var/backups/houses-${ts}.env && find /var/backups -name "houses-*.db" -mtime +30 -delete && find /var/backups -name "houses-*.env" -mtime +30 -delete'
+  ExecStart=/bin/sh -c 'ts=$(date +%F); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && chmod 600 /var/backups/houses-${ts}.db && cp /etc/houses.env /var/backups/houses-${ts}.env && chmod 600 /var/backups/houses-${ts}.env && ls -1t /var/backups/houses-*.db | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env | tail -n +31 | xargs -r rm'
+
+  # /etc/systemd/system/houses-backup-push.service  (off-box push)
+  [Unit]
+  Description=Push the houses backup off-box
+  After=houses-backup.service
+  Requires=houses-backup.service
+
+  [Service]
+  Type=oneshot
+  ExecStart=/bin/sh -c 'newest=$(ls -1t /var/backups/houses-*.db | head -1); ... rclone/rsync the newest snapshot + its .env (age-encrypted) to the bucket/LAN host ...'
 
   # /etc/systemd/system/houses-backup.timer
   [Unit]
