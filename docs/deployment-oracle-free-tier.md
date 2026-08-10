@@ -53,6 +53,13 @@ sudo apt update && sudo apt install -y python3-venv unzip curl ca-certificates s
 # uv (the repo's package manager)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
+# cloudflared for the HTTPS tunnel (Phase 5 primary path) — not in
+# Ubuntu's apt; Cloudflare publishes a per-arch .deb on GitHub
+# releases. Sanity-checked like the Chrome download (file(1) + dpkg
+# fails loudly on a bad payload).
+curl -Lo /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb
+file /tmp/cloudflared.deb | grep -q "Debian binary package" && sudo dpkg -i /tmp/cloudflared.deb
+
 # Chrome for the scraper — Google ships an arm64 Linux .deb (the URL was
 # verified resolving with a binary payload at plan-write time, 2026-08).
 # The download is sanity-checked anyway, so a failed fetch can't silently
@@ -302,7 +309,12 @@ the WebSocket stays connected.
 
   [Service]
   Type=oneshot
-  ExecStart=/bin/sh -c 'newest=$(ls -1t /var/backups/houses-*.db | head -1); envfile=${newest%%.db}.env; age -e -r <recipient> -o "${newest}.age" "$newest" && age -e -r <recipient> -o "${envfile}.age" "$envfile" && ... rclone/rsync the .age ciphertexts to the bucket/LAN host ... && ls -1t /var/backups/houses-*.db.age | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env.age | tail -n +31 | xargs -r rm'
+  # Complete example (rclone remote "houses:" configured once via
+  # `rclone config` with an authenticated S3-compatible/R2 bucket; the
+  # age recipient is the operator's public key). The trailing lsl
+  # verifies the payload actually landed — an unverified off-box copy
+  # is the plan's one silent-failure risk.
+  ExecStart=/bin/sh -c 'newest=$(ls -1t /var/backups/houses-*.db | head -1); envfile=${newest%%.db}.env; age -e -r age1<recipient> -o "${newest}.age" "$newest" && age -e -r age1<recipient> -o "${envfile}.age" "$envfile" && rclone copyto "${newest}.age" houses:backups/ && rclone copyto "${envfile}.age" houses:backups/ && rclone lsl houses:backups/ | grep -q "$(basename ${newest}).age" && ls -1t /var/backups/houses-*.db.age | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env.age | tail -n +31 | xargs -r rm'
 
   # /etc/systemd/system/houses-backup.timer
   [Unit]
