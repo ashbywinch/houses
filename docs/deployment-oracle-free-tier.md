@@ -46,13 +46,16 @@ production, which is why the free ARM shape (24 GB RAM) is the host — no free
 sudo apt update && sudo apt install -y python3-venv unzip curl ca-certificates sqlite3 rsync nodejs npm \
   fonts-liberation libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 \
   libxcomposite1 libxdamage1 libgbm1 libasound2
+# Ubuntu 24.04 ships node 22 — satisfies vite 8's requirement
+# (^20.19 || >=22.12); recheck if the frontend bumps vite.
 
 # uv (the repo's package manager)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Chrome for the scraper (Google ships an arm64 Linux .deb — verify the
-# download before installing, so a failed fetch can't silently leave the
-# scraper without a browser). If the deb is unavailable, fall back to
+# Chrome for the scraper — Google ships an arm64 Linux .deb (the URL was
+# verified resolving with a binary payload at plan-write time, 2026-08).
+# The download is sanity-checked anyway, so a failed fetch can't silently
+# leave the scraper browserless. If the deb is unavailable, fall back to
 # Ubuntu's chromium and point houses-chrome.service's ExecStart at it:
 #   sudo apt install -y chromium-browser   # then use /usr/bin/chromium-browser
 curl -Lo /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_arm64.deb
@@ -91,7 +94,8 @@ sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
   ```
 
 - Copy the live data and secrets (from the LAN machine, **never deleting the
-  source**):
+  source**). **Stop the LAN app first** (`make stop` on the LAN machine)
+  so nothing writes to the DB after the snapshot:
 
   > **Secrets — environment first.** `docs/coding-standards.md` says secrets
   > come from the environment, never files, and this is a public-IP host.
@@ -163,7 +167,12 @@ Wants=network-online.target
 [Service]
 User=ubuntu
 WorkingDirectory=/opt/houses
-EnvironmentFile=/opt/houses/.env
+# The app loads /opt/houses/.env itself (pydantic — quotes and $VAR
+# work there). systemd's EnvironmentFile= parser differs (no quote
+# stripping, no expansion, rejects lines), so do NOT load the .env
+# through it. Secrets live in Environment= (or a strict plain-KEY=VALUE
+# /etc/houses.env, chmod 600):
+Environment=HOUSES_SESSION_SECRET=… HOUSES_GOOGLE_WEB_CLIENT_ID=… HOUSES_GOOGLE_WEB_CLIENT_SECRET=… HOUSES_GOOGLE_DEVICE_CLIENT_ID=… HOUSES_GOOGLE_DEVICE_CLIENT_SECRET=…
 ExecStart=/bin/sh /opt/houses/run_prod.sh
 Restart=always
 
