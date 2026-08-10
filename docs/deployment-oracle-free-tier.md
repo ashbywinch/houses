@@ -84,46 +84,79 @@ sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
 
 ## Phase 4 — systemd service
 
+Create the launcher script (systemd `ExecStart` must be a single line —
+an inline multi-line `python -c` does not parse):
+
+```bash
+# /opt/houses/run_prod.sh  — the `make run-prod` shape: built frontend
+# served by FastAPI on one port, background DAG scheduler + WebSocket
+# broadcaster included, no dev reload.
+cat > /opt/houses/run_prod.sh <<'EOF'
+#!/bin/sh
+cd /opt/houses
+exec /home/ubuntu/.local/bin/uv run python -c "
+import uvicorn
+from houses.config import settings
+from houses.server import app
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
+build = Path('/opt/houses/houses/frontend/dist')
+if build.exists():
+    app.mount('/', StaticFiles(directory=str(build), html=True), name='frontend')
+uvicorn.run(app, host='0.0.0.0', port=settings.port, reload=False)"
+EOF
+chmod +x /opt/houses/run_prod.sh
+```
+
 `houses.service` (env from `.env`, WorkingDirectory `/opt/houses`,
 `Restart=always`):
 
 ```ini
 EnvironmentFile=/opt/houses/.env
-ExecStart=/home/ubuntu/.local/bin/uv run python -c "
-  import uvicorn
-  from houses.config import settings
-  from houses.server import app
-  from fastapi.staticfiles import StaticFiles
-  from pathlib import Path
-  build = Path('/opt/houses/houses/frontend/dist')
-  if build.exists(): app.mount('/', StaticFiles(directory=str(build), html=True), name='frontend')
-  uvicorn.run(app, host='0.0.0.0', port=settings.port, reload=False)"
+ExecStart=/bin/sh /opt/houses/run_prod.sh
 ```
-
-This is exactly the `make run-prod` shape — one process, background DAG
-scheduler + WebSocket broadcaster included, no dev reload.
 
 ## Phase 5 — OAuth + no-domain launch
 
-- In `/opt/houses/.env` set:
-  `HOUSES_PUBLIC_URL=http://<public-ip>.sslip.io:8765`
-  `HOUSES_FRONTEND_URL=http://<public-ip>.sslip.io:8765`
-  (same hostname — cookie host matches the callback).
-- Google Cloud Console → OAuth client → authorized redirect URIs: **add
-  `http://<public-ip>.sslip.io:8765/api/auth/callback`** (keep the LAN one
-  while both run). Consent screen: add your brother's Google account as a
-  **test user** if it's still in Testing mode.
-- Restart `houses.service`, then verify from your phone on **cellular**: page
-  loads → Google sign-in completes → a property detail opens → the WebSocket
-  stays connected.
+Google rejects plain-`http://` redirect URIs for **public** hosts, so the
+web-flow sign-in needs HTTPS, which the no-domain interim does not have.
+Two workable paths:
+
+- **Interim (no domain): use the device flow.** The app ships one
+  (`/api/auth/device` — the same path `tools/capture_dom.py --login`
+  uses). On the box: `HOUSES_PUBLIC_URL` / `HOUSES_FRONTEND_URL` are
+  irrelevant to it, but keep them set to
+  `http://<public-ip>.sslip.io:8765` so the app's links are consistent.
+  Run `make login` once per new user: it prints a Google approval URL —
+  the person opens it on any device and approves; the box mints the
+  session. Costs a code + approval dance per user, but works with no
+  HTTPS and no domain. (The LAN web-flow callback stays configured for
+  the dev machine.)
+- **Full web-flow sign-in arrives with the domain cutover (Phase 7)** —
+  register `https://houses.<yourdomain>/api/auth/callback` there and the
+  normal "Sign in with Google" button works.
+
+Restart `houses.service`, then verify from your phone on **cellular**: page
+loads → sign-in completes (device flow for now) → a property detail opens →
+the WebSocket stays connected.
+
+> If you have the domain from day one, skip the interim: go straight to
+> Phase 7, register the `https` callback, and use the web flow throughout.
 
 ## Phase 6 — safety net (the part that matters)
 
-- **Nightly backup timer** (`houses-backup.timer` + service):
-  `sqlite3 data/houses.db ".backup '/var/backups/houses-$(date +%F).db'"` plus
-  a copy of `.env`, keep N days. Optionally `rclone` to object storage later —
-  the DB is the only copy of the family's finances; treat backups like the
-  repo rules treat the DB.
+- **Nightly backup timer** (`houses-backup.service` + `.timer`): systemd
+  does not expand `$(date …)` in `ExecStart`, so wrap it in a shell:
+
+  ```ini
+  [Service]
+  Type=oneshot
+  ExecStart=/bin/sh -c 'ts=$(date +%F); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && cp /opt/houses/.env /var/backups/houses-${ts}.env && find /var/backups -name "houses-*.db" -mtime +30 -delete'
+  ```
+
+  Optionally `rclone` the backup dir to object storage later — the DB is
+  the only copy of the family's finances; treat backups like the repo
+  rules treat the DB.
 - Monitoring: `journalctl -u houses -f` for errors; systemd restart policy
   handles crashes.
 - The `HOUSES_SHEET_ID` / service-account entries become inert once the
@@ -131,10 +164,13 @@ scheduler + WebSocket broadcaster included, no dev reload.
 
 ## Phase 7 — domain cutover (later, ~15 min)
 
-A record `houses.<yourdomain> → <public-ip>` (or Cloudflare proxy — enable
-WebSockets; origin stays plain http on 8765, "Full (strict)" TLS). Update the
-two env vars to `https://houses.<yourdomain>`, add that callback URI to
-Google, restart. Nothing else changes.
+A record `houses.<yourdomain> → <public-ip>`. With Cloudflare proxy in front:
+enable WebSockets, and use **Flexible** TLS — the origin stays plain http on
+8765, and "Full (strict)" would fail with 526 (it requires a valid
+certificate on the origin itself). Register `https://houses.<yourdomain>/api/auth/callback`
+in Google, update the two env vars to `https://houses.<yourdomain>`, restart.
+This is also the step that restores the normal "Sign in with Google" button
+(the Phase 5 device flow can be retired). Nothing else changes.
 
 ---
 
