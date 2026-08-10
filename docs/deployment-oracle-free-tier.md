@@ -189,6 +189,23 @@ curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 || { echo "Ch
   ssh ubuntu@<ip> "sudo test -r /etc/houses.env && sudo grep -q '^HOUSES_PORT=8765' /etc/houses.env && echo 'secrets installed, port 8765 OK' || { echo 'check /etc/houses.env (missing or HOUSES_PORT mismatch with the firewall rule)'; exit 1; }"
   ```
 
+  **Secrets at rest — deliberate, minimal posture (no added volume
+  encryption).** `/etc/houses.env` is plaintext on the box (root-only
+  600) and nothing is layered on top of it. Rationale: OCI encrypts
+  every block and boot volume at rest by default — AES-256 with
+  OCI-managed keys, mandatory, no opt-out — so the file is ciphertext
+  at the storage layer and a stolen disk or volume backup yields
+  nothing. The one residual no at-rest scheme removes — a live root
+  compromise — is accepted: root can read the running process's
+  environment (`/proc/<pid>/environ`) regardless, so file encryption
+  buys nothing for that threat. systemd-creds and LUKS were considered
+  and rejected: their keys are machine-bound (a restore to a new
+  instance loses them unless you also maintain a second, operator-held
+  key copy), and they add boot-time machinery without closing any gap
+  the platform default leaves open. Off-box, the chain is already
+  broken: only age-encrypted ciphertexts leave the box, under the
+  operator's key.
+
 - Frontend: the built `dist/` is committed in the repo — no build step
   needed; `run-prod` serves it from FastAPI on 8765.
 
