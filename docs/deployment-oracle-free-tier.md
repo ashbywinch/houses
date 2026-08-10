@@ -50,8 +50,11 @@ sudo apt update && sudo apt install -y python3-venv unzip curl ca-certificates s
 # uv (the repo's package manager)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Chrome for the scraper (arm64 deb)
+# Chrome for the scraper (Google ships an arm64 Linux .deb — verify the
+# download before installing, so a failed fetch can't silently leave the
+# scraper without a browser)
 curl -Lo /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_arm64.deb
+file /tmp/chrome.deb | grep -q "Debian binary package" || { echo "chrome download failed"; exit 1; }
 sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
 ```
 
@@ -86,6 +89,14 @@ sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
 
 - Copy the live data and secrets (from the LAN machine, **never deleting the
   source**):
+
+  > **Secrets note:** `docs/coding-standards.md` says secrets come from the
+  > environment, never files. This deployment deliberately uses the same
+  > `.env` file the local dev setup uses (pydantic loads it), so the Google
+  > client secrets and session secret ship as one file. If you want to align
+  > strictly, inject the same values via systemd `Environment=` instead and
+  > delete `.env` after first boot — but keep the copied/backed-up `.env`
+  > `chmod 600` either way (Phase 6), and never commit it.
 
   ```bash
   # consistent snapshot of the DB while the app runs
@@ -177,9 +188,11 @@ Two workable paths:
   register `https://houses.<yourdomain>/api/auth/callback` there and the
   normal "Sign in with Google" button works.
 
-Restart `houses.service`, then verify from your phone on **cellular**: page
-loads → sign-in completes (device flow for now) → a property detail opens →
-the WebSocket stays connected.
+Restart `houses.service`, then verify from a whitelisted network (your
+home WiFi — or add the phone's **cellular egress IP** to the security
+list temporarily, since a carrier NAT address is not on the family-IP
+allowlist): page loads → sign-in completes (device flow for now) → a
+property detail opens → the WebSocket stays connected.
 
 > If you have the domain from day one, skip the interim: go straight to
 > Phase 7, register the `https` callback, and use the web flow throughout.
