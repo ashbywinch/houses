@@ -116,6 +116,7 @@ curl -s localhost:9222/json/version   # must return the browser version
   > file copy, root-readable only.
 
   ```bash
+  set -e   # abort the cutover if any copy step fails
   # the LAN app is stopped (make stop, above) — .backup of a live DB is
   # consistent, but any write after the snapshot never reaches the VM.
   # The snapshot is the family's financial data: private perms, and it
@@ -124,6 +125,7 @@ curl -s localhost:9222/json/version   # must return the browser version
   sqlite3 data/houses.db ".backup '/tmp/houses-backup.db'"
   ssh ubuntu@<ip> "mkdir -p /opt/houses/data"   # a fresh clone has no data/
   scp /tmp/houses-backup.db ubuntu@<ip>:/opt/houses/data/houses.db
+  ssh ubuntu@<ip> "chmod 600 /opt/houses/data/houses.db"
   rm -f /tmp/houses-backup.db
   # every other runtime file — the disk API cache, the commute toolchain
   # outputs, the council-tax/rail/fare/Ofsted CSVs, bus/parking data —
