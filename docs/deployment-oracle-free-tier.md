@@ -52,9 +52,11 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Chrome for the scraper (Google ships an arm64 Linux .deb — verify the
 # download before installing, so a failed fetch can't silently leave the
-# scraper without a browser)
+# scraper without a browser). If the deb is unavailable, fall back to
+# Ubuntu's chromium and point houses-chrome.service's ExecStart at it:
+#   sudo apt install -y chromium-browser   # then use /usr/bin/chromium-browser
 curl -Lo /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_arm64.deb
-file /tmp/chrome.deb | grep -q "Debian binary package" || { echo "chrome download failed"; exit 1; }
+file /tmp/chrome.deb | grep -q "Debian binary package" || { echo "chrome download failed — use the chromium fallback"; exit 1; }
 sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
 ```
 
@@ -90,13 +92,15 @@ sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
 - Copy the live data and secrets (from the LAN machine, **never deleting the
   source**):
 
-  > **Secrets note:** `docs/coding-standards.md` says secrets come from the
-  > environment, never files. This deployment deliberately uses the same
-  > `.env` file the local dev setup uses (pydantic loads it), so the Google
-  > client secrets and session secret ship as one file. If you want to align
-  > strictly, inject the same values via systemd `Environment=` instead and
-  > delete `.env` after first boot — but keep the copied/backed-up `.env`
-  > `chmod 600` either way (Phase 6), and never commit it.
+  > **Secrets — environment first.** `docs/coding-standards.md` says secrets
+  > come from the environment, never files, and this is a public-IP host.
+  > Preferred path: put the Google client secrets and the session secret in
+  > `houses.service`'s `Environment=` lines (or an `EnvironmentFile=` outside
+  > the repo, e.g. `/etc/houses.env`, `chmod 600`), and do NOT copy the LAN
+  > `.env` at all. Fallback (the local-dev shape): copy `.env` as below —
+  > pydantic loads it — keep it `chmod 600`, never commit it, and remember
+  > the backup timer also retains it (Phase 6). Either way, never leave the
+  > secrets in a world-readable file.
 
   ```bash
   # consistent snapshot of the DB while the app runs
@@ -108,6 +112,10 @@ sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
   # except the live DB and its WAL files (they come from the snapshot)
   rsync -a --exclude 'houses.db*' data/ ubuntu@<ip>:/opt/houses/data/
   scp .env ubuntu@<ip>:/opt/houses/.env
+  # The VM listens on settings.port — the copied .env must agree with the
+  # VCN ingress rule (8765). A dev .env that sets HOUSES_PORT elsewhere
+  # would put the app behind the firewall before Phase 5 even starts.
+  ssh ubuntu@<ip> "grep -q '^HOUSES_PORT=8765' /opt/houses/.env && echo 'port 8765 OK' || echo 'HOUSES_PORT mismatch or unset — align .env with the firewall rule'"
   ```
 
 - Frontend: the built `dist/` is committed in the repo — no build step
@@ -115,37 +123,28 @@ sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
 
 ## Phase 4 — systemd service
 
-Create the launcher script (systemd `ExecStart` must be a single line —
-an inline multi-line `python -c` does not parse). This is the repo's
-`make run-prod` launch shape ([Makefile](https://github.com/ashbywinch/houses/blob/main/Makefile#L140-L145) —
-mount `houses/frontend/dist` on FastAPI, one uvicorn process with the
-background DAG scheduler + WebSocket broadcaster, no reload), wrapped so
-systemd can run it. Facts assumed here, verified against the repo at
-write time: `dist/` is committed (no build step), the port comes from
-`settings.port` (config.py, env `HOUSES_PORT`), and `make login` exists
-for the Phase 5 device flow.
+Create the launcher script (systemd `ExecStart` must be a single line).
+It delegates to the repo's own `make run-prod` target
+([Makefile](https://github.com/ashbywinch/houses/blob/main/Makefile#L140-L145))
+so there is ONE source of truth for the launch command — no inline copy
+to drift:
 
 ```bash
-# /opt/houses/run_prod.sh  — the `make run-prod` shape: built frontend
-# served by FastAPI on one port, background DAG scheduler + WebSocket
-# broadcaster included, no dev reload.
+# /opt/houses/run_prod.sh
 cat > /opt/houses/run_prod.sh <<'EOF'
 #!/bin/sh
 cd /opt/houses
-exec /home/ubuntu/.local/bin/uv run python -c "
-import uvicorn
-from houses.config import settings
-from houses.server import app
-from fastapi.staticfiles import StaticFiles
-from pathlib import Path
-build = Path('/opt/houses/houses/frontend/dist')
-if not build.exists():
-    raise SystemExit(f'frontend build not found at {build} — check the committed dist path')
-app.mount('/', StaticFiles(directory=str(build), html=True), name='frontend')
-uvicorn.run(app, host='0.0.0.0', port=settings.port, reload=False)"
+exec make run-prod
 EOF
 chmod +x /opt/houses/run_prod.sh
 ```
+
+Two things `make run-prod` needs from the environment on a server:
+`make run-prod` binds `settings.host` (127.0.0.1 by default) and
+re-runs `setup` + `frontend-build` (a few seconds on a warmed cache),
+so the box's env must set `HOUSES_HOST=0.0.0.0` — add it to
+`/opt/houses/.env` (or the service `Environment=`) alongside the
+Phase 3 values, and expect a short boot before the port answers.
 
 `houses.service` (env from `.env`, WorkingDirectory `/opt/houses`,
 `Restart=always`):
