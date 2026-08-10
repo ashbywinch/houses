@@ -94,6 +94,7 @@ make stop                       # Stop dev server + frontend
 - **Isochrone website integration (settings page, generation, map)**: [docs/website-isochrone-integration.md](docs/website-isochrone-integration.md)
 - **Capture / compare the frontend DOM**: Run `tools/capture_dom.py`, then compare against `docs/current-ui/`. See `docs/development.md` → *Capturing the Frontend DOM*.
 - **Write docs**: [docs/writing-documentation.md](docs/writing-documentation.md)
+- **Deploy to Oracle Cloud Free Tier**: [docs/deployment-oracle-free-tier.md](docs/deployment-oracle-free-tier.md)
 - **Remaining work (uncertainty in the DAG library, usability backlog)**: [docs/remaining-work-plan.md](docs/remaining-work-plan.md)
 - **Use the API**: [docs/api.md](docs/api.md)
 - **Troubleshoot batch endpoints**: [docs/troubleshooting-endpoints.md](docs/troubleshooting-endpoints.md)
