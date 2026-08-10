@@ -59,8 +59,14 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # Ubuntu's chromium and point houses-chrome.service's ExecStart at it:
 #   sudo apt install -y chromium-browser   # then use /usr/bin/chromium-browser
 curl -Lo /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_arm64.deb
-file /tmp/chrome.deb | grep -q "Debian binary package" || { echo "chrome download failed — use the chromium fallback"; exit 1; }
-sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
+if file /tmp/chrome.deb | grep -q "Debian binary package"; then
+  sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
+else
+  echo "chrome deb unavailable — installing chromium instead"
+  sudo apt install -y chromium-browser
+fi
+# if the fallback ran, point houses-chrome.service's ExecStart at the
+# chromium binary (/usr/bin/chromium-browser)
 ```
 
 - Launch headless Chrome with remote debugging as a **systemd service**
@@ -120,7 +126,11 @@ sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
   # them, but this file feeds the unit). Nothing secret stays in the
   # repo tree.
   scp .env ubuntu@<ip>:/tmp/houses.env
-  ssh ubuntu@<ip> "sudo install -o root -g root -m 600 /tmp/houses.env /etc/houses.env && rm /tmp/houses.env"
+  # `;` not `&&` — the /tmp copy is removed even if install fails, so a
+  # failed cutover never leaves secrets in /tmp; the verification then
+  # makes a failed install visible
+  ssh ubuntu@<ip> "sudo install -o root -g root -m 600 /tmp/houses.env /etc/houses.env; rm -f /tmp/houses.env"
+  ssh ubuntu@<ip> "sudo test -r /etc/houses.env && echo 'secrets installed'"
   # The VM listens on settings.port — the env must agree with the VCN
   # ingress rule (8765). A dev .env that sets HOUSES_PORT elsewhere
   # would put the app behind the firewall before Phase 5 even starts.
@@ -259,6 +269,10 @@ property detail opens → the WebSocket stays connected.
   pre-authenticated request URL — anyone holding the URL can read it),
   a second VM, or the LAN machine
   (`rsync -a /var/backups/ user@lan-host:/backups/houses/`).
+  The `.env` snapshot is secrets — **encrypt it before any off-box
+  transfer** (`age -e -r <key> /var/backups/houses-${ts}.env`) so the
+  copy that leaves the box is ciphertext, not the Google client
+  secrets.
   Without an off-box copy, a single-instance loss (termination, disk
   failure) is a total loss.
 - Monitoring: `journalctl -u houses -f` for errors; systemd restart policy
