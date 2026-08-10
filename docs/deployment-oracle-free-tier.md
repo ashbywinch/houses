@@ -117,10 +117,11 @@ curl -s localhost:9222/json/version   # must return the browser version
 
   ```bash
   set -e   # abort the cutover if any copy step fails
+  trap 'rm -f /tmp/houses-backup.db' EXIT   # clean up even on failure
   # the LAN app is stopped (make stop, above) — .backup of a live DB is
   # consistent, but any write after the snapshot never reaches the VM.
   # The snapshot is the family's financial data: private perms, and it
-  # is removed right after the copy (never left in world-readable /tmp).
+  # is removed on every exit path (never left in world-readable /tmp).
   umask 077
   sqlite3 data/houses.db ".backup '/tmp/houses-backup.db'"
   ssh ubuntu@<ip> "mkdir -p /opt/houses/data"   # a fresh clone has no data/
@@ -156,7 +157,7 @@ curl -s localhost:9222/json/version   # must return the browser version
   # fail loudly if the conversion dropped or blanked anything — the
   # critical keys must be present with a NON-EMPTY value (the file is
   # root-only, so the check needs sudo)
-  ssh ubuntu@<ip> "for k in HOUSES_SESSION_SECRET HOUSES_GOOGLE_WEB_CLIENT_ID HOUSES_GOOGLE_WEB_CLIENT_SECRET HOUSES_SHEET_ID; do sudo grep -q \"^\$k=.\" /etc/houses.env || { echo \"missing or empty \$k in /etc/houses.env\"; exit 1; }; done && echo 'secrets intact'"
+  ssh ubuntu@<ip> "for k in HOUSES_SESSION_SECRET HOUSES_GOOGLE_WEB_CLIENT_ID HOUSES_GOOGLE_WEB_CLIENT_SECRET HOUSES_GOOGLE_DEVICE_CLIENT_ID HOUSES_GOOGLE_DEVICE_CLIENT_SECRET HOUSES_SHEET_ID; do sudo grep -q \"^\$k=.\" /etc/houses.env || { echo \"missing or empty \$k in /etc/houses.env\"; exit 1; }; done && echo 'secrets intact'"
   # `;` not `&&` — the /tmp copy is removed even on failure, so a failed
   # cutover never leaves secrets in /tmp; the verification makes a
   # failed install visible
@@ -309,6 +310,20 @@ property detail opens → the WebSocket stays connected.
   ```
 
   Enable with `sudo systemctl enable --now houses-backup.timer`.
+
+  **Restore runbook** — drill this once before you need it; a backup that
+  has never been restored is unverified:
+  1. Bring up a fresh box (Phases 1–2) and stop its app:
+     `sudo systemctl stop houses`.
+  2. Pull the newest snapshot + its `.age` ciphertexts from wherever the
+     push unit sent them, decrypt (`age -d -i <key> houses-<ts>.db.age > houses-<ts>.db`),
+     and place the DB at `/opt/houses/data/houses.db` (`chmod 600`).
+  3. Copy `/etc/houses.env` from the backup (or re-run Phase 3's
+     secrets step), then `sudo systemctl start houses` and verify a
+     property detail loads and the WebSocket connects.
+
+  Without an off-box copy, a single-instance loss (termination, disk
+  failure) is a total loss.
 
   **Make the backup off-box from day one** — on-box `/var/backups` dies
   with the instance, and the DB is the only copy of the family's
