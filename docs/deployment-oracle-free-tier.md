@@ -332,14 +332,17 @@ property detail opens → the WebSocket stays connected.
      `uv sync`, the `houses` / `houses-chrome` units, and
      `/etc/houses.env`) — a Phases 1–2 box has no `houses.service` yet —
      then stop its app: `sudo systemctl stop houses`.
-  2. Stop the app, clear any stale SQLite sidecar files (a leftover WAL
-     would merge with the restored DB), then decrypt with `umask 077`
-     (the shell redirect would otherwise write the plaintext
-     world-readable before any chmod):
-     `sudo systemctl stop houses; rm -f /opt/houses/data/houses.db-wal /opt/houses/data/houses.db-shm; umask 077; age -d -i <key> houses-<ts>.db.age > houses-<ts>.db`,
-     place the DB at `/opt/houses/data/houses.db`, then `chmod 600` and
-     `sudo chown ubuntu:ubuntu` it — the backup unit runs as root, so
-     the snapshot is root-owned and the app could not write it.
+  2. Restore with absolute paths, in one block (relative paths in the
+     wrong working directory would silently write the DB elsewhere):
+     ```bash
+     sudo systemctl stop houses
+     rm -f /opt/houses/data/houses.db-wal /opt/houses/data/houses.db-shm
+     umask 077
+     age -d -i <key> /path/to/houses-<ts>.db.age > /opt/houses/data/houses.db
+     sudo chmod 600 /opt/houses/data/houses.db
+     sudo chown ubuntu:ubuntu /opt/houses/data/houses.db
+     sudo systemctl start houses
+     ```
   3. Copy `/etc/houses.env` from the backup (or re-run Phase 3's
      secrets step), then `sudo systemctl start houses` and verify a
      property detail loads and the WebSocket connects.
