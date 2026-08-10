@@ -151,8 +151,9 @@ curl -fsS localhost:9222/json/version >/dev/null 2>&1 || { echo "Chrome CDP endp
   # interpolate=False is deliberate: with the default, a \$VAR in any
   # value would be silently rewritten during the cutover, mangling a
   # secret undetected while the LAN app is already stopped. The check
-  # below also compares VALUES for the critical keys, not just presence.
-  ssh ubuntu@<ip> "for k in HOUSES_SESSION_SECRET HOUSES_GOOGLE_WEB_CLIENT_SECRET; do src=\$(grep -m1 '^'\$k'=' .env | cut -d= -f2-); got=\$(sudo grep -m1 '^'\$k'=' /etc/houses.env | cut -d= -f2-); [ \"\$src\" = \"\$got\" ] || { echo \"value mismatch for \$k\"; exit 1; }; done && echo 'critical values match'"
+  # below compares VALUES via the same dotenv parser on both sides
+  # (grep/cut would false-alarm on quoted values the conversion strips).
+  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; src = dotenv_values(stream=sys.stdin, interpolate=False); got = dotenv_values('/etc/houses.env', interpolate=False); ok = all(src.get(k) == got.get(k) for k in ('HOUSES_SESSION_SECRET', 'HOUSES_GOOGLE_WEB_CLIENT_SECRET')); print('critical values match' if ok else 'value mismatch'); exit(0 if ok else 1)\""
   # force the deployment host/port — the LAN .env's values (or their
   # absence) would otherwise leave the app bound to loopback and the
   # firewall would never see a listener
@@ -162,6 +163,9 @@ curl -fsS localhost:9222/json/version >/dev/null 2>&1 || { echo "Chrome CDP endp
   # VM hostname or every link the app generates goes back to the LAN
   ssh ubuntu@<ip> "sudo sh -c 'grep -q \"^HOUSES_PUBLIC_URL=\" /etc/houses.env && sed -i \"s|^HOUSES_PUBLIC_URL=.*|HOUSES_PUBLIC_URL=http://<public-ip>.sslip.io:8765|\" /etc/houses.env || echo HOUSES_PUBLIC_URL=http://<public-ip>.sslip.io:8765 >> /etc/houses.env'"
   ssh ubuntu@<ip> "sudo sh -c 'grep -q \"^HOUSES_FRONTEND_URL=\" /etc/houses.env && sed -i \"s|^HOUSES_FRONTEND_URL=.*|HOUSES_FRONTEND_URL=http://<public-ip>.sslip.io:8765|\" /etc/houses.env || echo HOUSES_FRONTEND_URL=http://<public-ip>.sslip.io:8765 >> /etc/houses.env'"
+  # the <public-ip> placeholder must be substituted — a literal one
+  # would make every app link point at a hostname that resolves nowhere
+  ssh ubuntu@<ip> "sudo grep -q '<public-ip>' /etc/houses.env && { echo 'substitute <public-ip> with the VM address first'; exit 1; } || echo 'URLs OK'"
   # fail loudly if the conversion dropped or blanked anything — the
   # critical keys must be present with a NON-EMPTY value (the file is
   # root-only, so the check needs sudo)
