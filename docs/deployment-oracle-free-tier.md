@@ -117,10 +117,14 @@ curl -s localhost:9222/json/version   # must return the browser version
 
   ```bash
   # the LAN app is stopped (make stop, above) — .backup of a live DB is
-  # consistent, but any write after the snapshot never reaches the VM
+  # consistent, but any write after the snapshot never reaches the VM.
+  # The snapshot is the family's financial data: private perms, and it
+  # is removed right after the copy (never left in world-readable /tmp).
+  umask 077
   sqlite3 data/houses.db ".backup '/tmp/houses-backup.db'"
   ssh ubuntu@<ip> "mkdir -p /opt/houses/data"   # a fresh clone has no data/
   scp /tmp/houses-backup.db ubuntu@<ip>:/opt/houses/data/houses.db
+  rm -f /tmp/houses-backup.db
   # every other runtime file — the disk API cache, the commute toolchain
   # outputs, the council-tax/rail/fare/Ofsted CSVs, bus/parking data —
   # except the live DB and its WAL files (they come from the snapshot)
@@ -135,8 +139,14 @@ curl -s localhost:9222/json/version   # must return the browser version
   # Stream the LAN .env straight into the conversion — no /tmp copy, so
   # an interrupted cutover can never leave a world-readable plaintext
   # secrets file behind. The conversion runs python-dotenv (the repo's
-  # own parser) and installs the result root-only.
-  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; [print(f'{k}={v}') for k, v in dotenv_values(stream=sys.stdin).items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
+  # own parser), double-quotes any value containing whitespace, and
+  # installs the result root-only.
+  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; [print(f'{k}=\\\"{v}\\\"' if any(c.isspace() for c in v) else f'{k}={v}') for k, v in dotenv_values(stream=sys.stdin).items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
+  # force the deployment host/port — the LAN .env's values (or their
+  # absence) would otherwise leave the app bound to loopback and the
+  # firewall would never see a listener
+  ssh ubuntu@<ip> "sudo sh -c 'grep -q \"^HOUSES_HOST=\" /etc/houses.env && sed -i \"s/^HOUSES_HOST=.*/HOUSES_HOST=0.0.0.0/\" /etc/houses.env || echo HOUSES_HOST=0.0.0.0 >> /etc/houses.env'"
+  ssh ubuntu@<ip> "sudo sh -c 'grep -q \"^HOUSES_PORT=\" /etc/houses.env && sed -i \"s/^HOUSES_PORT=.*/HOUSES_PORT=8765/\" /etc/houses.env || echo HOUSES_PORT=8765 >> /etc/houses.env'"
   # fail loudly if the conversion dropped or blanked anything — the
   # critical keys must be present with a NON-EMPTY value (the file is
   # root-only, so the check needs sudo)
@@ -265,7 +275,7 @@ property detail opens → the WebSocket stays connected.
 
   [Service]
   Type=oneshot
-  ExecStart=/bin/sh -c 'ts=$(date +%%F-%%H%%M%%S); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && chmod 600 /var/backups/houses-${ts}.db && cp /etc/houses.env /var/backups/houses-${ts}.env && chmod 600 /var/backups/houses-${ts}.env && ls -1t /var/backups/houses-*.db | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.age | tail -n +31 | xargs -r rm'
+  ExecStart=/bin/sh -c 'ts=$(date +%%F-%%H%%M%%S); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && chmod 600 /var/backups/houses-${ts}.db && cp /etc/houses.env /var/backups/houses-${ts}.env && chmod 600 /var/backups/houses-${ts}.env && ls -1t /var/backups/houses-*.db | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env | tail -n +31 | xargs -r rm'
 
   # /etc/systemd/system/houses-backup-push.service  (off-box push)
   [Unit]
@@ -275,7 +285,7 @@ property detail opens → the WebSocket stays connected.
 
   [Service]
   Type=oneshot
-  ExecStart=/bin/sh -c 'newest=$(ls -1t /var/backups/houses-*.db | head -1); envfile=${newest%.db}.env; age -e -r <recipient> -o "${newest}.age" "$newest" && age -e -r <recipient> -o "${envfile}.age" "$envfile" && ... rclone/rsync the .age ciphertexts to the bucket/LAN host ...'
+  ExecStart=/bin/sh -c 'newest=$(ls -1t /var/backups/houses-*.db | head -1); envfile=${newest%.db}.env; age -e -r <recipient> -o "${newest}.age" "$newest" && age -e -r <recipient> -o "${envfile}.age" "$envfile" && ... rclone/rsync the .age ciphertexts to the bucket/LAN host ... && ls -1t /var/backups/houses-*.age | tail -n +31 | xargs -r rm'
 
   # /etc/systemd/system/houses-backup.timer
   [Unit]
