@@ -43,7 +43,7 @@ production, which is why the free ARM shape (24 GB RAM) is the host — no free
 
 ```bash
 # deps
-sudo apt update && sudo apt install -y python3-venv unzip curl ca-certificates sqlite3 rsync \
+sudo apt update && sudo apt install -y python3-venv unzip curl ca-certificates sqlite3 rsync nodejs npm \
   fonts-liberation libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 \
   libxcomposite1 libxdamage1 libgbm1 libasound2
 
@@ -71,6 +71,7 @@ sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
   User=ubuntu
   ExecStart=/usr/bin/google-chrome --headless=new --disable-dev-shm-usage --remote-debugging-port=9222 --user-data-dir=/var/lib/houses-chrome about:blank
   Restart=always
+  RestartSec=5
   [Install]
   WantedBy=multi-user.target
   ```
@@ -134,6 +135,9 @@ to drift:
 cat > /opt/houses/run_prod.sh <<'EOF'
 #!/bin/sh
 cd /opt/houses
+# systemd's default PATH lacks ~/.local/bin (uv) — make's UV fallback
+# handles it, but be explicit so make/npm resolve identically to a shell
+export PATH="$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 exec make run-prod
 EOF
 chmod +x /opt/houses/run_prod.sh
@@ -236,9 +240,11 @@ property detail opens → the WebSocket stays connected.
   **Make the backup off-box from day one** — on-box `/var/backups` dies
   with the instance, and the DB is the only copy of the family's
   finances. Add a second step to the timer that pushes the newest
-  snapshot somewhere else: OCI Object Storage (the `oci` CLI or
-  `rclone` with a pre-authenticated bucket), a second VM, or the LAN
-  machine (`rsync -a /var/backups/ user@lan-host:/backups/houses/`).
+  snapshot somewhere else: a **private, authenticated** OCI Object
+  Storage bucket via `rclone` with access keys (never a
+  pre-authenticated request URL — anyone holding the URL can read it),
+  a second VM, or the LAN machine
+  (`rsync -a /var/backups/ user@lan-host:/backups/houses/`).
   Without an off-box copy, a single-instance loss (termination, disk
   failure) is a total loss.
 - Monitoring: `journalctl -u houses -f` for errors; systemd restart policy
