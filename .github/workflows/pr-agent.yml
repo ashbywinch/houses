@@ -51,8 +51,14 @@ jobs:
           # A human "/skip" comment opts this PR out of the AI review
           # (config skip_commands in .pr_agent.toml) — pr-agent then posts
           # nothing, which must NOT fail the PR. Deliberate opt-out only.
+          # Only the PR author and users with write access (OWNER/MEMBER/
+          # COLLABORATOR) may opt out — on a public repo an arbitrary commenter
+          # could otherwise disable the review gate. Matching mirrors pr-agent,
+          # which lowercases comment bodies: case-insensitive, anchored to the
+          # start of the comment or a line so a conversational "/skip" mention
+          # doesn't opt the PR out.
           if gh api --paginate "repos/${{ github.repository }}/issues/$PR_NUM/comments" \
-            --jq '[.[] | select(.user.login != "github-actions[bot]") | select(.body | test("(^|\\s)/skip(\\s|$)"))] | length' \
+            --jq '[.[] | select(.user.login != "github-actions[bot]") | select(.user.login == "${{ github.event.pull_request.user.login }}" or .author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR") | select(.body | test("(^|\\n)\\s*/skip(\\s|$)"; "i"))] | length' \
             | grep -q '[1-9]'; then
             echo "Review check passed — AI review skipped via /skip comment"
             exit 0
