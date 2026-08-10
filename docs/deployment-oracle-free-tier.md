@@ -90,8 +90,8 @@ WantedBy=multi-user.target
 EOF
 sudo mkdir -p /var/lib/houses-chrome && sudo chown ubuntu:ubuntu /var/lib/houses-chrome
 sudo systemctl daemon-reload && sudo systemctl enable --now houses-chrome.service
-for i in $(seq 1 15); do curl -fsS localhost:9222/json/version >/dev/null 2>&1 && break; sleep 1; done
-curl -fsS localhost:9222/json/version >/dev/null 2>&1 || { echo "Chrome CDP endpoint not answering on :9222 — check houses-chrome.service"; exit 1; }
+for i in $(seq 1 15); do curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 && break; sleep 1; done
+curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 || { echo "Chrome CDP endpoint not answering on :9222 — check houses-chrome.service"; exit 1; }
 ```
 
 ## Phase 3 — app deploy
@@ -147,12 +147,11 @@ curl -fsS localhost:9222/json/version >/dev/null 2>&1 || { echo "Chrome CDP endp
   # secrets file behind. The conversion runs python-dotenv (the repo's
   # own parser), double-quotes any value containing whitespace, and
   # installs the result root-only.
-  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; [print(f'{k}=\\\"{v.replace(chr(34), chr(92)+chr(34))}\\\"' if any(c.isspace() for c in v) else f'{k}={v}') for k, v in dotenv_values(stream=sys.stdin, interpolate=False).items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
-  # interpolate=False is deliberate: with the default, a \$VAR in any
-  # value would be silently rewritten during the cutover, mangling a
-  # secret undetected while the LAN app is already stopped. The check
-  # below compares VALUES via the same dotenv parser on both sides
-  # (grep/cut would false-alarm on quoted values the conversion strips).
+  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; [print(f'{k}={v}') for k, v in dotenv_values(stream=sys.stdin, interpolate=False).items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
+  # values are written PLAIN KEY=VALUE — no quotes (the doc's own rule,
+  # and systemd's EnvironmentFile keeps everything after the '='), so
+  # nothing mangled reaches the app; interpolate=False prevents a \$VAR
+  # in any value from being silently rewritten mid-cutover.
   cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; src = dotenv_values(stream=sys.stdin, interpolate=False); got = dotenv_values('/etc/houses.env', interpolate=False); ok = all(src.get(k) == got.get(k) for k in ('HOUSES_SESSION_SECRET', 'HOUSES_GOOGLE_WEB_CLIENT_SECRET')); print('critical values match' if ok else 'value mismatch'); exit(0 if ok else 1)\""
   # force the deployment host/port — the LAN .env's values (or their
   # absence) would otherwise leave the app bound to loopback and the
@@ -173,7 +172,7 @@ curl -fsS localhost:9222/json/version >/dev/null 2>&1 || { echo "Chrome CDP endp
   # `;` not `&&` — the /tmp copy is removed even on failure, so a failed
   # cutover never leaves secrets in /tmp; the verification makes a
   # failed install visible
-  ssh ubuntu@<ip> "sudo test -r /etc/houses.env && sudo grep -q '^HOUSES_PORT=8765' /etc/houses.env && echo 'secrets installed, port 8765 OK' || echo 'check /etc/houses.env (missing or HOUSES_PORT mismatch with the firewall rule)'"
+  ssh ubuntu@<ip> "sudo test -r /etc/houses.env && sudo grep -q '^HOUSES_PORT=8765' /etc/houses.env && echo 'secrets installed, port 8765 OK' || { echo 'check /etc/houses.env (missing or HOUSES_PORT mismatch with the firewall rule)'; exit 1; }"
   ```
 
 - Frontend: the built `dist/` is committed in the repo — no build step
@@ -198,8 +197,8 @@ export PATH="$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:
 # wait for the scraper browser's CDP endpoint before serving (the app
 # can start either way, but property adds need it live) — and fail
 # loudly if it never comes up
-for i in $(seq 1 30); do curl -fsS localhost:9222/json/version >/dev/null 2>&1 && break; sleep 1; done
-curl -fsS localhost:9222/json/version >/dev/null 2>&1 || { echo "scraper browser not reachable on :9222"; exit 1; }
+for i in $(seq 1 30); do curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 && break; sleep 1; done
+curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 || { echo "scraper browser not reachable on :9222"; exit 1; }
 exec make run-prod
 EOF
 chmod +x /opt/houses/run_prod.sh
@@ -302,7 +301,6 @@ property detail opens → the WebSocket stays connected.
   [Unit]
   Description=Push the houses backup off-box
   After=houses-backup.service
-  Requires=houses-backup.service
 
   [Service]
   Type=oneshot
@@ -325,8 +323,10 @@ property detail opens → the WebSocket stays connected.
 
   **Restore runbook** — drill this once before you need it; a backup that
   has never been restored is unverified:
-  1. Bring up a fresh box (Phases 1–2) and stop its app:
-     `sudo systemctl stop houses`.
+  1. Bring up a fresh box and complete Phases 3–4 first (repo clone,
+     `uv sync`, the `houses` / `houses-chrome` units, and
+     `/etc/houses.env`) — a Phases 1–2 box has no `houses.service` yet —
+     then stop its app: `sudo systemctl stop houses`.
   2. Pull the newest snapshot + its `.age` ciphertexts from wherever the
      push unit sent them, decrypt with `umask 077` (the shell redirect
      would otherwise write the plaintext world-readable before any
