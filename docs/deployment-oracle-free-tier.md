@@ -31,9 +31,12 @@ production, which is why the free ARM shape (24 GB RAM) is the host — no free
   - Image: **Ubuntu 24.04** (arm64), Shape: **VM.Standard.A1.Flex**,
     4 OCPU / 24 GB RAM, boot volume ~150–200 GB.
   - **Reserved public IP**, SSH key pair (download the `.pem`, `chmod 600`).
-- **VCN security list**: add an ingress rule **8765/tcp from 0.0.0.0/0**
-  (the app port). Leave 9222 (Chrome) closed to the internet — it binds
-  localhost only.
+- **VCN security list**: add an ingress rule **8765/tcp from the family's
+  egress IPs only** — not `0.0.0.0/0`. The interim phase serves financial
+  data over plain HTTP (see Phase 5), so keep the exposure to known
+  networks from the start; widen it only if you must, and never leave it
+  open after the Phase 7 TLS cutover. Leave 9222 (Chrome) closed to the
+  internet — it binds localhost only.
 - SSH in: `ssh -i ~/.ssh/oracle.pem ubuntu@<public-ip>`.
 
 ## Phase 2 — box setup
@@ -102,7 +105,14 @@ sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
 ## Phase 4 — systemd service
 
 Create the launcher script (systemd `ExecStart` must be a single line —
-an inline multi-line `python -c` does not parse):
+an inline multi-line `python -c` does not parse). This is the repo's
+`make run-prod` launch shape ([Makefile](https://github.com/ashbywinch/houses/blob/main/Makefile#L140-L145) —
+mount `houses/frontend/dist` on FastAPI, one uvicorn process with the
+background DAG scheduler + WebSocket broadcaster, no reload), wrapped so
+systemd can run it. Facts assumed here, verified against the repo at
+write time: `dist/` is committed (no build step), the port comes from
+`settings.port` (config.py, env `HOUSES_PORT`), and `make login` exists
+for the Phase 5 device flow.
 
 ```bash
 # /opt/houses/run_prod.sh  — the `make run-prod` shape: built frontend
@@ -210,9 +220,15 @@ the WebSocket stays connected.
   ```
 
   Enable with `sudo systemctl enable --now houses-backup.timer`.
-  Optionally `rclone` the backup dir to object storage later — the DB is
-  the only copy of the family's finances; treat backups like the repo
-  rules treat the DB.
+
+  **Make the backup off-box from day one** — on-box `/var/backups` dies
+  with the instance, and the DB is the only copy of the family's
+  finances. Add a second step to the timer that pushes the newest
+  snapshot somewhere else: OCI Object Storage (the `oci` CLI or
+  `rclone` with a pre-authenticated bucket), a second VM, or the LAN
+  machine (`rsync -a /var/backups/ user@lan-host:/backups/houses/`).
+  Without an off-box copy, a single-instance loss (termination, disk
+  failure) is a total loss.
 - Monitoring: `journalctl -u houses -f` for errors; systemd restart policy
   handles crashes.
 - The `HOUSES_SHEET_ID` / service-account entries become inert once the
