@@ -143,12 +143,16 @@ curl -s localhost:9222/json/version   # must return the browser version
   # secrets file behind. The conversion runs python-dotenv (the repo's
   # own parser), double-quotes any value containing whitespace, and
   # installs the result root-only.
-  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; [print(f'{k}=\\\"{v}\\\"' if any(c.isspace() for c in v) else f'{k}={v}') for k, v in dotenv_values(stream=sys.stdin).items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
+  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; [print(f'{k}=\\\"{v.replace(chr(34), chr(92)+chr(34))}\\\"' if any(c.isspace() for c in v) else f'{k}={v}') for k, v in dotenv_values(stream=sys.stdin).items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
   # force the deployment host/port — the LAN .env's values (or their
   # absence) would otherwise leave the app bound to loopback and the
   # firewall would never see a listener
   ssh ubuntu@<ip> "sudo sh -c 'grep -q \"^HOUSES_HOST=\" /etc/houses.env && sed -i \"s/^HOUSES_HOST=.*/HOUSES_HOST=0.0.0.0/\" /etc/houses.env || echo HOUSES_HOST=0.0.0.0 >> /etc/houses.env'"
   ssh ubuntu@<ip> "sudo sh -c 'grep -q \"^HOUSES_PORT=\" /etc/houses.env && sed -i \"s/^HOUSES_PORT=.*/HOUSES_PORT=8765/\" /etc/houses.env || echo HOUSES_PORT=8765 >> /etc/houses.env'"
+  # the LAN .env's public URLs point at the dev host — force them to the
+  # VM hostname or every link the app generates goes back to the LAN
+  ssh ubuntu@<ip> "sudo sh -c 'grep -q \"^HOUSES_PUBLIC_URL=\" /etc/houses.env && sed -i \"s|^HOUSES_PUBLIC_URL=.*|HOUSES_PUBLIC_URL=http://<public-ip>.sslip.io:8765|\" /etc/houses.env || echo HOUSES_PUBLIC_URL=http://<public-ip>.sslip.io:8765 >> /etc/houses.env'"
+  ssh ubuntu@<ip> "sudo sh -c 'grep -q \"^HOUSES_FRONTEND_URL=\" /etc/houses.env && sed -i \"s|^HOUSES_FRONTEND_URL=.*|HOUSES_FRONTEND_URL=http://<public-ip>.sslip.io:8765|\" /etc/houses.env || echo HOUSES_FRONTEND_URL=http://<public-ip>.sslip.io:8765 >> /etc/houses.env'"
   # fail loudly if the conversion dropped or blanked anything — the
   # critical keys must be present with a NON-EMPTY value (the file is
   # root-only, so the check needs sudo)
@@ -179,8 +183,10 @@ cd /opt/houses
 # handles it, but be explicit so make/npm resolve identically to a shell
 export PATH="$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 # wait for the scraper browser's CDP endpoint before serving (the app
-# can start either way, but property adds need it live)
+# can start either way, but property adds need it live) — and fail
+# loudly if it never comes up
 for i in $(seq 1 30); do curl -fsS localhost:9222/json/version >/dev/null 2>&1 && break; sleep 1; done
+curl -fsS localhost:9222/json/version >/dev/null 2>&1 || { echo "scraper browser not reachable on :9222"; exit 1; }
 exec make run-prod
 EOF
 chmod +x /opt/houses/run_prod.sh
