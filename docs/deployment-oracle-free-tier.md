@@ -345,7 +345,12 @@ the WebSocket stays connected.
   # The push requires the snapshot produced by TONIGHT'S run: the
   # backup unit writes /var/backups/last-backup-ts only on success, and
   # a failed snapshot must not silently re-push yesterday's stale copy
-  # (Wants= does not gate on the dependee's exit status). The env
+  # (Wants= does not gate on the dependee's exit status). NOTE on the
+  # %% escaping below: systemd expands %% to a literal % in ExecStart
+  # before the shell runs, so the freshness guard the shell executes is
+  # [ "${ts%-*}" = "$(date +%F)" ] — shortest-suffix removal keeps the
+  # YYYY-MM-DD, which equals today's date only for tonight's snapshot.
+  # The env
   # ciphertext (already age-encrypted by the backup unit) is pushed
   # as-is. Remote retention: the lsl verifies the landing, then rclone
   # deletes ciphertexts older than 31 days so the bucket does not grow
