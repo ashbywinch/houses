@@ -949,9 +949,9 @@
    "severity": "error"
   },
   {
-   "line": 196,
+   "line": 210,
    "column": 19,
-   "stop_line": 196,
+   "stop_line": 210,
    "stop_column": 40,
    "path": "houses/council_tax.py",
    "code": -2,
@@ -961,9 +961,9 @@
    "severity": "error"
   },
   {
-   "line": 209,
+   "line": 223,
    "column": 24,
-   "stop_line": 209,
+   "stop_line": 223,
    "stop_column": 46,
    "path": "houses/council_tax.py",
    "code": -2,
@@ -997,9 +997,9 @@
    "severity": "error"
   },
   {
-   "line": 16,
+   "line": 18,
    "column": 15,
-   "stop_line": 16,
+   "stop_line": 18,
    "stop_column": 22,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -1009,9 +1009,9 @@
    "severity": "error"
   },
   {
-   "line": 16,
+   "line": 18,
    "column": 15,
-   "stop_line": 16,
+   "stop_line": 18,
    "stop_column": 22,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -1021,9 +1021,9 @@
    "severity": "error"
   },
   {
-   "line": 19,
+   "line": 21,
    "column": 55,
-   "stop_line": 19,
+   "stop_line": 21,
    "stop_column": 62,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -1033,9 +1033,9 @@
    "severity": "error"
   },
   {
-   "line": 19,
+   "line": 21,
    "column": 64,
-   "stop_line": 19,
+   "stop_line": 21,
    "stop_column": 71,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -1045,9 +1045,9 @@
    "severity": "error"
   },
   {
-   "line": 23,
+   "line": 42,
    "column": 9,
-   "stop_line": 23,
+   "stop_line": 42,
    "stop_column": 31,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -1057,9 +1057,9 @@
    "severity": "error"
   },
   {
-   "line": 34,
+   "line": 53,
    "column": 15,
-   "stop_line": 34,
+   "stop_line": 53,
    "stop_column": 22,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -1069,9 +1069,9 @@
    "severity": "error"
   },
   {
-   "line": 34,
+   "line": 53,
    "column": 15,
-   "stop_line": 34,
+   "stop_line": 53,
    "stop_column": 22,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -1081,9 +1081,9 @@
    "severity": "error"
   },
   {
-   "line": 49,
+   "line": 68,
    "column": 9,
-   "stop_line": 49,
+   "stop_line": 68,
    "stop_column": 31,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -1093,9 +1093,9 @@
    "severity": "error"
   },
   {
-   "line": 62,
+   "line": 81,
    "column": 9,
-   "stop_line": 62,
+   "stop_line": 81,
    "stop_column": 25,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -1105,9 +1105,9 @@
    "severity": "error"
   },
   {
-   "line": 73,
+   "line": 92,
    "column": 15,
-   "stop_line": 73,
+   "stop_line": 92,
    "stop_column": 22,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -1117,9 +1117,9 @@
    "severity": "error"
   },
   {
-   "line": 73,
+   "line": 92,
    "column": 15,
-   "stop_line": 73,
+   "stop_line": 92,
    "stop_column": 22,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -1129,9 +1129,9 @@
    "severity": "error"
   },
   {
-   "line": 96,
+   "line": 123,
    "column": 9,
-   "stop_line": 96,
+   "stop_line": 123,
    "stop_column": 31,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -1141,9 +1141,9 @@
    "severity": "error"
   },
   {
-   "line": 105,
+   "line": 132,
    "column": 9,
-   "stop_line": 105,
+   "stop_line": 132,
    "stop_column": 16,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -1153,9 +1153,9 @@
    "severity": "error"
   },
   {
-   "line": 105,
+   "line": 132,
    "column": 9,
-   "stop_line": 105,
+   "stop_line": 132,
    "stop_column": 16,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -1165,9 +1165,9 @@
    "severity": "error"
   },
   {
-   "line": 113,
+   "line": 140,
    "column": 9,
-   "stop_line": 113,
+   "stop_line": 140,
    "stop_column": 31,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -1417,9 +1417,9 @@
    "severity": "error"
   },
   {
-   "line": 20,
+   "line": 23,
    "column": 9,
-   "stop_line": 20,
+   "stop_line": 23,
    "stop_column": 27,
    "path": "houses/nodes/commute_breakdown_node.py",
    "code": -2,
@@ -1429,9 +1429,9 @@
    "severity": "error"
   },
   {
-   "line": 33,
+   "line": 47,
    "column": 9,
-   "stop_line": 33,
+   "stop_line": 47,
    "stop_column": 16,
    "path": "houses/nodes/commute_breakdown_node.py",
    "code": -2,
@@ -1441,9 +1441,9 @@
    "severity": "error"
   },
   {
-   "line": 75,
+   "line": 98,
    "column": 24,
-   "stop_line": 75,
+   "stop_line": 98,
    "stop_column": 28,
    "path": "houses/nodes/commute_breakdown_node.py",
    "code": -2,
@@ -1453,9 +1453,9 @@
    "severity": "error"
   },
   {
-   "line": 167,
+   "line": 172,
    "column": 33,
-   "stop_line": 167,
+   "stop_line": 172,
    "stop_column": 39,
    "path": "houses/nodes/commute_pipeline_builder.py",
    "code": -2,
@@ -1465,9 +1465,9 @@
    "severity": "error"
   },
   {
-   "line": 192,
+   "line": 197,
    "column": 33,
-   "stop_line": 192,
+   "stop_line": 197,
    "stop_column": 47,
    "path": "houses/nodes/commute_pipeline_builder.py",
    "code": -2,
@@ -1477,9 +1477,9 @@
    "severity": "error"
   },
   {
-   "line": 23,
+   "line": 24,
    "column": 15,
-   "stop_line": 23,
+   "stop_line": 24,
    "stop_column": 22,
    "path": "houses/nodes/epc_node.py",
    "code": -2,
@@ -1489,9 +1489,9 @@
    "severity": "error"
   },
   {
-   "line": 23,
+   "line": 24,
    "column": 15,
-   "stop_line": 23,
+   "stop_line": 24,
    "stop_column": 22,
    "path": "houses/nodes/epc_node.py",
    "code": -2,
@@ -1501,9 +1501,9 @@
    "severity": "error"
   },
   {
-   "line": 25,
+   "line": 26,
    "column": 54,
-   "stop_line": 25,
+   "stop_line": 26,
    "stop_column": 61,
    "path": "houses/nodes/epc_node.py",
    "code": -2,
@@ -1513,9 +1513,9 @@
    "severity": "error"
   },
   {
-   "line": 40,
+   "line": 41,
    "column": 9,
-   "stop_line": 40,
+   "stop_line": 41,
    "stop_column": 31,
    "path": "houses/nodes/epc_node.py",
    "code": -2,
@@ -1525,9 +1525,9 @@
    "severity": "error"
   },
   {
-   "line": 48,
+   "line": 57,
    "column": 15,
-   "stop_line": 48,
+   "stop_line": 57,
    "stop_column": 22,
    "path": "houses/nodes/epc_node.py",
    "code": -2,
@@ -1537,9 +1537,9 @@
    "severity": "error"
   },
   {
-   "line": 48,
+   "line": 57,
    "column": 15,
-   "stop_line": 48,
+   "stop_line": 57,
    "stop_column": 22,
    "path": "houses/nodes/epc_node.py",
    "code": -2,
@@ -1549,9 +1549,9 @@
    "severity": "error"
   },
   {
-   "line": 55,
+   "line": 64,
    "column": 37,
-   "stop_line": 55,
+   "stop_line": 64,
    "stop_column": 42,
    "path": "houses/nodes/epc_node.py",
    "code": -2,
@@ -1561,9 +1561,9 @@
    "severity": "error"
   },
   {
-   "line": 78,
+   "line": 87,
    "column": 9,
-   "stop_line": 78,
+   "stop_line": 87,
    "stop_column": 31,
    "path": "houses/nodes/epc_node.py",
    "code": -2,
@@ -1573,9 +1573,9 @@
    "severity": "error"
   },
   {
-   "line": 81,
+   "line": 90,
    "column": 15,
-   "stop_line": 81,
+   "stop_line": 90,
    "stop_column": 31,
    "path": "houses/nodes/epc_node.py",
    "code": -2,
@@ -2557,9 +2557,9 @@
    "severity": "error"
   },
   {
-   "line": 54,
+   "line": 55,
    "column": 9,
-   "stop_line": 54,
+   "stop_line": 55,
    "stop_column": 19,
    "path": "houses/nodes/total_monthly_housing_cost_node.py",
    "code": -2,
@@ -2569,9 +2569,9 @@
    "severity": "error"
   },
   {
-   "line": 71,
+   "line": 72,
    "column": 25,
-   "stop_line": 71,
+   "stop_line": 72,
    "stop_column": 93,
    "path": "houses/nodes/total_monthly_housing_cost_node.py",
    "code": -2,
@@ -2581,9 +2581,9 @@
    "severity": "error"
   },
   {
-   "line": 81,
+   "line": 82,
    "column": 25,
-   "stop_line": 81,
+   "stop_line": 82,
    "stop_column": 83,
    "path": "houses/nodes/total_monthly_housing_cost_node.py",
    "code": -2,
@@ -2593,9 +2593,9 @@
    "severity": "error"
   },
   {
-   "line": 89,
+   "line": 90,
    "column": 9,
-   "stop_line": 89,
+   "stop_line": 90,
    "stop_column": 25,
    "path": "houses/nodes/total_monthly_housing_cost_node.py",
    "code": -2,
@@ -2605,9 +2605,9 @@
    "severity": "error"
   },
   {
-   "line": 96,
+   "line": 97,
    "column": 9,
-   "stop_line": 96,
+   "stop_line": 97,
    "stop_column": 16,
    "path": "houses/nodes/total_monthly_housing_cost_node.py",
    "code": -2,
@@ -2617,9 +2617,9 @@
    "severity": "error"
   },
   {
-   "line": 96,
+   "line": 97,
    "column": 9,
-   "stop_line": 96,
+   "stop_line": 97,
    "stop_column": 16,
    "path": "houses/nodes/total_monthly_housing_cost_node.py",
    "code": -2,
@@ -2629,9 +2629,9 @@
    "severity": "error"
   },
   {
-   "line": 149,
+   "line": 150,
    "column": 9,
-   "stop_line": 149,
+   "stop_line": 150,
    "stop_column": 16,
    "path": "houses/nodes/total_monthly_housing_cost_node.py",
    "code": -2,
@@ -2641,9 +2641,9 @@
    "severity": "error"
   },
   {
-   "line": 149,
+   "line": 150,
    "column": 9,
-   "stop_line": 149,
+   "stop_line": 150,
    "stop_column": 16,
    "path": "houses/nodes/total_monthly_housing_cost_node.py",
    "code": -2,
@@ -2701,9 +2701,9 @@
    "severity": "error"
   },
   {
-   "line": 130,
+   "line": 145,
    "column": 9,
-   "stop_line": 130,
+   "stop_line": 145,
    "stop_column": 16,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2713,9 +2713,9 @@
    "severity": "error"
   },
   {
-   "line": 130,
+   "line": 145,
    "column": 9,
-   "stop_line": 130,
+   "stop_line": 145,
    "stop_column": 16,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2725,9 +2725,9 @@
    "severity": "error"
   },
   {
-   "line": 147,
+   "line": 162,
    "column": 9,
-   "stop_line": 147,
+   "stop_line": 162,
    "stop_column": 16,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2737,9 +2737,9 @@
    "severity": "error"
   },
   {
-   "line": 147,
+   "line": 162,
    "column": 9,
-   "stop_line": 147,
+   "stop_line": 162,
    "stop_column": 16,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2749,9 +2749,9 @@
    "severity": "error"
   },
   {
-   "line": 170,
+   "line": 198,
    "column": 15,
-   "stop_line": 170,
+   "stop_line": 198,
    "stop_column": 22,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2761,9 +2761,9 @@
    "severity": "error"
   },
   {
-   "line": 170,
+   "line": 198,
    "column": 15,
-   "stop_line": 170,
+   "stop_line": 198,
    "stop_column": 22,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2773,9 +2773,9 @@
    "severity": "error"
   },
   {
-   "line": 194,
+   "line": 234,
    "column": 15,
-   "stop_line": 194,
+   "stop_line": 234,
    "stop_column": 22,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2785,9 +2785,9 @@
    "severity": "error"
   },
   {
-   "line": 194,
+   "line": 234,
    "column": 15,
-   "stop_line": 194,
+   "stop_line": 234,
    "stop_column": 22,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2797,9 +2797,9 @@
    "severity": "error"
   },
   {
-   "line": 224,
+   "line": 276,
    "column": 15,
-   "stop_line": 224,
+   "stop_line": 276,
    "stop_column": 22,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2809,9 +2809,9 @@
    "severity": "error"
   },
   {
-   "line": 224,
+   "line": 276,
    "column": 15,
-   "stop_line": 224,
+   "stop_line": 276,
    "stop_column": 22,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2821,9 +2821,9 @@
    "severity": "error"
   },
   {
-   "line": 274,
+   "line": 329,
    "column": 15,
-   "stop_line": 274,
+   "stop_line": 329,
    "stop_column": 22,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2833,9 +2833,9 @@
    "severity": "error"
   },
   {
-   "line": 274,
+   "line": 329,
    "column": 15,
-   "stop_line": 274,
+   "stop_line": 329,
    "stop_column": 22,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -2845,9 +2845,9 @@
    "severity": "error"
   },
   {
-   "line": 280,
+   "line": 335,
    "column": 38,
-   "stop_line": 280,
+   "stop_line": 335,
    "stop_column": 42,
    "path": "houses/nodes/transit.py",
    "code": -2,
@@ -3565,9 +3565,9 @@
    "severity": "error"
   },
   {
-   "line": 118,
+   "line": 274,
    "column": 20,
-   "stop_line": 118,
+   "stop_line": 274,
    "stop_column": 47,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3577,9 +3577,9 @@
    "severity": "error"
   },
   {
-   "line": 141,
+   "line": 297,
    "column": 20,
-   "stop_line": 141,
+   "stop_line": 297,
    "stop_column": 47,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3589,9 +3589,9 @@
    "severity": "error"
   },
   {
-   "line": 153,
+   "line": 309,
    "column": 20,
-   "stop_line": 153,
+   "stop_line": 309,
    "stop_column": 27,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3601,9 +3601,9 @@
    "severity": "error"
   },
   {
-   "line": 154,
+   "line": 310,
    "column": 20,
-   "stop_line": 154,
+   "stop_line": 310,
    "stop_column": 34,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3613,9 +3613,9 @@
    "severity": "error"
   },
   {
-   "line": 155,
+   "line": 311,
    "column": 20,
-   "stop_line": 155,
+   "stop_line": 311,
    "stop_column": 35,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -3625,9 +3625,9 @@
    "severity": "error"
   },
   {
-   "line": 196,
+   "line": 352,
    "column": 20,
-   "stop_line": 196,
+   "stop_line": 352,
    "stop_column": 47,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
@@ -5029,9 +5029,9 @@
    "severity": "error"
   },
   {
-   "line": 1696,
+   "line": 1724,
    "column": 9,
-   "stop_line": 1696,
+   "stop_line": 1724,
    "stop_column": 16,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,

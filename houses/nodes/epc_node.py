@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import override
 
 from money import Money
 
@@ -39,6 +40,14 @@ class EpcNode(DerivedNode[dict]):
     @property
     def provenance_source_type(self) -> SourceType:
         return SourceType.API
+
+    @override
+    async def build_provenance(self) -> Provenance:
+        prov = await super().build_provenance()
+        val = self._attempt.value_or_none()
+        if self._attempt.succeeded and isinstance(val, dict) and val.get("band"):
+            prov.value = f"Band {val['band']}"
+        return prov
 
 
 class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
@@ -88,6 +97,8 @@ class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
             and v.yearly_cost.stddev > 0
         ):
             p.description = "Council tax estimated — address lookup failed."
+        if self._attempt.succeeded and v is not None and v.evidence_url:
+            p.url = v.evidence_url
         return p
 
     # Default build_provenance() walks best_address and postcode deps.

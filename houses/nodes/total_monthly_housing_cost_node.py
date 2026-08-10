@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import override
 
 from money import Money
 
-from dag.attempt import Attempt
+from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
 from dag.expression import Attr, Conditional, Div, Field, Literal, Ref
 from dag.measurement import Measurement
@@ -248,3 +249,27 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
                 "others_breakdown": others_breakdown,
             }
         )
+
+    @override
+    async def build_provenance(self) -> Provenance:
+        """The monthly figures as a human summary, never the raw dict.
+
+        The node VALUE is the breakdown dict (the UI renders the rows
+        from it), but the provenance trust bar leads with the value —
+        dumping the dict read "couple: value: 3753.21, stddev: …".
+        """
+        prov = await super().build_provenance()
+        val = self._attempt.value_or_none()
+        if isinstance(val, dict):
+            couple = val.get("couple") or {}
+            others = val.get("others") or {}
+            parts = []
+            if couple.get("value") is not None:
+                owner = val.get("couple_names") or val.get("couple_label") or ""
+                parts.append(f"{owner} £{Decimal(couple['value']):,.2f}/mo".strip())
+            if others.get("value") is not None:
+                label = val.get("others_label") or ""
+                parts.append(f"{label} £{Decimal(others['value']):,.2f}/mo".strip())
+            if parts:
+                prov.value = ", ".join(parts)
+        return prov

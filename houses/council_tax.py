@@ -6,7 +6,9 @@ import csv
 import logging
 import re
 from collections import namedtuple
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import httpx
 from money import Money
@@ -75,12 +77,24 @@ def _extract_building(address: str) -> dict:
     num_match = re.match(r"^(\d+[A-Z]?)\s", building)
     if num_match:
         return {"postcode": postcode, "building_number": num_match.group(1)}
+    # A unit descriptor ("Flat 3") names a unit INSIDE a building — the
+    # building descriptor is the next part of the address.
+    unit_match = re.match(r"^(flat|unit|apartment|maisonette)\s+\d+[A-Z]?$", building, re.IGNORECASE)
+    if unit_match and len(parts) > 1:
+        return {"postcode": postcode, "unit": building, "building_name": parts[1]}
     return {"postcode": postcode, "building_name": building}
 
 
 def _normalise(text: str) -> str:
     """Strip whitespace, uppercase, remove punctuation for comparison."""
     return re.sub(r"[^A-Z0-9 ]", "", text.upper().strip())
+
+
+def _normalise_keep_commas(text: str) -> str:
+    """Uppercase, collapse whitespace, drop punctuation EXCEPT commas —
+    the comma is the boundary marker between a building name and the
+    rest of a VOA address ("THE OLD RECTORY, HIGH WYCOMBE")."""
+    return re.sub(r"\s+", " ", re.sub(r"[^A-Z0-9,]", " ", text.upper())).strip()
 
 
 def _lookup_yearly_cost(band: str, local_authority: str) -> Money | None:
@@ -215,7 +229,12 @@ class CachedVOAClient:
         return result
 
 
-async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[CouncilTaxInfo]:
+async def lookup_council_tax(
+    postcode: str,
+    address: str = "",
+    *,
+    page_fetcher: Callable[[str, int], Any] | None = None,
+) -> Attempt[CouncilTaxInfo]:
     """Look up council tax band via VOA website scraper.
 
     Returns an ``Attempt[CouncilTaxInfo]``. When the address is ambiguous
@@ -223,11 +242,18 @@ async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[Counci
     attempt carries the reason (e.g. ``"address matched multiple properties"``).
 
     Server callers extract the value with ``.value_or_none()`` and store
-    ``""`` on the EnrichedProperty for failures.
+    ``""`` on the EnrichedProperty for failures.  ``page_fetcher`` is a
+    test seam (callable(postcode, page) -> object with ``.rows``) so
+    tests never mock uk_property_apis.
     """
     try:
-        async with CachedVOAClient() as client:
-            page = await client.fetch_page(postcode)
+        if page_fetcher is not None:
+            page = page_fetcher(postcode, 0)
+            if hasattr(page, "__await__"):
+                page = await page
+        else:
+            async with CachedVOAClient() as client:
+                page = await client.fetch_page(postcode)
         results_raw = [{"address": r.address, "band": r.band, "local_authority": r.local_authority} for r in page.rows]
     except ImportError:
         logger.warning("uk-property-apis not installed; skipping council tax lookup")
@@ -255,7 +281,73 @@ async def lookup_council_tax(postcode: str, address: str = "") -> Attempt[Counci
         logger.debug("Could not extract building identifier from address %r", address)
         return Attempt.impossible("could not extract building identifier")
 
-    matches = [r for r in active if norm_id in _normalise(r["address"])]
+    if building.get("building_number"):
+        # A house number identifies the property only when it is followed
+        # by the street name — "10" matches "FLAT 2ND FLR 10 DOWNING
+        # STREET" (that flat IS at 10 Downing Street) but "5" must not
+        # match "FLAT 5, 15 HIGH STREET" (that flat is at 15), nor
+        # "15 HIGH STREET" (whole-token), nor "110 DOWNING STREET" nor
+        # "A5 HIGH STREET" (letter- or digit-prefixed substrings).
+        addr_tokens = _normalise(address).split()
+        try:
+            house_idx = addr_tokens.index(norm_id)
+        except ValueError:
+            house_idx = -1
+        if house_idx < 0 or house_idx + 1 >= len(addr_tokens):
+            # No street token follows the number — pairing it would be
+            # guessing; fail closed.
+            return Attempt.impossible("address does not identify a single property")
+        street_first = addr_tokens[house_idx + 1]
+        pattern = rf"(?<![A-Z0-9]){re.escape(norm_id)}\s+{re.escape(street_first)}(?![A-Z0-9])"
+        matches = [r for r in active if re.search(pattern, _normalise(r["address"]))]
+    else:
+        # A NAME identifier only identifies the property when it is the
+        # building descriptor at the START of the VOA address AND is
+        # followed by a comma or the end of the address — "The Old
+        # Rectory" must not claim "The Old Rectory Cottage". The comma
+        # survives in _normalise_keep_commas (plain _normalise strips
+        # punctuation). Substring matching is never used: a street-level
+        # address must not claim a numbered property ("Rupert Avenue"
+        # matched the row "1 RUPERT AVENUE" and took its band).
+        name_norm = _normalise_keep_commas(building_id)
+        unit_norm = _normalise_keep_commas(building.get("unit") or "")
+        unit_prefixes = ("FLAT", "UNIT", "APARTMENT", "MAISONETTE")
+        matches = []
+        for r in active:
+            addr = _normalise_keep_commas(r["address"])
+            if unit_norm and addr.startswith(unit_norm + ", " + name_norm):
+                # VOA rows for a flat at a numbered building put the unit
+                # first — "FLAT 3, 123 HIGH STREET" — the query's unit
+                # plus building identifies the row.
+                matches.append(r)
+                continue
+            if not addr.startswith(name_norm):
+                continue
+            tail = addr[len(name_norm):].lstrip()
+            if tail == "":
+                matches.append(r)
+            elif tail.startswith(","):
+                tokens = tail[1:].lstrip().split()
+                if not tokens:
+                    matches.append(r)
+                    continue
+                first = tokens[0].rstrip(",")
+                if unit_norm:
+                    # The query names a specific unit ("Flat 3, The Old
+                    # Rectory") — accept rows carrying that unit.
+                    rest_upper = " ".join(t.strip(",") for t in tokens).upper()
+                    if rest_upper == unit_norm or rest_upper.startswith(unit_norm + " "):
+                        matches.append(r)
+                else:
+                    is_unit = first.upper() in unit_prefixes or (len(tokens) == 1 and first.isdigit())
+                    if not is_unit:
+                        matches.append(r)
+        if not matches:
+            # The name is present but never identifies a unit on its own.
+            near = [r for r in active if norm_id in _normalise(r["address"])]
+            if near:
+                logger.debug("Address %r names a building/street but no specific unit in %s", building_id, postcode)
+                return Attempt.impossible("address does not identify a single property")
 
     if not matches:
         logger.debug("Could not match building %r in VOA results for %s", building_id, postcode)

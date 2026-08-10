@@ -294,7 +294,7 @@ function canEdit(personName: string): boolean {
       <template v-if="affordability?.group_monthly_cost?.succeeded && affordability?.group_monthly_cost?.value?.couple">
         <div class="costs-row costs-row--group">
           <span class="costs-label">
-            {{ affordability.group_monthly_cost.value.couple_names || affordability.group_monthly_cost.value.couple_label }} — the joint owners
+            {{ affordability.group_monthly_cost.value.couple_names || affordability.group_monthly_cost.value.couple_label }}
             <ProvenanceToggle v-if="affordability?.group_monthly_cost?.provenance" :provenance="affordability?.group_monthly_cost?.provenance" title="Total monthly cost" />
           </span>
           <span class="costs-value" :title="totalMonthlyApprox ? 'Council tax estimated — total is approximate' : undefined">
@@ -382,17 +382,26 @@ function canEdit(personName: string): boolean {
 .costs-table { display: flex; flex-direction: column; }
 .costs-row {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   padding: var(--sp-2) 0;
   border-bottom: 1px solid var(--border);
 }
+/* The provenance body must break out of the horizontal row onto its own
+   full-width line — when it participates in the label/value flex line,
+   mobile squeezes the label, shoves the £ value off-screen, and the row
+   grows to ~1,000px. display:contents keeps the closed ⓘ exactly where
+   it was; only the opened body wraps. */
+.costs-row > .provenance-toggle { display: contents; }
+.costs-row > .provenance-toggle .provenance-toggle__body { flex-basis: 100%; min-width: 0; }
 .costs-row--sub { padding-left: var(--sp-5); border-bottom: none; }
 .costs-row--total { font-weight: var(--fw-bold); border-bottom: none; border-top: 2px solid var(--slate-200); margin-top: var(--sp-2); padding-top: var(--sp-3); }
 .costs-row--group { font-weight: var(--fw-bold); border-bottom: none; border-top: 2px solid var(--slate-200); margin-top: var(--sp-3); padding-top: var(--sp-3); }
 .costs-row--group-others { margin-top: var(--sp-4); }
 .costs-row--group .costs-label {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem;
 }
@@ -400,6 +409,10 @@ function canEdit(personName: string): boolean {
   font-size: 0.9rem;
   color: var(--text-muted);
 }
+/* Same breakout for the group rows, where the toggle sits inside the
+   label: the opened body takes a full-width second line of the label. */
+.costs-row--group .costs-label > .provenance-toggle { display: contents; }
+.costs-row--group .costs-label .provenance-toggle__body { flex-basis: 100%; min-width: 0; }
 .costs-group-breakdown { margin-top: var(--sp-1); }
 .costs-row--impossible { opacity: 0.5; }
 .costs-label { font-size: var(--fs-sm); color: var(--text); }

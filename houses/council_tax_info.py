@@ -20,11 +20,15 @@ class CouncilTaxInfo:
     yearly_cost: Measurement[Money] | None = None
     evidence_url: str = ""
 
-    def to_provenance_value(self) -> dict:
-        """JSON-safe projection for provenance display."""
-        return {
-            "band": self.band,
-            "yearly_cost": str(self.yearly_cost.value) if self.yearly_cost is not None else None,
-            "uncertainty": self.yearly_cost.stddev if self.yearly_cost is not None else 0.0,
-            "evidence_url": self.evidence_url,
-        }
+    def to_provenance_value(self) -> str:
+        """Human summary for provenance display.
+
+        The old projection returned a machine dict (band / "GBP …"
+        yearly_cost / uncertainty / evidence_url) that the provenance
+        tree dumped as-is. The evidence URL moves to the provenance
+        ``url`` field (CouncilTaxNode), so it renders as a link.
+        """
+        if self.yearly_cost is None:
+            return f"Band {self.band}" if self.band else "Council tax"
+        amount = self.yearly_cost.value.amount
+        return f"Band {self.band} · £{amount:,.2f}/yr"

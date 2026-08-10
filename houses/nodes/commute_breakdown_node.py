@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from decimal import Decimal
+from typing import override
+
 from money import Money
 
 from dag.attempt import Attempt
@@ -25,10 +28,21 @@ class CommuteBreakdownNode(DerivedNode[dict]):
             return None
         lines: list[FormulaLine] = []
         for name, pv in (v.get("persons") or {}).items():
-            lines.append(FormulaLine(label=f"{name}’s commute (yearly)", value=f"£{pv.get('yearly_gbp', '0')}"))
+            for c in pv.get("commutes") or ():
+                yearly = Decimal(str(c.get("yearly_gbp") or 0))
+                if yearly <= 0:
+                    # Zero-cost commutes contribute nothing to the total —
+                    # "how the total is calculated" skips them.
+                    continue
+                trips = c.get("trips_per_week", 0)
+                weeks = c.get("weeks_per_year", 0)
+                freq = f"{trips}x/wk · {weeks} wks/yr"
+                lines.append(
+                    FormulaLine(label=f"{name} → {c['label']} · {freq}", value=f"£{yearly:,.2f}/yr")
+                )
         if not lines:
             return None
-        return Formula(lines=lines, result=f"£{v.get('yearly_total_gbp', '0')}")
+        return Formula(lines=lines, result=f"£{Decimal(str(v.get('yearly_total_gbp', '0'))):,.2f}/yr")
 
     def compute(self, *args: Attempt[dict]) -> Attempt[dict]:
         # Last arg is always persons_source, the rest are commute selectors
@@ -52,6 +66,7 @@ class CommuteBreakdownNode(DerivedNode[dict]):
             daily_amount: Money | None = None
             pois = p.get("places_of_interest", ()) if isinstance(p, dict) else getattr(p, "places_of_interest", ())
             name = p.get("name") if isinstance(p, dict) else getattr(p, "name", "?")
+            commutes: list[dict] = []
             for poi in pois or ():
                 key = f"{name}/{poi.label}"
                 commute_node = self._commute_selectors.get(key)
@@ -72,9 +87,18 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                     yearly_person_poi = daily_amount * poi.trips_per_week * poi.weeks_per_year
                     person_yearly += yearly_person_poi
                     yearly_total += yearly_person_poi
+                    commutes.append(
+                        {
+                            "label": poi.label,
+                            "trips_per_week": poi.trips_per_week,
+                            "weeks_per_year": poi.weeks_per_year,
+                            "yearly_gbp": str(yearly_person_poi.amount),
+                        }
+                    )
             per_person[name] = {
                 "daily_gbp": str(daily_amount.amount) if daily_amount is not None else "0",
                 "yearly_gbp": str(person_yearly.amount),
+                "commutes": commutes,
             }
         return Attempt.succeeded(
             {
@@ -83,3 +107,17 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                 "formula_explanation": "Aggregated from DAG nodes",
             }
         )
+
+    @override
+    async def build_provenance(self):
+        """The aggregate as a human total, never the dict dump.
+
+        The node VALUE stays the breakdown dict (the expression system
+        reads yearly_total_gbp); only the provenance display value is
+        swapped for the human figure.
+        """
+        prov = await super().build_provenance()
+        v = self._attempt.value_or_none()
+        if self._attempt.succeeded and isinstance(v, dict) and v.get("yearly_total_gbp") is not None:
+            prov.value = f"£{Decimal(str(v['yearly_total_gbp'])):,.2f}/yr"
+        return prov

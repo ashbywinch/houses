@@ -200,10 +200,12 @@ describe('CostsSection explanatory copy (C5/C6/C10)', () => {
         },
       },
     })
-    expect(wrapper.text()).toContain('Simon+Lorena — the joint owners')
+    expect(wrapper.text()).toContain('Simon+Lorena')
     expect(wrapper.text()).toContain('Ashby')
     // the impersonal "other adults" label is gone — the person's name
     expect(wrapper.text()).not.toContain('the other adults')
+    // "the joint owners" is gone too — names are sufficient
+    expect(wrapper.text()).not.toContain('the joint owners')
   })
 
   it('does NOT claim renovation costs are part of the mortgage', () => {
@@ -289,10 +291,11 @@ describe('CostsSection uncertainty rendering (Part A)', () => {
       },
     })
     const text = wrapper.text()
-    expect(text).toContain('Simon+Lorena — the joint owners')
+    expect(text).toContain('Simon+Lorena')
     expect(text).toContain('Ashby')
     expect(text).toContain('£1548.67/mo')
     expect(text).toContain('£322.5/mo')
+    expect(text).not.toContain('the joint owners')
     // Council tax and sinking fund are separate rows, not merged
     expect(text).toContain('Council tax')
     expect(text).toContain('Sinking fund')
