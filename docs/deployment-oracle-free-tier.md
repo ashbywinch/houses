@@ -90,7 +90,7 @@ WantedBy=multi-user.target
 EOF
 sudo mkdir -p /var/lib/houses-chrome && sudo chown ubuntu:ubuntu /var/lib/houses-chrome
 sudo systemctl daemon-reload && sudo systemctl enable --now houses-chrome.service
-for i in $(seq 1 15); do if systemctl is-active --quiet houses-chrome.service; then curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 && break; else echo "houses-chrome.service is not active"; exit 1; fi; sleep 1; done
+for i in $(seq 1 15); do curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 && break; sleep 1; done
 curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 || { echo "Chrome CDP endpoint not answering on :9222 — check houses-chrome.service"; exit 1; }
 ```
 
@@ -148,7 +148,7 @@ curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 || { echo "Ch
   # EnvironmentFile keeps everything after '=' — no quotes needed, and
   # a quoted value would be mangled); values containing a literal
   # newline are rejected (they would split into a malformed line).
-  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; vals = dotenv_values(stream=sys.stdin, interpolate=False); bad = [k for k, v in vals.items() if v is not None and chr(10) in v]; assert not bad, 'newline in value: ' + ', '.join(bad); [print(f'{k}={v}') for k, v in vals.items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
+  cat .env | ssh ubuntu@<ip> "set -o pipefail && sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; vals = dotenv_values(stream=sys.stdin, interpolate=False); bad = [k for k, v in vals.items() if v is not None and chr(10) in v]; assert not bad, 'newline in value: ' + ', '.join(bad); [print(f'{k}={v}') for k, v in vals.items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
   # values are written PLAIN KEY=VALUE — no quotes (the doc's own rule,
   # and systemd's EnvironmentFile keeps everything after the '='), so
   # nothing mangled reaches the app; interpolate=False prevents a \$VAR
@@ -198,7 +198,7 @@ export PATH="$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:
 # wait for the scraper browser's CDP endpoint before serving (the app
 # can start either way, but property adds need it live) — and fail
 # loudly if it never comes up
-for i in $(seq 1 30); do if systemctl is-active --quiet houses-chrome.service; then curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 && break; else echo "houses-chrome.service is not active"; exit 1; fi; sleep 1; done
+for i in $(seq 1 30); do curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 && break; sleep 1; done
 curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 || { echo "scraper browser not reachable on :9222"; exit 1; }
 exec make run-prod
 EOF
@@ -245,41 +245,34 @@ WantedBy=multi-user.target
 
 ## Phase 5 — OAuth + no-domain launch
 
-Google rejects plain-`http://` redirect URIs for **public** hosts, so the
-web-flow sign-in needs HTTPS, which the no-domain interim does not have.
-Two workable paths:
+Google rejects plain-`http://` redirect URIs for **public** hosts, and
+the app carries family financial data — plain HTTP on a public IP is
+sniffable regardless of allowlisting. **HTTPS is required from the
+start.** Since you already own a domain, the primary path is:
 
-- **Interim (no domain): use the device flow.** The app ships one
-  (`/api/auth/device` — the same path `tools/capture_dom.py --login`
-  uses). On the box: `HOUSES_PUBLIC_URL` / `HOUSES_FRONTEND_URL` are
-  irrelevant to it, but keep them set to
-  `http://<public-ip>.sslip.io:8765` so the app's links are consistent.
-  Run `make login` once per new user: it prints a Google approval URL —
-  the person opens it on any device and approves; the box mints the
-  session. Costs a code + approval dance per user, but works with no
-  HTTPS and no domain. (The LAN web-flow callback stays configured for
-  the dev machine.)
-- **Full web-flow sign-in arrives with the domain cutover (Phase 7)** —
-  register `https://houses.<yourdomain>/api/auth/callback` there and the
-  normal "Sign in with Google" button works.
+- **Primary: Cloudflare Tunnel to your existing domain — HTTPS from day
+  one.** `cloudflared tunnel create houses`, route
+  `houses.<yourdomain>` to it, and let the tunnel publish the origin
+  port (it reaches any port, so 8765 stays). The origin speaks plain
+  HTTP **inside** the tunnel, never on the public internet. Register
+  `https://houses.<yourdomain>/api/auth/callback` in Google and the
+  normal "Sign in with Google" button works immediately — no device
+  flow, no interim. Set `HOUSES_PUBLIC_URL` /
+  `HOUSES_FRONTEND_URL` to `https://houses.<yourdomain>`.
+- **Fallback (accepting the risk): no-domain sslip.io over plain HTTP
+  with the device flow.** Only if you accept on-path eavesdropping of
+  the family's financial data and session cookies on a public IP —
+  restrict the security list to trusted networks, treat it as strictly
+  temporary, and migrate to the tunnel before anyone uses the app from
+  an untrusted network. The app's device flow (`make login` on the box)
+  works with no HTTPS and no redirect URI; the "Sign in with Google"
+  button stays dead until the tunnel/domain lands.
 
 Restart `houses.service`, then verify from a whitelisted network (your
 home WiFi — or add the phone's **cellular egress IP** to the security
 list temporarily, since a carrier NAT address is not on the family-IP
-allowlist): page loads → sign-in completes (device flow for now) → a
-property detail opens → the WebSocket stays connected.
-
-> If you have the domain from day one, skip the interim: go straight to
-> Phase 7, register the `https` callback, and use the web flow throughout.
-
-> **Security during the interim:** the app carries family financial data
-> over plain HTTP on a public IP until Phase 7. Minimise the window —
-> restrict the OCI security-list ingress for 8765/tcp to the IPs the
-> family actually connects from (your home connection, your brother's),
-> not `0.0.0.0/0`, and treat Phase 7 as the real fix (HTTPS terminates
-> at Cloudflare). If you want HTTPS from day one without a domain, put
-> Caddy in front of the box and use a Cloudflare tunnel to a domain you
-> already own — either removes the plain-HTTP exposure entirely.
+allowlist): page loads → sign-in completes → a property detail opens →
+the WebSocket stays connected.
 
 ## Phase 6 — safety net (the part that matters)
 
