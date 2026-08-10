@@ -90,7 +90,7 @@ WantedBy=multi-user.target
 EOF
 sudo mkdir -p /var/lib/houses-chrome && sudo chown ubuntu:ubuntu /var/lib/houses-chrome
 sudo systemctl daemon-reload && sudo systemctl enable --now houses-chrome.service
-for i in $(seq 1 15); do curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 && break; sleep 1; done
+for i in $(seq 1 15); do if systemctl is-active --quiet houses-chrome.service; then curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 && break; else echo "houses-chrome.service is not active"; exit 1; fi; sleep 1; done
 curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 || { echo "Chrome CDP endpoint not answering on :9222 — check houses-chrome.service"; exit 1; }
 ```
 
@@ -148,7 +148,7 @@ curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 || { echo "Ch
   # EnvironmentFile keeps everything after '=' — no quotes needed, and
   # a quoted value would be mangled); values containing a literal
   # newline are rejected (they would split into a malformed line).
-  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; vals = dotenv_values(stream=sys.stdin, interpolate=False); assert all('\\n' not in (v or '') for v in vals.values()); [print(f'{k}={v}') for k, v in vals.items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
+  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; vals = dotenv_values(stream=sys.stdin, interpolate=False); bad = [k for k, v in vals.items() if v is not None and chr(10) in v]; assert not bad, 'newline in value: ' + ', '.join(bad); [print(f'{k}={v}') for k, v in vals.items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
   # values are written PLAIN KEY=VALUE — no quotes (the doc's own rule,
   # and systemd's EnvironmentFile keeps everything after the '='), so
   # nothing mangled reaches the app; interpolate=False prevents a \$VAR
@@ -198,7 +198,7 @@ export PATH="$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:
 # wait for the scraper browser's CDP endpoint before serving (the app
 # can start either way, but property adds need it live) — and fail
 # loudly if it never comes up
-for i in $(seq 1 30); do curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 && break; sleep 1; done
+for i in $(seq 1 30); do if systemctl is-active --quiet houses-chrome.service; then curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 && break; else echo "houses-chrome.service is not active"; exit 1; fi; sleep 1; done
 curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 || { echo "scraper browser not reachable on :9222"; exit 1; }
 exec make run-prod
 EOF
@@ -332,8 +332,9 @@ property detail opens → the WebSocket stays connected.
      `uv sync`, the `houses` / `houses-chrome` units, and
      `/etc/houses.env`) — a Phases 1–2 box has no `houses.service` yet —
      then stop its app: `sudo systemctl stop houses`.
-  2. Restore with absolute paths, in one block (relative paths in the
-     wrong working directory would silently write the DB elsewhere):
+  2. Restore the DB with absolute paths, in one block (relative paths in
+     the wrong working directory would silently write the DB elsewhere);
+     do NOT start the app yet:
      ```bash
      sudo systemctl stop houses
      rm -f /opt/houses/data/houses.db-wal /opt/houses/data/houses.db-shm
@@ -341,10 +342,12 @@ property detail opens → the WebSocket stays connected.
      age -d -i <key> /path/to/houses-<ts>.db.age > /opt/houses/data/houses.db
      sudo chmod 600 /opt/houses/data/houses.db
      sudo chown ubuntu:ubuntu /opt/houses/data/houses.db
-     sudo systemctl start houses
      ```
-  3. Copy `/etc/houses.env` from the backup (or re-run Phase 3's
-     secrets step), then `sudo systemctl start houses` and verify a
+  3. Restore `/etc/houses.env` from the backup (or re-run Phase 3's
+     secrets step) — the environment must be in place BEFORE the first
+     start, or the app serves (or restart-loops) with the wrong config
+     and the later start is a no-op.
+  4. Start and verify: `sudo systemctl restart houses`, then confirm a
      property detail loads and the WebSocket connects.
 
   Without an off-box copy, a single-instance loss (termination, disk
