@@ -43,11 +43,12 @@ production, which is why the free ARM shape (24 GB RAM) is the host — no free
 
 ```bash
 # deps
-sudo apt update && sudo apt install -y python3-venv unzip curl ca-certificates sqlite3 rsync nodejs npm \
+sudo apt update && sudo apt install -y python3-venv unzip curl ca-certificates sqlite3 rsync nodejs npm git make \
   fonts-liberation libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 \
   libxcomposite1 libxdamage1 libgbm1 libasound2
-# Ubuntu 24.04 ships node 22 — satisfies vite 8's requirement
-# (^20.19 || >=22.12); recheck if the frontend bumps vite.
+# Ubuntu 24.04's nodejs is 22 via noble-updates (checked against a 24.04
+# apt cache: 22.22.1) — satisfies vite 8's ^20.19 || >=22.12. If your
+# image's nodejs still resolves to 18 (pre-SRU), install 22 via NodeSource.
 
 # uv (the repo's package manager)
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -121,20 +122,18 @@ fi
   # except the live DB and its WAL files (they come from the snapshot)
   rsync -a --exclude 'houses.db*' data/ ubuntu@<ip>:/opt/houses/data/
   # Secrets: install the LAN .env as a ROOT-ONLY /etc/houses.env —
-  # strip any quotes/export/$ first, because systemd's EnvironmentFile
-  # parser is strict KEY=VALUE (the app's own pydantic would handle
-  # them, but this file feeds the unit). Nothing secret stays in the
-  # repo tree.
+  # sanitized to strict KEY=VALUE first, because systemd's
+  # EnvironmentFile parser strips no quotes and expands nothing (the
+  # app's own pydantic would handle the original, but this file feeds
+  # the unit). Process env beats the repo .env, so HOUSES_HOST /
+  # HOUSES_PORT / the public URLs belong here too, not in
+  # /opt/houses/.env. Nothing secret stays in the repo tree.
   scp .env ubuntu@<ip>:/tmp/houses.env
-  # `;` not `&&` — the /tmp copy is removed even if install fails, so a
-  # failed cutover never leaves secrets in /tmp; the verification then
-  # makes a failed install visible
-  ssh ubuntu@<ip> "sudo install -o root -g root -m 600 /tmp/houses.env /etc/houses.env; rm -f /tmp/houses.env"
-  ssh ubuntu@<ip> "sudo test -r /etc/houses.env && echo 'secrets installed'"
-  # The VM listens on settings.port — the env must agree with the VCN
-  # ingress rule (8765). A dev .env that sets HOUSES_PORT elsewhere
-  # would put the app behind the firewall before Phase 5 even starts.
-  ssh ubuntu@<ip> "grep -q '^HOUSES_PORT=8765' /etc/houses.env && echo 'port 8765 OK' || echo 'HOUSES_PORT mismatch or unset — align env with the firewall rule'"
+  ssh ubuntu@<ip> "sed -E -e 's/^[[:space:]]*export[[:space:]]+//' -e 's/^([^=]+)=\"(.*)\"/\1=\2/' -e 's/^([^=]+)='\''(.*)'\''/\1=\2/' -e '/^[[:space:]]*#/d' /tmp/houses.env | sudo tee /etc/houses.env >/dev/null && sudo chown root:root /etc/houses.env && sudo chmod 600 /etc/houses.env; rm -f /tmp/houses.env"
+  # `;` not `&&` — the /tmp copy is removed even on failure, so a failed
+  # cutover never leaves secrets in /tmp; the verification makes a
+  # failed install visible
+  ssh ubuntu@<ip> "sudo test -r /etc/houses.env && grep -q '^HOUSES_PORT=8765' /etc/houses.env && echo 'secrets installed, port 8765 OK' || echo 'check /etc/houses.env (missing or HOUSES_PORT mismatch with the firewall rule)'"
   ```
 
 - Frontend: the built `dist/` is committed in the repo — no build step
@@ -163,10 +162,13 @@ chmod +x /opt/houses/run_prod.sh
 
 Two things `make run-prod` needs from the environment on a server:
 `make run-prod` binds `settings.host` (127.0.0.1 by default) and
-re-runs `setup` + `frontend-build` (a few seconds on a warmed cache),
-so the box's env must set `HOUSES_HOST=0.0.0.0` — add it to
-`/opt/houses/.env` (or the service `Environment=`) alongside the
-Phase 3 values, and expect a short boot before the port answers.
+re-runs `setup` + `frontend-build` (a few seconds on a warmed cache).
+Put `HOUSES_HOST=0.0.0.0` in `/etc/houses.env` (the unit's
+`EnvironmentFile` — process env wins over the repo `.env`), and after
+start verify the listener answers externally:
+`curl -s http://<public-ip>:8765/api/auth/me` and
+`ssh ubuntu@<ip> 'ss -tlnp | grep 8765'`. Expect a short boot before
+the port answers.
 
 `houses.service` (env from `.env`, WorkingDirectory `/opt/houses`,
 `Restart=always`):
@@ -289,12 +291,13 @@ supported plain-HTTP origin ports are 80/8080/8880/2052/2082/2086/2095
 
 - **Cloudflare Tunnel** (`cloudflared tunnel route dns houses …`): reaches
   any origin port, so 8765 keeps working untouched.
-- **Proxied record**: move the app to a supported port first — set
-  `HOUSES_PORT=8080` in `/opt/houses/.env` (the launcher already runs
-  `uvicorn … port=settings.port`, so no code change is needed — just
-  restart `houses.service`), update the OCI security list for 8080 — and
-  use **Flexible** TLS with a plain-HTTP origin ("Full (strict)" fails
-  with 526 because it requires a certificate on the origin itself).
+- **Proxied record**: move the app to a supported port first — change
+  `HOUSES_PORT=8765` to `HOUSES_PORT=8080` in `/etc/houses.env` (the
+  unit's `EnvironmentFile`; an edit in the repo `.env` would lose to it —
+  process env wins), update the OCI security list for 8080, restart
+  `houses.service` — and use **Flexible** TLS with a plain-HTTP origin
+  ("Full (strict)" fails with 526 because it requires a certificate on
+  the origin itself).
 
 Either way, at cutover **restrict the OCI security list for the app port
 to Cloudflare's published IP ranges** (`https://www.cloudflare.com/ips/`)
