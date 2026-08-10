@@ -97,18 +97,16 @@ sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
   source**). **Stop the LAN app first** (`make stop` on the LAN machine)
   so nothing writes to the DB after the snapshot:
 
-  > **Secrets — environment first.** `docs/coding-standards.md` says secrets
-  > come from the environment, never files, and this is a public-IP host.
-  > Preferred path: put the Google client secrets and the session secret in
-  > `houses.service`'s `Environment=` lines (or an `EnvironmentFile=` outside
-  > the repo, e.g. `/etc/houses.env`, `chmod 600`), and do NOT copy the LAN
-  > `.env` at all. Fallback (the local-dev shape): copy `.env` as below —
-  > pydantic loads it — keep it `chmod 600`, never commit it, and remember
-  > the backup timer also retains it (Phase 6). Either way, never leave the
-  > secrets in a world-readable file.
+  > **Secrets — environment only.** `docs/coding-standards.md` says secrets
+  > come from the environment, never files. The single path is the
+  > root-only `/etc/houses.env` above (chmod 600, outside the repo tree);
+  > nothing secret is copied into `/opt/houses` or committed. The backup
+  > timer retains it with 600 perms (Phase 6) — that is the one accepted
+  > file copy, root-readable only.
 
   ```bash
-  # consistent snapshot of the DB while the app runs
+  # the LAN app is stopped (make stop, above) — .backup of a live DB is
+  # consistent, but any write after the snapshot never reaches the VM
   sqlite3 data/houses.db ".backup '/tmp/houses-backup.db'"
   ssh ubuntu@<ip> "mkdir -p /opt/houses/data"   # a fresh clone has no data/
   scp /tmp/houses-backup.db ubuntu@<ip>:/opt/houses/data/houses.db
@@ -116,11 +114,17 @@ sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
   # outputs, the council-tax/rail/fare/Ofsted CSVs, bus/parking data —
   # except the live DB and its WAL files (they come from the snapshot)
   rsync -a --exclude 'houses.db*' data/ ubuntu@<ip>:/opt/houses/data/
-  scp .env ubuntu@<ip>:/opt/houses/.env
-  # The VM listens on settings.port — the copied .env must agree with the
-  # VCN ingress rule (8765). A dev .env that sets HOUSES_PORT elsewhere
+  # Secrets: install the LAN .env as a ROOT-ONLY /etc/houses.env —
+  # strip any quotes/export/$ first, because systemd's EnvironmentFile
+  # parser is strict KEY=VALUE (the app's own pydantic would handle
+  # them, but this file feeds the unit). Nothing secret stays in the
+  # repo tree.
+  scp .env ubuntu@<ip>:/tmp/houses.env
+  ssh ubuntu@<ip> "sudo install -o root -g root -m 600 /tmp/houses.env /etc/houses.env && rm /tmp/houses.env"
+  # The VM listens on settings.port — the env must agree with the VCN
+  # ingress rule (8765). A dev .env that sets HOUSES_PORT elsewhere
   # would put the app behind the firewall before Phase 5 even starts.
-  ssh ubuntu@<ip> "grep -q '^HOUSES_PORT=8765' /opt/houses/.env && echo 'port 8765 OK' || echo 'HOUSES_PORT mismatch or unset — align .env with the firewall rule'"
+  ssh ubuntu@<ip> "grep -q '^HOUSES_PORT=8765' /etc/houses.env && echo 'port 8765 OK' || echo 'HOUSES_PORT mismatch or unset — align env with the firewall rule'"
   ```
 
 - Frontend: the built `dist/` is committed in the repo — no build step
@@ -167,12 +171,13 @@ Wants=network-online.target
 [Service]
 User=ubuntu
 WorkingDirectory=/opt/houses
-# The app loads /opt/houses/.env itself (pydantic — quotes and $VAR
-# work there). systemd's EnvironmentFile= parser differs (no quote
-# stripping, no expansion, rejects lines), so do NOT load the .env
-# through it. Secrets live in Environment= (or a strict plain-KEY=VALUE
-# /etc/houses.env, chmod 600):
-Environment=HOUSES_SESSION_SECRET=… HOUSES_GOOGLE_WEB_CLIENT_ID=… HOUSES_GOOGLE_WEB_CLIENT_SECRET=… HOUSES_GOOGLE_DEVICE_CLIENT_ID=… HOUSES_GOOGLE_DEVICE_CLIENT_SECRET=…
+# Secrets come from a root-only env file (chmod 600 — a systemd unit
+# file is world-readable, so never put secrets in Environment= lines
+# here). /etc/houses.env must be STRICT KEY=VALUE: no quotes, no
+# export, no $ references (systemd's parser is not a dotenv parser).
+# The app's pydantic reads process env first, then ./.env, so these
+# win over anything in the repo.
+EnvironmentFile=/etc/houses.env
 ExecStart=/bin/sh /opt/houses/run_prod.sh
 Restart=always
 
@@ -230,7 +235,7 @@ property detail opens → the WebSocket stays connected.
 
   [Service]
   Type=oneshot
-  ExecStart=/bin/sh -c 'ts=$(date +%F); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && cp /opt/houses/.env /var/backups/houses-${ts}.env && chmod 600 /var/backups/houses-${ts}.env && find /var/backups -name "houses-*.db" -mtime +30 -delete && find /var/backups -name "houses-*.env" -mtime +30 -delete'
+  ExecStart=/bin/sh -c 'ts=$(date +%F); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && chmod 600 /var/backups/houses-${ts}.db && cp /etc/houses.env /var/backups/houses-${ts}.env && chmod 600 /var/backups/houses-${ts}.env && find /var/backups -name "houses-*.db" -mtime +30 -delete && find /var/backups -name "houses-*.env" -mtime +30 -delete'
 
   # /etc/systemd/system/houses-backup.timer
   [Unit]
