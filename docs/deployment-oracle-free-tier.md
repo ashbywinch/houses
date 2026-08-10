@@ -43,7 +43,7 @@ production, which is why the free ARM shape (24 GB RAM) is the host — no free
 
 ```bash
 # deps
-sudo apt update && sudo apt install -y python3-venv unzip curl ca-certificates sqlite3 rsync nodejs npm git make \
+sudo apt update && sudo apt install -y python3-venv unzip curl ca-certificates sqlite3 rsync age rclone nodejs npm git make \
   fonts-liberation libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 \
   libxcomposite1 libxdamage1 libgbm1 libasound2
 # Ubuntu 24.04's nodejs is 22 via noble-updates (checked against a 24.04
@@ -131,11 +131,15 @@ echo "houses-chrome.service ExecStart must use: $CHROME_BIN"
   # the unit). Process env beats the repo .env, so HOUSES_HOST /
   # HOUSES_PORT / the public URLs belong here too, not in
   # /opt/houses/.env. Nothing secret stays in the repo tree.
-  scp .env ubuntu@<ip>:/tmp/houses.env
-  ssh ubuntu@<ip> "/opt/houses/.venv/bin/python -c \"from dotenv import dotenv_values; [print(f'{k}={v}') for k, v in dotenv_values('/tmp/houses.env').items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env; rm -f /tmp/houses.env"
-  # fail loudly if the conversion dropped anything — the critical keys
-  # must be present in the installed file
-  ssh ubuntu@<ip> "for k in HOUSES_SESSION_SECRET HOUSES_GOOGLE_WEB_CLIENT_ID HOUSES_GOOGLE_WEB_CLIENT_SECRET HOUSES_SHEET_ID; do grep -q \"^\$k=\" /etc/houses.env || { echo \"missing \$k in /etc/houses.env\"; exit 1; }; done && echo 'secrets intact'"
+  # Stream the LAN .env straight into the conversion — no /tmp copy, so
+  # an interrupted cutover can never leave a world-readable plaintext
+  # secrets file behind. The conversion runs python-dotenv (the repo's
+  # own parser) and installs the result root-only.
+  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; [print(f'{k}={v}') for k, v in dotenv_values(stream=sys.stdin).items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
+  # fail loudly if the conversion dropped or blanked anything — the
+  # critical keys must be present with a NON-EMPTY value (the file is
+  # root-only, so the check needs sudo)
+  ssh ubuntu@<ip> "for k in HOUSES_SESSION_SECRET HOUSES_GOOGLE_WEB_CLIENT_ID HOUSES_GOOGLE_WEB_CLIENT_SECRET HOUSES_SHEET_ID; do sudo grep -q \"^\$k=.\" /etc/houses.env || { echo \"missing or empty \$k in /etc/houses.env\"; exit 1; }; done && echo 'secrets intact'"
   # `;` not `&&` — the /tmp copy is removed even on failure, so a failed
   # cutover never leaves secrets in /tmp; the verification makes a
   # failed install visible
@@ -275,6 +279,7 @@ property detail opens → the WebSocket stays connected.
   [Timer]
   OnCalendar=*-*-* 03:00:00
   Persistent=true
+  Unit=houses-backup-push.service
 
   [Install]
   WantedBy=timers.target
