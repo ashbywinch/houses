@@ -90,7 +90,8 @@ WantedBy=multi-user.target
 EOF
 sudo mkdir -p /var/lib/houses-chrome && sudo chown ubuntu:ubuntu /var/lib/houses-chrome
 sudo systemctl daemon-reload && sudo systemctl enable --now houses-chrome.service
-curl -s localhost:9222/json/version   # must return the browser version
+for i in $(seq 1 15); do curl -fsS localhost:9222/json/version >/dev/null 2>&1 && break; sleep 1; done
+curl -fsS localhost:9222/json/version >/dev/null 2>&1 || { echo "Chrome CDP endpoint not answering on :9222 — check houses-chrome.service"; exit 1; }
 ```
 
 ## Phase 3 — app deploy
@@ -294,7 +295,7 @@ property detail opens → the WebSocket stays connected.
 
   [Service]
   Type=oneshot
-  ExecStart=/bin/sh -c 'newest=$(ls -1t /var/backups/houses-*.db | head -1); envfile=${newest%.db}.env; age -e -r <recipient> -o "${newest}.age" "$newest" && age -e -r <recipient> -o "${envfile}.age" "$envfile" && ... rclone/rsync the .age ciphertexts to the bucket/LAN host ... && ls -1t /var/backups/houses-*.age | tail -n +31 | xargs -r rm'
+  ExecStart=/bin/sh -c 'newest=$(ls -1t /var/backups/houses-*.db | head -1); envfile=${newest%%.db}.env; age -e -r <recipient> -o "${newest}.age" "$newest" && age -e -r <recipient> -o "${envfile}.age" "$envfile" && ... rclone/rsync the .age ciphertexts to the bucket/LAN host ... && ls -1t /var/backups/houses-*.db.age | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env.age | tail -n +31 | xargs -r rm'
 
   # /etc/systemd/system/houses-backup.timer
   [Unit]
@@ -316,8 +317,12 @@ property detail opens → the WebSocket stays connected.
   1. Bring up a fresh box (Phases 1–2) and stop its app:
      `sudo systemctl stop houses`.
   2. Pull the newest snapshot + its `.age` ciphertexts from wherever the
-     push unit sent them, decrypt (`age -d -i <key> houses-<ts>.db.age > houses-<ts>.db`),
-     and place the DB at `/opt/houses/data/houses.db` (`chmod 600`).
+     push unit sent them, decrypt with `umask 077` (the shell redirect
+     would otherwise write the plaintext world-readable before any
+     chmod): `umask 077; age -d -i <key> houses-<ts>.db.age > houses-<ts>.db`,
+     place the DB at `/opt/houses/data/houses.db`, then `chmod 600` and
+     `sudo chown ubuntu:ubuntu` it — the backup unit runs as root, so
+     the snapshot is root-owned and the app could not write it.
   3. Copy `/etc/houses.env` from the backup (or re-run Phase 3's
      secrets step), then `sudo systemctl start houses` and verify a
      property detail loads and the WebSocket connects.
