@@ -67,7 +67,7 @@ function coupleRows() {
     row('Commutes', b.commutes, a.monthly_commute_cost?.provenance),
     row('Life insurance', b.insurance, a.life_insurance_total?.provenance),
     row('Rental income', b.rental_income, a.rental_income?.provenance),
-    row('Rent received', b.rent_received, a.group_monthly_cost?.provenance),
+    row('Rent paid', b.rent_paid, a.group_monthly_cost?.provenance),
   ].filter((r): r is { label: string; value: string; provenance?: Provenance } => r !== null)
 }
 

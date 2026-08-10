@@ -194,6 +194,7 @@ describe('CostsSection explanatory copy (C5/C6/C10)', () => {
             couple_label: 'S',
             others_label: 'Ashby',
             couple_names: 'Simon+Lorena',
+            couple_breakdown: { rent_paid: 200 },
           },
           error: null,
           provenance: {},
@@ -202,6 +203,10 @@ describe('CostsSection explanatory copy (C5/C6/C10)', () => {
     })
     expect(wrapper.text()).toContain('Simon+Lorena')
     expect(wrapper.text()).toContain('Ashby')
+    // the couple's own rent paid is a row; the old guessed transfer row
+    // ("Rent received") must never render
+    expect(wrapper.text()).toContain('Rent paid')
+    expect(wrapper.text()).not.toContain('Rent received')
     // the impersonal "other adults" label is gone — the person's name
     expect(wrapper.text()).not.toContain('the other adults')
     // "the joint owners" is gone too — names are sufficient

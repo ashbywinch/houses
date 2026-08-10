@@ -211,13 +211,17 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
             }
             return value, round(stddev, 2), breakdown
 
-        others_rent = sum((money_of(p, "rent_paid_monthly") for p in others), Decimal(0))
-        # The rent the others pay to the couple is the CURRENT-home
-        # arrangement — it only applies when THIS property is the current
-        # home.  A new purchase has no rent transfer in either direction.
+        # Rent is per-person, never a transfer between groups: an adult's
+        # rent_paid is THEIR cost (we don't know who they pay), and the
+        # property's rental income is its owners' income (we don't know who
+        # pays it).  The couple's figure must never absorb the others'
+        # rent — that double-counted the same money even when the payer
+        # really paid the couple.
         rent_scale = 1 if is_current else 0
-        others_rent = rent_scale * others_rent
-        couple_rent = others_rent  # the rent the others pay goes to the couple
+        couple_rent_paid = rent_scale * sum(
+            (money_of(p, "rent_paid_monthly") for p in adults if p.name in owners), Decimal(0)
+        )
+        others_rent_paid = rent_scale * sum((money_of(p, "rent_paid_monthly") for p in others), Decimal(0))
         mortgage_val = (mortgage.value_or_none() or Money("0", "GBP")).amount
         rental_val = (rental_income.value_or_none() or Money("0", "GBP")).amount
 
@@ -225,16 +229,16 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         others_share = len(others) / n_adults
 
         couple_val, couple_std, couple_breakdown = group_figure(
-            [p for p in adults if p.name in owners], owner_share, -couple_rent
+            [p for p in adults if p.name in owners], owner_share, couple_rent_paid
         )
         couple_val += mortgage_val - rental_val
         couple_breakdown["mortgage"] = round(float(mortgage_val), 2)
         couple_breakdown["rental_income"] = round(-float(rental_val), 2)
-        if is_current:
-            couple_breakdown["rent_received"] = round(-float(couple_rent), 2)
-        others_val, others_std, others_breakdown = group_figure(others, others_share, others_rent)
-        if is_current:
-            others_breakdown["rent_paid"] = round(float(others_rent), 2)
+        if couple_rent_paid:
+            couple_breakdown["rent_paid"] = round(float(couple_rent_paid), 2)
+        others_val, others_std, others_breakdown = group_figure(others, others_share, others_rent_paid)
+        if others_rent_paid:
+            others_breakdown["rent_paid"] = round(float(others_rent_paid), 2)
 
         return Attempt.succeeded(
             {

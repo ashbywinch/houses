@@ -153,18 +153,17 @@ function buildSaveBody(person: PersonSettings): Record<string, unknown> {
     selling_home: person.selling_home,
     places_of_interest: person.places_of_interest,
   }
-  for (const f of ['home_sale_price', 'outstanding_mortgage', 'cash_contribution', 'life_insurance_monthly'] as const) {
+  for (const f of ['home_sale_price', 'outstanding_mortgage', 'cash_contribution', 'life_insurance_monthly', 'rent_paid_monthly'] as const) {
     if (!person[f]) continue
     // a cleared input serializes as {amount: ''} — normalize to 0 so a
     // momentarily-empty field can't fail the whole save (the server
     // rejects malformed money shapes)
-    body[f] = person[f].amount === '' ? { amount: '0', currency: person[f].currency } : person[f]
+    body[f] = person[f].amount === '' ? { amount: '0', currency: person[f].currency } : { ...person[f] }
   }
   if (person.petrol_mpg != null) body.petrol_mpg = person.petrol_mpg
   if (person.bus_walk_penalty) body.bus_walk_penalty = { ...person.bus_walk_penalty }
   if (person.home_co_owners?.length) body.home_co_owners = person.home_co_owners
   if (person.home_property_rid) body.home_property_rid = person.home_property_rid
-  if (person.rent_paid_monthly) body.rent_paid_monthly = { ...person.rent_paid_monthly }
   const t = thresholds.value[person.name]
   if (t) body.thresholds = { ...t }
   return body
@@ -499,6 +498,7 @@ const depositRows = computed(() => {
               You co-own {{ coOwnerInfo.owner }}'s home ({{ coOwnerInfo.share }}%) — its sale already
               counts toward your deposit contribution, so don't add this house as your own.
             </p>
+            <div class="settings-subheading">Deposit toward the new home</div>
             <label class="toggle-row">
               <span class="toggle-row__label">Selling a home to fund this purchase</span>
               <ToggleSwitch v-model="person.selling_home" :disabled="!isOwn(person)" @change="scheduleSave(person)" />
@@ -521,48 +521,6 @@ const depositRows = computed(() => {
                 />
               </div>
               <p class="band-helper">What you expect to get and still owe on the home you're selling. Whole pounds only.</p>
-            </template>
-            <p v-else class="band-helper">Deposit is cash — no current home.</p>
-            <div class="stack-field">
-              <label for="cash">
-                {{ person.selling_home ? 'Other money toward the deposit (£)' : 'Cash available for the deposit (£)' }}
-              </label>
-              <WholePoundsField
-                id="cash"
-                :model-value="person.cash_contribution ? integerPounds(person.cash_contribution.amount) : ''"
-                @update:model-value="(v) => { if (person.cash_contribution) person.cash_contribution.amount = v }"
-              />
-            </div>
-            <div class="stack-field">
-              <label for="life-insurance">Life insurance (£/month)</label>
-              <input
-                id="life-insurance"
-                type="text"
-                inputmode="decimal"
-                :value="person.life_insurance_monthly?.amount"
-                :disabled="!isOwn(person)"
-                @keydown="blockPenceKey"
-                @input="moneyInput(person.life_insurance_monthly!, $event)"
-                @blur="penceInput(person.life_insurance_monthly!, $event)"
-              />
-            </div>
-            <template v-if="person.selling_home">
-              <div class="stack-field">
-                <label for="rent-paid">Rent paid to the joint owners (£/month)</label>
-                <input
-                  id="rent-paid"
-                  type="text"
-                  inputmode="decimal"
-                  :value="person.rent_paid_monthly?.amount"
-                  :disabled="!isOwn(person)"
-                  @keydown="blockPenceKey"
-                  @input="moneyInput(person.rent_paid_monthly!, $event)"
-                  @blur="penceInput(person.rent_paid_monthly!, $event)"
-                />
-                <span class="band-helper">What you pay the joint owners for your share of the current home.</span>
-              </div>
-
-              <hr class="divider" />
               <div class="stack-field">
                 <label for="home-property">Which house is this?</label>
                 <select
@@ -593,6 +551,45 @@ const depositRows = computed(() => {
                 </div>
               </div>
             </template>
+            <p v-else class="band-helper">Deposit is cash — no current home.</p>
+            <div class="stack-field">
+              <label for="cash">
+                {{ person.selling_home ? 'Other money toward the deposit (£)' : 'Cash available for the deposit (£)' }}
+              </label>
+              <WholePoundsField
+                id="cash"
+                :model-value="person.cash_contribution ? integerPounds(person.cash_contribution.amount) : ''"
+                @update:model-value="(v) => { if (person.cash_contribution) person.cash_contribution.amount = v }"
+              />
+            </div>
+            <div class="settings-subheading">Your monthly costs</div>
+            <div class="stack-field">
+              <label for="life-insurance">Life insurance (£/month)</label>
+              <input
+                id="life-insurance"
+                type="text"
+                inputmode="decimal"
+                :value="person.life_insurance_monthly?.amount"
+                :disabled="!isOwn(person)"
+                @keydown="blockPenceKey"
+                @input="moneyInput(person.life_insurance_monthly!, $event)"
+                @blur="penceInput(person.life_insurance_monthly!, $event)"
+              />
+            </div>
+            <div class="stack-field">
+              <label :for="'rent-paid-' + person.name">Rent paid (£/month)</label>
+              <input
+                :id="'rent-paid-' + person.name"
+                type="text"
+                inputmode="decimal"
+                :value="person.rent_paid_monthly?.amount"
+                :disabled="!isOwn(person)"
+                @keydown="blockPenceKey"
+                @input="moneyInput(person.rent_paid_monthly ??= { amount: '', currency: 'GBP' }, $event)"
+                @blur="person.rent_paid_monthly && penceInput(person.rent_paid_monthly, $event)"
+              />
+              <span class="band-helper">What you pay in rent for your current home — it counts toward the monthly cost of whichever property is marked as your current home.</span>
+            </div>
           </section>
           <!-- Household finances -->
           <section
@@ -603,6 +600,7 @@ const depositRows = computed(() => {
             @focusout="flushFinancialSave"
           >
             <div class="card-heading">Household finances</div>
+            <div class="settings-subheading">New home purchase</div>
             <div class="stack-field">
               <label for="mortgage-rate">Mortgage rate (%)</label>
               <input id="mortgage-rate" type="text" inputmode="decimal" v-model="fin['mortgage-rate']" />
@@ -615,6 +613,7 @@ const depositRows = computed(() => {
               <label for="sinking-fund">Sinking fund (% of value per year)</label>
               <input id="sinking-fund" type="text" inputmode="decimal" v-model="fin['sinking-fund']" />
             </div>
+            <div class="settings-subheading">Commute running costs</div>
             <div class="stack-field">
               <label for="petrol-cost">Petrol cost (£ per litre)</label>
               <input id="petrol-cost" type="text" inputmode="decimal" v-model="fin['petrol-cost']" />
@@ -837,6 +836,14 @@ const depositRows = computed(() => {
 
 <style scoped>
 .settings-person__strip { margin: var(--sp-2) 0 0; }
+.settings-subheading {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  color: var(--slate-500);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: var(--sp-4) 0 var(--sp-3);
+}
 .co-owner-row {
   display: flex;
   align-items: center;

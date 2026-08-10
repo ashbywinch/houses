@@ -76,7 +76,6 @@ export interface GroupCostBreakdown {
   sinking_fund: number
   mortgage?: number
   rental_income?: number
-  rent_received?: number
   rent_paid?: number
 }
 export interface GroupMonthlyCost {

@@ -489,17 +489,18 @@ class TestGroupMonthlyCostNode:
         assert val["couple_names"] == "Simon+Lorena"
 
     @pytest.mark.asyncio
-    async def test_rent_transferred_only_when_current_home(self):
-        """Regression: the couple's figure subtracted the others' rent and
-        the payer's figure added it for EVERY property.  The rent is the
-        CURRENT-home arrangement — it must only apply when the property
-        IS the current home (Status=Current), not to a new purchase."""
+    async def test_rent_stays_in_each_person_own_finances(self):
+        """Regression: the couple's figure subtracted the others' rent
+        (rent_received) — a guessed transfer.  We do not know who pays
+        whom: rent paid affects ONLY the payer's finances, rent received
+        ONLY the receiver's.  The current-home rent_paid figures are each
+        group's own cost; nothing moves between the groups."""
         node, mg, sf, li, ri, st, cb, ct, ps = self._node("ctax4")
         mg.push(Money("0", "GBP"), "test")
         sf.push(Money("0", "GBP"), "test")
         li.push(Money("0", "GBP"), "test")
         ri.push(Money("0", "GBP"), "test")
-        st.push("Current", "test")  # this IS the current home → rent applies
+        st.push("Current", "test")  # this IS the current home → rent_paid applies
         cb.push({}, "test")
         simon = Person("Simon", True, home_co_owners=(HomeCoOwner(name="Lorena", share=50),))
         ashby = Person("Ashby", False, rent_paid_monthly=Money("600", "GBP"))
@@ -510,13 +511,73 @@ class TestGroupMonthlyCostNode:
         assert a.succeeded
         val = a.value_or_none()
         assert val is not None
-        # Current home: couple receives Ashby's rent (subtract), Ashby pays
-        # (add). Council tax still applies (only sinking+insurance are
-        # excluded for the current home) — couple's ⅔ share = 100, Ashby's
-        # ⅓ = 50.
+        # Council tax still applies (only sinking+insurance are excluded
+        # for the current home) — couple's ⅔ share = 100, Ashby's ⅓ = 50.
         couple = val["couple_breakdown"]
-        assert float(couple["rent_received"]) == pytest.approx(-600, abs=0.01)
+        assert couple.get("rent_received") is None, "no transfer row — rent_received must not exist"
+        assert float(val["couple"]["value"]) == pytest.approx(100, abs=0.01)
         others = val["others_breakdown"]
+        # Ashby's rent is HER cost — it stays in her figure.
         assert float(others["rent_paid"]) == pytest.approx(600, abs=0.01)
+        assert float(val["others"]["value"]) == pytest.approx(50 + 600, abs=0.01)
+
+    @pytest.mark.asyncio
+    async def test_rental_income_and_rent_paid_are_never_combined(self):
+        """Regression (double deduction): the couple's figure deducted the
+        property's rental income AND the others' rent — the same money
+        could be counted twice even when Ashby really pays the couple.
+        rent_paid (Ashby's cost) and rental_income (the house's income)
+        are unrelated figures; only the house's income reduces the
+        couple's figure."""
+        node, mg, sf, li, ri, st, cb, ct, ps = self._node("ctax5")
+        mg.push(Money("0", "GBP"), "test")
+        sf.push(Money("0", "GBP"), "test")
+        li.push(Money("0", "GBP"), "test")
+        ri.push(Money("600", "GBP"), "test")  # the house's rental income
+        st.push("Current", "test")
+        cb.push({}, "test")
+        simon = Person("Simon", True, home_co_owners=(HomeCoOwner(name="Lorena", share=50),))
+        ashby = Person("Ashby", False, rent_paid_monthly=Money("600", "GBP"))
+        ps.push([simon, Person("Lorena", False), ashby], "test")
+        ct.push(CouncilTaxInfo(band="D", yearly_cost=Measurement(Money("1800", "GBP"), 0.0)), "test")
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded
+        val = a.value_or_none()
+        assert val is not None
+        couple = val["couple_breakdown"]
+        assert float(couple["rental_income"]) == pytest.approx(-600, abs=0.01)
+        assert couple.get("rent_received") is None
+        # council 100 + mortgage 0 − rental income 600 — Ashby's rent is
+        # NOT deducted from the couple (it is her own cost).
         assert float(val["couple"]["value"]) == pytest.approx(100 - 600, abs=0.01)
         assert float(val["others"]["value"]) == pytest.approx(50 + 600, abs=0.01)
+
+    @pytest.mark.asyncio
+    async def test_couple_own_rent_paid_counts_in_couple_figure(self):
+        """Any adult might pay rent — the couple's own rent_paid is their
+        cost and must appear in the couple's figure (it was silently
+        dropped)."""
+        node, mg, sf, li, ri, st, cb, ct, ps = self._node("ctax6")
+        mg.push(Money("0", "GBP"), "test")
+        sf.push(Money("0", "GBP"), "test")
+        li.push(Money("0", "GBP"), "test")
+        ri.push(Money("0", "GBP"), "test")
+        st.push("Current", "test")
+        cb.push({}, "test")
+        simon = Person(
+            "Simon",
+            True,
+            home_co_owners=(HomeCoOwner(name="Lorena", share=50),),
+            rent_paid_monthly=Money("200", "GBP"),
+        )
+        ps.push([simon, Person("Lorena", False), Person("Ashby", False)], "test")
+        ct.push(CouncilTaxInfo(band="D", yearly_cost=Measurement(Money("1800", "GBP"), 0.0)), "test")
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded
+        val = a.value_or_none()
+        assert val is not None
+        couple = val["couple_breakdown"]
+        assert Decimal(couple["rent_paid"]) == Decimal("200.00")
+        assert Decimal(val["couple"]["value"]) == Decimal("300.00")

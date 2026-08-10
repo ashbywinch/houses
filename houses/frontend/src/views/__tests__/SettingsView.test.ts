@@ -46,6 +46,7 @@ function makeSettings() {
           home_sale_price: { amount: '550000.00', currency: 'GBP' },
           outstanding_mortgage: { amount: '373000.00', currency: 'GBP' },
           cash_contribution: { amount: '0.00', currency: 'GBP' },
+          rent_paid_monthly: { amount: '600.00', currency: 'GBP' },
           petrol_mpg: 45,
           bus_walk_penalty: { value: 20, unit: 'minute' },
           home_co_owners: [{ name: 'Lorena', share: 50 }],
@@ -522,36 +523,51 @@ describe('SettingsView — selling-home toggle (P7, B7)', () => {
     expect(ashby.text()).toContain('Deposit is cash')
   })
 
-  it('gates rent-paid, the house link and co-owners behind the selling-home toggle', async () => {
-    // Simon sells a home → the whole current-home section shows
+  it('shows rent-paid for every adult; gates only the house link and co-owners', async () => {
+    // Simon sells a home → the current-home section shows in full
     const simon = await mountView()
     await simon.flush()
     const simonSection = personSection(simon.wrapper)
-    expect(simonSection.find('input#rent-paid').exists()).toBe(true)
+    expect(simonSection.find('input[id^="rent-paid"]').exists()).toBe(true)
     expect(simonSection.find('select#home-property').exists()).toBe(true)
     expect(simonSection.find('.co-owner-add').exists()).toBe(true)
 
-    // Ashby does not sell a home → rent-paid, house link and co-owners
-    // must NOT appear (there is no current home to pay rent against)
+    // Ashby does not sell a home — but any adult may pay rent, so her
+    // rent-paid input must still be there; only the house link and
+    // co-owners stay gated behind the selling-home toggle.
     const ashby = await mountView('', 'Ashby')
     await ashby.flush()
     const ashbySection = personSection(ashby.wrapper)
-    expect(ashbySection.find('input#rent-paid').exists()).toBe(false)
+    expect(ashbySection.find('input[id^="rent-paid"]').exists()).toBe(true)
     expect(ashbySection.find('select#home-property').exists()).toBe(false)
     expect(ashbySection.find('.co-owner-add').exists()).toBe(false)
   })
 
-  it('hides the rent-paid and house-link fields when the toggle is switched off', async () => {
+  it('keeps rent-paid when the selling-home toggle is switched off', async () => {
     const { wrapper, flush } = await mountView()
     await flush()
     const simon = personSection(wrapper)
-    expect(simon.find('input#rent-paid').exists()).toBe(true)
-    // Flip the selling-home switch off
+    expect(simon.find('input[id^="rent-paid"]').exists()).toBe(true)
+    // Flip the selling-home switch off — rent-paid survives, the
+    // current-home section (house link, co-owners) hides.
     await simon.find('.toggle-row .switch').trigger('click')
     await flush()
-    expect(simon.find('input#rent-paid').exists()).toBe(false)
+    expect(simon.find('input[id^="rent-paid"]').exists()).toBe(true)
     expect(simon.find('select#home-property').exists()).toBe(false)
     expect(simon.find('.co-owner-add').exists()).toBe(false)
+  })
+
+  it('saves the rent-paid figure with the person', async () => {
+    const { wrapper, flush } = await mountView()
+    await flush()
+    const simon = personSection(wrapper)
+    expect((simon.find('input[id^="rent-paid"]').element as HTMLInputElement).value).toBe('600.00')
+    await simon.find('input[id^="rent-paid"]').setValue(650)
+    await simon.trigger('focusout')
+    await flush()
+    const patchPersonMock = vi.mocked(api.patchPerson)
+    const [, body] = patchPersonMock.mock.calls[0]
+    expect(body.rent_paid_monthly).toEqual({ amount: '650', currency: 'GBP' })
   })
 })
 
