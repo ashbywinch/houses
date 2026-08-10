@@ -133,6 +133,9 @@ echo "houses-chrome.service ExecStart must use: $CHROME_BIN"
   # /opt/houses/.env. Nothing secret stays in the repo tree.
   scp .env ubuntu@<ip>:/tmp/houses.env
   ssh ubuntu@<ip> "/opt/houses/.venv/bin/python -c \"from dotenv import dotenv_values; [print(f'{k}={v}') for k, v in dotenv_values('/tmp/houses.env').items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env; rm -f /tmp/houses.env"
+  # fail loudly if the conversion dropped anything — the critical keys
+  # must be present in the installed file
+  ssh ubuntu@<ip> "for k in HOUSES_SESSION_SECRET HOUSES_GOOGLE_WEB_CLIENT_ID HOUSES_GOOGLE_WEB_CLIENT_SECRET HOUSES_SHEET_ID; do grep -q \"^\$k=\" /etc/houses.env || { echo \"missing \$k in /etc/houses.env\"; exit 1; }; done && echo 'secrets intact'"
   # `;` not `&&` — the /tmp copy is removed even on failure, so a failed
   # cutover never leaves secrets in /tmp; the verification makes a
   # failed install visible
@@ -263,7 +266,7 @@ property detail opens → the WebSocket stays connected.
 
   [Service]
   Type=oneshot
-  ExecStart=/bin/sh -c 'newest=$(ls -1t /var/backups/houses-*.db | head -1); ... rclone/rsync the newest snapshot + its .env (age-encrypted) to the bucket/LAN host ...'
+  ExecStart=/bin/sh -c 'newest=$(ls -1t /var/backups/houses-*.db | head -1); envfile=${newest%.db}.env; age -e -r <recipient> -o "${newest}.age" "$newest" && age -e -r <recipient> -o "${envfile}.age" "$envfile" && ... rclone/rsync the .age ciphertexts to the bucket/LAN host ...'
 
   # /etc/systemd/system/houses-backup.timer
   [Unit]
@@ -307,16 +310,17 @@ supported plain-HTTP origin ports are 80/8080/8880/2052/2082/2086/2095
 
 - **Cloudflare Tunnel** (`cloudflared tunnel route dns houses …`): reaches
   any origin port, so 8765 keeps working untouched.
-- **Proxied record**: move the app to a supported port first — change
-  `HOUSES_PORT=8765` to `HOUSES_PORT=8080` in `/etc/houses.env` (the
-  unit's `EnvironmentFile`; an edit in the repo `.env` would lose to it —
-  process env wins), update the OCI security list for 8080, restart
-  `houses.service` — and use **Flexible** TLS with a plain-HTTP origin
-  ("Full (strict)" fails with 526 because it requires a certificate on
-  the origin itself).
+- **Proxied record with origin TLS**: run Caddy (or any ACME-capable
+  proxy) on the origin to terminate TLS with a Let's Encrypt cert, move
+  the app to a supported HTTPS origin port (e.g. 8443), and use
+  **Full (strict)** — Cloudflare validates the origin cert, so the
+  Cloudflare→origin leg is encrypted too.
+- **Flexible TLS alone is NOT enough**: it encrypts only browser↔
+  Cloudflare; the leg from Cloudflare to the plain-HTTP origin crosses
+  the public internet unencrypted. Prefer the tunnel or origin TLS.
 
-Either way, at cutover **restrict the OCI security list for the app port
-to Cloudflare's published IP ranges** (`https://www.cloudflare.com/ips/`)
+Whichever path: **restrict the OCI security list for the app port to
+Cloudflare's published IP ranges** (`https://www.cloudflare.com/ips/`)
 instead of `0.0.0.0/0` — otherwise the origin IP stays directly
 reachable over plain HTTP and the TLS you just added is bypassable.
 
