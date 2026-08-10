@@ -313,7 +313,7 @@ the WebSocket stays connected.
 
   [Service]
   Type=oneshot
-  ExecStart=/bin/sh -c 'ts=$(date +%%F-%%H%%M%%S); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && chmod 600 /var/backups/houses-${ts}.db && cp /etc/houses.env /var/backups/houses-${ts}.env && chmod 600 /var/backups/houses-${ts}.env && echo ${ts} > /var/backups/last-backup-ts && ls -1t /var/backups/houses-*.db | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env | tail -n +31 | xargs -r rm'
+  ExecStart=/bin/sh -c 'ts=$(date +%%F-%%H%%M%%S); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && chmod 600 /var/backups/houses-${ts}.db && cp /etc/houses.env /var/backups/houses-${ts}.env && chmod 600 /var/backups/houses-${ts}.env && age -e -r age1<recipient> -o /var/backups/houses-${ts}.env.age /var/backups/houses-${ts}.env && rm /var/backups/houses-${ts}.env && echo ${ts} > /var/backups/last-backup-ts && ls -1t /var/backups/houses-*.db | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env.age | tail -n +31 | xargs -r rm'
 
   [Install]
   WantedBy=timers.target
@@ -328,13 +328,14 @@ the WebSocket stays connected.
   # The push requires the snapshot produced by TONIGHT'S run: the
   # backup unit writes /var/backups/last-backup-ts only on success, and
   # a failed snapshot must not silently re-push yesterday's stale copy
-  # (Wants= does not gate on the dependee's exit status). Remote
-  # retention: the lsl verifies the landing, then rclone deletes
-  # ciphertexts older than 31 days so the bucket does not grow forever.
-  # Complete example (rclone remote "houses:" configured once via
-  # `rclone config` with an authenticated S3-compatible/R2 bucket; the
-  # age recipient is the operator's public key).
-  ExecStart=/bin/sh -c 'ts=$(cat /var/backups/last-backup-ts); newest=/var/backups/houses-${ts}.db; envfile=${newest%%.db}.env; [ "${ts%%-*}" = "$(date +%%F)" ] || { echo "no snapshot from tonight (last: ${ts}) — backup failed"; exit 1; }; [ -f "$newest" ] || { echo "snapshot ${ts} missing"; exit 1; }; age -e -r age1<recipient> -o "${newest}.age" "$newest" && age -e -r age1<recipient> -o "${envfile}.age" "$envfile" && rclone copyto "${newest}.age" houses:backups/ && rclone copyto "${envfile}.age" houses:backups/ && rclone lsl houses:backups/ | grep -q "$(basename ${newest}).age" && rclone delete houses:backups/ --min-age 31d && ls -1t /var/backups/houses-*.db.age | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env.age | tail -n +31 | xargs -r rm'
+  # (Wants= does not gate on the dependee's exit status). The env
+  # ciphertext (already age-encrypted by the backup unit) is pushed
+  # as-is. Remote retention: the lsl verifies the landing, then rclone
+  # deletes ciphertexts older than 31 days so the bucket does not grow
+  # forever. Complete example (rclone remote "houses:" configured once
+  # via `rclone config` with an authenticated S3-compatible/R2 bucket;
+  # the age recipient is the operator's public key).
+  ExecStart=/bin/sh -c 'ts=$(cat /var/backups/last-backup-ts); newest=/var/backups/houses-${ts}.db; envfile=/var/backups/houses-${ts}.env.age; [ "${ts%%-*}" = "$(date +%%F)" ] || { echo "no snapshot from tonight (last: ${ts}) — backup failed"; exit 1; }; [ -f "$newest" ] && [ -f "$envfile" ] || { echo "snapshot ${ts} missing"; exit 1; }; age -e -r age1<recipient> -o "${newest}.age" "$newest" && rclone copyto "${newest}.age" houses:backups/ && rclone copyto "$envfile" houses:backups/ && rclone lsl houses:backups/ | grep -q "$(basename ${newest}).age" && rclone delete houses:backups/ --min-age 31d && ls -1t /var/backups/houses-*.db.age | tail -n +31 | xargs -r rm && ls -1t /var/backups/houses-*.env.age | tail -n +31 | xargs -r rm'
 
   # /etc/systemd/system/houses-backup.timer
   [Unit]
@@ -368,10 +369,14 @@ the WebSocket stays connected.
      sudo chmod 600 /opt/houses/data/houses.db
      sudo chown ubuntu:ubuntu /opt/houses/data/houses.db
      ```
-  3. Restore `/etc/houses.env` from the backup (or re-run Phase 3's
-     secrets step) — the environment must be in place BEFORE the first
-     start, or the app serves (or restart-loops) with the wrong config
-     and the later start is a no-op.
+  3. Restore `/etc/houses.env` from the backup — decrypt the env
+     ciphertext and install root-only (the environment must be in place
+     BEFORE the first start, or the app serves — or restart-loops —
+     with the wrong config and the later start is a no-op):
+     ```bash
+     umask 077
+     age -d -i <key> /path/to/houses-<ts>.env.age | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env
+     ```
   4. Start and verify: `sudo systemctl restart houses`, then confirm a
      property detail loads and the WebSocket connects.
 
@@ -388,10 +393,13 @@ the WebSocket stays connected.
   (`rsync -a /var/backups/*.age user@lan-host:/backups/houses/` — only
   the age-encrypted ciphertexts ever leave the box, never the plaintext
   snapshots).
-  The `.env` snapshot is secrets — **encrypt it before any off-box
-  transfer** (`age -e -r <key> /var/backups/houses-${ts}.env`) so the
-  copy that leaves the box is ciphertext, not the Google client
-  secrets.
+  The `.env` snapshot is secrets — the backup unit age-encrypts it at
+  snapshot time, so only the ciphertext ever exists on disk or leaves
+  the box. The one unavoidable plaintext at rest is `/etc/houses.env`
+  itself (systemd's `EnvironmentFile` needs a file): root-only
+  `chmod 600`, no world/group read, and it holds nothing that a
+  root-level VM compromise doesn't already get from the app's own
+  environment.
   Without an off-box copy, a single-instance loss (termination, disk
   failure) is a total loss.
 - Monitoring: `journalctl -u houses -f` for errors; systemd restart policy
