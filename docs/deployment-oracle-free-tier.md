@@ -65,33 +65,33 @@ if file /tmp/chrome.deb | grep -q "Debian binary package"; then
   CHROME_BIN=/usr/bin/google-chrome
 else
   echo "chrome deb unavailable — installing chromium instead"
+  # Ubuntu 24.04's apt chromium-browser is a snap transitional package —
+  # the first launch pulls the snap; verify it actually starts headless
   sudo apt install -y chromium-browser
   CHROME_BIN=/usr/bin/chromium-browser
 fi
-echo "houses-chrome.service ExecStart must use: $CHROME_BIN"
-# paste that binary into the unit's ExecStart below — a mismatch
-# (fallback installed but the unit still says google-chrome) crash-loops
+$CHROME_BIN --headless=new --version || { echo "$CHROME_BIN does not launch headless — fix before continuing"; exit 1; }
+
+# generate the unit with the binary that was actually installed — no
+# manual paste, so a fallback install can't leave the unit pointing at
+# the wrong browser
+sudo tee /etc/systemd/system/houses-chrome.service >/dev/null <<EOF
+[Unit]
+Description=Headless browser for the Rightmove scraper
+
+[Service]
+User=ubuntu
+ExecStart=$CHROME_BIN --headless=new --disable-dev-shm-usage --remote-debugging-port=9222 --user-data-dir=/var/lib/houses-chrome about:blank
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo mkdir -p /var/lib/houses-chrome && sudo chown ubuntu:ubuntu /var/lib/houses-chrome
+sudo systemctl daemon-reload && sudo systemctl enable --now houses-chrome.service
+curl -s localhost:9222/json/version   # must return the browser version
 ```
-
-- Launch headless Chrome with remote debugging as a **systemd service**
-  (`houses-chrome.service`) — as an **unprivileged user** (a root Chrome
-  with `--no-sandbox` would be a host compromise if the scraper ever
-  loads a malicious page; Ubuntu's user-namespace kernel config lets a
-  normal user run Chrome with its sandbox on):
-
-  ```ini
-  [Service]
-  User=ubuntu
-  ExecStart=/usr/bin/google-chrome --headless=new --disable-dev-shm-usage --remote-debugging-port=9222 --user-data-dir=/var/lib/houses-chrome about:blank
-  Restart=always
-  RestartSec=5
-  [Install]
-  WantedBy=multi-user.target
-  ```
-
-  (Give the user the data dir: `sudo mkdir -p /var/lib/houses-chrome && sudo chown ubuntu:ubuntu /var/lib/houses-chrome`.)
-  Start and enable it, then verify: `sudo systemctl daemon-reload && sudo systemctl enable --now houses-chrome.service` and
-  `curl -s localhost:9222/json/version` returns the browser version.
 
 ## Phase 3 — app deploy
 
@@ -144,7 +144,7 @@ echo "houses-chrome.service ExecStart must use: $CHROME_BIN"
   # `;` not `&&` — the /tmp copy is removed even on failure, so a failed
   # cutover never leaves secrets in /tmp; the verification makes a
   # failed install visible
-  ssh ubuntu@<ip> "sudo test -r /etc/houses.env && grep -q '^HOUSES_PORT=8765' /etc/houses.env && echo 'secrets installed, port 8765 OK' || echo 'check /etc/houses.env (missing or HOUSES_PORT mismatch with the firewall rule)'"
+  ssh ubuntu@<ip> "sudo test -r /etc/houses.env && sudo grep -q '^HOUSES_PORT=8765' /etc/houses.env && echo 'secrets installed, port 8765 OK' || echo 'check /etc/houses.env (missing or HOUSES_PORT mismatch with the firewall rule)'"
   ```
 
 - Frontend: the built `dist/` is committed in the repo — no build step
@@ -166,6 +166,9 @@ cd /opt/houses
 # systemd's default PATH lacks ~/.local/bin (uv) — make's UV fallback
 # handles it, but be explicit so make/npm resolve identically to a shell
 export PATH="$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# wait for the scraper browser's CDP endpoint before serving (the app
+# can start either way, but property adds need it live)
+for i in $(seq 1 30); do curl -fsS localhost:9222/json/version >/dev/null 2>&1 && break; sleep 1; done
 exec make run-prod
 EOF
 chmod +x /opt/houses/run_prod.sh
