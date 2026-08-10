@@ -61,9 +61,10 @@ sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
 ## Phase 3 — app deploy
 
 - Copy the repo (fresh clone is cleanest — the working tree has uncommitted
-  session work that stays local):
+  session work that stays local; `/opt` is root-owned, so claim it first):
 
   ```bash
+  sudo mkdir -p /opt/houses && sudo chown ubuntu:ubuntu /opt/houses
   git clone https://github.com/ashbywinch/houses.git /opt/houses && cd /opt/houses
   uv sync --all-extras
   ```
@@ -75,7 +76,10 @@ sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
   # consistent snapshot of the DB while the app runs
   sqlite3 data/houses.db ".backup '/tmp/houses-backup.db'"
   scp /tmp/houses-backup.db ubuntu@<ip>:/opt/houses/data/houses.db
-  scp -r data/api_cache ubuntu@<ip>:/opt/houses/data/
+  # every other runtime file — the disk API cache, the commute toolchain
+  # outputs, the council-tax/rail/fare/Ofsted CSVs, bus/parking data —
+  # except the live DB and its WAL files (they come from the snapshot)
+  rsync -a --exclude 'houses.db*' data/ ubuntu@<ip>:/opt/houses/data/
   scp .env ubuntu@<ip>:/opt/houses/.env
   ```
 
@@ -143,6 +147,15 @@ the WebSocket stays connected.
 > If you have the domain from day one, skip the interim: go straight to
 > Phase 7, register the `https` callback, and use the web flow throughout.
 
+> **Security during the interim:** the app carries family financial data
+> over plain HTTP on a public IP until Phase 7. Minimise the window —
+> restrict the OCI security-list ingress for 8765/tcp to the IPs the
+> family actually connects from (your home connection, your brother's),
+> not `0.0.0.0/0`, and treat Phase 7 as the real fix (HTTPS terminates
+> at Cloudflare). If you want HTTPS from day one without a domain, put
+> Caddy in front of the box and use a Cloudflare tunnel to a domain you
+> already own — either removes the plain-HTTP exposure entirely.
+
 ## Phase 6 — safety net (the part that matters)
 
 - **Nightly backup timer** (`houses-backup.service` + `.timer`): systemd
@@ -151,7 +164,7 @@ the WebSocket stays connected.
   ```ini
   [Service]
   Type=oneshot
-  ExecStart=/bin/sh -c 'ts=$(date +%F); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && cp /opt/houses/.env /var/backups/houses-${ts}.env && find /var/backups -name "houses-*.db" -mtime +30 -delete'
+  ExecStart=/bin/sh -c 'ts=$(date +%F); sqlite3 /opt/houses/data/houses.db ".backup /var/backups/houses-${ts}.db" && cp /opt/houses/.env /var/backups/houses-${ts}.env && find /var/backups -name "houses-*.db" -mtime +30 -delete && find /var/backups -name "houses-*.env" -mtime +30 -delete'
   ```
 
   Optionally `rclone` the backup dir to object storage later — the DB is
