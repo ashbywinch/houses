@@ -75,11 +75,13 @@ class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
                 info = replace(info, yearly_cost=Measurement(info.yearly_cost, 0.0))
             return Attempt.succeeded(info)
         # Lookup failed — return a Band D estimate with a spread instead
-        # of plain "?"; provenance notes the fallback (Part A).
+        # of plain "?"; provenance notes the fallback with the REAL reason
+        # (e.g. which addresses were ambiguous) so it can be troubleshot.
         return Attempt.succeeded(
             CouncilTaxInfo(
                 band="?",
                 yearly_cost=Measurement(_FALLBACK_YEARLY_COST, _FALLBACK_STDDEV),
+                lookup_error=result.error or "address lookup failed",
             )
         )
 
@@ -96,9 +98,8 @@ class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
             and v.yearly_cost is not None
             and v.yearly_cost.stddev > 0
         ):
-            p.description = "Council tax estimated — address lookup failed."
-        if self._attempt.succeeded and v is not None and v.evidence_url:
-            p.url = v.evidence_url
+            reason = v.lookup_error or "address lookup failed"
+            p.description = f"Council tax estimated — {reason}."
         return p
 
     # Default build_provenance() walks best_address and postcode deps.

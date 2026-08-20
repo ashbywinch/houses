@@ -133,7 +133,7 @@ def test_match_cert_ambiguous_different_addresses_returns_impossible():
     ]
     result = _match_cert(certs, "Rose")
     assert result.impossible
-    assert result.error == "address matched multiple properties"
+    assert result.error == "address matched multiple properties: 'Rose Cottage', 'Rose Garden House' (2 matches)"
 
 
 # ── lookup_epc with address tests ──

@@ -204,11 +204,15 @@ def _match_cert(certs: list[dict], building_id: str, address: str = "") -> Attem
             candidates = [c for c in certs if norm_id in _normalise(c.get("addressLine1", ""))]
         if not candidates:
             return Attempt.impossible("no matching certificate for this address")
-        # Ambiguity check: more than one distinct address matches
-        unique_addresses = {c.get("addressLine1", "") for c in candidates}
+        # Ambiguity check: more than one distinct address matches.  Name
+        # the first two (sorted, deterministic) + the count so the
+        # provenance can be used to troubleshoot the match.
+        unique_addresses = sorted({c.get("addressLine1", "") for c in candidates})
         if len(unique_addresses) > 1:
-            return Attempt.impossible("address matched multiple properties")
-
+            sample = ", ".join(repr(a) for a in unique_addresses[:2])
+            return Attempt.impossible(
+                f"address matched multiple properties: {sample} ({len(unique_addresses)} matches)"
+            )
     candidates.sort(key=lambda c: c.get("registrationDate", ""), reverse=True)
     band = candidates[0].get("currentEnergyEfficiencyBand", "")
     raw = band.strip() if band else ""

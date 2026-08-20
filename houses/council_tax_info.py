@@ -13,12 +13,15 @@ class CouncilTaxInfo:
 
     ``yearly_cost`` is a Measurement: exact (stddev 0) when looked up,
     an estimate with a spread when the lookup failed and the node
-    fell back to a Band D approximation.
+    fell back to a Band D approximation.  ``lookup_error`` carries the
+    real failure reason on that fallback (e.g. which addresses were
+    ambiguous) so the provenance can say WHY it's an estimate.
     """
 
     band: str = ""
     yearly_cost: Measurement[Money] | None = None
     evidence_url: str = ""
+    lookup_error: str = ""
 
     def to_provenance_value(self) -> str:
         """Human summary for provenance display.
