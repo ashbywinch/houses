@@ -353,6 +353,20 @@ async def lookup_council_tax(
         logger.debug("Could not match building %r in VOA results for %s", building_id, postcode)
         return Attempt.impossible(f"no VOA match for building {building_id}")
 
+    # Exact-match priority: a candidate whose VOA address is the query's
+    # building designation verbatim (a token-aligned prefix of the
+    # normalized query) IS the property.  A separate dwelling at the same
+    # number — an annexe or flat, e.g. "FLAT 2, 2 WILLOWMEAD GARDENS" —
+    # must not make the exact address ambiguous.
+    norm_query_tokens = _normalise(address).split()
+    exact_matches = []
+    for m in matches:
+        row_tokens = _normalise(m["address"]).split()
+        if len(row_tokens) >= 2 and norm_query_tokens[: len(row_tokens)] == row_tokens:
+            exact_matches.append(m)
+    if len(exact_matches) == 1:
+        matches = exact_matches
+
     # Ambiguity check: more than one distinct address matches.  The error
     # names the first two (sorted, deterministic) and the total count so
     # the provenance is actually troubleshooting-useful — "matched
