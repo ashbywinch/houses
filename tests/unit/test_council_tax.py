@@ -48,13 +48,14 @@ class TestNormalise:
         assert _normalise("") == ""
 
 
-class TestLookupAmbiguityDetail:
-    """An ambiguous match must name what was ambiguous — first two
-    addresses and the count — so the provenance is troubleshooting-useful
-    instead of a bare 'matched multiple properties'."""
+class TestLookupExactMatchPriority:
+    """An exact match must win — a separate dwelling at the same number
+    (annexe/flat) must not make the exact address ambiguous.  Without an
+    exact match, the ambiguity error names what matched (first two +
+    count) so the provenance is troubleshooting-useful."""
 
     @pytest.mark.asyncio
-    async def test_ambiguous_error_names_matched_addresses(self):
+    async def test_exact_match_wins_over_annexe_variant(self):
         from houses.council_tax import lookup_council_tax
 
         class Row:
@@ -66,8 +67,7 @@ class TestLookupAmbiguityDetail:
         class Page:
             rows = [
                 Row("2 WILLOWMEAD GARDENS", "D"),
-                Row("FLAT 2, 2 WILLOWMEAD GARDENS", "D"),
-                Row("12 WILLOWMEAD GARDENS", "D"),
+                Row("FLAT 2, 2 WILLOWMEAD GARDENS", "A"),
             ]
 
         def fetcher(postcode: str, page: int):
@@ -78,14 +78,42 @@ class TestLookupAmbiguityDetail:
             "2 Willowmead Gardens, Marlow, SL7 1HW",
             page_fetcher=fetcher,
         )
+        assert a.succeeded, f"exact address must win, got: {a.status}: {a.error}"
+        info = a.value_or_none()
+        assert info is not None
+        assert info.band == "D"
+
+    @pytest.mark.asyncio
+    async def test_no_exact_match_stays_ambiguous_with_names(self):
+        from houses.council_tax import lookup_council_tax
+
+        class Row:
+            def __init__(self, address: str, band: str):
+                self.address = address
+                self.band = band
+                self.local_authority = "Woking"
+
+        class Page:
+            rows = [
+                Row("2 WILLOWMEAD GARDENS", "D"),
+                Row("2 WILLOWMEAD COURT", "D"),
+            ]
+
+        def fetcher(postcode: str, page: int):
+            return Page()
+
+        # "2 Willowmead" alone names the number but no building — neither
+        # row is an exact prefix of the query, so it stays ambiguous.
+        a = await lookup_council_tax(
+            "SL7 1HW",
+            "2 Willowmead, Marlow, SL7 1HW",
+            page_fetcher=fetcher,
+        )
         assert a.impossible
         assert "address matched multiple properties" in (a.error or "")
-        # First two matched addresses + count — and crucially '12' is NOT
-        # in the sample (the hardened number+street pattern excludes it).
         assert "'2 WILLOWMEAD GARDENS'" in (a.error or "")
-        assert "'FLAT 2, 2 WILLOWMEAD GARDENS'" in (a.error or "")
+        assert "'2 WILLOWMEAD COURT'" in (a.error or "")
         assert "(2 matches)" in (a.error or "")
-        assert "12 WILLOWMEAD" not in (a.error or "")
 
 
 class TestLoadRates:

@@ -204,6 +204,21 @@ def _match_cert(certs: list[dict], building_id: str, address: str = "") -> Attem
             candidates = [c for c in certs if norm_id in _normalise(c.get("addressLine1", ""))]
         if not candidates:
             return Attempt.impossible("no matching certificate for this address")
+
+        # Exact-match priority: a candidate whose certificate address is
+        # the query's building designation verbatim (a token-aligned
+        # prefix of the normalized query) IS the property — a separate
+        # dwelling at the same number (annexe/flat) must not make it
+        # ambiguous.
+        if address:
+            norm_query_tokens = _normalise(address).split()
+            exact_candidates = []
+            for c in candidates:
+                row_tokens = _normalise(c.get("addressLine1", "")).split()
+                if len(row_tokens) >= 2 and norm_query_tokens[: len(row_tokens)] == row_tokens:
+                    exact_candidates.append(c)
+            if len(exact_candidates) == 1:
+                candidates = exact_candidates
         # Ambiguity check: more than one distinct address matches.  Name
         # the first two (sorted, deterministic) + the count so the
         # provenance can be used to troubleshoot the match.
