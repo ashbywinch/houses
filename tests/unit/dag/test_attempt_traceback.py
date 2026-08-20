@@ -290,3 +290,46 @@ class TestUserFacingMessages:
         assert "89306649" in j["message"]
         assert "89306649" not in j["user_message"]
         assert "dep failed" not in j["user_message"]
+
+    def test_http_error_friendly_user_message_preferred_over_raw_str(self):
+        """HttpError str() may embed the raw response body; the explicit
+        friendly user_message must win as the UI text (walkthrough run 3 —
+        a raw 'HTTP 404: {$type: ...}' blob was rendered to the user)."""
+        from dag.attempt import AttemptError
+        from dag.http_error import HttpError
+
+        raw_body = "{'$type': 'Tfl.Api.Presentation.Entities.ApiError, Tfl.Api.Presentation.Entities', 'httpStatusCode': 404}"  # noqa: E501
+        exc = HttpError(
+            404,
+            message=raw_body,
+            body=raw_body,
+            user_message="TfL couldn't find a route for this journey",
+        )
+        info = AttemptError.from_exception(f"node: {exc}", exc, source="node")
+        assert info.display_message == "TfL couldn't find a route for this journey"
+        assert raw_body not in info.display_message
+        # The internal message keeps the raw reason for logs.
+        assert raw_body in info.message
+
+    def test_http_error_without_user_message_falls_back_to_str(self):
+        from dag.attempt import AttemptError
+        from dag.http_error import HttpError
+
+        exc = HttpError(429, "rate limited")
+        info = AttemptError.from_exception(f"node: {exc}", exc, source="node")
+        assert info.display_message == "HTTP 429: rate limited"
+
+    def test_http_error_user_message_survives_persistence_round_trip(self):
+        from dag.attempt import AttemptError
+        from dag.http_error import HttpError
+
+        exc = HttpError(
+            409,
+            message="{'message': 'route planner unavailable'}",
+            body="{'message': 'route planner unavailable'}",
+            user_message="TfL's route planner is unavailable right now",
+        )
+        info = AttemptError.from_exception(f"node: {exc}", exc, source="node")
+        restored = AttemptError.from_dict(info.to_dict())
+        assert restored.display_message == "TfL's route planner is unavailable right now"
+        assert "route planner unavailable" in restored.message

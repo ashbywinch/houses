@@ -51,6 +51,26 @@ class TestPropertyApi:
         assert data["best_location"]["status"] == "succeeded"
         assert data["best_location"]["value"] == {"lat": 51.5, "lon": -0.1}
 
+    def test_patch_address_recomputes_best_address(self):
+        """PATCH /properties/{rid}/address must surface the corrected
+        address in the immediate detail refetch (the C2 edit flow)."""
+        from houses.nodes.property import PropertyNodes
+
+        client, reg = self._setup()
+        prop = PropertyNodes("prop123")
+        prop.rightmove_address.push("10 High St", "Rightmove")
+        reg["prop123"] = prop
+        flush_all()
+
+        detail_before = client.get("/api/properties/prop123/detail").json()
+        assert detail_before["best_address"]["value"] == "10 High St"
+
+        resp = client.patch("/api/properties/prop123/address", json={"address": "20 New Rd, London"})
+        assert resp.status_code == 200
+
+        detail_after = client.get("/api/properties/prop123/detail").json()
+        assert detail_after["best_address"]["value"] == "20 New Rd, London"
+
     def test_get_property_404(self):
         client, _ = self._setup()
         resp = client.get("/api/properties/nonexistent")

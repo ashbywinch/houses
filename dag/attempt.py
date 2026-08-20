@@ -108,18 +108,24 @@ class AttemptError:
         """Build an AttemptError from a caught exception, deriving code,
         retryable, and traceback from the exception's shape.
 
-        ``message`` is the internal message (may include node context);
-        ``user_message`` is the exception's own text — the friendly bit
-        safe to show the user.
+        ``message`` is the internal message (may include node context).
+        ``user_message`` prefers the exception's explicit friendly text
+        (``HttpError.user_message``) — never ``str(exc)`` when a client
+        provided one, because HTTP error strings can embed raw response
+        bodies.  Falls back to ``str(exc)`` as before.
         """
         code, retryable = classify_exception(exc)
         tb = ""
         if exc is not None:
             tb = "".join(_traceback.format_exception(type(exc), exc, exc.__traceback__))
+        user_message = ""
+        if exc is not None:
+            friendly = getattr(exc, "user_message", "")
+            user_message = friendly if isinstance(friendly, str) and friendly else str(exc)
         return cls(
             code=code,
             message=message,
-            user_message=str(exc) if exc is not None else message,
+            user_message=user_message or message,
             retryable=retryable,
             source=source,
             exc=exc,

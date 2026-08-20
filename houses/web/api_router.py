@@ -276,6 +276,9 @@ async def patch_address(rid: str, body: dict):
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
 
     prop.corrected_address.push(body.get("address", ""), "user")
+    # Recompute before responding — the frontend refetches the detail
+    # immediately, and the background scheduler would race that request.
+    await prop.best_address.refresh()
     return {"status": "ok"}
 
 
@@ -290,6 +293,8 @@ async def patch_location(rid: str, body: dict):
         raise HTTPException(status_code=422, detail="lat and lon are required")
     gp = GeoPoint(lat=lat, lon=lon)
     prop.precise_location.push(gp, "user")
+    # Recompute before responding — same race as the address PATCH.
+    await prop.best_location.refresh()
     return {"status": "ok"}
 
 

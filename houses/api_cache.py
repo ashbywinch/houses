@@ -20,14 +20,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 
-CACHE_DIR = Path("data/api_cache")
+_APP_KEY_RE = re.compile(r"app_key=[^&\"'}\s]+")
 
+
+CACHE_DIR = Path("data/api_cache")
 
 def set_cache_dir(path: str | Path) -> None:
     """Override the cache directory (used by tests to isolate caches)."""
@@ -61,12 +64,28 @@ def get_cached(
         return json.loads(path.read_text())  # type: ignore[no-any-return]
     return None
 
-
 def set_cached(method: str, url: str, params: dict[str, Any] | None, body: str | None, data: dict[str, Any]) -> None:
     """Store a JSON response so future identical requests skip the API."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path = _cache_path(_make_key(method, url, params, body))
-    path.write_text(json.dumps(data))
+    path.write_text(json.dumps(_scrub_secrets(data)))
+
+
+def _scrub_secrets(obj: Any) -> Any:
+    """Strip API keys echoed inside cached response bodies.
+
+    Cache KEYS already exclude auth params; response bodies are another
+    matter — TfL error payloads echo the request URL, including
+    ``app_key``.  Scrub any ``app_key=...`` in string values before
+    writing, recursively.
+    """
+    if isinstance(obj, dict):
+        return {k: _scrub_secrets(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_scrub_secrets(item) for item in obj]
+    if isinstance(obj, str) and "app_key=" in obj:
+        return _APP_KEY_RE.sub("app_key=REDACTED", obj)
+    return obj
 
 
 def evict_cached(method: str, url: str, params: dict[str, Any] | None, body: str | None) -> None:

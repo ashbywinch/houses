@@ -277,3 +277,119 @@ class TestTflClientNoRoute:
         _v = a.value_or_none()
         assert _v is not None
         assert _v.infeasible
+
+    @pytest.mark.asyncio
+    async def test_404_http_error_is_infeasible_not_impossible(self, monkeypatch):
+        """A TfL 404 'No journey found for your inputs' (e.g. the only
+        route needs a mode we excluded) is a deterministic no-route
+        answer — the client must yield succeeded-infeasible, never an
+        impossible attempt that poisons the transit branch."""
+        from dag.http_error import HttpError
+        from houses.tfl_client import TflClient
+
+        async def raise_404(url, params):
+            raise HttpError(
+                404,
+                message="{'message': 'No journey found for your inputs.'}",
+                body="{'message': 'No journey found for your inputs.'}",
+            )
+
+        monkeypatch.setattr(TflClient, "_cached_api_call", staticmethod(raise_404))
+
+        client = TflClient("51.5788804,-0.7648387", "RG12 8YA", "Bracknell", park_and_ride=True)
+        data = await client._fetch_data()
+        assert data is None
+        a = await client._process_data(None)
+        assert a.succeeded, f"404 no-route must be succeeded, got: {a.status}: {a.error}"
+        _v = a.value_or_none()
+        assert _v is not None
+        assert _v.infeasible
+        assert "HTTP 404" in _v.no_route_reason
+        assert "bus mode excluded" in _v.no_route_reason  # allow_bus=False probe
+
+    @pytest.mark.asyncio
+    async def test_409_http_error_still_propagates(self, monkeypatch):
+        """A planner outage (409) is a genuine failure — it must keep
+        raising so the DAG retries/surfaces it, not masquerade as no-route."""
+        import pytest
+
+        from dag.http_error import HttpError
+        from houses.tfl_client import TflClient
+
+        async def raise_409(url, params):
+            raise HttpError(409, message="route planner unavailable", body="{}")
+
+        monkeypatch.setattr(TflClient, "_cached_api_call", staticmethod(raise_409))
+
+        client = TflClient("SW1V 2QQ", "RG12 8YA", "Bracknell")
+        with pytest.raises(HttpError) as excinfo:
+            await client._fetch_data()
+        assert excinfo.value.status == 409
+
+    @pytest.mark.asyncio
+    async def test_404_no_route_does_not_poison_transit_chain(self, monkeypatch):
+        """Full scheduler path: no_bus has no route (succeeded-infeasible
+        after the 404 conversion) and with_bus succeeds — TransitNode must
+        pick with_bus.  An impossible no_bus would short-circuit refresh
+        before compute and poison the branch."""
+        from houses.nodes.transit import TflTransitNode, TransitNode
+        from houses.tfl_client import TflClient
+
+        def _infeasible():
+            return Commute(
+                person=Person(name="", has_car=True),
+                label="no route",
+                destination=PlaceOfInterest(label="Bracknell", address="RG12 8YA"),
+                duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+                daily_cost=Money("0", "GBP"),
+                mode="transit",
+                _details=(),
+                infeasible=True,
+                no_route_reason="TfL couldn't find a route for this journey (HTTP 404, bus mode excluded)",
+            )
+
+        def _feasible(minutes: int):
+            return Commute(
+                person=Person(name="", has_car=True),
+                label="Bracknell",
+                destination=PlaceOfInterest(label="Bracknell", address="RG12 8YA"),
+                duration=Quantity(minutes, "minute"),  # type: ignore[arg-type]
+                daily_cost=Money("5", "GBP"),
+                mode="transit",
+                _details=(),
+            )
+
+        async def plan(self):
+            if self._allow_bus:
+                return Attempt.succeeded(_feasible(55))
+            return Attempt.succeeded(_infeasible())
+
+        monkeypatch.setattr(TflClient, "plan", plan)
+
+        loc = UserInputNode[GeoPoint]("t404_loc", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("t404_poi", PlaceOfInterest)
+        loc.push(GeoPoint(51.5, -0.1), "test")
+        poi.push(PlaceOfInterest(label="Bracknell", address="RG12 8YA"), "test")
+
+        no_bus = TflTransitNode("t404_nb", best_location=loc, poi=poi, has_car=True, allow_bus=False)
+        with_bus = TflTransitNode("t404_wb", best_location=loc, poi=poi, has_car=True, allow_bus=True)
+        node = TransitNode(
+            "t404",
+            best_location=loc,
+            poi=poi,
+            has_car=True,
+            no_bus_node=no_bus,
+            with_bus_node=with_bus,
+        )
+
+        await flush_processor()
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded, f"transit must pick with_bus, got: {a.status}: {a.error}"
+        _v = a.value_or_none()
+        assert _v is not None
+        assert _v.duration.magnitude == 55
+        # The no-route reason is debuggable from the provenance of the
+        # no_bus probe — a plain description, not a log side-channel.
+        nb_prov = await no_bus.build_provenance()
+        assert "HTTP 404" in (nb_prov.description or "")

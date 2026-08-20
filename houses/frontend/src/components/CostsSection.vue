@@ -288,13 +288,13 @@ function canEdit(personName: string): boolean {
               </div>
       <ProvenanceToggle v-if="affordability?.rental_income?.provenance" :provenance="affordability?.rental_income?.provenance" title="Rental income" />
 
-      <!-- Monthly cost by group — S+L (the joint owners) and the other
-           adults are shown as SEPARATE blocks; the per-group components
-           come from the DAG node so the split is never recomputed here. -->
+      <!-- Monthly cost by group — S+L and the other adults are shown as
+           SEPARATE blocks; the per-group components come from the DAG
+           node so the split is never recomputed here. -->
       <template v-if="affordability?.group_monthly_cost?.succeeded && affordability?.group_monthly_cost?.value?.couple">
         <div class="costs-row costs-row--group">
           <span class="costs-label">
-            {{ affordability.group_monthly_cost.value.couple_names || affordability.group_monthly_cost.value.couple_label }}
+            {{ affordability.group_monthly_cost.value.couple_label }}
             <ProvenanceToggle v-if="affordability?.group_monthly_cost?.provenance" :provenance="affordability?.group_monthly_cost?.provenance" title="Total monthly cost" />
           </span>
           <span class="costs-value" :title="totalMonthlyApprox ? 'Council tax estimated — total is approximate' : undefined">

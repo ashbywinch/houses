@@ -87,3 +87,5 @@ houses/frontend/public/provenance-v4.html
 houses/frontend/public/provenance-v5.html
 houses/frontend/public/provenance-v4-data.js
 houses/frontend/public/vue.global.js
+
+.lucidlint-cache/

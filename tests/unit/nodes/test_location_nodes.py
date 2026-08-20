@@ -79,6 +79,111 @@ class TestBestAddressNode:
         assert j["value"] == "10 High St"
         assert "error" not in j
 
+    @pytest.mark.asyncio
+    async def test_corrected_address_push_after_compute_recomputes(self):
+        """First corrected_address push after an initial compute (corrected
+        never had a value) must recompute best_address."""
+        from houses.nodes.location import BestAddressNode
+
+        user = UserInputNode[str]("addr_user_firstpush", str)
+        corrected = UserInputNode[str]("addr_corr_firstpush", str)
+        rightmove = UserInputNode[str]("addr_rm_firstpush", str)
+        node = BestAddressNode(
+            "addr_best_firstpush",
+            user_entered_address=user,
+            corrected_address=corrected,
+            rightmove_address=rightmove,
+        )
+
+        rightmove.push("Old Rightmove St", "Rightmove")
+        await flush_processor()
+        await flush_processor()
+        assert (await node.attempt()).value_or_none() == "Old Rightmove St"
+
+        corrected.push("New Corrected St", "User correction")
+        await flush_processor()
+        await flush_processor()
+        assert (await node.attempt()).value_or_none() == "New Corrected St"
+
+    @pytest.mark.asyncio
+    async def test_corrected_address_push_after_restart_recomputes(self):
+        """A corrected_address push after a server restart must recompute
+        best_address — the optional-source staleness snapshot is lost on
+        restart and must not mask the change."""
+        from houses.nodes.location import BestAddressNode
+
+        node_id = "addr_best_restart"
+        # First process: seed rightmove + corrected, compute best_address.
+        user = UserInputNode[str]("addr_user_restart", str)
+        corrected = UserInputNode[str]("addr_corr_restart", str)
+        rightmove = UserInputNode[str]("addr_rm_restart", str)
+        node = BestAddressNode(
+            node_id,
+            user_entered_address=user,
+            corrected_address=corrected,
+            rightmove_address=rightmove,
+        )
+        rightmove.push("Old Rightmove St", "Rightmove")
+        corrected.push("Old Corrected St", "User correction")
+        await flush_processor()
+        await flush_processor()
+        assert (await node.attempt()).value_or_none() == "Old Corrected St"
+
+        # Restart: fresh node objects load persisted attempts from the DB.
+        user2 = UserInputNode[str]("addr_user_restart", str)
+        corrected2 = UserInputNode[str]("addr_corr_restart", str)
+        rightmove2 = UserInputNode[str]("addr_rm_restart", str)
+        node2 = BestAddressNode(
+            node_id,
+            user_entered_address=user2,
+            corrected_address=corrected2,
+            rightmove_address=rightmove2,
+        )
+        # Fresh after restart — no recompute cascade without a change.
+        assert (await node2.attempt()).value_or_none() == "Old Corrected St"
+
+        corrected2.push("New Corrected St", "User correction")
+        await flush_processor()
+        await flush_processor()
+        assert (await node2.attempt()).value_or_none() == "New Corrected St"
+
+    @pytest.mark.asyncio
+    async def test_user_entered_address_push_after_restart_recomputes(self):
+        """A user_entered_address push after restart takes priority over the
+        persisted corrected_address."""
+        from houses.nodes.location import BestAddressNode
+
+        node_id = "addr_best_user_restart"
+        user = UserInputNode[str]("addr_user_u", str)
+        corrected = UserInputNode[str]("addr_corr_u", str)
+        rightmove = UserInputNode[str]("addr_rm_u", str)
+        node = BestAddressNode(
+            node_id,
+            user_entered_address=user,
+            corrected_address=corrected,
+            rightmove_address=rightmove,
+        )
+        rightmove.push("Old Rightmove St", "Rightmove")
+        corrected.push("Old Corrected St", "User correction")
+        await flush_processor()
+        await flush_processor()
+        assert (await node.attempt()).value_or_none() == "Old Corrected St"
+
+        user2 = UserInputNode[str]("addr_user_u", str)
+        corrected2 = UserInputNode[str]("addr_corr_u", str)
+        rightmove2 = UserInputNode[str]("addr_rm_u", str)
+        node2 = BestAddressNode(
+            node_id,
+            user_entered_address=user2,
+            corrected_address=corrected2,
+            rightmove_address=rightmove2,
+        )
+
+        user2.push("User Rd, SW1V 2QQ", "user")
+        await flush_processor()
+        await flush_processor()
+        assert (await node2.attempt()).value_or_none() == "User Rd, SW1V 2QQ"
+
 
 class TestBestLocationNode:
     @pytest.mark.asyncio
@@ -178,6 +283,48 @@ class TestBestLocationNode:
         await flush_processor()
         await flush_processor()
         assert (await node.attempt()).value_or_none() == user_gp
+
+    @pytest.mark.asyncio
+    async def test_precise_location_push_after_restart_recomputes(self):
+        """A precise_location push after a server restart must recompute
+        best_location — same optional-source staleness bug class."""
+        from houses.nodes.location import BestLocationNode
+
+        node_id = "best_loc_restart"
+        precise = UserInputNode[GeoPoint]("precise_restart", GeoPoint)
+        rightmove_loc = UserInputNode[GeoPoint]("rm_loc_restart", GeoPoint)
+        best_addr = UserInputNode[str]("addr_restart", str)
+        node = BestLocationNode(
+            node_id,
+            precise_location=precise,
+            rightmove_location=rightmove_loc,
+            best_address=best_addr,
+        )
+
+        rm_gp = GeoPoint(51.4, -0.2)
+        rightmove_loc.push(rm_gp, "rightmove")
+        best_addr.push("London", "rightmove")
+        await flush_processor()
+        await flush_processor()
+        assert (await node.attempt()).value_or_none() == rm_gp
+
+        # Restart: fresh nodes load persisted state.
+        precise2 = UserInputNode[GeoPoint]("precise_restart", GeoPoint)
+        rightmove_loc2 = UserInputNode[GeoPoint]("rm_loc_restart", GeoPoint)
+        best_addr2 = UserInputNode[str]("addr_restart", str)
+        node2 = BestLocationNode(
+            node_id,
+            precise_location=precise2,
+            rightmove_location=rightmove_loc2,
+            best_address=best_addr2,
+        )
+        assert (await node2.attempt()).value_or_none() == rm_gp
+
+        user_gp = GeoPoint(51.5, -0.1)
+        precise2.push(user_gp, "user")
+        await flush_processor()
+        await flush_processor()
+        assert (await node2.attempt()).value_or_none() == user_gp
 
     @pytest.mark.asyncio
     async def test_to_json_with_succeeded(self):

@@ -191,7 +191,7 @@ describe('CostsSection explanatory copy (C5/C6/C10)', () => {
           value: {
             couple: { value: '1100', stddev: 0 },
             others: { value: '200', stddev: 0 },
-            couple_label: 'S',
+            couple_label: 'S+L',
             others_label: 'Ashby',
             couple_names: 'Simon+Lorena',
             couple_breakdown: { rent_paid: 200 },
@@ -201,7 +201,7 @@ describe('CostsSection explanatory copy (C5/C6/C10)', () => {
         },
       },
     })
-    expect(wrapper.text()).toContain('Simon+Lorena')
+    expect(wrapper.text()).toContain('S+L')
     expect(wrapper.text()).toContain('Ashby')
     // the couple's own rent paid is a row; the old guessed transfer row
     // ("Rent received") must never render
@@ -209,8 +209,9 @@ describe('CostsSection explanatory copy (C5/C6/C10)', () => {
     expect(wrapper.text()).not.toContain('Rent received')
     // the impersonal "other adults" label is gone — the person's name
     expect(wrapper.text()).not.toContain('the other adults')
-    // "the joint owners" is gone too — names are sufficient
+    // and the "the joint owners" suffix is gone too — the label is just S+L
     expect(wrapper.text()).not.toContain('the joint owners')
+    expect(wrapper.text()).not.toContain('Simon+Lorena')
   })
 
   it('does NOT claim renovation costs are part of the mortgage', () => {
@@ -296,7 +297,7 @@ describe('CostsSection uncertainty rendering (Part A)', () => {
       },
     })
     const text = wrapper.text()
-    expect(text).toContain('Simon+Lorena')
+    expect(text).toContain('S+L')
     expect(text).toContain('Ashby')
     expect(text).toContain('£1548.67/mo')
     expect(text).toContain('£322.5/mo')

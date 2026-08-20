@@ -12,6 +12,12 @@ class HttpError(Exception):
     """An HTTP request failed with a non-2xx status code.
 
     Carries enough information for retry logic and diagnostics.
+
+    ``message`` is internal (logs/debug) and may embed the raw response
+    body. ``user_message`` is the UI-safe text — clients that surface
+    errors to users MUST pass friendly text here; raw bodies belong in
+    ``body``.  ``AttemptError.from_exception`` prefers ``user_message``
+    over ``str(exc)``, so a raw body never reaches the UI by default.
     """
 
     def __init__(
@@ -21,10 +27,12 @@ class HttpError(Exception):
         *,
         headers: dict[str, str] | None = None,
         body: str = "",
+        user_message: str = "",
     ) -> None:
         self.status = status
         self.headers = headers or {}
         self.body = body
+        self.user_message = user_message or f"HTTP {status}: {message or _status_phrase(status)}"
         reason = message or _status_phrase(status)
         super().__init__(f"HTTP {status}: {reason}")
 

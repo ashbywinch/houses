@@ -196,6 +196,7 @@ class Commute:
     _details: tuple[CostGroup, ...] = ()
     is_child: bool = False
     infeasible: bool = False
+    no_route_reason: str = ""
 
     def to_provenance_value(self) -> str:
         """Human summary for provenance display — ONE canonical structure
@@ -207,7 +208,7 @@ class Commute:
         Full leg-by-leg details live in the formula, not here.
         """
         if self.infeasible:
-            return "Infeasible route"
+            return self.no_route_reason or "Infeasible route"
         mode_label = _MODE_LABELS.get(self.mode, self.mode.title())
         cost = f"£{self.daily_cost.amount:,.2f}/day"
         poi = self.destination

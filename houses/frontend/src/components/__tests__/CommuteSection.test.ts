@@ -53,3 +53,27 @@ describe('CommuteSection provenance (round-2 walkthrough)', () => {
     expect(wrapper.text()).toContain('Petrol MPG')
   })
 })
+
+describe('CommuteSection no-route reason', () => {
+  it('shows the TfL no-route reason instead of the generic message', async () => {
+    const commutes = {
+      'Simon/Bracknell': {
+        succeeded: true,
+        value: {
+          mode: 'transit',
+          duration: null,
+          daily_cost: { amount: '0', currency: 'GBP' },
+          details: [],
+          infeasible: true,
+          no_route_reason: "TfL couldn't find a route for this journey (HTTP 404, bus mode excluded)",
+        },
+        error: null,
+        provenance: { label: 'Simon/Bracknell commute', sourceType: 'calc', sources: {} },
+      },
+    }
+    const wrapper = mountSection(commutes)
+    await wrapper.find('.commute-accordion button').trigger('click') // expand
+    expect(wrapper.text()).toContain('HTTP 404')
+    expect(wrapper.text()).not.toContain('check the address in Settings')
+  })
+})
