@@ -156,6 +156,13 @@ class BusLegAugmentNode(DerivedNode[Commute]):
         deps = [transit_input]
         if max_walk_node is not None:
             deps.append(max_walk_node)
+        # Static deps include the bus route + fare nodes so their changed
+        # signals re-schedule this node when they resolve LATER — a refresh
+        # that found them pending must not leave the augment stuck forever.
+        # _get_active_deps gates whether a pending/irrelevant bus route can
+        # block (same pattern as ParkAndRideAugmentNode's postcode).
+        deps.append(bus_route_node)
+        deps.append(bods_fare_node)
         super().__init__(node_id, Commute, tuple(deps))
 
     def _current_max_walk(self) -> int:

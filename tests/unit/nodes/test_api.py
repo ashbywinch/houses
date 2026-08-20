@@ -71,6 +71,35 @@ class TestPropertyApi:
         detail_after = client.get("/api/properties/prop123/detail").json()
         assert detail_after["best_address"]["value"] == "20 New Rd, London"
 
+    def test_patch_address_drains_cascade_before_responding(self):
+        """The PATCH must recompute the downstream DAG (council tax, EPC)
+        BEFORE responding — the frontend refetches immediately and would
+        otherwise race the background cascade and show stale figures."""
+        from houses.nodes.property import PropertyNodes
+        from houses.services_provider import get_services
+
+        client, reg = self._setup()
+        prop = PropertyNodes("prop123")
+        prop.rightmove_address.push("10 High St", "Rightmove")
+        prop.postcode.push("SW1V 2QQ", "Rightmove")
+        reg["prop123"] = prop
+        flush_all()
+
+        epc_svc = get_services().epc_service
+        epc_svc.calls.clear()
+
+        resp = client.patch(
+            "/api/properties/prop123/address",
+            json={"address": "20 New Rd, London SW1V 2QQ"},
+        )
+        assert resp.status_code == 200
+
+        assert any(addr == "20 New Rd, London SW1V 2QQ" for _, addr in epc_svc.calls), (
+            f"EPC must be recomputed with the new address before the PATCH returns, calls={epc_svc.calls}"
+        )
+        detail = client.get("/api/properties/prop123/detail").json()
+        assert detail["affordability"]["council_tax"]["succeeded"]
+
     def test_get_property_404(self):
         client, _ = self._setup()
         resp = client.get("/api/properties/nonexistent")

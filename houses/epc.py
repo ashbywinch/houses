@@ -105,7 +105,7 @@ async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
     cached = get_cached("GET", EPC_SEARCH_URL, params)
     if cached is not None:
         certs = cached.get("data", [])
-        return _match_cert(certs, building_id)
+        return _match_cert(certs, building_id, address)
 
     try:
         async with cached_async_client(timeout=10.0) as client:
@@ -124,7 +124,7 @@ async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
             data = resp.json()
             set_cached("GET", EPC_SEARCH_URL, params, None, data)
             certs = data.get("data", [])
-            return _match_cert(certs, building_id)
+            return _match_cert(certs, building_id, address)
 
     except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
         raise  # transient — let DAG retry handle it
@@ -165,7 +165,7 @@ def _should_lookup_epc(address: str) -> tuple[bool, str]:
     return True, _extract_building_id(first)
 
 
-def _match_cert(certs: list[dict], building_id: str) -> Attempt[str]:
+def _match_cert(certs: list[dict], building_id: str, address: str = "") -> Attempt[str]:
     """Find the most recent certificate, optionally matching the building identifier.
 
     When *building_id* is provided, returns the band from the most recent
@@ -173,6 +173,12 @@ def _match_cert(certs: list[dict], building_id: str) -> Attempt[str]:
     If multiple different addresses match (ambiguous — e.g. "High Street"
     could be any of several buildings), returns a failed Attempt with a
     descriptive reason.
+
+    A NUMBER identifier is matched as a whole token — "2" must not claim
+    "12 WILLOWMEAD GARDENS", "20 …" or "A2 …" (the same hardening as the
+    council-tax lookup).  When the query address supplies the street token
+    after the number, the pair ("2 WILLOWMEAD") is required, so a flat's
+    row can't be confused with the house's.
     """
     if not certs:
         return Attempt.impossible("no certificates found")
@@ -180,7 +186,22 @@ def _match_cert(certs: list[dict], building_id: str) -> Attempt[str]:
     candidates = certs
     if building_id:
         norm_id = _normalise(building_id)
-        candidates = [c for c in certs if norm_id in _normalise(c.get("addressLine1", ""))]
+        if norm_id.isdigit():
+            street = ""
+            if address:
+                tokens = _normalise(address).split()
+                try:
+                    idx = tokens.index(norm_id)
+                    if idx + 1 < len(tokens):
+                        street = tokens[idx + 1]
+                except ValueError:
+                    pass
+            pattern = rf"(?<![A-Z0-9]){re.escape(norm_id)}(?![A-Z0-9])"
+            if street:
+                pattern = rf"(?<![A-Z0-9]){re.escape(norm_id)}\s+{re.escape(street)}(?![A-Z0-9])"
+            candidates = [c for c in certs if re.search(pattern, _normalise(c.get("addressLine1", "")))]
+        else:
+            candidates = [c for c in certs if norm_id in _normalise(c.get("addressLine1", ""))]
         if not candidates:
             return Attempt.impossible("no matching certificate for this address")
         # Ambiguity check: more than one distinct address matches
