@@ -77,6 +77,12 @@ class PropertyNodes:
         self.user_notes = UserInputNode[str](f"{rid}/user_notes", str)
         self.triage_status = UserInputNode[str](f"{rid}/triage_status", str)
 
+        # Annexe apportionment (app-only, not synced to sheet): which
+        # people pay a share of the annexe's council tax, and whether the
+        # detected second dwelling is actually unrelated to the purchase.
+        # Defaults are seeded at bootstrap so they never block refresh.
+        self.annexe_payers = UserInputNode[list[str]](f"{rid}/annexe_payers", list[str])
+        self.annexe_ignored = UserInputNode[bool](f"{rid}/annexe_ignored", bool)
         # ── Location DerivedNodes ─────────────────────────────────────
         self.best_address = BestAddressNode(
             f"{rid}/best_address",
@@ -207,6 +213,8 @@ class PropertyNodes:
             commute_breakdown_node=self.commute_breakdown,
             council_tax_node=self.council_tax,
             persons_source=self._svc.persons_source,
+            annexe_payers_node=self.annexe_payers,
+            annexe_ignored_node=self.annexe_ignored,
         )
 
         # ── Signal wiring ──────────────────────────────────────────────
@@ -313,6 +321,10 @@ class PropertyNodes:
                 "monthly_commute_cost": await self.commute_breakdown.to_json(),
                 "rental_income": await self.rental_income.to_json(),
                 "group_monthly_cost": await self.group_monthly_cost.to_json(),
+            },
+            "annexe": {
+                "payers": await self.annexe_payers.to_json_value(),
+                "ignored": await self.annexe_ignored.to_json_value(),
             },
             "area": {
                 "walkability": await self.walkability.to_json(),

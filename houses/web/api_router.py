@@ -308,6 +308,30 @@ async def patch_location(rid: str, body: dict):
     return {"status": "ok"}
 
 
+@api_router.patch("/properties/{rid}/annexe")
+async def patch_annexe(rid: str, body: dict):
+    """Set the annexe apportionment for a property.
+
+    ``payers`` — the people who pay a share of the annexe's council tax
+    (they split it equally).  ``ignored`` — the detected second dwelling
+    is not related to the purchase; hide it and exclude its costs.
+    """
+    prop = get_registry_property(rid)
+    if prop is None:
+        raise HTTPException(status_code=404, detail=f"Property {rid} not found")
+    if "payers" in body:
+        payers = body["payers"]
+        if not isinstance(payers, list) or not all(isinstance(p, str) for p in payers):
+            raise HTTPException(status_code=422, detail="payers must be a list of person names")
+        prop.annexe_payers.push(payers, "user")
+    if "ignored" in body:
+        prop.annexe_ignored.push(bool(body["ignored"]), "user")
+    from dag.scheduler import flush_processor
+
+    await flush_processor()
+    return {"status": "ok"}
+
+
 @api_router.patch("/properties/{rid}/triage")
 async def patch_triage(rid: str, body: dict):
     prop = get_registry_property(rid)

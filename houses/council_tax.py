@@ -16,7 +16,7 @@ from money import Money
 from dag.attempt import Attempt
 from dag.measurement import Measurement
 from houses.api_cache import cached_sync_client, get_cached, set_cached
-from houses.council_tax_info import CouncilTaxInfo
+from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
 
 logger = logging.getLogger(__name__)
 
@@ -364,8 +364,13 @@ async def lookup_council_tax(
         row_tokens = _normalise(m["address"]).split()
         if len(row_tokens) >= 2 and norm_query_tokens[: len(row_tokens)] == row_tokens:
             exact_matches.append(m)
-    if len(exact_matches) == 1:
-        matches = exact_matches
+    if len(exact_matches) >= 1:
+        # Multiple exact prefixes are the SAME property with locality
+        # variants ("2 WILLOWMEAD GARDENS" vs "… MARLOW") — collapse when
+        # the band agrees; different bands on the same designation is a
+        # real conflict that falls through to the ambiguity error.
+        bands = {m["band"] for m in exact_matches}
+        matches = [exact_matches[0]] if len(bands) == 1 else exact_matches
 
     # Ambiguity check: more than one distinct address matches.  The error
     # names the first two (sorted, deterministic) and the total count so
@@ -385,6 +390,35 @@ async def lookup_council_tax(
         )
 
     matched = matches[0]
+
+    # Annexe detection: the exact match IS the property.  An annexe is a
+    # single OTHER VOA property whose address is the main address with a
+    # unit prefix (a superset) — "FLAT 2, 2 WILLOWMEAD GARDENS" ends in
+    # "2 WILLOWMEAD GARDENS".  Locality-suffixed duplicates ("2
+    # WILLOWMEAD GARDENS MARLOW") are the same property, not an annexe.
+    annexe = None
+    main_tokens = _normalise(matched["address"]).split()
+    annexe_rows = []
+    for r in active:
+        if _normalise(r["address"]) == _normalise(matched["address"]):
+            continue
+        row_tokens = _normalise(r["address"]).split()
+        if (
+            len(row_tokens) > len(main_tokens)
+            and row_tokens[len(row_tokens) - len(main_tokens):] == main_tokens
+        ):
+            annexe_rows.append(r)
+    if len(annexe_rows) == 1:
+        r = annexe_rows[0]
+        annexe_yearly = (
+            _lookup_yearly_cost(r["band"], r["local_authority"]) if r["local_authority"] else None
+        )
+        annexe = AnnexeDwelling(
+            address=r["address"],
+            band=r["band"],
+            yearly_cost=Measurement(annexe_yearly, 0.0) if annexe_yearly is not None else None,
+        )
+
     yearly_cost = None
     evidence_url = ""
     if matched["local_authority"]:
@@ -399,5 +433,6 @@ async def lookup_council_tax(
             band=matched["band"],
             yearly_cost=Measurement(yearly_cost, 0.0) if yearly_cost is not None else None,
             evidence_url=evidence_url,
+            annexe=annexe,
         ),
     )

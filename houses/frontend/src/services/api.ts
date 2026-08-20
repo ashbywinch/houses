@@ -63,6 +63,17 @@ export function patchAddress(rid: string, address: string): Promise<Response> {
   }).then(checkFor401)
 }
 
+export function patchAnnexe(
+  rid: string,
+  body: { payers?: string[]; ignored?: boolean },
+): Promise<Response> {
+  return fetch(`${BASE}/properties/${encodeURIComponent(rid)}/annexe`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(body),
+  }).then(checkFor401)
+}
+
 export function patchLocation(rid: string, lat: number, lon: number): Promise<Response> {
   return fetch(`${BASE}/properties/${encodeURIComponent(rid)}/location`, {
     method: 'PATCH',

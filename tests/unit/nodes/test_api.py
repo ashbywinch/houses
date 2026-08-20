@@ -100,6 +100,44 @@ class TestPropertyApi:
         detail = client.get("/api/properties/prop123/detail").json()
         assert detail["affordability"]["council_tax"]["succeeded"]
 
+    def test_patch_annexe_sets_payers_and_detail_exposes_annexe(self):
+        """PATCH /properties/{rid}/annexe persists the apportionment and
+        the detail payload exposes the detected annexe + the choice."""
+        from money import Money
+
+        from dag.attempt import Attempt
+        from dag.measurement import Measurement
+        from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
+        from houses.nodes.property import PropertyNodes
+
+        client, reg = self._setup()
+        prop = PropertyNodes("prop123")
+        prop.rightmove_address.push("10 High St", "Rightmove")
+        prop.postcode.push("SW1V 2QQ", "Rightmove")
+        reg["prop123"] = prop
+        prop.council_tax._attempt = Attempt.succeeded(
+            CouncilTaxInfo(
+                band="D",
+                yearly_cost=Measurement(Money("1800", "GBP"), 0.0),
+                annexe=AnnexeDwelling(
+                    address="FLAT 2, 10 HIGH ST",
+                    band="A",
+                    yearly_cost=Measurement(Money("900", "GBP"), 0.0),
+                ),
+            )
+        )
+        flush_all()
+
+        detail = client.get("/api/properties/prop123/detail").json()
+        assert detail["affordability"]["council_tax"]["value"]["annexe"]["band"] == "A"
+
+        resp = client.patch("/api/properties/prop123/annexe", json={"payers": ["Ashby"], "ignored": False})
+        assert resp.status_code == 200
+
+        detail = client.get("/api/properties/prop123/detail").json()
+        assert detail["annexe"]["payers"]["value"] == ["Ashby"]
+        assert detail["annexe"]["ignored"]["value"] is False
+
     def test_get_property_404(self):
         client, _ = self._setup()
         resp = client.get("/api/properties/nonexistent")
@@ -129,6 +167,7 @@ class TestPropertyApi:
         """Regression: the 'choose a current house' dropdown was always
         empty on the settings page — /api/properties/current-homes was
         captured by the /api/properties/{rid} route (declared earlier),
+
         returning 'Property current-homes not found'.
 
         Contract: the two routes EACH resolve to their own handler — a

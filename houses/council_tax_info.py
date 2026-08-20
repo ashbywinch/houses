@@ -8,6 +8,21 @@ from dag.measurement import Measurement
 
 
 @dataclass(frozen=True)
+class AnnexeDwelling:
+    """A separate council-tax dwelling at the same address (annexe/flat).
+
+    Detected when exactly one other VOA property at the postcode is the
+    main property's address with a unit prefix — e.g. "FLAT 2, 2
+    WILLOWMEAD GARDENS" contains "2 WILLOWMEAD GARDENS".  It is a
+    separate dwelling with its own council tax bill.
+    """
+
+    address: str
+    band: str
+    yearly_cost: Measurement[Money] | None = None
+
+
+@dataclass(frozen=True)
 class CouncilTaxInfo:
     """Council tax band, cost, and evidence source.
 
@@ -22,6 +37,7 @@ class CouncilTaxInfo:
     yearly_cost: Measurement[Money] | None = None
     evidence_url: str = ""
     lookup_error: str = ""
+    annexe: AnnexeDwelling | None = None
 
     def to_provenance_value(self) -> str:
         """Human summary for provenance display.
@@ -32,6 +48,12 @@ class CouncilTaxInfo:
         ``url`` field (CouncilTaxNode), so it renders as a link.
         """
         if self.yearly_cost is None:
-            return f"Band {self.band}" if self.band else "Council tax"
-        amount = self.yearly_cost.value.amount
-        return f"Band {self.band} · £{amount:,.2f}/yr"
+            base = f"Band {self.band}" if self.band else "Council tax"
+        else:
+            amount = self.yearly_cost.value.amount
+            base = f"Band {self.band} · £{amount:,.2f}/yr"
+        if self.annexe is not None:
+            base += f" · annexe {self.annexe.address} (Band {self.annexe.band})"
+            if self.annexe.yearly_cost is not None:
+                base += f" · £{self.annexe.yearly_cost.value.amount:,.2f}/yr"
+        return base
