@@ -5,11 +5,12 @@ import { useAuthStore } from '../stores/auth'
 import { usePropertiesStore } from '../stores/properties'
 import Header from '../components/Header.vue'
 import MapView, { type MapMarker } from '../components/MapView.vue'
-import * as api from '../services/api'
+import AnnexeSection from '../components/AnnexeSection.vue'
 import CommuteSection from '../components/CommuteSection.vue'
 import CostsSection from '../components/CostsSection.vue'
 import SchoolsSection from '../components/SchoolsSection.vue'
 import NotesSection from '../components/NotesSection.vue'
+import * as api from '../services/api'
 const route = useRoute()
 const router = useRouter()
 const store = usePropertiesStore()
@@ -34,6 +35,14 @@ function scrollTo(id: string) {
 }
 
 // ── Existing computed / helpers ──────────────────────
+const adultsList = computed(() => {
+  const persons = detail.value?.settings?.persons?.value as unknown[] | undefined
+  if (!Array.isArray(persons)) return []
+  return (persons as { name?: string; is_child?: boolean }[])
+    .filter(p => !p.is_child && p.name)
+    .map(p => ({ name: p.name as string }))
+})
+
 const address = computed(() => detail.value?.best_address?.value ?? rid.value)
 
 const price = computed(() => detail.value?.rightmove_price?.succeeded
@@ -329,13 +338,22 @@ async function saveAddress() {
         :commutes="detail.commutes"
       />
 
-      <!-- ═══════════ COSTS ═══════════ -->
       <CostsSection
         :affordability="detail.affordability"
         :epc="detail.epc"
         :persons="detail.settings?.persons"
         :rid="rid"
         :current-person="currentPerson"
+      />
+
+      <!-- ═══════════ ANNEXE ═══════════ -->
+      <AnnexeSection
+        v-if="detail.annexe"
+        :rid="rid"
+        :annexe="(detail.affordability?.council_tax?.value as any)?.annexe ?? null"
+        :payers="detail.annexe.payers.value ?? []"
+        :ignored="detail.annexe.ignored.value ?? false"
+        :adults="adultsList"
       />
 
       <!-- ═══════════ NOTES ═══════════ -->

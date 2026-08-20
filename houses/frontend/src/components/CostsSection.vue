@@ -63,6 +63,7 @@ function coupleRows() {
   return [
     row('Mortgage', b.mortgage, a.monthly_mortgage?.provenance),
     row('Council tax', b.council_tax, a.council_tax?.provenance),
+    row('Annexe council tax', b.annexe_council_tax, a.council_tax?.provenance),
     row('Sinking fund', b.sinking_fund, a.monthly_sinking_fund?.provenance),
     row('Commutes', b.commutes, a.monthly_commute_cost?.provenance),
     row('Life insurance', b.insurance, a.life_insurance_total?.provenance),
@@ -79,6 +80,7 @@ function othersRows() {
   const a = props.affordability ?? {}
   return [
     row('Council tax', b.council_tax, a.council_tax?.provenance),
+    row('Annexe council tax', b.annexe_council_tax, a.council_tax?.provenance),
     row('Sinking fund', b.sinking_fund, a.monthly_sinking_fund?.provenance),
     row('Commutes', b.commutes, a.monthly_commute_cost?.provenance),
     row('Life insurance', b.insurance, a.life_insurance_total?.provenance),

@@ -116,6 +116,103 @@ class TestLookupExactMatchPriority:
         assert "(2 matches)" in (a.error or "")
 
 
+class TestAnnexeDetection:
+    """An annexe is a single extra VOA property whose address is the main
+    address with a unit prefix — 'FLAT 2, 2 WILLOWMEAD GARDENS' contains
+    '2 WILLOWMEAD GARDENS'.  Locality-suffixed duplicates are the same
+    property, not an annexe."""
+
+    @pytest.mark.asyncio
+    async def test_unit_prefixed_row_is_detected_as_annexe(self):
+        from houses.council_tax import lookup_council_tax
+
+        class Row:
+            def __init__(self, address: str, band: str):
+                self.address = address
+                self.band = band
+                self.local_authority = "Woking"
+
+        class Page:
+            rows = [
+                Row("2 WILLOWMEAD GARDENS", "D"),
+                Row("FLAT 2, 2 WILLOWMEAD GARDENS", "A"),
+            ]
+
+        def fetcher(postcode: str, page: int):
+            return Page()
+
+        a = await lookup_council_tax(
+            "SL7 1HW",
+            "2 Willowmead Gardens, Marlow, SL7 1HW",
+            page_fetcher=fetcher,
+        )
+        assert a.succeeded
+        info = a.value_or_none()
+        assert info is not None and info.annexe is not None
+        assert info.annexe.address == "FLAT 2, 2 WILLOWMEAD GARDENS"
+        assert info.annexe.band == "A"
+        assert info.annexe.yearly_cost is not None
+
+    @pytest.mark.asyncio
+    async def test_locality_suffixed_duplicate_is_not_annexe(self):
+        from houses.council_tax import lookup_council_tax
+
+        class Row:
+            def __init__(self, address: str, band: str):
+                self.address = address
+                self.band = band
+                self.local_authority = "Woking"
+
+        class Page:
+            rows = [
+                Row("2 WILLOWMEAD GARDENS", "D"),
+                Row("2 WILLOWMEAD GARDENS MARLOW", "D"),
+            ]
+
+        def fetcher(postcode: str, page: int):
+            return Page()
+
+        a = await lookup_council_tax(
+            "SL7 1HW",
+            "2 Willowmead Gardens, Marlow, SL7 1HW",
+            page_fetcher=fetcher,
+        )
+        assert a.succeeded
+        info = a.value_or_none()
+        assert info is not None
+        assert info.annexe is None, "locality-suffixed row is the same property"
+
+    @pytest.mark.asyncio
+    async def test_two_prefixed_rows_means_no_annexe(self):
+        from houses.council_tax import lookup_council_tax
+
+        class Row:
+            def __init__(self, address: str, band: str):
+                self.address = address
+                self.band = band
+                self.local_authority = "Woking"
+
+        class Page:
+            rows = [
+                Row("2 WILLOWMEAD GARDENS", "D"),
+                Row("FLAT 1, 2 WILLOWMEAD GARDENS", "A"),
+                Row("FLAT 2, 2 WILLOWMEAD GARDENS", "B"),
+            ]
+
+        def fetcher(postcode: str, page: int):
+            return Page()
+
+        a = await lookup_council_tax(
+            "SL7 1HW",
+            "2 Willowmead Gardens, Marlow, SL7 1HW",
+            page_fetcher=fetcher,
+        )
+        assert a.succeeded
+        info = a.value_or_none()
+        assert info is not None
+        assert info.annexe is None, "two prefixed rows are flats, not a single annexe"
+
+
 class TestLoadRates:
     """_load_rates loads the CSV and caches it."""
 

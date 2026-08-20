@@ -9,6 +9,7 @@ from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
 from dag.expression import Attr, Conditional, Div, Field, Literal, Ref
 from dag.measurement import Measurement
+from dag.node import Node
 
 
 class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
@@ -118,7 +119,6 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
     each group's shares counted. The couple's figure subtracts rent
     received from the others; the others' figure adds the rent they pay.
     """
-
     def __init__(
         self,
         node_id: str,
@@ -131,21 +131,41 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         commute_breakdown_node,
         council_tax_node,
         persons_source,
+        annexe_payers_node=None,
+        annexe_ignored_node=None,
     ):
+        self._annexe_payers_node = annexe_payers_node
+        self._annexe_ignored_node = annexe_ignored_node
+        deps = (
+            monthly_mortgage_node,
+            yearly_sinking_fund_node,
+            life_insurance_node,
+            rental_income_node,
+            status_node,
+            commute_breakdown_node,
+            council_tax_node,
+            persons_source,
+        )
+        if annexe_payers_node is not None:
+            deps = deps + (annexe_payers_node,)
+        if annexe_ignored_node is not None:
+            deps = deps + (annexe_ignored_node,)
         super().__init__(
             node_id,
             dict,
-            (
-                monthly_mortgage_node,
-                yearly_sinking_fund_node,
-                life_insurance_node,
-                rental_income_node,
-                status_node,
-                commute_breakdown_node,
-                council_tax_node,
-                persons_source,
-            ),
+            deps,
         )
+
+    def _get_active_deps(self):
+        """The annexe inputs are static deps (their signals re-schedule
+        this node) but a PENDING annexe setting must not block the whole
+        money cascade — only once the user has set them (or bootstrap
+        seeded the defaults) do they gate refresh."""
+        deps: list[Node] = [d for d in self._deps]
+        for node in (self._annexe_payers_node, self._annexe_ignored_node):
+            if node is not None and node.latest_attempt().pending:
+                deps.remove(node)
+        return tuple(deps)
 
     def compute(
         self,
@@ -157,6 +177,8 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         commute: Attempt[dict],
         council_tax: Attempt,
         persons: Attempt[list],
+        annexe_payers: Attempt[list] | None = None,
+        annexe_ignored: Attempt[bool] | None = None,
     ) -> Attempt[dict]:
         from houses.model.domain import joint_owner_names
 
@@ -195,20 +217,48 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         sinking_monthly = Decimal(0) if is_current else (sinking.value_or_none() or Money("0", "GBP")).amount / Decimal(12)  # noqa: E501
         insurance_scale = 0 if is_current else 1
 
+        # Annexe: a second dwelling at the same address has its OWN council
+        # tax bill.  Only the people the user picked pay it, split equally
+        # among themselves; until anyone is picked (or the user says the
+        # address is unrelated) it contributes nothing.
+        annexe = council.annexe if council is not None else None
+        ignored = (
+            bool(annexe_ignored.value_or_none())
+            if annexe_ignored is not None and annexe_ignored.succeeded
+            else False
+        )
+        payers: set[str] = set()
+        annexe_monthly = Decimal(0)
+        annexe_stddev = 0.0
+        if annexe is not None and annexe.yearly_cost is not None and not ignored:
+            if annexe_payers is not None and annexe_payers.succeeded:
+                payers = set(annexe_payers.value_or_none() or [])
+            if payers:
+                annexe_monthly = Decimal(str(annexe.yearly_cost.value.amount)) / Decimal(12)
+                annexe_stddev = float(annexe.yearly_cost.stddev) if annexe.yearly_cost.stddev else 0.0
+
         def group_figure(group: list, owner_share: float, rent: Decimal) -> tuple[Decimal, float, dict]:
             commutes = sum((commute_monthly(p.name) for p in group), Decimal(0))
             insurance = insurance_scale * sum((money_of(p, "life_insurance_monthly") for p in group), Decimal(0))
             share = Decimal(str(round(owner_share, 4)))
-            council_share = share * council_monthly
+            payer_count = sum(1 for p in group if p.name in payers)
+            annexe_share = (
+                Decimal(str(round(payer_count / len(payers), 4))) * annexe_monthly if payers else Decimal(0)
+            )
+            council_share = share * council_monthly + annexe_share
             sinking_share = share * sinking_monthly
             value = commutes + insurance + council_share + sinking_share + rent
             stddev = owner_share * float(council_stddev) / 12.0
+            if payers:
+                stddev += (payer_count / len(payers)) * annexe_stddev / 12.0
             breakdown = {
                 "commutes": round(float(commutes), 2),
                 "insurance": round(float(insurance), 2),
                 "council_tax": round(float(council_share), 2),
                 "sinking_fund": round(float(sinking_share), 2),
             }
+            if annexe_share:
+                breakdown["annexe_council_tax"] = round(float(annexe_share), 2)
             return value, round(stddev, 2), breakdown
 
         # Rent is per-person, never a transfer between groups: an adult's
@@ -276,4 +326,18 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
                 parts.append(f"{label} £{Decimal(others['value']):,.2f}/mo".strip())
             if parts:
                 prov.value = ", ".join(parts)
+            # Explain an annexe allocation: whose share of the second
+            # dwelling's council tax is inside these figures.
+            allocated = (val.get("couple_breakdown") or {}).get("annexe_council_tax") or (
+                val.get("others_breakdown") or {}
+            ).get("annexe_council_tax")
+            if allocated and self._annexe_payers_node is not None:
+                payer_att = self._annexe_payers_node.latest_attempt()
+                payers = payer_att.value_or_none() if payer_att is not None else None
+                if payers:
+                    annexe_note = "includes annexe council tax (second dwelling) split between: " + ", ".join(payers)
+                    if prov.description is None:
+                        prov.description = annexe_note
+                    else:
+                        prov.description = f"{prov.description} — {annexe_note}"
         return prov

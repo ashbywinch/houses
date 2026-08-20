@@ -581,3 +581,146 @@ class TestGroupMonthlyCostNode:
         couple = val["couple_breakdown"]
         assert Decimal(couple["rent_paid"]) == Decimal("200.00")
         assert Decimal(val["couple"]["value"]) == Decimal("300.00")
+
+    def _node_with_annexe(self, node_id: str):
+        """Build the node with annexe_payers/annexe_ignored inputs — no
+        same-id duplicate (the scheduler keys nodes by id)."""
+        from houses.nodes.total_monthly_housing_cost_node import GroupMonthlyCostNode
+
+        mg = UserInputNode[Money]("g_" + node_id + "_mg", Money)
+        sf = UserInputNode[Money]("g_" + node_id + "_sf", Money)
+        li = UserInputNode[Money]("g_" + node_id + "_li", Money)
+        ri = UserInputNode[Money]("g_" + node_id + "_ri", Money)
+        st = UserInputNode[str]("g_" + node_id + "_st", str)
+        cb = UserInputNode[dict]("g_" + node_id + "_cb", dict)
+        ct = UserInputNode[CouncilTaxInfo]("g_" + node_id + "_ct", CouncilTaxInfo)
+        ps = UserInputNode[list]("g_" + node_id + "_ps", list)
+        ap = UserInputNode[list]("g_" + node_id + "_ap", list)
+        ai = UserInputNode[bool]("g_" + node_id + "_ai", bool)
+        node = GroupMonthlyCostNode(
+            node_id,
+            monthly_mortgage_node=mg,
+            yearly_sinking_fund_node=sf,
+            life_insurance_node=li,
+            rental_income_node=ri,
+            status_node=st,
+            commute_breakdown_node=cb,
+            council_tax_node=ct,
+            persons_source=ps,
+            annexe_payers_node=ap,
+            annexe_ignored_node=ai,
+        )
+        return node, mg, sf, li, ri, st, cb, ct, ps, ap, ai
+
+    @pytest.mark.asyncio
+    async def test_annexe_council_tax_split_between_picked_payers(self):
+        """The annexe's council tax is split equally among the people the
+        user picked — here only Ashby pays it, so the others' figure
+        carries the whole annexe bill."""
+        from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
+
+        node, mg, sf, li, ri, st, cb, ct, ps, ap, ai = self._node_with_annexe("annexe1")
+        mg.push(Money("0", "GBP"), "test")
+        sf.push(Money("0", "GBP"), "test")
+        li.push(Money("0", "GBP"), "test")
+        ri.push(Money("0", "GBP"), "test")
+        st.push("", "test")
+        cb.push({}, "test")
+        simon = Person("Simon", True, home_co_owners=(HomeCoOwner(name="Lorena", share=50),))
+        ps.push([simon, Person("Lorena", False), Person("Ashby", False)], "test")
+        ct.push(
+            CouncilTaxInfo(
+                band="D",
+                yearly_cost=Measurement(Money("1800", "GBP"), 0.0),
+                annexe=AnnexeDwelling(
+                    address="FLAT 2, 2 WILLOWMEAD GARDENS",
+                    band="A",
+                    yearly_cost=Measurement(Money("900", "GBP"), 0.0),
+                ),
+            ),
+            "test",
+        )
+        ap.push(["Ashby"], "test")
+        ai.push(False, "test")
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded
+        val = a.value_or_none()
+        assert val is not None
+        # Couple: main ⅔ of £150/mo = 100.  Others: main ⅓ (50) + annexe 75.
+        assert float(val["couple"]["value"]) == pytest.approx(100, abs=0.01)
+        assert float(val["others"]["value"]) == pytest.approx(125, abs=0.01)
+        assert float(val["others_breakdown"]["annexe_council_tax"]) == pytest.approx(75, abs=0.01)
+        assert "annexe_council_tax" not in val["couple_breakdown"]
+
+        prov = await node.build_provenance()
+        assert "Ashby" in (prov.description or "")
+        assert "annexe" in (prov.description or "")
+
+    @pytest.mark.asyncio
+    async def test_annexe_contributes_nothing_until_payers_picked(self):
+        from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
+
+        node, mg, sf, li, ri, st, cb, ct, ps, ap, ai = self._node_with_annexe("annexe2")
+        mg.push(Money("0", "GBP"), "test")
+        sf.push(Money("0", "GBP"), "test")
+        li.push(Money("0", "GBP"), "test")
+        ri.push(Money("0", "GBP"), "test")
+        st.push("", "test")
+        cb.push({}, "test")
+        simon = Person("Simon", True, home_co_owners=(HomeCoOwner(name="Lorena", share=50),))
+        ps.push([simon, Person("Lorena", False), Person("Ashby", False)], "test")
+        ct.push(
+            CouncilTaxInfo(
+                band="D",
+                yearly_cost=Measurement(Money("1800", "GBP"), 0.0),
+                annexe=AnnexeDwelling(
+                    address="FLAT 2, 2 WILLOWMEAD GARDENS",
+                    band="A",
+                    yearly_cost=Measurement(Money("900", "GBP"), 0.0),
+                ),
+            ),
+            "test",
+        )
+        ap.push([], "test")  # nobody picked yet
+        ai.push(False, "test")
+        await flush_processor()
+
+        val = (await node.attempt()).value_or_none()
+        assert val is not None
+        assert float(val["couple"]["value"]) == pytest.approx(100, abs=0.01)
+        assert float(val["others"]["value"]) == pytest.approx(50, abs=0.01)
+
+    @pytest.mark.asyncio
+    async def test_ignored_annexe_contributes_nothing(self):
+        from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
+
+        node, mg, sf, li, ri, st, cb, ct, ps, ap, ai = self._node_with_annexe("annexe3")
+        mg.push(Money("0", "GBP"), "test")
+        sf.push(Money("0", "GBP"), "test")
+        li.push(Money("0", "GBP"), "test")
+        ri.push(Money("0", "GBP"), "test")
+        st.push("", "test")
+        cb.push({}, "test")
+        simon = Person("Simon", True, home_co_owners=(HomeCoOwner(name="Lorena", share=50),))
+        ps.push([simon, Person("Lorena", False), Person("Ashby", False)], "test")
+        ct.push(
+            CouncilTaxInfo(
+                band="D",
+                yearly_cost=Measurement(Money("1800", "GBP"), 0.0),
+                annexe=AnnexeDwelling(
+                    address="FLAT 2, 2 WILLOWMEAD GARDENS",
+                    band="A",
+                    yearly_cost=Measurement(Money("900", "GBP"), 0.0),
+                ),
+            ),
+            "test",
+        )
+        ap.push(["Ashby"], "test")
+        ai.push(True, "test")  # user says the address is unrelated
+        await flush_processor()
+
+        val = (await node.attempt()).value_or_none()
+        assert val is not None
+        assert float(val["others"]["value"]) == pytest.approx(50, abs=0.01)
