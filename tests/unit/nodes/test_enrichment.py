@@ -91,6 +91,48 @@ class TestCouncilTaxNode:
         finally:
             _sp.reset(token)
 
+    @pytest.mark.asyncio
+    async def test_fallback_carries_lookup_reason_into_provenance(self):
+        """The Band-D fallback must record WHY the lookup failed (including
+        the ambiguous addresses) so the provenance can be troubleshot."""
+        from houses.nodes.epc_node import CouncilTaxNode
+        from houses.services_provider import _request_services as _sp
+        from tests.helpers import make_services
+
+        class _FailingCT:
+            async def lookup(self, postcode, address=""):
+                return Attempt.impossible(
+                    "address matched multiple properties: '2 WILLOWMEAD GARDENS', "
+                    "'FLAT 2, 2 WILLOWMEAD GARDENS' (2 matches)"
+                )
+
+        svc = make_services(council_tax_service=_FailingCT())
+        token = _sp.set(svc)
+        try:
+            addr = UserInputNode[str]("addr_ct_fb", str)
+            pc = UserInputNode[str]("pc_ct_fb", str)
+            node = CouncilTaxNode("ct_fb", best_address=addr, postcode_node=pc)
+            addr.push("2 Willowmead Gardens, Marlow, SL7 1HW", "test")
+            pc.push("SL7 1HW", "test")
+
+            from dag.scheduler import flush_processor
+
+            await flush_processor()
+
+            a = await node.attempt()
+            assert a.succeeded, f"fallback estimate, not impossible: {a.status}: {a.error}"
+            val = a.value_or_none()
+            assert val is not None
+            assert "multiple properties" in val.lookup_error
+            assert "2 WILLOWMEAD GARDENS" in val.lookup_error
+
+            prov = await node.build_provenance()
+            assert "Council tax estimated" in (prov.description or "")
+            assert "multiple properties" in (prov.description or "")
+            assert "(2 matches)" in (prov.description or "")
+        finally:
+            _sp.reset(token)
+
 
 class TestWalkabilityNode:
     @pytest.mark.asyncio

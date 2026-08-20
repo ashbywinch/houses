@@ -353,8 +353,11 @@ async def lookup_council_tax(
         logger.debug("Could not match building %r in VOA results for %s", building_id, postcode)
         return Attempt.impossible(f"no VOA match for building {building_id}")
 
-    # Ambiguity check: more than one distinct address matches
-    unique_addresses = {m["address"] for m in matches}
+    # Ambiguity check: more than one distinct address matches.  The error
+    # names the first two (sorted, deterministic) and the total count so
+    # the provenance is actually troubleshooting-useful — "matched
+    # multiple properties" alone says nothing about WHAT was ambiguous.
+    unique_addresses = sorted({m["address"] for m in matches})
     if len(unique_addresses) > 1:
         logger.debug(
             "Ambiguous address %r — matched %d different VOA addresses for %s",
@@ -362,7 +365,10 @@ async def lookup_council_tax(
             len(unique_addresses),
             postcode,
         )
-        return Attempt.impossible("address matched multiple properties")
+        sample = ", ".join(repr(a) for a in unique_addresses[:2])
+        return Attempt.impossible(
+            f"address matched multiple properties: {sample} ({len(unique_addresses)} matches)"
+        )
 
     matched = matches[0]
     yearly_cost = None

@@ -1,5 +1,7 @@
 """Tests for council tax extract/normalise functions — no API calls."""
 
+import pytest
+
 from houses.council_tax import _extract_building, _normalise
 
 
@@ -44,6 +46,46 @@ class TestNormalise:
 
     def test_empty_string(self):
         assert _normalise("") == ""
+
+
+class TestLookupAmbiguityDetail:
+    """An ambiguous match must name what was ambiguous — first two
+    addresses and the count — so the provenance is troubleshooting-useful
+    instead of a bare 'matched multiple properties'."""
+
+    @pytest.mark.asyncio
+    async def test_ambiguous_error_names_matched_addresses(self):
+        from houses.council_tax import lookup_council_tax
+
+        class Row:
+            def __init__(self, address: str, band: str):
+                self.address = address
+                self.band = band
+                self.local_authority = "Woking"
+
+        class Page:
+            rows = [
+                Row("2 WILLOWMEAD GARDENS", "D"),
+                Row("FLAT 2, 2 WILLOWMEAD GARDENS", "D"),
+                Row("12 WILLOWMEAD GARDENS", "D"),
+            ]
+
+        def fetcher(postcode: str, page: int):
+            return Page()
+
+        a = await lookup_council_tax(
+            "SL7 1HW",
+            "2 Willowmead Gardens, Marlow, SL7 1HW",
+            page_fetcher=fetcher,
+        )
+        assert a.impossible
+        assert "address matched multiple properties" in (a.error or "")
+        # First two matched addresses + count — and crucially '12' is NOT
+        # in the sample (the hardened number+street pattern excludes it).
+        assert "'2 WILLOWMEAD GARDENS'" in (a.error or "")
+        assert "'FLAT 2, 2 WILLOWMEAD GARDENS'" in (a.error or "")
+        assert "(2 matches)" in (a.error or "")
+        assert "12 WILLOWMEAD" not in (a.error or "")
 
 
 class TestLoadRates:

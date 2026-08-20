@@ -46,10 +46,14 @@ def test_street_pairing_disambiguates_flats_from_house():
     ]
     a = _match_cert(certs, "2", address="2 Willowmead Gardens, Marlow, SL7 1HW")
     # House + flat rows are genuinely distinct addresses — ambiguous is
-    # correct; the bug would have been '20' joining the set too.
+    # correct; the bug would have been '20' joining the set too.  The
+    # error names what matched so the provenance is troubleshooting-useful.
     assert a.impossible
     assert "multiple properties" in (a.error or "")
-
+    assert "'2 WILLOWMEAD GARDENS'" in (a.error or "")
+    assert "'FLAT 2, 2 WILLOWMEAD GARDENS'" in (a.error or "")
+    assert "(2 matches)" in (a.error or "")
+    assert "20 WILLOWMEAD" not in (a.error or "")
 
 def test_no_match_reports_no_certificate():
     certs = [_cert("12 WILLOWMEAD GARDENS")]
