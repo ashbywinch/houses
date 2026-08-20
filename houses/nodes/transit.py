@@ -31,8 +31,13 @@ def _with_destination(
     return Attempt.succeeded(replace(val, destination=poi))
 
 
-def _infeasible_commute(label: str = "") -> Attempt[Commute]:
-    """Return a succeeded Commute that marks a route as not viable."""
+def _infeasible_commute(label: str = "", reason: str = "") -> Attempt[Commute]:
+    """Return a succeeded Commute that marks a route as not viable.
+
+    ``reason`` explains WHY no route exists (missing destination address,
+    TfL 404 no-journey, no car) — it travels on the Commute so the
+    provenance can show it without the DAG swallowing the answer.
+    """
     return Attempt.succeeded(
         Commute(
             person=Person(name="", has_car=False),
@@ -43,6 +48,7 @@ def _infeasible_commute(label: str = "") -> Attempt[Commute]:
             mode="",
             _details=(),
             infeasible=True,
+            no_route_reason=reason,
         )
     )
 
@@ -202,7 +208,7 @@ class WalkNode(DerivedNode[Commute]):
             return Attempt.impossible("missing location or destination")
         dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
-            return _infeasible_commute("empty destination")
+            return _infeasible_commute("empty destination", "No destination address for this journey")
         if self._route_fn is not None:
             result = await self._route_fn(loc, dest, self._max_walk)
         else:
@@ -240,7 +246,7 @@ class DriveNode(DerivedNode[Commute]):
             return Attempt.impossible("missing location or destination")
         dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
-            return _infeasible_commute("empty destination")
+            return _infeasible_commute("empty destination", "No destination address for this journey")
         if self._route_fn is not None:
             result = await self._route_fn(loc, dest)
         else:
@@ -280,7 +286,7 @@ class TflTransitNode(DerivedNode[Commute]):
             return Attempt.impossible("missing location or destination")
         dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
-            return _infeasible_commute("empty destination")
+            return _infeasible_commute("empty destination", "No destination address for this journey")
 
         origin_str = loc if isinstance(loc, str) else f"{loc.lat},{loc.lon}"
         dest_str = dest if isinstance(dest, str) else f"{dest.lat},{dest.lon}"

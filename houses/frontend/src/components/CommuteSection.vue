@@ -74,7 +74,7 @@ function toggleProvenance(key: string) {
         <span
           class="pill"
           :class="pillColour(c, thresholdsFor(String(key)).good, thresholdsFor(String(key)).fine)"
-          :title="c?.value?.duration ? undefined : 'No route found for this commute'"
+          :title="c?.value?.duration ? undefined : (c?.value?.no_route_reason || 'No route found for this commute')"
         >
           <template v-if="c?.value?.duration">
             {{ commuteDuration(c?.value?.duration) }}
@@ -85,7 +85,10 @@ function toggleProvenance(key: string) {
         <span class="commute-accordion__chevron" :class="{ 'commute-accordion__chevron--open': expandedCommutes.has(key as string) }">▼</span>
       </button>
       <div v-if="expandedCommutes.has(key as string)" class="commute-accordion__body">
-        <p v-if="!c?.value?._details?.length && !c?.provenance" class="commute-accordion__empty">
+        <p v-if="c?.value?.infeasible && c?.value?.no_route_reason" class="commute-accordion__empty">
+          {{ c?.value?.no_route_reason }}
+        </p>
+        <p v-else-if="!c?.value?._details?.length && !c?.provenance" class="commute-accordion__empty">
           No route found for this destination — check the address in Settings.
         </p>
         <div v-if="c?.value?._details?.length" class="commute-legs">

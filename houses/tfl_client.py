@@ -39,6 +39,20 @@ _MODE_MAP: dict[str, LegMode] = {
 }
 
 
+def _friendly_tfl_message(status: int) -> str:
+    """UI-safe reason for a TfL API failure.
+
+    404 is TfL's deterministic "cannot route this journey" answer; 409
+    is a planner outage.  Anything else degrades to a generic phrase —
+    never the raw response body, which stays in HttpError.message/body.
+    """
+    if status == 404:
+        return "TfL couldn't find a route for this journey"
+    if status == 409:
+        return "TfL's route planner is unavailable right now"
+    return "TfL couldn't plan this route"
+
+
 class TflClient:
     """TfL API client for public-transit route planning in London.
 
@@ -69,6 +83,7 @@ class TflClient:
         self._label = label
         self._park_and_ride = park_and_ride
         self._allow_bus = allow_bus
+        self._no_route_reason: str = ""
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -423,17 +438,36 @@ class TflClient:
                 # expiry, 409 planner outage) and must not poison the cache.
                 set_cached("GET", url, cache_params, None, {"_cached_status": 404, "_cached_body": data})
             if resp.status_code == 429 or (500 <= resp.status_code < 600):
-                raise HttpError(resp.status_code, body=str(data))
+                raise HttpError(
+                    resp.status_code,
+                    body=str(data),
+                    user_message="TfL is busy right now — try again shortly",
+                )
             if 400 <= resp.status_code < 500:
                 # Non-transient client error (e.g. 404 no route, 409 route
-                # planner unavailable) — surface the reason instead of letting
-                # _process_data reduce it to a generic "could not route".
+                # planner unavailable) — keep the raw body in the internal
+                # message (logs) and `body`; the UI sees only the friendly
+                # user_message (walkthrough run 3 — a raw TfL 404 blob was
+                # rendered to the user).
                 reason = str(data)[:200]
-                raise HttpError(resp.status_code, body=str(data), message=reason)
+                raise HttpError(
+                    resp.status_code,
+                    body=str(data),
+                    message=reason,
+                    user_message=_friendly_tfl_message(resp.status_code),
+                )
             return data
-
     async def _fetch_data(self) -> dict | None:
-        """Call TfL API and return the raw JSON response, or None on failure."""
+        """Call TfL API and return the raw JSON response, or None on failure.
+
+        A 404 "No journey found for your inputs" is TfL's deterministic
+        no-route answer (the only route may need a mode we excluded, e.g.
+        Wycombe → Bracknell needs bus) — it returns None so ``plan()``
+        yields a succeeded-infeasible commute and the selector falls back
+        to with-bus / drive / walk instead of failing hard.  Other
+        HttpErrors (429/5xx transient, 409 outage, 401/403 auth) still
+        propagate so the DAG retries or surfaces them.
+        """
         modes = ["tube", "overground", "dlr", "tram", "national-rail", "walking"]
         if self._allow_bus:
             modes.append("bus")
@@ -448,9 +482,16 @@ class TflClient:
             **TflClient._tfl_auth_params(),
         }
 
-        data = await TflClient._cached_api_call(url, params)
-        if data is not None and "Disambiguation" in str(data.get("$type", "")):
-            data = await self._geocode_fallback(params)
+        try:
+            data = await TflClient._cached_api_call(url, params)
+            if data is not None and "Disambiguation" in str(data.get("$type", "")):
+                data = await self._geocode_fallback(params)
+        except HttpError as e:
+            if e.status != 404:
+                raise
+            mode_note = "" if self._allow_bus else ", bus mode excluded"
+            self._no_route_reason = f"TfL couldn't find a route for this journey (HTTP 404{mode_note})"
+            return None
         return data
 
     async def _process_data(self, data: dict | None) -> Attempt[Commute]:
@@ -506,6 +547,7 @@ class TflClient:
                 mode="transit",
                 _details=(),
                 infeasible=True,
+                no_route_reason=self._no_route_reason or "TfL couldn't find a route for this journey",
             )
         )
 

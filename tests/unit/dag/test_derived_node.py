@@ -226,6 +226,31 @@ class TestDerivedNode:
         assert loaded["status"] == "succeeded"
         assert loaded["value"] == 84
 
+    @pytest.mark.asyncio
+    async def test_http_error_raised_in_compute_surfaces_friendly_message(self):
+        """A compute that raises HttpError (the TfL path) must persist a
+        friendly user_message — the raw body stays in the internal
+        message/logs only (walkthrough run 3)."""
+        src = UserInputNode[str]("src_http_err", str)
+        node = _RaisingHttpNode("http_err_node", deps=(src,))
+        src.push("x", "test")
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.impossible
+        assert a.error_info is not None
+        assert a.error_info.display_message == "TfL couldn't find a route for this journey"
+        assert "$type" in a.error_info.message  # internal message keeps the raw reason
+
+        j = await node.to_json()
+        assert j["error"] == "TfL couldn't find a route for this journey"
+        assert "$type" not in j["error"]
+        assert j["error_detail"]["user_message"] == "TfL couldn't find a route for this journey"
+
+        loaded = latest_node_result("http_err_node")
+        assert loaded["error"] == "TfL couldn't find a route for this journey"
+        assert "$type" not in loaded["error"]
+
 
 class _DoubleNode(DerivedNode[int]):
     def __init__(self, node_id: str, deps):
@@ -237,7 +262,24 @@ class _DoubleNode(DerivedNode[int]):
         val = dep_attempts[0]
         if val.succeeded:
             return Attempt.succeeded(val.value_or_none() * 2)
-        return Attempt.impossible("dep failed")
+
+
+class _RaisingHttpNode(DerivedNode[str]):
+    """Mimics a service call that raises HttpError (e.g. TfL 404)."""
+
+    def __init__(self, node_id: str, deps):
+        super().__init__(node_id, str, deps)
+
+    async def compute(self, *dep_attempts) -> Attempt[str]:
+        from dag.http_error import HttpError
+
+        raw = "{'$type': 'Tfl.Api.Presentation.Entities.ApiError', 'httpStatusCode': 404}"
+        raise HttpError(
+            404,
+            message=raw,
+            body=raw,
+            user_message="TfL couldn't find a route for this journey",
+        )
 
 
 class _SumNode(DerivedNode[int]):

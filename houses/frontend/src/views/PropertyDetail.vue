@@ -156,8 +156,11 @@ async function saveAddress() {
     await api.patchAddress(rid.value, draft)
     editingAddress.value = false
     addressSaved.value = true
-    // refetch: the DAG recomputes council tax and every downstream total
-    await store.loadDetail(rid.value)
+    // Refetch with force=true: the cached detail predates the correction,
+    // so a plain loadDetail() would return the stale cache and the address
+    // would appear unchanged. The DAG recomputes council tax and every
+    // downstream total on the server before this refetch.
+    await store.loadDetail(rid.value, true)
     setTimeout(() => (addressSaved.value = false), 3000)
   } catch {
     addressError.value = 'Could not save the address — try again.'

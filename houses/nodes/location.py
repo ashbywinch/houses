@@ -19,34 +19,38 @@ class BestAddressNode(DerivedNode[str]):
     def __init__(self, node_id: str, *, user_entered_address, corrected_address, rightmove_address):
         self._user_entered = user_entered_address
         self._corrected = corrected_address
-        self._user_entered_ts: str = ""
-        self._corrected_ts: str = ""
         super().__init__(node_id, str, (rightmove_address,))
+
+        from dag.signals import Slot
+
+        # Optional sources are NOT hard deps (a permanently pending input
+        # must not block refresh), but their changes must still schedule a
+        # recompute — mirror BestLocationNode's optional-dep wiring.
+        for src in (self._user_entered, self._corrected):
+            slot = Slot(self._on_dep_changed)
+            self._slots.append(slot)
+            src.changed.connect(slot)
 
     def _is_stale(self) -> bool:
         if self._attempt.pending:
             return True
         if super()._is_stale():
             return True
-        for src, ts_field in (
-            (self._user_entered, self._user_entered_ts),
-            (self._corrected, self._corrected_ts),
-        ):
-            # On restart the in-memory snapshot is lost (not persisted).
-            # Restore it from the dep's current _db_created_at so we can
-            # detect FUTURE changes correctly, without a false positive.
-            if not ts_field:
-                ts_field = src._db_created_at
-            ts = src._db_created_at
-            if ts and ts != ts_field:
+        # Detect optional-source changes exactly like the base class does
+        # for hard deps: a source persisted after this node last computed
+        # means the node's value predates it.  No in-memory snapshot — a
+        # snapshot is lost on restart and ambiguous when the source never
+        # had a value, which would mask the first push.
+        for src in (self._user_entered, self._corrected):
+            if (
+                src._persisted_at is not None
+                and self._computed_at is not None
+                and src._persisted_at > self._computed_at
+            ):
                 return True
         return False
 
     async def compute(self, rightmove: Attempt[str]) -> Attempt[str]:
-        # Snapshot timestamps for optional sources
-        self._user_entered_ts = self._user_entered._db_created_at
-        self._corrected_ts = self._corrected._db_created_at
-
         # Check optional sources in priority order
         user_attempt = await self._user_entered.attempt()
         if user_attempt.succeeded:
@@ -73,9 +77,6 @@ class BestLocationNode(DerivedNode[GeoPoint]):
         self._precise_location = precise_location
         self._rightmove_location = rightmove_location
         self._geocode = geocode
-        self._precise_ts_at_compute: str = ""
-        self._rightmove_ts_at_compute: str = ""
-        self._geocode_ts_at_compute: str = ""
         super().__init__(node_id, GeoPoint, (best_address,))
 
         from dag.signals import Slot
@@ -94,30 +95,22 @@ class BestLocationNode(DerivedNode[GeoPoint]):
             return True
         if super()._is_stale():
             return True
-        for src, ts_field in (
-            (self._precise_location, self._precise_ts_at_compute),
-            (self._rightmove_location, self._rightmove_ts_at_compute),
-        ):
-            if not ts_field:
-                ts_field = src._db_created_at
-            ts = src._db_created_at
-            if ts and ts != ts_field:
-                return True
-        if self._geocode is not None:
-            if not self._geocode_ts_at_compute:
-                self._geocode_ts_at_compute = self._geocode._db_created_at
-            ts = self._geocode._db_created_at
-            if ts and ts != self._geocode_ts_at_compute:
+        # Optional sources are detected the same way as BestAddressNode:
+        # persisted after this node last computed.  No in-memory snapshots —
+        # one is lost on restart and masks the first change after a source
+        # that previously had no value.
+        for src in (self._precise_location, self._rightmove_location, self._geocode):
+            if src is None:
+                continue
+            if (
+                src._persisted_at is not None
+                and self._computed_at is not None
+                and src._persisted_at > self._computed_at
+            ):
                 return True
         return False
 
     async def compute(self, address: Attempt[str]) -> Attempt[GeoPoint]:
-        # Snapshot timestamps for optional sources so _is_stale() can
-        # detect future changes after this recompute.
-        self._precise_ts_at_compute = self._precise_location._db_created_at
-        self._rightmove_ts_at_compute = self._rightmove_location._db_created_at
-        if self._geocode is not None:
-            self._geocode_ts_at_compute = self._geocode._db_created_at
 
         # Check precise_location first (optional — may be pending)
         precise_attempt = await self._precise_location.attempt()

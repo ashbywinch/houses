@@ -356,9 +356,18 @@ class DerivedNode(Node[T], Generic[T]):
         # The provenance error/description feed the UI — use the friendly
         # user_message, never the internal node-id/dep chain.
         user_error = error_info.display_message if error_info is not None else self._attempt.error
+        # A succeeded-infeasible commute (TfL 404 "no route", missing
+        # destination, no car) carries its reason on the value — surface
+        # it as the description so the provenance explains WHY there is no
+        # route.  Duck-typed: only values with both attributes contribute.
+        val = self._attempt.value_or_none()
+        no_route_reason = ""
+        if self._attempt.succeeded and val is not None and getattr(val, "infeasible", False):
+            no_route_reason = getattr(val, "no_route_reason", "") or ""
+        description = user_error if self._attempt.impossible else (no_route_reason or None)
         return Provenance(
             label=self.display_name,
-            description=user_error if self._attempt.impossible else None,
+            description=description,
             value=project_value(self._attempt.value),
             url=self._source_url,
             source_type=self.provenance_source_type,

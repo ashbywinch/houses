@@ -9,6 +9,8 @@ retries stay genuine.
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -186,6 +188,41 @@ async def test_cached_api_call_caches_404_wrapped_but_not_429(isolated_cache):
 
 
 @pytest.mark.asyncio
+async def test_cached_api_call_live_404_has_friendly_user_message(isolated_cache):
+    """A live TfL 404 must surface a friendly user_message — the UI renders
+    display_message, and a raw ApiError body must never reach it."""
+    body = {"$type": "Tfl.Api.Presentation.Entities.ApiError", "httpStatusCode": 404, "message": "no route"}
+    inner = _FakeInner(httpx.Response(404, json=body))
+
+    def client_factory(**kw):
+        return httpx.AsyncClient(transport=CachingTransport(inner=inner))
+
+    with pytest.raises(HttpError) as excinfo:
+        await TflClient._cached_api_call(URL, AUTH_PARAMS, _client_factory=client_factory)
+    e = excinfo.value
+    assert e.status == 404
+    assert e.user_message == "TfL couldn't find a route for this journey"
+    assert "$type" not in e.user_message
+    # The raw body stays in the internal message and body for logs.
+    assert "$type" in str(e)
+    assert "$type" in e.body
+
+
+@pytest.mark.asyncio
+async def test_cached_api_call_live_429_has_friendly_user_message(isolated_cache):
+    inner = _FakeInner(httpx.Response(429, json={"error": "rate limit"}))
+
+    def client_factory(**kw):
+        return httpx.AsyncClient(transport=CachingTransport(inner=inner))
+
+    with pytest.raises(HttpError) as excinfo:
+        await TflClient._cached_api_call(f"{URL}/rl", AUTH_PARAMS, _client_factory=client_factory)
+    e = excinfo.value
+    assert e.status == 429
+    assert e.user_message == "TfL is busy right now — try again shortly"
+
+
+@pytest.mark.asyncio
 async def test_transport_writes_404_wrapped_and_preserves_status(isolated_cache):
     # First request: 404 from the inner, cached WRAPPED. Second request: served
     # from cache WITH the 404 status — not as a fake 200.
@@ -205,10 +242,7 @@ async def test_transport_writes_404_wrapped_and_preserves_status(isolated_cache)
 @pytest.mark.asyncio
 async def test_transport_evicts_raw_transient_body(isolated_cache):
     # Raw legacy 500 body (httpStatusCode) is poison — evicted, inner served.
-    set_cached(
-        "GET", URL, STRIPPED_PARAMS, None,
-        {"$type": "ApiError", "httpStatusCode": 500},
-    )
+    set_cached("GET", URL, STRIPPED_PARAMS, None, {"$type": "ApiError", "httpStatusCode": 500})
     inner = _FakeInner(httpx.Response(200, json={"journeys": [{"duration": 5}]}))
     async with httpx.AsyncClient(transport=CachingTransport(inner=inner)) as client:
         resp = await client.get(URL, params=AUTH_PARAMS)
@@ -216,6 +250,30 @@ async def test_transport_evicts_raw_transient_body(isolated_cache):
     assert inner.requests  # poison did not short-circuit
     entry = get_cached("GET", URL, STRIPPED_PARAMS, None)
     assert entry is None or "httpStatusCode" not in entry
+
+
+def test_set_cached_scrubs_app_key_from_body(isolated_cache):
+    """Response bodies that echo the request URL carry the API key — it
+    must be scrubbed before the body hits disk."""
+    from houses.api_cache import get_cached, set_cached
+
+    set_cached(
+        "GET",
+        "https://api.tfl.gov.uk/Journey/JourneyResults/51.5,-0.1/to/SW1V 2QQ",
+        {"nationalSearch": "true"},
+        None,
+        {
+            "relativeUri": "/Journey/JourneyResults/51.5,-0.1/to/SW1V%202QQ?nationalSearch=true&app_key=super-secret-key",  # noqa: E501
+            "nested": {"uri": "?x=1&app_key=another-secret"},
+            "plain": "no key here",
+        },
+    )
+    cached = get_cached("GET", "https://api.tfl.gov.uk/Journey/JourneyResults/51.5,-0.1/to/SW1V 2QQ", {"nationalSearch": "true"})  # noqa: E501
+    assert "super-secret-key" not in json.dumps(cached)
+    assert "another-secret" not in json.dumps(cached)
+    assert "app_key=REDACTED" in cached["relativeUri"]
+    assert "app_key=REDACTED" in cached["nested"]["uri"]
+    assert cached["plain"] == "no key here"
 
 
 @pytest.mark.asyncio

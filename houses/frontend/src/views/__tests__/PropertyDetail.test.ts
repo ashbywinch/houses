@@ -666,7 +666,7 @@ describe('PropertyDetail address edit (C2)', () => {
     await wrapper.find('button.address-edit-save').trigger('click')
 
     expect(api.patchAddress).toHaveBeenCalledWith('123', '1 Main St, London SW1V 2QQ')
-    expect(store.loadDetail).toHaveBeenCalledWith('123')
+    expect(store.loadDetail).toHaveBeenCalledWith('123', true)
   })
 })
 
