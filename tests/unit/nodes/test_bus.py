@@ -573,3 +573,90 @@ class TestBusFallbackForNoTflRoute:
         assert val is not None
         assert val.duration.magnitude == 13
         assert not val.infeasible
+
+
+class TestBusAugmentLateRoute:
+    """The bus route/fare are conditional deps — but they must be STATIC
+    deps too, so their changed signals re-schedule the augment when they
+    resolve after its first (blocked) refresh.  Without the static wiring
+    a late-arriving route leaves the augment pending forever."""
+
+    @pytest.mark.asyncio
+    async def test_late_route_and_fare_re_schedule_augment(self):
+        from dag.attempt import Attempt
+        from dag.derived_node import DerivedNode
+        from houses.model.domain import Commute, Person, PlaceOfInterest
+        from houses.nodes.bus import BusLegAugmentNode
+
+        class _FixedTransit(DerivedNode[Commute]):
+            def __init__(self, node_id: str, commute: Commute):
+                super().__init__(node_id, Commute, ())
+                self._att = Attempt.succeeded(commute)
+
+            async def attempt(self):
+                return self._att
+
+            def latest_attempt(self):
+                return self._att
+
+            def compute(self, *dep_attempts):
+                raise AssertionError("fixed node should not compute")
+
+        infeasible = Commute(
+            person=Person(name="George", has_car=False, is_child=True),
+            label="Secondary School",
+            destination=PlaceOfInterest(label="Secondary School", address="51.6053205,-1.2749334"),
+            duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+            daily_cost=Money("0", "GBP"),
+            mode="transit",
+            _details=(),
+            infeasible=True,
+        )
+        transit = _FixedTransit("blr_inf", infeasible)
+
+        # Route and fare are NOT pushed yet — pending at the first flush.
+        route = UserInputNode[dict]("blr_route", dict)
+        fare = UserInputNode[dict]("blr_fare", dict)
+        node = BusLegAugmentNode(
+            "blr",
+            transit_input=transit,
+            bus_route_node=route,
+            bods_fare_node=fare,
+            max_walk_node=_mw(30),
+        )
+
+        await flush_processor()
+        # First refresh found the bus route pending → the augment must
+        # still be pending (blocked), NOT resolved as failed.
+        assert (await node.attempt()).pending, "augment must wait for the bus route"
+
+        # The route arrives LATER — its changed signal must re-schedule
+        # the augment (this is the regression: it used to stay pending).
+        route.push(
+            {
+                "bus_stops": [
+                    {
+                        "departure_name": "Tyrrells Close",
+                        "arrival_name": "Great Western Park ASDA",
+                        "departure_lat": 51.596798,
+                        "departure_lon": -1.294132,
+                        "arrival_lat": 51.604454,
+                        "arrival_lon": -1.271184,
+                    }
+                ],
+                "duration_minutes": 13,
+            },
+            "test",
+        )
+        await flush_processor()
+        await flush_processor()
+        fare.push({"stop_fares": {}}, "test")
+        await flush_processor()
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded, f"late bus route must resolve the augment, got: {a.status}: {a.error}"
+        val = a.value_or_none()
+        assert val is not None
+        assert val.duration.magnitude == 13
+        assert not val.infeasible

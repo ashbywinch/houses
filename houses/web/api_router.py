@@ -279,6 +279,13 @@ async def patch_address(rid: str, body: dict):
     # Recompute before responding — the frontend refetches the detail
     # immediately, and the background scheduler would race that request.
     await prop.best_address.refresh()
+    # Drain the downstream cascade (council tax, EPC, geocode, commutes,
+    # group cost) so the response — and the immediate refetch — reflect
+    # the recomputed state, not a mid-cascade one (same pattern as
+    # /admin/regenerate).
+    from dag.scheduler import flush_processor
+
+    await flush_processor()
     return {"status": "ok"}
 
 
@@ -295,6 +302,9 @@ async def patch_location(rid: str, body: dict):
     prop.precise_location.push(gp, "user")
     # Recompute before responding — same race as the address PATCH.
     await prop.best_location.refresh()
+    from dag.scheduler import flush_processor
+
+    await flush_processor()
     return {"status": "ok"}
 
 
