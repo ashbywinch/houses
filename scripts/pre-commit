@@ -39,9 +39,10 @@ fi
 if [ ! -x .venv/bin/ruff ]; then
     echo "pre-commit: .venv/bin/ruff not found — run 'make setup' first" >&2
     exit 1
+fi
+
 # Delegate to the shared make targets so the hook and CI can never drift
 # apart: lint-check (ruff + frontend stylelint) plus the FULL typecheck
 # (pyrefly baseline gate + vue-tsc build mode) — the same gate CI runs,
 # so nothing CI can catch is ever left for CI to find first.
 make lint-check typecheck
-fi

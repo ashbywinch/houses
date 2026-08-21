@@ -6,14 +6,19 @@
 # .github/workflows/pr-agent.yml and must NEVER be ${{ github.head_ref }}.
 
 [openai]
-api_base = "https://opencode.ai/zen/go/v1"
+# The canonical LLM endpoint (skill://cloudflare-ai-gateway): Cloudflare
+# AI Gateway, dynamic route fallback2 (OpenCode primary → DeepSeek
+# fallback). The previous opencode.ai/zen/go/v1 workspace hit its $1/mo
+# spending cap (401 MonthlyLimitError) and every review silently failed.
+api_base = "https://gateway.ai.cloudflare.com/v1/e21a5be58ac1e8f7d5619539feb2dc3d/default/compat"
 
 [config]
-model = "openai/deepseek-v4-flash"
+model = "openai/dynamic/fallback2"
 ai_timeout = 1800 # reviews on large diffs take minutes; the upstream default is too low
 custom_model_max_tokens = 128000
 max_model_tokens = 128000
 fallback_models = []
+
 verbosity_level = 3
 repo_context_from_default_branch = true # standards docs read from main (maintainer-controlled), never the PR head
 repo_context_files = [
@@ -23,6 +28,12 @@ repo_context_files = [
     "docs/writing-documentation.md",
     "docs/dag-library.md",
 ]
+
+[litellm]
+# cf-aig-* headers — the same values the local metadata proxy injects
+# (skill://cloudflare-ai-gateway): Cloudflare-side retries disabled, the
+# client (PR-Agent's retry_with_fallback_models) owns retries.
+extra_headers = '{"cf-aig-request-timeout": "1800000", "cf-aig-max-attempts": "0", "cf-aig-backoff": "exponential"}'
 
 [pr_reviewer]
 require_tests_review = true
