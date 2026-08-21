@@ -20,9 +20,11 @@ class StampDutyNode(DerivedNode[Money]):
         self._price_node = rightmove_price
         self._status_node = status_node
         deps = [rightmove_price]
+        names = ["price"]
         if status_node is not None:
             deps.append(status_node)
-        super().__init__(node_id, Money, tuple(deps))
+            names.append("status")
+        super().__init__(node_id, Money, tuple(deps), dep_names=tuple(names))
 
     @property
     def expression(self):

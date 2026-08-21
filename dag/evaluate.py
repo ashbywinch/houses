@@ -102,9 +102,9 @@ async def evaluate(targets: Node | Iterable[Node], overrides: dict[str, Any] | N
                 continue
             try:
                 if iscoroutinefunction(node.compute):
-                    result = await node.compute(*dep_attempts)
+                    result = await node._call_compute(dep_attempts, active)
                 else:
-                    result = node.compute(*dep_attempts)
+                    result = node._call_compute(dep_attempts, active)
             except Exception as e:
                 result = Attempt.impossible(
                     f"{node_id}: {e}",

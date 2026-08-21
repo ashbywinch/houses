@@ -286,6 +286,46 @@ class TestRealAddressForm:
         assert info.annexe.band == "A"
 
 
+class TestUnitPrefixedAnnexe:
+    """The classic UK annexe form '2A WILLOWMEAD GARDENS' (main house
+    number + a letter) is a superset of '2 WILLOWMEAD GARDENS' and must
+    be detected — while '12'/'20' (digit-prefixed) must not be."""
+
+    @pytest.mark.asyncio
+    async def test_letter_suffixed_number_is_detected_as_annexe(self):
+        from houses.council_tax import lookup_council_tax
+
+        class Row:
+            def __init__(self, address: str, band: str):
+                self.address = address
+                self.band = band
+                self.local_authority = "Woking"
+
+        class Page:
+            rows = [
+                Row("2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "F"),
+                Row("2A WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "A"),
+                Row("12 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "D"),
+                Row("20 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "D"),
+            ]
+
+        def fetcher(postcode: str, page: int):
+            return Page()
+
+        a = await lookup_council_tax(
+            "SL7 1HW",
+            "2 Willowmead Gardens, Marlow, SL7 1HW",
+            page_fetcher=fetcher,
+        )
+        assert a.succeeded, f"lookup must succeed, got: {a.status}: {a.error}"
+        info = a.value_or_none()
+        assert info is not None
+        assert info.band == "F"
+        assert info.annexe is not None, "2A is the annexe — a letter-suffixed number"
+        assert "2A WILLOWMEAD" in info.annexe.address
+        assert info.annexe.band == "A"
+
+
 class TestMissingRate:
     """A matched band whose local authority has no resolvable yearly rate
     must still succeed (the band is real) but record WHY there is no

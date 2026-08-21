@@ -76,7 +76,7 @@ class TownDescNode(DerivedNode[dict]):
         self._nearest_town = nearest_town
         self._town_name = town_name
         deps: tuple[Node, ...] = (best_location, nearest_town, town_name, postcode_node)
-        super().__init__(node_id, dict, deps)
+        super().__init__(node_id, dict, deps, dep_names=("location", "nearest_town", "town_name", "postcode"))
 
     def _get_active_deps(self):
         """The postcode is an optional refinement for the LLM prompt — a

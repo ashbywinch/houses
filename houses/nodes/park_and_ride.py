@@ -62,9 +62,11 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         # this node when a postcode arrives later; _get_active_deps gates
         # whether a PENDING postcode can block refresh.
         deps = (transit_node, max_walk_node)
+        names = ["transit", "max_walk"]
         if has_car:
             deps = deps + (best_location, postcode_node)
-        super().__init__(node_id, Commute, deps)
+            names += ["location", "postcode_attempt"]
+        super().__init__(node_id, Commute, deps, dep_names=tuple(names))
         self.display_name = "Park & Ride"
 
     def _get_active_deps(self):

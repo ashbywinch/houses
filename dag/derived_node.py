@@ -20,6 +20,67 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+_CODE_VERSION_CACHE: dict[type, str] = {}
+
+
+def _compute_code_version(node: DerivedNode) -> str:
+    """Fingerprint of the compute code — changes when the computation
+    changes, so persisted results computed by older code can be detected.
+
+    The hash covers the class identity plus the compute function source.
+    Cached per class (compute is a bound method — same code for every
+    instance).  Returns "" when the source can't be introspected (e.g.
+    dynamically generated functions) — callers treat that as "cannot
+    fingerprint", never as a mismatch.
+    """
+    cls = type(node)
+    cached = _CODE_VERSION_CACHE.get(cls)
+    if cached is not None:
+        return cached
+    import hashlib
+    import inspect
+
+    func = node.compute
+    if inspect.ismethod(func):
+        func = func.__func__
+    try:
+        src = inspect.getsource(func)
+    except (OSError, TypeError):
+        _CODE_VERSION_CACHE[cls] = ""
+        return ""
+    digest = hashlib.sha256(f"{cls.__module__}.{cls.__qualname__}:{src}".encode()).hexdigest()[:16]
+    _CODE_VERSION_CACHE[cls] = digest
+    return digest
+
+
+def _check_compute_arity(node: DerivedNode, dep_attempts: list[Attempt]) -> None:
+    """Fail loudly when a positional compute can't accept the dep attempts.
+
+    A silent mismatch surfaces later as a confusing TypeError or — worse —
+    a value bound to the wrong parameter.  Named-deps nodes are exempt
+    (names bind), and varargs computes accept anything.
+    """
+    import inspect
+
+    sig = inspect.signature(node.compute)
+    params = list(sig.parameters.values())
+    if any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params):
+        return
+    n = len(dep_attempts)
+    min_args = sum(
+        1
+        for p in params
+        if p.default is inspect.Parameter.empty
+        and p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    )
+    if not (min_args <= n <= len(params)):
+        raise ValueError(
+            f"{node._id}: compute() takes {min_args}–{len(params)} positional "
+            f"argument(s) but {n} dep attempt(s) were passed — the deps and "
+            f"the compute signature have drifted. Declare dep_names or fix the deps."
+        )
+
+
 class DerivedNode(Node[T], Generic[T]):
     """A node whose value is computed from other nodes."""
 
@@ -44,9 +105,21 @@ class DerivedNode(Node[T], Generic[T]):
         except Exception:
             return None
 
-    def __init__(self, node_id: str, value_type: type[T], deps: tuple[Node, ...], source_url: str = "") -> None:
+    def __init__(
+        self,
+        node_id: str,
+        value_type: type[T],
+        deps: tuple[Node, ...],
+        source_url: str = "",
+        dep_names: tuple[str, ...] | None = None,
+    ) -> None:
         super().__init__(node_id, value_type, source_url)
         self._deps = deps
+        self._dep_names = dep_names
+        if dep_names is not None and len(dep_names) != len(deps):
+            raise ValueError(
+                f"{self._id}: dep_names ({len(dep_names)}) must match deps ({len(deps)})"
+            )
         self._attempt: Attempt[T] = Attempt.pending()
         self._connections: list[Connection] = []
         self._slots: list[Slot] = []
@@ -68,6 +141,57 @@ class DerivedNode(Node[T], Generic[T]):
             self._connections.append(conn)
 
         _get_scheduler().register(self)
+
+    def _get_active_deps(self) -> tuple[Node, ...]:
+        return self._deps
+
+    # ── Compute dispatch ───────────────────────────────
+    # compute() is called with the active deps' attempts.  Nodes whose
+    # deps are CONDITIONAL (built dynamically, or _get_active_deps
+    # gating a subset) declare ``dep_names`` so attempts bind by NAME —
+    # a dropped middle dep can never shift later arguments into the
+    # wrong parameter (the historical group-node misalignment).  Other
+    # nodes stay positional, guarded by an arity check that fails
+    # loudly instead of letting a mismatch surface as a confusing
+    # TypeError deep inside a compute body.
+
+    def _call_compute(self, dep_attempts: list[Attempt], active_deps: tuple[Node, ...]) -> Attempt[T]:
+        if self._dep_names is not None:
+            # Bind by dep identity against the static deps, so a
+            # non-trailing subset of active deps still reaches the
+            # right parameter.  Omitted names rely on compute defaults.
+            kwargs: dict[str, Attempt] = {}
+            for name, dep in zip(self._dep_names, self._deps, strict=True):
+                if dep in active_deps:
+                    kwargs[name] = dep_attempts[active_deps.index(dep)]
+            result = self.compute(**kwargs)
+        else:
+            _check_compute_arity(self, dep_attempts)
+            result = self.compute(*dep_attempts)
+        return result if not iscoroutine(result) else result
+
+    # ── Code-version stamp ─────────────────────────────
+    # Every persisted result records a fingerprint of the compute code
+    # that produced it.  A persisted row whose fingerprint differs from
+    # the current compute is stale-in-code: recompute even though every
+    # dep timestamp says "fresh" (the gap that left stale TypeError
+    # results sitting on live properties after a code change).
+
+    def _current_code_version(self) -> str:
+        return _compute_code_version(self)
+
+    def code_is_stale(self) -> bool:
+        """True when the persisted result was produced by different code.
+
+        ``None`` means the node was never persisted (a fresh in-memory
+        attempt) — never stale.  ``""`` means a persisted row written
+        before the version stamp existed (old code) — stale once.
+        """
+        current = self._current_code_version()
+        if not current:
+            return False  # can't fingerprint this compute — never guess
+        persisted = getattr(self, "_persisted_code_version", None)
+        return persisted is not None and persisted != current
 
     def disconnect(self) -> None:
         """Disconnect all signal connections and unregister from the scheduler."""
@@ -93,6 +217,14 @@ class DerivedNode(Node[T], Generic[T]):
         _get_scheduler().schedule(self)
 
     def _is_stale(self) -> bool:
+        if self.code_is_stale():
+            logger.warning(
+                "STALE_CODE: %s persisted=%s current=%s",
+                self._id,
+                getattr(self, "_persisted_code_version", ""),
+                self._current_code_version(),
+            )
+            return True
         if self._retry_at is not None:
             return True
         if self._attempt.pending:
@@ -237,6 +369,7 @@ class DerivedNode(Node[T], Generic[T]):
                 result = Attempt.impossible(message)
             self._attempt = result
             self._computed_at = datetime.now(UTC)
+            self._persisted_code_version = self._current_code_version()
             # _db_created_at may be None for deps never persisted (e.g. a
             # freshly-created node).  Storing None means the next staleness
             # check skips this dep — the _computed_at comparison still works.
@@ -254,7 +387,7 @@ class DerivedNode(Node[T], Generic[T]):
         if any(a.pending for a in dep_attempts):
             return
         try:
-            result = self.compute(*dep_attempts)
+            result = self._call_compute(dep_attempts, active_deps)
             if iscoroutine(result):
                 result = await result
                 # Yield to event loop so HTTP requests aren't starved during
@@ -302,6 +435,7 @@ class DerivedNode(Node[T], Generic[T]):
 
         self._attempt = result
         self._computed_at = datetime.now(UTC)
+        self._persisted_code_version = self._current_code_version()
 
         # _db_created_at may be None for deps never persisted (e.g. a
         # freshly-created node).  Storing None means the next staleness

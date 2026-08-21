@@ -15,6 +15,8 @@ from money import Money
 
 from dag.attempt import Attempt
 from dag.measurement import Measurement
+from houses.address_utils import normalise as _normalise
+from houses.address_utils import strip_postcode as _strip_postcode
 from houses.api_cache import cached_sync_client, get_cached, set_cached
 from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
 
@@ -97,34 +99,11 @@ def _extract_building(address: str) -> dict:
     return {"postcode": postcode, "building_name": building}
 
 
-def _normalise(text: str) -> str:
-    """Strip whitespace, uppercase, remove punctuation for comparison."""
-    return re.sub(r"[^A-Z0-9 ]", "", text.upper().strip())
-
-
 def _normalise_keep_commas(text: str) -> str:
     """Uppercase, collapse whitespace, drop punctuation EXCEPT commas —
     the comma is the boundary marker between a building name and the
     rest of a VOA address ("THE OLD RECTORY, HIGH WYCOMBE")."""
     return re.sub(r"\s+", " ", re.sub(r"[^A-Z0-9,]", " ", text.upper())).strip()
-
-
-_POSTCODE_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\s+(\d[A-Z]{2})\b")
-
-
-def _strip_postcode(tokens: list[str], address: str) -> list[str]:
-    """Drop the postcode tokens from a normalized token list.
-
-    VOA rows end with the postcode while the query may carry a county
-    between locality and postcode ("2 WILLOWMEAD GARDENS, MARLOW,
-    BUCKINGHAMSHIRE, SL7 1HW").  The county token must not break the
-    token-aligned prefix/suffix comparisons below.
-    """
-    m = _POSTCODE_RE.search(_normalise(address))
-    if not m:
-        return tokens
-    drop = set(m.groups())
-    return [t for t in tokens if t not in drop]
 
 
 def _lookup_yearly_cost(band: str, local_authority: str) -> Money | None:
@@ -438,6 +417,20 @@ async def lookup_council_tax(
         # at index >= 1 so a locality-suffixed duplicate (index 0) is not
         # an annexe.  Trailing locality/county after the designation is
         # tolerated ("FLAT 2, 2 WILLOWMEAD GARDENS, MARLOW, BUCKINGHAMSHIRE").
+        # The letter-suffix annexe has the SAME token count as the main
+        # ("2A WILLOWMEAD GARDENS" vs "2 WILLOWMEAD GARDENS") — the
+        # classic UK annexe form: main number + exactly one letter.
+        # "12"/"20" digit-prefixed rows stay excluded.
+        letter_suffix = (
+            len(row_tokens) >= len(main_tokens)
+            and len(row_tokens[0]) == len(main_tokens[0]) + 1
+            and row_tokens[0].startswith(main_tokens[0])
+            and row_tokens[0][-1:].isalpha()
+            and row_tokens[1 : 1 + len(main_tokens) - 1] == main_tokens[1:]
+        )
+        if letter_suffix:
+            annexe_rows.append(r)
+            continue
         if len(row_tokens) > len(main_tokens):
             for i in range(1, len(row_tokens) - len(main_tokens) + 1):
                 if row_tokens[i : i + len(main_tokens)] == main_tokens:

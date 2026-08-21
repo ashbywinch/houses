@@ -49,6 +49,15 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
                 yearly_sinking_fund_node,
                 life_insurance_node,
             ),
+            dep_names=(
+                "mortgage",
+                "rental_income",
+                "status",
+                "commute",
+                "council_tax",
+                "sinking",
+                "life_insurance",
+            ),
         )
 
     @property
@@ -147,16 +156,34 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
             council_tax_node,
             persons_source,
         )
+        names = [
+            "mortgage",
+            "sinking",
+            "life_insurance",
+            "rental_income",
+            "status",
+            "commute",
+            "council_tax",
+            "persons",
+        ]
         if annexe_payers_node is not None:
             deps = deps + (annexe_payers_node,)
+            names.append("annexe_payers")
         if annexe_ignored_node is not None:
             deps = deps + (annexe_ignored_node,)
+            names.append("annexe_ignored")
         if council_tax_payers_node is not None:
             deps = deps + (council_tax_payers_node,)
+            names.append("council_tax_payers")
         super().__init__(
             node_id,
             dict,
             deps,
+            # Bind attempts by name: the three apportionment deps are
+            # appended conditionally and were the historical source of
+            # positional misalignment (a dropped/pending dep shifted
+            # council_tax_payers into annexe_payers).
+            dep_names=tuple(names),
         )
 
 

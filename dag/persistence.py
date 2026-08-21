@@ -120,21 +120,39 @@ def _deserialize_value(raw: str | None) -> Any:
     return d
 
 
+def _ensure_code_version_column() -> None:
+    """Idempotently add the ``code_version`` column to node_results.
+
+    Older databases predate the code-version stamp; ALTER is cheap and
+    safe (SQLite), and rows written before the column exists get NULL,
+    which the staleness check treats as "unknown code" → one recompute.
+    """
+    conn = _get_db()
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(node_results)")]
+    if "code_version" not in cols:
+        conn.execute("ALTER TABLE node_results ADD COLUMN code_version TEXT")
+        conn.commit()
+
+
 def init_db(db_path: str | None = None) -> None:
+    """Initialise the SQLite database schema, migrating older databases."""
     global DB_PATH
     if db_path:
         DB_PATH = Path(db_path)
     conn = _get_db()
-    conn.executescript("""
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS node_results (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
             node_id TEXT NOT NULL,
             result_json TEXT NOT NULL,
             dep_timestamps TEXT,
-            created_at TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_nr_node ON node_results(node_id, created_at DESC);
-    """)
+            created_at TEXT NOT NULL,
+            code_version TEXT
+        )
+        """
+    )
+    conn.commit()
+    _ensure_code_version_column()
 
 
 def save_node_result(
@@ -142,6 +160,7 @@ def save_node_result(
     result_dict: dict[str, Any],
     dep_timestamps: dict[str, str] | None = None,
     created_at: str | None = None,
+    code_version: str | None = None,
 ) -> int:
     """Persist a node's to_json() output to the node_results table.
 
@@ -149,19 +168,24 @@ def save_node_result(
     *created_at* should be the same value used by the caller's ``_db_created_at``
     so that the in-memory timestamp matches the DB column (avoids false staleness).
     When omitted, a fresh timestamp is generated (callers that don't care about
-    round-trip consistency).
+    round-trip consistency).  *code_version* fingerprints the compute code
+    that produced the value — a persisted row whose version no longer matches
+    the current compute is stale-in-code and must recompute.
     """
     if not _table_exists("node_results"):
         init_db()
+    _ensure_code_version_column()
     conn = _get_db()
     now = created_at or datetime.now(UTC).isoformat()
     cur = conn.execute(
-        "INSERT INTO node_results (node_id, result_json, dep_timestamps, created_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO node_results (node_id, result_json, dep_timestamps, created_at, code_version)"
+        " VALUES (?, ?, ?, ?, ?)",
         (
             node_id,
             json.dumps(result_dict, cls=DagJSONEncoder),
             json.dumps(dep_timestamps, cls=DagJSONEncoder) if dep_timestamps else None,
             now,
+            code_version,
         ),
     )
     conn.commit()
@@ -173,9 +197,10 @@ def latest_node_result(node_id: str) -> dict[str, Any] | None:
     if not _table_exists("node_results"):
         init_db()
         return None
+    _ensure_code_version_column()
     conn = _get_db()
     row = conn.execute(
-        "SELECT result_json, dep_timestamps, created_at FROM node_results"
+        "SELECT result_json, dep_timestamps, created_at, code_version FROM node_results"
         " WHERE node_id=? ORDER BY created_at DESC LIMIT 1",
         (node_id,),
     ).fetchone()
@@ -184,6 +209,7 @@ def latest_node_result(node_id: str) -> dict[str, Any] | None:
     result = json.loads(row["result_json"])
     result["_dep_timestamps"] = json.loads(row["dep_timestamps"]) if row["dep_timestamps"] else {}
     result["_persisted_at"] = row["created_at"]
+    result["_code_version"] = row["code_version"]
     return result
 
 

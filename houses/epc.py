@@ -13,6 +13,8 @@ import re
 import httpx
 
 from dag.attempt import Attempt
+from houses.address_utils import normalise as _normalise
+from houses.address_utils import strip_postcode as _strip_postcode
 from houses.api_cache import cached_async_client, get_cached, set_cached
 from houses.config import settings
 
@@ -73,28 +75,6 @@ def _is_road_name(first_token: str) -> bool:
     """Check if the first address token is a road name (ends with road suffix as a separate word)."""
     lower = first_token.strip().lower()
     return any(lower.endswith(f" {s}") for s in ROAD_SUFFIXES)
-
-
-def _normalise(text: str) -> str:
-    return re.sub(r"[^A-Z0-9 ]", "", text.upper().strip())
-
-
-_POSTCODE_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\s+(\d[A-Z]{2})\b")
-
-
-def _strip_postcode(tokens: list[str], address: str) -> list[str]:
-    """Drop the postcode tokens from a normalized token list.
-
-    The query address carries the postcode (and possibly a county
-    between locality and postcode) while certificate addressLine1 values
-    usually do not.  The county token must not break the token-aligned
-    prefix comparison in ``_match_cert``.
-    """
-    m = _POSTCODE_RE.search(_normalise(address))
-    if not m:
-        return tokens
-    drop = set(m.groups())
-    return [t for t in tokens if t not in drop]
 
 
 async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
