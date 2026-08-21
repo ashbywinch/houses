@@ -759,3 +759,36 @@ class TestGroupMonthlyCostNode:
         assert float(val["others"]["value"]) == pytest.approx(0, abs=0.01)
         assert float(val["couple_breakdown"]["council_tax"]) == pytest.approx(150, abs=0.01)
         assert float(val["others_breakdown"]["council_tax"]) == pytest.approx(0, abs=0.01)
+
+    @pytest.mark.asyncio
+    async def test_stale_payer_name_does_not_shrink_allocation(self):
+        """A payer name that no longer matches a household adult (renamed
+        on the sheet after the apportionment was stored) must not reduce
+        the bill's allocation — the bill splits among the MATCHING
+        payers, so the full council tax is still accounted for."""
+        from houses.council_tax_info import CouncilTaxInfo
+
+        node, mg, sf, li, ri, st, cb, ct, ps, ap, ai, ctp = self._node_with_annexe("stale1")
+        mg.push(Money("0", "GBP"), "test")
+        sf.push(Money("0", "GBP"), "test")
+        li.push(Money("0", "GBP"), "test")
+        ri.push(Money("0", "GBP"), "test")
+        st.push("", "test")
+        cb.push({}, "test")
+        simon = Person("Simon", True, home_co_owners=(HomeCoOwner(name="Lorena", share=50),))
+        ps.push([simon, Person("Lorena", False), Person("Ashby", False)], "test")
+        ct.push(CouncilTaxInfo(band="D", yearly_cost=Measurement(Money("1800", "GBP"), 0.0)), "test")
+        ap.push([], "test")
+        ai.push(False, "test")
+        # "Simon" was renamed to "Simon W" on the sheet — the stored
+        # choice still names the old person.
+        ctp.push(["Simon W", "Lorena"], "test")
+        await flush_processor()
+
+        val = (await node.attempt()).value_or_none()
+        assert val is not None
+        # Lorena (the one matching adult) pays the FULL main bill — the
+        # stale name is dropped, not counted in the denominator.
+        assert float(val["couple"]["value"]) == pytest.approx(150, abs=0.01)
+        assert float(val["others"]["value"]) == pytest.approx(0, abs=0.01)
+        assert float(val["couple_breakdown"]["council_tax"]) == pytest.approx(150, abs=0.01)

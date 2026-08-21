@@ -180,6 +180,46 @@ class TestCouncilTaxNode:
         finally:
             _sp.reset(token)
 
+    @pytest.mark.asyncio
+    async def test_evidence_url_reaches_provenance(self):
+        """The evidence link must surface on the provenance — the review
+        caught the rewrite dropping ``p.url = v.evidence_url``."""
+        from money import Money
+
+        from dag.measurement import Measurement
+        from houses.council_tax_info import CouncilTaxInfo
+        from houses.nodes.epc_node import CouncilTaxNode
+        from houses.services_provider import _request_services as _sp
+        from tests.helpers import make_services
+
+        class _EvidencedCT:
+            async def lookup(self, postcode, address=""):
+                return Attempt.succeeded(
+                    CouncilTaxInfo(
+                        band="D",
+                        yearly_cost=Measurement(Money("1800", "GBP"), 0.0),
+                        evidence_url="https://www.civaccount.co.uk/api/v1/councils/woking",
+                    )
+                )
+
+        svc = make_services(council_tax_service=_EvidencedCT())
+        token = _sp.set(svc)
+        try:
+            addr = UserInputNode[str]("addr_ct_ev", str)
+            pc = UserInputNode[str]("pc_ct_ev", str)
+            node = CouncilTaxNode("ct_ev", best_address=addr, postcode_node=pc)
+            addr.push("2 Willowmead Gardens, Marlow, SL7 1HW", "test")
+            pc.push("SL7 1HW", "test")
+
+            from dag.scheduler import flush_processor
+
+            await flush_processor()
+
+            prov = await node.build_provenance()
+            assert prov.url == "https://www.civaccount.co.uk/api/v1/councils/woking"
+        finally:
+            _sp.reset(token)
+
 
 class TestWalkabilityNode:
     @pytest.mark.asyncio

@@ -163,6 +163,25 @@ class TestBodsFareNode:
 
 class TestBusLegAugmentNode:
     @pytest.mark.asyncio
+    async def test_constructs_without_max_walk_node(self):
+        """max_walk_node is optional — the dep_names must shrink with the
+        deps, not force a 4-vs-3 ValueError at construction."""
+        from houses.model.domain import Commute
+        from houses.nodes.bus import BusLegAugmentNode
+
+        transit = UserInputNode[Commute]("t_bl_nmw", Commute)
+        route = UserInputNode[dict]("r_bl_nmw", dict)
+        fare = UserInputNode[dict]("f_bl_nmw", dict)
+
+        node = BusLegAugmentNode(
+            "bla_nmw",
+            transit_input=transit,
+            bus_route_node=route,
+            bods_fare_node=fare,
+        )
+        assert node._dep_names == ("transit_attempt", "bus_route_attempt", "bods_fare_attempt")
+
+    @pytest.mark.asyncio
     async def test_walk_short_no_replacement(self):
         """When walk is shorter than max_walk, commute is returned unchanged."""
         from money import Money
