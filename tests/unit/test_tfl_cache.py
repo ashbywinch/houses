@@ -269,6 +269,7 @@ def test_set_cached_scrubs_app_key_from_body(isolated_cache):
         },
     )
     cached = get_cached("GET", "https://api.tfl.gov.uk/Journey/JourneyResults/51.5,-0.1/to/SW1V 2QQ", {"nationalSearch": "true"})  # noqa: E501
+    assert cached is not None
     assert "super-secret-key" not in json.dumps(cached)
     assert "another-secret" not in json.dumps(cached)
     assert "app_key=REDACTED" in cached["relativeUri"]

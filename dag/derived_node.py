@@ -6,7 +6,7 @@ import traceback
 from abc import abstractmethod
 from datetime import UTC, datetime, timedelta
 from inspect import iscoroutine
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from dag.attempt import Attempt, AttemptError, Formula, Provenance, SourceType, project_value
 from dag.eval_context import staged_attempt
@@ -153,9 +153,13 @@ class DerivedNode(Node[T], Generic[T]):
     # wrong parameter (the historical group-node misalignment).  Other
     # nodes stay positional, guarded by an arity check that fails
     # loudly instead of letting a mismatch surface as a confusing
-    # TypeError deep inside a compute body.
-
-    def _call_compute(self, dep_attempts: list[Attempt], active_deps: tuple[Node, ...]) -> Attempt[T]:
+    def _call_compute(
+        self, dep_attempts: list[Attempt], active_deps: tuple[Node, ...]
+    ) -> Any:
+        # Returns either the Attempt or a coroutine resolving to one —
+        # the caller awaits via iscoroutine().  Typed as Any because the
+        # two shapes defeat a static union (attribute access on the
+        # coroutine branch is checked at the await site).
         if self._dep_names is not None:
             # Bind by dep identity against the static deps, so a
             # non-trailing subset of active deps still reaches the

@@ -154,6 +154,9 @@ lint-github: deps   # CI only: findings surface as PR annotations
 	@$(RUFF) check houses/ tests/ tools/ dag/ --output-format=github
 	cd houses/frontend && npm run lint:css   # keep the same coverage as `make lint`
 
+typecheck-py: deps   # pyrefly only — the fast Python-side gate the pre-commit hook runs
+	@$(PYTHON) scripts/pyrefly-lock.py check --pyrefly-config pyrefly.toml
+
 typecheck: deps
 	@$(PYTHON) scripts/pyrefly-lock.py check --pyrefly-config pyrefly.toml
 	# Frontend typecheck MUST be build-mode (-b): the root tsconfig is a
@@ -169,7 +172,7 @@ typecheck: deps
 typecheck-update-baseline: deps
 	@$(PYTHON) scripts/pyrefly-lock.py update-baseline --pyrefly-config pyrefly.toml
 
-.PHONY: typecheck typecheck-update-baseline
+.PHONY: typecheck-py typecheck typecheck-update-baseline
 
 format: setup
 	@$(RUFF) check --fix houses/ tests/ dag/

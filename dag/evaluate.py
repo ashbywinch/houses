@@ -23,7 +23,7 @@ Design rules (from the plan, settled 2026-08-06):
 from __future__ import annotations
 
 from collections.abc import Iterable
-from inspect import iscoroutinefunction
+from inspect import iscoroutine
 from typing import Any
 
 from dag.attempt import Attempt, AttemptError
@@ -101,10 +101,9 @@ async def evaluate(targets: Node | Iterable[Node], overrides: dict[str, Any] | N
                 staging[node_id] = Attempt.impossible(f"{node_id}: dep failed ({errors})")
                 continue
             try:
-                if iscoroutinefunction(node.compute):
-                    result = await node._call_compute(dep_attempts, active)
-                else:
-                    result = node._call_compute(dep_attempts, active)
+                result = node._call_compute(dep_attempts, active)
+                if iscoroutine(result):
+                    result = await result
             except Exception as e:
                 result = Attempt.impossible(
                     f"{node_id}: {e}",
