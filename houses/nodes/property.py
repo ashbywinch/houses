@@ -278,9 +278,24 @@ class PropertyNodes:
         lazily, per property, on first view.
         """
         from dag.derived_node import DerivedNode
+        from dag.node import Node
         from dag.scheduler import flush_processor
 
-        dirty = [n for n in vars(self).values() if isinstance(n, DerivedNode) and n.code_is_stale()]
+        # Walk the whole node graph via deps — vars(self) alone misses
+        # nodes stored in containers (the commute selectors dict and
+        # their sub-pipeline are only reachable through deps).
+        seen: set[int] = set()
+        queue = [n for n in vars(self).values() if isinstance(n, Node)]
+        dirty = []
+        while queue:
+            node = queue.pop()
+            if id(node) in seen:
+                continue
+            seen.add(id(node))
+            if isinstance(node, DerivedNode):
+                if node.code_is_stale():
+                    dirty.append(node)
+                queue.extend(node._get_active_deps())
         for n in dirty:
             await n.refresh()
         if dirty:
