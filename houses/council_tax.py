@@ -43,6 +43,18 @@ def _reset():
     _cached_rates = None
 
 
+# Legacy district -> current billing authority.  VOA rows are keyed by the
+# district that existed when the row was created; the government Band D CSV
+# uses today's authorities.  Buckinghamshire's 2020 unitary reorg merged the
+# four districts below into one UA.
+_RATE_ALIASES = {
+    "wycombe": "buckinghamshire ua",
+    "aylesbury vale": "buckinghamshire ua",
+    "chiltern": "buckinghamshire ua",
+    "south bucks": "buckinghamshire ua",
+}
+
+
 def _load_rates() -> dict[str, float]:
     global _cached_rates
     if _cached_rates is not None:
@@ -97,6 +109,24 @@ def _normalise_keep_commas(text: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^A-Z0-9,]", " ", text.upper())).strip()
 
 
+_POSTCODE_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\s+(\d[A-Z]{2})\b")
+
+
+def _strip_postcode(tokens: list[str], address: str) -> list[str]:
+    """Drop the postcode tokens from a normalized token list.
+
+    VOA rows end with the postcode while the query may carry a county
+    between locality and postcode ("2 WILLOWMEAD GARDENS, MARLOW,
+    BUCKINGHAMSHIRE, SL7 1HW").  The county token must not break the
+    token-aligned prefix/suffix comparisons below.
+    """
+    m = _POSTCODE_RE.search(_normalise(address))
+    if not m:
+        return tokens
+    drop = set(m.groups())
+    return [t for t in tokens if t not in drop]
+
+
 def _lookup_yearly_cost(band: str, local_authority: str) -> Money | None:
     """Fetch the Band D rate from CivAccount, falling back to the CSV.
 
@@ -129,6 +159,13 @@ def _lookup_yearly_cost(band: str, local_authority: str) -> Money | None:
             if key.startswith(norm) or norm.startswith(key):
                 band_d_rate = val
                 break
+
+    # 2b) VOA rows carry LEGACY district names (e.g. "Wycombe"), but the
+    #     CSV is keyed by today's billing authorities (the 2020 unitary
+    #     reorg merged the Buckinghamshire districts into one UA).
+    if band_d_rate is None and norm in _RATE_ALIASES:
+        norm = _RATE_ALIASES[norm]
+        band_d_rate = rates.get(norm)
 
     # 3) London boroughs: the CSV only has an aggregate "London boroughs" entry.
     #    Individual borough names (Ealing, Westminster, etc.) don't appear.
@@ -352,16 +389,10 @@ async def lookup_council_tax(
     if not matches:
         logger.debug("Could not match building %r in VOA results for %s", building_id, postcode)
         return Attempt.impossible(f"no VOA match for building {building_id}")
-
-    # Exact-match priority: a candidate whose VOA address is the query's
-    # building designation verbatim (a token-aligned prefix of the
-    # normalized query) IS the property.  A separate dwelling at the same
-    # number — an annexe or flat, e.g. "FLAT 2, 2 WILLOWMEAD GARDENS" —
-    # must not make the exact address ambiguous.
-    norm_query_tokens = _normalise(address).split()
+    norm_query_tokens = _strip_postcode(_normalise(address).split(), address)
     exact_matches = []
     for m in matches:
-        row_tokens = _normalise(m["address"]).split()
+        row_tokens = _strip_postcode(_normalise(m["address"]).split(), m["address"])
         if len(row_tokens) >= 2 and norm_query_tokens[: len(row_tokens)] == row_tokens:
             exact_matches.append(m)
     if len(exact_matches) >= 1:
@@ -393,21 +424,25 @@ async def lookup_council_tax(
 
     # Annexe detection: the exact match IS the property.  An annexe is a
     # single OTHER VOA property whose address is the main address with a
-    # unit prefix (a superset) — "FLAT 2, 2 WILLOWMEAD GARDENS" ends in
+    # unit prefix (a superset) — "FLAT 2, 2 WILLOWMEAD GARDENS" contains
     # "2 WILLOWMEAD GARDENS".  Locality-suffixed duplicates ("2
     # WILLOWMEAD GARDENS MARLOW") are the same property, not an annexe.
     annexe = None
-    main_tokens = _normalise(matched["address"]).split()
+    main_tokens = _strip_postcode(_normalise(matched["address"]).split(), matched["address"])
     annexe_rows = []
     for r in active:
-        if _normalise(r["address"]) == _normalise(matched["address"]):
+        row_tokens = _strip_postcode(_normalise(r["address"]).split(), r["address"])
+        if row_tokens == main_tokens:
             continue
-        row_tokens = _normalise(r["address"]).split()
-        if (
-            len(row_tokens) > len(main_tokens)
-            and row_tokens[len(row_tokens) - len(main_tokens):] == main_tokens
-        ):
-            annexe_rows.append(r)
+        # The main designation appears contiguously after a unit prefix —
+        # at index >= 1 so a locality-suffixed duplicate (index 0) is not
+        # an annexe.  Trailing locality/county after the designation is
+        # tolerated ("FLAT 2, 2 WILLOWMEAD GARDENS, MARLOW, BUCKINGHAMSHIRE").
+        if len(row_tokens) > len(main_tokens):
+            for i in range(1, len(row_tokens) - len(main_tokens) + 1):
+                if row_tokens[i : i + len(main_tokens)] == main_tokens:
+                    annexe_rows.append(r)
+                    break
     if len(annexe_rows) == 1:
         r = annexe_rows[0]
         annexe_yearly = (

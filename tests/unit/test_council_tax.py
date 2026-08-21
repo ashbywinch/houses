@@ -233,3 +233,54 @@ class TestLoadRates:
         rates = _load_rates()
         assert len(rates) > 100, "Should have 100+ billing authorities"
         assert all(isinstance(v, float) for v in rates.values())
+
+    def test_legacy_district_aliases_resolve_to_unitary_rate(self):
+        """VOA rows carry the LEGACY district name (Wycombe), but the CSV
+        is keyed by today's billing authority (buckinghamshire ua — the
+        2020 unitary reorg).  Without the alias the yearly cost is None
+        and the council tax contributes £0 despite a real band."""
+        from houses.council_tax import _lookup_yearly_cost
+
+        cost = _lookup_yearly_cost("F", "Wycombe")
+        assert cost is not None, "Wycombe must alias to the Buckinghamshire UA rate"
+        assert cost.amount > 0
+
+
+class TestRealAddressForm:
+    """Real property addresses carry the county ('2 Willowmead Gardens,
+    Marlow, Buckinghamshire, SL7 1HW') while VOA rows carry only the
+    locality ('2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW').  The exact-match
+    rule must survive the county token."""
+
+    @pytest.mark.asyncio
+    async def test_exact_match_survives_county_and_detects_annexe(self):
+        from houses.council_tax import lookup_council_tax
+
+        class Row:
+            def __init__(self, address: str, band: str):
+                self.address = address
+                self.band = band
+                self.local_authority = "Wycombe"
+
+        class Page:
+            rows = [
+                Row("2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "F"),
+                Row("FLAT 2, 2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "A"),
+                Row("12 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "D"),
+            ]
+
+        def fetcher(postcode: str, page: int):
+            return Page()
+
+        a = await lookup_council_tax(
+            "SL7 1HW",
+            "2 Willowmead Gardens, Marlow, Buckinghamshire, SL7 1HW",
+            page_fetcher=fetcher,
+        )
+        assert a.succeeded, f"exact match must win despite the county, got: {a.status}: {a.error}"
+        info = a.value_or_none()
+        assert info is not None
+        assert info.band == "F"
+        assert info.annexe is not None
+        assert info.annexe.address == "FLAT 2, 2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW"
+        assert info.annexe.band == "A"

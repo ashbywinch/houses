@@ -79,6 +79,24 @@ def _normalise(text: str) -> str:
     return re.sub(r"[^A-Z0-9 ]", "", text.upper().strip())
 
 
+_POSTCODE_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z\d]?)\s+(\d[A-Z]{2})\b")
+
+
+def _strip_postcode(tokens: list[str], address: str) -> list[str]:
+    """Drop the postcode tokens from a normalized token list.
+
+    The query address carries the postcode (and possibly a county
+    between locality and postcode) while certificate addressLine1 values
+    usually do not.  The county token must not break the token-aligned
+    prefix comparison in ``_match_cert``.
+    """
+    m = _POSTCODE_RE.search(_normalise(address))
+    if not m:
+        return tokens
+    drop = set(m.groups())
+    return [t for t in tokens if t not in drop]
+
+
 async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
     """Look up EPC band for a property.
 
@@ -211,10 +229,12 @@ def _match_cert(certs: list[dict], building_id: str, address: str = "") -> Attem
         # dwelling at the same number (annexe/flat) must not make it
         # ambiguous.
         if address:
-            norm_query_tokens = _normalise(address).split()
+            norm_query_tokens = _strip_postcode(_normalise(address).split(), address)
             exact_candidates = []
             for c in candidates:
-                row_tokens = _normalise(c.get("addressLine1", "")).split()
+                row_tokens = _strip_postcode(
+                    _normalise(c.get("addressLine1", "")).split(), c.get("addressLine1", "")
+                )
                 if len(row_tokens) >= 2 and norm_query_tokens[: len(row_tokens)] == row_tokens:
                     exact_candidates.append(c)
             if len(exact_candidates) == 1:
