@@ -243,9 +243,15 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         # (each group's headcount share — the historical behaviour).  The
         # user can instead pick WHO pays it (e.g. only the owners) — the
         # picked people split the bill equally among themselves.
+        # Names are matched against the household: a stale payer (renamed/
+        # removed on the sheet after the apportionment was stored) is
+        # dropped, so the bill splits among the MATCHING payers and the
+        # full amount is still allocated (a stale name must not shrink
+        # the share by counting in the denominator).
+        adult_names = {p.name for p in adults}
         main_payers: set[str] = set()
         if council_tax_payers is not None and council_tax_payers.succeeded:
-            main_payers = set(council_tax_payers.value_or_none() or [])
+            main_payers = set(council_tax_payers.value_or_none() or []) & adult_names
         main_payer_total = len(main_payers) if main_payers else n_adults
 
         # Annexe: a second dwelling at the same address has its OWN council
@@ -261,7 +267,7 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         annexe_stddev = 0.0
         if annexe is not None and annexe.yearly_cost is not None and not ignored:
             if annexe_payers is not None and annexe_payers.succeeded:
-                payers = set(annexe_payers.value_or_none() or [])
+                payers = set(annexe_payers.value_or_none() or []) & adult_names
             if payers:
                 annexe_monthly = Decimal(str(annexe.yearly_cost.value.amount)) / Decimal(12)
                 annexe_stddev = float(annexe.yearly_cost.stddev) if annexe.yearly_cost.stddev else 0.0

@@ -96,6 +96,8 @@ class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
         v = self._attempt.value_or_none()
         if self._attempt.succeeded and v is not None and v.lookup_error:
             p.description = f"Council tax estimated — {v.lookup_error}."
+        if self._attempt.succeeded and v is not None and v.evidence_url:
+            p.url = v.evidence_url
         return p
 
     # Default build_provenance() walks best_address and postcode deps.

@@ -8,11 +8,10 @@ import re
 from collections import namedtuple
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from money import Money
-from uk_property_apis.voa import VOAClient
 
 from dag.attempt import Attempt
 from dag.measurement import Measurement
@@ -20,6 +19,9 @@ from houses.address_utils import normalise as _normalise
 from houses.address_utils import strip_postcode as _strip_postcode
 from houses.api_cache import cached_sync_client, get_cached, set_cached
 from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
+
+if TYPE_CHECKING:
+    from uk_property_apis.voa import VOAClient
 
 logger = logging.getLogger(__name__)
 
