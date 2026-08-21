@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import typing
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from money import Money
@@ -307,6 +308,7 @@ async def patch_location(rid: str, body: dict):
     await flush_processor()
     return {"status": "ok"}
 
+
 @api_router.patch("/properties/{rid}/council-tax")
 async def patch_council_tax(rid: str, body: dict):
     """Set the council-tax apportionment for a property.
@@ -336,6 +338,7 @@ async def patch_council_tax(rid: str, body: dict):
 
     await flush_processor()
     return {"status": "ok"}
+
 
 @api_router.patch("/properties/{rid}/triage")
 async def patch_triage(rid: str, body: dict):
@@ -677,7 +680,7 @@ def _person_from_dict(d: dict, target: Person) -> Person:
                 modes = poi.get("acceptable_modes")
                 if modes is not None:
                     poi = {**poi, "acceptable_modes": tuple(modes)}
-                normalized.append(PlaceOfInterest(**poi))
+                normalized.append(PlaceOfInterest(**typing.cast(dict[str, Any], poi)))
             else:
                 normalized.append(poi)
         updates["places_of_interest"] = tuple(normalized)
@@ -821,10 +824,9 @@ async def patch_works_estimate(
     from houses.services_provider import get_services as _get_svc
 
     _pa = _get_svc().persons_source.latest_attempt()
-    if _pa.succeeded and _pa.value_or_none():
-        _names = {
-            getattr(p, "name", None) or (p.get("name") if isinstance(p, dict) else None) for p in _pa.value_or_none()
-        }
+    _pa_value = _pa.value_or_none()
+    if _pa.succeeded and _pa_value:
+        _names = {getattr(p, "name", None) or (p.get("name") if isinstance(p, dict) else None) for p in _pa_value}
         if person_name not in _names:
             raise HTTPException(
                 status_code=400,

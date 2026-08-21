@@ -86,9 +86,11 @@ class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
         )
 
     @property
+    @override
     def provenance_source_type(self) -> SourceType:
         return SourceType.API
 
+    @override
     async def build_provenance(self) -> Provenance:
         p = await super().build_provenance()
         v = self._attempt.value_or_none()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import replace
+from typing import override
 
 from money import Money
 from pint import Quantity
@@ -27,6 +28,7 @@ class BusRouteNode(DerivedNode[dict]):
         self._google_routes_post = _google_routes_post or self._default_google_routes_post
         super().__init__(node_id, dict, (best_location, poi))
 
+    @override
     async def compute(self, location: Attempt, dest: Attempt) -> Attempt[dict]:
         loc = location.value_or_none()
         dest_val = dest.value_or_none()
@@ -97,6 +99,7 @@ class BodsFareNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, bus_route_node):
         super().__init__(node_id, dict, (bus_route_node,))
 
+    @override
     def compute(self, route: Attempt[dict]) -> Attempt[dict]:
         route_val = route.value_or_none()
         if route_val is None:
@@ -178,6 +181,7 @@ class BusLegAugmentNode(DerivedNode[Commute]):
         val = att.value_or_none() if att is not None else None
         return int(val) if val is not None else 30
 
+    @override
     def _get_active_deps(self):
         """Only need bus route and fare when the walk is too long, or when
         TfL found no route at all (the Google Routes bus is the fallback)."""
@@ -206,6 +210,7 @@ class BusLegAugmentNode(DerivedNode[Commute]):
             return False
         return int(first_legs[0].duration.magnitude) > self._current_max_walk()
 
+    @override
     def compute(
         self,
         transit_attempt: Attempt[Commute],

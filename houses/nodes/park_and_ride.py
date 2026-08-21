@@ -9,6 +9,7 @@ the station's car park.
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import override
 
 from money import Money
 from pint import Quantity
@@ -69,6 +70,7 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         super().__init__(node_id, Commute, deps, dep_names=tuple(names))
         self.display_name = "Park & Ride"
 
+    @override
     def _get_active_deps(self):
         """The postcode is only an active dep once it has a value — a
         pending/empty postcode must not stall refresh (a permanently
@@ -82,6 +84,7 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
                 deps.append(self.postcode_node)
         return tuple(deps)
 
+    @override
     async def compute(
         self,
         transit: Attempt[Commute],
@@ -211,9 +214,10 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
             duration=new_duration,
         )
 
-        self._car_park_name = car_park.name or "unknown car park"
+        self._car_park_name = (car_park.name or "unknown car park") if car_park is not None else "unknown car park"
         return Attempt.succeeded(new_commute)
 
+    @override
     async def build_provenance(self) -> Provenance:
         sources: dict[str, Provenance] = {}
         for dep in self._get_active_deps():

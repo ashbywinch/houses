@@ -110,8 +110,6 @@ async def evaluate(targets: Node | Iterable[Node], overrides: dict[str, Any] | N
                     error_info=AttemptError.from_exception(str(e), e, source=node_id),
                 )
             staging[node_id] = result
-        return {
-            target._id: staging.get(target._id) or target.latest_attempt() for target in target_nodes
-        }
+        return {target._id: staging.get(target._id) or target.latest_attempt() for target in target_nodes}
     finally:
         eval_staging_ctx.reset(token)

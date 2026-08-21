@@ -22,7 +22,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
@@ -31,6 +31,7 @@ _APP_KEY_RE = re.compile(r"app_key=[^&\"'}\s]+")
 
 
 CACHE_DIR = Path("data/api_cache")
+
 
 def set_cache_dir(path: str | Path) -> None:
     """Override the cache directory (used by tests to isolate caches)."""
@@ -63,6 +64,7 @@ def get_cached(
     if path.exists():
         return json.loads(path.read_text())  # type: ignore[no-any-return]
     return None
+
 
 def set_cached(method: str, url: str, params: dict[str, Any] | None, body: str | None, data: dict[str, Any]) -> None:
     """Store a JSON response so future identical requests skip the API."""
@@ -151,6 +153,7 @@ class CachingTransport(httpx.AsyncBaseTransport):
     def __init__(self, inner: httpx.AsyncBaseTransport | None = None):
         self._inner = inner or httpx.AsyncHTTPTransport()
 
+    @override
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         parsed = urlparse(str(request.url))
         # Key space is UNIFIED with the callers' direct get_cached/set_cached

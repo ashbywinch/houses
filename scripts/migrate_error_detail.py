@@ -62,7 +62,8 @@ def _migrate_works_estimates(conn: sqlite3.Connection) -> int:
             continue
         changed = False
         for name, val in list(value.items()):
-            if isinstance(val, (int, float)) or (isinstance(val, str) and val.replace(".", "").replace("-", "").isdigit()):
+            is_numeric_str = isinstance(val, str) and val.replace(".", "").replace("-", "").isdigit()
+            if isinstance(val, (int, float)) or is_numeric_str:
                 value[name] = {"amount": str(val), "currency": "GBP"}
                 changed = True
         if changed:

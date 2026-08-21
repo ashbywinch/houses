@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 from money import Money
+from uk_property_apis.voa import VOAClient
 
 from dag.attempt import Attempt
 from dag.measurement import Measurement
@@ -212,9 +213,12 @@ class CachedVOAClient:
     _VoaRow = namedtuple("_VoaRow", ["band", "address", "postcode", "local_authority"])
 
     def __init__(self):
-        self._inner: object | None = None
+        self._inner: VOAClient | None = None
 
     async def __aenter__(self):
+        # Local re-import: the module-level VOAClient is bound at import
+        # time, so tests that patch uk_property_apis.voa.VOAClient must
+        # see the patch here (a stale binding would run the real client).
         from uk_property_apis.voa import VOAClient
 
         self._inner = VOAClient()
@@ -236,6 +240,8 @@ class CachedVOAClient:
                 rows.append(self._VoaRow(**r))
             return type("Page", (), {"rows": rows})()
 
+        if self._inner is None:
+            raise RuntimeError("CachedVOAClient used before __aenter__")
         result = await self._inner.fetch_page(postcode, page=page)
         rows = [
             {"band": r.band, "address": r.address, "postcode": r.postcode, "local_authority": r.local_authority}
@@ -270,7 +276,15 @@ async def lookup_council_tax(
         else:
             async with CachedVOAClient() as client:
                 page = await client.fetch_page(postcode)
-        results_raw = [{"address": r.address, "band": r.band, "local_authority": r.local_authority} for r in page.rows]
+        results_raw = [
+            {
+                "address": str(r.address),
+                "band": str(r.band),
+                "local_authority": str(r.local_authority or ""),
+            }
+            for r in page.rows
+            if r.address and r.band
+        ]
     except ImportError:
         logger.warning("uk-property-apis not installed; skipping council tax lookup")
         return Attempt.impossible("uk-property-apis not installed")
@@ -339,7 +353,7 @@ async def lookup_council_tax(
                 continue
             if not addr.startswith(name_norm):
                 continue
-            tail = addr[len(name_norm):].lstrip()
+            tail = addr[len(name_norm) :].lstrip()
             if tail == "":
                 matches.append(r)
             elif tail.startswith(","):
@@ -395,9 +409,7 @@ async def lookup_council_tax(
             postcode,
         )
         sample = ", ".join(repr(a) for a in unique_addresses[:2])
-        return Attempt.impossible(
-            f"address matched multiple properties: {sample} ({len(unique_addresses)} matches)"
-        )
+        return Attempt.impossible(f"address matched multiple properties: {sample} ({len(unique_addresses)} matches)")
 
     matched = matches[0]
 
@@ -438,9 +450,7 @@ async def lookup_council_tax(
                     break
     if len(annexe_rows) == 1:
         r = annexe_rows[0]
-        annexe_yearly = (
-            _lookup_yearly_cost(r["band"], r["local_authority"]) if r["local_authority"] else None
-        )
+        annexe_yearly = _lookup_yearly_cost(r["band"], r["local_authority"]) if r["local_authority"] else None
         annexe = AnnexeDwelling(
             address=r["address"],
             band=r["band"],

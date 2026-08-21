@@ -1,14 +1,16 @@
 #!/usr/bin/env sh
-# Pre-commit hook: gitleaks + ruff + stylelint + pyrefly on staged content.
+# Pre-commit hook: gitleaks + ruff + stylelint + full typecheck (pyrefly
+# baseline gate + vue-tsc build mode) on staged content.
 #
 # Install: `make install-hooks` (copies this file to .git/hooks/pre-commit).
 # Re-run `make install-hooks` after pulling updates — this file is the
 # single source of truth; the copy in .git/hooks is not versioned.
 #
-# Fail fast: a staged file that fails ruff or the pyrefly baseline gate
-# blocks the commit with the same output as `make lint` / `make
-# typecheck-py`. The hook never mutates your working tree — auto-fixing
-# is `make format` / `ruff check --fix`.
+# Fail fast: a staged file that fails ruff, the pyrefly baseline gate,
+# or vue-tsc blocks the commit with the same output as `make check`.
+# The hook never mutates your working tree — auto-fixing is `make
+# format` / `ruff check --fix`.
+#
 #
 # gitleaks scans the staged content (not diffs), so secrets in files marked
 # -diff / linguist-generated in .gitattributes stay caught even though no
@@ -38,9 +40,8 @@ if [ ! -x .venv/bin/ruff ]; then
     echo "pre-commit: .venv/bin/ruff not found — run 'make setup' first" >&2
     exit 1
 # Delegate to the shared make targets so the hook and CI can never drift
-# apart: lint-check (ruff + frontend stylelint — same scope as CI lint)
-# plus typecheck-py (the pyrefly baseline gate).  The full `make check`
-# (including vue-tsc) stays on the pre-push hook — pyrefly here catches
-# the Python-side drift at commit time, before anything reaches CI.
-make lint-check typecheck-py
+# apart: lint-check (ruff + frontend stylelint) plus the FULL typecheck
+# (pyrefly baseline gate + vue-tsc build mode) — the same gate CI runs,
+# so nothing CI can catch is ever left for CI to find first.
+make lint-check typecheck
 fi

@@ -61,6 +61,7 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
         )
 
     @property
+    @override
     def expression(self):
         return (
             Ref(self._deps[0])  # mortgage
@@ -68,17 +69,14 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
                 predicate=lambda: (
                     (self._status_node.latest_attempt().value_or_none() or "").strip().lower() != "current"
                 ),
-                if_true=(
-                    Div(Ref(self._sinking_node), Literal(12))
-                    + Ref(self._life_insurance_node)
-                ),
+                if_true=(Div(Ref(self._sinking_node), Literal(12)) + Ref(self._life_insurance_node)),
                 if_false=Literal(Money("0", "GBP")),
             )
             + Conditional(
                 predicate=lambda: bool(
-                    self._deps[3].latest_attempt().value_or_none()
-                    and isinstance(self._deps[3].latest_attempt().value_or_none(), dict)
-                    and "yearly_total_gbp" in self._deps[3].latest_attempt().value_or_none()
+                    (v3 := self._deps[3].latest_attempt().value_or_none())
+                    and isinstance(v3, dict)
+                    and "yearly_total_gbp" in v3
                 ),
                 if_true=Div(Field(Ref(self._deps[3]), "yearly_total_gbp"), Literal(12)),
                 if_false=Literal(Money("0", "GBP")),
@@ -87,8 +85,9 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
                 predicate=lambda: bool(
                     self._deps[4].latest_attempt().succeeded
                     and self._deps[4].latest_attempt().value_or_none() is not None
-                    and hasattr(self._deps[4].latest_attempt().value_or_none(), "yearly_cost")
-                    and self._deps[4].latest_attempt().value_or_none().yearly_cost is not None
+                    and (v4 := self._deps[4].latest_attempt().value_or_none()) is not None
+                    and hasattr(v4, "yearly_cost")
+                    and v4.yearly_cost is not None
                 ),
                 if_true=Div(Attr(Ref(self._deps[4]), "yearly_cost"), Literal(12)),
                 if_false=Literal(Money("0", "GBP")),
@@ -96,6 +95,7 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
             - Ref(self._deps[1])  # rental_income
         )
 
+    @override
     def _get_active_deps(self):
         status_att = self._status_node.latest_attempt()
         is_current = status_att.succeeded and (status_att.value_or_none() or "").strip().lower() == "current"
@@ -103,6 +103,7 @@ class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
             return self._deps[:5]
         return self._deps
 
+    @override
     def compute(
         self,
         mortgage: Attempt[Money],
@@ -127,6 +128,7 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
     each group's shares counted. The couple's figure subtracts rent
     received from the others; the others' figure adds the rent they pay.
     """
+
     def __init__(
         self,
         node_id: str,
@@ -186,7 +188,7 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
             dep_names=tuple(names),
         )
 
-
+    @override
     def compute(
         self,
         mortgage: Attempt[Money],
@@ -229,13 +231,13 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         council_yearly = council.yearly_cost if council is not None else None
         council_stddev = float(council_yearly.stddev) if council_yearly is not None else 0.0
         council_monthly = (
-            Decimal(str(council_yearly.value.amount)) / Decimal(12)
-            if council_yearly is not None
-            else Decimal(0)
+            Decimal(str(council_yearly.value.amount)) / Decimal(12) if council_yearly is not None else Decimal(0)
         )
         # For a Current property the sinking fund and life insurance are
         # excluded (the family's current living cost, not the purchase).
-        sinking_monthly = Decimal(0) if is_current else (sinking.value_or_none() or Money("0", "GBP")).amount / Decimal(12)  # noqa: E501
+        sinking_monthly = (
+            Decimal(0) if is_current else (sinking.value_or_none() or Money("0", "GBP")).amount / Decimal(12)
+        )  # noqa: E501
         insurance_scale = 0 if is_current else 1
         # Main house council tax: by default it splits across ALL adults
         # (each group's headcount share — the historical behaviour).  The
@@ -252,9 +254,7 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         # address is unrelated) it contributes nothing.
         annexe = council.annexe if council is not None else None
         ignored = (
-            bool(annexe_ignored.value_or_none())
-            if annexe_ignored is not None and annexe_ignored.succeeded
-            else False
+            bool(annexe_ignored.value_or_none()) if annexe_ignored is not None and annexe_ignored.succeeded else False
         )
         payers: set[str] = set()
         annexe_monthly = Decimal(0)
@@ -277,9 +277,7 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
                 else share * council_monthly
             )
             payer_count = sum(1 for p in group if p.name in payers)
-            annexe_share = (
-                Decimal(str(round(payer_count / len(payers), 4))) * annexe_monthly if payers else Decimal(0)
-            )
+            annexe_share = Decimal(str(round(payer_count / len(payers), 4))) * annexe_monthly if payers else Decimal(0)
             council_share = main_share + annexe_share
             sinking_share = share * sinking_monthly
             value = commutes + insurance + council_share + sinking_share + rent

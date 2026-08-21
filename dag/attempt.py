@@ -247,6 +247,15 @@ class Attempt[T](metaclass=_AttemptMeta):
 
     __slots__ = ("_status", "_value", "_error", "_metadata", "_created_at", "_error_info")
 
+    # Annotated so pyrefly knows the slot types (the metaclass + the
+    # object.__setattr__ construction hide them from inference).
+    _status: _Status
+    _value: T | None
+    _error: str
+    _metadata: dict
+    _created_at: datetime
+    _error_info: AttemptError | None
+
     _now: Callable[[], datetime] = lambda: datetime.now(UTC)
 
     def __init__(

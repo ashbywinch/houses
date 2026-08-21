@@ -6,7 +6,7 @@ import traceback
 from abc import abstractmethod
 from datetime import UTC, datetime, timedelta
 from inspect import iscoroutine
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, override
 
 from dag.attempt import Attempt, AttemptError, Formula, Provenance, SourceType, project_value
 from dag.eval_context import staged_attempt
@@ -117,9 +117,7 @@ class DerivedNode(Node[T], Generic[T]):
         self._deps = deps
         self._dep_names = dep_names
         if dep_names is not None and len(dep_names) != len(deps):
-            raise ValueError(
-                f"{self._id}: dep_names ({len(dep_names)}) must match deps ({len(deps)})"
-            )
+            raise ValueError(f"{self._id}: dep_names ({len(dep_names)}) must match deps ({len(deps)})")
         self._attempt: Attempt[T] = Attempt.pending()
         self._connections: list[Connection] = []
         self._slots: list[Slot] = []
@@ -153,9 +151,7 @@ class DerivedNode(Node[T], Generic[T]):
     # wrong parameter (the historical group-node misalignment).  Other
     # nodes stay positional, guarded by an arity check that fails
     # loudly instead of letting a mismatch surface as a confusing
-    def _call_compute(
-        self, dep_attempts: list[Attempt], active_deps: tuple[Node, ...]
-    ) -> Any:
+    def _call_compute(self, dep_attempts: list[Attempt], active_deps: tuple[Node, ...]) -> Any:
         # Returns either the Attempt or a coroutine resolving to one —
         # the caller awaits via iscoroutine().  Typed as Any because the
         # two shapes defeat a static union (attribute access on the
@@ -207,6 +203,7 @@ class DerivedNode(Node[T], Generic[T]):
     def _get_active_deps(self) -> tuple[Node, ...]:
         return self._deps
 
+    @override
     def latest_attempt(self) -> Attempt:
         # During a scenario evaluation (dag.evaluate), the staged
         # hypothetical attempt shadows the real one — compute bodies
@@ -253,6 +250,7 @@ class DerivedNode(Node[T], Generic[T]):
                     return True
         return False
 
+    @override
     async def attempt(self) -> Attempt[T]:
         return self._attempt
 
@@ -443,6 +441,7 @@ class DerivedNode(Node[T], Generic[T]):
         except Exception:
             return {"label": ""}
 
+    @override
     async def build_provenance(self) -> Provenance:
         sources: dict[str, Provenance] = {}
         for dep in self._get_active_deps():
@@ -499,6 +498,7 @@ class DerivedNode(Node[T], Generic[T]):
         Default is None — no formula."""
         return None
 
+    @override
     async def to_json(self) -> dict:
         result = await super().to_json()
         if self._retry_at is not None:
@@ -508,6 +508,7 @@ class DerivedNode(Node[T], Generic[T]):
             result["stale"] = self._is_stale()
         return result
 
+    @override
     async def to_json_value(self) -> dict:
         result = await super().to_json_value()
         if self._retry_at is not None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from money import Money
 
@@ -22,6 +22,10 @@ from houses.nodes.settings_node import aggregate_dict
 from houses.nodes.stamp_duty_node import StampDutyNode
 from houses.nodes.total_works_node import TotalWorksNode
 from houses.nodes.yearly_sinking_fund_node import YearlySinkingFundNode
+
+if TYPE_CHECKING:
+    from houses.nodes.commute import CommuteSelectorNode
+    from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
 from houses.services_provider import get_services
 
 
@@ -166,6 +170,10 @@ class PropertyNodes:
             acceptable=_school_acceptable,
         )
         # ── Commute Pipeline ────────────────────────────────────────────
+        # The builder attaches these in place; declare them so pyrefly
+        # knows the attributes exist before the helper assigns them.
+        self.commute_selectors: dict[str, CommuteSelectorNode] = {}
+        self.commute_breakdown: CommuteBreakdownNode | None = None
         self._build_commute_pipeline()
 
         # ── Monthly Cost Calculation Nodes ──────────────────────────────
@@ -272,15 +280,17 @@ class PropertyNodes:
         from dag.derived_node import DerivedNode
         from dag.scheduler import flush_processor
 
-        dirty = [
-            n
-            for n in vars(self).values()
-            if isinstance(n, DerivedNode) and n.code_is_stale()
-        ]
+        dirty = [n for n in vars(self).values() if isinstance(n, DerivedNode) and n.code_is_stale()]
         for n in dirty:
             await n.refresh()
         if dirty:
             await flush_processor()
+
+    async def _commute_breakdown_json(self) -> dict:
+        """The commute aggregator is attached by the pipeline builder during
+        __init__ — it is always present by the time serialization runs."""
+        assert self.commute_breakdown is not None, "commute pipeline not built"
+        return await self.commute_breakdown.to_json()
 
     async def to_json_summary(self) -> dict[str, Any]:
         from dag.persistence import property_created_at
@@ -355,7 +365,7 @@ class PropertyNodes:
                 "mortgage_required": await self.mortgage_required.to_json(),
                 "monthly_mortgage": await self.monthly_mortgage.to_json(),
                 "monthly_sinking_fund": await self.monthly_sinking_fund.to_json(),
-                "monthly_commute_cost": await self.commute_breakdown.to_json(),
+                "monthly_commute_cost": await self._commute_breakdown_json(),
                 "rental_income": await self.rental_income.to_json(),
                 "group_monthly_cost": await self.group_monthly_cost.to_json(),
             },

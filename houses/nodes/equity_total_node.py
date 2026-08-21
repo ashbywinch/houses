@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import override
 
 from money import Money
 
@@ -21,6 +22,7 @@ class EquityTotalNode(DerivedNode[Money]):
     """
 
     @property
+    @override
     def provenance_formula(self) -> Formula | None:
         if not self._attempt.succeeded or self._attempt.value_or_none() is None:
             return None
@@ -39,22 +41,24 @@ class EquityTotalNode(DerivedNode[Money]):
             names.append("status")
         super().__init__(node_id, Money, tuple(deps), dep_names=tuple(names))
 
+    @override
     def _get_active_deps(self) -> tuple:
         if self._status_node is not None:
             return (self._persons_source, self._status_node)
         return (self._persons_source,)
 
+    @override
     def compute(
         self,
         persons: Attempt[list],
         status: Attempt[str] | None = None,
     ) -> Attempt[Money]:
-        self._assert_deps_succeeded(
-            persons=persons,
-            status=status,
-        )
+        if status is not None:
+            self._assert_deps_succeeded(persons=persons, status=status)
+        else:
+            self._assert_deps_succeeded(persons=persons)
 
-        is_current = status is not None and status.value_or_none().strip().lower() == "current"
+        is_current = status is not None and (status.value_or_none() or "").strip().lower() == "current"
 
         from houses.model.domain import home_equity_contributions
 
