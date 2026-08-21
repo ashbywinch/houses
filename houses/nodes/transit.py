@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, replace
 from enum import Enum
+from typing import override
 
 from money import Money
 from pint import Quantity
@@ -148,6 +149,7 @@ class PersonMaxWalkNode(DerivedNode[int]):
         super().__init__(node_id, int, (persons_source,))
         self.display_name = "Max walk"
 
+    @override
     def compute(self, persons: Attempt[list]) -> Attempt[int]:
         if not persons.succeeded:
             return Attempt.impossible(persons.error)
@@ -165,6 +167,7 @@ class WalkLegCheckNode(DerivedNode[bool]):
         super().__init__(node_id, bool, (transit_node,))
         self._max_walk = max_walk
 
+    @override
     def compute(self, transit: Attempt[Commute]) -> Attempt[bool]:
         if not transit.succeeded:
             return Attempt.succeeded(False)
@@ -201,6 +204,7 @@ class WalkNode(DerivedNode[Commute]):
         # the destination without this patch.
         self._poi_info = poi_info
 
+    @override
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
         loc = location.value_or_none()
         poi_val = poi.value_or_none()
@@ -237,6 +241,7 @@ class DriveNode(DerivedNode[Commute]):
         self._route_fn = route_fn
         self._poi_info = poi_info
 
+    @override
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
         if not self._has_car:
             return _infeasible_commute("no car available")
@@ -279,6 +284,7 @@ class TflTransitNode(DerivedNode[Commute]):
         self._poi_info = poi_info
         self.display_name = "TfL"
 
+    @override
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
         loc = location.value_or_none()
         poi_val = poi.value_or_none()
@@ -332,13 +338,14 @@ class TransitNode(DerivedNode[Commute]):
         self._best_address = best_address
         self._poi_info = poi_info
 
+    @override
     async def compute(
         self,
         location: Attempt[GeoPoint],
         poi: Attempt[PlaceOfInterest],
         no_bus: Attempt[Commute],
         with_bus: Attempt[Commute],
-        best_address: Attempt[str] = None,
+        best_address: Attempt[str] | None = None,
     ) -> Attempt[Commute]:
 
         no_bus_val = no_bus.value_or_none()

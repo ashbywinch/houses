@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import override
+
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from houses.geo import GeoPoint
@@ -31,6 +33,7 @@ class BestAddressNode(DerivedNode[str]):
             self._slots.append(slot)
             src.changed.connect(slot)
 
+    @override
     def _is_stale(self) -> bool:
         if self._attempt.pending:
             return True
@@ -50,6 +53,7 @@ class BestAddressNode(DerivedNode[str]):
                 return True
         return False
 
+    @override
     async def compute(self, rightmove: Attempt[str]) -> Attempt[str]:
         # Check optional sources in priority order
         user_attempt = await self._user_entered.attempt()
@@ -90,6 +94,7 @@ class BestLocationNode(DerivedNode[GeoPoint]):
             self._slots.append(slot)
             geocode.changed.connect(slot)
 
+    @override
     def _is_stale(self) -> bool:
         if self._attempt.pending:
             return True
@@ -110,6 +115,7 @@ class BestLocationNode(DerivedNode[GeoPoint]):
                 return True
         return False
 
+    @override
     async def compute(self, address: Attempt[str]) -> Attempt[GeoPoint]:
 
         # Check precise_location first (optional — may be pending)

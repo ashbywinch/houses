@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import typing
 from decimal import Decimal
 
 import pytest
@@ -87,7 +88,9 @@ class TestPropertyApi:
         reg["prop123"] = prop
         flush_all()
 
-        epc_svc = get_services().epc_service
+        from tests.helpers import FakeEPC
+
+        epc_svc = typing.cast(FakeEPC, get_services().epc_service)
         epc_svc.calls.clear()
 
         resp = client.patch(
@@ -324,9 +327,7 @@ class TestPropertyApi:
         # The literal route resolves to the homes list (not a {rid} lookup)
         resp = client.get("/api/properties/current-homes")
         assert resp.status_code == 200, resp.text
-        assert resp.json()["homes"] == [
-            {"rid": "88275093", "address": "31 Isambard Road, Southall, UB2 4GN"}
-        ]
+        assert resp.json()["homes"] == [{"rid": "88275093", "address": "31 Isambard Road, Southall, UB2 4GN"}]
 
         # AND the parameterised route still resolves to its own property
         # (a reorder that shadows {rid} would fail here)
@@ -440,10 +441,7 @@ class TestProvenanceUserFriendly:
             # render as "Ashby: £25,000.00"; an empty dict renders nothing.
             if not v:
                 return True
-            return all(
-                isinstance(k, str) and isinstance(val, str) and val.startswith("GBP ")
-                for k, val in v.items()
-            )
+            return all(isinstance(k, str) and isinstance(val, str) and val.startswith("GBP ") for k, val in v.items())
         if isinstance(v, list):
             # allowlisted: named-object lists (persons) — the UI renders names.
             return all(isinstance(i, dict) and "name" in i for i in v)
@@ -703,7 +701,6 @@ class TestPatchPersonApi:
         assert simon["bus_walk_penalty"] == {"value": 20, "unit": "minute"}
         assert simon["petrol_mpg"] == 40
         assert simon["home_sale_price"] == {"amount": "550000.00", "currency": "GBP"}
-
 
     def test_non_superuser_cannot_rename_onto_another_person(self):
         """name is the ownership key: a non-superuser editing their own

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import override
+
 import pytest
 from money import Money
 from pint import Quantity
@@ -78,13 +80,16 @@ class _StubFareReader(BusJourneyRegistry):
     """A BusJourneyRegistry that returns known fares without loading real data."""
 
     def __init__(self):
+        super().__init__()
         self._loaded = True
         self._data = {}
         self._meta = {}
 
+    @override
     def _load(self):
         pass
 
+    @override
     def fares_for_stops(self, dep_stop_name, arr_stop_name, dep_point=None, arr_point=None):
         from money import Money
 
@@ -462,12 +467,15 @@ class TestBusLegAugmentInfeasible:
                 super().__init__(node_id, Commute, ())
                 self._att = Attempt.succeeded(commute)
 
+            @override
             async def attempt(self):
                 return self._att
 
+            @override
             def latest_attempt(self):
                 return self._att
 
+            @override
             def compute(self, *dep_attempts):
                 raise AssertionError("fixed node should not compute")
 
@@ -518,12 +526,15 @@ class TestBusFallbackForNoTflRoute:
                 super().__init__(node_id, Commute, ())
                 self._att = Attempt.succeeded(commute)
 
+            @override
             async def attempt(self):
                 return self._att
 
+            @override
             def latest_attempt(self):
                 return self._att
 
+            @override
             def compute(self, *dep_attempts):
                 raise AssertionError("fixed node should not compute")
 
@@ -593,12 +604,15 @@ class TestBusAugmentLateRoute:
                 super().__init__(node_id, Commute, ())
                 self._att = Attempt.succeeded(commute)
 
+            @override
             async def attempt(self):
                 return self._att
 
+            @override
             def latest_attempt(self):
                 return self._att
 
+            @override
             def compute(self, *dep_attempts):
                 raise AssertionError("fixed node should not compute")
 

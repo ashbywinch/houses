@@ -189,7 +189,8 @@ def save_node_result(
         ),
     )
     conn.commit()
-    return cur.lastrowid
+    rowid = cur.lastrowid
+    return rowid if rowid is not None else 0
 
 
 def latest_node_result(node_id: str) -> dict[str, Any] | None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import override
 
 from money import Money
 
@@ -27,9 +28,15 @@ class StampDutyNode(DerivedNode[Money]):
         super().__init__(node_id, Money, tuple(deps), dep_names=tuple(names))
 
     @property
+    @override
     def expression(self):
         return Conditional(
-            predicate=lambda: (self._status_node.latest_attempt().value_or_none() or "").strip().lower() == "current",
+            predicate=lambda: (
+                ((self._status_node.latest_attempt().value_or_none() or "") if self._status_node is not None else "")
+                .strip()
+                .lower()
+                == "current"
+            ),
             if_true=Literal(Money("0", "GBP")),
             if_false=TieredRate(
                 self._price_node,
@@ -45,11 +52,13 @@ class StampDutyNode(DerivedNode[Money]):
             description="Stamp Duty is a one-off government tax on property purchases.",
         )
 
+    @override
     def _get_active_deps(self):
         if self._status_node is not None:
             return (self._price_node, self._status_node)
         return (self._price_node,)
 
+    @override
     def compute(
         self,
         price: Attempt[Money],

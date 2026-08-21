@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from pydantic import TypeAdapter
 
@@ -180,6 +180,7 @@ class Node(ABC, Generic[T]):
         if self._source_url:
             result["source_url"] = self._source_url
         return result
+
     def _persist(self, result_dict: dict, dep_timestamps: dict[str, str] | None = None) -> None:
         from dag.persistence import save_node_result
 
@@ -196,7 +197,7 @@ class Node(ABC, Generic[T]):
         if dep_timestamps is not None:
             self._loaded_dep_timestamps = dep_timestamps
 
-    def _impossible(self, dep_attempts: dict[str, Attempt[T]], extra: str = "") -> Attempt[T]:
+    def _impossible(self, dep_attempts: dict[str, Attempt[Any]], extra: str = "") -> Attempt[T]:
         parts = [self._id]
         if extra:
             parts.append(extra)

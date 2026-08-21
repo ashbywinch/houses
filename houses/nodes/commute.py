@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import replace
+from typing import override
 
 from money import Money
 
@@ -148,6 +149,11 @@ class CommuteSelectorNode(DerivedNode[Commute]):
     propagates as usual.
     """
 
+    # The expression is always the Choose built in __init__ (the base
+    # class attribute is `Expression | None` — narrow it so pyrefly sees
+    # evaluate()/last_results).
+    _expression: Choose
+
     def __init__(
         self,
         node_id: str,
@@ -212,6 +218,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         """Whether ``mode`` may be selected.  Unset = all acceptable."""
         return not self._acceptable_modes or mode in self._acceptable_modes
 
+    @override
     def _get_active_deps(self) -> tuple[Node, ...]:
         deps = [self.origin, self.poi]
         if self._max_walk_node is not None:
@@ -225,6 +232,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         return tuple(deps)
 
     @property
+    @override
     def expression(self):
         return self._expression
 
@@ -258,6 +266,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
             return fallback_walk[1]
         return best
 
+    @override
     def compute(
         self,
         origin: Attempt[GeoPoint],
@@ -284,6 +293,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
             return Attempt.impossible("; ".join(errors))
         return result
 
+    @override
     async def to_json(self) -> dict:
         attempt = await self.attempt()
         result: dict = {
@@ -310,6 +320,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         result["provenance"] = (await self.build_provenance()).to_dict()
         return result
 
+    @override
     async def to_json_value(self) -> dict:
         result = await super().to_json_value()
         result["is_child"] = self.is_child
@@ -341,6 +352,7 @@ class MergeRailFareNode(DerivedNode[Commute]):
         )
 
     @property
+    @override
     def provenance_formula(self):
         from dag.attempt import Formula, FormulaLine
 
@@ -360,6 +372,7 @@ class MergeRailFareNode(DerivedNode[Commute]):
                 lines.append(FormulaLine(label="Rail fare", value=str(rf.daily_cost)))
         return Formula(lines=lines, result=str(val.daily_cost))
 
+    @override
     def _get_active_deps(self) -> tuple[Node, ...]:
         """The rail-fare input is a CONDITIONAL dependency: it is only
         activated when the selected commute uses transit legs.  A
@@ -374,6 +387,7 @@ class MergeRailFareNode(DerivedNode[Commute]):
                 deps.append(self._rail_fare_result)
         return tuple(deps)
 
+    @override
     def compute(
         self,
         commute: Attempt[Commute],

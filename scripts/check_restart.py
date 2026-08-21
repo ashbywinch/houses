@@ -40,7 +40,7 @@ register_property(sample_rid, prop)
 async def check():
     for key, sel in prop.commute_selectors.items():
         a = await sel.attempt()
-        print(f"  {key:40s} status={a.status:12s} cached={sel._cached is not None}")
+        print(f"  {key:40s} status={a.status:12s}")
         if a.succeeded:
             val = a.value_or_none()
             if isinstance(val, dict):

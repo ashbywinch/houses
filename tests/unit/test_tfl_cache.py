@@ -10,6 +10,7 @@ retries stay genuine.
 from __future__ import annotations
 
 import json
+from typing import override
 
 import httpx
 import pytest
@@ -46,6 +47,7 @@ class _FakeInner(httpx.AsyncBaseTransport):
         self.response = response
         self.requests: list[httpx.Request] = []
 
+    @override
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         return self.response
@@ -149,7 +151,10 @@ async def test_cached_api_call_unwraps_wrapped_entry(isolated_cache):
     # New-format deterministic 4xx: wrapped with its status. _cached_api_call
     # returns the BODY, not the wrapper.
     set_cached(
-        "GET", URL, STRIPPED_PARAMS, None,
+        "GET",
+        URL,
+        STRIPPED_PARAMS,
+        None,
         {"_cached_status": 404, "_cached_body": {"message": "no route"}},
     )
     data = await TflClient._cached_api_call(URL, AUTH_PARAMS)
@@ -268,7 +273,9 @@ def test_set_cached_scrubs_app_key_from_body(isolated_cache):
             "plain": "no key here",
         },
     )
-    cached = get_cached("GET", "https://api.tfl.gov.uk/Journey/JourneyResults/51.5,-0.1/to/SW1V 2QQ", {"nationalSearch": "true"})  # noqa: E501
+    cached = get_cached(
+        "GET", "https://api.tfl.gov.uk/Journey/JourneyResults/51.5,-0.1/to/SW1V 2QQ", {"nationalSearch": "true"}
+    )  # noqa: E501
     assert cached is not None
     assert "super-secret-key" not in json.dumps(cached)
     assert "another-secret" not in json.dumps(cached)

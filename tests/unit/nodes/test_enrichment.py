@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import override
+
 import pytest
 
 import dag.user_input_node  # noqa: F401 — register Money/Quantity schemas
@@ -65,9 +67,7 @@ class TestCouncilTaxNode:
             async def lookup(self, postcode, address=""):
                 from dag.attempt import Attempt
 
-                return Attempt.succeeded(
-                    CouncilTaxInfo(band="D", yearly_cost=Measurement(Money("1800", "GBP"), 0.0))
-                )
+                return Attempt.succeeded(CouncilTaxInfo(band="D", yearly_cost=Measurement(Money("1800", "GBP"), 0.0)))
 
         svc = make_services(council_tax_service=_FakeCT())
         token = _sp.set(svc)
@@ -445,10 +445,12 @@ class TestParkAndRideAugmentNode:
             crs = "WOK"
 
         class _FakeStationRegistry(StationRegistry):
+            @override
             def find(self, name):
                 return _FakeStation() if "Woking" in name else None
 
         class _FakeCarParkRegistry(CarParkRegistry):
+            @override
             def find_car_park(self, station):
                 return CarPark(name="Woking Park", daily_cost=Money("12.80", "GBP"))
 
@@ -706,6 +708,7 @@ class TestTransitCostAttribution:
             assert a.succeeded
 
             result = a.value_or_none()
+            assert result is not None
             assert result.daily_cost is not None
             assert float(result.daily_cost.amount) == 21.50, f"Expected 21.50, got {result.daily_cost}"
 
@@ -780,6 +783,7 @@ class TestTransitCostAttribution:
 
             a = await node.attempt()
             result = a.value_or_none()
+            assert result is not None
             assert result.daily_cost is not None
             # daily_cost = 0 (existing) + parking
             assert float(result.daily_cost.amount) > 0, f"Expected >0, got {result.daily_cost}"

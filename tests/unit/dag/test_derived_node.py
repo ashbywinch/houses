@@ -85,7 +85,6 @@ class TestDerivedNode:
         await flush_processor()
         assert received == ["changed", "changed"]
 
-
     @pytest.mark.asyncio
     async def test_impossible_when_dep_fails(self):
         """When a dep returns Attempt.impossible, the derived node should also be impossible."""
@@ -96,6 +95,7 @@ class TestDerivedNode:
                 super().__init__("fail_src", int, ())
                 self._attempt = Attempt.impossible("always fails")
 
+            @override
             def compute(self):
                 return self._attempt
 
@@ -117,6 +117,7 @@ class TestDerivedNode:
                 super().__init__("fail_crash_src", int, ())
                 self._attempt = Attempt.impossible("always fails")
 
+            @override
             def compute(self):
                 return self._attempt
 
@@ -124,9 +125,11 @@ class TestDerivedNode:
             def __init__(self, node_id: str, deps):
                 super().__init__(node_id, int, deps)
 
+            @override
             def compute(self, *args):
-                return Attempt.succeeded(args[0].value + 1)
+                return Attempt.succeeded((args[0].value_or_none() or 0) + 1)
 
+            @override
             async def build_provenance(self):
                 return Provenance(label="crash_test")
 
@@ -253,11 +256,14 @@ class _DoubleNode(DerivedNode[int]):
         super().__init__(node_id, int, deps)
         self.compute_count = 0
 
+    @override
     def compute(self, *dep_attempts) -> Attempt[int]:
         self.compute_count += 1
         val = dep_attempts[0]
-        if val.succeeded:
-            return Attempt.succeeded(val.value_or_none() * 2)
+        v = val.value_or_none()
+        if val.succeeded and v is not None:
+            return Attempt.succeeded(v * 2)
+        return Attempt.impossible("dep failed")
 
 
 class _RaisingHttpNode(DerivedNode[str]):
@@ -266,6 +272,7 @@ class _RaisingHttpNode(DerivedNode[str]):
     def __init__(self, node_id: str, deps):
         super().__init__(node_id, str, deps)
 
+    @override
     async def compute(self, *dep_attempts) -> Attempt[str]:
         from dag.http_error import HttpError
 
@@ -283,11 +290,12 @@ class _SumNode(DerivedNode[int]):
         super().__init__(node_id, int, deps)
         self.compute_count = 0
 
+    @override
     def compute(self, *dep_attempts) -> Attempt[int]:
         self.compute_count += 1
         vals = [a.value_or_none() for a in dep_attempts]
         if all(a.succeeded for a in dep_attempts):
-            return Attempt.succeeded(sum(vals))
+            return Attempt.succeeded(sum(v for v in vals if v is not None))
         return Attempt.impossible("one or more deps failed")
 
 
@@ -295,10 +303,12 @@ class _AsyncDoubleNode(DerivedNode[int]):
     def __init__(self, node_id: str, deps):
         super().__init__(node_id, int, deps)
 
+    @override
     async def compute(self, *dep_attempts) -> Attempt[int]:
         val = dep_attempts[0]
-        if val.succeeded:
-            return Attempt.succeeded(val.value_or_none() * 2)
+        v = val.value_or_none()
+        if val.succeeded and v is not None:
+            return Attempt.succeeded(v * 2)
         return Attempt.impossible("dep failed")
 
 
@@ -364,6 +374,7 @@ class TestNamedDepsDispatch:
             super().__init__(node_id, int, (a, b, c), dep_names=("a", "b", "c"))
             self.received: tuple | None = None
 
+        @override
         def _get_active_deps(self):
             # Drop the MIDDLE dep — positionally this would bind b's
             # attempt to the `c` parameter.
@@ -389,8 +400,7 @@ class TestNamedDepsDispatch:
 
         assert node.received is not None
         assert node.received[1] is None, (
-            "the dropped middle dep must stay None — the c attempt must "
-            f"not land in b's slot: {node.received}"
+            f"the dropped middle dep must stay None — the c attempt must not land in b's slot: {node.received}"
         )
         assert node.received[2] is not None
         assert (await node.attempt()).value_or_none() == 3
@@ -421,8 +431,7 @@ class TestComputeArityGuard:
         await flush_processor()
         attempt = await node.attempt()
         assert attempt.impossible, (
-            "a positional arity drift must fail loudly, not silently "
-            f"misbind — got: {attempt.status}: {attempt.error}"
+            f"a positional arity drift must fail loudly, not silently misbind — got: {attempt.status}: {attempt.error}"
         )
         assert "arity_bad" in (attempt.error or "")
         assert "drifted" in (attempt.error or "")
@@ -447,9 +456,7 @@ class TestCodeVersionStaleness:
         # current compute no longer matches. Dep timestamps are unchanged.
         node._persisted_code_version = "old-code-hash"
         await node.refresh()
-        assert node.compute_count == 2, (
-            "a code-version mismatch must recompute despite fresh dep timestamps"
-        )
+        assert node.compute_count == 2, "a code-version mismatch must recompute despite fresh dep timestamps"
 
     @pytest.mark.asyncio
     async def test_legacy_row_without_code_version_is_code_stale(self):
