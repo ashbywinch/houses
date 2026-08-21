@@ -66,6 +66,22 @@ export interface GroupCostValue {
   value: string
   stddev: number
 }
+
+export interface AnnexeValue {
+  address: string
+  band: string
+  yearly_cost?: { value: MoneyValue; stddev?: number } | null
+}
+
+/** CouncilTaxInfo as serialised by the DAG node (band, cost, evidence,
+ * and the annexe dwelling when the VOA lookup detected one). */
+export interface CouncilTaxValue {
+  band: string
+  yearly_cost?: { value: MoneyValue; stddev?: number } | null
+  evidence_url: string
+  lookup_error?: string
+  annexe?: AnnexeValue | null
+}
 /** Per-component monthly cost for one group (S+L vs the others) so the
  *  detail page can render the two groups' costs as separate blocks
  *  instead of mixing household rows. */
@@ -212,7 +228,7 @@ export interface PropertyDetail {
     ignored: AttemptValue<boolean>
   }
   affordability: {
-    council_tax: AttemptValue<Record<string, unknown>>
+    council_tax: AttemptValue<CouncilTaxValue>
     works_estimates: AttemptValue<Record<string, number>>
     total_works: AttemptValue<MoneyValue>
     total_equity: AttemptValue<MoneyValue>

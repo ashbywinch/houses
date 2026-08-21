@@ -331,3 +331,37 @@ class TestMissingRate:
         info = CouncilTaxInfo(band="F", lookup_error="no yearly rate found for Narnia")
         assert "no yearly rate found for Narnia" in info.to_provenance_value()
         assert "Band F" in info.to_provenance_value()
+
+    @pytest.mark.asyncio
+    async def test_evidence_url_points_at_working_civaccount_api(self, monkeypatch):
+        """The old evidence URL (civaccount.co.uk/councils/<slug>) 404s for
+        EVERY authority — the CivAccount website has no such pages.  The
+        API endpoint that actually serves the rate must be the link."""
+        from houses.council_tax import lookup_council_tax
+
+        monkeypatch.setattr("houses.council_tax._lookup_yearly_cost", lambda band, la: None)
+
+        class Row:
+            def __init__(self, address: str, band: str):
+                self.address = address
+                self.band = band
+                self.local_authority = "Woking"
+
+        class Page:
+            rows = [Row("2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "F")]
+
+        def fetcher(postcode: str, page: int):
+            return Page()
+
+        a = await lookup_council_tax(
+            "SL7 1HW",
+            "2 Willowmead Gardens, Marlow, SL7 1HW",
+            page_fetcher=fetcher,
+        )
+        info = a.value_or_none()
+        assert info is not None
+        assert info.evidence_url.startswith("https://www.civaccount.co.uk/api/v1/councils/"), (
+            "evidence must link to the working API endpoint, got: "
+            f"{info.evidence_url!r}"
+        )
+        assert "woking" in info.evidence_url

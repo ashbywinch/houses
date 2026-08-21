@@ -459,7 +459,10 @@ async def lookup_council_tax(
     lookup_error = ""
     if matched["local_authority"]:
         slug = matched["local_authority"].lower().replace(" ", "-").replace(".", "")
-        evidence_url = f"https://www.civaccount.co.uk/councils/{slug}"
+        # The CivAccount WEBSITE has no /councils/<slug> pages (they 404 for
+        # every authority) — the API endpoint that actually serves the rate
+        # is the only working evidence link.
+        evidence_url = f"{CIVACCOUNT_URL}/{slug}"
         yearly_cost = _lookup_yearly_cost(matched["band"], matched["local_authority"])
         if yearly_cost is None:
             # The band is real but the rate is not — the provenance must
