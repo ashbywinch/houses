@@ -49,6 +49,22 @@ def test_exact_building_wins_over_flat_variant():
     assert a.value_or_none() == "B"
 
 
+def test_exact_match_survives_county_in_query_address():
+    """The real address form carries the county ('2 Willowmead Gardens,
+    Marlow, Buckinghamshire, SL7 1HW'); certificate addressLine1 values
+    usually do not.  The county token must not break the prefix rule —
+    the house's certificate still wins over the flat's."""
+    certs = [
+        _cert("2 WILLOWMEAD GARDENS, MARLOW", band="B"),
+        _cert("FLAT 2, 2 WILLOWMEAD GARDENS, MARLOW", band="E"),
+    ]
+    a = _match_cert(
+        certs, "2", address="2 Willowmead Gardens, Marlow, Buckinghamshire, SL7 1HW"
+    )
+    assert a.succeeded, f"exact address must win despite the county, got: {a.status}: {a.error}"
+    assert a.value_or_none() == "B"
+
+
 def test_no_exact_match_stays_ambiguous_with_names():
     """No exact prefix → genuinely ambiguous; the error names the first
     two matches + count so the provenance is troubleshooting-useful."""

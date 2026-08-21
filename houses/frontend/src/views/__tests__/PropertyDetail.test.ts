@@ -702,3 +702,97 @@ describe('PropertyDetail commute settings link (D2)', () => {
     expect(link.attributes('href') ?? '').toContain('person=Simon')
   })
 })
+
+describe('PropertyDetail council-tax apportionment (AnnexeSection wiring)', () => {
+  async function mountWithApportionment(detail: PropertyDetailType) {
+    const router = createRouter({
+      history: createWebHashHistory(),
+      routes: [{ path: '/property/:rid', component: PropertyDetail }],
+    })
+    router.push('/property/123')
+    await router.isReady()
+    const wrapper = mount(PropertyDetail, {
+      global: { plugins: [createPinia(), router] },
+    })
+    const store = usePropertiesStore()
+    store.details['123'] = detail
+    store.loading = false
+    await wrapper.vm.$nextTick()
+    await wrapper.vm.$nextTick()
+    return wrapper
+  }
+
+  function detailWith(overrides: Partial<PropertyDetailType>): PropertyDetailType {
+    const d = makeDetail()
+    return {
+      ...d,
+      settings: {
+        ...d.settings,
+        persons: {
+          succeeded: true,
+          value: [{ name: 'Simon' }, { name: 'Lorena' }, { name: 'Ashby' }],
+          error: null,
+          provenance: { label: 'test' },
+        },
+      },
+      council_tax_apportionment: {
+        main_payers: { succeeded: true, value: [], error: null, provenance: { label: 'test' } },
+        annexe_payers: { succeeded: true, value: [], error: null, provenance: { label: 'test' } },
+        ignored: { succeeded: true, value: false, error: null, provenance: { label: 'test' } },
+      },
+      ...overrides,
+    }
+  }
+
+  function councilTaxValue(annexe: unknown) {
+    return {
+      band: 'F',
+      yearly_cost: { value: { amount: '3650.11', currency: 'GBP' }, stddev: 0 },
+      evidence_url: '',
+      annexe,
+    }
+  }
+
+  it('renders both bills when the lookup detected an annexe', async () => {
+    const detail = detailWith({
+      affordability: {
+        ...makeDetail().affordability,
+        council_tax: {
+          succeeded: true,
+          value: councilTaxValue({
+            address: 'FLAT 2, 2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW',
+            band: 'A',
+            yearly_cost: { value: { amount: '900', currency: 'GBP' }, stddev: 0 },
+          }),
+          error: null,
+          provenance: { label: 'council_tax' },
+        },
+      },
+    })
+    const wrapper = await mountWithApportionment(detail)
+    const text = wrapper.text()
+    expect(text).toContain('Council tax — who pays')
+    expect(text).toContain('Main house — Band F · £3,650.11/yr')
+    expect(text).toContain('FLAT 2, 2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW')
+    expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(6)
+  })
+
+  it('shows only the main bill when the lookup found no annexe', async () => {
+    const detail = detailWith({
+      affordability: {
+        ...makeDetail().affordability,
+        council_tax: {
+          succeeded: true,
+          value: councilTaxValue(null),
+          error: null,
+          provenance: { label: 'council_tax' },
+        },
+      },
+    })
+    const wrapper = await mountWithApportionment(detail)
+    const text = wrapper.text()
+    expect(text).toContain('Main house — Band F · £3,650.11/yr')
+    expect(text).not.toContain('Annexe —')
+    expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(3)
+  })
+})
