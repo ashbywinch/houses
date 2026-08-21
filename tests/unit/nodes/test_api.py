@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+
 from houses.geo import GeoPoint
 from tests.unit.conftest import flush_all
 
@@ -137,6 +139,89 @@ class TestPropertyApi:
         detail = client.get("/api/properties/prop123/detail").json()
         assert detail["annexe"]["payers"]["value"] == ["Ashby"]
         assert detail["annexe"]["ignored"]["value"] is False
+
+    def test_annexe_apportionment_changes_user_visible_total(self):
+        """PATCHing the annexe payers must change the monthly cost the
+        detail page renders — the settings drive the DAG, end to end, not
+        just the stored inputs."""
+        from money import Money
+        from pint import Quantity
+
+        from dag.attempt import Attempt
+        from dag.measurement import Measurement
+        from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
+        from houses.model.domain import HomeCoOwner, Person
+        from houses.nodes.property import PropertyNodes
+        from houses.services_provider import _request_services as _sp
+        from tests.helpers import make_services
+
+        class _AnnexeCT:
+            async def lookup(self, postcode, address=""):
+                return Attempt.succeeded(
+                    CouncilTaxInfo(
+                        band="D",
+                        yearly_cost=Measurement(Money("1800", "GBP"), 0.0),
+                        annexe=AnnexeDwelling(
+                            address="FLAT 2, 2 WILLOWMEAD GARDENS",
+                            band="A",
+                            yearly_cost=Measurement(Money("900", "GBP"), 0.0),
+                        ),
+                    )
+                )
+
+        svc = make_services(council_tax_service=_AnnexeCT())
+        token = _sp.set(svc)
+        try:
+            # Clean family: no POIs (no TfL chain in unit tests), no
+            # works-estimate requirement — so the money cascade resolves.
+            _push_persons(
+                Person(
+                    name="Simon",
+                    has_car=True,
+                    bus_walk_penalty=Quantity(20, "minute"),  # type: ignore[arg-type]
+                    home_co_owners=(HomeCoOwner(name="Lorena", share=50),),
+                ),
+                Person(name="Lorena", has_car=False, bus_walk_penalty=Quantity(15, "minute")),  # type: ignore[arg-type]
+                Person(name="Ashby", has_car=True, bus_walk_penalty=Quantity(10, "minute")),  # type: ignore[arg-type]
+            )
+            client, reg = self._setup()
+            rid = "42345679"
+            prop = PropertyNodes(rid)
+            prop.rightmove_price.push(Money("500000", "GBP"), "test")
+            prop.rightmove_address.push("1 Test St", "test")
+            prop.postcode.push("SW1V 2QQ", "test")
+            prop.works_estimates.push({}, "test")
+            prop.rental_income.push(Money("0", "GBP"), "test")
+            prop.comment_status.push("", "test")
+            reg[rid] = prop
+
+            flush_all()
+
+            detail = client.get(f"/api/properties/{rid}/detail").json()
+            group = detail["affordability"]["group_monthly_cost"]["value"]
+            others_before = float(group["others"]["value"])
+            assert "annexe_council_tax" not in (group.get("others_breakdown") or {})
+
+            resp = client.patch(f"/api/properties/{rid}/annexe", json={"payers": ["Ashby"]})
+            assert resp.status_code == 200
+
+            detail = client.get(f"/api/properties/{rid}/detail").json()
+            group = detail["affordability"]["group_monthly_cost"]["value"]
+            others_after = float(group["others"]["value"])
+            # Annex £900/yr → £75/mo, paid by Ashby alone → the others'
+            # visible total rises by exactly 75.
+            assert others_after == pytest.approx(others_before + 75, abs=0.01), (
+                f"annexe share must land in the visible total, before={others_before} after={others_after}"
+            )
+            assert float(group["others_breakdown"]["annexe_council_tax"]) == pytest.approx(75, abs=0.01)
+
+            # "Not related" → the annexe drops back out of the total.
+            client.patch(f"/api/properties/{rid}/annexe", json={"ignored": True})
+            detail = client.get(f"/api/properties/{rid}/detail").json()
+            group = detail["affordability"]["group_monthly_cost"]["value"]
+            assert float(group["others"]["value"]) == pytest.approx(others_before, abs=0.01)
+        finally:
+            _sp.reset(token)
 
     def test_get_property_404(self):
         client, _ = self._setup()
