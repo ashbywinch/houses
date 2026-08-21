@@ -48,7 +48,7 @@ const adultsList = computed(() => {
 // default (the DAG's empty-payers behaviour) and there is nothing to
 // configure.
 const councilTaxAnnexe = computed(
-  () => (detail.value?.affordability?.council_tax?.value as any)?.annexe ?? null,
+  () => detail.value?.affordability?.council_tax?.value?.annexe ?? null,
 )
 
 const address = computed(() => detail.value?.best_address?.value ?? rid.value)
@@ -356,8 +356,8 @@ async function saveAddress() {
       <AnnexeSection
         v-if="detail.council_tax_apportionment && councilTaxAnnexe"
         :rid="rid"
-        :main-bill="(detail.affordability?.council_tax?.value as any) ?? null"
-        :annexe="(detail.affordability?.council_tax?.value as any)?.annexe ?? null"
+        :main-bill="detail.affordability?.council_tax?.value ?? null"
+        :annexe="councilTaxAnnexe"
         :main-payers="detail.council_tax_apportionment.main_payers.value ?? []"
         :annexe-payers="detail.council_tax_apportionment.annexe_payers.value ?? []"
         :ignored="detail.council_tax_apportionment.ignored.value ?? false"
