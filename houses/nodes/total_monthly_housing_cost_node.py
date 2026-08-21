@@ -9,7 +9,6 @@ from dag.attempt import Attempt, Provenance
 from dag.derived_node import DerivedNode
 from dag.expression import Attr, Conditional, Div, Field, Literal, Ref
 from dag.measurement import Measurement
-from dag.node import Node
 
 
 class TotalMonthlyHousingCostNode(DerivedNode[Measurement[Money]]):
@@ -133,9 +132,11 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         persons_source,
         annexe_payers_node=None,
         annexe_ignored_node=None,
+        council_tax_payers_node=None,
     ):
         self._annexe_payers_node = annexe_payers_node
         self._annexe_ignored_node = annexe_ignored_node
+        self._council_tax_payers_node = council_tax_payers_node
         deps = (
             monthly_mortgage_node,
             yearly_sinking_fund_node,
@@ -150,22 +151,14 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
             deps = deps + (annexe_payers_node,)
         if annexe_ignored_node is not None:
             deps = deps + (annexe_ignored_node,)
+        if council_tax_payers_node is not None:
+            deps = deps + (council_tax_payers_node,)
         super().__init__(
             node_id,
             dict,
             deps,
         )
 
-    def _get_active_deps(self):
-        """The annexe inputs are static deps (their signals re-schedule
-        this node) but a PENDING annexe setting must not block the whole
-        money cascade — only once the user has set them (or bootstrap
-        seeded the defaults) do they gate refresh."""
-        deps: list[Node] = [d for d in self._deps]
-        for node in (self._annexe_payers_node, self._annexe_ignored_node):
-            if node is not None and node.latest_attempt().pending:
-                deps.remove(node)
-        return tuple(deps)
 
     def compute(
         self,
@@ -179,6 +172,7 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         persons: Attempt[list],
         annexe_payers: Attempt[list] | None = None,
         annexe_ignored: Attempt[bool] | None = None,
+        council_tax_payers: Attempt[list] | None = None,
     ) -> Attempt[dict]:
         from houses.model.domain import joint_owner_names
 
@@ -216,6 +210,14 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         # excluded (the family's current living cost, not the purchase).
         sinking_monthly = Decimal(0) if is_current else (sinking.value_or_none() or Money("0", "GBP")).amount / Decimal(12)  # noqa: E501
         insurance_scale = 0 if is_current else 1
+        # Main house council tax: by default it splits across ALL adults
+        # (each group's headcount share — the historical behaviour).  The
+        # user can instead pick WHO pays it (e.g. only the owners) — the
+        # picked people split the bill equally among themselves.
+        main_payers: set[str] = set()
+        if council_tax_payers is not None and council_tax_payers.succeeded:
+            main_payers = set(council_tax_payers.value_or_none() or [])
+        main_payer_total = len(main_payers) if main_payers else n_adults
 
         # Annexe: a second dwelling at the same address has its OWN council
         # tax bill.  Only the people the user picked pay it, split equally
@@ -241,14 +243,22 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
             commutes = sum((commute_monthly(p.name) for p in group), Decimal(0))
             insurance = insurance_scale * sum((money_of(p, "life_insurance_monthly") for p in group), Decimal(0))
             share = Decimal(str(round(owner_share, 4)))
+            main_payer_count = sum(1 for p in group if p.name in main_payers) if main_payers else len(group)
+            main_share = (
+                Decimal(str(round(main_payer_count / main_payer_total, 4))) * council_monthly
+                if main_payers
+                else share * council_monthly
+            )
             payer_count = sum(1 for p in group if p.name in payers)
             annexe_share = (
                 Decimal(str(round(payer_count / len(payers), 4))) * annexe_monthly if payers else Decimal(0)
             )
-            council_share = share * council_monthly + annexe_share
+            council_share = main_share + annexe_share
             sinking_share = share * sinking_monthly
             value = commutes + insurance + council_share + sinking_share + rent
             stddev = owner_share * float(council_stddev) / 12.0
+            if main_payers:
+                stddev = (main_payer_count / main_payer_total) * float(council_stddev) / 12.0
             if payers:
                 stddev += (payer_count / len(payers)) * annexe_stddev / 12.0
             breakdown = {

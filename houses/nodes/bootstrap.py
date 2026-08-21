@@ -173,10 +173,6 @@ def _seed_input_defaults(prop) -> None:
         prop.works_estimates.push({}, "default")
     if prop.rental_income.latest_attempt().pending:
         prop.rental_income.push(Money("0", "GBP"), "default")
-    if prop.annexe_payers.latest_attempt().pending:
-        prop.annexe_payers.push([], "default")
-    if prop.annexe_ignored.latest_attempt().pending:
-        prop.annexe_ignored.push(False, "default")
 
 
 def load_property_nodes_from_db() -> int:

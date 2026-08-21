@@ -345,17 +345,17 @@ async function saveAddress() {
         :rid="rid"
         :current-person="currentPerson"
       />
-
-      <!-- ═══════════ ANNEXE ═══════════ -->
+      <!-- ═══════════ COUNCIL TAX ═══════════ -->
       <AnnexeSection
-        v-if="detail.annexe"
+        v-if="detail.council_tax_apportionment"
         :rid="rid"
+        :main-bill="(detail.affordability?.council_tax?.value as any) ?? null"
         :annexe="(detail.affordability?.council_tax?.value as any)?.annexe ?? null"
-        :payers="detail.annexe.payers.value ?? []"
-        :ignored="detail.annexe.ignored.value ?? false"
+        :main-payers="detail.council_tax_apportionment.main_payers.value ?? []"
+        :annexe-payers="detail.council_tax_apportionment.annexe_payers.value ?? []"
+        :ignored="detail.council_tax_apportionment.ignored.value ?? false"
         :adults="adultsList"
       />
-
       <!-- ═══════════ NOTES ═══════════ -->
       <NotesSection :rid="rid" />
     </template>

@@ -63,11 +63,11 @@ export function patchAddress(rid: string, address: string): Promise<Response> {
   }).then(checkFor401)
 }
 
-export function patchAnnexe(
+export function patchCouncilTax(
   rid: string,
-  body: { payers?: string[]; ignored?: boolean },
+  body: { main_payers?: string[]; annexe_payers?: string[]; ignored?: boolean },
 ): Promise<Response> {
-  return fetch(`${BASE}/properties/${encodeURIComponent(rid)}/annexe`, {
+  return fetch(`${BASE}/properties/${encodeURIComponent(rid)}/council-tax`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),

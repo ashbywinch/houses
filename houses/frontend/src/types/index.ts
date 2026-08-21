@@ -206,8 +206,9 @@ export interface PropertyDetail {
     primary: { school: AttemptValue<SchoolValue> }
     secondary: { school: AttemptValue<SchoolValue> }
   }
-  annexe?: {
-    payers: AttemptValue<string[]>
+  council_tax_apportionment?: {
+    main_payers: AttemptValue<string[]>
+    annexe_payers: AttemptValue<string[]>
     ignored: AttemptValue<boolean>
   }
   affordability: {

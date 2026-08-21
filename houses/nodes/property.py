@@ -77,13 +77,25 @@ class PropertyNodes:
         self.user_notes = UserInputNode[str](f"{rid}/user_notes", str)
         self.triage_status = UserInputNode[str](f"{rid}/triage_status", str)
 
-        # Annexe apportionment (app-only, not synced to sheet): which
-        # people pay a share of the annexe's council tax, and whether the
-        # detected second dwelling is actually unrelated to the purchase.
+        # Council-tax apportionment (app-only): which people pay a share
+        # of the MAIN house's council tax (empty = all adults, the
+        # default headcount split) and of the ANNEXE's (if detected);
+        # annexe_ignored says the second dwelling is unrelated.
         # Defaults are seeded at bootstrap so they never block refresh.
+        self.council_tax_payers = UserInputNode[list[str]](f"{rid}/council_tax_payers", list[str])
         self.annexe_payers = UserInputNode[list[str]](f"{rid}/annexe_payers", list[str])
         self.annexe_ignored = UserInputNode[bool](f"{rid}/annexe_ignored", bool)
-        # ── Location DerivedNodes ─────────────────────────────────────
+        # Materialise defaults NOW so the nodes are never pending: the
+        # group node passes its deps to compute POSITIONALLY, so a dropped
+        # pending dep would shift every later argument into the wrong
+        # parameter (the main-payers value landing in annexe_payers).
+        # Push only when never set — a persisted user choice survives.
+        if self.council_tax_payers.latest_attempt().pending:
+            self.council_tax_payers.push([], "default")
+        if self.annexe_payers.latest_attempt().pending:
+            self.annexe_payers.push([], "default")
+        if self.annexe_ignored.latest_attempt().pending:
+            self.annexe_ignored.push(False, "default")
         self.best_address = BestAddressNode(
             f"{rid}/best_address",
             user_entered_address=self.user_entered_address,
@@ -215,6 +227,7 @@ class PropertyNodes:
             persons_source=self._svc.persons_source,
             annexe_payers_node=self.annexe_payers,
             annexe_ignored_node=self.annexe_ignored,
+            council_tax_payers_node=self.council_tax_payers,
         )
 
         # ── Signal wiring ──────────────────────────────────────────────
@@ -322,8 +335,9 @@ class PropertyNodes:
                 "rental_income": await self.rental_income.to_json(),
                 "group_monthly_cost": await self.group_monthly_cost.to_json(),
             },
-            "annexe": {
-                "payers": await self.annexe_payers.to_json_value(),
+            "council_tax_apportionment": {
+                "main_payers": await self.council_tax_payers.to_json_value(),
+                "annexe_payers": await self.annexe_payers.to_json_value(),
                 "ignored": await self.annexe_ignored.to_json_value(),
             },
             "area": {

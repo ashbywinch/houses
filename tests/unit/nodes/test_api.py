@@ -102,9 +102,9 @@ class TestPropertyApi:
         detail = client.get("/api/properties/prop123/detail").json()
         assert detail["affordability"]["council_tax"]["succeeded"]
 
-    def test_patch_annexe_sets_payers_and_detail_exposes_annexe(self):
-        """PATCH /properties/{rid}/annexe persists the apportionment and
-        the detail payload exposes the detected annexe + the choice."""
+    def test_patch_council_tax_sets_payers_and_detail_exposes_them(self):
+        """PATCH /properties/{rid}/council-tax persists the apportionment
+        and the detail payload exposes the bills + the choices."""
         from money import Money
 
         from dag.attempt import Attempt
@@ -133,12 +133,17 @@ class TestPropertyApi:
         detail = client.get("/api/properties/prop123/detail").json()
         assert detail["affordability"]["council_tax"]["value"]["annexe"]["band"] == "A"
 
-        resp = client.patch("/api/properties/prop123/annexe", json={"payers": ["Ashby"], "ignored": False})
+        resp = client.patch(
+            "/api/properties/prop123/council-tax",
+            json={"main_payers": ["Simon", "Lorena"], "annexe_payers": ["Ashby"], "ignored": False},
+        )
         assert resp.status_code == 200
 
         detail = client.get("/api/properties/prop123/detail").json()
-        assert detail["annexe"]["payers"]["value"] == ["Ashby"]
-        assert detail["annexe"]["ignored"]["value"] is False
+        apportionment = detail["council_tax_apportionment"]
+        assert apportionment["main_payers"]["value"] == ["Simon", "Lorena"]
+        assert apportionment["annexe_payers"]["value"] == ["Ashby"]
+        assert apportionment["ignored"]["value"] is False
 
     def test_annexe_apportionment_changes_user_visible_total(self):
         """PATCHing the annexe payers must change the monthly cost the
@@ -200,26 +205,47 @@ class TestPropertyApi:
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
             others_before = float(group["others"]["value"])
+            couple_before = float(group["couple"]["value"])
             assert "annexe_council_tax" not in (group.get("others_breakdown") or {})
 
-            resp = client.patch(f"/api/properties/{rid}/annexe", json={"payers": ["Ashby"]})
+            # Main bill: Simon+Lorena pay it ALL → the couple takes the
+            # couple's default share plus Ashby's ⅓ (£50/mo); the others'
+            # total drops by exactly that main share.
+            resp = client.patch(
+                f"/api/properties/{rid}/council-tax",
+                json={"main_payers": ["Simon", "Lorena"]},
+            )
             assert resp.status_code == 200
-
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
-            others_after = float(group["others"]["value"])
-            # Annex £900/yr → £75/mo, paid by Ashby alone → the others'
-            # visible total rises by exactly 75.
-            assert others_after == pytest.approx(others_before + 75, abs=0.01), (
-                f"annexe share must land in the visible total, before={others_before} after={others_after}"
+            assert float(group["couple_breakdown"]["council_tax"]) == pytest.approx(150, abs=0.01), (
+                "the couple must pay the WHOLE main bill when they are the only payers"
+            )
+            assert float(group["others_breakdown"]["council_tax"]) == pytest.approx(0, abs=0.01), (
+                "others must stop paying the main bill when only the owners pay it"
+            )
+            assert float(group["others"]["value"]) == pytest.approx(others_before - 50, abs=0.02)
+            assert float(group["couple"]["value"]) == pytest.approx(couple_before + 50, abs=0.02)
+
+            # Annex bill: Ashby alone pays it → +£75/mo on the others.
+            resp = client.patch(
+                f"/api/properties/{rid}/council-tax",
+                json={"annexe_payers": ["Ashby"], "ignored": False},
+            )
+            assert resp.status_code == 200
+            detail = client.get(f"/api/properties/{rid}/detail").json()
+            group = detail["affordability"]["group_monthly_cost"]["value"]
+            others_with_annexe = float(group["others"]["value"])
+            assert others_with_annexe == pytest.approx(others_before - 50 + 75, abs=0.01), (
+                f"annexe share must land in the visible total, got {others_with_annexe}"
             )
             assert float(group["others_breakdown"]["annexe_council_tax"]) == pytest.approx(75, abs=0.01)
 
-            # "Not related" → the annexe drops back out of the total.
-            client.patch(f"/api/properties/{rid}/annexe", json={"ignored": True})
+            # "Not related" → the annexe drops back out; main payers keep.
+            client.patch(f"/api/properties/{rid}/council-tax", json={"ignored": True})
             detail = client.get(f"/api/properties/{rid}/detail").json()
             group = detail["affordability"]["group_monthly_cost"]["value"]
-            assert float(group["others"]["value"]) == pytest.approx(others_before, abs=0.01)
+            assert float(group["others"]["value"]) == pytest.approx(others_before - 50, abs=0.01)
         finally:
             _sp.reset(token)
 
