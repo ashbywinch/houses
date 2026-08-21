@@ -1,11 +1,14 @@
-"""Force-regeneration of DAG nodes whose persisted results are stale in
-code (Part D follow-up, 2026-08-06).
+"""Force-regeneration of DAG nodes (Part D follow-up, 2026-08-06).
 
-After a code change, a node's persisted result can be wrong even though
-its dep timestamps say "fresh" — the staleness check only sees input
-changes, not code changes. ``force_regenerate`` bypasses the staleness
-check and recomputes the matched nodes through the normal refresh path
-(persist + signals), so the cascade to dependents works as usual.
+Code changes are now detected automatically: every persisted result
+carries a code-version fingerprint, and a mismatch recomputes on the
+next refresh (see ``DerivedNode.code_is_stale``).  ``force_regenerate``
+remains for explicit recomputes — a full refresh right now, or a
+recompute whose inputs changed but whose dep timestamps don't reflect
+it.  It bypasses the staleness check and recomputes the matched nodes
+through the normal refresh path (persist + signals), so the cascade to
+dependents works as usual.
+
 
 Patterns are glob-style over node ids: ``*`` matches any run of
 characters (including ``/``). A pattern with no ``*`` is an exact id.
