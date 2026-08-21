@@ -217,13 +217,11 @@ class DerivedNode(Node[T], Generic[T]):
         _get_scheduler().schedule(self)
 
     def _is_stale(self) -> bool:
+        # Staleness is a NORMAL condition (any dep change re-schedules the
+        # downstream node) — the old STALE1/2/3/CODE warnings logged at
+        # WARNING on every pass and flooded the log during the code-version
+        # migration sweep.  The checks are the logic; the noise is gone.
         if self.code_is_stale():
-            logger.warning(
-                "STALE_CODE: %s persisted=%s current=%s",
-                self._id,
-                getattr(self, "_persisted_code_version", ""),
-                self._current_code_version(),
-            )
             return True
         if self._retry_at is not None:
             return True
@@ -235,13 +233,6 @@ class DerivedNode(Node[T], Generic[T]):
                 and self._computed_at is not None
                 and dep._persisted_at > self._computed_at
             ):
-                logger.warning(
-                    "STALE1: %s dep=%s persisted=%s > computed=%s",
-                    self._id,
-                    dep._id,
-                    dep._persisted_at.isoformat(),
-                    self._computed_at.isoformat(),
-                )
                 return True
             if (
                 isinstance(dep, DerivedNode)
@@ -249,33 +240,13 @@ class DerivedNode(Node[T], Generic[T]):
                 and self._computed_at is not None
                 and dep._computed_at > self._computed_at
             ):
-                logger.warning(
-                    "STALE2: %s dep=%s computed=%s > self_computed=%s",
-                    self._id,
-                    dep._id,
-                    dep._computed_at.isoformat(),
-                    self._computed_at.isoformat(),
-                )
                 return True
             if self._loaded_dep_timestamps:
                 stored = self._loaded_dep_timestamps.get(dep._id, "")
-                if stored:
-                    if not dep._db_created_at:
-                        logger.warning(
-                            "STALE_EMPTY: %s dep=%s has empty _db_created_at",
-                            self._id,
-                            dep._id,
-                        )
-                        continue
-                    if dep._db_created_at != stored:
-                        logger.warning(
-                            "STALE3: %s dep=%s stored=%s actual=%s",
-                            self._id,
-                            dep._id,
-                            stored,
-                            dep._db_created_at,
-                        )
-                        return True
+                if stored and not dep._db_created_at:
+                    continue
+                if stored and dep._db_created_at != stored:
+                    return True
         return False
 
     async def attempt(self) -> Attempt[T]:
@@ -333,9 +304,10 @@ class DerivedNode(Node[T], Generic[T]):
         """Recompute and persist this node.
 
         Skips nodes whose inputs haven't changed since they were last
-        computed. ``force=True`` bypasses the staleness check — for
-        code changes that alter computation under unchanged inputs
-        (the persisted results are fresh-by-timestamp but wrong).
+        computed.  Code changes are caught by the code-version stamp
+        (a persisted row computed by different code is stale).
+        ``force=True`` bypasses the staleness check entirely — for
+        explicit full recomputes (admin regenerate).
         """
         if not force and not self._is_stale():
             return
@@ -348,8 +320,6 @@ class DerivedNode(Node[T], Generic[T]):
                 )
         dep_attempts = [await dep.attempt() for dep in active_deps]
         # Propagate impossible before checking pending — if a dep is
-        # impossible and another is pending, fail fast rather than
-        # waiting indefinitely for the pending dep to resolve.
         impossible_deps = [a for a in dep_attempts if a.impossible]
         if impossible_deps:
             errors = "; ".join(a.error or "unknown" for a in impossible_deps)
