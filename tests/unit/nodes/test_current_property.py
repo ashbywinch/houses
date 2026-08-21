@@ -597,6 +597,7 @@ class TestGroupMonthlyCostNode:
         ps = UserInputNode[list]("g_" + node_id + "_ps", list)
         ap = UserInputNode[list]("g_" + node_id + "_ap", list)
         ai = UserInputNode[bool]("g_" + node_id + "_ai", bool)
+        ctp = UserInputNode[list]("g_" + node_id + "_ctp", list)
         node = GroupMonthlyCostNode(
             node_id,
             monthly_mortgage_node=mg,
@@ -609,8 +610,9 @@ class TestGroupMonthlyCostNode:
             persons_source=ps,
             annexe_payers_node=ap,
             annexe_ignored_node=ai,
+            council_tax_payers_node=ctp,
         )
-        return node, mg, sf, li, ri, st, cb, ct, ps, ap, ai
+        return node, mg, sf, li, ri, st, cb, ct, ps, ap, ai, ctp
 
     @pytest.mark.asyncio
     async def test_annexe_council_tax_split_between_picked_payers(self):
@@ -619,7 +621,7 @@ class TestGroupMonthlyCostNode:
         carries the whole annexe bill."""
         from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
 
-        node, mg, sf, li, ri, st, cb, ct, ps, ap, ai = self._node_with_annexe("annexe1")
+        node, mg, sf, li, ri, st, cb, ct, ps, ap, ai, ctp = self._node_with_annexe("annexe1")
         mg.push(Money("0", "GBP"), "test")
         sf.push(Money("0", "GBP"), "test")
         li.push(Money("0", "GBP"), "test")
@@ -642,6 +644,7 @@ class TestGroupMonthlyCostNode:
         )
         ap.push(["Ashby"], "test")
         ai.push(False, "test")
+        ctp.push([], "test")
         await flush_processor()
 
         a = await node.attempt()
@@ -662,7 +665,7 @@ class TestGroupMonthlyCostNode:
     async def test_annexe_contributes_nothing_until_payers_picked(self):
         from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
 
-        node, mg, sf, li, ri, st, cb, ct, ps, ap, ai = self._node_with_annexe("annexe2")
+        node, mg, sf, li, ri, st, cb, ct, ps, ap, ai, ctp = self._node_with_annexe("annexe2")
         mg.push(Money("0", "GBP"), "test")
         sf.push(Money("0", "GBP"), "test")
         li.push(Money("0", "GBP"), "test")
@@ -685,6 +688,7 @@ class TestGroupMonthlyCostNode:
         )
         ap.push([], "test")  # nobody picked yet
         ai.push(False, "test")
+        ctp.push([], "test")
         await flush_processor()
 
         val = (await node.attempt()).value_or_none()
@@ -696,7 +700,7 @@ class TestGroupMonthlyCostNode:
     async def test_ignored_annexe_contributes_nothing(self):
         from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
 
-        node, mg, sf, li, ri, st, cb, ct, ps, ap, ai = self._node_with_annexe("annexe3")
+        node, mg, sf, li, ri, st, cb, ct, ps, ap, ai, ctp = self._node_with_annexe("annexe3")
         mg.push(Money("0", "GBP"), "test")
         sf.push(Money("0", "GBP"), "test")
         li.push(Money("0", "GBP"), "test")
@@ -719,8 +723,39 @@ class TestGroupMonthlyCostNode:
         )
         ap.push(["Ashby"], "test")
         ai.push(True, "test")  # user says the address is unrelated
+        ctp.push([], "test")
         await flush_processor()
 
         val = (await node.attempt()).value_or_none()
         assert val is not None
         assert float(val["others"]["value"]) == pytest.approx(50, abs=0.01)
+
+    @pytest.mark.asyncio
+    async def test_main_bill_split_by_picked_payers(self):
+        """When the settings say only Simon+Lorena pay the MAIN house
+        council tax, the couple pays 100% of it and the others' figure
+        excludes the main bill entirely."""
+        from houses.council_tax_info import CouncilTaxInfo
+
+        node, mg, sf, li, ri, st, cb, ct, ps, ap, ai, ctp = self._node_with_annexe("main1")
+        mg.push(Money("0", "GBP"), "test")
+        sf.push(Money("0", "GBP"), "test")
+        li.push(Money("0", "GBP"), "test")
+        ri.push(Money("0", "GBP"), "test")
+        st.push("", "test")
+        cb.push({}, "test")
+        simon = Person("Simon", True, home_co_owners=(HomeCoOwner(name="Lorena", share=50),))
+        ps.push([simon, Person("Lorena", False), Person("Ashby", False)], "test")
+        ct.push(CouncilTaxInfo(band="D", yearly_cost=Measurement(Money("1800", "GBP"), 0.0)), "test")
+        ap.push([], "test")
+        ai.push(False, "test")
+        ctp.push(["Simon", "Lorena"], "test")
+        await flush_processor()
+
+        val = (await node.attempt()).value_or_none()
+        assert val is not None
+        # Main £150/mo paid by the couple alone; the annexe is absent.
+        assert float(val["couple"]["value"]) == pytest.approx(150, abs=0.01)
+        assert float(val["others"]["value"]) == pytest.approx(0, abs=0.01)
+        assert float(val["couple_breakdown"]["council_tax"]) == pytest.approx(150, abs=0.01)
+        assert float(val["others_breakdown"]["council_tax"]) == pytest.approx(0, abs=0.01)

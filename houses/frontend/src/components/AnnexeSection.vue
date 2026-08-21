@@ -5,12 +5,14 @@ import { usePropertiesStore } from '../stores/properties'
 
 const props = defineProps<{
   rid: string
+  mainBill?: { band: string; yearly_cost?: { value: { amount: string; currency: string } } | null } | null
   annexe?: {
     address: string
     band: string
     yearly_cost?: { value: { amount: string; currency: string } } | null
   } | null
-  payers: string[]
+  mainPayers: string[]
+  annexePayers: string[]
   ignored: boolean
   adults: { name: string }[]
 }>()
@@ -18,39 +20,51 @@ const props = defineProps<{
 const store = usePropertiesStore()
 const saving = ref(false)
 const errorMsg = ref('')
-const localPayers = ref<string[]>([])
+const localMainPayers = ref<string[]>([])
+const localAnnexePayers = ref<string[]>([])
 const localIgnored = ref(false)
 
 watch(
-  () => [props.payers, props.ignored],
+  () => [props.mainPayers, props.annexePayers, props.ignored],
   () => {
-    localPayers.value = [...props.payers]
+    localMainPayers.value = [...props.mainPayers]
+    localAnnexePayers.value = [...props.annexePayers]
     localIgnored.value = props.ignored
   },
   { immediate: true },
 )
 
-const yearlyText = computed(() => {
+const mainYearlyText = computed(() => {
+  const c = props.mainBill?.yearly_cost?.value
+  return c ? `£${Number(c.amount).toLocaleString()}/yr` : ''
+})
+
+const annexeYearlyText = computed(() => {
   const c = props.annexe?.yearly_cost?.value
   return c ? `£${Number(c.amount).toLocaleString()}/yr` : ''
 })
 
-function togglePayer(name: string) {
-  if (localPayers.value.includes(name)) {
-    localPayers.value = localPayers.value.filter(p => p !== name)
-  } else {
-    localPayers.value = [...localPayers.value, name]
-  }
+/** Empty main payers = all adults (the default headcount split). */
+const mainPayerNames = computed(() =>
+  localMainPayers.value.length > 0 ? localMainPayers.value : props.adults.map(a => a.name),
+)
+
+function toggle(list: string[], name: string): string[] {
+  return list.includes(name) ? list.filter(p => p !== name) : [...list, name]
 }
 
 async function save() {
   saving.value = true
   errorMsg.value = ''
   try {
-    await api.patchAnnexe(props.rid, { payers: localPayers.value, ignored: localIgnored.value })
+    await api.patchCouncilTax(props.rid, {
+      main_payers: localMainPayers.value,
+      annexe_payers: localAnnexePayers.value,
+      ignored: localIgnored.value,
+    })
     await store.loadDetail(props.rid, true)
   } catch {
-    errorMsg.value = "Couldn't save the annexe choice."
+    errorMsg.value = "Couldn't save the council tax choice."
   } finally {
     saving.value = false
   }
@@ -68,71 +82,94 @@ function restoreAnnexe() {
 </script>
 
 <template>
-  <section id="section-annexe" class="detail-section">
-    <h2 class="detail-section__title">Annexe — separate council tax</h2>
+  <section id="section-council-tax" class="detail-section">
+    <h2 class="detail-section__title">Council tax — who pays</h2>
 
-    <template v-if="annexe && !localIgnored">
-      <p class="annexe-intro">
-        {{ annexe.address }} is a separate dwelling at this address with its own council tax
-        bill (Band {{ annexe.band }}{{ yearlyText ? ' · ' + yearlyText : '' }}).
-        <template v-if="localPayers.length === 0">
-          It is <strong>not yet included</strong> in the monthly costs — pick who pays a share below.
-        </template>
+    <div class="ctax-bill">
+      <p class="ctax-bill__head">
+        Main house — Band {{ mainBill?.band }}{{ mainYearlyText ? ' · ' + mainYearlyText : '' }}
       </p>
-      <p class="annexe-question">Who should pay a share of the annexe council tax?</p>
-      <label v-for="a in adults" :key="a.name" class="annexe-payer">
-        <input
-          type="checkbox"
-          :checked="localPayers.includes(a.name)"
-          @change="togglePayer(a.name)"
-        />
+      <p class="ctax-bill__hint">
+        Split between: <strong>{{ mainPayerNames.join(', ') }}</strong>
+        <template v-if="localMainPayers.length === 0"> (all adults — default)</template>
+      </p>
+      <label v-for="a in adults" :key="'m' + a.name" class="ctax-payer">
+        <input type="checkbox" :checked="localMainPayers.includes(a.name)" @change="localMainPayers = toggle(localMainPayers, a.name)" />
         {{ a.name }}
       </label>
-      <div class="annexe-actions">
-        <button class="btn--primary" :disabled="saving" @click="save">
-          {{ saving ? 'Saving…' : 'Save' }}
-        </button>
-        <button class="btn--secondary" :disabled="saving" @click="hideAnnexe">
-          Not related — hide
-        </button>
-      </div>
-      <p v-if="errorMsg" class="annexe-error">{{ errorMsg }}</p>
-    </template>
+    </div>
 
+    <template v-if="annexe && !localIgnored">
+      <div class="ctax-bill ctax-bill--annexe">
+        <p class="ctax-bill__head">
+          Annexe — {{ annexe.address }} · Band {{ annexe.band }}{{ annexeYearlyText ? ' · ' + annexeYearlyText : '' }}
+          — separate council tax
+        </p>
+        <p class="ctax-bill__hint">
+          <template v-if="localAnnexePayers.length === 0">
+            Not yet included in the monthly costs — pick who pays a share below.
+          </template>
+          <template v-else>Split between: <strong>{{ localAnnexePayers.join(', ') }}</strong></template>
+        </p>
+        <label v-for="a in adults" :key="'a' + a.name" class="ctax-payer">
+          <input type="checkbox" :checked="localAnnexePayers.includes(a.name)" @change="localAnnexePayers = toggle(localAnnexePayers, a.name)" />
+          {{ a.name }}
+        </label>
+        <button class="ctax-hide" :disabled="saving" @click="hideAnnexe">Not related — hide</button>
+      </div>
+    </template>
     <template v-else-if="annexe && localIgnored">
-      <p class="annexe-intro">
-        Annexed address hidden ({{ annexe.address }}) — treated as unrelated to this property.
-        <button class="annexe-restore" @click="restoreAnnexe">Show it again</button>
+      <p class="ctax-bill__hint">
+        Annexed address hidden ({{ annexe.address }}) — treated as unrelated.
+        <button class="ctax-restore" @click="restoreAnnexe">Show it again</button>
       </p>
     </template>
+
+    <div class="ctax-actions">
+      <button class="btn--primary" :disabled="saving" @click="save">
+        {{ saving ? 'Saving…' : 'Save' }}
+      </button>
+    </div>
+    <p v-if="errorMsg" class="ctax-error">{{ errorMsg }}</p>
   </section>
 </template>
 
 <style scoped>
-.annexe-intro {
-  margin: 0 0 0.5rem;
+.ctax-bill {
+  margin: 0.25rem 0 0.75rem;
 }
-.annexe-question {
+.ctax-bill--annexe {
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+}
+.ctax-bill__head {
   font-weight: var(--fw-semibold);
-  margin: 0.5rem 0;
+  margin: 0 0 0.25rem;
 }
-.annexe-payer {
+.ctax-bill__hint {
+  margin: 0 0 0.5rem;
+  color: var(--text-secondary);
+}
+.ctax-payer {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.2rem 0;
+  padding: 0.15rem 0;
 }
-.annexe-actions {
+.ctax-actions {
   display: flex;
   gap: 0.5rem;
-  margin-top: 0.75rem;
+  margin-top: 0.5rem;
 }
-.annexe-error {
-  color: var(--red);
-  font-size: 0.85rem;
-  margin: 0.4rem 0 0;
+.ctax-hide {
+  background: none;
+  border: none;
+  color: var(--blue);
+  cursor: pointer;
+  padding: 0.35rem 0 0;
+  text-decoration: underline;
 }
-.annexe-restore {
+.ctax-restore {
   background: none;
   border: none;
   color: var(--blue);
@@ -140,5 +177,10 @@ function restoreAnnexe() {
   padding: 0;
   margin-left: 0.25rem;
   text-decoration: underline;
+}
+.ctax-error {
+  color: var(--red);
+  font-size: 0.85rem;
+  margin: 0.4rem 0 0;
 }
 </style>

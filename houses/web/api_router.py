@@ -307,30 +307,35 @@ async def patch_location(rid: str, body: dict):
     await flush_processor()
     return {"status": "ok"}
 
+@api_router.patch("/properties/{rid}/council-tax")
+async def patch_council_tax(rid: str, body: dict):
+    """Set the council-tax apportionment for a property.
 
-@api_router.patch("/properties/{rid}/annexe")
-async def patch_annexe(rid: str, body: dict):
-    """Set the annexe apportionment for a property.
-
-    ``payers`` — the people who pay a share of the annexe's council tax
-    (they split it equally).  ``ignored`` — the detected second dwelling
-    is not related to the purchase; hide it and exclude its costs.
+    ``main_payers`` — who pays a share of the MAIN house's council tax
+    (they split it equally; empty = all adults, the default headcount
+    split).  ``annexe_payers`` — who pays the ANNEXE's council tax.
+    ``ignored`` — the detected second dwelling is unrelated; hide it and
+    exclude its costs.
     """
     prop = get_registry_property(rid)
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
-    if "payers" in body:
-        payers = body["payers"]
-        if not isinstance(payers, list) or not all(isinstance(p, str) for p in payers):
+
+    def _names(value) -> list[str]:
+        if not isinstance(value, list) or not all(isinstance(p, str) for p in value):
             raise HTTPException(status_code=422, detail="payers must be a list of person names")
-        prop.annexe_payers.push(payers, "user")
+        return value
+
+    if "main_payers" in body:
+        prop.council_tax_payers.push(_names(body["main_payers"]), "user")
+    if "annexe_payers" in body:
+        prop.annexe_payers.push(_names(body["annexe_payers"]), "user")
     if "ignored" in body:
         prop.annexe_ignored.push(bool(body["ignored"]), "user")
     from dag.scheduler import flush_processor
 
     await flush_processor()
     return {"status": "ok"}
-
 
 @api_router.patch("/properties/{rid}/triage")
 async def patch_triage(rid: str, body: dict):
