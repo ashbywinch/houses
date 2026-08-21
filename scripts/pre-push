@@ -21,7 +21,7 @@
 
 set -e
 
-if [ -z "$(git rev-list --not --remotes -- '*.py' '*.ts' '*.vue' '*.js' 'pyrefly.toml')" ]; then
+if [ -z "$(git rev-list HEAD --not --remotes -- '*.py' '*.ts' '*.vue' '*.js' 'pyrefly.toml')" ]; then
     exit 0
 fi
 
