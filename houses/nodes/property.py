@@ -261,8 +261,31 @@ class PropertyNodes:
             "postcode": await self.postcode.to_json(),
         }
 
+    async def refresh_code_stale_nodes(self) -> None:
+        """Recompute any derived node whose persisted result was produced
+        by different code (the code-version stamp), then drain the cascade.
+
+        Called before serialization so a read never serves a result that
+        old code computed — the 'regenerate after deploy' step happens
+        lazily, per property, on first view.
+        """
+        from dag.derived_node import DerivedNode
+        from dag.scheduler import flush_processor
+
+        dirty = [
+            n
+            for n in vars(self).values()
+            if isinstance(n, DerivedNode) and n.code_is_stale()
+        ]
+        for n in dirty:
+            await n.refresh()
+        if dirty:
+            await flush_processor()
+
     async def to_json_summary(self) -> dict[str, Any]:
         from dag.persistence import property_created_at
+
+        await self.refresh_code_stale_nodes()
 
         result = {
             "rid": self.rid,
@@ -297,6 +320,7 @@ class PropertyNodes:
         return result
 
     async def to_json_detail(self) -> dict[str, Any]:
+        await self.refresh_code_stale_nodes()
         return {
             "rid": self.rid,
             "best_address": await self.best_address.to_json(),

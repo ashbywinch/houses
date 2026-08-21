@@ -37,6 +37,14 @@ describe('Header — settings link (P9, D2)', () => {
     expect(wrapper.find('.header__menu-item--person').exists()).toBe(false)
   })
 
+  it('links the title back to the property list', () => {
+    const wrapper = mountHeader()
+    const link = wrapper.find('a.header__title-link')
+    expect(link.exists()).toBe(true)
+    expect(link.text()).toBe('Test')
+    expect(link.attributes('href')).toBe('/')
+  })
+
   it('still loads the household people for the superuser impersonation bar', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,

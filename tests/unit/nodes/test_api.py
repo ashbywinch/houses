@@ -111,39 +111,49 @@ class TestPropertyApi:
         from dag.measurement import Measurement
         from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
         from houses.nodes.property import PropertyNodes
+        from houses.services_provider import _request_services as _sp
+        from tests.helpers import make_services
 
-        client, reg = self._setup()
-        prop = PropertyNodes("prop123")
-        prop.rightmove_address.push("10 High St", "Rightmove")
-        prop.postcode.push("SW1V 2QQ", "Rightmove")
-        reg["prop123"] = prop
-        prop.council_tax._attempt = Attempt.succeeded(
-            CouncilTaxInfo(
-                band="D",
-                yearly_cost=Measurement(Money("1800", "GBP"), 0.0),
-                annexe=AnnexeDwelling(
-                    address="FLAT 2, 10 HIGH ST",
-                    band="A",
-                    yearly_cost=Measurement(Money("900", "GBP"), 0.0),
-                ),
+        class _CTWithAnnexe:
+            async def lookup(self, postcode, address=""):
+                return Attempt.succeeded(
+                    CouncilTaxInfo(
+                        band="D",
+                        yearly_cost=Measurement(Money("1800", "GBP"), 0.0),
+                        annexe=AnnexeDwelling(
+                            address="FLAT 2, 10 HIGH ST",
+                            band="A",
+                            yearly_cost=Measurement(Money("900", "GBP"), 0.0),
+                        ),
+                    )
+                )
+
+        svc = make_services(council_tax_service=_CTWithAnnexe())
+        token = _sp.set(svc)
+        try:
+            client, reg = self._setup()
+            prop = PropertyNodes("prop123")
+            prop.rightmove_address.push("10 High St", "Rightmove")
+            prop.postcode.push("SW1V 2QQ", "Rightmove")
+            reg["prop123"] = prop
+            flush_all()
+
+            detail = client.get("/api/properties/prop123/detail").json()
+            assert detail["affordability"]["council_tax"]["value"]["annexe"]["band"] == "A"
+
+            resp = client.patch(
+                "/api/properties/prop123/council-tax",
+                json={"main_payers": ["Simon", "Lorena"], "annexe_payers": ["Ashby"], "ignored": False},
             )
-        )
-        flush_all()
+            assert resp.status_code == 200
 
-        detail = client.get("/api/properties/prop123/detail").json()
-        assert detail["affordability"]["council_tax"]["value"]["annexe"]["band"] == "A"
-
-        resp = client.patch(
-            "/api/properties/prop123/council-tax",
-            json={"main_payers": ["Simon", "Lorena"], "annexe_payers": ["Ashby"], "ignored": False},
-        )
-        assert resp.status_code == 200
-
-        detail = client.get("/api/properties/prop123/detail").json()
-        apportionment = detail["council_tax_apportionment"]
-        assert apportionment["main_payers"]["value"] == ["Simon", "Lorena"]
-        assert apportionment["annexe_payers"]["value"] == ["Ashby"]
-        assert apportionment["ignored"]["value"] is False
+            detail = client.get("/api/properties/prop123/detail").json()
+            apportionment = detail["council_tax_apportionment"]
+            assert apportionment["main_payers"]["value"] == ["Simon", "Lorena"]
+            assert apportionment["annexe_payers"]["value"] == ["Ashby"]
+            assert apportionment["ignored"]["value"] is False
+        finally:
+            _sp.reset(token)
 
     def test_annexe_apportionment_changes_user_visible_total(self):
         """PATCHing the annexe payers must change the monthly cost the

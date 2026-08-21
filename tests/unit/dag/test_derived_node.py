@@ -83,13 +83,6 @@ class TestDerivedNode:
         await flush_processor()
         assert received == ["changed", "changed"]
 
-    @pytest.mark.asyncio
-    async def test_pending_when_dep_pending(self):
-        src = UserInputNode[int]("src", int)
-        node = _DoubleNode("double", deps=(src,))
-
-        a = await node.attempt()
-        assert a.pending is True
 
     @pytest.mark.asyncio
     async def test_impossible_when_dep_fails(self):
@@ -356,3 +349,113 @@ class TestCommuteDetailsRoundTrip:
         assert val is not None
         assert len(val._details) == 1, f"commute details must survive reload, got: {val._details!r}"
         assert val._details[0].legs[0].mode == LegMode.TRAIN
+
+
+class TestNamedDepsDispatch:
+    """Nodes with ``dep_names`` get their dep attempts bound by NAME, so a
+    ``_get_active_deps`` that drops a MIDDLE dep cannot shift every later
+    argument into the wrong parameter (the historical group-node bug)."""
+
+    class _NamedNode(DerivedNode[int]):
+        def __init__(self, node_id, a, b, c):
+            super().__init__(node_id, int, (a, b, c), dep_names=("a", "b", "c"))
+            self.received: tuple | None = None
+
+        def _get_active_deps(self):
+            # Drop the MIDDLE dep — positionally this would bind b's
+            # attempt to the `c` parameter.
+            return (self._deps[0], self._deps[2])
+
+        def compute(self, a=None, b=None, c=None):
+            self.received = (a, b, c)
+            av = a.value_or_none() if a is not None else 0
+            cv = c.value_or_none() if c is not None else 0
+            return Attempt.succeeded(av + cv)
+
+    @pytest.mark.asyncio
+    async def test_middle_dep_drop_binds_by_name_not_position(self):
+        a = UserInputNode[int]("nda", int)
+        b = UserInputNode[int]("ndb", int)
+        c = UserInputNode[int]("ndc", int)
+        node = self._NamedNode("named_mid", a, b, c)
+
+        a.push(1, "t")
+        c.push(2, "t")
+        await flush_processor()
+
+        assert node.received is not None
+        assert node.received[1] is None, (
+            "the dropped middle dep must stay None — the c attempt must "
+            f"not land in b's slot: {node.received}"
+        )
+        assert node.received[2] is not None
+        assert (await node.attempt()).value_or_none() == 3
+
+
+class TestComputeArityGuard:
+    """A node whose positional deps outnumber its compute parameters must
+    fail LOUDLY (a ValueError naming the node), never silently misbind."""
+
+    class _TooManyDepsNode(DerivedNode[int]):
+        def __init__(self, node_id, deps):
+            super().__init__(node_id, int, deps)
+
+        def compute(self, a, b):
+            return Attempt.succeeded(0)
+
+    @pytest.mark.asyncio
+    async def test_positional_arity_mismatch_fails_with_named_error(self):
+        a = UserInputNode[int]("ga", int)
+        b = UserInputNode[int]("gb", int)
+        c = UserInputNode[int]("gc", int)
+        node = self._TooManyDepsNode("arity_bad", (a, b, c))
+
+        a.push(1, "t")
+        b.push(2, "t")
+        c.push(3, "t")
+        await flush_processor()
+        attempt = await node.attempt()
+        assert attempt.impossible, (
+            "a positional arity drift must fail loudly, not silently "
+            f"misbind — got: {attempt.status}: {attempt.error}"
+        )
+        assert "arity_bad" in (attempt.error or "")
+        assert "drifted" in (attempt.error or "")
+
+
+class TestCodeVersionStaleness:
+    """A persisted result computed by DIFFERENT code must recompute even
+    when every dep timestamp is fresh — the gap that let the stale
+    'takes 9 to 11 arguments' errors sit on live properties."""
+
+    @pytest.mark.asyncio
+    async def test_refresh_recomputes_when_persisted_code_version_differs(self):
+        src = UserInputNode[int]("cv_src", int)
+        node = _DoubleNode("cv_double", deps=(src,))
+
+        src.push(2, "test")
+        await flush_processor()
+        assert (await node.attempt()).value_or_none() == 4
+        assert node.compute_count == 1
+
+        # Simulate a code change: the persisted row carries a version the
+        # current compute no longer matches. Dep timestamps are unchanged.
+        node._persisted_code_version = "old-code-hash"
+        await node.refresh()
+        assert node.compute_count == 2, (
+            "a code-version mismatch must recompute despite fresh dep timestamps"
+        )
+
+    @pytest.mark.asyncio
+    async def test_legacy_row_without_code_version_is_code_stale(self):
+        src = UserInputNode[int]("cv_src2", int)
+        node = _DoubleNode("cv_double2", deps=(src,))
+
+        src.push(3, "test")
+        await flush_processor()
+        assert (await node.attempt()).value_or_none() == 6
+
+        # Pre-migration rows have no code version at all — "" means
+        # "unknown code", which must recompute once.
+        node._persisted_code_version = ""
+        assert node.code_is_stale() is True

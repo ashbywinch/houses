@@ -34,7 +34,9 @@ onMounted(fetchPersons)
       <div v-if="$slots.actions" class="header__actions header__actions--left">
         <slot name="actions" />
       </div>
-      <h1 class="header__title">{{ title }}</h1>
+      <h1 class="header__title">
+        <RouterLink to="/" class="header__title-link">{{ title }}</RouterLink>
+      </h1>
       <div class="header__actions header__actions--right">
         <slot name="actions-right" />
         <template v-if="auth.loading">
@@ -114,6 +116,14 @@ onMounted(fetchPersons)
   text-overflow: ellipsis;
   flex: 0 0 auto;
   min-width: 0;
+}
+.header__title-link {
+  color: inherit;
+  text-decoration: none;
+}
+.header__title-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 /* Mobile header pattern: ONE row. The title truncates and the text
    actions collapse to icon-only (label stays in the accessible

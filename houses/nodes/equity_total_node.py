@@ -33,9 +33,11 @@ class EquityTotalNode(DerivedNode[Money]):
         self._persons_source = persons_source
         self._status_node = status_node
         deps = [persons_source]
+        names = ["persons"]
         if status_node is not None:
             deps.append(status_node)
-        super().__init__(node_id, Money, tuple(deps))
+            names.append("status")
+        super().__init__(node_id, Money, tuple(deps), dep_names=tuple(names))
 
     def _get_active_deps(self) -> tuple:
         if self._status_node is not None:

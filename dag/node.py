@@ -45,6 +45,7 @@ class Node(ABC, Generic[T]):
         self._persisted_at: datetime | None = None
         self._db_created_at: str = ""
         self._loaded_dep_timestamps: dict[str, str] = {}
+        self._persisted_code_version: str | None = None
         self._retry_at: datetime | None = None
         self._retry_count: int = 0
         self._max_retries: int = 3
@@ -71,6 +72,7 @@ class Node(ABC, Generic[T]):
                 self._persisted_at = None
         self._db_created_at = persisted
         self._computed_at = self._persisted_at
+        self._persisted_code_version = stored.get("_code_version") or ""
         dep_ts = stored.get("_dep_timestamps")
         if dep_ts:
             self._loaded_dep_timestamps = dep_ts
@@ -178,15 +180,19 @@ class Node(ABC, Generic[T]):
         if self._source_url:
             result["source_url"] = self._source_url
         return result
-
     def _persist(self, result_dict: dict, dep_timestamps: dict[str, str] | None = None) -> None:
         from dag.persistence import save_node_result
 
         now_str = datetime.now(UTC).isoformat()
-        save_node_result(self._id, result_dict, dep_timestamps, created_at=now_str)
+        from dag.derived_node import DerivedNode
+
+        code_version = self._current_code_version() if isinstance(self, DerivedNode) else None
+        save_node_result(self._id, result_dict, dep_timestamps, created_at=now_str, code_version=code_version)
         now = datetime.fromisoformat(now_str)
         self._persisted_at = now
         self._db_created_at = now_str
+        if code_version is not None:
+            self._persisted_code_version = code_version
         if dep_timestamps is not None:
             self._loaded_dep_timestamps = dep_timestamps
 

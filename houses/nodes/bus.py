@@ -163,7 +163,12 @@ class BusLegAugmentNode(DerivedNode[Commute]):
         # block (same pattern as ParkAndRideAugmentNode's postcode).
         deps.append(bus_route_node)
         deps.append(bods_fare_node)
-        super().__init__(node_id, Commute, tuple(deps))
+        super().__init__(
+            node_id,
+            Commute,
+            tuple(deps),
+            dep_names=("transit_attempt", "max_walk", "bus_route_attempt", "bods_fare_attempt"),
+        )
 
     def _current_max_walk(self) -> int:
         """The effective walk tolerance — staging-aware, so a what-if

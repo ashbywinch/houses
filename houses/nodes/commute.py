@@ -179,15 +179,20 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         # max_walk sits BEFORE the conditional alternatives so positional
         # compute matching stays stable whether walk/drive are present.
         deps = [origin, poi]
+        names = ["origin", "poi"]
         if max_walk_node is not None:
             deps.append(max_walk_node)
+            names.append("max_walk")
         if self._mode_acceptable("transit"):
             deps.append(transit_result)
+            names.append("transit")
         if walk_result is not None and self._mode_acceptable("walk"):
             deps.append(walk_result)
+            names.append("walk")
         if drive_result is not None and self._mode_acceptable("car"):
             deps.append(drive_result)
-        super().__init__(node_id, Commute, tuple(deps))
+            names.append("drive")
+        super().__init__(node_id, Commute, tuple(deps), dep_names=tuple(names))
 
         # Build expression once — cached so last_results persists across calls
         alts: dict[str, Expression] = {}
@@ -328,7 +333,12 @@ class MergeRailFareNode(DerivedNode[Commute]):
     def __init__(self, node_id: str, *, commute_result, rail_fare_result):
         self._commute_result = commute_result
         self._rail_fare_result = rail_fare_result
-        super().__init__(node_id, Commute, (commute_result, rail_fare_result))
+        super().__init__(
+            node_id,
+            Commute,
+            (commute_result, rail_fare_result),
+            dep_names=("commute", "rail_fare"),
+        )
 
     @property
     def provenance_formula(self):
