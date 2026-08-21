@@ -8,22 +8,20 @@
 # Why `make check` and not the tools directly: CI runs `make check` (via
 # `make test`, which includes lint-check + typecheck) — delegating here
 # means the hook and CI can never drift apart, exactly like the pre-commit
-# hook delegates to `make lint-check`. The deadlock that once forced the
-# hook to call the tools directly is gone: check targets depend on `deps`
-# (uv sync + npm install), never on install-hooks.
+# hook delegates to `make lint-check typecheck-py`. The deadlock that once
+# forced the hook to call the tools directly is gone: check targets depend
+# on `deps` (uv sync + npm install), never on install-hooks.
 #
-# Skips on: no .py/.ts/.vue changes in the push, or when the venv isn't
-# set up (run `make setup` first).
+# The skip check looks at the COMMITS being pushed (`git rev-list --not
+# --remotes`), not the working tree.  The tree is always clean right after
+# committing, so a tree-based check silently skipped every normal push —
+# pyrefly/typecheck failures reached CI first (2026-08-21, PR 66).
+# A push that touches Python/TS/Vue sources or the typecheck config runs
+# the full gate.
 
 set -e
 
-# Only run when the push actually touches Python/TS/Vue sources or the
-# typecheck config — a pure docs push shouldn't pay the check cost.
-# Covers staged, unstaged, and untracked sources (the gate must not
-# silently skip a broken file).
-if [ -z "$(git diff --cached --name-only -- '*.py' '*.ts' '*.vue' '*.js' 'pyrefly.toml')" ] && \
-   [ -z "$(git diff --name-only -- '*.py' '*.ts' '*.vue' '*.js' 'pyrefly.toml')" ] && \
-   [ -z "$(git ls-files --others --exclude-standard -- '*.py' '*.ts' '*.vue' '*.js' 'pyrefly.toml')" ]; then
+if [ -z "$(git rev-list --not --remotes -- '*.py' '*.ts' '*.vue' '*.js' 'pyrefly.toml')" ]; then
     exit 0
 fi
 

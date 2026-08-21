@@ -4,7 +4,7 @@ import { createPinia } from 'pinia'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { usePropertiesStore } from '../../stores/properties'
 import PropertyDetail from '../PropertyDetail.vue'
-import type { PropertyDetail as PropertyDetailType } from '../../types'
+import type { AnnexeValue, PropertyDetail as PropertyDetailType } from '../../types'
 import * as api from '../../services/api'
 
 // Mock the API module so fetch-based calls don't fail in test environment
@@ -744,7 +744,7 @@ describe('PropertyDetail council-tax apportionment (AnnexeSection wiring)', () =
     }
   }
 
-  function councilTaxValue(annexe: unknown) {
+  function councilTaxValue(annexe: AnnexeValue | null) {
     return {
       band: 'F',
       yearly_cost: { value: { amount: '3650.11', currency: 'GBP' }, stddev: 0 },

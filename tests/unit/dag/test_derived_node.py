@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import override
+
 import pytest
 from money import Money
 from pint import Quantity
@@ -241,6 +243,7 @@ class TestDerivedNode:
         assert j["error_detail"]["user_message"] == "TfL couldn't find a route for this journey"
 
         loaded = latest_node_result("http_err_node")
+        assert loaded is not None
         assert loaded["error"] == "TfL couldn't find a route for this journey"
         assert "$type" not in loaded["error"]
 
@@ -366,6 +369,7 @@ class TestNamedDepsDispatch:
             # attempt to the `c` parameter.
             return (self._deps[0], self._deps[2])
 
+        @override
         def compute(self, a=None, b=None, c=None):
             self.received = (a, b, c)
             av = a.value_or_none() if a is not None else 0
@@ -400,6 +404,7 @@ class TestComputeArityGuard:
         def __init__(self, node_id, deps):
             super().__init__(node_id, int, deps)
 
+        @override
         def compute(self, a, b):
             return Attempt.succeeded(0)
 
