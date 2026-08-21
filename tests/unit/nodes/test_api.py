@@ -105,6 +105,90 @@ class TestPropertyApi:
         detail = client.get("/api/properties/prop123/detail").json()
         assert detail["affordability"]["council_tax"]["succeeded"]
 
+    def test_patch_council_tax_rejects_non_bool_ignored(self):
+        """`"ignored": "false"` (a string) or 1 must be a 422 — bool("false")
+        is True and would silently hide the annexe."""
+        from houses.nodes.property import PropertyNodes
+
+        client, reg = self._setup()
+        prop = PropertyNodes("prop124")
+        reg["prop124"] = prop
+        flush_all()
+
+        for bad in ("false", 1, "true", None):
+            resp = client.patch("/api/properties/prop124/council-tax", json={"ignored": bad})
+            assert resp.status_code == 422, (
+                f"ignored={bad!r}: expected 422, got {resp.status_code}: {resp.text[:150]}"
+            )
+
+    def test_council_tax_payer_choice_survives_property_reload(self):
+        """The default-push guard must only fire when the node was NEVER
+        set — a saved payer choice persists across PropertyNodes
+        reconstruction (the persisted row loads eagerly in __init__)."""
+        from houses.nodes.property import PropertyNodes
+
+        client, reg = self._setup()
+        prop = PropertyNodes("prop125")
+        reg["prop125"] = prop
+        flush_all()
+
+        resp = client.patch(
+            "/api/properties/prop125/council-tax",
+            json={"main_payers": ["Simon"], "annexe_payers": ["Ashby"], "ignored": True},
+        )
+        assert resp.status_code == 200
+
+        # Reconstruct the property from the persisted rows — the choice
+        # must NOT be clobbered by the constructor's default push.
+        prop2 = PropertyNodes("prop125")
+        assert prop2.council_tax_payers.latest_attempt().value_or_none() == ["Simon"]
+        assert prop2.annexe_payers.latest_attempt().value_or_none() == ["Ashby"]
+        assert prop2.annexe_ignored.latest_attempt().value_or_none() is True
+
+    @pytest.mark.asyncio
+    async def test_refresh_code_stale_nodes_walks_the_commute_pipeline(self):
+        """The lazy code-version refresh must reach nodes stored inside
+        containers — the commute selectors and their sub-pipeline are in
+        dicts/attrs, not direct attributes of the property."""
+        from dag.scheduler import flush_processor
+        from houses.model.domain import HomeCoOwner, Person, PlaceOfInterest
+        from houses.nodes.property import PropertyNodes
+        from houses.services_provider import _request_services as _sp
+        from tests.helpers import make_services
+
+        svc = make_services()
+        token = _sp.set(svc)
+        try:
+            _push_persons(
+                Person(
+                    name="Simon",
+                    has_car=True,
+                    places_of_interest=(PlaceOfInterest("Office", "SW1V 2QQ"),),
+                    home_co_owners=(HomeCoOwner(name="Lorena", share=50),),
+                ),
+                Person(name="Lorena", has_car=False),
+            )
+            client, reg = self._setup()
+            prop = PropertyNodes("prop126")
+            prop.rightmove_address.push("1 Test St", "test")
+            reg["prop126"] = prop
+            await flush_processor()
+
+            assert prop.commute_selectors, "a person with a POI must build commute selectors"
+            selector = next(iter(prop.commute_selectors.values()))
+            # Simulate a deploy: the selector's persisted result came from
+            # old code. vars(prop) alone would never find it.
+            selector._persisted_code_version = "stale-code"
+            assert selector.code_is_stale() is True
+
+            await prop.refresh_code_stale_nodes()
+
+            assert selector.code_is_stale() is False, (
+                "the commute selector must be recomputed by the stale scan"
+            )
+        finally:
+            _sp.reset(token)
+
     def test_patch_council_tax_sets_payers_and_detail_exposes_them(self):
         """PATCH /properties/{rid}/council-tax persists the apportionment
         and the detail payload exposes the bills + the choices."""

@@ -333,7 +333,9 @@ async def patch_council_tax(rid: str, body: dict):
     if "annexe_payers" in body:
         prop.annexe_payers.push(_names(body["annexe_payers"]), "user")
     if "ignored" in body:
-        prop.annexe_ignored.push(bool(body["ignored"]), "user")
+        if not isinstance(body["ignored"], bool):
+            raise HTTPException(status_code=422, detail="ignored must be a boolean")
+        prop.annexe_ignored.push(body["ignored"], "user")
     from dag.scheduler import flush_processor
 
     await flush_processor()
