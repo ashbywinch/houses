@@ -777,7 +777,7 @@ describe('PropertyDetail council-tax apportionment (AnnexeSection wiring)', () =
     expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(6)
   })
 
-  it('shows only the main bill when the lookup found no annexe', async () => {
+  it('renders no apportionment UI at all when the lookup found no annexe', async () => {
     const detail = detailWith({
       affordability: {
         ...makeDetail().affordability,
@@ -791,8 +791,9 @@ describe('PropertyDetail council-tax apportionment (AnnexeSection wiring)', () =
     })
     const wrapper = await mountWithApportionment(detail)
     const text = wrapper.text()
-    expect(text).toContain('Main house — Band F · £3,650.11/yr')
-    expect(text).not.toContain('Annexe —')
-    expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(3)
+    expect(text).not.toContain('Council tax — who pays')
+    expect(text).not.toContain('Main house — Band')
+    expect(text).not.toContain('all adults — default')
+    expect(wrapper.find('#section-council-tax').exists()).toBe(false)
   })
 })

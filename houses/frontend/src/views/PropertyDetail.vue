@@ -43,6 +43,14 @@ const adultsList = computed(() => {
     .map(p => ({ name: p.name as string }))
 })
 
+// Annexe dwelling from the council-tax lookup.  No annexe → no
+// apportionment UI at all: the main bill splits across all adults by
+// default (the DAG's empty-payers behaviour) and there is nothing to
+// configure.
+const councilTaxAnnexe = computed(
+  () => (detail.value?.affordability?.council_tax?.value as any)?.annexe ?? null,
+)
+
 const address = computed(() => detail.value?.best_address?.value ?? rid.value)
 
 const price = computed(() => detail.value?.rightmove_price?.succeeded
@@ -345,9 +353,8 @@ async function saveAddress() {
         :rid="rid"
         :current-person="currentPerson"
       />
-      <!-- ═══════════ COUNCIL TAX ═══════════ -->
       <AnnexeSection
-        v-if="detail.council_tax_apportionment"
+        v-if="detail.council_tax_apportionment && councilTaxAnnexe"
         :rid="rid"
         :main-bill="(detail.affordability?.council_tax?.value as any) ?? null"
         :annexe="(detail.affordability?.council_tax?.value as any)?.annexe ?? null"
