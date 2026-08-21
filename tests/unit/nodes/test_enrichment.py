@@ -133,6 +133,53 @@ class TestCouncilTaxNode:
         finally:
             _sp.reset(token)
 
+    @pytest.mark.asyncio
+    async def test_missing_rate_carries_reason_into_provenance(self):
+        """A matched band with NO resolvable yearly rate is not the same
+        as a successful lookup — the provenance must say the rate is
+        missing (yearly_cost is None, so the current description branch
+        that only fires for the stddev>0 fallback misses it)."""
+        from houses.council_tax_info import CouncilTaxInfo
+        from houses.nodes.epc_node import CouncilTaxNode
+        from houses.services_provider import _request_services as _sp
+        from tests.helpers import make_services
+
+        class _RateLessCT:
+            async def lookup(self, postcode, address=""):
+                return Attempt.succeeded(
+                    CouncilTaxInfo(
+                        band="F",
+                        yearly_cost=None,
+                        lookup_error="no yearly rate found for Narnia",
+                    )
+                )
+
+        svc = make_services(council_tax_service=_RateLessCT())
+        token = _sp.set(svc)
+        try:
+            addr = UserInputNode[str]("addr_ct_rate", str)
+            pc = UserInputNode[str]("pc_ct_rate", str)
+            node = CouncilTaxNode("ct_rate", best_address=addr, postcode_node=pc)
+            addr.push("2 Willowmead Gardens, Marlow, SL7 1HW", "test")
+            pc.push("SL7 1HW", "test")
+
+            from dag.scheduler import flush_processor
+
+            await flush_processor()
+
+            a = await node.attempt()
+            assert a.succeeded
+            val = a.value_or_none()
+            assert val is not None
+            assert val.yearly_cost is None
+            assert "no yearly rate" in (val.lookup_error or "")
+
+            prov = await node.build_provenance()
+            assert "no yearly rate" in (prov.description or "")
+            assert "Narnia" in (prov.description or "")
+        finally:
+            _sp.reset(token)
+
 
 class TestWalkabilityNode:
     @pytest.mark.asyncio

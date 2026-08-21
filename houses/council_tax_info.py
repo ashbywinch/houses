@@ -52,6 +52,8 @@ class CouncilTaxInfo:
         else:
             amount = self.yearly_cost.value.amount
             base = f"Band {self.band} · £{amount:,.2f}/yr"
+        if self.lookup_error:
+            base += f" — {self.lookup_error}"
         if self.annexe is not None:
             base += f" · annexe {self.annexe.address} (Band {self.annexe.band})"
             if self.annexe.yearly_cost is not None:

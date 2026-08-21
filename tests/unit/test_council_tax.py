@@ -284,3 +284,50 @@ class TestRealAddressForm:
         assert info.annexe is not None
         assert info.annexe.address == "FLAT 2, 2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW"
         assert info.annexe.band == "A"
+
+
+class TestMissingRate:
+    """A matched band whose local authority has no resolvable yearly rate
+    must still succeed (the band is real) but record WHY there is no
+    cost — the provenance must not silently show a band with no figure
+    and no explanation."""
+
+    @pytest.mark.asyncio
+    async def test_matched_band_without_rate_records_lookup_error(self, monkeypatch):
+        from houses.council_tax import lookup_council_tax
+
+        monkeypatch.setattr("houses.council_tax._lookup_yearly_cost", lambda band, la: None)
+
+        class Row:
+            def __init__(self, address: str, band: str):
+                self.address = address
+                self.band = band
+                self.local_authority = "Narnia"
+
+        class Page:
+            rows = [Row("2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "F")]
+
+        def fetcher(postcode: str, page: int):
+            return Page()
+
+        a = await lookup_council_tax(
+            "SL7 1HW",
+            "2 Willowmead Gardens, Marlow, SL7 1HW",
+            page_fetcher=fetcher,
+        )
+        assert a.succeeded, f"band match must succeed even without a rate: {a.status}: {a.error}"
+        info = a.value_or_none()
+        assert info is not None
+        assert info.band == "F"
+        assert info.yearly_cost is None
+        assert "Narnia" in (info.lookup_error or ""), (
+            "the provenance must say WHICH authority has no rate, got: "
+            f"{info.lookup_error!r}"
+        )
+
+    def test_provenance_value_includes_lookup_error(self):
+        from houses.council_tax_info import CouncilTaxInfo
+
+        info = CouncilTaxInfo(band="F", lookup_error="no yearly rate found for Narnia")
+        assert "no yearly rate found for Narnia" in info.to_provenance_value()
+        assert "Band F" in info.to_provenance_value()

@@ -456,10 +456,15 @@ async def lookup_council_tax(
 
     yearly_cost = None
     evidence_url = ""
+    lookup_error = ""
     if matched["local_authority"]:
-        yearly_cost = _lookup_yearly_cost(matched["band"], matched["local_authority"])
         slug = matched["local_authority"].lower().replace(" ", "-").replace(".", "")
         evidence_url = f"https://www.civaccount.co.uk/councils/{slug}"
+        yearly_cost = _lookup_yearly_cost(matched["band"], matched["local_authority"])
+        if yearly_cost is None:
+            # The band is real but the rate is not — the provenance must
+            # say why there is no figure instead of silently omitting it.
+            lookup_error = f"no yearly rate found for {matched['local_authority']}"
     else:
         logger.warning("No local authority found for %s postcode %s", building_id, postcode)
 
@@ -468,6 +473,7 @@ async def lookup_council_tax(
             band=matched["band"],
             yearly_cost=Measurement(yearly_cost, 0.0) if yearly_cost is not None else None,
             evidence_url=evidence_url,
+            lookup_error=lookup_error,
             annexe=annexe,
         ),
     )

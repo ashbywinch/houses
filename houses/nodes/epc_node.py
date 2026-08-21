@@ -92,14 +92,8 @@ class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
     async def build_provenance(self) -> Provenance:
         p = await super().build_provenance()
         v = self._attempt.value_or_none()
-        if (
-            self._attempt.succeeded
-            and v is not None
-            and v.yearly_cost is not None
-            and v.yearly_cost.stddev > 0
-        ):
-            reason = v.lookup_error or "address lookup failed"
-            p.description = f"Council tax estimated — {reason}."
+        if self._attempt.succeeded and v is not None and v.lookup_error:
+            p.description = f"Council tax estimated — {v.lookup_error}."
         return p
 
     # Default build_provenance() walks best_address and postcode deps.
