@@ -87,6 +87,7 @@ def _referenced_helper_sources(func: FunctionType) -> list[str]:
                 bound.add(alias.asname or alias.name)
     called: list[str] = []
     self_methods: list[str] = []
+    qualified: list[tuple[str, str]] = []  # (module name, function name)
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name) and node.func.id not in bound:
@@ -97,12 +98,21 @@ def _referenced_helper_sources(func: FunctionType) -> list[str]:
                 and node.func.value.id == "self"
             ):
                 self_methods.append(node.func.attr)
+            elif isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+                # module-qualified call: address_utils.normalise(...) —
+                # the base name resolves to an imported module.
+                qualified.append((node.func.value.id, node.func.attr))
     # Include the source of each referenced function, transitively
     # (bounded, cycle-safe).  Cross-module imports resolve in their OWN
     # module — a change to a shared helper (e.g. address_utils.normalise)
     # must invalidate the fingerprint even though it lives elsewhere.
     seen: set[tuple[str, str]] = set()
     queue: list[tuple[str, object]] = [(name, module) for name in called]
+    # module-qualified names resolve through the imported module
+    for mod_name, fn_name in qualified:
+        mod_obj = vars(module).get(mod_name)
+        if mod_obj is not None and _inspect.ismodule(mod_obj):
+            queue.append((fn_name, mod_obj))
     parts: list[str] = []
 
     # The compute's own class — private helpers called via ``self`` are
