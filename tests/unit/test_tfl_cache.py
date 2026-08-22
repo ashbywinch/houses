@@ -156,10 +156,34 @@ async def test_cached_api_call_unwraps_wrapped_entry(isolated_cache):
         URL,
         STRIPPED_PARAMS,
         None,
-        {"_cached_status": 403, "_cached_body": {"message": "forbidden"}},
+        {"_cached_status": 300, "_cached_body": {"message": "multiple choices"}},
     )
     data = await TflClient._cached_api_call(URL, AUTH_PARAMS)
-    assert data == {"message": "forbidden"}
+    assert data == {"message": "multiple choices"}
+
+
+@pytest.mark.asyncio
+async def test_wrapped_transient_429_is_evicted_not_served(isolated_cache):
+    """A LEGACY wrapped 429 (cached before the whitelist rule) must be
+    evicted, never unwrapped and served as route data — the reorder
+    could otherwise mask an outage as 'no journeys' (review)."""
+    def client_200(**kwargs):
+        return httpx.AsyncClient(
+            transport=CachingTransport(inner=_FakeInner(httpx.Response(200, json={"journeys": []})))
+        )
+
+    set_cached(
+        "GET",
+        URL,
+        STRIPPED_PARAMS,
+        None,
+        {"_cached_status": 429, "_cached_body": {"message": "rate limited"}},
+    )
+    await TflClient._cached_api_call(URL, AUTH_PARAMS, _client_factory=client_200)
+    entry = get_cached("GET", URL, STRIPPED_PARAMS, None)
+    assert entry is not None and "_cached_status" not in entry, (
+        "the wrapped 429 must be evicted and re-fetched fresh, not served"
+    )
 
 
 @pytest.mark.asyncio
