@@ -78,16 +78,37 @@ def _scrub_secrets(obj: Any) -> Any:
 
     Cache KEYS already exclude auth params; response bodies are another
     matter — TfL error payloads echo the request URL, including
-    ``app_key``.  Scrub any ``app_key=...`` in string values before
-    writing, recursively.
+    ``app_key``.  Scrub any ``app_key=...`` AND any occurrence of the
+    raw key value (escaped/JSON-encoded forms slip past the query
+    regex) in string values, recursively.
     """
     if isinstance(obj, dict):
         return {k: _scrub_secrets(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [_scrub_secrets(item) for item in obj]
-    if isinstance(obj, str) and "app_key=" in obj:
-        return _APP_KEY_RE.sub("app_key=REDACTED", obj)
+    if isinstance(obj, str):
+        scrubbed = obj
+        if "app_key=" in scrubbed:
+            scrubbed = _APP_KEY_RE.sub("app_key=REDACTED", scrubbed)
+        raw_key = _cached_secret_key()
+        if raw_key and raw_key in scrubbed:
+            scrubbed = scrubbed.replace(raw_key, "REDACTED")
+        return scrubbed
     return obj
+
+
+_cached_secret_key_value: str = ""
+
+
+def _cached_secret_key() -> str:
+    """The TfL app key VALUE (lazily read) — scrubbing the raw value
+    catches escaped/JSON-encoded echoes the query regex misses."""
+    global _cached_secret_key_value
+    if not _cached_secret_key_value:
+        from houses.config import settings
+
+        _cached_secret_key_value = settings.tfl_api_key
+    return _cached_secret_key_value
 
 
 def evict_cached(method: str, url: str, params: dict[str, Any] | None, body: str | None) -> None:
