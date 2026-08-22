@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 from money import Money
@@ -277,38 +278,50 @@ class PropertyNodes:
         old code computed — the 'regenerate after deploy' step happens
         lazily, per property, on first view.
         """
-        from dag.derived_node import DerivedNode
-        from dag.node import Node
-        from dag.scheduler import flush_processor
 
         # Walk the whole node graph via deps — vars(self) alone misses
         # nodes stored in containers (the commute selectors dict and
         # their sub-pipeline are only reachable through deps).
-        # In-flight guard: summary + detail refetches run back to back,
-        # and both could pass the staleness check before either persists
-        # — duplicate external calls.  One refresh pass per property.
-        if getattr(self, "_code_refresh_in_flight", False):
+        # Concurrent serializations (summary racing detail, two tabs)
+        # must not both pass the staleness check — but the second caller
+        # must AWAIT the in-flight pass, not return stale.  One task per
+        # property; late callers join it.
+        task = getattr(self, "_code_refresh_task", None)
+        if task is not None:
+            await task
             return
-        self._code_refresh_in_flight = True
+        self._code_refresh_task = asyncio.create_task(self._run_code_refresh())
         try:
-            seen: set[int] = set()
-            queue = [n for n in vars(self).values() if isinstance(n, Node)]
-            dirty = []
-            while queue:
-                node = queue.pop()
-                if id(node) in seen:
-                    continue
-                seen.add(id(node))
-                if isinstance(node, DerivedNode):
-                    if node.code_is_stale():
-                        dirty.append(node)
-                    queue.extend(node._get_active_deps())
-            for n in dirty:
-                await n.refresh()
-            if dirty:
-                await flush_processor()
+            await self._code_refresh_task
         finally:
-            self._code_refresh_in_flight = False
+            self._code_refresh_task = None
+
+    async def _run_code_refresh(self) -> None:
+        """Walk the node graph via deps and refresh code-stale nodes.
+
+        vars(self) alone misses nodes stored in containers (the commute
+        selectors dict and their sub-pipeline are only reachable through
+        deps)."""
+        from dag.derived_node import DerivedNode
+        from dag.node import Node
+        from dag.scheduler import flush_processor
+
+        seen: set[int] = set()
+        queue = [n for n in vars(self).values() if isinstance(n, Node)]
+        dirty = []
+        while queue:
+            node = queue.pop()
+            if id(node) in seen:
+                continue
+            seen.add(id(node))
+            if isinstance(node, DerivedNode):
+                if node.code_is_stale():
+                    dirty.append(node)
+                queue.extend(node._get_active_deps())
+        for n in dirty:
+            await n.refresh()
+        if dirty:
+            await flush_processor()
 
     async def _commute_breakdown_json(self) -> dict:
         """The commute aggregator is attached by the pipeline builder during

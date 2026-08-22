@@ -287,6 +287,9 @@ class TflTransitNode(DerivedNode[Commute]):
 
     @override
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
+        # Reset first: a raising plan() (409/5xx) must not leave the
+        # previous run's 404 detail to mislabel the provenance.
+        self._last_no_route_detail = ""
         loc = location.value_or_none()
         poi_val = poi.value_or_none()
         if loc is None or not poi_val:
@@ -315,10 +318,11 @@ class TflTransitNode(DerivedNode[Commute]):
     async def build_provenance(self) -> Provenance:
         p = await super().build_provenance()
         v = self._attempt.value_or_none()
-        if self._last_no_route_detail:
-            p.description = (
-                f"{(v.no_route_reason if v is not None else 'No route found')} ({self._last_no_route_detail})"
-            )
+        # Only a succeeded-infeasible result carries the no-route note —
+        # an impossible attempt (outage/retry-exhausted) must show its
+        # own error, never a stale 404 detail.
+        if self._last_no_route_detail and self._attempt.succeeded and v is not None and v.infeasible:
+            p.description = f"{v.no_route_reason} ({self._last_no_route_detail})"
         return p
 
 
