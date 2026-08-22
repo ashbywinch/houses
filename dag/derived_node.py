@@ -86,14 +86,52 @@ def _referenced_helper_sources(func: FunctionType) -> list[str]:
             for alias in node.names:
                 bound.add(alias.asname or alias.name)
     called: list[str] = []
+    self_methods: list[str] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id not in bound:
-            called.append(node.func.id)
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id not in bound:
+                called.append(node.func.id)
+            elif (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "self"
+            ):
+                self_methods.append(node.func.attr)
     # Include the source of each referenced module-level function,
     # transitively (bounded, cycle-safe).
     seen: set[str] = set()
     queue = list(called)
     parts: list[str] = []
+
+    # The compute's own class — private helpers called via ``self`` are
+    # node-class methods; a behavioral change to one must invalidate the
+    # fingerprint too (the review's gap: self._helper calls were never
+    # tracked).
+    node_cls = None
+    if "." in func.__qualname__:
+        cls_name = func.__qualname__.rsplit(".", 1)[0]
+        for _name, obj in vars(module).items():
+            if _inspect.isclass(obj) and obj.__qualname__ == cls_name:
+                node_cls = obj
+                break
+    if node_cls is not None:
+        for mname in self_methods:
+            method = vars(node_cls).get(mname)
+            if method is None:
+                continue
+            try:
+                msrc = _inspect.getsource(method)
+            except (OSError, TypeError):
+                continue
+            parts.append(_normalize_compute_source(msrc))
+            try:
+                mtree = ast.parse(msrc)
+            except SyntaxError:
+                continue
+            for n in ast.walk(mtree):
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
+                    queue.append(n.func.id)
+
     while queue:
         name = queue.pop()
         if name in seen:
