@@ -283,6 +283,13 @@ class PropertyNodes:
         """
         from dag.derived_node import _CODE_VERSION_EPOCH
 
+        # Skip the walk when no code could have changed since the last
+        # scan (the epoch only moves when a new class fingerprint is
+        # computed, i.e. on a code change).
+        last = getattr(self, "_code_refresh_epoch", None)
+        if last == _CODE_VERSION_EPOCH:
+            return
+
         # Walk the whole node graph via deps — vars(self) alone misses
         # nodes stored in containers (the commute selectors dict and
         # their sub-pipeline are only reachable through deps).

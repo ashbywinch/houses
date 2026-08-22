@@ -67,11 +67,13 @@ def _referenced_helper_sources(func: FunctionType) -> list[str]:
         tree = ast.parse(func_src)
     except SyntaxError:
         return []
-    # Names called in the body that are module-level defs.
+    # Function NAMES CALLED in the body that resolve to module-level
+    # defs — only actual Call targets, not every bare name (a name used
+    # as a value or attribute base must not pull in an unrelated helper).
     called: list[str] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-            called.append(node.id)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            called.append(node.func.id)
     # Include the source of each referenced module-level function,
     # transitively (bounded, cycle-safe).
     seen: set[str] = set()
@@ -96,8 +98,8 @@ def _referenced_helper_sources(func: FunctionType) -> list[str]:
         except SyntaxError:
             continue
         for n in ast.walk(htree):
-            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
-                queue.append(n.id)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
+                queue.append(n.func.id)
     return sorted(parts)
 
 
