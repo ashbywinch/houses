@@ -25,7 +25,12 @@ const localAnnexePayers = ref<string[]>([])
 const localIgnored = ref(false)
 
 watch(
-  () => [props.mainPayers, props.annexePayers, props.ignored],
+  // Compare a STABLE primitive: a fresh array/object on every evaluation
+  // would retrigger on any unrelated parent re-render (broadcast, detail
+  // refresh, the saving-state flip) and wipe in-progress checkbox
+  // selections.
+  () =>
+    `${props.mainPayers.join('\u0000')}|${props.annexePayers.join('\u0000')}|${props.ignored}`,
   () => {
     localMainPayers.value = [...props.mainPayers]
     localAnnexePayers.value = [...props.annexePayers]
