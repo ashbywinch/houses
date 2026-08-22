@@ -298,7 +298,7 @@ class TestTflClientNoRoute:
         assert _v.infeasible
 
     @pytest.mark.asyncio
-    async def test_404_http_error_is_infeasible_not_impossible(self, monkeypatch):
+    async def test_404_http_error_is_infeasible_not_impossible(self):
         """A TfL 404 'No journey found for your inputs' (e.g. the only
         route needs a mode we excluded) is a deterministic no-route
         answer — the client must yield succeeded-infeasible, never an
@@ -313,9 +313,9 @@ class TestTflClientNoRoute:
                 body="{'message': 'No journey found for your inputs.'}",
             )
 
-        monkeypatch.setattr(TflClient, "_cached_api_call", staticmethod(raise_404))
-
-        client = TflClient("51.5788804,-0.7648387", "RG12 8YA", "Bracknell", park_and_ride=True)
+        client = TflClient(
+            "51.5788804,-0.7648387", "RG12 8YA", "Bracknell", park_and_ride=True, cached_call=raise_404
+        )
         data = await client._fetch_data()
         assert data is None
         a = await client._process_data(None)
@@ -330,7 +330,7 @@ class TestTflClientNoRoute:
         assert "bus mode excluded" not in _v.no_route_reason
 
     @pytest.mark.asyncio
-    async def test_409_http_error_still_propagates(self, monkeypatch):
+    async def test_409_http_error_still_propagates(self):
         """A planner outage (409) is a genuine failure — it must keep
         raising so the DAG retries/surfaces it, not masquerade as no-route."""
         import pytest
@@ -341,15 +341,13 @@ class TestTflClientNoRoute:
         async def raise_409(url, params):
             raise HttpError(409, message="route planner unavailable", body="{}")
 
-        monkeypatch.setattr(TflClient, "_cached_api_call", staticmethod(raise_409))
-
-        client = TflClient("SW1V 2QQ", "RG12 8YA", "Bracknell")
+        client = TflClient("SW1V 2QQ", "RG12 8YA", "Bracknell", cached_call=raise_409)
         with pytest.raises(HttpError) as excinfo:
             await client._fetch_data()
         assert excinfo.value.status == 409
 
     @pytest.mark.asyncio
-    async def test_404_no_route_does_not_poison_transit_chain(self, monkeypatch):
+    async def test_404_no_route_does_not_poison_transit_chain(self):
         """Full scheduler path: no_bus has no route (succeeded-infeasible
         after the 404 conversion) and with_bus succeeds — TransitNode must
         pick with_bus.  An impossible no_bus would short-circuit refresh
@@ -381,20 +379,25 @@ class TestTflClientNoRoute:
                 _details=(),
             )
 
-        async def plan(self):
-            if self._allow_bus:
+        async def plan(client):
+            if client._allow_bus:
                 return Attempt.succeeded(_feasible(55))
             return Attempt.succeeded(_infeasible())
-
-        monkeypatch.setattr(TflClient, "plan", plan)
 
         loc = UserInputNode[GeoPoint]("t404_loc", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("t404_poi", PlaceOfInterest)
         loc.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest(label="Bracknell", address="RG12 8YA"), "test")
 
-        no_bus = TflTransitNode("t404_nb", best_location=loc, poi=poi, has_car=True, allow_bus=False)
-        with_bus = TflTransitNode("t404_wb", best_location=loc, poi=poi, has_car=True, allow_bus=True)
+        def make_client(origin, dest, label, park_and_ride=False, allow_bus=False):
+            return TflClient(origin, dest, label, park_and_ride=park_and_ride, allow_bus=allow_bus, plan_override=plan)
+
+        no_bus = TflTransitNode(
+            "t404_nb", best_location=loc, poi=poi, has_car=True, allow_bus=False, client_factory=make_client
+        )
+        with_bus = TflTransitNode(
+            "t404_wb", best_location=loc, poi=poi, has_car=True, allow_bus=True, client_factory=make_client
+        )
         node = TransitNode(
             "t404",
             best_location=loc,
@@ -404,7 +407,6 @@ class TestTflClientNoRoute:
             with_bus_node=with_bus,
         )
 
-        await flush_processor()
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded, f"transit must pick with_bus, got: {a.status}: {a.error}"

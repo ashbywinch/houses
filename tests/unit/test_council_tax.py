@@ -337,10 +337,8 @@ class TestMissingRate:
     and no explanation."""
 
     @pytest.mark.asyncio
-    async def test_matched_band_without_rate_records_lookup_error(self, monkeypatch):
+    async def test_matched_band_without_rate_records_lookup_error(self):
         from houses.council_tax import lookup_council_tax
-
-        monkeypatch.setattr("houses.council_tax._lookup_yearly_cost", lambda band, la: None)
 
         class Row:
             def __init__(self, address: str, band: str):
@@ -358,6 +356,7 @@ class TestMissingRate:
             "SL7 1HW",
             "2 Willowmead Gardens, Marlow, SL7 1HW",
             page_fetcher=fetcher,
+            rate_lookup=lambda band, la: None,
         )
         assert a.succeeded, f"band match must succeed even without a rate: {a.status}: {a.error}"
         info = a.value_or_none()
@@ -377,13 +376,11 @@ class TestMissingRate:
         assert "Band F" in info.to_provenance_value()
 
     @pytest.mark.asyncio
-    async def test_evidence_url_points_at_working_civaccount_api(self, monkeypatch):
+    async def test_evidence_url_points_at_working_civaccount_api(self):
         """The old evidence URL (civaccount.co.uk/councils/<slug>) 404s for
         EVERY authority — the CivAccount website has no such pages.  The
         API endpoint that actually serves the rate must be the link."""
         from houses.council_tax import lookup_council_tax
-
-        monkeypatch.setattr("houses.council_tax._lookup_yearly_cost", lambda band, la: None)
 
         class Row:
             def __init__(self, address: str, band: str):
@@ -401,6 +398,7 @@ class TestMissingRate:
             "SL7 1HW",
             "2 Willowmead Gardens, Marlow, SL7 1HW",
             page_fetcher=fetcher,
+            rate_lookup=lambda band, la: None,
         )
         info = a.value_or_none()
         assert info is not None

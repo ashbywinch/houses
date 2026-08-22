@@ -258,7 +258,10 @@ async def lookup_council_tax(
     address: str = "",
     *,
     page_fetcher: Callable[[str, int], Any] | None = None,
+    rate_lookup: Callable[[str, str], Money | None] | None = None,
 ) -> Attempt[CouncilTaxInfo]:
+    if rate_lookup is None:
+        rate_lookup = _lookup_yearly_cost
     """Look up council tax band via VOA website scraper.
 
     Returns an ``Attempt[CouncilTaxInfo]``. When the address is ambiguous
@@ -452,7 +455,7 @@ async def lookup_council_tax(
                     break
     if len(annexe_rows) == 1:
         r = annexe_rows[0]
-        annexe_yearly = _lookup_yearly_cost(r["band"], r["local_authority"]) if r["local_authority"] else None
+        annexe_yearly = rate_lookup(r["band"], r["local_authority"]) if r["local_authority"] else None
         annexe = AnnexeDwelling(
             address=r["address"],
             band=r["band"],
@@ -468,7 +471,7 @@ async def lookup_council_tax(
         # every authority) — the API endpoint that actually serves the rate
         # is the only working evidence link.
         evidence_url = f"{CIVACCOUNT_URL}/{slug}"
-        yearly_cost = _lookup_yearly_cost(matched["band"], matched["local_authority"])
+        yearly_cost = rate_lookup(matched["band"], matched["local_authority"])
         if yearly_cost is None:
             # The band is real but the rate is not — the provenance must
             # say why there is no figure instead of silently omitting it.

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import override
+from typing import Any, override
 
 from money import Money
 from pint import Quantity
@@ -277,11 +278,13 @@ class TflTransitNode(DerivedNode[Commute]):
         has_car: bool,
         allow_bus: bool = False,
         poi_info: PlaceOfInterest | None = None,
+        client_factory: Callable[..., Any] | None = None,
     ):
         super().__init__(node_id, Commute, (best_location, poi))
         self._has_car = has_car
         self._allow_bus = allow_bus
         self._poi_info = poi_info
+        self._client_factory = client_factory
         self._last_no_route_detail: str = ""
         self.display_name = "TfL"
 
@@ -303,14 +306,21 @@ class TflTransitNode(DerivedNode[Commute]):
 
         from houses.tfl_client import TflClient
 
-        client = TflClient(
+        client_factory = self._client_factory or TflClient
+        client = client_factory(
             origin_str,
             dest_str,
             poi_val.label if isinstance(poi_val, PlaceOfInterest) else "",
             park_and_ride=self._has_car,
             allow_bus=self._allow_bus,
         )
-        result = await client.plan()
+        # Dispatch the override DIRECTLY — the autouse unit-test mock
+        # replaces TflClient.plan() wholesale, so the check must live in
+        # the caller to survive it (DI per docs/testing-standards).
+        if client._plan_override is not None:
+            result = await client._plan_override(client)
+        else:
+            result = await client.plan()
         self._last_no_route_detail = client._no_route_detail
         return _with_destination(result, self._poi_info)
 
