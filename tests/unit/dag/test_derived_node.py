@@ -437,7 +437,39 @@ class TestComputeArityGuard:
         assert "drifted" in (attempt.error or "")
 
 
+class TestNamedRequiredGuard:
+    """The named-deps branch must fail loudly when a REQUIRED compute
+    param has no active dep — the positional arity guard must not be
+    the only loud failure mode."""
+
+    class _RequiredNode(DerivedNode[int]):
+        def __init__(self, node_id, a, b):
+            super().__init__(node_id, int, (a, b), dep_names=("a", "b"))
+
+        @override
+        def _get_active_deps(self):
+            return (self._deps[0],)  # drops b
+
+        @override
+        def compute(self, a, b):
+            return Attempt.succeeded(0)
+
+    @pytest.mark.asyncio
+    async def test_required_inactive_dep_fails_with_named_error(self):
+        a = UserInputNode[int]("req_a", int)
+        b = UserInputNode[int]("req_b", int)
+        node = self._RequiredNode("named_req", a, b)
+        a.push(1, "t")
+        b.push(2, "t")
+        await flush_processor()
+        attempt = await node.attempt()
+        assert attempt.impossible
+        assert "requires" in (attempt.error or "")
+        assert "b" in (attempt.error or "")
+
+
 class TestCodeVersionStaleness:
+
     """A persisted result computed by DIFFERENT code must recompute even
     when every dep timestamp is fresh — the gap that let the stale
     'takes 9 to 11 arguments' errors sit on live properties."""
@@ -457,6 +489,20 @@ class TestCodeVersionStaleness:
         node._persisted_code_version = "old-code-hash"
         await node.refresh()
         assert node.compute_count == 2, "a code-version mismatch must recompute despite fresh dep timestamps"
+
+    def test_unfingerprintable_compute_with_old_fingerprint_is_stale(self, monkeypatch):
+        """A compute that can't be introspected now (current version "")
+        but whose persisted row carries a REAL old fingerprint came from
+        different code — it must recompute once, not be skipped forever."""
+        from dag import derived_node as dn
+
+        node = _DoubleNode("cv_nofp", deps=(UserInputNode[int]("cv_nofp_src", int),))
+        node._persisted_code_version = "old-code-hash"
+        monkeypatch.setattr(dn, "_compute_code_version", lambda n: "")
+        assert node.code_is_stale() is True
+        # After a recompute the stored version is "" too — stable, not a loop.
+        node._persisted_code_version = ""
+        assert node.code_is_stale() is False
 
     @pytest.mark.asyncio
     async def test_legacy_row_without_code_version_is_code_stale(self):
