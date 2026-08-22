@@ -97,16 +97,19 @@ def _referenced_helper_sources(func: FunctionType) -> list[str]:
                 and node.func.value.id == "self"
             ):
                 self_methods.append(node.func.attr)
-    # Include the source of each referenced module-level function,
-    # transitively (bounded, cycle-safe).
-    seen: set[str] = set()
-    queue = list(called)
+    # Include the source of each referenced function, transitively
+    # (bounded, cycle-safe).  Cross-module imports resolve in their OWN
+    # module — a change to a shared helper (e.g. address_utils.normalise)
+    # must invalidate the fingerprint even though it lives elsewhere.
+    seen: set[tuple[str, str]] = set()
+    queue: list[tuple[str, object]] = [(name, module) for name in called]
     parts: list[str] = []
 
     # The compute's own class — private helpers called via ``self`` are
     # node-class methods; a behavioral change to one must invalidate the
     # fingerprint too (the review's gap: self._helper calls were never
-    # tracked).
+    # tracked).  getattr resolves through the MRO so a helper inherited
+    # from a base class in another module is found.
     node_cls = None
     if "." in func.__qualname__:
         cls_name = func.__qualname__.rsplit(".", 1)[0]
@@ -116,7 +119,7 @@ def _referenced_helper_sources(func: FunctionType) -> list[str]:
                 break
     if node_cls is not None:
         for mname in self_methods:
-            method = vars(node_cls).get(mname)
+            method = getattr(node_cls, mname, None)
             if method is None:
                 continue
             try:
@@ -128,31 +131,34 @@ def _referenced_helper_sources(func: FunctionType) -> list[str]:
                 mtree = ast.parse(msrc)
             except SyntaxError:
                 continue
+            m_module = _inspect.getmodule(method)
             for n in ast.walk(mtree):
                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
-                    queue.append(n.func.id)
+                    queue.append((n.func.id, m_module))
 
     while queue:
-        name = queue.pop()
-        if name in seen:
+        name, mod = queue.pop()
+        key = (name, getattr(mod, "__name__", ""))
+        if key in seen:
             continue
-        seen.add(name)
-        obj = vars(module).get(name)
-        if obj is None or not _inspect.isfunction(obj) or _inspect.getmodule(obj) is not module:
+        seen.add(key)
+        obj = vars(mod).get(name) if mod is not None else None
+        if obj is None or not _inspect.isfunction(obj):
             continue
         try:
             hsrc = _inspect.getsource(cast(FunctionType, obj))
         except (OSError, TypeError):
             continue
         parts.append(_normalize_compute_source(hsrc))
-        # recurse into the helper's own references
+        # recurse into the helper's own references, resolved in ITS module
         try:
             htree = ast.parse(hsrc)
         except SyntaxError:
             continue
+        h_module = _inspect.getmodule(obj)
         for n in ast.walk(htree):
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
-                queue.append(n.func.id)
+                queue.append((n.func.id, h_module))
     return sorted(parts)
 
 
