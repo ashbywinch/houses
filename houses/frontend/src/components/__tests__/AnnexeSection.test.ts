@@ -67,10 +67,16 @@ describe('AnnexeSection council-tax apportionment', () => {
   it('hides the annexe when the user says it is not related', async () => {
     const wrapper = mountSection()
     await wrapper.find('.ctax-hide').trigger('click')
-    expect(api.patchCouncilTax).toHaveBeenCalledWith('123', {
-      main_payers: [],
-      annexe_payers: [],
-      ignored: true,
-    })
+    expect(api.patchCouncilTax).toHaveBeenCalledWith('123', { ignored: true })
+  })
+
+  it('hide does not persist unsaved payer selections', async () => {
+    // Toggle a payer checkbox (no Save), then hide — the in-progress
+    // selection must NOT ride along with the ignore flag.
+    const wrapper = mountSection()
+    const boxes = wrapper.findAll('input[type="checkbox"]')
+    await boxes[0].setValue(true)
+    await wrapper.find('.ctax-hide').trigger('click')
+    expect(api.patchCouncilTax).toHaveBeenCalledWith('123', { ignored: true })
   })
 })

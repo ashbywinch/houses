@@ -21,7 +21,25 @@
 
 set -e
 
-if [ -z "$(git rev-list HEAD --not --remotes -- '*.py' '*.ts' '*.vue' '*.js' 'pyrefly.toml')" ]; then
+# Inspect the REFS BEING PUSHED (stdin), not HEAD — a push of a branch
+# other than the checked-out one must still gate (a HEAD-based check
+# silently skipped it: the review caught the exact CI-first scenario
+# slipping through for cross-branch pushes).
+touches_source=0
+while read -r _local_ref _local_oid _remote_ref _remote_oid; do
+    if [ "$_remote_oid" = "0000000000000000000000000000000000000000" ]; then
+        # New branch: no upstream range — any unpushed source commit in
+        # the branch counts.
+        if git rev-list "$_local_oid" --not --remotes -- '*.py' '*.ts' '*.vue' '*.js' 'pyrefly.toml' | grep -q .; then
+            touches_source=1
+        fi
+    else
+        if git diff --name-only "$_remote_oid..$_local_oid" -- '*.py' '*.ts' '*.vue' '*.js' 'pyrefly.toml' | grep -q .; then
+            touches_source=1
+        fi
+    fi
+done
+if [ "$touches_source" = "0" ]; then
     exit 0
 fi
 

@@ -30,7 +30,6 @@ class TestBestAddressNode:
         corrected.push("User Rd", "user")
         rightmove.push("RM Rd", "rightmove")
         await flush_processor()
-        await flush_processor()
         assert (await node.attempt()).value_or_none() == "Best Rd"
 
     @pytest.mark.asyncio
@@ -46,7 +45,6 @@ class TestBestAddressNode:
         corrected.push("User Rd", "user")
         rightmove.push("RM Rd", "rightmove")
         await flush_processor()
-        await flush_processor()
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() == "User Rd"
@@ -61,7 +59,6 @@ class TestBestAddressNode:
         node = BestAddressNode("ba3", user_entered_address=shared, corrected_address=shared, rightmove_address=shared)
         shared.push("Rightmove Rd", "rightmove")
         await flush_processor()
-        await flush_processor()
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() == "Rightmove Rd"
@@ -72,7 +69,6 @@ class TestBestAddressNode:
         user.push("10 High St", "user")
         corrected.push("", "user")
         rightmove.push("", "rightmove")
-        await flush_processor()
         await flush_processor()
         j = await node.to_json()
         assert j["status"] == "succeeded"
@@ -97,11 +93,9 @@ class TestBestAddressNode:
 
         rightmove.push("Old Rightmove St", "Rightmove")
         await flush_processor()
-        await flush_processor()
         assert (await node.attempt()).value_or_none() == "Old Rightmove St"
 
         corrected.push("New Corrected St", "User correction")
-        await flush_processor()
         await flush_processor()
         assert (await node.attempt()).value_or_none() == "New Corrected St"
 
@@ -126,7 +120,6 @@ class TestBestAddressNode:
         rightmove.push("Old Rightmove St", "Rightmove")
         corrected.push("Old Corrected St", "User correction")
         await flush_processor()
-        await flush_processor()
         assert (await node.attempt()).value_or_none() == "Old Corrected St"
 
         # Restart: fresh node objects load persisted attempts from the DB.
@@ -143,7 +136,6 @@ class TestBestAddressNode:
         assert (await node2.attempt()).value_or_none() == "Old Corrected St"
 
         corrected2.push("New Corrected St", "User correction")
-        await flush_processor()
         await flush_processor()
         assert (await node2.attempt()).value_or_none() == "New Corrected St"
 
@@ -166,7 +158,6 @@ class TestBestAddressNode:
         rightmove.push("Old Rightmove St", "Rightmove")
         corrected.push("Old Corrected St", "User correction")
         await flush_processor()
-        await flush_processor()
         assert (await node.attempt()).value_or_none() == "Old Corrected St"
 
         user2 = UserInputNode[str]("addr_user_u", str)
@@ -180,7 +171,6 @@ class TestBestAddressNode:
         )
 
         user2.push("User Rd, SW1V 2QQ", "user")
-        await flush_processor()
         await flush_processor()
         assert (await node2.attempt()).value_or_none() == "User Rd, SW1V 2QQ"
 
@@ -203,7 +193,6 @@ class TestBestLocationNode:
         best_addr.push("London", "rightmove")
 
         await flush_processor()
-        await flush_processor()
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() == gp
@@ -225,7 +214,6 @@ class TestBestLocationNode:
         rightmove_loc.push(rm_gp, "rightmove")
         best_addr.push("Vague Road, London", "rightmove")
 
-        await flush_processor()
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
@@ -275,12 +263,10 @@ class TestBestLocationNode:
         best_addr.push("London", "rightmove")
         precise.push(rm_gp, "user")  # same as rightmove initially
         await flush_processor()
-        await flush_processor()
         assert (await node.attempt()).value_or_none() == rm_gp
 
         user_gp = GeoPoint(51.5, -0.1)
         precise.push(user_gp, "user")
-        await flush_processor()
         await flush_processor()
         assert (await node.attempt()).value_or_none() == user_gp
 
@@ -305,7 +291,6 @@ class TestBestLocationNode:
         rightmove_loc.push(rm_gp, "rightmove")
         best_addr.push("London", "rightmove")
         await flush_processor()
-        await flush_processor()
         assert (await node.attempt()).value_or_none() == rm_gp
 
         # Restart: fresh nodes load persisted state.
@@ -322,7 +307,6 @@ class TestBestLocationNode:
 
         user_gp = GeoPoint(51.5, -0.1)
         precise2.push(user_gp, "user")
-        await flush_processor()
         await flush_processor()
         assert (await node2.attempt()).value_or_none() == user_gp
 
@@ -341,7 +325,6 @@ class TestBestLocationNode:
         precise.push(gp, "user")
         rightmove_loc.push(GeoPoint(51.4, -0.2), "rightmove")
         best_addr.push("London", "rightmove")
-        await flush_processor()
         await flush_processor()
         j = await node.to_json()
         assert j["status"] == "succeeded"
@@ -395,7 +378,6 @@ class TestBestLocationNodeGeocodeFallback:
         geocode_result.push(gp_geo, "geocode")
 
         await flush_processor()
-        await flush_processor()
         a = await node.attempt()
         assert a.succeeded
         # Geocode should take priority over rightmove when precise is missing
@@ -424,7 +406,6 @@ class TestBestLocationNodeGeocodeFallback:
         best_addr.push("Vague Road, London", "rightmove")
         rightmove_loc.push(gp_rm, "rightmove")
         # geocode_result left empty (pending)
-        await flush_processor()
         await flush_processor()
 
         a = await node.attempt()
@@ -459,7 +440,6 @@ class TestBestLocationNodeGeocodeFallback:
         precise.push(gp_precise, "user")
 
         await flush_processor()
-        await flush_processor()
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() == gp_precise
@@ -488,12 +468,10 @@ class TestBestLocationNodeGeocodeFallback:
         gp1 = GeoPoint(51.4, -0.2)
         geocode_result.push(gp1, "geocode")
         await flush_processor()
-        await flush_processor()
         assert (await node.attempt()).value_or_none() == gp1
 
         # Update geocode with better coordinates
         gp2 = GeoPoint(51.5, -0.1)
         geocode_result.push(gp2, "geocode")
-        await flush_processor()
         await flush_processor()
         assert (await node.attempt()).value_or_none() == gp2

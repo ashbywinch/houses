@@ -70,9 +70,24 @@ def _referenced_helper_sources(func: FunctionType) -> list[str]:
     # Function NAMES CALLED in the body that resolve to module-level
     # defs — only actual Call targets, not every bare name (a name used
     # as a value or attribute base must not pull in an unrelated helper).
+    # Names bound LOCALLY (parameters, assignments, imports) shadow any
+    # same-module function and are excluded — a collision with a local
+    # must not fingerprint an unrelated helper.
+    bound: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            bound.add(node.id)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                bound.add(alias.asname or alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                bound.add(alias.asname or alias.name)
     called: list[str] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id not in bound:
             called.append(node.func.id)
     # Include the source of each referenced module-level function,
     # transitively (bounded, cycle-safe).
