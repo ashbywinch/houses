@@ -295,7 +295,10 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
             breakdown = {
                 "commutes": round(float(commutes), 2),
                 "insurance": round(float(insurance), 2),
-                "council_tax": round(float(council_share), 2),
+                # Main bill only — the annexe bill has its own row below,
+                # so the breakdown rows sum to the group total (the
+                # annexe was double-counted when council_tax included it).
+                "council_tax": round(float(main_share), 2),
                 "sinking_fund": round(float(sinking_share), 2),
             }
             if annexe_share:

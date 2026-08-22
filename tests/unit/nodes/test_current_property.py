@@ -656,6 +656,13 @@ class TestGroupMonthlyCostNode:
         assert float(val["others"]["value"]) == pytest.approx(125, abs=0.01)
         assert float(val["others_breakdown"]["annexe_council_tax"]) == pytest.approx(75, abs=0.01)
         assert "annexe_council_tax" not in val["couple_breakdown"]
+        # The main council-tax line must NOT contain the annexe bill —
+        # the annexe has its own row, so the breakdown rows sum to the
+        # group total (a double-counted annexe broke the row sum).
+        assert float(val["others_breakdown"]["council_tax"]) == pytest.approx(50, abs=0.01), (
+            "council_tax must be main-bill only; the annexe lives in its own row"
+        )
+        assert float(val["couple_breakdown"]["council_tax"]) == pytest.approx(100, abs=0.01)
 
         prov = await node.build_provenance()
         assert "Ashby" in (prov.description or "")
