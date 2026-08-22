@@ -417,15 +417,18 @@ class TflClient:
                 # Wrapped deterministic non-2xx — a cached 404 must behave
                 # like a LIVE 404 (raise HttpError) so the caller's
                 # conversion sets the no-route reason/detail; other
-                # statuses unwrap as before.  Checked BEFORE the transient
-                # body test — the wrapper's _cached_status key would
-                # otherwise misclassify a deterministic entry as a legacy
-                # transient and evict it.
+                # statuses unwrap as before.  A WRAPPED transient status
+                # (legacy 429/5xx) is evicted, never served as data.
                 if cached["_cached_status"] == 404:
                     body = cached["_cached_body"]
                     raise HttpError(404, message=str(body), body=body)
-                return cached["_cached_body"]
-            if TflClient._is_transient_error_body(cached):
+                if TflClient._is_transient_error_body(cached):
+                    logger.warning("evicting cached transient error response for %s", url)
+                    evict_cached("GET", url, cache_params, None)
+                    cached = None
+                else:
+                    return cached["_cached_body"]
+            elif TflClient._is_transient_error_body(cached):
                 # Legacy poisoned entry (429/5xx cached before the rule): reject
                 # and evict so the route is re-fetched — transient errors are
                 # never served from cache.
