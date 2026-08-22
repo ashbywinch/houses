@@ -68,13 +68,16 @@ def _check_compute_arity(node: DerivedNode, dep_attempts: list[Attempt]) -> None
     if any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params):
         return
     n = len(dep_attempts)
-    min_args = sum(
-        1
+    positional = [
+        p
         for p in params
-        if p.default is inspect.Parameter.empty
-        and p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-    )
-    if not (min_args <= n <= len(params)):
+        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    min_args = sum(1 for p in positional if p.default is inspect.Parameter.empty)
+    # Upper bound = positionally-fillable params ONLY — keyword-only and
+    # **kwargs can't absorb positional deps, so counting them inflated
+    # the bound and let a bare TypeError escape the guard.
+    if not (min_args <= n <= len(positional)):
         raise ValueError(
             f"{node._id}: compute() takes {min_args}–{len(params)} positional "
             f"argument(s) but {n} dep attempt(s) were passed — the deps and "
@@ -140,9 +143,6 @@ class DerivedNode(Node[T], Generic[T]):
             self._connections.append(conn)
 
         _get_scheduler().register(self)
-
-    def _get_active_deps(self) -> tuple[Node, ...]:
-        return self._deps
 
     # ── Compute dispatch ───────────────────────────────
     # compute() is called with the active deps' attempts.  Nodes whose

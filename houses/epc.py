@@ -208,6 +208,7 @@ def _match_cert(certs: list[dict], building_id: str, address: str = "") -> Attem
         # prefix of the normalized query) IS the property — a separate
         # dwelling at the same number (annexe/flat) must not make it
         # ambiguous.
+        exact_collapse = False
         if address:
             norm_query_tokens = _strip_postcode(_normalise(address).split(), address)
             exact_candidates = []
@@ -217,17 +218,24 @@ def _match_cert(certs: list[dict], building_id: str, address: str = "") -> Attem
                 )
                 if len(row_tokens) >= 2 and norm_query_tokens[: len(row_tokens)] == row_tokens:
                     exact_candidates.append(c)
-            if len(exact_candidates) == 1:
+            if exact_candidates:
+                # Multiple exact prefixes are the SAME building with
+                # locality variants (re-issued certs) — use them all and
+                # let the registration-date sort pick the newest.  The
+                # ambiguity check must not re-trip on them.
                 candidates = exact_candidates
+                exact_collapse = True
         # Ambiguity check: more than one distinct address matches.  Name
         # the first two (sorted, deterministic) + the count so the
-        # provenance can be used to troubleshoot the match.
-        unique_addresses = sorted({c.get("addressLine1", "") for c in candidates})
-        if len(unique_addresses) > 1:
-            sample = ", ".join(repr(a) for a in unique_addresses[:2])
-            return Attempt.impossible(
-                f"address matched multiple properties: {sample} ({len(unique_addresses)} matches)"
-            )
+        # provenance can be used to troubleshoot the match.  Skipped for
+        # an exact-prefix collapse — same building, different locality.
+        if not exact_collapse:
+            unique_addresses = sorted({c.get("addressLine1", "") for c in candidates})
+            if len(unique_addresses) > 1:
+                sample = ", ".join(repr(a) for a in unique_addresses[:2])
+                return Attempt.impossible(
+                    f"address matched multiple properties: {sample} ({len(unique_addresses)} matches)"
+                )
     candidates.sort(key=lambda c: c.get("registrationDate", ""), reverse=True)
     band = candidates[0].get("currentEnergyEfficiencyBand", "")
     raw = band.strip() if band else ""

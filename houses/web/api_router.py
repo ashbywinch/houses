@@ -328,14 +328,20 @@ async def patch_council_tax(rid: str, body: dict):
             raise HTTPException(status_code=422, detail="payers must be a list of person names")
         return value
 
-    if "main_payers" in body:
-        prop.council_tax_payers.push(_names(body["main_payers"]), "user")
-    if "annexe_payers" in body:
-        prop.annexe_payers.push(_names(body["annexe_payers"]), "user")
-    if "ignored" in body:
-        if not isinstance(body["ignored"], bool):
-            raise HTTPException(status_code=422, detail="ignored must be a boolean")
-        prop.annexe_ignored.push(body["ignored"], "user")
+    # Validate the ENTIRE body before pushing anything — a partial write
+    # on a 422 leaves the property in a half-updated state (review).
+    main_payers = _names(body["main_payers"]) if "main_payers" in body else None
+    annexe_payers = _names(body["annexe_payers"]) if "annexe_payers" in body else None
+    if "ignored" in body and not isinstance(body["ignored"], bool):
+        raise HTTPException(status_code=422, detail="ignored must be a boolean")
+    ignored = body.get("ignored")
+
+    if main_payers is not None:
+        prop.council_tax_payers.push(main_payers, "user")
+    if annexe_payers is not None:
+        prop.annexe_payers.push(annexe_payers, "user")
+    if ignored is not None:
+        prop.annexe_ignored.push(ignored, "user")
     from dag.scheduler import flush_processor
 
     await flush_processor()

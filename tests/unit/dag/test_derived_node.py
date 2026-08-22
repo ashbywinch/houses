@@ -437,6 +437,35 @@ class TestComputeArityGuard:
         assert "drifted" in (attempt.error or "")
 
 
+class TestKeywordOnlyArityGuard:
+    """The positional arity guard's upper bound must count only
+    positionally-fillable params — keyword-only params can't absorb
+    positional deps."""
+
+    class _KwOnlyNode(DerivedNode[int]):
+        def __init__(self, node_id, deps):
+            super().__init__(node_id, int, deps)
+
+        @override
+        def compute(self, a, *, flags=None):
+            return Attempt.succeeded(0)
+
+    @pytest.mark.asyncio
+    async def test_kwonly_params_do_not_inflate_the_upper_bound(self):
+        # compute(a, *, flags) can only absorb ONE positional arg — the
+        # kw-only param must not count toward the upper bound, so 2 deps
+        # fail the friendly guard instead of a bare TypeError.
+        a = UserInputNode[int]("ko_a", int)
+        b = UserInputNode[int]("ko_b", int)
+        node = self._KwOnlyNode("arity_kw2", (a, b))
+        a.push(1, "t")
+        b.push(2, "t")
+        await flush_processor()
+        attempt = await node.attempt()
+        assert attempt.impossible
+        assert "drifted" in (attempt.error or "")
+
+
 class TestNamedRequiredGuard:
     """The named-deps branch must fail loudly when a REQUIRED compute
     param has no active dep — the positional arity guard must not be

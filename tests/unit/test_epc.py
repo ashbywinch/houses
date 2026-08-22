@@ -84,3 +84,18 @@ def test_no_match_reports_no_certificate():
     a = _match_cert(certs, "2", address="2 Willowmead Gardens, Marlow, SL7 1HW")
     assert a.impossible
     assert "no matching certificate" in (a.error or "")
+
+
+def test_exact_prefix_locality_variants_collapse_newest_wins():
+    """Two certificates for the SAME building — one with the locality,
+    one without — are both exact prefixes of the query; they must not be
+    ambiguous.  The newest registration wins (mirrors the council-tax
+    band-collapse)."""
+    certs = [
+        {**_cert("2 WILLOWMEAD GARDENS", band="B"), "registrationDate": "2023-06-01"},
+        {**_cert("2 WILLOWMEAD GARDENS, MARLOW", band="C"), "registrationDate": "2025-01-01"},
+    ]
+    a = _match_cert(certs, "2", address="2 Willowmead Gardens, Marlow, SL7 1HW")
+    assert a.succeeded, f"locality variants are the same building, got: {a.status}: {a.error}"
+    assert a.value_or_none() == "C"
+
