@@ -267,7 +267,15 @@ class GroupMonthlyCostNode(DerivedNode[dict]):
         annexe_stddev = 0.0
         if annexe is not None and annexe.yearly_cost is not None and not ignored:
             if annexe_payers is not None and annexe_payers.succeeded:
-                payers = set(annexe_payers.value_or_none() or []) & adult_names
+                stored_payers = set(annexe_payers.value_or_none() or [])
+                if stored_payers:
+                    payers = stored_payers & adult_names
+                    if not payers:
+                        # All stored names are stale (renamed on the
+                        # sheet) — the annexe bill must not silently
+                        # vanish.  Mirror the main-bill path: fall back
+                        # to the all-adults split.
+                        payers = adult_names
             if payers:
                 annexe_monthly = Decimal(str(annexe.yearly_cost.value.amount)) / Decimal(12)
                 annexe_stddev = float(annexe.yearly_cost.stddev) if annexe.yearly_cost.stddev else 0.0

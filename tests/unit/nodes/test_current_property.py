@@ -669,6 +669,52 @@ class TestGroupMonthlyCostNode:
         assert "annexe" in (prov.description or "")
 
     @pytest.mark.asyncio
+    async def test_stale_annexe_payers_fall_back_to_all_adults(self):
+        """A stored annexe payer list whose names no longer match the
+        household (renamed on the sheet) must NOT silently drop the
+        annexe bill — mirroring the main-bill path, it falls back to the
+        all-adults split so the second dwelling's council tax is never
+        lost without explanation."""
+        from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
+
+        node, mg, sf, li, ri, st, cb, ct, ps, ap, ai, ctp = self._node_with_annexe("annexe_stale")
+        mg.push(Money("0", "GBP"), "test")
+        sf.push(Money("0", "GBP"), "test")
+        li.push(Money("0", "GBP"), "test")
+        ri.push(Money("0", "GBP"), "test")
+        st.push("", "test")
+        cb.push({}, "test")
+        simon = Person("Simon", True, home_co_owners=(HomeCoOwner(name="Lorena", share=50),))
+        ps.push([simon, Person("Lorena", False), Person("Ashby", False)], "test")
+        ct.push(
+            CouncilTaxInfo(
+                band="D",
+                yearly_cost=Measurement(Money("1800", "GBP"), 0.0),
+                annexe=AnnexeDwelling(
+                    address="FLAT 2, 2 WILLOWMEAD GARDENS",
+                    band="A",
+                    yearly_cost=Measurement(Money("900", "GBP"), 0.0),
+                ),
+            ),
+            "test",
+        )
+        # "Ashby" was renamed to "Ashby K" on the sheet — the stored pick
+        # no longer matches any adult.
+        ap.push(["Ashby K"], "test")
+        ai.push(False, "test")
+        ctp.push([], "test")
+        await flush_processor()
+
+        a = await node.attempt()
+        assert a.succeeded
+        val = a.value_or_none()
+        assert val is not None
+        # Annex £75/mo split across ALL adults (£25 each): the couple's
+        # 2/3 share = 50, Ashby's 1/3 = 25.  The bill must NOT vanish.
+        assert float(val["couple_breakdown"]["annexe_council_tax"]) == pytest.approx(50, abs=0.01)
+        assert float(val["others_breakdown"]["annexe_council_tax"]) == pytest.approx(25, abs=0.01)
+
+    @pytest.mark.asyncio
     async def test_annexe_contributes_nothing_until_payers_picked(self):
         from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
 
