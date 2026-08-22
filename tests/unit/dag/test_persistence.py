@@ -122,3 +122,18 @@ class TestPropertyCreatedAt:
         latest = latest_node_result("prop456/rightmove_url")
         assert latest is not None
         assert ts <= latest["_persisted_at"]
+
+
+def test_init_db_creates_latest_row_index():
+    """A fresh database must get the node_results latest-row index — the
+    init_db rewrite dropped it, so fresh installs lost the fast
+    latest_node_result path (the live DB keeps the old index, but a new
+    deploy would not)."""
+    from dag.persistence import _get_db, init_db
+
+    init_db()
+    rows = _get_db().execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_nr_node'"
+    ).fetchall()
+    assert rows, "idx_nr_node must exist on a fresh database"
+

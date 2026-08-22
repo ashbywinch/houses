@@ -151,6 +151,12 @@ def init_db(db_path: str | None = None) -> None:
         )
         """
     )
+    # Latest-row lookups (latest_node_result, property_created_at) are the
+    # hot path — the index was dropped in the code_version rewrite and a
+    # fresh database must still get it.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_nr_node ON node_results(node_id, created_at DESC);"
+    )
     conn.commit()
     _ensure_code_version_column()
 
