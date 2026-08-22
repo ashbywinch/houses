@@ -71,7 +71,6 @@ class TestBusRouteNode:
         loc.push(GeoPoint(51.5, -0.1), "test")
         dest.push("EC3A 7LP", "test")
         await flush_processor()
-        await flush_processor()
         a = await node.attempt()
         assert a.succeeded
 
@@ -115,7 +114,6 @@ class TestBodsFareNode:
 
         route.push({}, "test")
         await flush_processor()
-        await flush_processor()
         a = await node.attempt()
         assert a.succeeded
 
@@ -148,7 +146,6 @@ class TestBodsFareNode:
                 },
                 "test",
             )
-            await flush_processor()
             await flush_processor()
             a = await node.attempt()
             assert a.succeeded, f"Expected succeeded, got {a.status}: {a.error}"
@@ -215,7 +212,6 @@ class TestBusLegAugmentNode:
         route.push({}, "test")
         fare.push({}, "test")
         await flush_processor()
-        await flush_processor()
         a = await node.attempt()
         assert a.succeeded
         assert a.value_or_none() == commute
@@ -257,7 +253,6 @@ class TestBusLegAugmentNode:
         # Empty route data — no bus stops
         route.push({"bus_stops": []}, "test")
         fare.push({}, "test")
-        await flush_processor()
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
@@ -320,7 +315,6 @@ class TestBusLegAugmentNode:
             },
             "test",
         )
-        await flush_processor()
         await flush_processor()
 
         a = await node.attempt()
@@ -400,7 +394,6 @@ class TestBusLegAugmentNode:
             "test",
         )
         await flush_processor()
-        await flush_processor()
 
         a = await node.attempt()
         assert a.succeeded
@@ -463,7 +456,6 @@ class TestBusLegAugmentNode:
             "test",
         )
         fare.push({}, "test")
-        await flush_processor()
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
@@ -682,9 +674,7 @@ class TestBusAugmentLateRoute:
             "test",
         )
         await flush_processor()
-        await flush_processor()
         fare.push({"stop_fares": {}}, "test")
-        await flush_processor()
         await flush_processor()
 
         a = await node.attempt()

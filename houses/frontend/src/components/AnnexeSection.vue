@@ -75,14 +75,28 @@ async function save() {
   }
 }
 
+async function setIgnored(value: boolean) {
+  // The hide/restore actions are about the annexe's relevance ONLY —
+  // in-progress, unsaved payer checkbox selections must not ride along.
+  saving.value = true
+  errorMsg.value = ''
+  try {
+    await api.patchCouncilTax(props.rid, { ignored: value })
+    localIgnored.value = value
+    await store.loadDetail(props.rid, true)
+  } catch {
+    errorMsg.value = "Couldn't save the council tax choice."
+  } finally {
+    saving.value = false
+  }
+}
+
 function hideAnnexe() {
-  localIgnored.value = true
-  save()
+  setIgnored(true)
 }
 
 function restoreAnnexe() {
-  localIgnored.value = false
-  save()
+  setIgnored(false)
 }
 </script>
 
