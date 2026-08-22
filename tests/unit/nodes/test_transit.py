@@ -207,6 +207,25 @@ class TestTransitNodeNoRoute:
         )
 
     @pytest.mark.asyncio
+    async def test_no_car_path_carries_no_route_reason(self):
+        """The car-less journey is infeasible with a reason the UI can
+        show — the review caught the reason being dropped."""
+        from houses.model.domain import PlaceOfInterest
+        from houses.nodes.transit import DriveNode
+
+        loc = UserInputNode[GeoPoint]("nc_loc", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("nc_poi", PlaceOfInterest)
+        node = DriveNode("nc", best_location=loc, poi=poi, has_car=False)
+        a = await node.compute(
+            Attempt.succeeded(GeoPoint(51.5, -0.1)),
+            Attempt.succeeded(PlaceOfInterest(label="X", address="SW1V 2QQ")),
+        )
+        assert a.succeeded
+        v = a.value_or_none()
+        assert v is not None and v.infeasible
+        assert v.no_route_reason == "no car available"
+
+    @pytest.mark.asyncio
     async def test_has_car_prefers_feasible_no_bus(self):
         a = await self._pick(
             True,

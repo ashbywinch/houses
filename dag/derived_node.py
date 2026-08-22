@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import traceback
 from abc import abstractmethod
@@ -159,11 +160,27 @@ class DerivedNode(Node[T], Generic[T]):
         if self._dep_names is not None:
             # Bind by dep identity against the static deps, so a
             # non-trailing subset of active deps still reaches the
-            # right parameter.  Omitted names rely on compute defaults.
+            # right parameter.  Omitted names rely on compute defaults —
+            # and a REQUIRED param with no active dep fails loudly (the
+            # named branch must not be quieter than the positional
+            # arity guard).
             kwargs: dict[str, Attempt] = {}
             for name, dep in zip(self._dep_names, self._deps, strict=True):
                 if dep in active_deps:
                     kwargs[name] = dep_attempts[active_deps.index(dep)]
+            missing = [
+                p.name
+                for p in inspect.signature(self.compute).parameters.values()
+                if p.default is inspect.Parameter.empty
+                and p.kind
+                in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+                and p.name not in kwargs
+            ]
+            if missing:
+                raise ValueError(
+                    f"{self._id}: compute() requires {missing} but those deps are "
+                    f"not active — give the parameters defaults or keep the deps active"
+                )
             result = self.compute(**kwargs)
         else:
             _check_compute_arity(self, dep_attempts)
@@ -187,11 +204,14 @@ class DerivedNode(Node[T], Generic[T]):
         attempt) — never stale.  ``""`` means a persisted row written
         before the version stamp existed (old code) — stale once.
         """
-        current = self._current_code_version()
-        if not current:
-            return False  # can't fingerprint this compute — never guess
         persisted = getattr(self, "_persisted_code_version", None)
-        return persisted is not None and persisted != current
+        current = self._current_code_version()
+        if current:
+            return persisted is not None and persisted != current
+        # Can't fingerprint this compute — but a persisted row WITH a
+        # fingerprint came from different code: recompute once (the
+        # stored version then matches "" and the check stays stable).
+        return persisted is not None and persisted != ""
 
     def disconnect(self) -> None:
         """Disconnect all signal connections and unregister from the scheduler."""

@@ -244,7 +244,7 @@ class DriveNode(DerivedNode[Commute]):
     @override
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
         if not self._has_car:
-            return _infeasible_commute("no car available")
+            return _infeasible_commute("no car available", "no car available")
         loc = location.value_or_none()
         poi_val = poi.value_or_none()
         if loc is None or not poi_val:

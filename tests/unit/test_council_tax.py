@@ -305,6 +305,7 @@ class TestUnitPrefixedAnnexe:
             rows = [
                 Row("2 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "F"),
                 Row("2A WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "A"),
+                Row("2AB WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "B"),
                 Row("12 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "D"),
                 Row("20 WILLOWMEAD GARDENS, MARLOW, SL7 1HW", "D"),
             ]
@@ -324,6 +325,9 @@ class TestUnitPrefixedAnnexe:
         assert info.annexe is not None, "2A is the annexe — a letter-suffixed number"
         assert "2A WILLOWMEAD" in info.annexe.address
         assert info.annexe.band == "A"
+        # A multi-char suffix ("2AB") is NOT the single-letter form — the
+        # len(row)+1 guard excludes it (the review's concern was moot).
+        assert "2AB" not in info.annexe.address
 
 
 class TestMissingRate:
