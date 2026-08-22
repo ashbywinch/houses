@@ -50,6 +50,20 @@ describe('AnnexeSection council-tax apportionment', () => {
     })
   })
 
+  it('does not reset in-progress selections on an unrelated re-render', async () => {
+    // The watch must compare stable values: a parent re-render that
+    // supplies new array references (broadcast, detail refresh, the
+    // saving-state flip) must not wipe the user's checked boxes.
+    const wrapper = mountSection()
+    const boxes = wrapper.findAll('input[type="checkbox"]')
+    await boxes[0].setValue(true)
+    expect((boxes[0].element as HTMLInputElement).checked).toBe(true)
+
+    await wrapper.setProps({ mainPayers: [], annexePayers: [], ignored: false })
+    const after = wrapper.findAll('input[type="checkbox"]')[0]
+    expect((after.element as HTMLInputElement).checked).toBe(true)
+  })
+
   it('hides the annexe when the user says it is not related', async () => {
     const wrapper = mountSection()
     await wrapper.find('.ctax-hide').trigger('click')
