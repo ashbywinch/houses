@@ -8,7 +8,8 @@ import traceback
 from abc import abstractmethod
 from datetime import UTC, datetime, timedelta
 from inspect import iscoroutine
-from typing import Any, Generic, TypeVar, override
+from types import FunctionType
+from typing import Any, Generic, TypeVar, cast, override
 
 from dag.attempt import Attempt, AttemptError, Formula, Provenance, SourceType, project_value
 from dag.eval_context import staged_attempt
@@ -40,6 +41,65 @@ def _normalize_compute_source(source: str) -> str:
     return ast.unparse(tree)
 
 
+def _referenced_helper_sources(func: FunctionType) -> list[str]:
+    """AST-normalized sources of the same-module helpers ``func`` calls.
+
+    The fingerprint must cover the compute's helpers too — a behavior
+    change in ``_infeasible_commute``/``_lookup_yearly_cost``-style
+    module functions leaves compute()'s text unchanged, so persisted
+    results would stay "fresh" forever.  Walks name references that
+    resolve to module-level defs in the function's own module,
+    transitively, cycle-safe.  Calls behind the services boundary
+    (svc.xxx_service.lookup) are not statically resolvable and are out
+    of scope — the node's compute text still covers its own logic.
+    """
+    import inspect as _inspect
+
+    module = _inspect.getmodule(func)
+    if module is None:
+        return []
+    try:
+        func_src = _inspect.getsource(func)
+    except (OSError, TypeError):
+        return []
+    try:
+        tree = ast.parse(func_src)
+    except SyntaxError:
+        return []
+    # Names called in the body that are module-level defs.
+    called: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            called.append(node.id)
+    # Include the source of each referenced module-level function,
+    # transitively (bounded, cycle-safe).
+    seen: set[str] = set()
+    queue = list(called)
+    parts: list[str] = []
+    while queue:
+        name = queue.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        obj = vars(module).get(name)
+        if obj is None or not _inspect.isfunction(obj) or _inspect.getmodule(obj) is not module:
+            continue
+        try:
+            hsrc = _inspect.getsource(cast(FunctionType, obj))
+        except (OSError, TypeError):
+            continue
+        parts.append(_normalize_compute_source(hsrc))
+        # recurse into the helper's own references
+        try:
+            htree = ast.parse(hsrc)
+        except SyntaxError:
+            continue
+        for n in ast.walk(htree):
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
+                queue.append(n.id)
+    return sorted(parts)
+
+
 def _compute_code_version(node: DerivedNode) -> str:
     """Fingerprint of the compute code — changes when the computation
     changes, so persisted results computed by older code can be detected.
@@ -67,7 +127,10 @@ def _compute_code_version(node: DerivedNode) -> str:
         _CODE_VERSION_CACHE[cls] = ""
         return ""
     normalized = _normalize_compute_source(raw)
-    digest = hashlib.sha256(f"{cls.__module__}.{cls.__qualname__}:{normalized}".encode()).hexdigest()[:16]
+    helpers = _referenced_helper_sources(func)
+    digest = hashlib.sha256(
+        f"{cls.__module__}.{cls.__qualname__}:{normalized}:{'|'.join(helpers)}".encode()
+    ).hexdigest()[:16]
     _CODE_VERSION_CACHE[cls] = digest
     return digest
 
