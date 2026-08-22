@@ -24,6 +24,7 @@ T = TypeVar("T")
 
 
 _CODE_VERSION_CACHE: dict[type, str] = {}
+_CODE_VERSION_EPOCH: int = 0
 
 
 def _normalize_compute_source(source: str) -> str:
@@ -132,6 +133,10 @@ def _compute_code_version(node: DerivedNode) -> str:
         f"{cls.__module__}.{cls.__qualname__}:{normalized}:{'|'.join(helpers)}".encode()
     ).hexdigest()[:16]
     _CODE_VERSION_CACHE[cls] = digest
+    # Bump the epoch whenever a NEW fingerprint is computed — the epoch
+    # is the cheap 'did any code change since my last scan' signal.
+    global _CODE_VERSION_EPOCH
+    _CODE_VERSION_EPOCH += 1
     return digest
 
 

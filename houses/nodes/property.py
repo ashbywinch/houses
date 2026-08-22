@@ -276,8 +276,12 @@ class PropertyNodes:
 
         Called before serialization so a read never serves a result that
         old code computed — the 'regenerate after deploy' step happens
-        lazily, per property, on first view.
+        lazily, per property, on first view.  After the first scan the
+        walk is O(1): the per-class fingerprint cache only grows when
+        CODE changes, so the module epoch tells us nothing could have
+        become stale.
         """
+        from dag.derived_node import _CODE_VERSION_EPOCH
 
         # Walk the whole node graph via deps — vars(self) alone misses
         # nodes stored in containers (the commute selectors dict and
@@ -295,6 +299,7 @@ class PropertyNodes:
             await self._code_refresh_task
         finally:
             self._code_refresh_task = None
+        self._code_refresh_epoch = _CODE_VERSION_EPOCH
 
     async def _run_code_refresh(self) -> None:
         """Walk the node graph via deps and refresh code-stale nodes.
