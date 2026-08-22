@@ -148,17 +148,36 @@ async def test_cached_api_call_serves_deterministic_404_body(isolated_cache):
 
 @pytest.mark.asyncio
 async def test_cached_api_call_unwraps_wrapped_entry(isolated_cache):
-    # New-format deterministic 4xx: wrapped with its status. _cached_api_call
-    # returns the BODY, not the wrapper.
+    # New-format deterministic 4xx (non-404): wrapped with its status.
+    # _cached_api_call returns the BODY, not the wrapper.  (A cached 404
+    # raises instead — see test_cached_404_raises_http_error_so_reason_survives.)
     set_cached(
         "GET",
         URL,
         STRIPPED_PARAMS,
         None,
-        {"_cached_status": 404, "_cached_body": {"message": "no route"}},
+        {"_cached_status": 403, "_cached_body": {"message": "forbidden"}},
     )
     data = await TflClient._cached_api_call(URL, AUTH_PARAMS)
-    assert data == {"message": "no route"}
+    assert data == {"message": "forbidden"}
+
+
+@pytest.mark.asyncio
+async def test_cached_404_raises_http_error_so_reason_survives(isolated_cache):
+    """A cached 404 must behave like a LIVE 404: raise HttpError so
+    _fetch_data sets the no-route reason/detail (the review's
+    cached-404 detail-loss finding — an unwrapped body skipped the
+    conversion entirely)."""
+    set_cached(
+        "GET",
+        URL,
+        STRIPPED_PARAMS,
+        None,
+        {"_cached_status": 404, "_cached_body": {"message": "No journey found for your inputs."}},
+    )
+    with pytest.raises(HttpError) as excinfo:
+        await TflClient._cached_api_call(URL, AUTH_PARAMS)
+    assert excinfo.value.status == 404
 
 
 @pytest.mark.asyncio
