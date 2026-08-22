@@ -121,6 +121,24 @@ class TestPropertyApi:
                 f"ignored={bad!r}: expected 422, got {resp.status_code}: {resp.text[:150]}"
             )
 
+    def test_patch_council_tax_validates_all_fields_before_any_push(self):
+        """A body with valid payers but an invalid ignored must 422
+        WITHOUT persisting the payer choices (no partial updates)."""
+        from houses.nodes.property import PropertyNodes
+
+        client, reg = self._setup()
+        prop = PropertyNodes("prop127")
+        reg["prop127"] = prop
+        flush_all()
+
+        resp = client.patch(
+            "/api/properties/prop127/council-tax",
+            json={"main_payers": ["Simon"], "ignored": "false"},
+        )
+        assert resp.status_code == 422
+        # The payer choice must NOT have been persisted.
+        assert prop.council_tax_payers.latest_attempt().value_or_none() in (None, [])
+
     def test_council_tax_payer_choice_survives_property_reload(self):
         """The default-push guard must only fire when the node was NEVER
         set — a saved payer choice persists across PropertyNodes
