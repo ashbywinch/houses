@@ -284,22 +284,31 @@ class PropertyNodes:
         # Walk the whole node graph via deps — vars(self) alone misses
         # nodes stored in containers (the commute selectors dict and
         # their sub-pipeline are only reachable through deps).
-        seen: set[int] = set()
-        queue = [n for n in vars(self).values() if isinstance(n, Node)]
-        dirty = []
-        while queue:
-            node = queue.pop()
-            if id(node) in seen:
-                continue
-            seen.add(id(node))
-            if isinstance(node, DerivedNode):
-                if node.code_is_stale():
-                    dirty.append(node)
-                queue.extend(node._get_active_deps())
-        for n in dirty:
-            await n.refresh()
-        if dirty:
-            await flush_processor()
+        # In-flight guard: summary + detail refetches run back to back,
+        # and both could pass the staleness check before either persists
+        # — duplicate external calls.  One refresh pass per property.
+        if getattr(self, "_code_refresh_in_flight", False):
+            return
+        self._code_refresh_in_flight = True
+        try:
+            seen: set[int] = set()
+            queue = [n for n in vars(self).values() if isinstance(n, Node)]
+            dirty = []
+            while queue:
+                node = queue.pop()
+                if id(node) in seen:
+                    continue
+                seen.add(id(node))
+                if isinstance(node, DerivedNode):
+                    if node.code_is_stale():
+                        dirty.append(node)
+                    queue.extend(node._get_active_deps())
+            for n in dirty:
+                await n.refresh()
+            if dirty:
+                await flush_processor()
+        finally:
+            self._code_refresh_in_flight = False
 
     async def _commute_breakdown_json(self) -> dict:
         """The commute aggregator is attached by the pipeline builder during

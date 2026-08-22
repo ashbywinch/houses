@@ -497,6 +497,22 @@ class TestNamedRequiredGuard:
         assert "b" in (attempt.error or "")
 
 
+class TestFingerprintNormalization:
+    def test_comment_and_whitespace_edits_do_not_change_the_fingerprint(self):
+        """A comment-only or reformat commit must NOT invalidate every
+        persisted fingerprint (the recompute storm) — the fingerprint
+        covers behavior, not source cosmetics."""
+        from dag.derived_node import _normalize_compute_source
+
+        a = "def compute(self, a, b):\n    x = a + b  # add them\n    return x\n"
+        b = "def compute(self, a, b):\n    x = a + b\n    return x\n"
+        c = "def compute(self, a, b):\n    # totally different comment\n    x = a + b\n    return x\n"
+        d = "def compute(self, a, b):\n    return a + b\n"
+        na, nb, nc, nd = (_normalize_compute_source(s) for s in (a, b, c, d))
+        assert na == nb == nc, "comments/whitespace must not change the normalized form"
+        assert nd != na, "behavior changes still change the fingerprint"
+
+
 class TestCodeVersionStaleness:
 
     """A persisted result computed by DIFFERENT code must recompute even
