@@ -79,7 +79,7 @@ def _check_compute_arity(node: DerivedNode, dep_attempts: list[Attempt]) -> None
     # the bound and let a bare TypeError escape the guard.
     if not (min_args <= n <= len(positional)):
         raise ValueError(
-            f"{node._id}: compute() takes {min_args}–{len(params)} positional "
+            f"{node._id}: compute() takes {min_args}–{len(positional)} positional "
             f"argument(s) but {n} dep attempt(s) were passed — the deps and "
             f"the compute signature have drifted. Declare dep_names or fix the deps."
         )
