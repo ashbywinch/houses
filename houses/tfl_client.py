@@ -421,7 +421,14 @@ class TflClient:
                 # (legacy 429/5xx) is evicted, never served as data.
                 if cached["_cached_status"] == 404:
                     body = cached["_cached_body"]
-                    raise HttpError(404, message=str(body), body=body)
+                    # Same two-tier shape as the LIVE 404: raw body in
+                    # message/body, friendly text to the UI.
+                    raise HttpError(
+                        404,
+                        message=str(body)[:200],
+                        body=body,
+                        user_message=_friendly_tfl_message(404),
+                    )
                 if TflClient._is_transient_error_body(cached):
                     logger.warning("evicting cached transient error response for %s", url)
                     evict_cached("GET", url, cache_params, None)

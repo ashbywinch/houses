@@ -202,6 +202,7 @@ async def test_cached_404_raises_http_error_so_reason_survives(isolated_cache):
     with pytest.raises(HttpError) as excinfo:
         await TflClient._cached_api_call(URL, AUTH_PARAMS)
     assert excinfo.value.status == 404
+    assert excinfo.value.user_message == "TfL couldn't find a route for this journey"
 
 
 @pytest.mark.asyncio

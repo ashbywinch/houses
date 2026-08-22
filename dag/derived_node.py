@@ -190,8 +190,22 @@ def _compute_code_version(node: DerivedNode) -> str:
         return ""
     normalized = _normalize_compute_source(raw)
     helpers = _referenced_helper_sources(func)
+    # Nodes also decide behavior in __init__ (mode alternatives, dep
+    # gating) and _get_active_deps — a change to those leaves compute()
+    # identical, so include their sources too (the review's gap).
+    import inspect as _inspect
+
+    structure_parts = []
+    for member in ("__init__", "_get_active_deps"):
+        try:
+            structure_parts.append(_normalize_compute_source(_inspect.getsource(getattr(cls, member))))
+        except (OSError, TypeError):
+            continue
     digest = hashlib.sha256(
-        f"{cls.__module__}.{cls.__qualname__}:{normalized}:{'|'.join(helpers)}".encode()
+        (
+            f"{cls.__module__}.{cls.__qualname__}:{normalized}:{'|'.join(helpers)}:"
+            f"{'|'.join(structure_parts)}"
+        ).encode()
     ).hexdigest()[:16]
     _CODE_VERSION_CACHE[cls] = digest
     # Bump the epoch whenever a NEW fingerprint is computed — the epoch
