@@ -77,6 +77,8 @@ class TflClient:
         label: str,
         park_and_ride: bool = False,
         allow_bus: bool = False,
+        cached_call: Callable | None = None,
+        plan_override: Callable | None = None,
     ):
         self._origin = origin_postcode
         self._destination = destination_postcode
@@ -85,11 +87,16 @@ class TflClient:
         self._allow_bus = allow_bus
         self._no_route_reason: str = ""
         self._no_route_detail: str = ""
+        # DI seams (docs/testing-standards: no monkeypatch in new tests).
+        self._cached_call = cached_call or TflClient._cached_api_call
+        self._plan_override = plan_override
 
     # ── Public API ──────────────────────────────────────────────────
 
     async def plan(self) -> Attempt[Commute]:
         """Fetch TfL route, enrich with costs, and return a Commute."""
+        if self._plan_override is not None:
+            return await self._plan_override(self)
         data = await self._fetch_data()
         if data is not None and self._park_and_ride:
             data = await _apply_park_and_ride_to_journeys(
@@ -484,7 +491,7 @@ class TflClient:
         }
 
         try:
-            data = await TflClient._cached_api_call(url, params)
+            data = await self._cached_call(url, params)
             if data is not None and "Disambiguation" in str(data.get("$type", "")):
                 data = await self._geocode_fallback(params)
         except HttpError as e:

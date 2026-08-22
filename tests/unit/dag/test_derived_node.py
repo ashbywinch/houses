@@ -535,15 +535,18 @@ class TestCodeVersionStaleness:
         await node.refresh()
         assert node.compute_count == 2, "a code-version mismatch must recompute despite fresh dep timestamps"
 
-    def test_unfingerprintable_compute_with_old_fingerprint_is_stale(self, monkeypatch):
+    def test_unfingerprintable_compute_with_old_fingerprint_is_stale(self):
         """A compute that can't be introspected now (current version "")
         but whose persisted row carries a REAL old fingerprint came from
         different code — it must recompute once, not be skipped forever."""
-        from dag import derived_node as dn
 
-        node = _DoubleNode("cv_nofp", deps=(UserInputNode[int]("cv_nofp_src", int),))
+        class _UnintrospectableNode(_DoubleNode):
+            @override
+            def _current_code_version(self) -> str:
+                return ""
+
+        node = _UnintrospectableNode("cv_nofp", deps=(UserInputNode[int]("cv_nofp_src", int),))
         node._persisted_code_version = "old-code-hash"
-        monkeypatch.setattr(dn, "_compute_code_version", lambda n: "")
         assert node.code_is_stale() is True
         # After a recompute the stored version is "" too — stable, not a loop.
         node._persisted_code_version = ""
