@@ -84,6 +84,7 @@ class TflClient:
         self._park_and_ride = park_and_ride
         self._allow_bus = allow_bus
         self._no_route_reason: str = ""
+        self._no_route_detail: str = ""
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -489,8 +490,12 @@ class TflClient:
         except HttpError as e:
             if e.status != 404:
                 raise
-            mode_note = "" if self._allow_bus else ", bus mode excluded"
-            self._no_route_reason = f"TfL couldn't find a route for this journey (HTTP 404{mode_note})"
+            mode_note = "" if self._allow_bus else "bus mode excluded"
+            # User-facing reason stays clean (two-tier messaging: no
+            # status codes or probe strategy in UI text); the internal
+            # detail rides separately to the node provenance.
+            self._no_route_reason = "TfL couldn't find a route for this journey"
+            self._no_route_detail = f"HTTP 404{mode_note and ', ' + mode_note}"
             return None
         return data
 

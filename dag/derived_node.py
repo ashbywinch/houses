@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import asyncio
 import inspect
 import logging
@@ -24,11 +25,27 @@ T = TypeVar("T")
 _CODE_VERSION_CACHE: dict[type, str] = {}
 
 
+def _normalize_compute_source(source: str) -> str:
+    """Behavior-only normalization of a compute function's source.
+
+    Comments and whitespace carry no behavior — an unparse round-trip
+    yields identical text for comment-only or reformatted edits, so a
+    non-behavioral commit cannot invalidate every persisted fingerprint
+    (the recompute-storm the review flagged).
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source
+    return ast.unparse(tree)
+
+
 def _compute_code_version(node: DerivedNode) -> str:
     """Fingerprint of the compute code — changes when the computation
     changes, so persisted results computed by older code can be detected.
 
-    The hash covers the class identity plus the compute function source.
+    The hash covers the class identity plus the AST-normalized compute
+    function source (comments/whitespace do not change the fingerprint).
     Cached per class (compute is a bound method — same code for every
     instance).  Returns "" when the source can't be introspected (e.g.
     dynamically generated functions) — callers treat that as "cannot
@@ -45,11 +62,12 @@ def _compute_code_version(node: DerivedNode) -> str:
     if inspect.ismethod(func):
         func = func.__func__
     try:
-        src = inspect.getsource(func)
+        raw = inspect.getsource(func)
     except (OSError, TypeError):
         _CODE_VERSION_CACHE[cls] = ""
         return ""
-    digest = hashlib.sha256(f"{cls.__module__}.{cls.__qualname__}:{src}".encode()).hexdigest()[:16]
+    normalized = _normalize_compute_source(raw)
+    digest = hashlib.sha256(f"{cls.__module__}.{cls.__qualname__}:{normalized}".encode()).hexdigest()[:16]
     _CODE_VERSION_CACHE[cls] = digest
     return digest
 

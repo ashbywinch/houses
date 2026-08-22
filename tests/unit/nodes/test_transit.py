@@ -323,8 +323,11 @@ class TestTflClientNoRoute:
         _v = a.value_or_none()
         assert _v is not None
         assert _v.infeasible
-        assert "HTTP 404" in _v.no_route_reason
-        assert "bus mode excluded" in _v.no_route_reason  # allow_bus=False probe
+        # Two-tier messaging: the user-facing reason is clean — the
+        # status code and probe strategy live on the provenance.
+        assert _v.no_route_reason == "TfL couldn't find a route for this journey"
+        assert "HTTP 404" not in _v.no_route_reason
+        assert "bus mode excluded" not in _v.no_route_reason
 
     @pytest.mark.asyncio
     async def test_409_http_error_still_propagates(self, monkeypatch):

@@ -8,7 +8,7 @@ from typing import override
 from money import Money
 from pint import Quantity
 
-from dag.attempt import Attempt, AttemptError
+from dag.attempt import Attempt, AttemptError, Provenance
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.commute import LegMode
@@ -282,6 +282,7 @@ class TflTransitNode(DerivedNode[Commute]):
         self._has_car = has_car
         self._allow_bus = allow_bus
         self._poi_info = poi_info
+        self._last_no_route_detail: str = ""
         self.display_name = "TfL"
 
     @override
@@ -299,14 +300,26 @@ class TflTransitNode(DerivedNode[Commute]):
 
         from houses.tfl_client import TflClient
 
-        result = await TflClient(
+        client = TflClient(
             origin_str,
             dest_str,
             poi_val.label if isinstance(poi_val, PlaceOfInterest) else "",
             park_and_ride=self._has_car,
             allow_bus=self._allow_bus,
-        ).plan()
+        )
+        result = await client.plan()
+        self._last_no_route_detail = client._no_route_detail
         return _with_destination(result, self._poi_info)
+
+    @override
+    async def build_provenance(self) -> Provenance:
+        p = await super().build_provenance()
+        v = self._attempt.value_or_none()
+        if self._last_no_route_detail:
+            p.description = (
+                f"{(v.no_route_reason if v is not None else 'No route found')} ({self._last_no_route_detail})"
+            )
+        return p
 
 
 class TransitNode(DerivedNode[Commute]):
