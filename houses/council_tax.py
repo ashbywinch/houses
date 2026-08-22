@@ -260,8 +260,6 @@ async def lookup_council_tax(
     page_fetcher: Callable[[str, int], Any] | None = None,
     rate_lookup: Callable[[str, str], Money | None] | None = None,
 ) -> Attempt[CouncilTaxInfo]:
-    if rate_lookup is None:
-        rate_lookup = _lookup_yearly_cost
     """Look up council tax band via VOA website scraper.
 
     Returns an ``Attempt[CouncilTaxInfo]``. When the address is ambiguous
@@ -273,6 +271,8 @@ async def lookup_council_tax(
     test seam (callable(postcode, page) -> object with ``.rows``) so
     tests never mock uk_property_apis.
     """
+    if rate_lookup is None:
+        rate_lookup = _lookup_yearly_cost
     try:
         if page_fetcher is not None:
             page = page_fetcher(postcode, 0)
