@@ -397,9 +397,14 @@ async def lookup_council_tax(
         # Multiple exact prefixes are the SAME property with locality
         # variants ("2 WILLOWMEAD GARDENS" vs "… MARLOW") — collapse when
         # the band agrees; different bands on the same designation is a
-        # real conflict that falls through to the ambiguity error.
+        # real conflict that falls through to the ambiguity error.  Prefer
+        # the variant WITH a local_authority — the rate lookup must not
+        # fail because the first row happened to lack one (review).
         bands = {m["band"] for m in exact_matches}
-        matches = [exact_matches[0]] if len(bands) == 1 else exact_matches
+        if len(bands) == 1:
+            matches = sorted(exact_matches, key=lambda m: not bool(m.get("local_authority")))[:1]
+        else:
+            matches = exact_matches
 
     # Ambiguity check: more than one distinct address matches.  The error
     # names the first two (sorted, deterministic) and the total count so

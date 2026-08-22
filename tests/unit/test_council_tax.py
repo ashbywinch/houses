@@ -368,6 +368,39 @@ class TestMissingRate:
             f"{info.lookup_error!r}"
         )
 
+    @pytest.mark.asyncio
+    async def test_exact_variant_without_authority_does_not_block_rate(self, monkeypatch):
+        """Two same-band exact-prefix rows (locality variants) — the
+        first lacks a local_authority.  The collapse must prefer the
+        variant WITH one so the rate still resolves (review)."""
+        from houses.council_tax import lookup_council_tax
+
+        class Row:
+            def __init__(self, address: str, band: str, la: str = "Woking"):
+                self.address = address
+                self.band = band
+                self.local_authority = la
+
+        class Page:
+            rows = [
+                Row("2 WILLOWMEAD GARDENS", "F", la=""),
+                Row("2 WILLOWMEAD GARDENS, MARLOW", "F", la="Woking"),
+            ]
+
+        def fetcher(postcode: str, page: int):
+            return Page()
+
+        a = await lookup_council_tax(
+            "SL7 1HW",
+            "2 Willowmead Gardens, Marlow, SL7 1HW",
+            page_fetcher=fetcher,
+        )
+        assert a.succeeded, f"lookup must succeed, got: {a.status}: {a.error}"
+        info = a.value_or_none()
+        assert info is not None
+        assert info.yearly_cost is not None, "the authority-bearing variant must resolve the rate"
+        assert info.lookup_error == ""
+
     def test_provenance_value_includes_lookup_error(self):
         from houses.council_tax_info import CouncilTaxInfo
 
