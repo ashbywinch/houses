@@ -120,18 +120,27 @@ def _deserialize_value(raw: str | None) -> Any:
     return d
 
 
+_code_version_ensured: set[str] = set()
+
+
 def _ensure_code_version_column() -> None:
     """Idempotently add the ``code_version`` column to node_results.
 
     Older databases predate the code-version stamp; ALTER is cheap and
     safe (SQLite), and rows written before the column exists get NULL,
     which the staleness check treats as "unknown code" → one recompute.
+    Cached per DB path — the PRAGMA was running on EVERY persist/load
+    (the hottest persistence path) before the review caught it.
     """
+    key = str(DB_PATH)
+    if key in _code_version_ensured:
+        return
     conn = _get_db()
     cols = [r["name"] for r in conn.execute("PRAGMA table_info(node_results)")]
     if "code_version" not in cols:
         conn.execute("ALTER TABLE node_results ADD COLUMN code_version TEXT")
         conn.commit()
+    _code_version_ensured.add(key)
 
 
 def init_db(db_path: str | None = None) -> None:

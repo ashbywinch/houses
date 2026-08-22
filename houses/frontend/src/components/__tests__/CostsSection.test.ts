@@ -375,3 +375,27 @@ describe('CostsSection uncertainty rendering (Part A)', () => {
     }
   })
 })
+
+  it('does not render an annexe council-tax row without an annexe allocation', () => {
+    // The DAG only adds annexe_council_tax to the breakdown when an
+    // annexe share is non-zero — the UI must not render a stray row
+    // for properties without one (review).
+    const wrapper = mountCosts({
+      affordability: {
+        group_monthly_cost: {
+          succeeded: true,
+          value: {
+            couple: { value: '100', stddev: 0 },
+            others: { value: '50', stddev: 0 },
+            couple_label: 'S&L',
+            others_label: 'A',
+            couple_breakdown: { commutes: 100, insurance: 0, council_tax: 50, sinking_fund: 0 },
+            others_breakdown: { commutes: 0, insurance: 0, council_tax: 25, sinking_fund: 0 },
+          },
+          error: null,
+          provenance: { label: 'Group Monthly Cost' },
+        },
+      },
+    })
+    expect(wrapper.text()).not.toContain('Annexe council tax')
+  })
