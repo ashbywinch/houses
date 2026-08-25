@@ -11,7 +11,14 @@ if TYPE_CHECKING:
 
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
+
+
+async def _fake_geocode(*_, **__):
+    from dag.attempt import Attempt
+    from houses.geopoint import GeoPoint
+
+    return Attempt.succeeded(GeoPoint(51.5005, -0.1005))
 
 
 @pytest.fixture(autouse=True)
@@ -183,7 +190,7 @@ class TestSchoolGenderFiltering:
     """School.accepts_any filters schools by acceptable genders."""
 
     def _make_school(self, gender: str) -> School:  # noqa: F821
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
         from houses.school import School
         from houses.school_gender import SchoolGender
 
@@ -528,7 +535,7 @@ class TestSchoolCoords:
     """School.coords — parses Latitude/Longitude from a GIAS row."""
 
     def test_valid_coords(self):
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
         from houses.school import School
 
         s = School.from_GIAS_row({"CorrectedLatitude": "51.5", "CorrectedLongitude": "-0.13"})
@@ -554,14 +561,14 @@ class TestSchoolCoords:
 
     def test_zero_coords(self):
         """Zero lat/lng should still return GeoPoint(0, 0)."""
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
         from houses.school import School
 
         s = School.from_GIAS_row({"CorrectedLatitude": "0", "CorrectedLongitude": "0"})
         assert s.coords == GeoPoint(0.0, 0.0)
 
     def test_returns_geopoint(self):
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
         from houses.school import School
 
         s = School.from_GIAS_row({"CorrectedLatitude": "52.2053", "CorrectedLongitude": "0.1218"})
@@ -613,7 +620,7 @@ class TestSchoolFromGIASRow:
         assert s.urn == ""
 
     def test_coords_from_lat_lng(self):
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
         from houses.school import School
 
         s = School.from_GIAS_row({"CorrectedLatitude": "51.5", "CorrectedLongitude": "-0.13"})
@@ -637,10 +644,10 @@ class TestFindNearestFilters:
     """find_nearest must exclude fee-paying schools, blank names, and filter by gender."""
 
     @pytest.mark.asyncio
-    async def test_excludes_fee_paying_school(self, monkeypatch):
+    async def test_excludes_fee_paying_school(self):
         """A fee-paying school should be excluded even if it's the nearest."""
         from houses.school import School
-        from houses.schools import find_nearest
+        from houses.schools import SchoolLookupOptions, find_nearest
 
         fee_paying = School.from_GIAS_row(
             {
@@ -668,30 +675,30 @@ class TestFindNearestFilters:
                 "Postcode": "SL6 2BB",
             }
         )
-        monkeypatch.setattr("houses.schools._load_schools", lambda: [fee_paying, non_fee])
-
-        async def mock_geocode(*_, **__):
-            from dag.attempt import Attempt
-            from houses.geo import GeoPoint
-
-            return Attempt.succeeded(GeoPoint(51.5005, -0.1005))
-
-        monkeypatch.setattr("houses.schools.geocode", mock_geocode)
-        monkeypatch.setattr("houses.schools._geocode_address", mock_geocode)
 
         from houses.school_gender import SchoolGender
 
         result = await find_nearest(
-            "SL6 3CC", child_age=7, acceptable=(SchoolGender.BOYS, SchoolGender.GIRLS, SchoolGender.MIXED)
+            "SL6 3CC",
+            child_age=7,
+            options=SchoolLookupOptions(
+                acceptable=(SchoolGender.BOYS, SchoolGender.GIRLS, SchoolGender.MIXED),
+                load_schools_fn=lambda: [fee_paying, non_fee],
+                geocode_fn=_fake_geocode,
+                geocode_address_fn=_fake_geocode,
+            ),
         )
         assert result.succeeded, "Expected a school, got None"
-        assert result.value_or_none().name == "Free School", f"Expected Free School, got {result.value_or_none().name}"
+        school = result.value_or_none()
+        assert school is not None
+        assert school.name == "Free School", f"Expected Free School, got {school.name}"
 
     @pytest.mark.asyncio
-    async def test_excludes_empty_name_school(self, monkeypatch):
+    async def test_excludes_empty_name_school(self):
         """A school with a blank name should be excluded."""
         from houses.school import School
-        from houses.schools import find_nearest
+        from houses.school_gender import SchoolGender
+        from houses.schools import SchoolLookupOptions, find_nearest
 
         unnamed = School.from_GIAS_row(
             {
@@ -719,33 +726,30 @@ class TestFindNearestFilters:
                 "Postcode": "SL6 2BB",
             }
         )
-        monkeypatch.setattr("houses.schools._load_schools", lambda: [unnamed, named])
-
-        async def mock_geocode(*_, **__):
-            from dag.attempt import Attempt
-            from houses.geo import GeoPoint
-
-            return Attempt.succeeded(GeoPoint(51.5005, -0.1005))
-
-        monkeypatch.setattr("houses.schools.geocode", mock_geocode)
-        monkeypatch.setattr("houses.schools._geocode_address", mock_geocode)
-
-        from houses.school_gender import SchoolGender
 
         result = await find_nearest(
-            "SL6 3CC", child_age=7, acceptable=(SchoolGender.BOYS, SchoolGender.GIRLS, SchoolGender.MIXED)
+            "SL6 3CC",
+            child_age=7,
+            options=SchoolLookupOptions(
+                acceptable=(SchoolGender.BOYS, SchoolGender.GIRLS, SchoolGender.MIXED),
+                load_schools_fn=lambda: [unnamed, named],
+                geocode_fn=_fake_geocode,
+                geocode_address_fn=_fake_geocode,
+            ),
         )
         assert result.succeeded, "Expected a school, got None"
-        assert result.value_or_none().name == "Has A Name School", (
-            f"Expected Has A Name, got {result.value_or_none().name}"
+        school = result.value_or_none()
+        assert school is not None
+        assert school.name == "Has A Name School", (
+            f"Expected Has A Name, got {school.name}"
         )
 
     @pytest.mark.asyncio
-    async def test_find_nearest_filters_by_acceptable_boys_only(self, monkeypatch):
+    async def test_find_nearest_filters_by_acceptable_boys_only(self):
         """With acceptable=(BOYS,), should return nearest boys school, reject mixed."""
         from houses.school import School
         from houses.school_gender import SchoolGender
-        from houses.schools import find_nearest
+        from houses.schools import SchoolLookupOptions, find_nearest
 
         boys_school = School.from_GIAS_row(
             {
@@ -773,28 +777,36 @@ class TestFindNearestFilters:
                 "Postcode": "SL6 2BB",
             }
         )
-        monkeypatch.setattr("houses.schools._load_schools", lambda: [boys_school, mixed_school])
-
-        async def mock_geocode(*_, **__):
-            from dag.attempt import Attempt
-            from houses.geo import GeoPoint
-
-            return Attempt.succeeded(GeoPoint(51.5005, -0.1005))
-
-        monkeypatch.setattr("houses.schools.geocode", mock_geocode)
-        monkeypatch.setattr("houses.schools._geocode_address", mock_geocode)
-
-        # With acceptable=(BOYS,), should find the boys school (mixed excluded)
-        result = await find_nearest("SL6 3CC", child_age=7, acceptable=(SchoolGender.BOYS,))
+        result = await find_nearest(
+            "SL6 3CC",
+            child_age=7,
+            options=SchoolLookupOptions(
+                acceptable=(SchoolGender.BOYS,),
+                load_schools_fn=lambda: [boys_school, mixed_school],
+                geocode_fn=_fake_geocode,
+                geocode_address_fn=_fake_geocode,
+            ),
+        )
         assert result.succeeded
-        assert result.value_or_none().name == "Boys Grammar"
+        school = result.value_or_none()
+        assert school is not None
+        assert school.name == "Boys Grammar"
 
         # With acceptable=(GIRLS,), neither school matches (one boys, one mixed)
-        result = await find_nearest("SL6 3CC", child_age=7, acceptable=(SchoolGender.GIRLS,))
+        result = await find_nearest(
+            "SL6 3CC",
+            child_age=7,
+            options=SchoolLookupOptions(
+                acceptable=(SchoolGender.GIRLS,),
+                load_schools_fn=lambda: [boys_school, mixed_school],
+                geocode_fn=_fake_geocode,
+                geocode_address_fn=_fake_geocode,
+            ),
+        )
         assert result.value_or_none() is None
 
     @pytest.mark.asyncio
-    async def test_excludes_special_schools(self, monkeypatch):
+    async def test_excludes_special_schools(self):
         """A special school (even at the property) must not be returned as
         the family's primary/secondary — the family needs a mainstream
         school. Regression: 90427107's nearest school for BOTH age 4 and
@@ -802,7 +814,7 @@ class TestFindNearestFilters:
         so primary and secondary showed the same special school."""
         from houses.school import School
         from houses.school_gender import SchoolGender
-        from houses.schools import find_nearest
+        from houses.schools import SchoolLookupOptions, find_nearest
 
         special = School.from_GIAS_row(
             {
@@ -832,19 +844,16 @@ class TestFindNearestFilters:
                 "Postcode": "SL6 2BB",
             }
         )
-        monkeypatch.setattr("houses.schools._load_schools", lambda: [special, mainstream])
-
-        async def mock_geocode(*_, **__):
-            from dag.attempt import Attempt
-            from houses.geo import GeoPoint
-
-            return Attempt.succeeded(GeoPoint(51.5005, -0.1005))
-
-        monkeypatch.setattr("houses.schools.geocode", mock_geocode)
-        monkeypatch.setattr("houses.schools._geocode_address", mock_geocode)
 
         result = await find_nearest(
-            "SL6 3CC", child_age=7, acceptable=(SchoolGender.BOYS, SchoolGender.GIRLS, SchoolGender.MIXED)
+            "SL6 3CC",
+            child_age=7,
+            options=SchoolLookupOptions(
+                acceptable=(SchoolGender.BOYS, SchoolGender.GIRLS, SchoolGender.MIXED),
+                load_schools_fn=lambda: [special, mainstream],
+                geocode_fn=_fake_geocode,
+                geocode_address_fn=_fake_geocode,
+            ),
         )
         assert result.succeeded, "Expected a school, got None"
         school = result.value_or_none()
@@ -854,11 +863,11 @@ class TestFindNearestFilters:
         )
 
     @pytest.mark.asyncio
-    async def test_find_nearest_filters_by_acceptable_girls_only(self, monkeypatch):
+    async def test_find_nearest_filters_by_acceptable_girls_only(self):
         """With acceptable=(GIRLS,), should return nearest girls school only."""
         from houses.school import School
         from houses.school_gender import SchoolGender
-        from houses.schools import find_nearest
+        from houses.schools import SchoolLookupOptions, find_nearest
 
         girls_school = School.from_GIAS_row(
             {
@@ -873,31 +882,41 @@ class TestFindNearestFilters:
                 "Postcode": "SL6 1AA",
             }
         )
-        monkeypatch.setattr("houses.schools._load_schools", lambda: [girls_school])
 
-        async def mock_geocode(*_, **__):
-            from dag.attempt import Attempt
-            from houses.geo import GeoPoint
-
-            return Attempt.succeeded(GeoPoint(51.5005, -0.1005))
-
-        monkeypatch.setattr("houses.schools.geocode", mock_geocode)
-        monkeypatch.setattr("houses.schools._geocode_address", mock_geocode)
-
-        result = await find_nearest("SL6 3CC", child_age=7, acceptable=(SchoolGender.GIRLS,))
+        result = await find_nearest(
+            "SL6 3CC",
+            child_age=7,
+            options=SchoolLookupOptions(
+                acceptable=(SchoolGender.GIRLS,),
+                load_schools_fn=lambda: [girls_school],
+                geocode_fn=_fake_geocode,
+                geocode_address_fn=_fake_geocode,
+            ),
+        )
         assert result.succeeded
-        assert result.value_or_none().name == "Girls Academy"
+        school = result.value_or_none()
+        assert school is not None
+        assert school.name == "Girls Academy"
 
         # With acceptable=(BOYS,), girls school should be excluded
-        result = await find_nearest("SL6 3CC", child_age=7, acceptable=(SchoolGender.BOYS,))
+        result = await find_nearest(
+            "SL6 3CC",
+            child_age=7,
+            options=SchoolLookupOptions(
+                acceptable=(SchoolGender.BOYS,),
+                load_schools_fn=lambda: [girls_school],
+                geocode_fn=_fake_geocode,
+                geocode_address_fn=_fake_geocode,
+            ),
+        )
         assert result.value_or_none() is None, "Girls school should not match BOYS acceptable"
 
     @pytest.mark.asyncio
-    async def test_find_nearest_accepts_all_types(self, monkeypatch):
+    async def test_find_nearest_accepts_all_types(self):
         """With acceptable containing all types, any school should match."""
         from houses.school import School
         from houses.school_gender import SchoolGender
-        from houses.schools import find_nearest
+        from houses.schools import SchoolLookupOptions, find_nearest
 
         girls = School.from_GIAS_row(
             {
@@ -912,33 +931,39 @@ class TestFindNearestFilters:
                 "Postcode": "SL6 1AA",
             }
         )
-        monkeypatch.setattr("houses.schools._load_schools", lambda: [girls])
-
-        async def mock_geocode(*_, **__):
-            from dag.attempt import Attempt
-            from houses.geo import GeoPoint
-
-            return Attempt.succeeded(GeoPoint(51.5005, -0.1005))
-
-        monkeypatch.setattr("houses.schools.geocode", mock_geocode)
-        monkeypatch.setattr("houses.schools._geocode_address", mock_geocode)
 
         result = await find_nearest(
-            "SL6 3CC", child_age=7, acceptable=(SchoolGender.BOYS, SchoolGender.GIRLS, SchoolGender.MIXED)
+            "SL6 3CC",
+            child_age=7,
+            options=SchoolLookupOptions(
+                acceptable=(SchoolGender.BOYS, SchoolGender.GIRLS, SchoolGender.MIXED),
+                load_schools_fn=lambda: [girls],
+                geocode_fn=_fake_geocode,
+                geocode_address_fn=_fake_geocode,
+            ),
         )
         assert result.succeeded
-        result = await find_nearest("SL6 3CC", child_age=7, acceptable=(SchoolGender.BOYS,))
+        result = await find_nearest(
+            "SL6 3CC",
+            child_age=7,
+            options=SchoolLookupOptions(
+                acceptable=(SchoolGender.BOYS,),
+                load_schools_fn=lambda: [girls],
+                geocode_fn=_fake_geocode,
+                geocode_address_fn=_fake_geocode,
+            ),
+        )
         assert result.value_or_none() is None
 
     @pytest.mark.asyncio
-    async def test_skips_school_without_coords_no_geocode(self, monkeypatch):
+    async def test_skips_school_without_coords_no_geocode(self):
         """find_nearest must skip schools with coords=None without
         calling geocode (no API calls at query time)."""
         from dag.attempt import Attempt
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
         from houses.school import School
         from houses.school_gender import SchoolGender
-        from houses.schools import find_nearest
+        from houses.schools import SchoolLookupOptions, find_nearest
 
         geocode_called = False
 
@@ -977,10 +1002,16 @@ class TestFindNearestFilters:
             statutory_high_age=11,
         )
 
-        monkeypatch.setattr("houses.schools.geocode", fake_geocode)
-        monkeypatch.setattr("houses.schools._load_schools", lambda: [no_coords, has_coords])
-
-        result = await find_nearest("51.5,-0.13", child_age=7, acceptable=(SchoolGender.MIXED,))
+        result = await find_nearest(
+            "51.5,-0.13",
+            child_age=7,
+            options=SchoolLookupOptions(
+                acceptable=(SchoolGender.MIXED,),
+                load_schools_fn=lambda: [no_coords, has_coords],
+                geocode_fn=fake_geocode,
+                geocode_address_fn=fake_geocode,
+            ),
+        )
         assert result.pending, (
             "When a school matching filters lacks coords, must return pending "
             "(incomplete data, cannot give definitive answer)"

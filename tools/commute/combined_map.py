@@ -23,12 +23,18 @@ from __future__ import annotations
 
 import argparse
 import base64
-import html
 import json
 import logging
 import os
 import sys
 from pathlib import Path
+
+from tools.commute.drive_isochrone import MapAssets, js_safe_json, user_label
+
+# one colour per layer — the transit layer always takes _COLORS[0], so the
+# drive layers cycle through the rest (index 0 is the transit colour).
+_COLORS = ["#e33", "#3a3", "#e80", "#a3a", "#0aa"]
+_DRIVE_COLORS = _COLORS[1:]
 
 logger = logging.getLogger(__name__)
 
@@ -38,26 +44,6 @@ DEFAULT_INTERSECTION = Path("data/commute/intersection.json")
 DEFAULT_OUT = Path("data/commute/commute_map.html")
 VENDOR_DIR = Path("tools/commute/vendor")
 
-# one colour per layer — the transit layer always takes _COLORS[0], so the
-# drive palette excludes it (a drive shed must never look like the train shed)
-_COLORS = ["#e33", "#3a3", "#e80", "#a3a", "#0aa"]
-_DRIVE_COLORS = _COLORS[1:]
-
-
-def _js_safe_json(obj) -> str:
-    """JSON safe to embed inside an HTML <script> element.
-
-    json.dumps does not escape ``<``/``>``/``&``, so a user-controlled label
-    like ``</script><script>…`` would terminate the script element. Escape
-    them as unicode escapes (still valid JSON; JS decodes them back).
-    """
-    return json.dumps(obj).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
-
-
-def _user_label(label: str) -> str:
-    """HTML-escape user-controlled labels: they render via innerHTML in the
-    layer control and marker popups."""
-    return html.escape(label)
 
 # CSS background images in leaflet.css (layer-control toggle + default marker)
 _CSS_IMAGES = ("layers-2x.png", "layers.png", "marker-icon.png")
@@ -70,24 +56,23 @@ def _data_uri(path: Path) -> str:
     return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode()
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def build_html(
     union: dict,
     drive: dict,
-    *,
-    leaflet_js: str,
-    leaflet_css: str,
-    icons: dict[str, str],
+    assets: MapAssets,
     intersection: dict | None = None,
 ) -> str:
     """The combined map page — deterministic given the payloads and assets.
 
-    ``icons`` maps a filename (e.g. ``marker-icon.png``) to a data URI.
-    ``intersection`` (optional) is the all-commutes payload from
+    ``assets`` carries the vendored Leaflet JS/CSS and the filename → data-URI
+    icon map. ``intersection`` (optional) is the all-commutes payload from
     ``intersection.py`` — its polygons get their own top layer.
     """
     transit = [c["outline"] for c in union.get("components", [])]
 
     drive_by_label: dict[str, list[dict]] = {}
+    # lucidlint: ignore loop-pipeline group-by/control-flow — comprehension cannot express
     for s in drive.get("searches", []):
         drive_by_label.setdefault(s["destination"]["label"], []).append(s)
 
@@ -95,7 +80,7 @@ def build_html(
     markers_js = []
     if transit:
         layers_js.append(
-            _js_safe_json(
+            js_safe_json(
                 {
                     "name": "Train: Pimlico & Aldgate",
                     "color": _COLORS[0],
@@ -108,19 +93,20 @@ def build_html(
         # the search NAME is user-controlled (built from the destination label)
         # — HTML-escape it for the popup innerHTML
         polygons = [
-            {"coords": s["polygon"], "url": s["rightmove_url"], "name": _user_label(s["name"])} for s in searches
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+            {"coords": s["polygon"], "url": s["rightmove_url"], "name": user_label(s["name"])} for s in searches
         ]
         # each polygon carries its own url — never keyed by a serialised
         # polygon string (Python json.dumps(52.0) != JS JSON.stringify(52.0),
         # a whole class of silent popup-loss bugs)
         layers_js.append(
-            _js_safe_json({"name": f"Drive to {_user_label(label)}", "color": color, "polygons": polygons})
+            js_safe_json({"name": f"Drive to {user_label(label)}", "color": color, "polygons": polygons})
         )
         d = searches[0]["destination"]
         markers_js.append(
-            _js_safe_json(
+            js_safe_json(
                 {
-                    "label": _user_label(label),
+                    "label": user_label(label),
                     "lat": d["lat"],
                     "lon": d["lon"],
                     "url": searches[0]["rightmove_url"],
@@ -129,11 +115,12 @@ def build_html(
         )
     if intersection and intersection.get("searches"):
         polygons = [
-            {"coords": s["polygon"], "url": s["rightmove_url"], "name": _user_label(s["name"])}
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+            {"coords": s["polygon"], "url": s["rightmove_url"], "name": user_label(s["name"])}
             for s in intersection["searches"]
         ]
         layers_js.append(
-            _js_safe_json(
+            js_safe_json(
                 {
                     "name": "Where we could live",
                     "color": "#c90",
@@ -144,15 +131,15 @@ def build_html(
             )
         )
 
-    css = leaflet_css
+    css = assets.leaflet_css
     for name in _CSS_IMAGES:
-        css = css.replace(f"url(images/{name})", f"url({icons[name]})")
+        css = css.replace(f"url(images/{name})", f"url({assets.icons[name]})")
     icon_option = {
         "marker-icon.png": "iconUrl",
         "marker-icon-2x.png": "iconRetinaUrl",
         "marker-shadow.png": "shadowUrl",
     }
-    icon_opts = ",\n  ".join(f"{icon_option[name]}: '{icons[name]}'" for name in _JS_ICONS)
+    icon_opts = ",\n  ".join(f"{icon_option[name]}: '{assets.icons[name]}'" for name in _JS_ICONS)
 
     html = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
@@ -243,7 +230,7 @@ for (const m of markers) {
 """
     return (
         html.replace("__CSS__", css)
-        .replace("__LEAFLET_JS__", leaflet_js)
+        .replace("__LEAFLET_JS__", assets.leaflet_js)
         .replace("__ICON_OPTS__", icon_opts)
         .replace("__LAYERS__", "[" + ",".join(layers_js) + "]")
         .replace("__MARKERS__", "[" + ",".join(markers_js) + "]")
@@ -271,6 +258,94 @@ def _fail(user_message: str, dev_detail: str) -> int:
     return 1
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+def _load_intersection(path: Path) -> dict | None:
+    """Saved intersection payload, or None when absent/unreadable (map renders without it)."""
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        print("The saved all-commutes data is unreadable — showing the map without it.", file=sys.stderr)
+        logger.warning("%s unreadable — omitting the intersection layer", path)
+        return None
+
+
+
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+def _load_intersection_layer(path: Path) -> dict | None:
+    """The gold 'Where we could live' layer, degraded to None with a warning
+    when absent, empty, or malformed (the map renders without it — but never
+    silently, so an empty intersection isn't mistaken for a complete map)."""
+    intersection = _load_intersection(path)
+    if intersection is None:
+        return None
+    if not (isinstance(intersection, dict) and intersection.get("searches")):
+        print(
+            "warning: the 'Where we could live' layer is missing — the saved all-commutes data has no "
+            "areas (run 'make commute-intersection' to check)",
+            file=sys.stderr,
+        )
+        logger.warning("%s has no searches — omitting the 'Where we could live' layer", path)
+        return None
+    if not all(
+        isinstance(s, dict) and "polygon" in s and "rightmove_url" in s and "name" in s
+        for s in intersection["searches"]
+    ):
+        # records missing expected keys would crash build_html — degrade
+        # to a map without the layer instead of aborting the whole build
+        print(
+            "warning: the saved all-commutes data is malformed — showing the map without it.",
+            file=sys.stderr,
+        )
+        logger.warning("%s has malformed search records — omitting the 'Where we could live' layer", path)
+        return None
+    return intersection
+
+
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+def _build_map(union_path: Path, drive_path: Path, vendor: Path, intersection: dict | None) -> tuple[dict, dict, str]:
+    """Load the payloads + vendor assets and render the page.
+
+    build_html indexes the payloads unconditionally — a structurally wrong
+    (but valid-JSON) artifact raises KeyError/TypeError here, which main's
+    fail handler reports as a two-tier exit.
+    """
+    union = json.loads(union_path.read_text())
+    drive = json.loads(drive_path.read_text())
+    assets = MapAssets(
+        leaflet_js=(vendor / "leaflet.js").read_text(),
+        leaflet_css=(vendor / "leaflet.css").read_text(),
+        icons={name: _data_uri(vendor / name) for name in _CSS_IMAGES + _JS_ICONS},
+    )
+    html = build_html(
+        union,
+        drive,
+        assets,
+        intersection=intersection,
+    )
+    return union, drive, html
+
+
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+def _warn_empty_layers(drive: dict, union: dict, drive_path: Path, union_path: Path) -> None:
+    """A map missing the drive/union layers must not be mistaken for complete."""
+    if isinstance(drive, dict) and not drive.get("searches"):
+        print(
+            "warning: no drive sheds found — the map shows only the train area (run 'make commute-drive' if "
+            "unexpected)",
+            file=sys.stderr,
+        )
+        logger.warning("%s has no searches — drive layers omitted", drive_path)
+    if isinstance(union, dict) and not union.get("components"):
+        print(
+            "warning: no train area found — the map may be incomplete (run 'make commute-searches' if "
+            "unexpected)",
+            file=sys.stderr,
+        )
+        logger.warning("%s has no components — train layer omitted", union_path)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build the combined commute isochrone map (offline).")
     parser.add_argument("--union", default=str(DEFAULT_UNION))
@@ -293,74 +368,15 @@ def main(argv: list[str] | None = None) -> int:
             f"combined map inputs not found: {', '.join(str(p) for p, _ in missing)}",
         )
     vendor = Path(args.vendor)
-    intersection_path = Path(args.intersection)
-    intersection = None
-    if intersection_path.exists():
-        try:
-            intersection = json.loads(intersection_path.read_text())
-        except (json.JSONDecodeError, OSError):
-            print("The saved all-commutes data is unreadable — showing the map without it.", file=sys.stderr)
-            logger.warning("%s unreadable — omitting the intersection layer", intersection_path)
-        if intersection is not None and not (isinstance(intersection, dict) and intersection.get("searches")):
-            # an empty intersection is a SUPPORTED outcome, but a map without
-            # the gold layer must not be mistaken for a complete one
-            print(
-                "warning: the 'Where we could live' layer is missing — the saved all-commutes data has no "
-                "areas (run 'make commute-intersection' to check)",
-                file=sys.stderr,
-            )
-            logger.warning("%s has no searches — omitting the 'Where we could live' layer", intersection_path)
-            intersection = None  # degrade like the corrupt-JSON path: render without the layer
-        elif isinstance(intersection, dict) and intersection.get("searches") and not all(
-            isinstance(s, dict) and "polygon" in s and "rightmove_url" in s and "name" in s
-            for s in intersection["searches"]
-        ):
-            # records missing expected keys would crash build_html — degrade
-            # to a map without the layer instead of aborting the whole build
-            print(
-                "warning: the saved all-commutes data is malformed — showing the map without it.",
-                file=sys.stderr,
-            )
-            logger.warning(
-                "%s has malformed search records — omitting the 'Where we could live' layer", intersection_path
-            )
-            intersection = None
+    intersection = _load_intersection_layer(Path(args.intersection))
     try:
-        union = json.loads(union_path.read_text())
-        drive = json.loads(drive_path.read_text())
-        leaflet_js = (vendor / "leaflet.js").read_text()
-        leaflet_css = (vendor / "leaflet.css").read_text()
-        icons = {name: _data_uri(vendor / name) for name in _CSS_IMAGES + _JS_ICONS}
-        # build_html indexes the payloads unconditionally — a structurally
-        # wrong (but valid-JSON) artifact raises KeyError/TypeError here
-        html = build_html(
-            union,
-            drive,
-            leaflet_js=leaflet_js,
-            leaflet_css=leaflet_css,
-            icons=icons,
-            intersection=intersection,
-        )
+        union, drive, html = _build_map(union_path, drive_path, vendor, intersection)
     except (json.JSONDecodeError, OSError, KeyError, TypeError, AttributeError) as e:
         return _fail(
             "The commute data or map assets are unreadable — regenerate them with 'make commute-drive'.",
             f"unreadable input for the combined map: {e}",
         )
-    # a map missing the drive/union layers must not be mistaken for complete
-    if isinstance(drive, dict) and not drive.get("searches"):
-        print(
-            "warning: no drive sheds found — the map shows only the train area (run 'make commute-drive' if "
-            "unexpected)",
-            file=sys.stderr,
-        )
-        logger.warning("%s has no searches — drive layers omitted", drive_path)
-    if isinstance(union, dict) and not union.get("components"):
-        print(
-            "warning: no train area found — the map may be incomplete (run 'make commute-searches' if "
-            "unexpected)",
-            file=sys.stderr,
-        )
-        logger.warning("%s has no components — train layer omitted", union_path)
+    _warn_empty_layers(drive, union, drive_path, union_path)
     write_map(html, args.out)
     print(f"combined commute map → {args.out}")
     return 0

@@ -29,6 +29,7 @@ def _relative_links(md_file: Path):
 
 
 class TestDocLinks(unittest.TestCase):
+    # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
     def test_all_relative_links_resolve(self):
         failures: list[str] = []
         for md_file in DOC_FILES:

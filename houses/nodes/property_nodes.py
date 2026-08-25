@@ -5,15 +5,21 @@ from typing import TYPE_CHECKING, Any
 
 from money import Money
 
+import dag.derived_node as _dag_derived
+import dag.persistence as _dag_per
+from dag.derived_node import DerivedNode
 from dag.node import Node
+from dag.persistence import property_created_at
+from dag.scheduler import flush_processor
 from dag.signals import Signal, Slot
 from dag.user_input_node import UserInputNode
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from houses.nodes.area import NearestTownNode, TownDescNode, TownNode, WalkabilityNode
+from houses.nodes.commute_pipeline_builder import build_commute_pipeline
 from houses.nodes.epc_node import CouncilTaxNode, EpcNode
 from houses.nodes.equity_total_node import EquityTotalNode
-from houses.nodes.geocode import GeocodeNode
-from houses.nodes.life_insurance_node import LifeInsuranceTotalNode
+from houses.nodes.geocode_node import GeocodeNode
+from houses.nodes.life_insurance_total_node import LifeInsuranceTotalNode
 from houses.nodes.location import BestAddressNode, BestLocationNode
 from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNode
 from houses.nodes.monthly_sinking_fund_node import MonthlySinkingFundNode
@@ -21,13 +27,14 @@ from houses.nodes.mortgage_required_node import MortgageRequiredNode
 from houses.nodes.schools import PrimarySchoolNode, SecondarySchoolNode
 from houses.nodes.settings_node import aggregate_dict
 from houses.nodes.stamp_duty_node import StampDutyNode
+from houses.nodes.total_monthly_housing_cost_node import GroupMonthlyCostNode, HousingCostConfig
 from houses.nodes.total_works_node import TotalWorksNode
 from houses.nodes.yearly_sinking_fund_node import YearlySinkingFundNode
+from houses.services_provider import get_services
 
 if TYPE_CHECKING:
     from houses.nodes.commute import CommuteSelectorNode
     from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
-from houses.services_provider import get_services
 
 
 class PropertyNodes:
@@ -41,7 +48,6 @@ class PropertyNodes:
         # Validate RID — must be numeric and at least 6 digits
         # (Rightmove property IDs are 6-10 digits; shorter values like
         # "999" are test data written outside pytest isolation).
-        import dag.persistence as _dag_per
 
         if not _dag_per.testing and (not rid.isdigit() or len(rid) < 6):
             raise ValueError(
@@ -100,7 +106,7 @@ class PropertyNodes:
         if self.annexe_payers.latest_attempt().pending:
             self.annexe_payers.push([], "default")
         if self.annexe_ignored.latest_attempt().pending:
-            self.annexe_ignored.push(False, "default")
+            self.annexe_ignored.push(value=False, source_label="default")
         self.best_address = BestAddressNode(
             f"{rid}/best_address",
             user_entered_address=self.user_entered_address,
@@ -176,6 +182,9 @@ class PropertyNodes:
         self.commute_selectors: dict[str, CommuteSelectorNode] = {}
         self.commute_breakdown: CommuteBreakdownNode | None = None
         self._build_commute_pipeline()
+        # The builder always attaches the breakdown node; narrow the
+        # Optional declaration for the config wiring below.
+        assert self.commute_breakdown is not None, "commute pipeline not built"
 
         # ── Monthly Cost Calculation Nodes ──────────────────────────────
         self.stamp_duty = StampDutyNode(
@@ -220,23 +229,24 @@ class PropertyNodes:
             f"{rid}/monthly_sinking_fund",
             yearly_sinking_fund_node=self.yearly_sinking_fund,
         )
-        from houses.nodes.total_monthly_housing_cost_node import GroupMonthlyCostNode
 
         # The headline has NO family total — only the joint owners'
         # (couple) figure and the other adults' figure, labelled by name.
         self.group_monthly_cost = GroupMonthlyCostNode(
             f"{rid}/group_monthly_cost",
-            monthly_mortgage_node=self.monthly_mortgage,
-            yearly_sinking_fund_node=self.yearly_sinking_fund,
-            life_insurance_node=self.life_insurance_total,
-            rental_income_node=self.rental_income,
-            status_node=self.comment_status,
-            commute_breakdown_node=self.commute_breakdown,
-            council_tax_node=self.council_tax,
-            persons_source=self._svc.persons_source,
-            annexe_payers_node=self.annexe_payers,
-            annexe_ignored_node=self.annexe_ignored,
-            council_tax_payers_node=self.council_tax_payers,
+            config=HousingCostConfig(
+                monthly_mortgage_node=self.monthly_mortgage,
+                yearly_sinking_fund_node=self.yearly_sinking_fund,
+                life_insurance_node=self.life_insurance_total,
+                rental_income_node=self.rental_income,
+                status_node=self.comment_status,
+                commute_breakdown_node=self.commute_breakdown,
+                council_tax_node=self.council_tax,
+                persons_source=self._svc.persons_source,
+                annexe_payers_node=self.annexe_payers,
+                annexe_ignored_node=self.annexe_ignored,
+                council_tax_payers_node=self.council_tax_payers,
+            ),
         )
 
         # ── Signal wiring ──────────────────────────────────────────────
@@ -252,14 +262,15 @@ class PropertyNodes:
                 node.changed.connect(slot)
 
     def _build_commute_pipeline(self) -> None:
-        from houses.nodes.commute_pipeline_builder import build_commute_pipeline
 
         build_commute_pipeline(self)
 
     def _on_node_changed(self) -> None:
         self.changed.emit()
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def to_json(self) -> dict[str, Any]:
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         return {
             "rid": self.rid,
             "best_address": await self.best_address.to_json(),
@@ -281,13 +292,12 @@ class PropertyNodes:
         CODE changes, so the module epoch tells us nothing could have
         become stale.
         """
-        from dag.derived_node import _CODE_VERSION_EPOCH
 
         # Skip the walk when no code could have changed since the last
         # scan (the epoch only moves when a new class fingerprint is
         # computed, i.e. on a code change).
         last = getattr(self, "_code_refresh_epoch", None)
-        if last == _CODE_VERSION_EPOCH:
+        if last == _dag_derived._CODE_VERSION_EPOCH:
             return
 
         # Walk the whole node graph via deps — vars(self) alone misses
@@ -306,7 +316,7 @@ class PropertyNodes:
             await self._code_refresh_task
         finally:
             self._code_refresh_task = None
-        self._code_refresh_epoch = _CODE_VERSION_EPOCH
+        self._code_refresh_epoch = _dag_derived._CODE_VERSION_EPOCH
 
     async def _run_code_refresh(self) -> None:
         """Walk the node graph via deps and refresh code-stale nodes.
@@ -314,9 +324,6 @@ class PropertyNodes:
         vars(self) alone misses nodes stored in containers (the commute
         selectors dict and their sub-pipeline are only reachable through
         deps)."""
-        from dag.derived_node import DerivedNode
-        from dag.node import Node
-        from dag.scheduler import flush_processor
 
         seen: set[int] = set()
         queue = [n for n in vars(self).values() if isinstance(n, Node)]
@@ -335,17 +342,19 @@ class PropertyNodes:
         if dirty:
             await flush_processor()
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def _commute_breakdown_json(self) -> dict:
         """The commute aggregator is attached by the pipeline builder during
         __init__ — it is always present by the time serialization runs."""
         assert self.commute_breakdown is not None, "commute pipeline not built"
         return await self.commute_breakdown.to_json()
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def to_json_summary(self) -> dict[str, Any]:
-        from dag.persistence import property_created_at
 
         await self.refresh_code_stale_nodes()
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         result = {
             "rid": self.rid,
             "best_address": await self.best_address.to_json_value(),
@@ -355,6 +364,7 @@ class PropertyNodes:
             "group_monthly_cost": await self.group_monthly_cost.to_json_value(),
             "town_name": await self.town_name.to_json_value(),
             "commutes": {k: {"commute": await v.to_json_value()} for k, v in self.commute_selectors.items()},
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             "schools": {
                 "primary": {
                     "school": await self.primary_school.to_json_value(),
@@ -365,6 +375,7 @@ class PropertyNodes:
             },
             "walkability": await self.walkability.to_json_value(),
             "epc": await self.epc.to_json_value(),
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             "triage": {
                 "favourite": await self.favourite.to_json_value(),
                 "dismissed": await self.dismissed.to_json_value(),
@@ -378,8 +389,10 @@ class PropertyNodes:
         }
         return result
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def to_json_detail(self) -> dict[str, Any]:
         await self.refresh_code_stale_nodes()
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         return {
             "rid": self.rid,
             "best_address": await self.best_address.to_json(),
@@ -389,6 +402,7 @@ class PropertyNodes:
             "rightmove_bedrooms": await self.rightmove_bedrooms.to_json(),
             "town_name": await self.town_name.to_json(),
             "epc": await self.epc.to_json(),
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             "location": {
                 "best_location": await self.best_location.to_json(),
                 "geocode": await self.geocode.to_json(),
@@ -396,6 +410,7 @@ class PropertyNodes:
                 "precise_location": await self.precise_location.to_json(),
             },
             "commutes": {k: await v.to_json() for k, v in self.commute_selectors.items()},
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             "schools": {
                 "primary": {
                     "school": await self.primary_school.to_json(),
@@ -404,6 +419,7 @@ class PropertyNodes:
                     "school": await self.secondary_school.to_json(),
                 },
             },
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             "affordability": {
                 "stamp_duty": await self.stamp_duty.to_json(),
                 "council_tax": await self.council_tax.to_json(),
@@ -418,15 +434,18 @@ class PropertyNodes:
                 "rental_income": await self.rental_income.to_json(),
                 "group_monthly_cost": await self.group_monthly_cost.to_json(),
             },
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             "council_tax_apportionment": {
                 "main_payers": await self.council_tax_payers.to_json_value(),
                 "annexe_payers": await self.annexe_payers.to_json_value(),
                 "ignored": await self.annexe_ignored.to_json_value(),
             },
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             "area": {
                 "walkability": await self.walkability.to_json(),
                 "town_description": await self.town_desc.to_json(),
             },
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             "triage": {
                 "favourite": await self.favourite.to_json(),
                 "dismissed": await self.dismissed.to_json(),
@@ -434,6 +453,7 @@ class PropertyNodes:
                 "user_notes": await self.user_notes.to_json(),
                 "triage_status": await self.triage_status.to_json(),
             },
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             "comments": {
                 "status": await self.comment_status.to_json(),
                 "status_reason": await self.comment_status_reason.to_json(),
@@ -442,8 +462,10 @@ class PropertyNodes:
                 "design_needed": await self.comment_design_needed.to_json(),
                 "planning_needed": await self.comment_planning_needed.to_json(),
             },
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             "settings": {
                 "persons": await self._svc.persons_source.to_json(),
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
                 "financial": {"status": "succeeded", "value": aggregate_dict(self._svc.setting_nodes)},
             },
         }

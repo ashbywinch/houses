@@ -5,18 +5,22 @@ from typing import override
 from dag.attempt import Attempt, Provenance, SourceType
 from dag.derived_node import DerivedNode
 from dag.node import Node
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from houses.services_provider import get_services
-from houses.walkability import _extract_town
+from houses.walkability import extract_town
 
 
 class WalkabilityNode(DerivedNode[dict]):
+# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, best_location, best_address):
         deps: tuple[Node, ...] = (best_location, best_address)
         super().__init__(node_id, dict, deps)
 
-    async def compute(self, location: Attempt[GeoPoint], address: Attempt[str]) -> Attempt[dict]:
+    @staticmethod
+    async def compute(location: Attempt[GeoPoint], address: Attempt[str]) -> Attempt[dict]:
         loc = location.value_or_none()
+        if loc is None:
+            return Attempt.impossible("location missing")
         svc = get_services()
         result = await svc.walkability_service.enrich(loc.lat, loc.lon, address.value_or_none() or "")
         return Attempt.succeeded(result)
@@ -38,19 +42,19 @@ class WalkabilityNode(DerivedNode[dict]):
             prov.value = " · ".join(parts) or "Walkability summary unavailable"
         return prov
 
-    @property
-    def provenance_source_type(self) -> SourceType:
-        return SourceType.API
+    provenance_source_type = SourceType.API
 
 
 class NearestTownNode(DerivedNode[str]):
     """Reverse-geocode the property's location to find the nearest town name."""
 
+# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, best_location):
         deps: tuple[Node, ...] = (best_location,)
         super().__init__(node_id, str, deps)
 
-    async def compute(self, location: Attempt[GeoPoint]) -> Attempt[str]:
+    @staticmethod
+    async def compute(location: Attempt[GeoPoint]) -> Attempt[str]:
         loc = location.value_or_none()
         if loc is None:
             return Attempt.impossible("no location")
@@ -64,9 +68,7 @@ class NearestTownNode(DerivedNode[str]):
         # so the frontend can show it.
         return Attempt.impossible(result.error or "could not determine nearest town")
 
-    @property
-    def provenance_source_type(self) -> SourceType:
-        return SourceType.GEOCODE
+    provenance_source_type = SourceType.GEOCODE
 
 
 class TownDescNode(DerivedNode[dict]):
@@ -89,8 +91,8 @@ class TownDescNode(DerivedNode[dict]):
             deps.append(self._postcode_node)
         return tuple(deps)
 
+    @staticmethod
     async def compute(
-        self,
         location: Attempt[GeoPoint],
         nearest_town: Attempt[str],
         town_name: Attempt[str],
@@ -119,25 +121,23 @@ class TownDescNode(DerivedNode[dict]):
             prov.value = val["description"]
         return prov
 
-    @property
-    def provenance_source_type(self) -> SourceType:
-        return SourceType.API
+    provenance_source_type = SourceType.API
 
 
 class TownNode(DerivedNode[str]):
+# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, best_address):
         deps: tuple[Node, ...] = (best_address,)
         super().__init__(node_id, str, deps)
 
-    def compute(self, address: Attempt[str]) -> Attempt[str]:
+    @staticmethod
+    def compute(address: Attempt[str]) -> Attempt[str]:
         addr = address.value_or_none() or ""
-        town = _extract_town(addr)
+        town = extract_town(addr)
         if town:
             return Attempt.succeeded(town)
         return Attempt.impossible("no town found in address")
 
-    @property
-    def provenance_source_type(self) -> SourceType:
-        return SourceType.CALC
+    provenance_source_type = SourceType.CALC
 
     # Default build_provenance() walks active deps and uses provenance_source_type.

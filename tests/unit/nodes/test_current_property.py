@@ -134,6 +134,7 @@ class TestCurrentPropertyGating:
         """TotalMonthlyHousingCostNode excludes sinking fund and life
         insurance when Status=Current."""
         from houses.nodes.total_monthly_housing_cost_node import (
+    HousingCostConfig,
             TotalMonthlyHousingCostNode,
         )
 
@@ -148,13 +149,15 @@ class TestCurrentPropertyGating:
 
         node = TotalMonthlyHousingCostNode(
             "ctm",
-            monthly_mortgage_node=mg,
+            config=HousingCostConfig(
+monthly_mortgage_node=mg,
             yearly_sinking_fund_node=sf,
             life_insurance_node=li,
             rental_income_node=ri,
             status_node=st,
             commute_breakdown_node=cb,
             council_tax_node=ct,
+            ),
         )
 
         mg.push(Money("1000", "GBP"), "test")
@@ -179,6 +182,7 @@ class TestCurrentPropertyGating:
     async def test_impossible_life_insurance_propagates(self):
         """When life_insurance is impossible, total must be impossible."""
         from houses.nodes.total_monthly_housing_cost_node import (
+            HousingCostConfig,
             TotalMonthlyHousingCostNode,
         )
 
@@ -193,13 +197,15 @@ class TestCurrentPropertyGating:
 
         node = TotalMonthlyHousingCostNode(
             "ctm3",
-            monthly_mortgage_node=mg,
+            config=HousingCostConfig(
+monthly_mortgage_node=mg,
             yearly_sinking_fund_node=sf,
             life_insurance_node=li,
             rental_income_node=ri,
             status_node=st,
             commute_breakdown_node=cb,
             council_tax_node=ct,
+            ),
         )
 
         mg.push(Money("1000", "GBP"), "test")
@@ -220,6 +226,7 @@ class TestCurrentPropertyGating:
     async def test_total_monthly_includes_sinking_and_life_when_not_current(self):
         """All cost components included when Status is not Current."""
         from houses.nodes.total_monthly_housing_cost_node import (
+            HousingCostConfig,
             TotalMonthlyHousingCostNode,
         )
 
@@ -234,13 +241,15 @@ class TestCurrentPropertyGating:
 
         node = TotalMonthlyHousingCostNode(
             "ctm2",
-            monthly_mortgage_node=mg,
+            config=HousingCostConfig(
+monthly_mortgage_node=mg,
             yearly_sinking_fund_node=sf,
             life_insurance_node=li,
             rental_income_node=ri,
             status_node=st,
             commute_breakdown_node=cb,
             council_tax_node=ct,
+            ),
         )
 
         mg.push(Money("1000", "GBP"), "test")
@@ -275,7 +284,7 @@ class TestGroupMonthlyCostNode:
     appear."""
 
     def _node(self, node_id: str):
-        from houses.nodes.total_monthly_housing_cost_node import GroupMonthlyCostNode
+        from houses.nodes.total_monthly_housing_cost_node import GroupMonthlyCostNode, HousingCostConfig
 
         mg = UserInputNode[Money]("g_" + node_id + "_mg", Money)
         sf = UserInputNode[Money]("g_" + node_id + "_sf", Money)
@@ -287,14 +296,16 @@ class TestGroupMonthlyCostNode:
         ps = UserInputNode[list]("g_" + node_id + "_ps", list)
         node = GroupMonthlyCostNode(
             node_id,
-            monthly_mortgage_node=mg,
-            yearly_sinking_fund_node=sf,
-            life_insurance_node=li,
-            rental_income_node=ri,
-            status_node=st,
-            commute_breakdown_node=cb,
-            council_tax_node=ct,
-            persons_source=ps,
+            config=HousingCostConfig(
+                monthly_mortgage_node=mg,
+                yearly_sinking_fund_node=sf,
+                life_insurance_node=li,
+                rental_income_node=ri,
+                status_node=st,
+                commute_breakdown_node=cb,
+                council_tax_node=ct,
+                persons_source=ps,
+            ),
         )
         return node, mg, sf, li, ri, st, cb, ct, ps
 
@@ -585,7 +596,7 @@ class TestGroupMonthlyCostNode:
     def _node_with_annexe(self, node_id: str):
         """Build the node with annexe_payers/annexe_ignored inputs — no
         same-id duplicate (the scheduler keys nodes by id)."""
-        from houses.nodes.total_monthly_housing_cost_node import GroupMonthlyCostNode
+        from houses.nodes.total_monthly_housing_cost_node import GroupMonthlyCostNode, HousingCostConfig
 
         mg = UserInputNode[Money]("g_" + node_id + "_mg", Money)
         sf = UserInputNode[Money]("g_" + node_id + "_sf", Money)
@@ -600,17 +611,19 @@ class TestGroupMonthlyCostNode:
         ctp = UserInputNode[list]("g_" + node_id + "_ctp", list)
         node = GroupMonthlyCostNode(
             node_id,
-            monthly_mortgage_node=mg,
-            yearly_sinking_fund_node=sf,
-            life_insurance_node=li,
-            rental_income_node=ri,
-            status_node=st,
-            commute_breakdown_node=cb,
-            council_tax_node=ct,
-            persons_source=ps,
-            annexe_payers_node=ap,
-            annexe_ignored_node=ai,
-            council_tax_payers_node=ctp,
+            config=HousingCostConfig(
+                monthly_mortgage_node=mg,
+                yearly_sinking_fund_node=sf,
+                life_insurance_node=li,
+                rental_income_node=ri,
+                status_node=st,
+                commute_breakdown_node=cb,
+                council_tax_node=ct,
+                persons_source=ps,
+                annexe_payers_node=ap,
+                annexe_ignored_node=ai,
+                council_tax_payers_node=ctp,
+            ),
         )
         return node, mg, sf, li, ri, st, cb, ct, ps, ap, ai, ctp
 

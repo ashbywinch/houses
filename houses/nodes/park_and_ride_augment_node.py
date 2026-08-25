@@ -8,7 +8,7 @@ the station's car park.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import override
 
 from money import Money
@@ -19,9 +19,24 @@ from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.car_park import CarParkRegistry
 from houses.commute import CostGroup, JourneyLeg, LegMode
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from houses.model.domain import Commute
+from houses.services_provider import get_services
 from houses.stations import StationRegistry
+
+
+@dataclass(frozen=True)
+class ParkAndRideOptions:
+    """Wiring for ``ParkAndRideAugmentNode``: the commute chain inputs plus
+    the station/car-park registries (injected for tests)."""
+
+    transit_node: Node
+    best_location: Node
+    postcode_node: Node
+    has_car: bool
+    max_walk_node: Node
+    station_registry: StationRegistry | None = None
+    car_park_registry: CarParkRegistry | None = None
 
 
 class ParkAndRideAugmentNode(DerivedNode[Commute]):
@@ -42,30 +57,24 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         self,
         node_id: str,
         *,
-        transit_node: Node,
-        best_location: Node,
-        postcode_node: Node,
-        has_car: bool,
-        max_walk_node,
-        station_registry: StationRegistry | None = None,
-        car_park_registry: CarParkRegistry | None = None,
+        options: ParkAndRideOptions,
     ):
-        self.transit_node = transit_node
-        self.best_location = best_location
-        self.postcode_node = postcode_node
-        self._has_car = has_car
+        self.transit_node = options.transit_node
+        self.best_location = options.best_location
+        self.postcode_node = options.postcode_node
+        self._has_car = options.has_car
         self._max_walk = 30
-        self._max_walk_node = max_walk_node
+        self._max_walk_node = options.max_walk_node
         self._car_park_name: str = ""
-        self._station_registry = station_registry
-        self._car_park_registry = car_park_registry
+        self._station_registry = options.station_registry
+        self._car_park_registry = options.car_park_registry
         # Static deps include postcode so its changed signal re-schedules
         # this node when a postcode arrives later; _get_active_deps gates
         # whether a PENDING postcode can block refresh.
-        deps = (transit_node, max_walk_node)
+        deps = (options.transit_node, options.max_walk_node)
         names = ["transit", "max_walk"]
-        if has_car:
-            deps = deps + (best_location, postcode_node)
+        if options.has_car:
+            deps = deps + (options.best_location, options.postcode_node)
             names += ["location", "postcode_attempt"]
         super().__init__(node_id, Commute, deps, dep_names=tuple(names))
         self.display_name = "Park & Ride"
@@ -135,7 +144,6 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
 
         # Get actual drive time via the drive time service — postcode
         # first, best-location fallback when the property has none.
-        from houses.services_provider import get_services
 
         if postcode:
             drive_minutes = await get_services().drive_time_service.estimate(postcode, station_name)
@@ -160,7 +168,7 @@ class ParkAndRideAugmentNode(DerivedNode[Commute]):
         parking_cost = car_park.daily_cost if car_park is not None else None
         existing_cost = commute.daily_cost
         if existing_cost is None:
-            existing_cost = Money("0", "GBP")
+            existing_cost = Money(amount="0", currency="GBP")
 
         # Replace the walk leg with a drive leg (actual drive time).
         # The drive leg goes in its OWN CostGroup so that fuel cost and

@@ -53,7 +53,7 @@ class TotalWorksNode(DerivedNode[Money]):
             return Attempt.impossible(f"Works estimate required for: {names}")
 
         # Filter out None values (cleared estimates); sum as Money
-        total = Money("0", "GBP")
+        total = Money(amount="0", currency="GBP")
         for v in wd.values():
             if v is None:
                 continue

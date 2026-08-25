@@ -329,12 +329,12 @@ class TestCommuteDetailsRoundTrip:
             person=Person(name="", has_car=False),
             label="Aldgate",
             destination=PlaceOfInterest(label="Aldgate", address="EC3A"),
-            duration=Quantity(156, "minute"),  # type: ignore[arg-type]
+            duration=Quantity(156, "minute"),  # type: ignore[arg-type]  # pint's stub types Quantity(156, "minute") as PlainQuantity, not assignable to Commute.duration's bare Quantity[Unknown] (invariant generic); PlainQuantity is a pint Quantity at runtime
             daily_cost=Money("100", "GBP"),
             mode="transit",
             _details=(
                 CostGroup(
-                    legs=(JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(42, "minute")),),  # type: ignore[arg-type]
+                    legs=(JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(42, "minute")),),  # type: ignore[arg-type]  # same pint stub-variance: Quantity(42, "minute") is PlainQuantity, JourneyLeg.duration is annotated bare Quantity[Unknown]
                     operator="TfL",
                     cost=Money("100", "GBP"),
                 ),
@@ -346,15 +346,17 @@ class TestCommuteDetailsRoundTrip:
         value_dict["details"] = value_dict.pop("_details")
         save_node_result("rt_legacy_details", {"status": "succeeded", "value": value_dict})
 
-        from houses.nodes.commute import CommuteSelectorNode
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
         node = CommuteSelectorNode(
             "rt_legacy_details",
-            origin=UserInputNode("rt_origin", object),
-            poi=UserInputNode("rt_poi", object),
-            transit_result=UserInputNode("rt_transit", object),
-            is_child=False,
-            max_walk_node=UserInputNode("rt_mw", int),
+            options=CommuteSelectorOptions(
+                origin=UserInputNode("rt_origin", object),
+                poi=UserInputNode("rt_poi", object),
+                transit_result=UserInputNode("rt_transit", object),
+                is_child=False,
+                max_walk_node=UserInputNode("rt_mw", int),
+            ),
         )
         a = node.latest_attempt()
         assert a.succeeded, f"reload must succeed, got: {a.status}: {a.error}"

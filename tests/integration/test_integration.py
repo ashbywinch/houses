@@ -32,16 +32,16 @@ class TestPostcodesIO:
 
 class TestGeocodeAddress:
     @pytest.mark.asyncio
-    async def test_geocode_address(self):
+    async def testgeocode_address(self):
         """Verify the full geocoding fallback chain runs without crashing.
 
-        Tests that _geocode_address handles Google Maps → ORS → Nominatim
+        Tests that geocode_address handles Google Maps → ORS → Nominatim
         gracefully regardless of external availability. If Nominatim is
         available, also verify coordinates are in the correct area.
         """
-        from houses.location import _geocode_address
+        from houses.location import geocode_address
 
-        result = await _geocode_address("Shoppenhangers Road, Maidenhead, SL6, UK")
+        result = await geocode_address("Shoppenhangers Road, Maidenhead, SL6, UK")
         coords = result.value_or_none()
 
         if coords is None:

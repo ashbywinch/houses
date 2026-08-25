@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 
 
 class TestGeoPointDistance:

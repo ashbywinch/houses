@@ -31,6 +31,7 @@ DRIVE_PATH = Path("data/commute/drive_searches.json")
 INTERSECTION_PATH = Path("data/commute/intersection.json")
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _load(path: Path) -> dict | None:
     if not path.is_file():
         return None
@@ -41,11 +42,10 @@ def _load(path: Path) -> dict | None:
         return None
 
 
-def isochrone_layers() -> list[dict]:
-    """The Leaflet layers for the Map page, or [] when no artifacts exist."""
-    layers: list[dict] = []
-
-    union = _load(UNION_PATH)
+def _union_layer(union_path: Path):
+    """The transit shed layer from the union artifact, or [] when absent."""
+    union = _load(union_path)
+    layers = []
     if union and union.get("components"):
         layers.append(
             {
@@ -58,27 +58,38 @@ def isochrone_layers() -> list[dict]:
                 ],
             }
         )
+    return layers
 
-    drive = _load(DRIVE_PATH)
-    if drive:
-        drive_by_label: dict[str, list[dict]] = {}
-        for s in drive.get("searches", []):
-            label = (s.get("destination") or {}).get("label", "")
-            if label:
-                drive_by_label.setdefault(label, []).append(s)
-        for i, (label, searches) in enumerate(drive_by_label.items(), 1):
-            layers.append(
-                {
-                    "name": f"Drive to {label}",
-                    "color": _DRIVE_COLORS[(i - 1) % len(_DRIVE_COLORS)],
-                    "polygons": [
-                        {"coords": s["polygon"], "name": s.get("name", ""), "url": s.get("rightmove_url", "")}
-                        for s in searches
-                    ],
-                }
-            )
 
-    intersection = _load(INTERSECTION_PATH)
+def _drive_layers(drive_path: Path):
+    """One layer per driving destination from the drive searches artifact."""
+    drive = _load(drive_path)
+    layers = []
+    if not drive:
+        return layers
+    drive_by_label = {}
+    for s in drive.get("searches", []):
+        label = (s.get("destination") or {}).get("label", "")
+        if label:
+            drive_by_label.setdefault(label, []).append(s)
+    layers.extend(
+        {
+            "name": f"Drive to {label}",
+            "color": _DRIVE_COLORS[(i - 1) % len(_DRIVE_COLORS)],
+            "polygons": [
+                {"coords": s["polygon"], "name": s.get("name", ""), "url": s.get("rightmove_url", "")}
+                for s in searches
+            ],
+        }
+        for i, (label, searches) in enumerate(drive_by_label.items(), 1)
+    )
+    return layers
+
+
+def _intersection_layer(intersection_path: Path):
+    """The all-commutes intersection layer, or [] when the artifact is absent."""
+    intersection = _load(intersection_path)
+    layers = []
     if intersection and intersection.get("searches"):
         layers.append(
             {
@@ -95,5 +106,27 @@ def isochrone_layers() -> list[dict]:
                 ],
             }
         )
-
     return layers
+
+
+
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+def isochrone_layers(
+    *,
+    union_path: Path | None = None,
+    drive_path: Path | None = None,
+    intersection_path: Path | None = None,
+) -> list[dict]:
+    """The Leaflet layers for the Map page, or [] when no artifacts exist.
+
+    ``union_path``/``drive_path``/``intersection_path`` are test seams
+    defaulting to the committed artifact paths, so tests never
+    monkeypatch the module constants.
+    """
+    layers: list[dict] = []
+    layers.extend(_union_layer(union_path or UNION_PATH))
+    layers.extend(_drive_layers(drive_path or DRIVE_PATH))
+    layers.extend(_intersection_layer(intersection_path or INTERSECTION_PATH))
+    return layers
+
+

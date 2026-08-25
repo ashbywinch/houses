@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from tools.commute.searches import build_searches, shed_to_searches
+from houses.geopoint import GeoPoint
+from tools.commute.searches import SearchOptions, build_searches, shed_to_searches
 from tools.commute.station_shed import BBox
 from tools.commute.tile import Rect
-from tools.commute.validate import validate
+from tools.commute.validate import StationControl, ValidationOptions, validate
 
 DESTINATIONS = ["SW1V 2QQ", "EC3A 7LP"]
 NOW = "2026-08-02T09:00:00+00:00"
@@ -27,14 +28,16 @@ def _payload():
     return shed_to_searches(
         SHED_RECORDS,
         BBOX,
-        cell_km=11.1,
-        buffer_km=5.0,
-        min_beds=2,
-        property_type="houses",
-        generated_at=NOW,
-        engine_version="v1",
-        threshold_min=132,
-        destinations=DESTINATIONS,
+        options=SearchOptions(
+            cell_km=11.1,
+            buffer_km=5.0,
+            min_beds=2,
+            property_type="houses",
+            generated_at=NOW,
+            engine_version="v1",
+            threshold_min=132,
+            destinations=DESTINATIONS,
+        ),
     )
 
 
@@ -45,10 +48,15 @@ def test_validate_clean_payload_passes():
     issues = validate(
         _payload(),
         KEPT,
-        buffer_km=5.0,
-        bbox=BBOX,
-        positive=[("Reading", 51.4599, -0.9705), ("Guildford", 51.2367, -0.5808)],
-        negative=[("Exeter St Davids", 50.7292, -3.5435)],
+        ValidationOptions(
+            buffer_km=5.0,
+            bbox=BBOX,
+            positive=[
+                StationControl("Reading", GeoPoint(51.4599, -0.9705)),
+                StationControl("Guildford", GeoPoint(51.2367, -0.5808)),
+            ],
+            negative=[StationControl("Exeter St Davids", GeoPoint(50.7292, -3.5435))],
+        ),
     )
     assert issues == []
 
@@ -57,10 +65,12 @@ def test_validate_positive_coverage_failure():
     issues = validate(
         _payload(),
         KEPT,
-        buffer_km=5.0,
-        bbox=BBOX,
-        positive=[("Brighton", 50.8290, -0.1410)],
-        negative=[],
+        ValidationOptions(
+            buffer_km=5.0,
+            bbox=BBOX,
+            positive=[StationControl("Brighton", GeoPoint(50.8290, -0.1410))],
+            negative=[],
+        ),
     )
     assert any("Brighton" in i for i in issues)
 
@@ -69,16 +79,19 @@ def test_validate_negative_control_failure():
     issues = validate(
         _payload(),
         KEPT,
-        buffer_km=5.0,
-        bbox=BBOX,
-        positive=[],
-        negative=[("Reading", 51.4599, -0.9705)],  # Reading IS covered — must fail
+        ValidationOptions(
+            buffer_km=5.0,
+            bbox=BBOX,
+            positive=[],
+            negative=[StationControl("Reading", GeoPoint(51.4599, -0.9705))],  # Reading IS covered — must fail
+        ),
     )
     assert any("Reading" in i for i in issues)
 
 
 def test_validate_rectangle_count_failure():
-    issues = validate(_payload(), KEPT, buffer_km=5.0, bbox=BBOX, positive=[], negative=[], max_rectangles=1)
+    options = ValidationOptions(buffer_km=5.0, bbox=BBOX, positive=[], negative=[], max_rectangles=1)
+    issues = validate(_payload(), KEPT, options)
     assert any("rectangles" in i for i in issues)
 
 
@@ -87,7 +100,7 @@ def test_validate_url_roundtrip_failure():
     # Tamper the stored polygon after the URL was built: the URL no longer
     # decodes back to the JSON polygon.
     payload["searches"][0]["polygon"][0] = (51.0, -1.0)
-    issues = validate(payload, KEPT, buffer_km=5.0, bbox=BBOX, positive=[], negative=[])
+    issues = validate(payload, KEPT, ValidationOptions(buffer_km=5.0, bbox=BBOX, positive=[], negative=[]))
     assert any("round-trip" in i for i in issues)
 
 
@@ -95,7 +108,7 @@ def test_validate_geometry_bbox_failure():
     payload = _payload()
     # A polygon with a corner outside the bbox must be flagged.
     payload["searches"][0]["polygon"][0] = (54.0, -0.5)  # north of bbox
-    issues = validate(payload, KEPT, buffer_km=5.0, bbox=BBOX, positive=[], negative=[])
+    issues = validate(payload, KEPT, ValidationOptions(buffer_km=5.0, bbox=BBOX, positive=[], negative=[]))
     assert any("outside" in i for i in issues)
 
 
@@ -106,15 +119,19 @@ def test_validate_kept_station_coverage_failure():
     payload = build_searches(
         [rect],
         kept,
-        threshold_min=132,
-        destinations=DESTINATIONS,
-        min_beds=2,
-        property_type="houses",
-        generated_at=NOW,
-        engine_version="v1",
+        options=SearchOptions(
+            cell_km=11.1,
+            buffer_km=5.0,
+            threshold_min=132,
+            destinations=DESTINATIONS,
+            min_beds=2,
+            property_type="houses",
+            generated_at=NOW,
+            engine_version="v1",
+        ),
     )
     far_kept = [{"name": "Brighton", "crs": "BTN", "lat": 50.8290, "lon": -0.1410, "kept": True}]
-    issues = validate(payload, far_kept, buffer_km=5.0, bbox=BBOX, positive=[], negative=[])
+    issues = validate(payload, far_kept, ValidationOptions(buffer_km=5.0, bbox=BBOX, positive=[], negative=[]))
     assert any("Brighton" in i for i in issues)
 
 
@@ -122,7 +139,7 @@ def test_validate_disjointness_failure():
     payload = _payload()
     # Overlap two searches by replacing the second polygon with the first's.
     payload["searches"][1]["polygon"] = payload["searches"][0]["polygon"]
-    issues = validate(payload, KEPT, buffer_km=5.0, bbox=BBOX, positive=[], negative=[])
+    issues = validate(payload, KEPT, ValidationOptions(buffer_km=5.0, bbox=BBOX, positive=[], negative=[]))
     assert any("overlap" in i for i in issues)
 
 

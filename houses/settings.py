@@ -21,6 +21,7 @@ def _parse_quantity(v: object, default_unit: str) -> Quantity:
     if isinstance(v, str):
         try:
             return Quantity(v)
+        # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
         except Exception:
             return Quantity(float(v), default_unit)
     if isinstance(v, dict):

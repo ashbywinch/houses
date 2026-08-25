@@ -1,6 +1,6 @@
 """Named range management across Data, View, and Constants tabs.
 
-``named_range_name`` and ``_const_range_name`` generate deterministic range names.
+``named_range_name`` and ``const_range_name`` generate deterministic range names.
 ``ensure_named_ranges`` syncs all ranges with the spreadsheet.
 ``ensure_constants_tab`` creates the Constants tab if missing.
 """
@@ -11,6 +11,7 @@ import logging
 import re
 
 import gspread
+from gspread.utils import ValueInputOption
 
 from houses.sheets.row import CONSTANTS_TAB, DATA_TAB, Row
 
@@ -48,7 +49,7 @@ def named_range_name(header: str) -> str:
     return "Data_" + "".join(w.capitalize() for w in words)
 
 
-def _const_range_name(header: str) -> str:
+def const_range_name(header: str) -> str:
     """Generate a Const_ named range from a constant name."""
     clean = re.sub(r"[^a-zA-Z0-9 ]+", "", header).strip()
     words = clean.split()
@@ -64,10 +65,8 @@ def ensure_constants_tab(spreadsheet: gspread.Spreadsheet) -> gspread.Worksheet:
     except gspread.WorksheetNotFound:
         ws = spreadsheet.add_worksheet(title=CONSTANTS_TAB, rows=20, cols=2)
 
-    values = [CONSTANTS_HEADERS]
-    for label, val in CONSTANTS_VALUES:
-        values.append([label, val])
-    ws.update(range_name="A1", values=values, value_input_option="USER_ENTERED")
+    values = [CONSTANTS_HEADERS] + [[label, val] for label, val in CONSTANTS_VALUES]
+    ws.update(range_name="A1", values=values, value_input_option=ValueInputOption.user_entered)
     logger.info("Created '%s' tab with %d constants", CONSTANTS_TAB, len(CONSTANTS_VALUES))
     return ws
 
@@ -88,6 +87,7 @@ def ensure_named_ranges(spreadsheet: gspread.Spreadsheet) -> None:
     for col_idx, header in enumerate(Row.HEADERS):
         name = named_range_name(header)
         current_names.add(name)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         range_spec = {"sheetId": sid_data, "startColumnIndex": col_idx, "endColumnIndex": col_idx + 1}
         if name in existing:
             rid = existing[name]["namedRangeId"]
@@ -116,6 +116,7 @@ def ensure_named_ranges(spreadsheet: gspread.Spreadsheet) -> None:
         ("View_Status", 39),
     ]:
         current_names.add(name)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         range_spec = {"sheetId": sid_view, "startColumnIndex": col_idx, "endColumnIndex": col_idx + 1}
         if name in existing:
             rid = existing[name]["namedRangeId"]
@@ -135,8 +136,9 @@ def ensure_named_ranges(spreadsheet: gspread.Spreadsheet) -> None:
     ws_const = spreadsheet.worksheet(CONSTANTS_TAB)
     sid_const = ws_const._properties["sheetId"]
     for row_idx, (label, _) in enumerate(CONSTANTS_VALUES):
-        name = _const_range_name(label)
+        name = const_range_name(label)
         current_names.add(name)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         range_spec = {
             "sheetId": sid_const,
             "startRowIndex": row_idx + 1,

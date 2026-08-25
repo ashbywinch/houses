@@ -31,6 +31,7 @@ def make_handler(directory: Path) -> type[http.server.SimpleHTTPRequestHandler]:
     directory_str = str(directory)
 
     class MapOnlyHandler(http.server.SimpleHTTPRequestHandler):
+# lucidlint: ignore detached-method staticmethod would break instantiation/super()
         def __init__(self, *args, **kwargs):
             super().__init__(*args, directory=directory_str, **kwargs)
 

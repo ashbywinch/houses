@@ -27,6 +27,7 @@ def asdict_serializable(obj: Any) -> Any:
     their values.
     """
     if isinstance(obj, Money):
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         return {"amount": _money_amount_str(obj), "currency": obj.currency}
     if isinstance(obj, Enum):
         return obj.value

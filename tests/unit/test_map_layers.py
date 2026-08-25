@@ -9,26 +9,30 @@ from __future__ import annotations
 
 import json
 
+from houses.web.api_router import IsochronePaths
+
 
 def _write(tmp_path, name: str, payload) -> None:
     (tmp_path / name).write_text(json.dumps(payload))
 
 
-def test_layers_empty_without_artifacts(tmp_path, monkeypatch):
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
+def test_layers_empty_without_artifacts(tmp_path):
     import houses.map_layers as ml
 
-    monkeypatch.setattr(ml, "UNION_PATH", tmp_path / "union.json")
-    monkeypatch.setattr(ml, "DRIVE_PATH", tmp_path / "drive_searches.json")
-    monkeypatch.setattr(ml, "INTERSECTION_PATH", tmp_path / "intersection.json")
-    assert ml.isochrone_layers() == []
+    assert (
+        ml.isochrone_layers(
+            union_path=tmp_path / "union.json",
+            drive_path=tmp_path / "drive_searches.json",
+            intersection_path=tmp_path / "intersection.json",
+        )
+        == []
+    )
 
 
-def test_layers_build_transit_drive_and_intersection(tmp_path, monkeypatch):
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
+def test_layers_build_transit_drive_and_intersection(tmp_path):
     import houses.map_layers as ml
-
-    monkeypatch.setattr(ml, "UNION_PATH", tmp_path / "union.json")
-    monkeypatch.setattr(ml, "DRIVE_PATH", tmp_path / "drive_searches.json")
-    monkeypatch.setattr(ml, "INTERSECTION_PATH", tmp_path / "intersection.json")
 
     _write(
         tmp_path,
@@ -59,7 +63,11 @@ def test_layers_build_transit_drive_and_intersection(tmp_path, monkeypatch):
         },
     )
 
-    layers = ml.isochrone_layers()
+    layers = ml.isochrone_layers(
+        union_path=tmp_path / "union.json",
+        drive_path=tmp_path / "drive_searches.json",
+        intersection_path=tmp_path / "intersection.json",
+    )
     assert [layer["name"] for layer in layers] == ["Train: Pimlico & Aldgate", "Drive to Dad", "Where we could live"]
 
     train = layers[0]
@@ -82,26 +90,31 @@ def test_layers_build_transit_drive_and_intersection(tmp_path, monkeypatch):
     assert "visibleByDefault" not in layers[1]
 
 
-def test_endpoint_returns_layers(tmp_path, monkeypatch):
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
+def test_endpoint_returns_layers(tmp_path):
     """GET /api/map/isochrones returns the layers payload (auth required)."""
     from fastapi.testclient import TestClient
 
-    import houses.map_layers as ml
     from houses.server import app
+    from houses.web import api_router
     from houses.web.auth import _make_session_cookie
-
-    monkeypatch.setattr(ml, "UNION_PATH", tmp_path / "union.json")
-    monkeypatch.setattr(ml, "DRIVE_PATH", tmp_path / "drive_searches.json")
-    monkeypatch.setattr(ml, "INTERSECTION_PATH", tmp_path / "intersection.json")
-    _write(tmp_path, "union.json", {"components": [{"outline": [[51.5, -0.1]]}]})
-
-    client = TestClient(app)
-    client.cookies.set(
-        "session",
-        _make_session_cookie(email="simon@example.com", name="Simon", picture="", is_superuser=False),
+    app.dependency_overrides[api_router._isochrone_paths] = lambda: IsochronePaths(
+        union=tmp_path / "union.json",
+        drive=tmp_path / "drive_searches.json",
+        intersection=tmp_path / "intersection.json",
     )
-    resp = client.get("/api/map/isochrones")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "layers" in data
-    assert data["layers"][0]["name"] == "Train: Pimlico & Aldgate"
+    try:
+        _write(tmp_path, "union.json", {"components": [{"outline": [[51.5, -0.1]]}]})
+
+        client = TestClient(app)
+        client.cookies.set(
+            "session",
+            _make_session_cookie(email="simon@example.com", name="Simon", picture="", is_superuser=False),
+        )
+        resp = client.get("/api/map/isochrones")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "layers" in data
+        assert data["layers"][0]["name"] == "Train: Pimlico & Aldgate"
+    finally:
+        app.dependency_overrides.pop(api_router._isochrone_paths, None)

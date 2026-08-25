@@ -9,7 +9,7 @@ from houses.stations import Station
 
 
 def _victoria_station() -> Station:
-    return Station(name="Victoria Station", crs="VIC", location=None)  # type: ignore[arg-type]
+    return Station(name="Victoria Station", crs="VIC", location=None)  # type: ignore[arg-type]  # location is annotated non-optional GeoPoint but get_tube_leg_fare only reads .name — None is the intended runtime value here
 
 
 def _tfl_fare_response(total_cost_pence: int) -> dict:
@@ -268,7 +268,7 @@ class TestFormatRouteSummary:
         assert "walk 7m" in result
 
 
-# ── TransitRoute._build_cost_groups + _render_leg_description ─────────
+# ── TransitRoute._build_cost_groups + render_leg_description ─────────
 
 
 class TestTfLRouteSummary:
@@ -313,12 +313,12 @@ class TestTfLRouteSummary:
         }
 
         groups = route._build_cost_groups(tfl_data)
-        from houses.commute import _render_leg_description
+        from houses.commute import render_leg_description
 
         all_descriptions = []
         for g in groups:
             for leg in g.legs:
-                all_descriptions.append(_render_leg_description(leg))
+                all_descriptions.append(render_leg_description(leg))
 
         combined = " ".join(all_descriptions)
         assert "Maidenhead" in combined, f"Should mention station name, got: {combined}"
@@ -365,9 +365,9 @@ class TestTfLRouteSummary:
         }
 
         groups = route._build_cost_groups(tfl_data)
-        from houses.commute import _render_leg_description
+        from houses.commute import render_leg_description
 
-        descriptions = [_render_leg_description(leg) for g in groups for leg in g.legs]
+        descriptions = [render_leg_description(leg) for g in groups for leg in g.legs]
         combined = " ".join(descriptions)
         assert "7 to" in combined, f"Expected '7 to' format, got: {descriptions}"
 
@@ -396,9 +396,9 @@ class TestTfLRouteSummary:
         }
 
         groups = route._build_cost_groups(tfl_data)
-        from houses.commute import _render_leg_description
+        from houses.commute import render_leg_description
 
-        descriptions = [_render_leg_description(leg) for g in groups for leg in g.legs]
+        descriptions = [render_leg_description(leg) for g in groups for leg in g.legs]
         combined = " ".join(descriptions)
         # Should extract tube line from instruction text, not use bare "line"
         assert "Bakerloo" in combined, f"Expected Bakerloo line from instruction, got: {descriptions}"
@@ -434,11 +434,11 @@ class TestPickBestJourney:
                 {"duration": 45, "legs": [walk_leg]},
             ]
         }
-        duration, cost, route = TflClient._pick_best_journey(data)
-        assert duration == 30
-        assert cost is None
-        assert isinstance(route, str)
-        assert route != ""
+        summary = TflClient._pick_best_journey(data)
+        assert summary.duration == 30
+        assert summary.cost is None
+        assert isinstance(summary.route_summary, str)
+        assert summary.route_summary != ""
 
     def test_picks_shortest_with_fare(self):
         from houses.tfl_client import TflClient
@@ -449,24 +449,26 @@ class TestPickBestJourney:
                 {"duration": 30, "fare": {"totalCost": 800}, "legs": []},
             ]
         }
-        duration, cost, route = TflClient._pick_best_journey(data)
-        assert duration == 30
-        assert cost == 16.0
-        assert isinstance(route, str)
+        summary = TflClient._pick_best_journey(data)
+        assert summary.duration == 30
+        assert summary.cost == 16.0
+        assert isinstance(summary.route_summary, str)
+
 
     def test_empty_journeys_returns_none(self):
         from houses.tfl_client import TflClient
 
-        dur, cst, rte = TflClient._pick_best_journey({"journeys": []})
-        assert dur is None
-        assert cst is None
+        summary = TflClient._pick_best_journey({"journeys": []})
+        assert summary.duration is None
+        assert summary.cost is None
+
 
     def test_none_data_returns_none(self):
         from houses.tfl_client import TflClient
 
-        dur, cst, rte = TflClient._pick_best_journey(None)
-        assert dur is None
-        assert cst is None
+        summary = TflClient._pick_best_journey(None)
+        assert summary.duration is None
+        assert summary.cost is None
 
 
 class TestTflCachedApiCall4xx:

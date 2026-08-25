@@ -8,7 +8,7 @@ import logging
 import gspread
 from google.oauth2.service_account import Credentials
 
-from houses.config import settings
+from houses.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,7 @@ def _build_client() -> gspread.Client | None:
         creds_dict = json.loads(raw)
         credentials = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
         return gspread.authorize(credentials)
+    # lucidlint: ignore broad-except deliberate fallback — any auth failure means 'not configured' (None)
     except Exception:
         logger.exception("Failed to authenticate from HOUSES_SERVICE_ACCOUNT_JSON")
         return None
@@ -35,6 +36,7 @@ def get_client() -> gspread.Client | None:
 
 
 def _real_get_client() -> gspread.Client | None:
+    # lucidlint: ignore global-state lazy memo of the authenticated gspread client; single writer
     global _client
     if _client is None:
         _client = _build_client()

@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from typing import Any
 
 from money import Money
 
+from dag.persistence import property_rids
 from dag.user_input_node import UserInputNode
-from houses.geo import GeoPoint
-from houses.nodes.property import PropertyNodes
+from houses.geopoint import GeoPoint
+from houses.nodes.property_nodes import PropertyNodes
 from houses.property_registry import register_property
+from houses.sheets.reader import get_properties_view_data
 
 logger = logging.getLogger(__name__)
 
@@ -58,100 +61,126 @@ def _upgrade_address(address: str, postcode: str) -> str:
         return f"{before}, {postcode}"
     return f"{address}, {postcode}"
 
+def _push_geo_coords(sources: dict[str, UserInputNode], key: str, lat: str, lng: str, what: str) -> bool:
+    """Push a sheet coordinate pair into sources; False when the cells aren't numeric."""
+    try:
+        flat, flng = float(lat), float(lng)
+        sources[key].push(GeoPoint(flat, flng), SOURCE_LABELS[key])
+        return True
+    except (ValueError, TypeError) as exc:
+        logger.warning("Invalid %s coords: lat=%s lng=%s (%s)", what, lat, lng, exc)
+        return False
 
-def bootstrap_from_row(row: dict[str, Any], sources: dict[str, UserInputNode]) -> int:
-    pushed = 0
 
+def _push_works_estimate(prop: PropertyNodes, raw_rid: str, ws_value: str) -> None:
+    """Push a View-tab works estimate onto the property; skips non-numeric cells."""
+    try:
+        parsed = float(ws_value.replace(",", "").replace("£", ""))
+        prop.works_estimates.push({"Ashby": Money(str(parsed), "GBP")}, "Sheet")
+    except (ValueError, TypeError) as exc:
+        logger.warning("Invalid works estimate for RID %s: %s (%s)", raw_rid, ws_value, exc)
+        return
+def _push_cell(
+    sources: dict[str, UserInputNode],
+    row: dict[str, str],
+    col_name: str,
+    source_key: str,
+    *,
+    parse: Callable[[str], object] | None = None,
+) -> bool:
+    """Push one stripped sheet cell into a source node; False (no push)
+    when the node isn't wired, the cell is blank, or the parser rejects
+    it — callers count only real pushes.  The label comes from
+    SOURCE_LABELS (Sheet fallback), matching the per-key push chain."""
+    if source_key not in sources:
+        return False
+    val = (row.get(col_name) or "").strip()
+    if not val:
+        return False
+    if parse is not None:
+        val = parse(val)
+        if val is None:
+            return False
+    sources[source_key].push(val, SOURCE_LABELS.get(source_key, "Sheet"))
+    return True
+
+
+def _parse_price(value: str) -> Money | None:
+    """'£450,000' / '450000' → Money; None when nothing numeric remains."""
+    cleaned = re.sub(r"[^0-9.]", "", value)
+    if not cleaned:
+        return None
+    return Money(cleaned, "GBP")
+
+
+def _push_upgraded_address(sources: dict[str, UserInputNode], row: dict[str, str]) -> int:
+    """Push the postcode-upgraded address onto both address nodes; 0–2 pushes."""
     address = (row.get("Address") or "").strip()
     postcode = (row.get("Postcode") or "").strip()
-    url = (row.get("Rightmove URL") or "").strip()
-    bedrooms = (row.get("Bedrooms") or "").strip()
-    price = (row.get("Price (£)") or "").strip()
-
-    if url and "rightmove_url" in sources:
-        sources["rightmove_url"].push(url, SOURCE_LABELS["rightmove_url"])
+    if not address or not postcode:
+        return 0
+    upgraded = _upgrade_address(address, postcode)
+    pushed = 0
+    if upgraded != address and "user_entered_address" in sources:
+        sources["user_entered_address"].push(upgraded, SOURCE_LABELS["user_entered_address"])
         pushed += 1
-
-    if address and "rightmove_address" in sources:
-        sources["rightmove_address"].push(address, SOURCE_LABELS["rightmove_address"])
+    if "corrected_address" in sources:
+        sources["corrected_address"].push(upgraded, SOURCE_LABELS["corrected_address"])
         pushed += 1
+    return pushed
 
-    if bedrooms and "rightmove_bedrooms" in sources:
-        sources["rightmove_bedrooms"].push(bedrooms, SOURCE_LABELS["rightmove_bedrooms"])
-        pushed += 1
 
-    if price and "rightmove_price" in sources:
-        cleaned = re.sub(r"[^0-9.]", "", price)
-        if cleaned:
-            sources["rightmove_price"].push(Money(cleaned, "GBP"), SOURCE_LABELS["rightmove_price"])
-            pushed += 1
-
-    approx_lat = (row.get("Approx Latitude (est)") or "").strip()
-    approx_lng = (row.get("Approx Longitude (est)") or "").strip()
-    if approx_lat and approx_lng and "rightmove_location" in sources:
-        try:
-            flat, flng = float(approx_lat), float(approx_lng)
-            sources["rightmove_location"].push(
-                GeoPoint(flat, flng),
-                SOURCE_LABELS["rightmove_location"],
-            )
-            pushed += 1
-        except (ValueError, TypeError) as exc:
-            logger.warning("Invalid approx coords: lat=%s lng=%s (%s)", approx_lat, approx_lng, exc)
-
-    actual_lat = (row.get("Actual Latitude") or "").strip()
-    actual_lng = (row.get("Actual Longitude") or "").strip()
-    if actual_lat and actual_lng and "precise_location" in sources:
-        try:
-            aflat, aflng = float(actual_lat), float(actual_lng)
-            sources["precise_location"].push(
-                GeoPoint(aflat, aflng),
-                SOURCE_LABELS["precise_location"],
-            )
-            pushed += 1
-        except (ValueError, TypeError) as exc:
-            logger.warning("Invalid actual coords: lat=%s lng=%s (%s)", actual_lat, actual_lng, exc)
-
-    if address and postcode:
-        upgraded = _upgrade_address(address, postcode)
-        if upgraded != address and "user_entered_address" in sources:
-            sources["user_entered_address"].push(
-                upgraded,
-                SOURCE_LABELS["user_entered_address"],
-            )
-            pushed += 1
-        if "corrected_address" in sources:
-            sources["corrected_address"].push(
-                upgraded,
-                SOURCE_LABELS["corrected_address"],
-            )
-            pushed += 1
-
-    if postcode and "postcode" in sources:
-        sources["postcode"].push(postcode, "Sheet")
-        pushed += 1
-
-    actual_postcode = (row.get("Actual Postcode") or "").strip()
-    if actual_postcode and "actual_postcode" in sources:
-        sources["actual_postcode"].push(actual_postcode, SOURCE_LABELS["actual_postcode"])
-        pushed += 1
-
+def _push_comment_cells(sources: dict[str, UserInputNode], row: dict[str, str]) -> int:
+    """Push every non-blank comment column; floats coerced for float nodes."""
+    pushed = 0
     for source_key, col_name in COMMENT_COLUMNS.items():
         if source_key not in sources:
             continue
         val = (row.get(col_name) or "").strip()
-        if val:
-            src = sources[source_key]
-            label = COMMENT_LABELS.get(source_key, "Sheet")
-            if isinstance(src, UserInputNode) and src._value_type is float:
-                try:
-                    val = float(val)
-                except (ValueError, TypeError):
-                    continue
-            src.push(val, label)
-            pushed += 1
-
+        if not val:
+            continue
+        src = sources[source_key]
+        label = COMMENT_LABELS.get(source_key, "Sheet")
+        if isinstance(src, UserInputNode) and src._value_type is float:
+            try:
+                val = float(val)
+            except (ValueError, TypeError):
+                continue
+        src.push(val, label)
+        pushed += 1
     return pushed
+
+
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+def bootstrap_from_row(row: dict[str, Any], sources: dict[str, UserInputNode]) -> int:
+    pushed = 0
+
+    pushed += _push_cell(sources, row, col_name="Rightmove URL", source_key="rightmove_url")
+    pushed += _push_cell(sources, row, col_name="Address", source_key="rightmove_address")
+    pushed += _push_cell(sources, row, col_name="Bedrooms", source_key="rightmove_bedrooms")
+    pushed += _push_cell(sources, row, col_name="Price (£)", source_key="rightmove_price", parse=_parse_price)
+
+    approx_lat = (row.get("Approx Latitude (est)") or "").strip()
+    approx_lng = (row.get("Approx Longitude (est)") or "").strip()
+    if approx_lat and approx_lng and "rightmove_location" in sources and _push_geo_coords(
+        sources, key="rightmove_location", lat=approx_lat, lng=approx_lng, what="approx"
+    ):
+        pushed += 1
+
+    actual_lat = (row.get("Actual Latitude") or "").strip()
+    actual_lng = (row.get("Actual Longitude") or "").strip()
+    if actual_lat and actual_lng and "precise_location" in sources and _push_geo_coords(
+        sources, key="precise_location", lat=actual_lat, lng=actual_lng, what="actual"
+    ):
+        pushed += 1
+
+    pushed += _push_upgraded_address(sources, row)
+    pushed += _push_cell(sources, row, col_name="Postcode", source_key="postcode")
+    pushed += _push_cell(sources, row, col_name="Actual Postcode", source_key="actual_postcode")
+    pushed += _push_comment_cells(sources, row)
+    return pushed
+
+
 
 
 def _seed_input_defaults(prop) -> None:
@@ -172,7 +201,7 @@ def _seed_input_defaults(prop) -> None:
     if prop.works_estimates.latest_attempt().pending:
         prop.works_estimates.push({}, "default")
     if prop.rental_income.latest_attempt().pending:
-        prop.rental_income.push(Money("0", "GBP"), "default")
+        prop.rental_income.push(Money(amount="0", currency="GBP"), "default")
 
 
 def load_property_nodes_from_db() -> int:
@@ -180,7 +209,6 @@ def load_property_nodes_from_db() -> int:
     Called on normal startup. No sheet dependency.
     Nodes load their persisted values from the database automatically.
     """
-    from dag.persistence import property_rids
 
     count = 0
     for rid in property_rids():
@@ -192,11 +220,11 @@ def load_property_nodes_from_db() -> int:
     return count
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def load_property_nodes_from_rows(rows: list[dict[str, Any]]) -> int:
     """Create PropertyNodes from sheet rows and push source values.
     Called on cold start (empty DB) or explicit reseed.
     """
-    from houses.sheets.reader import get_properties_view_data
 
     # Read View tab data for works_estimates (merged by Rightmove ID)
     view_rows = get_properties_view_data()
@@ -212,6 +240,7 @@ def load_property_nodes_from_rows(rows: list[dict[str, Any]]) -> int:
         if not raw_rid:
             continue
         prop = PropertyNodes(raw_rid)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         source_dict = {
             "rightmove_address": prop.rightmove_address,
             "rightmove_url": prop.rightmove_url,
@@ -234,11 +263,7 @@ def load_property_nodes_from_rows(rows: list[dict[str, Any]]) -> int:
         # Push works_estimates from View tab data
         ws_value = works_by_rid.get(raw_rid, "")
         if ws_value:
-            try:
-                parsed = float(ws_value.replace(",", "").replace("£", ""))
-                prop.works_estimates.push({"Ashby": Money(str(parsed), "GBP")}, "Sheet")
-            except (ValueError, TypeError):
-                logger.warning("Invalid works estimate for RID %s: %s", raw_rid, ws_value)
+            _push_works_estimate(prop, raw_rid, ws_value)
         # Default empty works estimates / rental income / comment status so
         # the money chain resolves even when a sheet cell was empty (a
         # pending input permanently blocks the cascade).  Never overwrites

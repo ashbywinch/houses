@@ -7,6 +7,7 @@ import math
 
 import pytest
 
+from houses.geopoint import GeoPoint
 from tools.commute.drive_isochrone import (
     DEFAULT_THRESHOLD_MIN,
     DriveDestination,
@@ -24,16 +25,18 @@ from tools.commute.drive_isochrone import (
     validate_payload,
 )
 from tools.commute.rightmove_url import parse_search_url
-from tools.commute.tile import Grid, Rect
+from tools.commute.tile import Grid, GridCell, Rect
 from tools.commute.units import KM, MINUTE
 
 NOW = "2026-08-03T09:00:00+00:00"
 
 
-async def _fake_geocode(postcode: str) -> tuple[float, float]:
+async def _fake_geocode(postcode: str) -> GeoPoint:
     """Fixed coords per postcode — the synthetic raws store these, so the
     offline reuse path matches (DI, not monkeypatching)."""
-    return {"OX7 5GZ": (51.1, -1.88), "RG12 8YA": (51.1, -1.88)}.get(postcode, (51.1, -1.88))
+    return {"OX7 5GZ": GeoPoint(51.1, -1.88), "RG12 8YA": GeoPoint(51.1, -1.88)}.get(
+        postcode, GeoPoint(51.1, -1.88)
+    )
 
 
 def _grid(
@@ -49,18 +52,21 @@ def _dest(label: str = "Dad", postcode: str = "OX7 5GZ", threshold: int = 90) ->
 # ── config ───────────────────────────────────────────────────────────
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_load_config_applies_global_threshold(tmp_path):
     cfg = tmp_path / "destinations.json"
     cfg.write_text(json.dumps({"threshold_min": 90, "destinations": [{"label": "Dad", "postcode": "OX7 5GZ"}]}))
     assert load_config(cfg) == [_dest(threshold=90)]
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_load_config_default_threshold_when_omitted(tmp_path):
     cfg = tmp_path / "destinations.json"
     cfg.write_text(json.dumps({"destinations": [{"label": "Dad", "postcode": "OX7 5GZ"}]}))
     assert load_config(cfg) == [_dest(threshold=DEFAULT_THRESHOLD_MIN)]
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_load_config_default_threshold_parameter(tmp_path):
     """The --threshold-min flag feeds this parameter; destinations without an
     explicit override adopt it (per-destination overrides still win)."""
@@ -78,6 +84,7 @@ def test_load_config_default_threshold_parameter(tmp_path):
     ]
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_apply_default_threshold_skips_explicit_overrides(tmp_path):
     """Regression: the CLI flag must beat the config file's TOP-LEVEL
     threshold_min (load_config's default_threshold cannot — the file wins),
@@ -103,6 +110,7 @@ def test_apply_default_threshold_skips_explicit_overrides(tmp_path):
     assert [d.threshold_min.to("minute").magnitude for d in dests] == [60, 75]
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_load_config_per_destination_override_wins(tmp_path):
     cfg = tmp_path / "destinations.json"
     body = {"threshold_min": 90, "destinations": [{"label": "Dad", "postcode": "OX7 5GZ", "threshold_min": 120}]}
@@ -110,6 +118,7 @@ def test_load_config_per_destination_override_wins(tmp_path):
     assert load_config(cfg) == [_dest(threshold=120)]
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_load_config_rejects_duplicate_labels(tmp_path):
     """Duplicate labels collapse two destinations into one constraint in the
     intersection (OR instead of AND) — rejected at the config layer."""
@@ -128,6 +137,7 @@ def test_load_config_rejects_duplicate_labels(tmp_path):
         load_config(cfg)
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_load_config_rejects_missing_fields(tmp_path):
     cfg = tmp_path / "destinations.json"
     cfg.write_text(json.dumps({"destinations": [{"postcode": "OX7 5GZ"}]}))
@@ -159,12 +169,14 @@ def test_grid_cell_centers_row_major():
     cells = grid_cell_centers(grid)
     assert len(cells) == 6
     # first cell is the south-west-most; rows then columns sweep north/east
-    r0, c0, lat0, lon0 = cells[0]
-    assert (r0, c0) == (0, 0)
-    assert lat0 == pytest.approx(51.0 + 0.05 / 2)
-    assert lon0 == pytest.approx(-2.0 + 0.08 / 2)
-    assert cells[1] == (0, 1, pytest.approx(51.025), pytest.approx(-1.88))
-    assert cells[3] == (1, 0, pytest.approx(51.075), pytest.approx(-1.96))
+    first = cells[0]
+    assert (first.row, first.col) == (0, 0)
+    assert first.lat == pytest.approx(51.0 + 0.05 / 2)
+    assert first.lon == pytest.approx(-2.0 + 0.08 / 2)
+    assert (cells[1].row, cells[1].col) == (0, 1)
+    assert cells[1].lat == pytest.approx(51.025) and cells[1].lon == pytest.approx(-1.88)
+    assert (cells[3].row, cells[3].col) == (1, 0)
+    assert cells[3].lat == pytest.approx(51.075) and cells[3].lon == pytest.approx(-1.96)
 
 
 # ── ORS matrix requests ──────────────────────────────────────────────
@@ -225,6 +237,7 @@ def test_config_signature_fingerprints_coordinates():
     assert config_signature(raw)["coords"] == {"Dad": (51.1, -1.88)}
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 async def test_changed_geocode_rejects_raw_reuse(tmp_path, capsys):
     """A raw built around the OLD geocoded coordinates must not be reused
     when the postcode now geocodes elsewhere."""
@@ -252,7 +265,7 @@ async def test_changed_geocode_rejects_raw_reuse(tmp_path, capsys):
     (out_dir / "drive_isochrone.json").write_text(_json.dumps(raw))
 
     async def _moved_geocode(postcode):  # geocoder now resolves elsewhere
-        return (51.5, -2.0)
+        return GeoPoint(51.5, -2.0)
 
     code = await drive_run(
         ["--config", str(cfg), "--out-dir", str(out_dir)], geocoder=_moved_geocode, ors_key=""
@@ -261,6 +274,7 @@ async def test_changed_geocode_rejects_raw_reuse(tmp_path, capsys):
     assert "regenerating" in capsys.readouterr().err
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 async def test_transient_geocode_failure_still_reuses_matching_raw(tmp_path, capsys):
     """A transient httpx geocoding failure (429/5xx) must also defer to the
     offline reuse path, not crash with a raw traceback."""
@@ -304,6 +318,7 @@ async def test_transient_geocode_failure_still_reuses_matching_raw(tmp_path, cap
     assert "reusing" in capsys.readouterr().out
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 async def test_geocode_failure_still_reuses_matching_raw(tmp_path, capsys):
     """A geocoding outage must not block offline reuse of a matching
     committed raw — the stored coordinates drive the signature comparison."""
@@ -401,6 +416,7 @@ def test_drive_map_html_one_marker_per_destination_label():
     assert "https://rm/b" not in html
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 async def test_run_fails_cleanly_on_bad_config(tmp_path):
     """A missing/corrupt destinations config must exit with the two-tier
     message, not a bare traceback."""
@@ -412,6 +428,7 @@ async def test_run_fails_cleanly_on_bad_config(tmp_path):
     assert code == 1
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 async def test_run_fails_cleanly_on_wrong_shaped_config(tmp_path):
     """A config file that is valid JSON but the wrong shape (a list, not an
     object) must exit via the two-tier message, not an AttributeError at
@@ -426,6 +443,7 @@ async def test_run_fails_cleanly_on_wrong_shaped_config(tmp_path):
     assert code == 1
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 async def test_run_fails_cleanly_on_empty_destinations_config(tmp_path):
     """An empty destinations list is accepted by the JSON shape but means
     nothing to route — exit with the two-tier message, not a min() over
@@ -440,6 +458,7 @@ async def test_run_fails_cleanly_on_empty_destinations_config(tmp_path):
     assert code == 1
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 async def test_validate_fails_cleanly_on_dict_shaped_searches(tmp_path):
     """--validate with a dict-shaped "searches" value must exit with the
     two-tier message, not iterate dict keys and crash."""
@@ -454,6 +473,7 @@ async def test_validate_fails_cleanly_on_dict_shaped_searches(tmp_path):
     assert code == 1
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 async def test_validate_fails_cleanly_on_missing_searches_key(tmp_path):
     """A payload without a 'searches' key must be flagged, not pass
     validation and then crash the success print with a KeyError."""
@@ -468,6 +488,7 @@ async def test_validate_fails_cleanly_on_missing_searches_key(tmp_path):
     assert code == 1
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 async def test_validate_fails_cleanly_on_null_metadata(tmp_path):
     """--validate with "metadata": null must exit with the two-tier message,
     not an AttributeError at metadata.get."""
@@ -482,6 +503,7 @@ async def test_validate_fails_cleanly_on_null_metadata(tmp_path):
     assert code == 1
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 async def test_validate_fails_cleanly_on_list_shaped_searches(tmp_path):
     """--validate with a top-level-list drive_searches.json must exit with
     the two-tier message, not an AttributeError at .get("searches")."""
@@ -494,6 +516,7 @@ async def test_validate_fails_cleanly_on_list_shaped_searches(tmp_path):
     assert code == 1
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 async def test_validate_fails_cleanly_on_corrupt_searches(tmp_path):
     """--validate with a corrupt drive_searches.json must not traceback."""
     from tools.commute.drive_isochrone import run as drive_run
@@ -530,6 +553,7 @@ async def test_fetch_matrix_does_not_retry_non_transient():
     assert calls["n"] == 1
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 async def test_run_fails_cleanly_on_malformed_raw_payload(tmp_path):
     """A structurally-broken committed raw payload (valid JSON, missing
     metadata) must exit via the two-tier message, not a KeyError traceback
@@ -556,6 +580,7 @@ async def test_run_fails_cleanly_on_malformed_raw_payload(tmp_path):
     assert not (out_dir / "drive_searches.json").exists()
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 async def test_run_does_not_write_when_validation_fails(tmp_path):
     """Regression: run() wrote the searches BEFORE validating, so a failing
     payload (e.g. a destination whose shed vanished) left an invalid committed
@@ -629,23 +654,24 @@ async def test_run_does_not_write_when_validation_fails(tmp_path):
 
 
 def test_kept_cells_threshold_boundary():
-    cells = [(r, c, 51.0 + r * 0.05, -2.0 + c * 0.08) for r in range(2) for c in range(3)]
+    cells = [GridCell(r, c, 51.0 + r * 0.05, -2.0 + c * 0.08) for r in range(2) for c in range(3)]
     durations = [d * MINUTE if d is not None else None for d in (0.0, 89.0, 90.0, 90.5, 91.0, None)]
-    assert kept_cells(cells, durations, 90 * MINUTE, 0 * MINUTE) == {(0, 0), (0, 1), (0, 2)}
+    assert kept_cells(cells, durations, 90 * MINUTE, 0 * MINUTE) == {GridCell(0, 0), GridCell(0, 1), GridCell(0, 2)}
 
 
 def test_kept_cells_slack_absorbs_boundary_overage():
-    cells = [(0, c, 51.0, -2.0 + c * 0.08) for c in range(4)]
+    cells = [GridCell(0, c, 51.0, -2.0 + c * 0.08) for c in range(4)]
     durations = [d * MINUTE for d in (90.0, 92.0, 93.0, 94.0)]
     slack = slack_minutes(4.0 * KM)  # ≈ 2.42
-    assert kept_cells(cells, durations, 90 * MINUTE, slack) == {(0, 0), (0, 1)}
-    assert (0, 2) not in kept_cells(cells, durations, 90 * MINUTE, slack)  # 93.0 > 90 + 2.42
+    assert kept_cells(cells, durations, 90 * MINUTE, slack) == {GridCell(0, 0), GridCell(0, 1)}
+    assert GridCell(0, 2) not in kept_cells(cells, durations, 90 * MINUTE, slack)  # 93.0 > 90 + 2.42
 
 
 def test_kept_cells_drops_unreachable():
     cells = [(0, 0, 51.0, -2.0), (0, 1, 51.0, -1.92)]
+    cells = [GridCell(0, 0, 51.0, -2.0), GridCell(0, 1, 51.0, -1.92)]
     durations = [None, 10.0 * MINUTE]
-    assert kept_cells(cells, durations, 90 * MINUTE, 0 * MINUTE) == {(0, 1)}
+    assert kept_cells(cells, durations, 90 * MINUTE, 0 * MINUTE) == {GridCell(0, 1)}
 
 
 # ── raw → searches ───────────────────────────────────────────────────
@@ -767,13 +793,15 @@ def test_raw_to_searches_keeps_main_shed_below_island_threshold():
 
 def test_components_are_four_connected():
     # edge-adjacent cells are one component; corner-touching cells are two
-    assert _components({(0, 0), (1, 0), (1, 1)}) == [{(0, 0), (1, 0), (1, 1)}]
-    assert _components({(0, 0), (1, 1)}) == [{(0, 0)}, {(1, 1)}]
+    assert _components({GridCell(0, 0), GridCell(1, 0), GridCell(1, 1)}) == [
+        {GridCell(0, 0), GridCell(1, 0), GridCell(1, 1)}
+    ]
+    assert _components({GridCell(0, 0), GridCell(1, 1)}) == [{GridCell(0, 0)}, {GridCell(1, 1)}]
 
 
 def test_signed_area_opposite_for_hole():
-    outer = [(0.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, 0.0)]
-    hole = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]  # reversed
+    outer = [GeoPoint(0.0, 0.0), GeoPoint(0.0, 1.0), GeoPoint(1.0, 1.0), GeoPoint(1.0, 0.0)]
+    hole = [GeoPoint(0.0, 0.0), GeoPoint(1.0, 0.0), GeoPoint(1.0, 1.0), GeoPoint(0.0, 1.0)]  # reversed
     assert _signed_area(outer) == -_signed_area(hole)
     assert _signed_area(outer) != 0
 
@@ -834,7 +862,7 @@ def test_raw_to_searches_absorbs_hole_and_keeps_large_island():
     assert ids == ["drive-dad-ox75gz-090", "drive-dad-ox75gz-090-2"]
     island = payload["searches"][1]
     # island polygon covers ~its 2×2 cells (0.1° × 0.16° ≈ 0.016 deg²)
-    area = abs(_signed_area(island["polygon"]))
+    area = abs(_signed_area([GeoPoint(lat, lon) for lat, lon in island["polygon"]]))
     assert 0.008 < area < 0.02
 
 
@@ -847,7 +875,7 @@ def test_raw_to_searches_drops_small_islands_below_threshold():
 
 
 def test_point_in_polygon():
-    square = [(51.0, -2.0), (51.0, -1.9), (51.1, -1.9), (51.1, -2.0)]
+    square = [GeoPoint(51.0, -2.0), GeoPoint(51.0, -1.9), GeoPoint(51.1, -1.9), GeoPoint(51.1, -2.0)]
     assert point_in_polygon(51.05, -1.95, square)
     assert not point_in_polygon(51.2, -1.95, square)
     # boundary counts as inside (conservative: never under-cover) — plain ray
@@ -939,6 +967,7 @@ def test_validate_payload_flags_non_dict_destination_without_crashing():
     assert any("malformed" in i for i in issues)
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_combined_map_fails_cleanly_on_malformed_payload(tmp_path):
     """main() must exit with the two-tier message, not a KeyError traceback,
     when a payload is valid JSON but structurally wrong."""
@@ -963,6 +992,7 @@ def test_combined_map_fails_cleanly_on_malformed_payload(tmp_path):
     assert not (tmp_path / "map.html").exists()
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_atomic_write_leaves_no_partial(tmp_path):
     """The artifact writer replaces via tmp + os.replace — a concurrent
     reader sees the old or the new file, never a truncated one, and no .tmp
@@ -978,6 +1008,7 @@ def test_atomic_write_leaves_no_partial(tmp_path):
     assert not list(out.parent.glob("*.tmp"))
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_combined_map_warns_when_drive_layers_absent(tmp_path, capsys):
     """A drive payload missing 'searches' must render the map with a
     warning — never silently produce a transit-only map that looks complete."""
@@ -1002,6 +1033,7 @@ def test_combined_map_warns_when_drive_layers_absent(tmp_path, capsys):
     assert "no drive sheds" in capsys.readouterr().err
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_combined_map_degrades_on_malformed_intersection_records(tmp_path, capsys):
     """Records missing expected keys (hand-edited) must drop the layer, not
     crash the whole map build with a KeyError."""
@@ -1029,6 +1061,7 @@ def test_combined_map_degrades_on_malformed_intersection_records(tmp_path, capsy
     assert "malformed" in capsys.readouterr().err
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_combined_map_degrades_on_malformed_intersection(tmp_path, capsys):
     """A valid-JSON-but-wrong-shape intersection (non-empty list) must
     render the map WITHOUT the layer, not crash after promising to."""
@@ -1055,6 +1088,7 @@ def test_combined_map_degrades_on_malformed_intersection(tmp_path, capsys):
     assert (tmp_path / "map.html").exists()
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_combined_map_warns_when_intersection_layer_is_missing(tmp_path, capsys):
     """An EMPTY (supported) intersection must not silently vanish from the
     map — the pipeline surfaces the missing 'Where we could live' layer."""

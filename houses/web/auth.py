@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import secrets
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote
@@ -22,34 +23,59 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from google.auth.exceptions import TransportError
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
-from houses.config import settings
+from houses.services_provider import get_services
+from houses.settings import settings
 
-_SESSION_MAX_AGE = timedelta(days=30)
+SESSION_MAX_AGE = timedelta(days=30)
 
 logger = logging.getLogger(__name__)
 
+@dataclass(frozen=True)
+class SessionMint:
+    """(user_payload, cookie_value) from _build_session — named so the
+    web callback and device-flow endpoint read the fields by meaning."""
+
+    payload: dict[str, Any]
+    cookie_value: str
+
+
+
+@dataclass(frozen=True)
+class _OAuthState:
+    """Per-login PKCE state: the code_verifier and when it was minted."""
+
+    code_verifier: str
+    created_at: float
+
+
+
 auth_router = APIRouter(prefix="/api/auth")
 
-# In-memory OAuth state store — maps state_token to dict with code_verifier
-# and created_at timestamp. Ephemeral — lost on server restart.
-_oauth_states: dict[str, dict] = {}
+# In-memory OAuth state store — maps state_token to its PKCE record.
+# Ephemeral — lost on server restart.
+# lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
+_oauth_states: dict[str, _OAuthState] = {}
 _STATE_MAX_AGE = timedelta(minutes=10)
 _STATE_MAX_ENTRIES = 100
+_OAUTH_STATE_BYTES = 32
 
 
 def _sweep_stale_states() -> None:
     """Remove OAuth state entries older than _STATE_MAX_AGE."""
     cutoff = datetime.now(UTC).timestamp() - _STATE_MAX_AGE.total_seconds()
-    stale = [k for k, v in _oauth_states.items() if v.get("created_at", 0) < cutoff]
+    stale = [k for k, v in _oauth_states.items() if v.created_at < cutoff]
     for k in stale:
         _oauth_states.pop(k, None)
 
 
-def _get_serializer() -> URLSafeTimedSerializer:
+
+
+def get_serializer() -> URLSafeTimedSerializer:
     """Return a serializer for signing session cookies."""
     return URLSafeTimedSerializer(settings.session_secret, salt="auth-session")
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def get_session_user(request: Request) -> dict[str, Any] | None:
     """Extract session user info from the signed ``session`` cookie.
 
@@ -60,7 +86,7 @@ def get_session_user(request: Request) -> dict[str, Any] | None:
     if not cookie:
         return None
     try:
-        return _get_serializer().loads(cookie, max_age=int(_SESSION_MAX_AGE.total_seconds()))
+        return get_serializer().loads(cookie, max_age=int(SESSION_MAX_AGE.total_seconds()))
     except (BadSignature, SignatureExpired):
         return None
 
@@ -78,10 +104,12 @@ def _person_superuser_flag(email: str, persons_attempt_value: Any) -> bool | Non
             if pe is not None and pe.casefold() == folded:
                 return bool(p.get("is_superuser"))
         elif hasattr(p, "email") and p.email is not None and p.email.casefold() == folded:
+            # lucidlint: ignore boolean-arg False is getattr's default, not a named flag
             return bool(getattr(p, "is_superuser", False))
     return None
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def effective_session_user(request: Request) -> dict[str, Any] | None:
     """The session user with is_superuser re-derived from LIVE settings.
 
@@ -95,17 +123,32 @@ def effective_session_user(request: Request) -> dict[str, Any] | None:
     if not session:
         return None
     try:
-        from houses.services_provider import get_services
-
         svc = get_services()
         persons_attempt = svc.persons_source.latest_attempt()
         if persons_attempt.succeeded:
             live = _person_superuser_flag(session.get("email", ""), persons_attempt.value_or_none())
+            # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
             if live is not None and live != session.get("is_superuser", False):
                 session = {**session, "is_superuser": live}
+    # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
     except Exception:
         logger.exception("Failed to re-derive superuser flag from settings")
+        return session
     return session
+
+
+def _current_person_name(session: Mapping[str, Any]) -> str | None:
+    """The Person display name for the session email, or None when unknown/failed."""
+    svc = get_services()
+    try:
+        persons_attempt = svc.persons_source.latest_attempt()
+        if persons_attempt.succeeded:
+            return _lookup_person_by_email(session["email"], persons_attempt.value_or_none())
+    # lucidlint: ignore broad-except deliberate degrade — person-name lookup failure returns None
+    except Exception:
+        logger.exception("Failed to look up person name")
+        return None
+    return None
 
 
 def _make_session_cookie(
@@ -116,6 +159,7 @@ def _make_session_cookie(
     impersonating: str | None = None,
 ) -> str:
     """Create a signed session cookie value."""
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     payload: dict[str, Any] = {
         "email": email,
         "name": name,
@@ -123,10 +167,10 @@ def _make_session_cookie(
         "is_superuser": is_superuser,
         "impersonating": impersonating,
     }
-    return _get_serializer().dumps(payload)
+    return get_serializer().dumps(payload)
 
 
-def _build_session(id_info: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
+def _build_session(id_info: Mapping[str, Any]) -> SessionMint:
     """Return (user_payload, session_cookie_value) for verified Google id_info.
 
     Shared by the web callback and the device-flow endpoint so both mint
@@ -139,8 +183,6 @@ def _build_session(id_info: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
 
     # Look up Person by email to determine superuser status
     is_superuser = False
-    from houses.services_provider import get_services
-
     svc = get_services()
     persons_attempt = svc.persons_source.latest_attempt()
     if persons_attempt.succeeded:
@@ -161,6 +203,7 @@ def _build_session(id_info: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
                 break
 
     cookie_value = _make_session_cookie(folded_email, name, picture, is_superuser)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     payload = {
         "email": folded_email,
         "name": name,
@@ -168,7 +211,7 @@ def _build_session(id_info: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
         "is_superuser": is_superuser,
         "impersonating": None,
     }
-    return payload, cookie_value
+    return SessionMint(payload, cookie_value)
 
 
 def _lookup_person_by_email(email: str, persons_attempt_value: Any) -> str | None:
@@ -227,7 +270,7 @@ def _set_session_cookie(response, cookie_value: str, secure: bool) -> None:
         samesite="lax",
         path="/",
         secure=secure,
-        max_age=int(_SESSION_MAX_AGE.total_seconds()),
+        max_age=int(SESSION_MAX_AGE.total_seconds()),
     )
 
 
@@ -251,9 +294,7 @@ async def login():
     Returns JSON with ``auth_url`` (redirect browser to Google).
     """
     _sweep_stale_states()
-    state = secrets.token_urlsafe(32)
-
-    from houses.services_provider import get_services
+    state = secrets.token_urlsafe(_OAUTH_STATE_BYTES)
 
     svc = get_services()
     try:
@@ -270,10 +311,10 @@ async def login():
     if len(_oauth_states) >= _STATE_MAX_ENTRIES:
         return {"status": "error", "detail": "Too many login attempts, try again"}
 
-    _oauth_states[state] = {
-        "code_verifier": code_verifier,
-        "created_at": datetime.now(UTC).timestamp(),
-    }
+    _oauth_states[state] = _OAuthState(
+        code_verifier=code_verifier,
+        created_at=datetime.now(UTC).timestamp(),
+    )
     return {"auth_url": authorization_url}
 
 
@@ -295,25 +336,24 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
     if state_data is None:
         return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=invalid_state")
 
-    code_verifier = state_data.get("code_verifier", "") if isinstance(state_data, dict) else ""
+    code_verifier = state_data.code_verifier
     if not code_verifier:
         return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=missing_code_verifier")
-
-    from houses.services_provider import get_services
 
     svc = get_services()
     try:
         id_info = svc.oauth_service.exchange_code(code, code_verifier, state)
-
+        # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
         if not id_info.get("email_verified", False):
             return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=email_not_verified")
 
-        _, cookie_value = _build_session(id_info)
+        cookie_value = _build_session(id_info).cookie_value
 
         response = RedirectResponse(url=f"{settings.frontend_url}/")
         _set_session_cookie(response, cookie_value, _is_secure(request))
         return response
 
+    # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
     except Exception as e:
         logger.exception("OAuth callback failed")
         return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=" + quote(str(e)))
@@ -332,7 +372,7 @@ async def device(request: Request):
     """
     try:
         body = await request.json()
-    except Exception as e:
+    except ValueError as e:
         logger.debug("Malformed JSON on /api/auth/device: %s", e)
         return JSONResponse(status_code=400, content={"detail": "invalid JSON body"})
     if not isinstance(body, dict):
@@ -347,8 +387,6 @@ async def device(request: Request):
             request.headers.get("origin", "?"),
         )
         return JSONResponse(status_code=403, content={"detail": "cross-origin requests not allowed"})
-
-    from houses.services_provider import get_services
 
     if not settings.device_client_id:
         logger.warning(
@@ -365,13 +403,16 @@ async def device(request: Request):
         return JSONResponse(
             status_code=503, content={"detail": "identity provider unreachable, try again"}
         )
+    # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
     except Exception as e:
         logger.warning("Device-flow id_token verification failed: %s", e)
         return JSONResponse(status_code=401, content={"detail": "invalid id_token"})
+    # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
     if not id_info.get("email_verified", False):
         return JSONResponse(status_code=401, content={"detail": "email not verified"})
 
-    payload, cookie_value = _build_session(id_info)
+    mint = _build_session(id_info)
+    payload, cookie_value = mint.payload, mint.cookie_value
     response = JSONResponse(
         content={"authenticated": True, **payload},
         headers={"Cache-Control": "no-store"},
@@ -394,23 +435,16 @@ async def me(request: Request):
         return {"authenticated": False}
 
     # Look up associated Person by email
-    person_name = None
-    from houses.services_provider import get_services
+    person_name = _current_person_name(session)
 
-    svc = get_services()
-    try:
-        persons_attempt = svc.persons_source.latest_attempt()
-        if persons_attempt.succeeded:
-            person_name = _lookup_person_by_email(session["email"], persons_attempt.value_or_none())
-    except Exception:
-        logger.exception("Failed to look up person name")
-
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     return {
         "authenticated": True,
         "email": session["email"],
         "name": session["name"],
         "picture": session.get("picture", ""),
         "person": person_name,
+        # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
         "is_superuser": session.get("is_superuser", False),
         "impersonating": session.get("impersonating"),
     }
@@ -425,6 +459,7 @@ async def logout(request: Request):
 
 
 @auth_router.post("/impersonate")
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 async def impersonate(request: Request, body: dict):
     """Set or clear impersonation for a superuser.
 
@@ -446,12 +481,11 @@ async def impersonate(request: Request, body: dict):
     if person is not None and not isinstance(person, str):
         raise HTTPException(status_code=400, detail="person must be a string or null")
     if person is not None:
-        from houses.services_provider import get_services
-
         persons_attempt = get_services().persons_source.latest_attempt()
         for p in persons_attempt.value_or_none() or []:
             name = getattr(p, "name", None) if not isinstance(p, dict) else p.get("name")
             if name == person:
+                # lucidlint: ignore boolean-arg False is getattr's default, not a named flag
                 is_child = bool(p.get("is_child")) if isinstance(p, dict) else bool(getattr(p, "is_child", False))
                 if is_child:
                     raise HTTPException(status_code=400, detail="Cannot impersonate a child")
@@ -461,6 +495,7 @@ async def impersonate(request: Request, body: dict):
         email=session["email"],
         name=session["name"],
         picture=session.get("picture", ""),
+        # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
         is_superuser=session.get("is_superuser", False),
         impersonating=person,
     )

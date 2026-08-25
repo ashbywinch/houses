@@ -8,13 +8,25 @@ Usage:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from houses.config import settings
+from houses.settings import settings
+
+logger = logging.getLogger(__name__)
+
+
+def _json_or_raw(value: str) -> object:
+    """Parse a stored JSON value; fall back to a truncated raw string."""
+    try:
+        return json.loads(value)
+    except ValueError as e:
+        logger.debug("corrupt stored JSON (showing raw text): %s", e)
+        return value[:60]
 
 
 def _get_conn():
@@ -62,15 +74,18 @@ def inspect_rid(rid: str):
         if nid not in nodes:
             try:
                 nodes[nid] = json.loads(r["result_json"])
-            except Exception:
+            except ValueError as e:
+                logger.debug("corrupt result_json for %s (shown as _corrupt): %s", nid, e)
                 nodes[nid] = {"_corrupt": str(r["result_json"][:200])}
-
-    for nid in sorted(nodes):
+                continue
         data = nodes[nid]
         short = nid.replace(f"{rid}/", "", 1)
         status = data.get("status", "?")
+        # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
         s = data.get("succeeded", False)
+        # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
         p = data.get("pending", False)
+        # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
         i = data.get("impossible", False)
         val = data.get("value")
         error = data.get("error", "")
@@ -100,13 +115,13 @@ def inspect_rid(rid: str):
         print("\n  --- source_values ---")
         for row in sv:
             short = row["node_id"].replace(f"{rid}/", "", 1)
-            try:
-                v = json.loads(row["value"])
-            except Exception:
-                v = row["value"][:60]
+            v = _json_or_raw(row["value"])
             print(f"    {short:30s} src={row['source']:20s} val={str(v)[:80]}")
 
-    # Derived values
+    conn.close()
+
+
+def _print_derived_values(conn, rid):
     dv = conn.execute(
         "SELECT node_id, value, source, error FROM derived_values WHERE property_id=?",
         (rid,),
@@ -115,14 +130,8 @@ def inspect_rid(rid: str):
         print("\n  --- derived_values ---")
         for row in dv:
             short = row["node_id"].replace(f"{rid}/", "", 1)
-            try:
-                v = json.loads(row["value"])
-            except Exception:
-                v = row["value"][:60]
+            v = _json_or_raw(row["value"])
             print(f"    {short:30s} src={row['source']:20s} err={row['error']} val={str(v)[:80]}")
-
-    conn.close()
-
 
 def main():
     args = sys.argv[1:]

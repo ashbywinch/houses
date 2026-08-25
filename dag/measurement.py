@@ -88,18 +88,19 @@ class Measurement(Generic[T]):
     def __add__(self, other: Any) -> Measurement:
         if isinstance(other, Measurement):
             return Measurement(
-                self.value + other.value,  # type: ignore[operator]
+                self.value + other.value,
                 _combine(_add, self.value, other.value, self.stddev, other.stddev),
             )
         return self + Measurement(other)
 
+# lucidlint: ignore middle-man protocol/reflected-operator requirement
     def __radd__(self, other: Any) -> Measurement:
         return self.__add__(other)  # addition is commutative
 
     def __sub__(self, other: Any) -> Measurement:
         if isinstance(other, Measurement):
             return Measurement(
-                self.value - other.value,  # type: ignore[operator]
+                self.value - other.value,
                 _combine(_sub, self.value, other.value, self.stddev, other.stddev),
             )
         return self - Measurement(other)
@@ -110,18 +111,19 @@ class Measurement(Generic[T]):
     def __mul__(self, other: Any) -> Measurement:
         if isinstance(other, Measurement):
             return Measurement(
-                self.value * other.value,  # type: ignore[operator]
+                self.value * other.value,
                 _combine(_mul, self.value, other.value, self.stddev, other.stddev),
             )
         return self * Measurement(other)
 
+# lucidlint: ignore middle-man protocol/reflected-operator requirement
     def __rmul__(self, other: Any) -> Measurement:
         return self.__mul__(other)  # multiplication is commutative
 
     def __truediv__(self, other: Any) -> Measurement:
         if isinstance(other, Measurement):
             return Measurement(
-                self.value / other.value,  # type: ignore[operator]
+                self.value / other.value,
                 _combine(_truediv, self.value, other.value, self.stddev, other.stddev),
             )
         return self / Measurement(other)
@@ -130,14 +132,16 @@ class Measurement(Generic[T]):
         return Measurement(other) / self
 
     def __neg__(self) -> Measurement:
-        return Measurement(-self.value, self.stddev)  # type: ignore[operator]
+        return Measurement(-self.value, self.stddev)  # type: ignore[operator]  # T is an unconstrained TypeVar — the checker can't verify it supports unary `-` (pyrefly: "Unary - is not supported on T"); runtime T is always pint Quantity/numbers/Money, all of which define __neg__
 
     # ── Provenance / serialization ──────────────────────────────
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def to_provenance_value(self) -> dict:
         """JSON-safe projection: ``{value, uncertainty}``.
 
         ``project_value`` handles the wrapped value's own projection
         (Money → its canonical string form, etc.).
         """
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         return {"value": project_value(self.value), "uncertainty": self.stddev}

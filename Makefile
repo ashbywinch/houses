@@ -5,7 +5,7 @@
 # bash, everywhere.
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
-.PHONY: help setup deps uv-sync install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e check lint format clean reset-db commute-shed commute-searches commute-validate commute-drive commute-drive-validate commute-map commute-intersection commute-serve
+.PHONY: help setup deps uv-sync install-hooks run frontend-dev frontend-build frontend-setup test test-all test-integration test-e2e e2e check lint format clean reset-db commute-shed commute-searches commute-validate commute-drive commute-drive-validate commute-map commute-intersection commute-serve lucidlint lucidlint-update-baseline
 
 # Variables
 PYTHON := .venv/bin/python
@@ -102,7 +102,7 @@ stop:
 
 run-prod: setup frontend-build
 	@echo "${YELLOW}Serving frontend build + backend on http://127.0.0.1:8765${NC}"
-	@$(UV) run python -c "import uvicorn; from houses.config import settings; from houses.server import app; from fastapi.staticfiles import StaticFiles; from pathlib import Path; build_dir = Path('houses/frontend/dist'); if build_dir.exists(): app.mount('/', StaticFiles(directory=str(build_dir), html=True), name='frontend'); uvicorn.run(app, host=settings.host, port=settings.port, reload=False)"
+	@$(UV) run python -c "import uvicorn; from houses.settings import settings; from houses.server import app; from fastapi.staticfiles import StaticFiles; from pathlib import Path; build_dir = Path('houses/frontend/dist'); if build_dir.exists(): app.mount('/', StaticFiles(directory=str(build_dir), html=True), name='frontend'); uvicorn.run(app, host=settings.host, port=settings.port, reload=False)"
 
 login: setup
 	@echo "${YELLOW}Requires servers running — use 'make run' first${NC}"
@@ -173,6 +173,24 @@ typecheck-update-baseline: deps
 	@$(PYTHON) scripts/pyrefly-lock.py update-baseline --pyrefly-config pyrefly.toml
 
 .PHONY: typecheck-py typecheck typecheck-update-baseline
+
+# lucidlint (github.com/ashbywinch/lucidlint) — the deterministic code-health
+# gate. Installed as a dev extra (pyproject.toml) via uv sync; the gate scans
+# the repo and fails only on NEW actions above the acknowledged baseline.
+# Warnings never fail. Findings carry the exact fix command — see
+# skill://lucidlint-workflow before acting on a finding.
+.PHONY: lucidlint lucidlint-update-baseline
+LUCIDLINT := .venv/bin/lucidlint
+
+lucidlint: deps
+	@echo "== lucidlint gate =="
+	@$(LUCIDLINT) --repo . --baseline lucidlint.json
+
+# Lock today's acknowledged debt so the gate fails only on NEW findings.
+# Run only after deliberately accepting remaining actions (see
+# docs/lucidlint-review-log.md for the reasoning behind every accepted item).
+lucidlint-update-baseline: deps
+	@$(LUCIDLINT) --repo . --update-baseline --baseline lucidlint.json
 
 format: setup
 	@$(RUFF) check --fix houses/ tests/ dag/

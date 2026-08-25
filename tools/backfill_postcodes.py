@@ -8,6 +8,7 @@ app to cascade through the in-memory nodes it already holds.
 import asyncio
 
 from dag.user_input_node import UserInputNode
+from houses.nodes.property_nodes import PropertyNodes
 
 BACKFILL = {
     "173677193": "RG4 9EJ",
@@ -16,7 +17,6 @@ BACKFILL = {
 
 
 async def main() -> None:
-    from houses.nodes.property import PropertyNodes
 
     for rid, postcode in BACKFILL.items():
         prop = PropertyNodes(rid)

@@ -34,13 +34,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import html
 import json
 import logging
 import math
 import os
 import re
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -49,14 +50,48 @@ from typing import Any
 import httpx
 from pint import Quantity
 
-from tools.commute.combined_map import _js_safe_json, _user_label
+from houses.api_cache import cached_async_client
+from houses.geopoint import GeoPoint
+from houses.location import geocode
+from houses.settings import settings
 from tools.commute.rightmove_url import build_search_url, parse_search_url
 from tools.commute.station_shed import DEFAULT_BBOX, BBox
-from tools.commute.tile import Grid, Rect
+from tools.commute.tile import KM_PER_DEG_LAT, Grid, GridCell, Rect
 from tools.commute.union import union_outline
 from tools.commute.units import KM, KMH, MINUTE
 
 logger = logging.getLogger(__name__)
+
+@dataclass(frozen=True)
+class MapAssets:
+    """The vendored Leaflet assets embedded into the page: JS/CSS sources and
+    filename → data-URI icon map."""
+
+    leaflet_js: str
+    leaflet_css: str
+    icons: dict[str, str]
+
+
+# one colour per layer — the transit layer always takes _COLORS[0], so the
+# drive palette excludes it (a drive shed must never look like the train shed)
+_COLORS = ["#e33", "#3a3", "#e80", "#a3a", "#0aa"]
+_DRIVE_COLORS = _COLORS[1:]
+
+
+def js_safe_json(obj) -> str:
+    """JSON safe to embed inside an HTML <script> element.
+
+    json.dumps does not escape ``<``/``>``/``&``, so a user-controlled label
+    like ``</script><script>…`` would terminate the script element. Escape
+    them as unicode escapes (still valid JSON; JS decodes them back).
+    """
+    return json.dumps(obj).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
+
+def user_label(label: str) -> str:
+    """HTML-escape user-controlled labels: they render via innerHTML in the
+    layer control and marker popups."""
+    return html.escape(label)
 
 ORS_MATRIX_URL = "https://api.openrouteservice.org/v2/matrix/driving-car"
 ENGINE_VERSION = "drive-isochrone-v1"
@@ -77,6 +112,14 @@ MIN_ISLAND_CELLS = 4  # fringe speckles below this many cells are noise
 GB_BBOX = BBox(**DEFAULT_BBOX)  # sanity bound for polygon vertices
 
 _REQUEST_DELAY_S = 0.2  # polite sequential cadence between matrix calls
+CELL_COUNT_EPSILON = 1e-9  # float-error guard before ceil — exact multiples must not add a phantom row
+SECONDS_PER_MINUTE = 60.0
+MINUTES_PER_HOUR = 60.0
+MINUTES_DECIMALS = 3
+POLYLINE_DECIMALS = 5
+MIN_POLYGON_VERTICES = 4
+MIN_CONTAINMENT_VERTICES = 3
+ROUND_TRIP_EPS = 5e-6  # degree tolerance for URL polygon round-trip comparison
 
 
 @dataclass(frozen=True)
@@ -153,30 +196,31 @@ def slack_minutes(cell_km: Quantity) -> Quantity:
 def region_bbox(lat: float, lon: float, region_km: Quantity) -> Rect:
     """Destination-centred square region, ``region_km`` in every direction."""
     km = region_km.to("km").magnitude
-    lat_deg = km / 111.0
-    lon_deg = km / (111.0 * math.cos(math.radians(lat)))
+    lat_deg = km / KM_PER_DEG_LAT
+    lon_deg = km / (KM_PER_DEG_LAT * math.cos(math.radians(lat)))
     return Rect(lat - lat_deg, lat + lat_deg, lon - lon_deg, lon + lon_deg)
 
 
-def grid_cell_centers(grid: Grid) -> list[tuple[int, int, float, float]]:
-    """All cell centres row-major: ``(row, col, lat, lon)``.
+def grid_cell_centers(grid: Grid) -> list[GridCell]:
+    """All cell centres row-major: ``GridCell(row, col, lat, lon)``.
 
     Row/col are the grid indices ``union_outline`` traces, so the duration
     list returned by the matrix call aligns with the kept-cell set by index.
     """
-    rows = math.ceil((grid.bbox.lat_max - grid.bbox.lat_min) / grid.lat_deg - 1e-9)
-    cols = math.ceil((grid.bbox.lon_max - grid.bbox.lon_min) / grid.lon_deg - 1e-9)
-    cells: list[tuple[int, int, float, float]] = []
+    rows = math.ceil((grid.bbox.lat_max - grid.bbox.lat_min) / grid.lat_deg - CELL_COUNT_EPSILON)
+    cols = math.ceil((grid.bbox.lon_max - grid.bbox.lon_min) / grid.lon_deg - CELL_COUNT_EPSILON)
+    cells: list[GridCell] = []
     for r in range(rows):
         for c in range(cols):
             rect = grid.cell_rect(r, c)
-            cells.append((r, c, (rect.lat_min + rect.lat_max) / 2.0, (rect.lon_min + rect.lon_max) / 2.0))
+            cells.append(GridCell(r, c, (rect.lat_min + rect.lat_max) / 2.0, (rect.lon_min + rect.lon_max) / 2.0))
     return cells
 
 
 # ── ORS matrix adapter ───────────────────────────────────────────────
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def build_matrix_requests(
     dest_lon: float, dest_lat: float, centers: list[tuple[float, float]], max_locations: int = MAX_LOCATIONS_PER_REQUEST
 ) -> list[dict]:
@@ -204,6 +248,7 @@ def build_matrix_requests(
     return bodies
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def parse_durations(data: dict, count: int) -> list[Quantity | None]:
     """Extract minutes from an ORS matrix response, aligned to the request order.
 
@@ -220,10 +265,11 @@ def parse_durations(data: dict, count: int) -> list[Quantity | None]:
     for row in rows:
         if len(row) != 1:
             raise ValueError(f"unexpected duration row {row!r} (expected one destination)")
-        out.append(None if row[0] is None else row[0] / 60.0 * MINUTE)
+        out.append(None if row[0] is None else row[0] / SECONDS_PER_MINUTE * MINUTE)
     return out
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 async def fetch_matrix(body: dict, *, key: str, timeout: float = 120.0, client: Any = None) -> dict:
     """POST one matrix request through the disk cache; retry transient errors.
 
@@ -237,8 +283,8 @@ async def fetch_matrix(body: dict, *, key: str, timeout: float = 120.0, client: 
     context manager exposing ``post(url, json=, headers=)``; default is the
     disk-cached httpx client.
     """
-    from houses.api_cache import cached_async_client
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     headers = {"Content-Type": "application/json", "Authorization": key}
     transient = (429, 500, 502, 503, 504)
     for attempt in (1, 2):
@@ -259,54 +305,63 @@ async def fetch_matrix(body: dict, *, key: str, timeout: float = 120.0, client: 
             if attempt == 2:
                 raise
             await asyncio.sleep(2.0)
-    raise RuntimeError("unreachable")  # pragma: no cover
+    raise RuntimeError("unreachable")  # pragma: no cover  # unreachable: attempts return or raise, type-checker only
 
 
 def kept_cells(
-    cells: list[tuple[int, int, float, float]],
+    cells: list[GridCell],
     durations_min: Sequence[Quantity | None],
     threshold_min: Quantity,
     slack: Quantity,
-) -> set[tuple[int, int]]:
+) -> set[GridCell]:
     """Cells whose centre drive time fits the threshold (plus boundary slack)."""
-    kept: set[tuple[int, int]] = set()
-    for (r, c, _lat, _lon), dur in zip(cells, durations_min, strict=True):
-        if dur is not None and dur <= threshold_min + slack:
-            kept.add((r, c))
-    return kept
+    return {
+        cell
+        for cell, dur in zip(cells, durations_min, strict=True)
+        if dur is not None and dur <= threshold_min + slack
+    }
 
 
 # ── payloads ─────────────────────────────────────────────────────────
 
 
+@dataclass(frozen=True)
+class MatrixBatchConfig:
+    """Grid + ORS matrix configuration for one raw-payload build.
+
+    ``fetch`` is injectable for tests: ``async (body, *, key) -> ORS matrix
+    response`` — the same signature as the real ``fetch_matrix``; None means
+    the real client.
+    """
+
+    cell_km: Quantity
+    region_km: Quantity
+    key: str
+    fetch: Callable | None = None
+
+
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 async def build_raw(
     destinations: list[DriveDestination],
-    coords: list[tuple[float, float]],
-    *,
-    cell_km: Quantity,
-    region_km: Quantity,
-    key: str,
-    fetch=None,
+    coords: list[GeoPoint],
+    config: MatrixBatchConfig,
     generated_at: str,
 ) -> dict:
     """Geocode-backed matrix batch → the raw isochrone payload.
 
-    ``fetch`` is injectable for tests: ``async (body, *, key) -> ORS matrix
-    response`` — the same signature as the real ``fetch_matrix``.
     Payload values are bare unit-named numbers (the wire format); all
     computation above is Quantity.
     """
-    if fetch is None:
-        fetch = fetch_matrix
+    fetch = config.fetch or fetch_matrix
     records: list[dict] = []
-    for dest, (lat, lon) in zip(destinations, coords, strict=True):
-        bbox = region_bbox(lat, lon, region_km)
-        grid = Grid.from_cell_km(bbox, cell_km.to("km").magnitude)
+    for dest, point in zip(destinations, coords, strict=True):
+        bbox = region_bbox(point.lat, point.lon, config.region_km)
+        grid = Grid.from_cell_km(bbox, config.cell_km.to("km").magnitude)
         cells = grid_cell_centers(grid)
-        centers = [(c_lon, c_lat) for _r, _c, c_lat, c_lon in cells]  # ORS wants [lon, lat]
+        centers = [(cell.lon, cell.lat) for cell in cells]  # ORS wants [lon, lat]
         durations: list[Quantity | None] = []
-        for body in build_matrix_requests(lon, lat, centers):
-            data = await fetch(body, key=key)
+        for body in build_matrix_requests(point.lon, point.lat, centers):
+            data = await fetch(body, key=config.key)
             durations.extend(parse_durations(data, len(body["sources"])))
             if _REQUEST_DELAY_S:
                 await asyncio.sleep(_REQUEST_DELAY_S)
@@ -314,11 +369,11 @@ async def build_raw(
             {
                 "label": dest.label,
                 "postcode": dest.postcode,
-                "lat": lat,
-                "lon": lon,
+                "lat": point.lat,
+                "lon": point.lon,
                 "threshold_min": int(dest.threshold_min.to("minute").magnitude),
-                "cell_km": cell_km.to("km").magnitude,
-                "slack_min": round(slack_minutes(cell_km).to("minute").magnitude, 3),
+                "cell_km": config.cell_km.to("km").magnitude,
+                "slack_min": round(slack_minutes(config.cell_km).to("minute").magnitude, MINUTES_DECIMALS),
                 "grid": {
                     "lat_min": bbox.lat_min,
                     "lat_max": bbox.lat_max,
@@ -327,25 +382,27 @@ async def build_raw(
                 },
                 "cells": [
                     {
-                        "r": r,
-                        "c": c,
-                        "lat": lat_c,
-                        "lon": lon_c,
-                        "duration_min": None if dur is None else round(dur.to("minute").magnitude, 3),
+                        "r": cell.row,
+                        "c": cell.col,
+                        "lat": cell.lat,
+                        "lon": cell.lon,
+                        "duration_min": None if dur is None else round(dur.to("minute").magnitude, MINUTES_DECIMALS),
                     }
-                    for (r, c, lat_c, lon_c), dur in zip(cells, durations, strict=True)
+                    for cell, dur in zip(cells, durations, strict=True)
                 ],
             }
         )
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     return {
         "metadata": {
             "engine_version": ENGINE_VERSION,
             "profile": "driving-car",
             "speed_model": "free-flow",
             "threshold_min": int(min(d.threshold_min for d in destinations).to("minute").magnitude),
-            "cell_km": cell_km.to("km").magnitude,
-            "region_km": region_km.to("km").magnitude,
+            "cell_km": config.cell_km.to("km").magnitude,
+            "region_km": config.region_km.to("km").magnitude,
             "destinations": [
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
                 {
                     "label": d.label,
                     "postcode": d.postcode,
@@ -360,6 +417,7 @@ async def build_raw(
     }
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def config_signature(raw: dict) -> dict:
     """The config identity a raw payload was built under.
 
@@ -372,6 +430,7 @@ def config_signature(raw: dict) -> dict:
         for rec in raw.get("destinations", [])
         if isinstance(rec, dict) and "label" in rec and "lat" in rec and "lon" in rec
     }
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     return {
         "engine_version": meta["engine_version"],
         "profile": meta["profile"],
@@ -386,9 +445,10 @@ def config_signature(raw: dict) -> dict:
     }
 
 
+# lucidlint: ignore record-shape component cell sets — homogeneous collections, not field-wise records
 def retained_components(
-    kept: set[tuple[int, int]], min_island_cells: int = MIN_ISLAND_CELLS
-) -> list[set[tuple[int, int]]]:
+    kept: set[GridCell], min_island_cells: int = MIN_ISLAND_CELLS
+) -> list[set[GridCell]]:
     """Components to outline: the main shed ALWAYS, plus satellites of at
     least ``min_island_cells`` cells — the single home of the
     'fringe speckles are noise, the destination's own shed never is' rule
@@ -399,33 +459,40 @@ def retained_components(
     return [c for c in comps if c is comps[0] or len(c) >= min_island_cells]
 
 
-def _components(kept: set[tuple[int, int]]) -> list[set[tuple[int, int]]]:
+# lucidlint: ignore record-shape component cell sets — homogeneous collections, not field-wise records
+def _components(kept: set[GridCell]) -> list[set[GridCell]]:
     """Connected components of the kept-cell set under 4-neighbourhood adjacency.
 
     Cells touching only at a corner are separate components — the same
     connectivity union_outline traces, so each component outlines cleanly.
     """
-    seen: set[tuple[int, int]] = set()
-    comps: list[set[tuple[int, int]]] = []
-    for cell in sorted(kept):
+    seen: set[GridCell] = set()
+    comps: list[set[GridCell]] = []
+    for cell in sorted(kept, key=lambda c: (c.row, c.col)):
         if cell in seen:
             continue
-        comp: set[tuple[int, int]] = {cell}
+        comp: set[GridCell] = {cell}
         stack = [cell]
         seen.add(cell)
         while stack:
-            r, c = stack.pop()
-            for n in ((r - 1, c), (r + 1, c), (r, c - 1), (r, c + 1)):
-                if n in kept and n not in seen:
-                    seen.add(n)
-                    comp.add(n)
-                    stack.append(n)
+            current = stack.pop()
+            r, c = current.row, current.col
+            for neighbor in (
+                GridCell(r - 1, c),
+                GridCell(r + 1, c),
+                GridCell(r, c - 1),
+                GridCell(r, c + 1),
+            ):
+                if neighbor in kept and neighbor not in seen:
+                    seen.add(neighbor)
+                    comp.add(neighbor)
+                    stack.append(neighbor)
         comps.append(comp)
     # deterministic order: largest (the destination's shed) first, then by position
-    return sorted(comps, key=lambda comp: (-len(comp), min(r for r, _ in comp), min(c for _, c in comp)))
+    return sorted(comps, key=lambda comp: (-len(comp), min(c.row for c in comp), min(c.col for c in comp)))
 
 
-def _signed_area(poly: list[tuple[float, float]]) -> float:
+def _signed_area(poly: list[GeoPoint]) -> float:
     """Shoelace signed area — sign separates outer boundaries from holes.
 
     union_outline keeps the kept cells on the interior's left, so a component's
@@ -433,11 +500,11 @@ def _signed_area(poly: list[tuple[float, float]]) -> float:
     opposite way. The outer ring is the largest |area| loop of its component.
     """
     return sum(
-        lat1 * lon2 - lat2 * lon1 for (lat1, lon1), (lat2, lon2) in zip(poly, poly[1:] + poly[:1], strict=True)
+        a.lat * b.lon - b.lat * a.lon for a, b in zip(poly, poly[1:] + poly[:1], strict=True)
     ) / 2.0
 
 
-def _outer_loop(cells: set[tuple[int, int]], grid: Grid) -> list[tuple[float, float]] | None:
+def outer_loop(cells: set[GridCell], grid: Grid) -> list[GeoPoint] | None:
     """A component's outer boundary loop (holes are absorbed, not traced)."""
     loops = union_outline(cells, grid)
     if not loops:
@@ -445,6 +512,7 @@ def _outer_loop(cells: set[tuple[int, int]], grid: Grid) -> list[tuple[float, fl
     return max(loops, key=lambda loop: abs(_signed_area(loop)))
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def raw_to_searches(
     raw: dict, *, min_beds: int = 2, property_type: str = "houses", generated_at: str, min_island_cells: int = 4
 ) -> dict:
@@ -466,7 +534,7 @@ def raw_to_searches(
     searches: list[dict] = []
     for dest in raw["destinations"]:
         grid = Grid.from_cell_km(Rect(**dest["grid"]), dest["cell_km"])
-        cells = [(c["r"], c["c"], c["lat"], c["lon"]) for c in dest["cells"]]
+        cells = [GridCell(c["r"], c["c"], c["lat"], c["lon"]) for c in dest["cells"]]
         # payload values are bare unit-named numbers (the wire format) —
         # restore units for the Quantity computation
         durations = [None if c["duration_min"] is None else c["duration_min"] * MINUTE for c in dest["cells"]]
@@ -476,10 +544,10 @@ def raw_to_searches(
         # same string (e.g. "Dad" and "Dad!"), so the postcode disambiguates
         postcode_slug = re.sub(r"[^a-z0-9]+", "", dest["postcode"].lower()) or "pc"
         for i, comp in enumerate(retained_components(kept, min_island_cells), 1):
-            loop = _outer_loop(comp, grid)
+            loop = outer_loop(comp, grid)
             if loop is None:
                 continue
-            poly = [(round(lat, 5), round(lon, 5)) for lat, lon in loop]
+            poly = [(round(p.lat, POLYLINE_DECIMALS), round(p.lon, POLYLINE_DECIMALS)) for p in loop]
             suffix = "" if i == 1 else f"-{i}"
             searches.append(
                 {
@@ -494,6 +562,7 @@ def raw_to_searches(
                     "threshold_min": dest["threshold_min"],
                 }
             )
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     return {
         "metadata": {
             "engine_version": SEARCHES_VERSION,
@@ -512,7 +581,7 @@ def raw_to_searches(
 # ── validation ───────────────────────────────────────────────────────
 
 
-def point_in_polygon(lat: float, lon: float, poly: list[tuple[float, float]]) -> bool:
+def point_in_polygon(lat: float, lon: float, poly: list[GeoPoint]) -> bool:
     """Ray-casting point-in-polygon; boundary counts as inside.
 
     Conservative (boundary-inclusive) matches the toolchain's over-coverage
@@ -526,12 +595,12 @@ def point_in_polygon(lat: float, lon: float, poly: list[tuple[float, float]]) ->
     inside = False
     n = len(poly)
     for i in range(n):
-        lat1, lon1 = poly[i]
-        lat2, lon2 = poly[(i + 1) % n]
-        if _point_segment_distance(lat, lon, lat1, lon1, lat2, lon2) <= eps:
+        p1 = poly[i]
+        p2 = poly[(i + 1) % n]
+        if _point_segment_distance(GeoPoint(lat, lon), p1, p2) <= eps:
             return True  # within ~1 m of a segment — on the boundary
-        if (lat1 > lat) != (lat2 > lat):
-            x_cross = lon1 + (lat - lat1) / (lat2 - lat1) * (lon2 - lon1)
+        if (p1.lat > lat) != (p2.lat > lat):
+            x_cross = p1.lon + (lat - p1.lat) / (p2.lat - p1.lat) * (p2.lon - p1.lon)
             if lon < x_cross:
                 inside = not inside
     return inside
@@ -549,16 +618,85 @@ def _polygon_is_valid(poly) -> bool:
     )
 
 
-def _point_segment_distance(lat, lon, lat1, lon1, lat2, lon2) -> float:
+def _point_segment_distance(point: GeoPoint, a: GeoPoint, b: GeoPoint) -> float:
     """Perpendicular distance from a point to a segment (degrees)."""
-    dx, dy = lat2 - lat1, lon2 - lon1
+    dx, dy = b.lat - a.lat, b.lon - a.lon
     if dx == 0.0 and dy == 0.0:
-        return math.hypot(lat - lat1, lon - lon1)
-    t = ((lat - lat1) * dx + (lon - lon1) * dy) / (dx * dx + dy * dy)
+        return math.hypot(point.lat - a.lat, point.lon - a.lon)
+    t = ((point.lat - a.lat) * dx + (point.lon - a.lon) * dy) / (dx * dx + dy * dy)
     t = max(0.0, min(1.0, t))
-    return math.hypot(lat - (lat1 + t * dx), lon - (lon1 + t * dy))
+    return math.hypot(point.lat - (a.lat + t * dx), point.lon - (a.lon + t * dy))
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+def _search_geometry_issues(s: dict, max_vertices: int) -> list[str]:
+    """Polygon shape, GB-bbox, and URL round-trip issues for one search."""
+    issues: list[str] = []
+    poly: Any = s.get("polygon")
+    if not _polygon_is_valid(poly):
+        issues.append(f"{s.get('id')}: polygon is malformed (expected [lat, lon] pairs)")
+        return issues
+    if len(poly) < MIN_POLYGON_VERTICES:
+        issues.append(f"{s.get('id')}: polygon has {len(poly)} vertices (need ≥ 4)")
+    elif poly[0] == poly[-1]:
+        issues.append(f"{s.get('id')}: polygon is closed — loops must stay open (the URL builder closes them)")
+    if len(poly) > max_vertices:
+        issues.append(f"{s.get('id')}: {len(poly)} vertices exceeds the {max_vertices} cap")
+    issues.extend(
+        f"{s.get('id')}: vertex ({lat}, {lon}) outside the GB bounding box"
+        for lat, lon in poly
+        if not GB_BBOX.contains(lat, lon)
+    )
+    try:
+        parsed = parse_search_url(s.get("rightmove_url", ""))
+        expected = poly + [poly[0]]
+        if len(parsed) != len(expected) or any(
+            abs(pl - el) > ROUND_TRIP_EPS or abs(po - eo) > ROUND_TRIP_EPS
+            for (pl, po), (el, eo) in zip(parsed, expected, strict=True)
+        ):
+            issues.append(f"{s.get('id')}: URL polygon does not round-trip to the stored polygon")
+    # lucidlint: ignore broad-except any parse failure is a URL issue (mirrors the noqa BLE001)
+    except Exception as e:  # noqa: BLE001 — any parse failure is a URL issue
+        issues.append(f"{s.get('id')}: rightmove_url unparseable ({e})")
+    return issues
+
+
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+def _destination_label(s: dict) -> str | None:
+    """The search's destination label (None when the destination is malformed)."""
+    dest = s.get("destination")
+    return dest.get("label") if isinstance(dest, dict) else None
+
+
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+def _containment_issues(searches: list[dict]) -> list[str]:
+    """Every destination's centre must sit inside one of its own shed's loops."""
+    issues: list[str] = []
+    by_label: dict[str | None, list[dict]] = {}
+    # lucidlint: ignore loop-pipeline group-by accumulation — no comprehension form; groupby would re-sort
+    for s in searches:
+        by_label.setdefault(_destination_label(s), []).append(s)
+    for group in by_label.values():
+        valid = [
+            o for o in group if _polygon_is_valid(o.get("polygon")) and len(o["polygon"]) >= MIN_CONTAINMENT_VERTICES
+        ]
+        for s in group:
+            d = s.get("destination")
+            if not isinstance(d, dict) or not isinstance(d.get("lat"), (int, float)) or not isinstance(
+                d.get("lon"), (int, float)
+            ):
+                issues.append(f"{s.get('id')}: destination is malformed (expected lat/lon)")
+                continue
+            inside_any = any(
+                point_in_polygon(d["lat"], d["lon"], [GeoPoint(lat, lon) for lat, lon in other["polygon"]])
+                for other in valid
+            )
+            if not inside_any:
+                issues.append(f"{s.get('id')}: destination centre outside every polygon of its shed")
+    return issues
+
+
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list[str]:
     """Return issues with the drive searches payload; empty means it passes.
 
@@ -580,60 +718,23 @@ def validate_payload(payload: dict, *, max_vertices: int = MAX_VERTICES) -> list
         issues.append(f"metadata count {metadata.get('count')} != {len(searches)} searches")
     labels_in_searches: set[str] = set()
     for s in searches:
-        poly = s.get("polygon")
-        malformed = not _polygon_is_valid(poly)
-        if malformed:
-            issues.append(f"{s.get('id')}: polygon is malformed (expected [lat, lon] pairs)")
-        else:
-            if len(poly) < 4:
-                issues.append(f"{s.get('id')}: polygon has {len(poly)} vertices (need ≥ 4)")
-            elif poly[0] == poly[-1]:
-                issues.append(f"{s.get('id')}: polygon is closed — loops must stay open (the URL builder closes them)")
-            if len(poly) > max_vertices:
-                issues.append(f"{s.get('id')}: {len(poly)} vertices exceeds the {max_vertices} cap")
-            for lat, lon in poly:
-                if not GB_BBOX.contains(lat, lon):
-                    issues.append(f"{s.get('id')}: vertex ({lat}, {lon}) outside the GB bounding box")
-            try:
-                parsed = parse_search_url(s.get("rightmove_url", ""))
-                expected = poly + [poly[0]]
-                if len(parsed) != len(expected) or any(
-                    abs(pl - el) > 5e-6 or abs(po - eo) > 5e-6
-                    for (pl, po), (el, eo) in zip(parsed, expected, strict=True)
-                ):
-                    issues.append(f"{s.get('id')}: URL polygon does not round-trip to the stored polygon")
-            except Exception as e:  # noqa: BLE001 — any parse failure is a URL issue
-                issues.append(f"{s.get('id')}: rightmove_url unparseable ({e})")
-        dest = s.get("destination")
-        label = dest.get("label") if isinstance(dest, dict) else None
+        issues.extend(_search_geometry_issues(s, max_vertices))
+        label = _destination_label(s)
         if isinstance(label, str) and label:
             labels_in_searches.add(label)
-    for label in metadata.get("destinations", []):
-        if label not in labels_in_searches:
-            issues.append(f"destination {label!r} produced no searches")
-    # every destination's centre must sit inside one of its own shed's loops
-    by_label: dict[str | None, list[dict]] = {}
-    for s in searches:
-        dest = s.get("destination")
-        label = dest.get("label") if isinstance(dest, dict) else None
-        by_label.setdefault(label, []).append(s)
-    for group in by_label.values():
-        valid = [o for o in group if _polygon_is_valid(o.get("polygon")) and len(o["polygon"]) >= 3]
-        for s in group:
-            d = s.get("destination")
-            if not isinstance(d, dict) or not isinstance(d.get("lat"), (int, float)) or not isinstance(
-                d.get("lon"), (int, float)
-            ):
-                issues.append(f"{s.get('id')}: destination is malformed (expected lat/lon)")
-                continue
-            if not any(point_in_polygon(d["lat"], d["lon"], other["polygon"]) for other in valid):
-                issues.append(f"{s.get('id')}: destination centre outside every polygon of its shed")
+    issues.extend(
+        f"destination {label!r} produced no searches"
+        for label in metadata.get("destinations", [])
+        if label not in labels_in_searches
+    )
+    issues.extend(_containment_issues(searches))
     return issues
 
 
 # ── writing ──────────────────────────────────────────────────────────
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _same_payload(existing: dict, new: dict) -> bool:
     """Byte-identical apart from ``generated_at`` (the determinism contract)."""
     if not isinstance(existing, dict) or not isinstance(new, dict):
@@ -657,6 +758,21 @@ def _atomic_write(path: Path, content: str) -> None:
     os.replace(tmp, path)
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+def _load_searches_payload(out_dir: Path) -> dict | None:
+    """Current searches payload, or None when absent/unreadable (will rewrite)."""
+    searches_path = out_dir / SEARCHES_FILENAME
+    if not searches_path.exists():
+        return None
+    try:
+        return json.loads(searches_path.read_text())
+    except json.JSONDecodeError:
+        logger.warning("%s unreadable (corrupt?) — will rewrite", searches_path)
+        return None
+
+
+
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def write_payloads(raw: dict | None, searches: dict, out_dir: str | Path) -> None:
     """Write raw (when regenerated) + searches.json/.txt/.html without churn.
 
@@ -669,13 +785,7 @@ def write_payloads(raw: dict | None, searches: dict, out_dir: str | Path) -> Non
         _atomic_write(out_dir / RAW_FILENAME, json.dumps(raw, indent=2) + "\n")
 
     searches_path = out_dir / SEARCHES_FILENAME
-    existing: dict | None = None
-    if searches_path.exists():
-        try:
-            existing = json.loads(searches_path.read_text())
-        except json.JSONDecodeError:
-            logger.warning("%s unreadable (corrupt?) — will rewrite", searches_path)
-            existing = None
+    existing = _load_searches_payload(out_dir)
     if existing is not None and _same_payload(existing, searches):
         _write_if_changed(out_dir / TXT_FILENAME, _urls_text(searches))
         _write_if_changed(out_dir / MAP_FILENAME, _map_html(searches))
@@ -690,10 +800,12 @@ def _write_if_changed(path: Path, content: str) -> None:
         path.write_text(content)
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _urls_text(payload: dict) -> str:
     return "\n".join(s["rightmove_url"] for s in payload["searches"]) + "\n"
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _map_html(searches: dict) -> str:
     """Leaflet map (Leaflet + CSS from CDN): destination markers + shed
     outlines. The combined map (combined_map.py) is the self-contained one;
@@ -715,8 +827,8 @@ def _map_html(searches: dict) -> str:
         # via innerHTML) and escape <>& as unicode so no </script> can break
         # out of the script element
         markers_js.append(
-            _js_safe_json(
-                {"label": _user_label(d["label"]), "lat": d["lat"], "lon": d["lon"], "url": s["rightmove_url"]}
+            js_safe_json(
+                {"label": user_label(d["label"]), "lat": d["lat"], "lon": d["lon"], "url": s["rightmove_url"]}
             )
         )
     html = """<!DOCTYPE html>
@@ -748,8 +860,7 @@ for (const m of markers) {
 # ── CLI ──────────────────────────────────────────────────────────────
 
 
-async def _geocode(postcode: str) -> tuple[float, float]:
-    from houses.location import geocode
+async def _geocode(postcode: str) -> GeoPoint:
 
     attempt = await geocode(postcode)
     point = attempt.value_or_none()
@@ -759,9 +870,10 @@ async def _geocode(postcode: str) -> tuple[float, float]:
         raise RuntimeError(
             f"could not geocode postcode {postcode!r}: {attempt.error or 'unknown reason'}"
         )
-    return point.lat, point.lon
+    return GeoPoint(point.lat, point.lon)
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _load_raw(path: Path) -> dict | None:
     try:
         return json.loads(path.read_text())
@@ -779,9 +891,278 @@ def _fail(user_message: str, dev_detail: str) -> int:
     return 1
 
 
+async def _geocode_destinations(geocoder, destinations):
+    """Geocode every destination; (coords, None) on success, (None, err) when deferred."""
+    try:
+        return [await geocoder(d.postcode) for d in destinations], None
+    except (RuntimeError, httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException) as e:
+        # DEFER geocoding errors (including transient httpx failures): a
+        # matching committed raw can still be reused offline (its stored
+        # coordinates are part of the signature); the error only matters if
+        # regeneration is actually needed
+        logger.warning("geocoding failed (%s) — a matching raw payload can still be reused", e)
+        return None, e
+
+
+def _validate_committed(out_dir: Path) -> int:
+    """--validate: check the committed searches payload and report."""
+    searches_path = out_dir / SEARCHES_FILENAME
+    if not searches_path.exists():
+        return _fail(
+            "No commute map data yet — run 'make commute-drive' first.",
+            f"{searches_path} not found for --validate",
+        )
+    try:
+        payload = json.loads(searches_path.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        return _fail(
+            "The saved commute map data is unreadable — regenerate it with 'make commute-drive'.",
+            f"unreadable {searches_path} for --validate: {e}",
+        )
+    issues = validate_payload(payload)
+    if issues:
+        for issue in issues:
+            print(f"- {issue}", file=sys.stderr)
+        return 1
+    print(f"drive searches OK ({len(payload['searches'])} search(es))")
+    return 0
+
+
+# lucidlint: ignore record-shape (destinations, threshold, region) triple — two-tier exit idiom; NamedTuple is ceremony
+def _load_destinations(
+    config_path: Path, threshold_override_min: int, region_override_km: float
+) -> tuple[list[DriveDestination], Quantity, Quantity] | int:
+    """Config → (destinations, shared threshold, region radius); int exit on failure.
+
+    ``threshold_override_min`` (CLI --threshold-min) overrides the config's
+    DEFAULT threshold for every destination without an explicit override, so
+    the kept cells, metadata, and config signature all agree. The region must
+    cover every destination's frontier — the MAX threshold reaches furthest (a
+    120-min destination needs a wider grid than a 60-min one, even when the
+    payload's default threshold is the min).
+    """
+    try:
+        config_data = json.loads(config_path.read_text())
+        destinations = load_config(config_path)
+    except (OSError, json.JSONDecodeError, ValueError, AttributeError, TypeError) as e:
+        return _fail(
+            "The commute destinations settings are missing or unreadable — fix them and try again.",
+            f"unreadable drive destinations config {config_path}: {e}",
+        )
+    if threshold_override_min:
+        destinations = apply_default_threshold(destinations, config_data, threshold_override_min * MINUTE)
+    threshold_min = min(d.threshold_min for d in destinations)
+    if region_override_km:
+        region_km = region_override_km * KM
+    else:
+        region_km = max(d.threshold_min for d in destinations).to("hour") * (REGION_MULTIPLIER * MINUTES_PER_HOUR * KMH)
+    return destinations, threshold_min, region_km
+
+
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+def _expected_signature(
+    destinations: list[DriveDestination], coords_by_label: dict[str, GeoPoint], *, threshold_min, region_km, cell_km
+) -> dict:
+    """The config identity the current run expects — a match reuses the raw."""
+    return config_signature(
+        {
+            "metadata": {
+                "engine_version": ENGINE_VERSION,
+                "profile": "driving-car",
+                "speed_model": "free-flow",
+                "threshold_min": int(threshold_min.to("minute").magnitude),
+                "cell_km": cell_km,
+                "region_km": region_km.to("km").magnitude,
+                "destinations": [
+                    {
+                        "label": d.label,
+                        "postcode": d.postcode,
+                        "threshold_min": int(d.threshold_min.to("minute").magnitude),
+                    }
+                    for d in destinations
+                ],
+            },
+            "destinations": [
+                {"label": d.label, "lat": coords_by_label[d.label].lat, "lon": coords_by_label[d.label].lon}
+                for d in destinations
+            ],
+        }
+    )
+
+
+# lucidlint: ignore record-shape (raw, exit) reuse pair — two-tier exit idiom; a NamedTuple is ceremony
+def _reuse_raw(
+    args,
+    destinations: list[DriveDestination],
+    coords: list[GeoPoint] | None,
+    *,
+    threshold_min,
+    region_km,
+) -> tuple[dict | None, int | None]:
+    """Decide whether the committed raw payload can be reused offline.
+
+    Returns ``(raw, exit_code)``: ``raw`` is the reused payload when the stored
+    signature matches; ``exit_code`` is non-None when the stored payload is
+    unreadable in a way that must abort the run.
+    """
+    raw_path = Path(args.out_dir) / RAW_FILENAME
+    if not raw_path.exists() or args.force:
+        return None, None
+    prev = _load_raw(raw_path)
+    if prev is None:
+        print("The saved drive map data is unreadable — regenerating it.", file=sys.stderr)
+        logger.warning("%s unreadable (corrupt or truncated write?) — regenerating", raw_path)
+        return None, None
+    try:
+        prev_signature = config_signature(prev)
+        if coords is not None:
+            coords_by_label = {d.label: c for d, c in zip(destinations, coords, strict=True)}
+        else:
+            # geocoding unavailable — compare against the STORED coordinates so
+            # an unchanged raw still reuses offline
+            coords_by_label = {
+                rec["label"]: GeoPoint(rec["lat"], rec["lon"])
+                for rec in prev.get("destinations", [])
+                if isinstance(rec, dict) and "label" in rec and "lat" in rec and "lon" in rec
+            }
+        expected = _expected_signature(
+            destinations, coords_by_label, threshold_min=threshold_min, region_km=region_km, cell_km=args.cell_km
+        )
+    except (KeyError, TypeError) as e:
+        return None, _fail(
+            "The saved commute map data is unreadable — rebuild it from scratch with "
+            "'make commute-drive FORCE=1'.",
+            f"unreadable raw payload {raw_path}: {e}",
+        )
+    if prev_signature == expected:
+        print(f"reusing {raw_path} ({len(prev['destinations'])} destination(s), offline)")
+        return prev, None
+    print("The commute settings changed — regenerating the drive map data.", file=sys.stderr)
+    logger.warning("config mismatch on %s — regenerating the raw payload", raw_path)
+    return None, None
+
+
+# lucidlint: ignore record-shape (raw, exit) fetch pair — two-tier exit idiom; a NamedTuple is ceremony
+async def _fetch_raw(
+    destinations: list[DriveDestination],
+    coords: list[GeoPoint],
+    *,
+    cell_km: Quantity,
+    region_km: Quantity,
+    key: str,
+) -> tuple[dict | None, int | None]:
+    """Run the ORS matrix batch; auth/transport failures become two-tier exits."""
+    if not key:
+        return None, _fail(
+            user_message=(
+                "The commute map can't be generated without the routing API key — add it to your environment "
+                "configuration and try again."
+            ),
+            dev_detail=(
+                "HEIGIT_API_KEY unset — set it in .env "
+                "(it populates settings.ors_api_key, the OpenRouteService key)"
+            ),
+        )
+    try:
+        raw = await build_raw(
+            destinations,
+            coords,
+            MatrixBatchConfig(cell_km=cell_km, region_km=region_km, key=key),
+            generated_at=datetime.now(UTC).isoformat(),
+        )
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code in (401, 403):
+            # auth failures never fix themselves by retrying
+            return None, _fail(
+                "The commute map service rejected the routing key — check it and try again.",
+                f"ORS auth failed ({e.response.status_code}): {e}",
+            )
+        return None, _fail(
+            "The commute map service didn't respond — try again in a minute.",
+            f"ORS matrix batch failed: {e}",
+        )
+    except (
+        httpx.RequestError,
+        httpx.TimeoutException,
+        json.JSONDecodeError,
+        ValueError,
+        TypeError,
+    ) as e:
+        # a 200 with a malformed body (gateway HTML, truncated response)
+        # raises from resp.json()/parse_durations, not from httpx
+        return None, _fail(
+            "The commute map service didn't respond — try again in a minute.",
+            f"ORS matrix batch failed: {e}",
+        )
+    return raw, None
+
+
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+def _warn_sheds_touching_region_edge(raw: dict) -> None:
+    """Kept cells on the region border mean the frontier may exceed --region-km."""
+    for record in raw["destinations"]:
+        grid = Grid.from_cell_km(Rect(**record["grid"]), record["cell_km"])
+        cells = grid_cell_centers(grid)
+        kept = kept_cells(
+            cells,
+            [None if c["duration_min"] is None else c["duration_min"] * MINUTE for c in record["cells"]],
+            record["threshold_min"] * MINUTE,
+            record["slack_min"] * MINUTE,
+        )
+        rows = math.ceil((grid.bbox.lat_max - grid.bbox.lat_min) / grid.lat_deg - CELL_COUNT_EPSILON)
+        cols = math.ceil((grid.bbox.lon_max - grid.bbox.lon_min) / grid.lon_deg - CELL_COUNT_EPSILON)
+        if kept and any(cell.row in (0, rows - 1) or cell.col in (0, cols - 1) for cell in kept):
+            logger.warning(
+                "%s: kept cells touch the region edge — the 90-min frontier may exceed --region-km; increase it",
+                record["label"],
+            )
+            print(
+                f"warning: {record['label']} shed touches the region edge — consider a larger --region-km",
+                file=sys.stderr,
+            )
+
+
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+def _build_searches_or_fail(
+    raw: dict,
+    *,
+    min_beds: int,
+    property_type: str,
+    generated_at: str,
+    min_island_cells: int,
+) -> tuple[dict | None, int | None]:
+    """Raw payload → validated searches; a conversion/validation failure is an exit code."""
+    try:
+        searches = raw_to_searches(
+            raw,
+            min_beds=min_beds,
+            property_type=property_type,
+            generated_at=generated_at,
+            min_island_cells=min_island_cells,
+        )
+    except (KeyError, TypeError, ValueError) as e:
+        return None, _fail(
+            "The saved commute map data is unreadable — rebuild it from scratch with 'make commute-drive FORCE=1'.",
+            f"raw→searches conversion failed: {e}",
+        )
+    issues = validate_payload(searches)
+    if issues:
+        for issue in issues:
+            print(f"- {issue}", file=sys.stderr)
+        print("drive searches FAIL validation — nothing written", file=sys.stderr)
+        return None, 1
+    return searches, None
+
+
+def _report(count: int, out_dir: Path) -> None:
+    print(f"{count} drive search(es) → {out_dir / SEARCHES_FILENAME}")
+    print(f"urls → {out_dir / TXT_FILENAME}")
+    print(f"map → {out_dir / MAP_FILENAME}")
+
+
 async def run(argv: list[str] | None = None, *, geocoder=None, ors_key: str | None = None) -> int:
     """``geocoder`` and ``ors_key`` are injectable for tests (DI): the
-    geocoder is ``async (postcode) -> (lat, lon)`` (default ``_geocode``);
+    geocoder is ``async (postcode) -> GeoPoint`` (default ``_geocode``);
     ``ors_key`` overrides ``settings.ors_api_key``."""
     parser = argparse.ArgumentParser(description="Build driving isochrone search URLs (one-off ORS matrix batch).")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG))
@@ -807,123 +1188,32 @@ async def run(argv: list[str] | None = None, *, geocoder=None, ors_key: str | No
 
     out_dir = Path(args.out_dir)
     if args.validate:
-        searches_path = out_dir / SEARCHES_FILENAME
-        if not searches_path.exists():
-            return _fail(
-                "No commute map data yet — run 'make commute-drive' first.",
-                f"{searches_path} not found for --validate",
-            )
-        try:
-            payload = json.loads(searches_path.read_text())
-        except (OSError, json.JSONDecodeError) as e:
-            return _fail(
-                "The saved commute map data is unreadable — regenerate it with 'make commute-drive'.",
-                f"unreadable {searches_path} for --validate: {e}",
-            )
-        issues = validate_payload(payload)
-        if issues:
-            for issue in issues:
-                print(f"- {issue}", file=sys.stderr)
-            return 1
-        print(f"drive searches OK ({len(payload['searches'])} search(es))")
-        return 0
+        return _validate_committed(out_dir)
 
     # --threshold-min overrides the config's DEFAULT threshold: applied to
     # every destination without an explicit per-destination override, so the
     # kept cells, metadata, and config signature all agree — a threshold
     # change is a real config change, so the raw payload regenerates (never a
     # silent reuse of cells kept at the old threshold).
-    try:
-        config_path = Path(args.config)
-        config_data = json.loads(config_path.read_text())
-        destinations = load_config(config_path)
-    except (OSError, json.JSONDecodeError, ValueError, AttributeError, TypeError) as e:
-        return _fail(
-            "The commute destinations settings are missing or unreadable — fix them and try again.",
-            f"unreadable drive destinations config {args.config}: {e}",
-        )
-    if args.threshold_min:
-        destinations = apply_default_threshold(destinations, config_data, args.threshold_min * MINUTE)
-    threshold_min = min(d.threshold_min for d in destinations)
-    # the region must cover every destination's frontier — the MAX threshold
-    # reaches furthest (a 120-min destination needs a wider grid than a 60-min
-    # one, even when the payload's default threshold is the min)
-    if args.region_km:
-        region_km = args.region_km * KM
-    else:
-        region_km = max(d.threshold_min for d in destinations).to("hour") * (REGION_MULTIPLIER * 60.0 * KMH)
+    loaded = _load_destinations(Path(args.config), args.threshold_min, args.region_km)
+    if isinstance(loaded, int):
+        return loaded
+    destinations, threshold_min, region_km = loaded
     generated_at = datetime.now(UTC).isoformat()
 
-    raw_path = out_dir / RAW_FILENAME
-    raw: dict | None = None
     if geocoder is None:
         geocoder = _geocode
-    geocode_error: Exception | None = None
-    try:
-        coords = [await geocoder(d.postcode) for d in destinations]
-    except (RuntimeError, httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException) as e:
-        # DEFER geocoding errors (including transient httpx failures): a
-        # matching committed raw can still be reused offline (its stored
-        # coordinates are part of the signature); the error only matters if
-        # regeneration is actually needed
-        coords = None
-        geocode_error = e
-        logger.warning("geocoding failed (%s) — a matching raw payload can still be reused", e)
+    coords, geocode_error = await _geocode_destinations(geocoder, destinations)
 
-    if raw_path.exists() and not args.force:
-        prev = _load_raw(raw_path)
-        if prev is not None:
-            try:
-                prev_signature = config_signature(prev)
-                if coords is not None:
-                    coords_by_label = {d.label: c for d, c in zip(destinations, coords, strict=True)}
-                else:
-                    # geocoding unavailable — compare against the STORED
-                    # coordinates so an unchanged raw still reuses offline
-                    coords_by_label = {
-                        rec["label"]: (rec["lat"], rec["lon"])
-                        for rec in prev.get("destinations", [])
-                        if isinstance(rec, dict) and "label" in rec and "lat" in rec and "lon" in rec
-                    }
-                expected = config_signature(
-                    {
-                    "metadata": {
-                        "engine_version": ENGINE_VERSION,
-                        "profile": "driving-car",
-                        "speed_model": "free-flow",
-                        "threshold_min": int(threshold_min.to("minute").magnitude),
-                        "cell_km": args.cell_km,
-                        "region_km": region_km.to("km").magnitude,
-                        "destinations": [
-                            {
-                                "label": d.label,
-                                "postcode": d.postcode,
-                                "threshold_min": int(d.threshold_min.to("minute").magnitude),
-                            }
-                            for d in destinations
-                        ],
-                    },
-                    "destinations": [
-                        {"label": d.label, "lat": coords_by_label[d.label][0], "lon": coords_by_label[d.label][1]}
-                        for d in destinations
-                    ],
-                }
-            )
-            except (KeyError, TypeError) as e:
-                return _fail(
-                    "The saved commute map data is unreadable — rebuild it from scratch with "
-                    "'make commute-drive FORCE=1'.",
-                    f"unreadable raw payload {raw_path}: {e}",
-                )
-            if prev_signature == expected:
-                raw = prev
-                print(f"reusing {raw_path} ({len(raw['destinations'])} destination(s), offline)")
-            else:
-                print("The commute settings changed — regenerating the drive map data.", file=sys.stderr)
-                logger.warning("config mismatch on %s — regenerating the raw payload", raw_path)
-        else:
-            print("The saved drive map data is unreadable — regenerating it.", file=sys.stderr)
-            logger.warning("%s unreadable (corrupt or truncated write?) — regenerating", raw_path)
+    raw, reuse_exit = _reuse_raw(
+        args,
+        destinations,
+        coords,
+        threshold_min=threshold_min,
+        region_km=region_km,
+    )
+    if reuse_exit is not None:
+        return reuse_exit
 
     if raw is None:
         if coords is None:
@@ -933,93 +1223,31 @@ async def run(argv: list[str] | None = None, *, geocoder=None, ors_key: str | No
                 "One of the commute destinations can't be found on the map — check its postcode and try again.",
                 f"geocoding failed for a drive destination: {geocode_error}",
             )
-        from houses.config import settings  # noqa: PLC0415
-
         api_key = ors_key if ors_key is not None else settings.ors_api_key
-        if not api_key:
-            return _fail(
-                "The commute map can't be generated without the routing API key — add it to your environment "
-                "configuration and try again.",
-                "HEIGIT_API_KEY unset — set it in .env (it populates settings.ors_api_key, the OpenRouteService key)",
-            )
-        try:
-            raw = await build_raw(
-                destinations,
-                coords,
-                cell_km=args.cell_km * KM,
-                region_km=region_km,
-                key=api_key,
-                generated_at=generated_at,
-            )
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code in (401, 403):
-                # auth failures never fix themselves by retrying
-                return _fail(
-                    "The commute map service rejected the routing key — check it and try again.",
-                    f"ORS auth failed ({e.response.status_code}): {e}",
-                )
-            return _fail(
-                "The commute map service didn't respond — try again in a minute.",
-                f"ORS matrix batch failed: {e}",
-            )
-        except (
-            httpx.RequestError,
-            httpx.TimeoutException,
-            json.JSONDecodeError,
-            ValueError,
-            TypeError,
-        ) as e:
-            # a 200 with a malformed body (gateway HTML, truncated response)
-            # raises from resp.json()/parse_durations, not from httpx
-            return _fail(
-                "The commute map service didn't respond — try again in a minute.",
-                f"ORS matrix batch failed: {e}",
-            )
-        for record in raw["destinations"]:
-            grid = Grid.from_cell_km(Rect(**record["grid"]), record["cell_km"])
-            cells = grid_cell_centers(grid)
-            kept = kept_cells(
-                [(c[0], c[1], c[2], c[3]) for c in cells],
-                [None if c["duration_min"] is None else c["duration_min"] * MINUTE for c in record["cells"]],
-                record["threshold_min"] * MINUTE,
-                record["slack_min"] * MINUTE,
-            )
-            rows = math.ceil((grid.bbox.lat_max - grid.bbox.lat_min) / grid.lat_deg - 1e-9)
-            cols = math.ceil((grid.bbox.lon_max - grid.bbox.lon_min) / grid.lon_deg - 1e-9)
-            if kept and any(r in (0, rows - 1) or c in (0, cols - 1) for r, c in kept):
-                logger.warning(
-                    "%s: kept cells touch the region edge — the 90-min frontier may exceed --region-km; increase it",
-                    record["label"],
-                )
-                print(
-                    f"warning: {record['label']} shed touches the region edge — consider a larger --region-km",
-                    file=sys.stderr,
-                )
+        raw, fetch_exit = await _fetch_raw(
+            destinations,
+            coords,
+            cell_km=args.cell_km * KM,
+            region_km=region_km,
+            key=api_key,
+        )
+        if fetch_exit is not None:
+            return fetch_exit
+        assert raw is not None  # fetch_exit None ⇔ the batch succeeded
+        _warn_sheds_touching_region_edge(raw)
 
-    try:
-        searches = raw_to_searches(
-            raw,
-            min_beds=args.min_beds,
-            property_type=args.property_type,
-            generated_at=generated_at,
-            min_island_cells=args.min_island_cells,
-        )
-    except (KeyError, TypeError, ValueError) as e:
-        return _fail(
-            "The saved commute map data is unreadable — rebuild it from scratch with 'make commute-drive FORCE=1'.",
-            f"raw→searches conversion failed: {e}",
-        )
-    issues = validate_payload(searches)
-    if issues:
-        for issue in issues:
-            print(f"- {issue}", file=sys.stderr)
-        print("drive searches FAIL validation — nothing written", file=sys.stderr)
-        return 1
+    searches, searches_exit = _build_searches_or_fail(
+        raw,
+        min_beds=args.min_beds,
+        property_type=args.property_type,
+        generated_at=generated_at,
+        min_island_cells=args.min_island_cells,
+    )
+    if searches_exit is not None:
+        return searches_exit
+    assert searches is not None  # searches_exit None ⇔ the payload validated
     write_payloads(raw, searches, out_dir)
-    count = len(searches["searches"])
-    print(f"{count} drive search(es) → {out_dir / SEARCHES_FILENAME}")
-    print(f"urls → {out_dir / TXT_FILENAME}")
-    print(f"map → {out_dir / MAP_FILENAME}")
+    _report(len(searches["searches"]), out_dir)
     return 0
 
 

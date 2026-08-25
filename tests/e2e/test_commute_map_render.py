@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from tools.commute.combined_map import _CSS_IMAGES, _JS_ICONS, VENDOR_DIR, _data_uri, build_html
+from tools.commute.combined_map import _CSS_IMAGES, _JS_ICONS, VENDOR_DIR, MapAssets, _data_uri, build_html
 
 pytestmark = pytest.mark.e2e
 
@@ -31,9 +31,11 @@ def _build_map(tmp_path: Path) -> Path:
     html = build_html(
         union,
         drive,
-        leaflet_js=(VENDOR_DIR / "leaflet.js").read_text(),
-        leaflet_css=(VENDOR_DIR / "leaflet.css").read_text(),
-        icons=icons,
+        assets=MapAssets(
+            leaflet_js=(VENDOR_DIR / "leaflet.js").read_text(),
+            leaflet_css=(VENDOR_DIR / "leaflet.css").read_text(),
+            icons=icons,
+        ),
     )
     path = tmp_path / "commute_map.html"
     path.write_text(html)
@@ -55,6 +57,7 @@ def _page():
     return pw, browser, page
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_commute_map_renders_visible_in_phone_viewport(tmp_path):
     pw, browser, page = _page()
     try:
@@ -78,6 +81,7 @@ def test_commute_map_renders_visible_in_phone_viewport(tmp_path):
         pw.stop()
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_commute_map_debug_panel_reports_health(tmp_path):
     """?debug=1 must surface diagnostics on the page itself (no console needed)."""
     pw, browser, page = _page()
@@ -92,6 +96,7 @@ def test_commute_map_debug_panel_reports_health(tmp_path):
         pw.stop()
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_drive_polygon_popup_links_to_rightmove(tmp_path):
     """Regression: drive/intersection polygons must have their Rightmove popup
     bound. The lookup keys must match JS JSON.stringify, or popups silently

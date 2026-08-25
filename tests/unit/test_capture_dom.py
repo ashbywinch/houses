@@ -40,6 +40,7 @@ def test_help_lists_auth_flags():
         assert flag in result.stdout
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_missing_state_file_fails_with_login_hint(tmp_path):
     result = _run("--state-file", str(tmp_path / "missing.json"))
     assert result.returncode != 0

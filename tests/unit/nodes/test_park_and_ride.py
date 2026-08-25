@@ -18,9 +18,9 @@ from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.car_park import CarParkRegistry
 from houses.commute import CostGroup, JourneyLeg, LegMode
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
-from houses.nodes.park_and_ride import ParkAndRideAugmentNode
+from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
 from houses.stations import StationRegistry
 
 
@@ -68,13 +68,15 @@ def _node(node_id: str, *, postcode_node, location_node):
     mw = UserInputNode[int](f"{node_id}_mw", int)
     node = ParkAndRideAugmentNode(
         f"{node_id}",
-        transit_node=transit,
-        best_location=location_node,
-        postcode_node=postcode_node,
-        has_car=True,
-        max_walk_node=mw,
-        station_registry=_FakeStationRegistry(),
-        car_park_registry=_FakeCarParkRegistry(),
+        options=ParkAndRideOptions(
+            transit_node=transit,
+            best_location=location_node,
+            postcode_node=postcode_node,
+            has_car=True,
+            max_walk_node=mw,
+            station_registry=_FakeStationRegistry(),
+            car_park_registry=_FakeCarParkRegistry(),
+        ),
     )
     return node, transit, mw
 
@@ -233,13 +235,15 @@ class TestParkAndRideAugmentNode:
             mw = UserInputNode[int]("pp5_mw", int)
             node = ParkAndRideAugmentNode(
                 "pp5",
-                transit_node=transit,
-                best_location=location,
-                postcode_node=postcode,
-                has_car=True,
-                max_walk_node=mw,
-                station_registry=_FakeStationRegistry(),
-                car_park_registry=_NoCostCarParkRegistry(),
+                options=ParkAndRideOptions(
+                    transit_node=transit,
+                    best_location=location,
+                    postcode_node=postcode,
+                    has_car=True,
+                    max_walk_node=mw,
+                    station_registry=_FakeStationRegistry(),
+                    car_park_registry=_NoCostCarParkRegistry(),
+                ),
             )
             transit.push(_walk_commute(), "test")
             mw.push(30, "test")

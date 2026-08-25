@@ -8,11 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from dag.attempt import Attempt
 from dag.scheduler import flush_processor
 from houses.api_cache import set_cache_dir
-from houses.config import settings
 from houses.nodes.bus import BusRouteNode
+from houses.settings import settings
 from tests.helpers import FakeSchoolLookup, make_services
 from tests.unit.isolation_fixtures import (  # noqa: F401, F811
     _inject_test_scheduler,
@@ -46,19 +45,20 @@ def _make_mock_services():
 
 
 @pytest.fixture(autouse=True)
-def _mock_google_routes(monkeypatch):
+def _mock_google_routes():
     """Prevent WalkNode, DriveNode, BusRouteNode, and TflTransitNode from making real API calls.
 
-    WalkNode/DriveNode call through ``CommuteRouter._google_route_commute``.
-    BusRouteNode receives ``_google_routes_post`` via the property.
-    TflTransitNode calls ``TflClient.plan()`` directly.
+    WalkNode/DriveNode call through ``get_services().route_planner`` — the
+    default fakes in tests/helpers return canned routes. TflTransitNode
+    builds its client via ``get_services().tfl_client_factory`` — the
+    default fake returns impossible. BusRouteNode receives
+    ``google_routes_post`` from the services ``commute_router`` (no post).
     """
+    from houses.services_provider import _request_services as _sp
 
-    async def mock_tfl_plan(self):
-        return Attempt.impossible("mocked — unit test")
-
-    monkeypatch.setattr("houses.tfl_client.TflClient.plan", mock_tfl_plan)
-    monkeypatch.setattr("houses.routing.CommuteRouter.google_routes_post", None)
+    token = _sp.set(make_services())
+    yield
+    _sp.reset(token)
 
 
 @pytest.fixture(autouse=True)
@@ -82,11 +82,11 @@ def _no_sheet_writes():
 def _isolate_settings_sources():
     """Clear the settings-source cache so _make_settings_source always
     reads from the per-test in-memory DB or factory, never stale state."""
-    from houses.services import _SETTINGS_SOURCE_CACHE
+    from houses.services import SETTINGS_SOURCE_CACHE
 
-    _SETTINGS_SOURCE_CACHE.clear()
+    SETTINGS_SOURCE_CACHE.clear()
     yield
-    _SETTINGS_SOURCE_CACHE.clear()
+    SETTINGS_SOURCE_CACHE.clear()
 
 
 @pytest.fixture(autouse=True)

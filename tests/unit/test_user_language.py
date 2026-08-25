@@ -24,6 +24,7 @@ def _template_of(src: str) -> str:
     return m.group(1) if m else ""
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_no_vue_template_uses_internal_words():
     offenders = []
     for vue in sorted(FRONTEND_SRC.rglob("*.vue")):
@@ -32,6 +33,7 @@ def test_no_vue_template_uses_internal_words():
     assert not offenders, f"user-visible templates use internal words: {offenders}"
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_commute_map_artifact_keeps_user_language():
     assert MAP_ARTIFACT.exists(), f"missing committed map artifact {MAP_ARTIFACT}"
     matches = FORBIDDEN.findall(MAP_ARTIFACT.read_text())

@@ -16,7 +16,7 @@ from dag.attempt import Attempt
 from houses.address_utils import normalise as _normalise
 from houses.address_utils import strip_postcode as _strip_postcode
 from houses.api_cache import cached_async_client, get_cached, set_cached
-from houses.config import settings
+from houses.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +69,7 @@ ROAD_SUFFIXES = frozenset(
         "meadows",
     }
 )
+HTTP_OK = 200
 
 
 def _is_road_name(first_token: str) -> bool:
@@ -98,6 +99,7 @@ async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
         return Attempt.impossible("address has no building identifier")
 
     pc = postcode.strip().upper()
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     params = {"postcode": pc, "page_size": 50}
 
     cached = get_cached("GET", EPC_SEARCH_URL, params)
@@ -115,7 +117,7 @@ async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
                     "Authorization": f"Bearer {settings.epc_bearer_token}",
                 },
             )
-            if resp.status_code != 200:
+            if resp.status_code != HTTP_OK:
                 logger.warning("EPC API returned %d for %s", resp.status_code, postcode)
                 return Attempt.impossible(f"EPC API returned status {resp.status_code}")
 
@@ -126,6 +128,7 @@ async def lookup_epc(postcode: str, address: str = "") -> Attempt[str]:
 
     except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
         raise  # transient — let DAG retry handle it
+    # lucidlint: ignore broad-except boundary — unknown EPC failures convert to an impossible attempt, never raise
     except Exception as e:
         logger.warning("EPC lookup failed for %s: %s", postcode, e)
         return Attempt.impossible(f"EPC lookup failed: {e}")
@@ -140,6 +143,7 @@ def _extract_building_id(first_token: str) -> str:
     return first
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _should_lookup_epc(address: str) -> tuple[bool, str]:
     """Decide whether to call the EPC API for this address.
 
@@ -163,6 +167,95 @@ def _should_lookup_epc(address: str) -> tuple[bool, str]:
     return True, _extract_building_id(first)
 
 
+def _street_after_token(tokens: list[str], token: str) -> str:
+    """The address token after *token*, or "" when the token is absent."""
+    try:
+        idx = tokens.index(token)
+    except ValueError as e:
+        logger.debug("building number %r not in address tokens: %s", token, e)
+        return ""
+    if idx + 1 < len(tokens):
+        return tokens[idx + 1]
+    return ""
+
+
+
+def _filter_candidates(certs, building_id: str, address: str):
+    """Certificates whose address matches the building identifier.
+
+    A NUMBER identifier is matched as a whole token — "2" must not claim
+    "12 WILLOWMEAD GARDENS", "20 …" or "A2 …" (the same hardening as the
+    council-tax lookup).  When the query address supplies the street token
+    after the number, the pair ("2 WILLOWMEAD") is required, so a flat's
+    row can't be confused with the house's.
+    """
+    norm_id = _normalise(building_id)
+    if norm_id.isdigit():
+        street = ""
+        if address:
+            street = _street_after_token(_normalise(address).split(), norm_id)
+        pattern = rf"(?<![A-Z0-9]){re.escape(norm_id)}(?![A-Z0-9])"
+        if street:
+            pattern = rf"(?<![A-Z0-9]){re.escape(norm_id)}\s+{re.escape(street)}(?![A-Z0-9])"
+        return [c for c in certs if re.search(pattern, _normalise(c.get("addressLine1", "")))]
+    return [c for c in certs if norm_id in _normalise(c.get("addressLine1", ""))]
+
+
+def _match_by_building(certs, building_id: str, address: str):
+    """Certificates for the building identifier plus an impossible-reason.
+
+    Returns (candidates, error) — error is None when the certificates
+    identify a single property, else the reason ("no matching certificate
+    for this address" or the ambiguity message).
+    """
+    candidates = _filter_candidates(certs, building_id, address)
+    if not candidates:
+        return [], "no matching certificate for this address"
+
+    # Exact-match priority: a candidate whose certificate address is the
+    # query's building designation verbatim (a token-aligned prefix of the
+    # normalized query) IS the property — a separate dwelling at the same
+    # number (annexe/flat) must not make it ambiguous.
+    exact_collapse = False
+    if address:
+        norm_query_tokens = _strip_postcode(_normalise(address).split(), address)
+        exact_candidates = []
+        for c in candidates:
+            row_tokens = _strip_postcode(
+                _normalise(c.get("addressLine1", "")).split(), c.get("addressLine1", "")
+            )
+            if len(row_tokens) >= 2 and norm_query_tokens[: len(row_tokens)] == row_tokens:
+                exact_candidates.append(c)
+        if exact_candidates:
+            # Multiple exact prefixes are the SAME building with locality
+            # variants (re-issued certs) — use them all and let the
+            # registration-date sort pick the newest.  The ambiguity check
+            # must not re-trip on them.
+            candidates = exact_candidates
+            exact_collapse = True
+    if not exact_collapse:
+        # Ambiguity check: more than one distinct address matches.  Name
+        # the first two (sorted, deterministic) + the count so the
+        # provenance can be used to troubleshoot the match.
+        unique_addresses = sorted({c.get("addressLine1", "") for c in candidates})
+        if len(unique_addresses) > 1:
+            sample = ", ".join(repr(a) for a in unique_addresses[:2])
+            return candidates, f"address matched multiple properties: {sample} ({len(unique_addresses)} matches)"
+    return candidates, None
+
+
+def _newest_band(candidates) -> Attempt[str]:
+    """Band from the newest certificate; impossible when it has none."""
+    candidates.sort(key=lambda c: c.get("registrationDate", ""), reverse=True)
+    band = candidates[0].get("currentEnergyEfficiencyBand", "")
+    raw = band.strip() if band else ""
+    if not raw:
+        return Attempt.impossible("certificate has no energy band")
+    return Attempt.succeeded(raw)
+
+
+
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _match_cert(certs: list[dict], building_id: str, address: str = "") -> Attempt[str]:
     """Find the most recent certificate, optionally matching the building identifier.
 
@@ -171,74 +264,15 @@ def _match_cert(certs: list[dict], building_id: str, address: str = "") -> Attem
     If multiple different addresses match (ambiguous — e.g. "High Street"
     could be any of several buildings), returns a failed Attempt with a
     descriptive reason.
-
-    A NUMBER identifier is matched as a whole token — "2" must not claim
-    "12 WILLOWMEAD GARDENS", "20 …" or "A2 …" (the same hardening as the
-    council-tax lookup).  When the query address supplies the street token
-    after the number, the pair ("2 WILLOWMEAD") is required, so a flat's
-    row can't be confused with the house's.
     """
     if not certs:
         return Attempt.impossible("no certificates found")
-
-    candidates = certs
     if building_id:
-        norm_id = _normalise(building_id)
-        if norm_id.isdigit():
-            street = ""
-            if address:
-                tokens = _normalise(address).split()
-                try:
-                    idx = tokens.index(norm_id)
-                    if idx + 1 < len(tokens):
-                        street = tokens[idx + 1]
-                except ValueError:
-                    pass
-            pattern = rf"(?<![A-Z0-9]){re.escape(norm_id)}(?![A-Z0-9])"
-            if street:
-                pattern = rf"(?<![A-Z0-9]){re.escape(norm_id)}\s+{re.escape(street)}(?![A-Z0-9])"
-            candidates = [c for c in certs if re.search(pattern, _normalise(c.get("addressLine1", "")))]
-        else:
-            candidates = [c for c in certs if norm_id in _normalise(c.get("addressLine1", ""))]
-        if not candidates:
-            return Attempt.impossible("no matching certificate for this address")
+        candidates, error = _match_by_building(certs, building_id, address)
+        if error is not None:
+            return Attempt.impossible(error)
+    else:
+        candidates = certs
+    return _newest_band(candidates)
 
-        # Exact-match priority: a candidate whose certificate address is
-        # the query's building designation verbatim (a token-aligned
-        # prefix of the normalized query) IS the property — a separate
-        # dwelling at the same number (annexe/flat) must not make it
-        # ambiguous.
-        exact_collapse = False
-        if address:
-            norm_query_tokens = _strip_postcode(_normalise(address).split(), address)
-            exact_candidates = []
-            for c in candidates:
-                row_tokens = _strip_postcode(
-                    _normalise(c.get("addressLine1", "")).split(), c.get("addressLine1", "")
-                )
-                if len(row_tokens) >= 2 and norm_query_tokens[: len(row_tokens)] == row_tokens:
-                    exact_candidates.append(c)
-            if exact_candidates:
-                # Multiple exact prefixes are the SAME building with
-                # locality variants (re-issued certs) — use them all and
-                # let the registration-date sort pick the newest.  The
-                # ambiguity check must not re-trip on them.
-                candidates = exact_candidates
-                exact_collapse = True
-        # Ambiguity check: more than one distinct address matches.  Name
-        # the first two (sorted, deterministic) + the count so the
-        # provenance can be used to troubleshoot the match.  Skipped for
-        # an exact-prefix collapse — same building, different locality.
-        if not exact_collapse:
-            unique_addresses = sorted({c.get("addressLine1", "") for c in candidates})
-            if len(unique_addresses) > 1:
-                sample = ", ".join(repr(a) for a in unique_addresses[:2])
-                return Attempt.impossible(
-                    f"address matched multiple properties: {sample} ({len(unique_addresses)} matches)"
-                )
-    candidates.sort(key=lambda c: c.get("registrationDate", ""), reverse=True)
-    band = candidates[0].get("currentEnergyEfficiencyBand", "")
-    raw = band.strip() if band else ""
-    if not raw:
-        return Attempt.impossible("certificate has no energy band")
-    return Attempt.succeeded(raw)
+

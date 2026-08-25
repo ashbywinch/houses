@@ -8,7 +8,7 @@ from pint import Quantity
 
 from dag.user_input_node import UserInputNode
 from houses.commute import CostGroup, JourneyLeg, LegMode
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 
 

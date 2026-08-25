@@ -5,7 +5,7 @@ from money import Money
 
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 
 
 class TestBootstrapFromRow:
@@ -265,7 +265,7 @@ class TestSeedInputDefaults:
     chain forever."""
 
     def _property(self, rid: str):
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
 
         return PropertyNodes(rid)
 

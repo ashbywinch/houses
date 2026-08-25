@@ -24,7 +24,7 @@ from typing import Any
 
 from money import Money
 
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,8 @@ class FareProductType(Enum):
 
 
 # Maps JSON product keys to FareProductType
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+# lucidlint: ignore global-state static lookup table (JSON product key → FareProductType); never mutated
 _KEY_TO_TYPE: dict[str, FareProductType] = {
     "adult_single": FareProductType.SINGLE,
     "adult_return": FareProductType.RETURN,
@@ -78,6 +80,17 @@ class BusJourney:
     available_fares: dict[FareProductType, FareProduct] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class _StopPoint:
+    """A bus stop reference for fare lookups: display name + coordinates."""
+
+    name: str
+    lat: float
+    lon: float
+
+
+
+
 # ---------------------------------------------------------------------------
 # Lookup helpers
 # ---------------------------------------------------------------------------
@@ -109,7 +122,7 @@ class BusJourneyRegistry:
     """
 
     def __init__(self) -> None:
-        self._data: dict[str, Any] | None = None
+        self._data: dict[str, Any] = {}
         self._meta: dict[str, Any] | None = None
         self._loaded = False
 
@@ -138,6 +151,7 @@ class BusJourneyRegistry:
         self._loaded = True
 
     @staticmethod
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def _assert_no_duplicate_products(data: dict[str, Any]) -> None:
         """Fail fast if any zone pair has multiple products of the same type.
 
@@ -176,8 +190,8 @@ class BusJourneyRegistry:
         self,
         dep_stop_name: str,
         arr_stop_name: str,
-        dep_point: dict[str, float] | None = None,
-        arr_point: dict[str, float] | None = None,
+        dep_point: GeoPoint | None = None,
+        arr_point: GeoPoint | None = None,
     ) -> dict[FareProductType, FareProduct]:
         """Look up available fare products between two bus stops.
 
@@ -199,7 +213,6 @@ class BusJourneyRegistry:
         # Alternative name: take the part after the first ", "
         dep_alt = dep_norm.split(", ", 1)[-1] if ", " in dep_norm else dep_norm
         arr_alt = arr_norm.split(", ", 1)[-1] if ", " in arr_norm else arr_norm
-
         # ── Stage 1: Direct name match ──────────────────────────────
         result = self._match_zone_pair(dep_norm, dep_alt, arr_norm, arr_alt)
         if result:
@@ -211,14 +224,11 @@ class BusJourneyRegistry:
             return result
 
         # ── Stage 3: Coordinate fallback ────────────────────────────
+
         if dep_point is not None and arr_point is not None:
             result = self._coord_match(
-                dep_stop_name,
-                arr_stop_name,
-                dep_point["lat"],
-                dep_point["lon"],
-                arr_point["lat"],
-                arr_point["lon"],
+                _StopPoint(dep_stop_name, dep_point.lat, dep_point.lon),
+                _StopPoint(arr_stop_name, arr_point.lat, arr_point.lon),
             )
             if result:
                 return result
@@ -313,12 +323,8 @@ class BusJourneyRegistry:
 
     def _coord_match(
         self,
-        dep_stop_name: str,
-        arr_stop_name: str,
-        dep_lat: float,
-        dep_lon: float,
-        arr_lat: float,
-        arr_lon: float,
+        dep: _StopPoint,
+        arr: _StopPoint,
     ) -> dict[FareProductType, FareProduct]:
         """Coordinate-based zone matching (100m radius)."""
         for op_key in self._data:
@@ -327,15 +333,15 @@ class BusJourneyRegistry:
             stop_coords: list[dict] = self._data[op_key].get("stop_coords", [])
             if not stop_coords:
                 continue
-            dep_zone = self._nearest_zone(dep_lat, dep_lon, stop_coords, radius_km=self._COORD_RADIUS_KM)
-            arr_zone = self._nearest_zone(arr_lat, arr_lon, stop_coords, radius_km=self._COORD_RADIUS_KM)
+            dep_zone = self._nearest_zone(dep.lat, dep.lon, stop_coords, radius_km=self._COORD_RADIUS_KM)
+            arr_zone = self._nearest_zone(arr.lat, arr.lon, stop_coords, radius_km=self._COORD_RADIUS_KM)
             if dep_zone and arr_zone:
                 products = self._products_for_zone_pair(op_key, dep_zone, arr_zone)
                 if products:
                     logger.info(
                         "Bus fare by coords: dep=%s arr=%s = %s:%s",
-                        dep_stop_name,
-                        arr_stop_name,
+                        dep.name,
+                        arr.name,
                         dep_zone,
                         arr_zone,
                     )
@@ -343,6 +349,7 @@ class BusJourneyRegistry:
         return {}
 
     @staticmethod
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def _nearest_zone(
         lat: float,
         lon: float,

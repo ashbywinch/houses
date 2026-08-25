@@ -1,13 +1,13 @@
 """Tests for the FastAPI server endpoints."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
-from houses.config import settings
 from houses.server import app
+from houses.settings import settings
 
 client = TestClient(app)
 
@@ -71,8 +71,9 @@ class TestInjectProperty:
 
     def test_rejects_existing_property_without_fields(self):
         """Re-enriching an existing property must specify which fields to update."""
-        from houses.config import settings
+        from houses.settings import settings
         from houses.sheets import col_index
+        from tests.helpers import inject_server_deps
 
         rid_index = col_index("Rightmove ID")
 
@@ -94,7 +95,7 @@ class TestInjectProperty:
         original_sheet_id = settings.sheet_id
         settings.sheet_id = "fake-sheet-id-for-test"
         try:
-            with patch("houses.server.get_client", return_value=mock_client):
+            with inject_server_deps(get_client_fn=lambda: mock_client):
                 resp = client.post(
                     "/api/properties",
                     json={"url": "https://www.rightmove.co.uk/properties/88375569"},
@@ -111,14 +112,15 @@ class TestInjectProperty:
         in the database must be rejected even when the sheet is
         unreachable — the DB is the source of truth for duplicates."""
         from dag.persistence import save_node_result
-
+        from tests.helpers import inject_server_deps
         rid = "88375570"
+
         save_node_result(
             f"{rid}/rightmove_address",
             {"status": "succeeded", "value": "12 Test Street, Testown RG1 1AA", "succeeded": True},
         )
         # No sheet client at all — dedupe must come from the DB, not the sheet.
-        with patch("houses.server.get_client", return_value=None):
+        with inject_server_deps(get_client_fn=lambda: None):
             resp = client.post(
                 "/api/properties",
                 json={"url": f"https://www.rightmove.co.uk/properties/{rid}"},

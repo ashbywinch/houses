@@ -8,7 +8,7 @@ import pytest
 from httpx import AsyncClient, Client, MockTransport, Response
 
 from houses.api_cache import set_cache_dir
-from houses.config import settings
+from houses.settings import settings
 from tests.unit.isolation_fixtures import _sqlite_memory  # noqa: F401 — re-exported for integration tests
 
 

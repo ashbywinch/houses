@@ -12,12 +12,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from money import Money
-from pint import Quantity
 
-from houses.geo import GeoPoint
-from houses.model.domain import Commute, PlaceOfInterest
+from houses.geopoint import GeoPoint
 from houses.stations import Station, StationRegistry
-from houses.tfl_client import TflClient
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +62,7 @@ class RailFareRegistry:
                 if origin and dest and cost_str:
                     try:
                         fares[frozenset({origin, dest})] = Money(cost_str, "GBP")
+                    # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
                     except Exception:
                         continue
         self._fares_by_pair = fares
@@ -95,66 +93,3 @@ class RailFareRegistry:
         if not self._fares_by_pair:
             return None
         return self._fares_by_pair.get(frozenset({origin.crs, destination.crs}))
-
-
-async def enrich_single_rail_fare(
-    commute: Commute,
-    origin_station: Station,
-    dest_station: Station,
-    destination_postcode: str,
-    parking_cost: Money | None = None,
-    _registry: RailFareRegistry | None = None,
-    _tube_fare_fn=None,
-) -> Commute | None:
-    """Enrich a single commute with a National Rail fare.
-
-    Looks up the fare between *origin_station* and *dest_station*,
-    applies a tube fare for last-mile connectivity, adds any
-    *parking_cost*, and returns an enriched ``Commute`` with
-    ``daily_cost`` set.
-
-    Returns ``None`` if no fare exists between the two stations.
-    Returns the original *commute* (but with the fare applied)
-    when the lookup succeeds.
-
-    ``_registry`` — optional ``RailFareRegistry`` instance.
-    ``_tube_fare_fn`` — optional async tube fare function (default: ``get_tube_leg_fare``).
-    """
-    from houses.rail_fare_registry import get_rail_fare_registry
-
-    registry = _registry or get_rail_fare_registry()
-    tube_fare_fn = _tube_fare_fn or TflClient.get_tube_leg_fare
-
-    fare = registry.fare_between(origin_station, dest_station)
-    if fare is None:
-        return None
-
-    tube_fare = await tube_fare_fn(dest_station, destination_postcode)
-    tube_single = tube_fare or Money(TflClient.FALLBACK_TUBE_SINGLE_GBP, "GBP")
-    rail_cost = (fare + tube_single) * 2
-
-    total = rail_cost + parking_cost if parking_cost is not None else rail_cost
-
-    enriched = Commute(
-        person=commute.person,
-        label=commute.label,
-        destination=PlaceOfInterest(
-            label=commute.destination.label,
-            address=commute.destination.address,
-        ),
-        duration=Quantity(int(commute.duration.magnitude), "minute") if commute.duration else Quantity(0, "minute"),
-        daily_cost=total,
-        _details=commute.details,
-        mode=commute.mode,
-        is_child=commute.is_child,
-    )
-
-    logger.info(
-        "NR fare: %s (rail) + %s (tube)%s = %s",
-        str(fare.amount),
-        str(tube_single.amount),
-        f" + {parking_cost.amount} (parking)" if parking_cost else "",
-        str(total.amount),
-    )
-
-    return enriched

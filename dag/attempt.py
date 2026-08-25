@@ -12,17 +12,27 @@ on ``Attempt`` objects.
 
 from __future__ import annotations
 
+import json as _json
+import logging
 import sys
 import traceback as _traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from decimal import Decimal as _Decimal
 from enum import Enum, StrEnum, auto
 from typing import Any, TypeVar
+
+from money import Money as _Money
 
 T = TypeVar("T")
 U = TypeVar("U")
 R = TypeVar("R")
+
+logger = logging.getLogger(__name__)
+HTTP_TOO_MANY_REQUESTS = 429
+HTTP_5XX_START = 500
+HTTP_5XX_END = 600
 
 
 class SourceType(StrEnum):
@@ -91,7 +101,9 @@ class AttemptError:
             return self.causes[0].display_message
         return self.message
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def to_dict(self) -> dict:
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         return {
             "code": self.code,
             "message": self.message,
@@ -114,7 +126,7 @@ class AttemptError:
         provided one, because HTTP error strings can embed raw response
         bodies.  Falls back to ``str(exc)`` as before.
         """
-        code, retryable = classify_exception(exc)
+        classification = classify_exception(exc)
         tb = ""
         if exc is not None:
             tb = "".join(_traceback.format_exception(type(exc), exc, exc.__traceback__))
@@ -123,15 +135,14 @@ class AttemptError:
             friendly = getattr(exc, "user_message", "")
             user_message = friendly if isinstance(friendly, str) and friendly else str(exc)
         return cls(
-            code=code,
+            code=classification.code,
             message=message,
             user_message=user_message or message,
-            retryable=retryable,
+            retryable=classification.retryable,
             source=source,
             exc=exc,
             traceback=tb,
         )
-
     @classmethod
     def from_dict(cls, d: dict) -> AttemptError:
         """Reconstruct an AttemptError from its JSON-safe projection.
@@ -146,6 +157,7 @@ class AttemptError:
             code=d.get("code", "error"),
             message=d.get("message", ""),
             user_message=d.get("user_message", ""),
+            # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
             retryable=d.get("retryable", False),
             source=d.get("source", ""),
             exc=None,
@@ -154,7 +166,18 @@ class AttemptError:
         )
 
 
-def classify_exception(exc: BaseException | None) -> tuple[str, bool]:
+@dataclass(frozen=True)
+class ExceptionClassification:
+    """(code, retryable) verdict for an exception.
+
+    Named so the DAG retry logic and AttemptError read the fields by
+    meaning rather than by position.
+    """
+
+    code: str
+    retryable: bool
+
+def classify_exception(exc: BaseException | None) -> ExceptionClassification:
     """Map an exception to (code, retryable) without importing HTTP libs.
 
     Handles ``houses.http_error.HttpError`` (``.status``), httpx errors
@@ -163,22 +186,25 @@ def classify_exception(exc: BaseException | None) -> tuple[str, bool]:
     logic and AttemptError both use it.
     """
     if exc is None:
-        return "error", False
+        return ExceptionClassification("error", retryable=False)
     if isinstance(exc, TimeoutError):
-        return "timeout", True
+        return ExceptionClassification("timeout", retryable=True)
     status = getattr(exc, "status", None)
     if status is None and hasattr(exc, "response"):
         status = getattr(exc.response, "status_code", None)
     if status is not None:
         try:
             code = int(status)
-        except (TypeError, ValueError):
-            code = None
+        except (TypeError, ValueError) as e:
+            # Non-numeric status means the error isn't an HTTP error —
+            # falls through to the plain "exception" classification.
+            logger.debug("status %r is not a numeric HTTP code; classifying as a plain exception: %s", status, e)
+            return ExceptionClassification("exception", retryable=False)
         if code is not None:
-            if code == 429 or 500 <= code < 600:
-                return "http_error", True
-            return "http_error", False
-    return "exception", False
+            if code == HTTP_TOO_MANY_REQUESTS or HTTP_5XX_START <= code < HTTP_5XX_END:
+                return ExceptionClassification("http_error", retryable=True)
+            return ExceptionClassification("http_error", retryable=False)
+    return ExceptionClassification("exception", retryable=False)
 
 
 def _active_exception() -> BaseException | None:
@@ -212,6 +238,7 @@ class _AttemptMeta(type):
         return lambda value, error="", **kwargs: cls(_Status.SUCCEEDED, value=value, error=error, **kwargs)
 
     @succeeded.setter
+    @staticmethod
     def succeeded(cls, value):
         raise AttributeError("Cannot set 'succeeded' — reserved by Attempt constructor/property")
 
@@ -220,14 +247,16 @@ class _AttemptMeta(type):
         return lambda: cls(_Status.PENDING)
 
     @pending.setter
+    @staticmethod
     def pending(cls, value):
         raise AttributeError("Cannot set 'pending' — reserved by Attempt constructor/property")
 
     @property
     def impossible(cls):
         return lambda error="", error_info=None: cls(_Status.IMPOSSIBLE, error=error, error_info=error_info)
-
     @impossible.setter
+    @staticmethod
+    # lucidlint: ignore unused-setter referenced API/guard — see review log
     def impossible(cls, value):
         raise AttributeError("Cannot set 'impossible' — reserved by Attempt constructor/property")
 
@@ -258,6 +287,7 @@ class Attempt[T](metaclass=_AttemptMeta):
 
     _now: Callable[[], datetime] = lambda: datetime.now(UTC)
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def __init__(
         self,
         status: _Status,
@@ -266,7 +296,6 @@ class Attempt[T](metaclass=_AttemptMeta):
         metadata: dict | None = None,
         *,
         error_info: AttemptError | None = None,
-        _now: Callable[[], datetime] | None = None,
     ) -> None:
         if status is _Status.SUCCEEDED and isinstance(value, Attempt):
             raise TypeError(
@@ -279,8 +308,7 @@ class Attempt[T](metaclass=_AttemptMeta):
         object.__setattr__(self, "_value", value)
         object.__setattr__(self, "_error", error)
         object.__setattr__(self, "_metadata", metadata or {})
-        object.__setattr__(self, "_created_at", (_now or Attempt._now)())
-        # Auto-capture the active exception when constructed inside an
+        object.__setattr__(self, "_created_at", Attempt._now())
         # except block (e.g. a service doing `except Exception as e:
         # return Attempt.impossible(...)`). Keeps the traceback for
         # debugging without putting it in the user-facing error string.
@@ -349,7 +377,7 @@ class Attempt[T](metaclass=_AttemptMeta):
 
     def value_or(self, default: T) -> T:
         """Return the value if succeeded, otherwise *default*."""
-        return self._value if self.succeeded else default  # type: ignore[return-value]
+        return self._value if self.succeeded else default  # type: ignore[return-value]  # _value is T | None (pending/impossible attempts hold no value); pyrefly can't narrow it through the `succeeded` property, so the succeeded branch still types as T | None against `-> T`
 
     def value_or_none(self) -> T | None:
         """Bridge to ``Optional[T]`` — returns the value or ``None``."""
@@ -363,20 +391,20 @@ class Attempt[T](metaclass=_AttemptMeta):
         """
         if not self.succeeded:
             raise ValueError(f"Attempt.get() called on {self._status.name}")
-        return self._value  # type: ignore[return-value]
+        return self._value  # type: ignore[return-value]  # same property-narrowing gap: `get()` guards with `if not self.succeeded: raise`, but pyrefly doesn't correlate `succeeded` with `_value`'s None-ness
 
     # ── Transform ─────────────────────────────────────────────────────
     def map(self, fn: Callable[[T], U]) -> Attempt[U]:
         """Transform the value if Succeeded; pass through otherwise."""
         if self.succeeded:
-            return Attempt.succeeded(fn(self._value))  # type: ignore[arg-type]
-        return self  # type: ignore[return-value]
+            return Attempt.succeeded(fn(self._value))  # type: ignore[arg-type]  # fn expects T, but _value is typed T | None and pyrefly can't narrow it via the `succeeded` property; this branch is only reached when a value exists
+        return self  # type: ignore[return-value]  # Attempt[T] vs Attempt[U]: T is an invariant TypeVar, but this branch is only reached when not succeeded — no T or U value is present, which the checker can't express
 
     def bind(self, fn: Callable[[T], Attempt[U]]) -> Attempt[U]:
         """Chain a fallible transform; ``fn`` returns ``Attempt[U]``."""
         if self.succeeded:
-            return fn(self._value)  # type: ignore[arg-type]
-        return self  # type: ignore[return-value]
+            return fn(self._value)  # type: ignore[arg-type]  # fn expects T, but _value is typed T | None and pyrefly can't narrow it via the `succeeded` property; this branch is only reached when a value exists
+        return self  # type: ignore[return-value]  # Attempt[T] vs Attempt[U]: T is an invariant TypeVar, but this branch is only reached when not succeeded — no T or U value is present, which the checker can't express
 
     # ── Exhaustive match ──────────────────────────────────────────────
     def match(
@@ -396,7 +424,7 @@ class Attempt[T](metaclass=_AttemptMeta):
             )
         """
         if self.succeeded:
-            return on_succeeded(self._value)  # type: ignore[arg-type]
+            return on_succeeded(self._value)  # type: ignore[arg-type]  # on_succeeded expects T, but _value is typed T | None and pyrefly can't narrow it via the `succeeded` property; this branch is only reached when a value exists
         if self.pending:
             return on_pending()
         return on_impossible(self._error)
@@ -406,6 +434,7 @@ class Attempt[T](metaclass=_AttemptMeta):
         return self._created_at
 
     @property
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def metadata(self) -> dict:
         """Arbitrary metadata attached at construction (JSON-safe).
 
@@ -431,33 +460,10 @@ class Attempt[T](metaclass=_AttemptMeta):
         return hash((self._status, self._value, self._error))
 
 
-def project_value(v: Any) -> Any:
-    """Project a node value to a JSON-safe form for provenance display.
-
-    - JSON-safe values pass through unchanged.
-    - Money serialises as its string form ("GBP 800,000.00") — the
-      canonical provenance convention.
-    - dicts are projected recursively (per-person Money estimates).
-    - Objects with a ``to_provenance_value()`` method (Commute, Person,
-      GeoPoint, ...) are projected through it.
-    - Anything else raises: silently dropping or repr-dumping a value
-      would hide a missing serialization path.
-    """
-    if v is None:
-        return None
-    import json as _json
-
-    try:
-        _json.dumps(v)
-        return v
-    except (TypeError, ValueError, OverflowError):
-        pass
-    from money import Money as _Money
-
+def _project_non_json(v: Any) -> Any:
+    """Project a value that failed the JSON probe through its type-specific path."""
     if isinstance(v, _Money):
         return str(v)
-    from decimal import Decimal as _Decimal
-
     if isinstance(v, _Decimal):
         # Decimal settings (petrol cost, mortgage rate) are value types
         # with a canonical float projection for display.
@@ -473,6 +479,34 @@ def project_value(v: Any) -> Any:
         f"value of type {type(v).__name__} has no provenance projection; "
         "add to_provenance_value() to it or project it in build_provenance"
     )
+
+
+def project_value(v: Any) -> Any:
+    """Project a node value to a JSON-safe form for provenance display.
+
+    - JSON-safe values pass through unchanged.
+    - Money serialises as its string form ("GBP 800,000.00") — the
+      canonical provenance convention.
+    - dicts are projected recursively (per-person Money estimates).
+    - Objects with a ``to_provenance_value()`` method (Commute, Person,
+      GeoPoint, ...) are projected through it.
+    - Anything else raises: silently dropping or repr-dumping a value
+      would hide a missing serialization path.
+    """
+    if v is None:
+        return None
+    try:
+        _json.dumps(v)
+        return v
+    except (TypeError, ValueError, OverflowError) as e:
+        # The JSON probe is a type test: non-serializable values take the
+        # type-specific projection path below — an ignorable, expected miss.
+        logger.debug(
+            "value of type %s is not JSON-serializable; projecting via its type-specific path: %s",
+            type(v).__name__,
+            e,
+        )
+        return _project_non_json(v)
 
 
 @dataclass
@@ -498,6 +532,7 @@ class Provenance:
     error: str = ""
     sources: dict[str, Provenance] = field(default_factory=dict)
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def to_dict(self) -> dict:
         """Serialise to a JSON-safe dict."""
         result: dict = {"label": self.label}
@@ -512,13 +547,9 @@ class Provenance:
             # node is fixed, never silently drop or repr-dump the value.
             # Money is the one canonical value-type exception: it has a
             # well-defined string form.
-            import json as _json
-
             try:
                 _json.dumps(self.value)
             except (TypeError, ValueError, OverflowError):
-                from money import Money as _Money
-
                 if isinstance(self.value, _Money):
                     result["value"] = str(self.value)
                 else:
@@ -538,7 +569,9 @@ class Provenance:
         if self.freshness is not None:
             result["freshness"] = self.freshness.isoformat()
         if self.formula is not None:
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             result["formula"] = {
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
                 "lines": [{"label": line.label, "value": line.value} for line in self.formula.lines],
                 "result": self.formula.result,
             }

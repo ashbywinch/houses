@@ -36,29 +36,49 @@ from __future__ import annotations
 import json
 import os
 import sys
+from dataclasses import dataclass
 
 import gspread
 from google.oauth2.service_account import Credentials
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from houses.config import settings  # noqa: E402
-from houses.sheets import COLUMN_HEADERS, col_letter  # noqa: E402
+from houses.settings import settings
+from houses.sheets import (
+    COLUMN_HEADERS,
+    col_letter,
+    ensure_named_ranges,
+    sync_data_formulas,
+    sync_view_formulas,
+)
+from houses.sheets import VIEW_HEADERS as NEW_HEADERS
+
+
+# lucidlint: ignore class-module small private helper — module keeps its domain name
+@dataclass(frozen=True)
+class SheetHandle:
+    """(spreadsheet, worksheet) pair from _get_sheet — named so the many
+    command functions read the fields by meaning, not position."""
+
+    sh: gspread.Spreadsheet
+    ws: gspread.Worksheet
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 DATA_TAB = "Properties Data"
 VIEW_TAB = "Properties View"
+VIEW_COLUMN_COUNT = 34
 
 
-def _get_sheet() -> tuple[gspread.Spreadsheet, gspread.Worksheet]:
+def _get_sheet() -> SheetHandle:
     creds = Credentials.from_service_account_info(json.loads(settings.service_account_json), scopes=SCOPES)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
     ws = sh.worksheet(DATA_TAB)
-    return sh, ws
+    return SheetHandle(sh, ws)
 
 
 def cmd_layout():
-    sh, ws = _get_sheet()
+    sheet = _get_sheet()
+    ws = sheet.ws
     data = ws.get_all_values()
     print(f"{DATA_TAB}: {len(data)} rows, {len(data[0])} cols")
     for i in range(max(len(COLUMN_HEADERS), len(data[0]))):
@@ -103,7 +123,9 @@ def cmd_move(header: str, after: str | None, tab: str | None = None):
     body = {
         "requests": [
             {
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
                 "moveDimension": {
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
                     "source": {
                         "sheetId": sheet_id,
                         "dimension": "COLUMNS",
@@ -143,6 +165,7 @@ def cmd_add(header: str, after: str | None = None, tab: str | None = None):
         "requests": [
             {
                 "insertDimension": {
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
                     "range": {
                         "sheetId": sheet_id,
                         "dimension": "COLUMNS",
@@ -190,8 +213,10 @@ def cmd_delete(header: str, tab: str | None = None):
             idx = _find_column(ws, header)
             if idx is not None:
                 found_in[t] = idx
-        except Exception:
-            pass
+        # lucidlint: ignore broad-except deliberate per-tab resilience — an unreadable tab is skipped
+        except Exception as e:
+            print(f"  Skipping '{t}' — could not read it: {e}")
+            continue
 
     if len(found_in) == 0:
         search_msg = f" in {tab}" if tab else f" in either '{DATA_TAB}' or '{VIEW_TAB}'"
@@ -211,6 +236,7 @@ def cmd_delete(header: str, tab: str | None = None):
     body = {
         "requests": [
             {
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
                 "deleteDimension": {
                     "range": {
                         "sheetId": sheet_id,
@@ -227,7 +253,8 @@ def cmd_delete(header: str, tab: str | None = None):
 
 
 def cmd_rename(old_name: str, new_name: str):
-    sh, ws = _get_sheet()
+    sheet = _get_sheet()
+    ws = sheet.ws
     headers = ws.get_all_values()[0]
     for i, h in enumerate(headers):
         if h.strip().lower() == old_name.strip().lower():
@@ -237,29 +264,44 @@ def cmd_rename(old_name: str, new_name: str):
     print(f"Column '{old_name}' not found")
 
 
+def _find_header_index(headers: list[str], name: str) -> int | None:
+    for i, h in enumerate(headers):
+        if h.strip().lower() == name:
+            return i
+    return None
+
+
+def _find_row_by_id(data, rid_col: int, rid: str):
+    for i, r in enumerate(data[1:], 2):
+        if len(r) > rid_col and r[rid_col].strip() == rid:
+            return r, i
+    return None, None
+
+
+# lucidlint: ignore record-shape (index, this, other) diff cells — a NamedTuple is ceremony for a local loop
+def _diff_cells(this_row, other_row, limit: int) -> list[tuple[int, str, str]]:
+    cells = []
+    for i in range(limit):
+        this_val = this_row[i].strip() if i < len(this_row) else ""
+        other_val = other_row[i].strip() if i < len(other_row) else ""
+        if this_val != other_val:
+            cells.append((i, this_val, other_val))
+    return cells
+
+
 def cmd_diff(rid: str, tab: str, other: str | None):
-    sh, ws = _get_sheet()
+    sheet = _get_sheet()
+    sh, ws = sheet.sh, sheet.ws
     this_data = ws.get_all_values()
     this_headers = this_data[0]
 
     # Find row by Rightmove ID
-    rid_col = None
-    for i, h in enumerate(this_headers):
-        if h.strip().lower() == "rightmove id":
-            rid_col = i
-            break
+    rid_col = _find_header_index(this_headers, "rightmove id")
     if rid_col is None:
         print("No Rightmove ID column found")
         return
 
-    this_row = None
-    this_row_num = None
-    for i, r in enumerate(this_data[1:], 2):
-        if len(r) > rid_col and r[rid_col].strip() == rid:
-            this_row = r
-            this_row_num = i
-            break
-
+    this_row, this_row_num = _find_row_by_id(this_data, rid_col, rid)
     if this_row is None:
         print(f"Row with Rightmove ID '{rid}' not found in {tab}")
         return
@@ -267,6 +309,7 @@ def cmd_diff(rid: str, tab: str, other: str | None):
     other_tab = other or tab
     try:
         ws2 = sh.worksheet(other_tab)
+    # lucidlint: ignore broad-except deliberate fallback — an unopenable tab aborts that command with a message
     except Exception as e:
         print(f"Could not open tab '{other_tab}': {e}")
         return
@@ -275,15 +318,11 @@ def cmd_diff(rid: str, tab: str, other: str | None):
     other_headers = other_data[0]
 
     print(f"Diff for Rightmove ID {rid} ({tab} row {this_row_num} vs {other_tab}):")
-    for i in range(min(len(this_row), len(other_headers))):
-        this_val = this_row[i].strip() if i < len(this_row) else ""
-        _ = other_headers[i] if i < len(other_headers) else f"?{i}"
-        other_val = ""
-        if other_data and len(other_data) > 1 and i < len(other_data[1]):
-            other_val = other_data[1][i].strip()
-        if this_val != other_val:
-            h = this_headers[i] if i < len(this_headers) else f"?{i}"
-            print(f"  {col_letter(i):3s} {h:25s} {tab}={this_val[:40]:40s} {other_tab}={other_val[:40]}")
+    other_row = other_data[1] if other_data and len(other_data) > 1 else []
+    limit = min(len(this_row), len(other_headers))
+    for i, this_val, other_val in _diff_cells(this_row, other_row, limit):
+        h = this_headers[i] if i < len(this_headers) else f"?{i}"
+        print(f"  {col_letter(i):3s} {h:25s} {tab}={this_val[:40]:40s} {other_tab}={other_val[:40]}")
 
 
 def cmd_delete_tab(tab: str):
@@ -312,7 +351,6 @@ def cmd_refresh_formulas():
     creds = Credentials.from_service_account_info(json.loads(settings.service_account_json), scopes=SCOPES)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
-    from houses.sheets import sync_data_formulas, sync_view_formulas
 
     sync_view_formulas(sh)
     sync_data_formulas(sh)
@@ -353,6 +391,7 @@ _EXPECTED_PRE_MIGRATION_VIEW = [
 
 
 def _col_letter(i: int) -> str:
+# lucidlint: ignore magic-number ASCII offsets (65='A', 64, 26) of the column-letter algorithm — algorithm constants
     return chr(65 + i) if i < 26 else chr(64 + i // 26) + chr(65 + i % 26)
 
 
@@ -373,10 +412,6 @@ def cmd_migrate_view(dry_run: bool = False, undo: bool = False):
     creds = Credentials.from_service_account_info(json.loads(settings.service_account_json), scopes=SCOPES)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
-
-    from houses.sheets import VIEW_HEADERS as NEW_HEADERS
-    from houses.sheets import ensure_named_ranges, sync_data_formulas, sync_view_formulas
-
     view_ws = sh.worksheet(VIEW_TAB)
     sid = view_ws._properties["sheetId"]
     headers = view_ws.get_all_values()[0]
@@ -397,11 +432,12 @@ def cmd_migrate_view(dry_run: bool = False, undo: bool = False):
 
     if undo:
         # Validate current state: must have 34 columns
-        if len(headers) < 34:
+        if len(headers) < VIEW_COLUMN_COUNT:
             print(f"ERROR: View tab has {len(headers)} columns, expected 34 for undo.")
             sys.exit(1)
 
         # Step 1: Delete the 7 inserted columns (indices 23-29)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         req_delete = {
             "deleteDimension": {"range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": 23, "endIndex": 30}}
         }
@@ -410,6 +446,7 @@ def cmd_migrate_view(dry_run: bool = False, undo: bool = False):
 
         # Step 2: Insert 2 columns at index 5 (Yearly Commute, Yearly Council Tax)
         req_insert = {
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             "insertDimension": {
                 "range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": 5, "endIndex": 7},
                 "inheritFromBefore": False,
@@ -437,6 +474,7 @@ def cmd_migrate_view(dry_run: bool = False, undo: bool = False):
             sys.exit(1)
 
     # Step 1: Delete cols F-G (indices 5-6)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     req_delete = {
         "deleteDimension": {"range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": 5, "endIndex": 7}}
     }
@@ -445,6 +483,7 @@ def cmd_migrate_view(dry_run: bool = False, undo: bool = False):
 
     # Step 2: Insert 7 cols at position 23 (post-delete index)
     req_insert = {
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         "insertDimension": {
             "range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": 23, "endIndex": 30},
             "inheritFromBefore": False,
@@ -512,19 +551,15 @@ def cmd_migrate_data_formulas(dry_run: bool = False):
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(os.environ.get("HOUSES_SHEET_ID", settings.sheet_id))
     ws_data = sh.worksheet(DATA_TAB)
-
-    from houses.sheets import COLUMN_HEADERS
-
     headers = ws_data.get_all_values()[0]
     num_cols = len(headers)
     expected = len(COLUMN_HEADERS)
 
     if dry_run:
         print(f"[DRY RUN] Data tab: {num_cols} columns, code expects {expected}")
-        missing = []
-        for i in range(min(num_cols, expected)):
-            if headers[i].strip() != COLUMN_HEADERS[i]:
-                missing.append((i, COLUMN_HEADERS[i]))
+        missing = [
+            (i, COLUMN_HEADERS[i]) for i in range(min(num_cols, expected)) if headers[i].strip() != COLUMN_HEADERS[i]
+        ]
         if missing:
             print(f"  Missing/wrong headers at indices: {[m[0] for m in missing]}")
         excess = num_cols - expected
@@ -567,7 +602,6 @@ def cmd_migrate_data_formulas(dry_run: bool = False):
         print(f"  Deleted {num_cols - expected} excess columns")
 
     # Step 3: Refresh formulas
-    from houses.sheets import ensure_named_ranges, sync_data_formulas, sync_view_formulas
 
     ensure_named_ranges(sh)
     print("  Named ranges refreshed")
@@ -578,83 +612,99 @@ def cmd_migrate_data_formulas(dry_run: bool = False):
     print("Data formulas migration complete.")
 
 
+def _flag_value(args: list[str], flag: str) -> str | None:
+    if flag in args:
+        return args[args.index(flag) + 1]
+    return None
+
+
+def _run_move(args: list[str]) -> None:
+    if len(args) < 1:
+        print("Usage: sheet_tool.py move <header> [--after <header>] [--tab <name>]")
+        return
+    cmd_move(args[0], _flag_value(args, "--after"), _flag_value(args, "--tab"))
+
+
+def _run_add(args: list[str]) -> None:
+    if len(args) < 1:
+        print("Usage: sheet_tool.py add <header> [--after <header>] [--tab <name>]")
+        return
+    cmd_add(args[0], _flag_value(args, "--after"), _flag_value(args, "--tab"))
+
+
+def _run_delete(args: list[str]) -> None:
+    if len(args) < 1:
+        print("Usage: sheet_tool.py delete <header> [--tab <name>]")
+        return
+    cmd_delete(args[0], _flag_value(args, "--tab"))
+
+
+def _run_rename(args: list[str]) -> None:
+    if len(args) < 2:
+        print("Usage: sheet_tool.py rename <old> <new>")
+        return
+    cmd_rename(args[0], args[1])
+
+
+def _run_diff(args: list[str]) -> None:
+    if len(args) < 1:
+        print("Usage: sheet_tool.py diff <rightmove_id> [--tab <name>] [--other <name>]")
+        return
+    cmd_diff(args[0], _flag_value(args, "--tab") or DATA_TAB, _flag_value(args, "--other"))
+
+
+def _run_delete_tab(args: list[str]) -> None:
+    if len(args) < 1:
+        print("Usage: sheet_tool.py delete-tab <tab_name>")
+        return
+    cmd_delete_tab(args[0])
+
+
+def _run_migrate_view(args: list[str]) -> None:
+    dry_run = "--dry-run" in args
+    undo = "--undo" in args
+    if dry_run and undo:
+        print("Cannot use both --dry-run and --undo")
+        sys.exit(1)
+    cmd_migrate_view(dry_run=dry_run, undo=undo)
+
+
+def _dispatch(cmd: str, args: list[str]) -> bool:
+    if cmd == "layout":
+        cmd_layout()
+    elif cmd == "move":
+        _run_move(args)
+    elif cmd == "add":
+        _run_add(args)
+    elif cmd == "delete" or cmd == "delete-column":
+        _run_delete(args)
+    elif cmd == "rename":
+        _run_rename(args)
+    elif cmd == "diff":
+        _run_diff(args)
+    elif cmd == "delete-tab":
+        _run_delete_tab(args)
+    elif cmd == "refresh-formulas":
+        cmd_refresh_formulas()
+    elif cmd == "migrate-view":
+        _run_migrate_view(args)
+    elif cmd == "migrate-view-gaps":
+        cmd_migrate_view_gaps(dry_run="--dry-run" in args)
+    elif cmd == "migrate-data-formulas":
+        cmd_migrate_data_formulas(dry_run="--dry-run" in args)
+    else:
+        return False
+    return True
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
         return
 
     cmd = sys.argv[1]
-
-    if cmd == "layout":
-        cmd_layout()
-    elif cmd == "move":
-        if len(sys.argv) < 3:
-            print("Usage: sheet_tool.py move <header> [--after <header>] [--tab <name>]")
-            return
-        header = sys.argv[2]
-        after = None
-        tab = None
-        if "--after" in sys.argv:
-            after = sys.argv[sys.argv.index("--after") + 1]
-        if "--tab" in sys.argv:
-            tab = sys.argv[sys.argv.index("--tab") + 1]
-        cmd_move(header, after, tab)
-    elif cmd == "add":
-        if len(sys.argv) < 3:
-            print("Usage: sheet_tool.py add <header> [--after <header>] [--tab <name>]")
-            return
-        header = sys.argv[2]
-        after = None
-        tab = None
-        if "--after" in sys.argv:
-            after = sys.argv[sys.argv.index("--after") + 1]
-        if "--tab" in sys.argv:
-            tab = sys.argv[sys.argv.index("--tab") + 1]
-        cmd_add(header, after, tab)
-    elif cmd == "delete" or cmd == "delete-column":
-        if len(sys.argv) < 3:
-            print("Usage: sheet_tool.py delete <header> [--tab <name>]")
-            return
-        header = sys.argv[2]
-        tab = None
-        if "--tab" in sys.argv:
-            tab = sys.argv[sys.argv.index("--tab") + 1]
-        cmd_delete(header, tab)
-    elif cmd == "rename":
-        if len(sys.argv) < 4:
-            print("Usage: sheet_tool.py rename <old> <new>")
-            return
-        cmd_rename(sys.argv[2], sys.argv[3])
-    elif cmd == "diff":
-        if len(sys.argv) < 3:
-            print("Usage: sheet_tool.py diff <rightmove_id> [--tab <name>] [--other <name>]")
-            return
-        tab = DATA_TAB
-        other = None
-        if "--tab" in sys.argv:
-            tab = sys.argv[sys.argv.index("--tab") + 1]
-        if "--other" in sys.argv:
-            other = sys.argv[sys.argv.index("--other") + 1]
-        cmd_diff(sys.argv[2], tab, other)
-    elif cmd == "delete-tab":
-        if len(sys.argv) < 3:
-            print("Usage: sheet_tool.py delete-tab <tab_name>")
-            return
-        cmd_delete_tab(sys.argv[2])
-    elif cmd == "refresh-formulas":
-        cmd_refresh_formulas()
-    elif cmd == "migrate-view":
-        dry_run = "--dry-run" in sys.argv
-        undo = "--undo" in sys.argv
-        if dry_run and undo:
-            print("Cannot use both --dry-run and --undo")
-            sys.exit(1)
-        cmd_migrate_view(dry_run=dry_run, undo=undo)
-    elif cmd == "migrate-view-gaps":
-        cmd_migrate_view_gaps(dry_run="--dry-run" in sys.argv)
-    elif cmd == "migrate-data-formulas":
-        cmd_migrate_data_formulas(dry_run="--dry-run" in sys.argv)
-    else:
+    args = sys.argv[2:]
+    if not _dispatch(cmd, args):
         print(f"Unknown command: {cmd}")
         print(__doc__)
 

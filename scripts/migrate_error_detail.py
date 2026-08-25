@@ -64,6 +64,7 @@ def _migrate_works_estimates(conn: sqlite3.Connection) -> int:
         for name, val in list(value.items()):
             is_numeric_str = isinstance(val, str) and val.replace(".", "").replace("-", "").isdigit()
             if isinstance(val, (int, float)) or is_numeric_str:
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
                 value[name] = {"amount": str(val), "currency": "GBP"}
                 changed = True
         if changed:

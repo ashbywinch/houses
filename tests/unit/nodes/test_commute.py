@@ -7,12 +7,12 @@ from pint import Quantity
 import dag.user_input_node  # noqa: F401 — register Money/Quantity pydantic schemas
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
-from dag.if_then_else import IfThenElseNode
+from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
 from dag.node import Node
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.commute import CostGroup, JourneyLeg, LegMode
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from tests.helpers import FixedCommuteNode
 
@@ -42,7 +42,7 @@ class TestCommuteSelectorNode:
         """A car-only POI must not register transit/walk as dependencies —
         a permanently pending excluded node would stall the selector's
         refresh forever."""
-        from houses.nodes.commute import CommuteSelectorNode
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
         origin = UserInputNode[GeoPoint]("origin", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
@@ -52,13 +52,15 @@ class TestCommuteSelectorNode:
 
         node = CommuteSelectorNode(
             "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            walk_result=walk,
-            drive_result=drive,
-            max_walk_node=_mw(30),
-            acceptable_modes=("car",),
+            options=CommuteSelectorOptions(
+                origin=origin,
+                poi=poi,
+                transit_result=transit,
+                walk_result=walk,
+                drive_result=drive,
+                max_walk_node=_mw(30),
+                acceptable_modes=("car",),
+            ),
         )
         dep_ids = {d._id for d in node._get_active_deps()}
         assert "transit" not in dep_ids
@@ -70,7 +72,7 @@ class TestCommuteSelectorNode:
         """acceptable_modes=('transit',) excludes the drive alternative even
         when driving is fastest — a train-only POI is never scored by a
         car route."""
-        from houses.nodes.commute import CommuteSelectorNode
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
         origin = UserInputNode[GeoPoint]("origin", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
@@ -81,13 +83,15 @@ class TestCommuteSelectorNode:
 
         node = CommuteSelectorNode(
             "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            walk_result=walk,
-            drive_result=drive,
-            max_walk_node=_mw(30),
-            acceptable_modes=("transit",),
+            options=CommuteSelectorOptions(
+                origin=origin,
+                poi=poi,
+                transit_result=transit,
+                walk_result=walk,
+                drive_result=drive,
+                max_walk_node=_mw(30),
+                acceptable_modes=("transit",),
+            ),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -108,7 +112,7 @@ class TestCommuteSelectorNode:
     async def test_car_only_poi_never_picks_transit(self):
         """acceptable_modes=('car',) excludes transit even when the train
         is faster — the person only accepts driving."""
-        from houses.nodes.commute import CommuteSelectorNode
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
         origin = UserInputNode[GeoPoint]("origin", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
@@ -119,13 +123,15 @@ class TestCommuteSelectorNode:
 
         node = CommuteSelectorNode(
             "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            walk_result=walk,
-            drive_result=drive,
-            max_walk_node=_mw(30),
-            acceptable_modes=("car",),
+            options=CommuteSelectorOptions(
+                origin=origin,
+                poi=poi,
+                transit_result=transit,
+                walk_result=walk,
+                drive_result=drive,
+                max_walk_node=_mw(30),
+                acceptable_modes=("car",),
+            ),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -146,7 +152,7 @@ class TestCommuteSelectorNode:
     async def test_walk_only_poi_picks_walk(self):
         """acceptable_modes=('walk',) selects the walk even when transit is
         faster."""
-        from houses.nodes.commute import CommuteSelectorNode
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
         origin = UserInputNode[GeoPoint]("origin", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
@@ -157,13 +163,15 @@ class TestCommuteSelectorNode:
 
         node = CommuteSelectorNode(
             "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            walk_result=walk,
-            drive_result=drive,
-            max_walk_node=_mw(30),
-            acceptable_modes=("walk",),
+            options=CommuteSelectorOptions(
+                origin=origin,
+                poi=poi,
+                transit_result=transit,
+                walk_result=walk,
+                drive_result=drive,
+                max_walk_node=_mw(30),
+                acceptable_modes=("walk",),
+            ),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -184,7 +192,7 @@ class TestCommuteSelectorNode:
     async def test_unset_modes_means_all_acceptable(self):
         """acceptable_modes=() (unset/legacy) keeps the old behaviour: every
         feasible mode competes."""
-        from houses.nodes.commute import CommuteSelectorNode
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
         origin = UserInputNode[GeoPoint]("origin", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
@@ -195,12 +203,14 @@ class TestCommuteSelectorNode:
 
         node = CommuteSelectorNode(
             "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            walk_result=walk,
-            drive_result=drive,
-            max_walk_node=_mw(30),
+            options=CommuteSelectorOptions(
+                origin=origin,
+                poi=poi,
+                transit_result=transit,
+                walk_result=walk,
+                drive_result=drive,
+                max_walk_node=_mw(30),
+            ),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -222,7 +232,7 @@ class TestCommuteSelectorNode:
         """When every acceptable mode is infeasible, the commute is
         impossible — never a silent fallback to a mode the person didn't
         accept."""
-        from houses.nodes.commute import CommuteSelectorNode
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
         origin = UserInputNode[GeoPoint]("origin", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
@@ -232,13 +242,15 @@ class TestCommuteSelectorNode:
 
         node = CommuteSelectorNode(
             "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            walk_result=walk,
-            drive_result=_impossible_commute("drive"),
-            max_walk_node=_mw(30),
-            acceptable_modes=("car",),
+            options=CommuteSelectorOptions(
+                origin=origin,
+                poi=poi,
+                transit_result=transit,
+                walk_result=walk,
+                drive_result=_impossible_commute("drive"),
+                max_walk_node=_mw(30),
+                acceptable_modes=("car",),
+            ),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -254,7 +266,7 @@ class TestCommuteSelectorNode:
 
     @pytest.mark.asyncio
     async def test_transit_takes_priority(self):
-        from houses.nodes.commute import CommuteSelectorNode
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
         origin = UserInputNode[GeoPoint]("origin", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
@@ -266,12 +278,14 @@ class TestCommuteSelectorNode:
 
         node = CommuteSelectorNode(
             "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            walk_result=walk,
-            drive_result=drive,
-            max_walk_node=_mw(30),
+            options=CommuteSelectorOptions(
+                origin=origin,
+                poi=poi,
+                transit_result=transit,
+                walk_result=walk,
+                drive_result=drive,
+                max_walk_node=_mw(30),
+            ),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -297,7 +311,7 @@ class TestCommuteSelectorNode:
     @pytest.mark.asyncio
     async def test_fallback_to_bus(self):
         """When transit is pending, selector is pending."""
-        from houses.nodes.commute import CommuteSelectorNode
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
         origin = UserInputNode[GeoPoint]("origin", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
@@ -305,10 +319,12 @@ class TestCommuteSelectorNode:
 
         node = CommuteSelectorNode(
             "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            max_walk_node=_mw(30),
+            options=CommuteSelectorOptions(
+                origin=origin,
+                poi=poi,
+                transit_result=transit,
+                max_walk_node=_mw(30),
+            ),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -323,7 +339,7 @@ class TestCommuteSelectorNode:
     @pytest.mark.asyncio
     async def test_impossible_when_both_fail(self):
         """When all routes fail (impossible), selector is impossible."""
-        from houses.nodes.commute import CommuteSelectorNode
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
         origin = UserInputNode[GeoPoint]("origin", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
@@ -331,12 +347,14 @@ class TestCommuteSelectorNode:
 
         node = CommuteSelectorNode(
             "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            walk_result=_impossible_commute("walk"),
-            drive_result=_impossible_commute("drive"),
-            max_walk_node=_mw(30),
+            options=CommuteSelectorOptions(
+                origin=origin,
+                poi=poi,
+                transit_result=transit,
+                walk_result=_impossible_commute("walk"),
+                drive_result=_impossible_commute("drive"),
+                max_walk_node=_mw(30),
+            ),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -350,7 +368,7 @@ class TestCommuteSelectorNode:
 
     @pytest.mark.asyncio
     async def test_impossible_when_origin_missing(self):
-        from houses.nodes.commute import CommuteSelectorNode
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
         origin = UserInputNode[GeoPoint]("origin", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
@@ -360,10 +378,12 @@ class TestCommuteSelectorNode:
 
         node = CommuteSelectorNode(
             "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            max_walk_node=_mw(30),
+            options=CommuteSelectorOptions(
+                origin=origin,
+                poi=poi,
+                transit_result=transit,
+                max_walk_node=_mw(30),
+            ),
         )
 
         office_poi = PlaceOfInterest("Office", "SW1V 2QQ")
@@ -376,7 +396,7 @@ class TestCommuteSelectorNode:
 
     @pytest.mark.asyncio
     async def test_recomputes_when_transit_updates(self):
-        from houses.nodes.commute import CommuteSelectorNode
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
         origin = UserInputNode[GeoPoint]("origin", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
@@ -388,12 +408,14 @@ class TestCommuteSelectorNode:
 
         node = CommuteSelectorNode(
             "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            walk_result=walk,
-            drive_result=drive,
-            max_walk_node=_mw(30),
+            options=CommuteSelectorOptions(
+                origin=origin,
+                poi=poi,
+                transit_result=transit,
+                walk_result=walk,
+                drive_result=drive,
+                max_walk_node=_mw(30),
+            ),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -406,16 +428,20 @@ class TestCommuteSelectorNode:
 
         await flush_processor()
 
-        assert (await node.attempt()).value_or_none().daily_cost == Money("4.50", "GBP")
+        selected = (await node.attempt()).value_or_none()
+        assert selected is not None
+        assert selected.daily_cost == Money("4.50", "GBP")
 
         transit.push(_make_commute(duration_min=30, cost_gbp=3.00), "TfL-Updated")
 
         await flush_processor()
-        assert (await node.attempt()).value_or_none().daily_cost == Money("3.00", "GBP")
+        selected = (await node.attempt()).value_or_none()
+        assert selected is not None
+        assert selected.daily_cost == Money("3.00", "GBP")
 
     @pytest.mark.asyncio
     async def test_to_json_shape(self):
-        from houses.nodes.commute import CommuteSelectorNode
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
         origin = UserInputNode[GeoPoint]("origin", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
@@ -427,12 +453,14 @@ class TestCommuteSelectorNode:
 
         node = CommuteSelectorNode(
             "commute_selector",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            walk_result=walk,
-            drive_result=drive,
-            max_walk_node=_mw(30),
+            options=CommuteSelectorOptions(
+                origin=origin,
+                poi=poi,
+                transit_result=transit,
+                walk_result=walk,
+                drive_result=drive,
+                max_walk_node=_mw(30),
+            ),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
@@ -458,27 +486,28 @@ class TestCommuteSelectorNode:
         A bug in ComputedTransitNode hardcodes is_child=False on the Commute
         object, so the selector must overwrite it after selection.
         """
-        from houses.nodes.commute import CommuteSelectorNode
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
         origin = UserInputNode[GeoPoint]("origin", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
         transit = FixedCommuteNode("transit")
-        bus = FixedCommuteNode("bus")
+        FixedCommuteNode("bus")
         _succeeded_walk_check(False)
 
         node = CommuteSelectorNode(
             "commute_selector_child",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            is_child=True,
-            max_walk_node=_mw(30),
+            options=CommuteSelectorOptions(
+                origin=origin,
+                poi=poi,
+                transit_result=transit,
+                is_child=True,
+                max_walk_node=_mw(30),
+            ),
         )
 
         origin.push(GeoPoint(51.5, -0.1), "user")
         poi.push(PlaceOfInterest("School", "SW1V 2QQ"), "config")
         transit.push(_make_commute(duration_min=10, cost_gbp=0), "walk")
-        bus.push(None)
 
         await flush_processor()
 
@@ -599,7 +628,7 @@ class TestMergeRailFareNode:
             person=person,
             label="Office",
             destination=office,
-            duration=Quantity(60, "minute"),  # type: ignore[arg-type]
+            duration=Quantity(60, "minute"),
 
             daily_cost=Money("10.90", "GBP"),  # parking cost only
             mode="transit",
@@ -644,7 +673,7 @@ class TestMergeRailFareNode:
             person=walk_commute.person,
             label=walk_commute.label,
             destination=walk_commute.destination,
-            duration=Quantity(20, "minute"),  # type: ignore[arg-type]
+            duration=Quantity(20, "minute"),
 
             daily_cost=Money("0", "GBP"),
             mode="walk",
@@ -740,7 +769,7 @@ def _make_commute(duration_min=32, cost_gbp=4.50):
         person=person,
         label=office.label,
         destination=office,
-        duration=Quantity(duration_min, "minute"),  # type: ignore[arg-type]
+        duration=Quantity(duration_min, "minute"),
 
         daily_cost=Money(str(cost_gbp), "GBP"),
         _details=(CostGroup(legs=(leg,), operator="TfL", cost=Money(str(cost_gbp), "GBP")),),
@@ -750,12 +779,12 @@ def _drive_commute(duration_min=16, cost_gbp=5.0) -> Commute:
     """A real driving commute — no transit legs, so NR fares never apply."""
     office = PlaceOfInterest("Office", "SW1V 2QQ")
     person = Person("Simon", True, places_of_interest=(office,))
-    leg = JourneyLeg(mode=LegMode.DRIVE, duration=Quantity(duration_min, "minute"))  # type: ignore[arg-type]
+    leg = JourneyLeg(mode=LegMode.DRIVE, duration=Quantity(duration_min, "minute"))
     return Commute(
         person=person,
         label=office.label,
         destination=office,
-        duration=Quantity(duration_min, "minute"),  # type: ignore[arg-type]
+        duration=Quantity(duration_min, "minute"),
 
         daily_cost=Money(str(cost_gbp), "GBP"),
         mode="drive",
@@ -770,21 +799,25 @@ def _bus_if(walk_check: DerivedNode, bus_node: Node) -> IfThenElseNode:
     return IfThenElseNode(
         f"_bus_if_{id(bus_node)}",
         Commute,
-        condition_sources=(walk_check,),
-        condition_fn=_bus_condition,
-        then_branch=bus_node,
+        options=IfThenElseOptions(
+            condition_sources=(walk_check,),
+            condition_fn=_bus_condition,
+            then_branch=bus_node,
+        ),
     )
 
 def _rail_fare_if(transit_node: Node, rail_fare_node: Node) -> IfThenElseNode:
     """Wrap a rail_fare node in IfThenElseNode activated when NR fare is needed."""
-    from houses.nodes.commute import _needs_rail_fare
+    from houses.nodes.commute import needs_rail_fare
 
     return IfThenElseNode(
         f"_rf_if_{id(rail_fare_node)}",
         Commute,
-        condition_sources=(transit_node,),
-        condition_fn=_needs_rail_fare,
-        then_branch=rail_fare_node,
+        options=IfThenElseOptions(
+            condition_sources=(transit_node,),
+            condition_fn=needs_rail_fare,
+            then_branch=rail_fare_node,
+        ),
     )
 
 class _ImpossibleCommuteNode(DerivedNode[Commute]):
@@ -809,7 +842,7 @@ async def test_commute_selector_init_with_persisted_result():
 
     from dag.persistence import save_node_result
     from houses.model.domain import Commute as CommuteDomain
-    from houses.nodes.commute import CommuteSelectorNode
+    from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
     node_id = "test_init_crash_persisted"
 
@@ -832,12 +865,14 @@ async def test_commute_selector_init_with_persisted_result():
 
     node = CommuteSelectorNode(
         node_id,
-        origin=origin,
-        poi=poi,
-        transit_result=transit,
-        walk_result=_impossible_commute("walk"),
-        drive_result=_impossible_commute("drive"),
-        max_walk_node=_mw(30),
+        options=CommuteSelectorOptions(
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            walk_result=_impossible_commute("walk"),
+            drive_result=_impossible_commute("drive"),
+            max_walk_node=_mw(30),
+        ),
     )
     node.disconnect()
 
@@ -985,12 +1020,12 @@ class TestRailFareNode:
         # fail with "terminal station not found".
         office = PlaceOfInterest("Office", "SW1V 2QQ")
         person = Person("Simon", True, places_of_interest=(office,))
-        leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(120, "minute"), end_station="Reading")  # type: ignore[arg-type]
+        leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(120, "minute"), end_station="Reading")
         transit_commute = Commute(
             person=person,
             label="Bracknell",
             destination=office,
-            duration=Quantity(120, "minute"),  # type: ignore[arg-type]
+            duration=Quantity(120, "minute"),
             daily_cost=Money("0", "GBP"),
             _details=(CostGroup(legs=(leg,), operator="TfL", cost=None),),
         )
@@ -1023,7 +1058,7 @@ class TestRailFareNode:
             person=Person(name="", has_car=False),
             label="NoRoute",
             destination=PlaceOfInterest(label="", address=""),
-            duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+            duration=Quantity(0, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="transit",
             _details=(),
@@ -1042,6 +1077,7 @@ class TestRailFareNode:
         assert val.infeasible
 
     @pytest.mark.asyncio
+    # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
     async def test_enriches_commute_with_rail_fare(self, tmp_path):
         """Commute with zero daily cost and train leg gets NR fare added (17.00 + 2.80) × 2 → 39.60."""
         from unittest.mock import patch
@@ -1077,7 +1113,7 @@ class TestRailFareNode:
             person=person,
             label=office.label,
             destination=office,
-            duration=Quantity(78, "minute"),  # type: ignore[arg-type]
+            duration=Quantity(78, "minute"),
 
             daily_cost=Money("0", "GBP"),
             _details=(
@@ -1085,7 +1121,7 @@ class TestRailFareNode:
                     legs=(
                         JourneyLeg(
                             mode=LegMode.BUS,
-                            duration=Quantity(10, "minute"),  # type: ignore[arg-type]
+                            duration=Quantity(10, "minute"),
 
                             start_station="",
                             end_station="",
@@ -1093,7 +1129,7 @@ class TestRailFareNode:
                         ),
                         JourneyLeg(
                             mode=LegMode.TRAIN,
-                            duration=Quantity(30, "minute"),  # type: ignore[arg-type]
+                            duration=Quantity(30, "minute"),
 
                             start_station="WOK",
                             end_station="Fenchurch Street",
@@ -1130,7 +1166,7 @@ class TestRailFareNode:
 async def test_commute_selector_impossible_without_bus():
     """When transit fails and bus_result is not an active dep
     (default None in compute), _impossible() must not crash."""
-    from houses.nodes.commute import CommuteSelectorNode
+    from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
     origin = UserInputNode[GeoPoint]("origin_nb", GeoPoint)
     poi = UserInputNode[PlaceOfInterest]("poi_nb", PlaceOfInterest)
@@ -1144,10 +1180,12 @@ async def test_commute_selector_impossible_without_bus():
 
     node = CommuteSelectorNode(
         "commute_nb",
-        origin=origin,
-        poi=poi,
-        transit_result=transit,
-        max_walk_node=_mw(30),
+        options=CommuteSelectorOptions(
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            max_walk_node=_mw(30),
+        ),
     )
 
     origin.push(GeoPoint(51.5, -0.1), "user")
@@ -1167,7 +1205,7 @@ async def test_walk_selected_when_fastest():
     into the `drive` position in compute(). With bus_result removed, the
     deps order matches compute()'s signature, so walk arrives in `walk`.
     """
-    from houses.nodes.commute import CommuteSelectorNode
+    from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
     origin = UserInputNode[GeoPoint]("org_ws", GeoPoint)
     poi = UserInputNode[PlaceOfInterest]("poi_ws", PlaceOfInterest)
@@ -1177,11 +1215,13 @@ async def test_walk_selected_when_fastest():
 
     node = CommuteSelectorNode(
         "walk_selected_test",
-        origin=origin,
-        poi=poi,
-        transit_result=transit,
-        walk_result=walk,
-        max_walk_node=_mw(30),
+        options=CommuteSelectorOptions(
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            walk_result=walk,
+            max_walk_node=_mw(30),
+        ),
     )
 
     origin.push(GeoPoint(51.5, -0.1), "user")
@@ -1258,7 +1298,7 @@ class TestNoRouteCommuteChain:
             person=Person(name="Simon", has_car=True),
             label=label,
             destination=PlaceOfInterest(label=label, address="RG12 8YA"),
-            duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+            duration=Quantity(0, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="transit",
             _details=(),
@@ -1266,13 +1306,13 @@ class TestNoRouteCommuteChain:
         )
 
     def test_needs_rail_fare_false_for_infeasible(self):
-        from houses.nodes.commute import _needs_rail_fare
+        from houses.nodes.commute import needs_rail_fare
 
-        assert _needs_rail_fare(Attempt.succeeded(self._infeasible_commute())) is False
+        assert needs_rail_fare(Attempt.succeeded(self._infeasible_commute())) is False
 
     @pytest.mark.asyncio
     async def test_rail_fare_if_survives_infeasible_transit(self):
-        """Infeasible transit → _needs_rail_fare False → else branch → succeeded(None),
+        """Infeasible transit → needs_rail_fare False → else branch → succeeded(None),
         NOT a short-circuited impossible."""
 
         class _FixedTransit(DerivedNode[Commute]):
@@ -1333,9 +1373,9 @@ class TestNoRouteCommuteChain:
     async def test_full_chain_drive_only_destination(self):
         """The user's bug: transit no-route + drive-only destination → the
         selector picks drive and the merge/final chain keeps it."""
-        from dag.if_then_else import IfThenElseNode
+        from dag.if_then_else_node import IfThenElseNode
         from houses.nodes.commute import MergeRailFareNode
-        from houses.nodes.commute import _needs_rail_fare as _needs_rail_fare_fn
+        from houses.nodes.commute import needs_rail_fare as _needs_rail_fare_fn
 
         class _Fixed(DerivedNode[Commute]):
             def __init__(self, node_id: str, attempt: Attempt[Commute]):
@@ -1356,7 +1396,7 @@ class TestNoRouteCommuteChain:
         poi = UserInputNode[str]("chain_poi", str)
         poi.push("RG12 8YA", "test")
 
-        from houses.nodes.commute import CommuteSelectorNode
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
         transit_no_route = _Fixed("chain_transit", Attempt.succeeded(self._infeasible_commute("Bracknell")))
         walk_no_route = _Fixed("chain_walk", Attempt.succeeded(self._infeasible_commute("walk")))
@@ -1366,20 +1406,24 @@ class TestNoRouteCommuteChain:
 
         selector = CommuteSelectorNode(
             "chain/commute",
-            origin=origin,
-            poi=poi,
-            transit_result=transit_no_route,
-            walk_result=walk_no_route,
-            drive_result=drive_src,
-            is_child=False,
-            max_walk_node=_mw(30),
+            options=CommuteSelectorOptions(
+                origin=origin,
+                poi=poi,
+                transit_result=transit_no_route,
+                walk_result=walk_no_route,
+                drive_result=drive_src,
+                is_child=False,
+                max_walk_node=_mw(30),
+            ),
         )
         rail_fare_if = IfThenElseNode(
             "chain/rail_fare_if",
-            Commute | None,  # type: ignore[arg-type]
-            condition_sources=(transit_no_route,),
-            condition_fn=_needs_rail_fare_fn,
-            then_branch=_impossible_commute("rail_fare"),
+            Commute | None,
+            options=IfThenElseOptions(
+                condition_sources=(transit_no_route,),
+                condition_fn=_needs_rail_fare_fn,
+                then_branch=_impossible_commute("rail_fare"),
+            ),
         )
         merge = MergeRailFareNode("chain/merge", commute_result=selector, rail_fare_result=rail_fare_if)
         await flush_processor()
@@ -1397,12 +1441,12 @@ class TestFareConditionalDependency:
         """A feasible transit commute with unpriced train legs (needs fare)."""
         office = PlaceOfInterest("Office", "SW1V 2QQ")
         person = Person("Simon", True, places_of_interest=(office,))
-        leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(duration_min, "minute"), end_station="Reading")  # type: ignore[arg-type]
+        leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(duration_min, "minute"), end_station="Reading")
         return Commute(
             person=person,
             label="Bracknell",
             destination=office,
-            duration=Quantity(duration_min, "minute"),  # type: ignore[arg-type]
+            duration=Quantity(duration_min, "minute"),
 
             daily_cost=Money("0", "GBP"),  # unpriced → needs NR fare
             _details=(CostGroup(legs=(leg,), operator="TfL", cost=None),),
@@ -1412,9 +1456,9 @@ class TestFareConditionalDependency:
     async def test_drive_selection_never_activates_fare_dependency(self):
         """Bracknell case: selector picks drive; the fare node must stay
         PENDING — never calculated — and the merge keeps the drive commute."""
-        from dag.if_then_else import IfThenElseNode
-        from houses.nodes.commute import CommuteSelectorNode, MergeRailFareNode
-        from houses.nodes.commute import _needs_rail_fare as _needs_rail_fare_fn
+        from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions, MergeRailFareNode
+        from houses.nodes.commute import needs_rail_fare as _needs_rail_fare_fn
 
         class _Fixed(DerivedNode[Commute]):
             def __init__(self, node_id: str, attempt: Attempt[Commute]):
@@ -1443,7 +1487,7 @@ class TestFareConditionalDependency:
                     person=Person(name="Simon", has_car=True),
                     label="walk",
                     destination=PlaceOfInterest(label="walk", address=""),
-                    duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+                    duration=Quantity(0, "minute"),
 
                     daily_cost=Money("0", "GBP"),
                     mode="walk",
@@ -1457,13 +1501,15 @@ class TestFareConditionalDependency:
 
         selector = CommuteSelectorNode(
             "cdd/commute",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            walk_result=walk,
-            drive_result=drive_src,
-            is_child=False,
-            max_walk_node=_mw(30),
+            options=CommuteSelectorOptions(
+                origin=origin,
+                poi=poi,
+                transit_result=transit,
+                walk_result=walk,
+                drive_result=drive_src,
+                is_child=False,
+                max_walk_node=_mw(30),
+            ),
         )
         class _WouldFailFare(DerivedNode[Commute]):
             def __init__(self, node_id: str):
@@ -1475,10 +1521,12 @@ class TestFareConditionalDependency:
         fare_node = _WouldFailFare("cdd_fare_never_run")  # unique id — no persisted row
         rail_fare_if = IfThenElseNode(
             "cdd/rail_fare_if",
-            Commute | None,  # type: ignore[arg-type]
-            condition_sources=(transit, selector),
-            condition_fn=_needs_rail_fare_fn,
-            then_branch=fare_node,
+            Commute | None,
+            options=IfThenElseOptions(
+                condition_sources=(transit, selector),
+                condition_fn=_needs_rail_fare_fn,
+                then_branch=fare_node,
+            ),
         )
         merge = MergeRailFareNode("cdd/merge", commute_result=selector, rail_fare_result=rail_fare_if)
         await flush_processor()
@@ -1508,9 +1556,9 @@ class TestFareConditionalDependency:
     async def test_transit_selection_activates_fare_dependency(self):
         """Selected commute is transit → the fare dependency activates and is
         applied."""
-        from dag.if_then_else import IfThenElseNode
-        from houses.nodes.commute import CommuteSelectorNode, MergeRailFareNode
-        from houses.nodes.commute import _needs_rail_fare as _needs_rail_fare_fn
+        from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions, MergeRailFareNode
+        from houses.nodes.commute import needs_rail_fare as _needs_rail_fare_fn
 
         class _Fixed(DerivedNode[Commute]):
             def __init__(self, node_id: str, attempt: Attempt[Commute]):
@@ -1539,7 +1587,7 @@ class TestFareConditionalDependency:
                     person=Person(name="Simon", has_car=True),
                     label="walk",
                     destination=PlaceOfInterest(label="walk", address=""),
-                    duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+                    duration=Quantity(0, "minute"),
 
                     daily_cost=Money("0", "GBP"),
                     mode="walk",
@@ -1553,31 +1601,33 @@ class TestFareConditionalDependency:
 
         selector = CommuteSelectorNode(
             "cda/commute",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            walk_result=walk,
-            drive_result=drive_src,
-            is_child=False,
-            max_walk_node=_mw(30),
+            options=CommuteSelectorOptions(
+                origin=origin,
+                poi=poi,
+                transit_result=transit,
+                walk_result=walk,
+                drive_result=drive_src,
+                is_child=False,
+                max_walk_node=_mw(30),
+            ),
         )
         # A fare node that returns a priced transit group
         from houses.nodes.rail_fare_node import RailFareNode  # noqa: F401  (import for side effects)
 
         class _Fare(DerivedNode[Commute]):
             def __init__(self, node_id: str):
-                super().__init__(node_id, Commute | None, ())  # type: ignore[arg-type]
+                super().__init__(node_id, Commute | None, ())  # type: ignore[arg-type]  # value_type is annotated type[T]; the framework's TypeAdapter deliberately accepts a T | None union so the IfThenElseNode no-branch None round-trips through persist/reload
                 self._att = Attempt.pending()
 
             async def attempt(self):
                 if self._att.pending:
-                    fare_leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(90, "minute"), end_station="Reading")  # type: ignore[arg-type]
+                    fare_leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(90, "minute"), end_station="Reading")
                     self._att = Attempt.succeeded(
                         Commute(
                             person=Person(name="", has_car=False),
                             label="fare",
                             destination=PlaceOfInterest(label="", address=""),
-                            duration=Quantity(90, "minute"),  # type: ignore[arg-type]
+                            duration=Quantity(90, "minute"),
 
                             daily_cost=Money("9.90", "GBP"),
                             mode="transit",
@@ -1594,10 +1644,12 @@ class TestFareConditionalDependency:
 
         rail_fare_if = IfThenElseNode(
             "cda/rail_fare_if",
-            Commute | None,  # type: ignore[arg-type]
-            condition_sources=(transit, selector),
-            condition_fn=_needs_rail_fare_fn,
-            then_branch=_Fare("cda_fare"),
+            Commute | None,
+            options=IfThenElseOptions(
+                condition_sources=(transit, selector),
+                condition_fn=_needs_rail_fare_fn,
+                then_branch=_Fare("cda_fare"),
+            ),
         )
         merge = MergeRailFareNode("cda/merge", commute_result=selector, rail_fare_result=rail_fare_if)
         await flush_processor()
@@ -1627,18 +1679,18 @@ class TestCommuteChainProvenanceFormula:
 
         class _Fare(DerivedNode[Commute]):
             def __init__(self, node_id: str):
-                super().__init__(node_id, Commute | None, ())  # type: ignore[arg-type]
+                super().__init__(node_id, Commute | None, ())  # type: ignore[arg-type]  # value_type is annotated type[T]; the framework's TypeAdapter deliberately accepts a T | None union so the IfThenElseNode no-branch None round-trips through persist/reload
                 self._att = Attempt.pending()
 
             async def attempt(self):
                 if self._att.pending:
-                    fare_leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(30, "minute"))  # type: ignore[arg-type]
+                    fare_leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(30, "minute"))
                     self._att = Attempt.succeeded(
                         Commute(
                             person=Person(name="", has_car=False),
                             label="fare",
                             destination=PlaceOfInterest(label="", address=""),
-                            duration=Quantity(30, "minute"),  # type: ignore[arg-type]
+                            duration=Quantity(30, "minute"),
                             daily_cost=Money("9.90", "GBP"),
                             mode="transit",
                             _details=(CostGroup(legs=(fare_leg,), operator="NR", cost=Money("9.90", "GBP")),),
@@ -1734,7 +1786,7 @@ async def test_max_walk_what_if_rescores_without_replanning():
     from dag.evaluate import evaluate
     from dag.user_input_node import UserInputNode
     from houses.model.domain import Person
-    from houses.nodes.commute import CommuteSelectorNode
+    from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
     from houses.nodes.transit import PersonMaxWalkNode
 
     persons = UserInputNode("mwp_persons", list)
@@ -1750,21 +1802,23 @@ async def test_max_walk_what_if_rescores_without_replanning():
     assert walk.calls == 1  # route planned once
 
     def build(penalty_minutes: int) -> CommuteSelectorNode:
-        pen = _Quantity(penalty_minutes, "minute")  # type: ignore[arg-type]
+        pen = _Quantity(penalty_minutes, "minute")
         persons.push([Person(name="Simon", has_car=False, bus_walk_penalty=pen)], "test")
         max_walk = PersonMaxWalkNode("mwp_mw", persons_source=persons, person_name="Simon")
         return CommuteSelectorNode(
             "mwp_sel",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            walk_result=walk,
-            max_walk_node=max_walk,
+            options=CommuteSelectorOptions(
+                origin=origin,
+                poi=poi,
+                transit_result=transit,
+                walk_result=walk,
+                max_walk_node=max_walk,
+            ),
         )
 
     # max_walk 30: the 25-min walk is acceptable and beats the 40-min transit
     selector = build(30)
-    staged30 = [Person(name="Simon", has_car=False, bus_walk_penalty=_Quantity(30, "minute"))]  # type: ignore[arg-type]
+    staged30 = [Person(name="Simon", has_car=False, bus_walk_penalty=_Quantity(30, "minute"))]
     r = await evaluate(selector, overrides={persons._id: staged30})
     assert r[selector._id].succeeded
     val = r[selector._id].value_or_none()
@@ -1773,7 +1827,7 @@ async def test_max_walk_what_if_rescores_without_replanning():
 
     # max_walk 15: the same 25-min walk is over the limit → transit wins
     selector = build(15)
-    staged15 = [Person(name="Simon", has_car=False, bus_walk_penalty=_Quantity(15, "minute"))]  # type: ignore[arg-type]
+    staged15 = [Person(name="Simon", has_car=False, bus_walk_penalty=_Quantity(15, "minute"))]
     r = await evaluate(selector, overrides={persons._id: staged15})
     assert r[selector._id].succeeded
     val = r[selector._id].value_or_none()

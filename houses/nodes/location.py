@@ -4,7 +4,8 @@ from typing import override
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
-from houses.geo import GeoPoint
+from dag.signals import Slot
+from houses.geopoint import GeoPoint
 from houses.model.geo import is_single_property_address
 
 
@@ -23,7 +24,6 @@ class BestAddressNode(DerivedNode[str]):
         self._corrected = corrected_address
         super().__init__(node_id, str, (rightmove_address,))
 
-        from dag.signals import Slot
 
         # Optional sources are NOT hard deps (a permanently pending input
         # must not block refresh), but their changes must still schedule a
@@ -82,8 +82,6 @@ class BestLocationNode(DerivedNode[GeoPoint]):
         self._rightmove_location = rightmove_location
         self._geocode = geocode
         super().__init__(node_id, GeoPoint, (best_address,))
-
-        from dag.signals import Slot
 
         for src in (precise_location, rightmove_location):
             slot = Slot(self._on_dep_changed)

@@ -8,7 +8,7 @@ stale test data has leaked into the database, causing properties to miss
 commutes for Lorena, George, or Simon's other destinations (Bracknell, Dad).
 """
 
-from unittest.mock import patch
+
 
 import pytest
 
@@ -161,59 +161,49 @@ def test_rejects_stale_test_data_from_db():
             return stale_test_data
         return None
 
-    with patch("houses.services.latest_node_result", side_effect=_mock_latest_node_result):
-        _reset_settings_cache()
-        with pytest.raises(RuntimeError, match="Stale test data"):
-            Services()
+    _reset_settings_cache()
+    with pytest.raises(RuntimeError, match="Stale test data"):
+        Services(latest_node_result_fn=_mock_latest_node_result)
 
 class TestSettingsWriteGuard:
     """The settings nodes hold real family data — a stray script or REPL
     kernel (no pytest isolation, not the uvicorn app) must not silently
     replace them.  Deliberate data fixes opt in explicitly."""
 
-    def _non_app_env(self, monkeypatch, *, script_ok=False, app=False):
-        import dag.persistence as per
-        import houses.nodes.settings as settings_mod
+    @staticmethod
+    def _guard_kwargs(*, script_ok=False, app=False):
+        """Guard flags for a non-app, non-pytest process — the exact
+        state the old monkeypatches simulated (no isolation fixtures, no
+        app-mode flag, env opt-in only when requested)."""
+        return {
+            "testing": False,
+            "app_mode": app,
+            "scripts_may_write": script_ok,
+        }
 
-        monkeypatch.setattr(settings_mod, "_app_mode", False)
-        monkeypatch.delenv("HOUSES_SCRIPTS_MAY_WRITE", raising=False)
-        if script_ok:
-            monkeypatch.setenv("HOUSES_SCRIPTS_MAY_WRITE", "1")
-        if app:
-            settings_mod.set_app_mode()
-        monkeypatch.setattr(per, "testing", False)
-
-    def test_guard_blocks_unapproved_script_writes(self, monkeypatch):
-        import pytest
-
+    def test_guard_blocks_unapproved_script_writes(self):
         from houses.nodes.settings import guard_settings_write
 
-        self._non_app_env(monkeypatch)
         with pytest.raises(RuntimeError):
-            guard_settings_write()
+            guard_settings_write(**self._guard_kwargs())
 
-    def test_guard_allows_explicit_script_opt_in(self, monkeypatch):
+    def test_guard_allows_explicit_script_opt_in(self):
         from houses.nodes.settings import guard_settings_write
 
-        self._non_app_env(monkeypatch, script_ok=True)
-        guard_settings_write()  # must not raise
+        guard_settings_write(**self._guard_kwargs(script_ok=True))  # must not raise
 
-    def test_guard_allows_the_app_process(self, monkeypatch):
+    def test_guard_allows_the_app_process(self):
         from houses.nodes.settings import guard_settings_write
 
-        self._non_app_env(monkeypatch, app=True)
-        guard_settings_write()  # must not raise
+        guard_settings_write(**self._guard_kwargs(app=True))  # must not raise
 
-    def test_settings_node_push_blocked_outside_the_app(self, monkeypatch):
-        import pytest
-
+    def test_settings_node_push_blocked_outside_the_app(self):
         from houses.model.domain import Person
         from houses.nodes.settings import SettingsNode
 
-        self._non_app_env(monkeypatch)
         node = SettingsNode("persons", list[Person])
         with pytest.raises(RuntimeError):
-            node.push([Person("Simon", has_car=True)], "user")
+            node.push([Person("Simon", has_car=True)], "user", **self._guard_kwargs())
 
 def test_effective_selling_home_inference_and_override():
     """Unset selling_home infers from whether home values exist; an
@@ -250,7 +240,7 @@ def test_effective_selling_home_tolerates_legacy_money_shapes():
 
     # bare numbers (not Money) construct fine — the dataclass doesn't
     # validate; the inference must tolerate the shape
-    legacy = Person("Legacy", has_car=True, home_sale_price=500000)  # type: ignore[arg-type]
+    legacy = Person("Legacy", has_car=True, home_sale_price=500000)  # type: ignore[arg-type]  # why: Money fields tolerate bare numbers — the dataclass does no validation
     assert effective_selling_home(legacy) is True
-    zero = Person("Zero", has_car=True, home_sale_price=0, outstanding_mortgage=0)  # type: ignore[arg-type]
+    zero = Person("Zero", has_car=True, home_sale_price=0, outstanding_mortgage=0)  # type: ignore[arg-type]  # why: legacy money shape (bare ints) must not crash the inference
     assert effective_selling_home(zero) is False

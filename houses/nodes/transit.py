@@ -13,9 +13,11 @@ from dag.attempt import Attempt, AttemptError, Provenance
 from dag.derived_node import DerivedNode
 from dag.node import Node
 from houses.commute import LegMode
-from houses.geo import GeoPoint
+from houses.commute_router import CommuteRouter as _CommuteRouter
+from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
-from houses.routing import CommuteRouter as _CommuteRouter
+from houses.services_provider import get_services
+from houses.tfl_client import TflRouteOptions
 
 
 def _with_destination(
@@ -28,6 +30,7 @@ def _with_destination(
     if poi is None or not result.succeeded:
         return result
     val = result.value_or_none()
+# lucidlint: ignore special-case sentinel handling is the contract here
     if val is None:
         return result
     return Attempt.succeeded(replace(val, destination=poi))
@@ -46,7 +49,7 @@ def _infeasible_commute(label: str = "", reason: str = "") -> Attempt[Commute]:
             label=label,
             destination=PlaceOfInterest(label="", address=""),
             duration=Quantity(0, "minute"),
-            daily_cost=Money("0", "GBP"),
+            daily_cost=Money(amount="0", currency="GBP"),
             mode="",
             _details=(),
             infeasible=True,
@@ -135,6 +138,42 @@ def _route_description(legs: tuple[CommuteLeg, ...]) -> str:
     return " → ".join(parts)
 
 
+@dataclass(frozen=True)
+class RouteOptions:
+    """Wiring for the single-mode route nodes (``WalkNode``, ``DriveNode``).
+
+    ``route_fn`` is the DI seam defaulting to the Services route planner;
+    ``max_walk`` applies to walking, ``has_car`` to driving.
+    """
+
+    best_location: Node
+    poi: Node
+    route_fn: Callable | None = None
+    poi_info: PlaceOfInterest | None = None
+    max_walk: int = 30
+    has_car: bool = False
+
+
+@dataclass(frozen=True)
+class TransitOptions:
+    """Wiring for the TfL transit family (``TflTransitNode``, ``TransitNode``).
+
+    Both nodes read the shared fields; ``TflTransitNode`` also reads
+    ``allow_bus``/``client_factory`` and ``TransitNode`` reads
+    ``best_address``/``no_bus_node``/``with_bus_node``.
+    """
+
+    best_location: Node
+    poi: Node
+    has_car: bool = False
+    poi_info: PlaceOfInterest | None = None
+    allow_bus: bool = False
+    client_factory: Callable[..., Any] | None = None
+    best_address: Node | None = None
+    no_bus_node: Node | None = None
+    with_bus_node: Node | None = None
+
+
 class PersonMaxWalkNode(DerivedNode[int]):
     """The person's own walking tolerance (bus_walk_penalty minutes).
 
@@ -171,10 +210,10 @@ class WalkLegCheckNode(DerivedNode[bool]):
     @override
     def compute(self, transit: Attempt[Commute]) -> Attempt[bool]:
         if not transit.succeeded:
-            return Attempt.succeeded(False)
+            return Attempt.succeeded(value=False)
         val = transit.value_or_none()
         if val is None:
-            return Attempt.succeeded(False)
+            return Attempt.succeeded(value=False)
         if val.details and val.details[0].legs:
             first_leg = val.details[0].legs[0]
             walk_time = int(first_leg.duration.magnitude) if first_leg.mode == LegMode.WALK else 0
@@ -190,20 +229,16 @@ class WalkNode(DerivedNode[Commute]):
         self,
         node_id: str,
         *,
-        best_location,
-        poi,
-        max_walk: int,
-        route_fn=None,
-        poi_info: PlaceOfInterest | None = None,
+        options: RouteOptions,
     ):
-        super().__init__(node_id, Commute, (best_location, poi))
+        super().__init__(node_id, Commute, (options.best_location, options.poi))
         self.display_name = "Walk"
-        self._max_walk = max_walk
-        self._route_fn = route_fn
+        self._max_walk = options.max_walk
+        self._route_fn = options.route_fn
         # The full destination POI (label + trips/weeks) — the route
         # planner only knows the address, so the provenance would lose
         # the destination without this patch.
-        self._poi_info = poi_info
+        self._poi_info = options.poi_info
 
     @override
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
@@ -213,11 +248,10 @@ class WalkNode(DerivedNode[Commute]):
             return Attempt.impossible("missing location or destination")
         dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
-            return _infeasible_commute("empty destination", "No destination address for this journey")
+            return _infeasible_commute(label="empty destination", reason="No destination address for this journey")
         if self._route_fn is not None:
             result = await self._route_fn(loc, dest, self._max_walk)
         else:
-            from houses.services_provider import get_services
 
             result = await get_services().route_planner.walk_route(loc, dest, self._max_walk)
         return _with_destination(result, self._poi_info)
@@ -230,33 +264,28 @@ class DriveNode(DerivedNode[Commute]):
         self,
         node_id: str,
         *,
-        best_location,
-        poi,
-        has_car: bool,
-        route_fn=None,
-        poi_info: PlaceOfInterest | None = None,
+        options: RouteOptions,
     ):
-        super().__init__(node_id, Commute, (best_location, poi))
+        super().__init__(node_id, Commute, (options.best_location, options.poi))
         self.display_name = "Drive"
-        self._has_car = has_car
-        self._route_fn = route_fn
-        self._poi_info = poi_info
+        self._has_car = options.has_car
+        self._route_fn = options.route_fn
+        self._poi_info = options.poi_info
 
     @override
     async def compute(self, location: Attempt[GeoPoint], poi: Attempt[PlaceOfInterest]) -> Attempt[Commute]:
         if not self._has_car:
-            return _infeasible_commute("no car available", "no car available")
+            return _infeasible_commute(label="no car available", reason="no car available")
         loc = location.value_or_none()
         poi_val = poi.value_or_none()
         if loc is None or not poi_val:
             return Attempt.impossible("missing location or destination")
         dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
-            return _infeasible_commute("empty destination", "No destination address for this journey")
+            return _infeasible_commute(label="empty destination", reason="No destination address for this journey")
         if self._route_fn is not None:
             result = await self._route_fn(loc, dest)
         else:
-            from houses.services_provider import get_services
 
             result = await get_services().route_planner.drive_route(loc, dest)
         return _with_destination(result, self._poi_info)
@@ -273,18 +302,13 @@ class TflTransitNode(DerivedNode[Commute]):
         self,
         node_id: str,
         *,
-        best_location: Node,
-        poi: Node,
-        has_car: bool,
-        allow_bus: bool = False,
-        poi_info: PlaceOfInterest | None = None,
-        client_factory: Callable[..., Any] | None = None,
+        options: TransitOptions,
     ):
-        super().__init__(node_id, Commute, (best_location, poi))
-        self._has_car = has_car
-        self._allow_bus = allow_bus
-        self._poi_info = poi_info
-        self._client_factory = client_factory
+        super().__init__(node_id, Commute, (options.best_location, options.poi))
+        self._has_car = options.has_car
+        self._allow_bus = options.allow_bus
+        self._poi_info = options.poi_info
+        self._client_factory = options.client_factory
         self._last_no_route_detail: str = ""
         self.display_name = "TfL"
 
@@ -299,24 +323,23 @@ class TflTransitNode(DerivedNode[Commute]):
             return Attempt.impossible("missing location or destination")
         dest = poi_val.address if isinstance(poi_val, PlaceOfInterest) else (poi_val or "")
         if not dest:
-            return _infeasible_commute("empty destination", "No destination address for this journey")
+            return _infeasible_commute(label="empty destination", reason="No destination address for this journey")
 
         origin_str = loc if isinstance(loc, str) else f"{loc.lat},{loc.lon}"
         dest_str = dest if isinstance(dest, str) else f"{dest.lat},{dest.lon}"
 
-        from houses.tfl_client import TflClient
-
-        client_factory = self._client_factory or TflClient
+        client_factory = self._client_factory or get_services().tfl_client_factory
         client = client_factory(
             origin_str,
             dest_str,
             poi_val.label if isinstance(poi_val, PlaceOfInterest) else "",
-            park_and_ride=self._has_car,
-            allow_bus=self._allow_bus,
+            TflRouteOptions(
+                park_and_ride=self._has_car,
+                allow_bus=self._allow_bus,
+            ),
         )
-        # Dispatch the override DIRECTLY — the autouse unit-test mock
-        # replaces TflClient.plan() wholesale, so the check must live in
-        # the caller to survive it (DI per docs/testing-standards).
+        # Dispatch the override DIRECTLY — a fake client factory supplies
+        # the canned plan wholesale (DI per docs/testing-standards).
         if client._plan_override is not None:
             result = await client._plan_override(client)
         else:
@@ -348,22 +371,23 @@ class TransitNode(DerivedNode[Commute]):
         self,
         node_id: str,
         *,
-        best_location,
-        poi,
-        has_car: bool,
-        best_address=None,
-        no_bus_node: TflTransitNode,
-        with_bus_node: TflTransitNode,
-        poi_info: PlaceOfInterest | None = None,
+        options: TransitOptions,
     ):
-        deps: tuple[Node, ...] = (best_location, poi, no_bus_node, with_bus_node)
-        if best_address is not None:
-            deps = deps + (best_address,)
+        if options.no_bus_node is None or options.with_bus_node is None:
+            raise ValueError(f"{node_id}: TransitOptions requires no_bus_node and with_bus_node")
+        deps: tuple[Node, ...] = (
+            options.best_location,
+            options.poi,
+            options.no_bus_node,
+            options.with_bus_node,
+        )
+        if options.best_address is not None:
+            deps = deps + (options.best_address,)
         super().__init__(node_id, Commute, deps)
         self.display_name = "TfL API"
-        self._has_car = has_car
-        self._best_address = best_address
-        self._poi_info = poi_info
+        self._has_car = options.has_car
+        self._best_address = options.best_address
+        self._poi_info = options.poi_info
 
     @override
     async def compute(
@@ -400,7 +424,7 @@ class TransitNode(DerivedNode[Commute]):
                 label="",
                 destination=PlaceOfInterest(label="", address=""),
                 duration=Quantity(0, "minute"),
-                daily_cost=Money("0", "GBP"),
+                daily_cost=Money(amount="0", currency="GBP"),
             )
             best_val = _CommuteRouter._pick_best_route(no_bus_val or empty, with_bus_val or empty)
 

@@ -1,22 +1,59 @@
 from __future__ import annotations
 
-from houses.nodes.property import PropertyNodes
+from houses.nodes.property_nodes import PropertyNodes
+from houses.services_provider import get_services
 
-_registry: dict[str, PropertyNodes] = {}
+
+class PropertyRegistry:
+    """The app-wide live registry of PropertyNodes keyed by Rightmove ID.
+
+    Owned by the Services container (``Services.property_registry``) so it can
+    be injected/replaced per context; production Services instances share the
+    module default instance below so startup seeding and per-request reads see
+    the same registry.
+    """
+
+    def __init__(self) -> None:
+        self._properties: dict[str, PropertyNodes] = {}
+
+    def register(self, rid: str, prop: PropertyNodes) -> None:
+        self._properties[rid] = prop
+
+    def get(self, rid: str) -> PropertyNodes | None:
+        try:
+            return self._properties[rid]
+        except KeyError:
+            return None
+
+    def list_properties(self) -> list[str]:
+        return list(self._properties)
+
+    def clear(self) -> None:
+        self._properties.clear()
 
 
-def _reset():
-    """Clear the property registry for test isolation."""
-    _registry.clear()
+DEFAULT_REGISTRY = PropertyRegistry()
+
+
+def _active_registry() -> PropertyRegistry:
+    """The registry to write/read: the active Services container's — or, when
+    no container is bound (startup lifespan, ad-hoc scripts), a fresh container
+    whose registry IS the shared default."""
+    return get_services().property_registry
 
 
 def register_property(rid: str, prop: PropertyNodes) -> None:
-    _registry[rid] = prop
+    _active_registry().register(rid, prop)
 
 
 def get_property(rid: str) -> PropertyNodes | None:
-    return _registry.get(rid)
+    return _active_registry().get(rid)
 
 
 def list_properties() -> list[str]:
-    return list(_registry.keys())
+    return _active_registry().list_properties()
+
+
+def _reset() -> None:
+    """Clear the active registry for test isolation."""
+    _active_registry().clear()

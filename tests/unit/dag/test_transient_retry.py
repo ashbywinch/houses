@@ -96,7 +96,7 @@ class _CatchAndDecideNode(DerivedNode[str]):
         self.error_to_raise: Exception | None = None
         self.schedule_retry_count = 0
 
-    def schedule_retry(self, delay: timedelta) -> None:  # type: ignore[override]
+    def schedule_retry(self, delay: timedelta) -> None:  # type: ignore[override]  # test double: replaces the base -> bool contract with a call-counting stub (return value never consumed here) and omits the repo's @override decorator — the guard targets production dispatch, not test fixtures
         self.schedule_retry_count += 1
 
     def compute(self, src: Attempt[str]) -> Attempt[str]:
@@ -153,7 +153,7 @@ class _ReturnImpossibleNode(DerivedNode[str]):
         self.permanent = permanent
         self.schedule_retry_count = 0
 
-    def schedule_retry(self, delay: timedelta) -> bool:  # type: ignore[override]
+    def schedule_retry(self, delay: timedelta) -> bool:  # type: ignore[override]  # test double: call-counting stub for the returned-impossible path; omits the repo's @override decorator, which guards production node dispatch, not test fixtures
         self.schedule_retry_count += 1
         return True
 

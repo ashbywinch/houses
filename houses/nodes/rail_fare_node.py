@@ -7,10 +7,12 @@ from money import Money
 from dag.attempt import Attempt, SourceType
 from dag.derived_node import DerivedNode
 from houses.commute import LegMode
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from houses.model.domain import Commute
-from houses.nodes.commute import _transit_legs
+from houses.nodes.commute import transit_legs
+from houses.rail_fare_registry import get_rail_fare_registry
 from houses.stations import Station
+from houses.tfl_client import TflClient
 
 
 class RailFareNode(DerivedNode[Commute]):
@@ -33,14 +35,13 @@ class RailFareNode(DerivedNode[Commute]):
     route can't fail noisily.
     """
 
-    @property
-    def provenance_source_type(self) -> SourceType:
-        return SourceType.API
+    provenance_source_type = SourceType.API
 
-    def __init__(self, node_id: str, *, transit_result, best_location, selector=None):
+    def __init__(self, node_id: str, *, transit_result, best_location, selector=None, tube_fare_fn=None):
         self.transit_result = transit_result
         self.best_location = best_location
         self.selector = selector
+        self._tube_fare_fn = tube_fare_fn  # DI seam (no monkeypatch): tests inject a canned tube fare
         deps: tuple = (transit_result, best_location)
         if selector is not None:
             deps = deps + (selector,)
@@ -70,7 +71,7 @@ class RailFareNode(DerivedNode[Commute]):
         # commute through inertly instead of running the fare lookup.
         if selected is not None and selected.succeeded:
             sel = selected.value_or_none()
-            if sel is not None and not sel.infeasible and not _transit_legs(sel):
+            if sel is not None and not sel.infeasible and not transit_legs(sel):
                 return Attempt.succeeded(commute)
 
         # If already has a fare, pass through — no NR lookup needed
@@ -85,15 +86,13 @@ class RailFareNode(DerivedNode[Commute]):
         Looks up the NR fare from the property's nearest station to the
         terminal station found in the commute legs, then applies it.
         """
-        if not location or not location.succeeded:
+        loc = location.value_or_none()
+        if loc is None:
             return Attempt.impossible("best_location not available")
-
-        from houses.rail_fare_registry import get_rail_fare_registry
-        from houses.tfl_client import TflClient
 
         registry = get_rail_fare_registry()
 
-        origin = registry.nearest_station(location.value_or_none())
+        origin = registry.nearest_station(loc)
         if not origin:
             return Attempt.impossible("origin station not found near property")
 
@@ -106,18 +105,20 @@ class RailFareNode(DerivedNode[Commute]):
 
         fare = registry.fare_between(origin, terminal_station)
         if fare is None:
-            dummy_lon = Station("London Terminals", "LON", GeoPoint(0, 0))
+            dummy_lon = Station(name="London Terminals", crs="LON", location=GeoPoint(lat=0, lon=0))
             fare = registry.fare_between(origin, dummy_lon)
         if fare is None:
             return Attempt.impossible(f"no fare {origin.crs}→{terminal_station.crs}")
-        tube_fare = await TflClient.get_tube_leg_fare(terminal_station, "") or Money(
+        tube_fare_fn = self._tube_fare_fn or TflClient.get_tube_leg_fare
+        tube_fare = await tube_fare_fn(terminal_station, "") or Money(
             TflClient.FALLBACK_TUBE_SINGLE_GBP, "GBP"
         )
         total = (fare + tube_fare) * 2
 
         return self._apply_fare_to_commute(commute, total)
 
-    def _find_terminal_station(self, registry, commute: Commute) -> Station | None:
+    @staticmethod
+    def _find_terminal_station(registry, commute: Commute) -> Station | None:
         """Find the terminal (destination) station from the commute's transit legs."""
         _transit_modes = {LegMode.TRAIN, LegMode.TUBE, LegMode.DLR, LegMode.OVERGROUND}
         for cg in reversed(commute.details):
@@ -129,7 +130,8 @@ class RailFareNode(DerivedNode[Commute]):
                         return stn
         return None
 
-    def _apply_fare_to_commute(self, commute: Commute, total: Money) -> Attempt[Commute]:
+    @staticmethod
+    def _apply_fare_to_commute(commute: Commute, total: Money) -> Attempt[Commute]:
         """Apply the computed NR fare to the commute's CostGroups."""
         _transit_modes = {LegMode.TRAIN, LegMode.TUBE, LegMode.DLR, LegMode.OVERGROUND}
         new_details = list(commute.details)

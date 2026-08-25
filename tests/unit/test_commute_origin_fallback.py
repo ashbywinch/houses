@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from tools.commute.station_shed import Station, origin_candidates, route_station_duration
+from tools.commute.station_shed import Station
 
 PBO = Station("Peterborough", "PBO", 52.5648, -0.2370)
 DEST = "SW1V 2QQ"
@@ -14,17 +14,17 @@ NAME = "Peterborough Rail Station"
 
 def test_origin_candidates_coords_first():
     # Note: str(-0.2370) == "-0.237" — float repr drops trailing zeros.
-    assert origin_candidates(PBO) == [COORDS, NAME]
+    assert PBO.origin_candidates() == [COORDS, NAME]
 
 
 def test_origin_candidates_appends_suffix():
     st = Station("Bristol Temple Meads", "BRI", 51.4491, -2.5813)
-    assert origin_candidates(st) == ["51.4491,-2.5813", "Bristol Temple Meads Rail Station"]
+    assert st.origin_candidates() == ["51.4491,-2.5813", "Bristol Temple Meads Rail Station"]
 
 
 def test_origin_candidates_keeps_existing_suffix():
     st = Station("Reading Rail Station", "RDG", 51.4599, -0.9705)
-    assert origin_candidates(st) == ["51.4599,-0.9705", "Reading Rail Station"]
+    assert st.origin_candidates() == ["51.4599,-0.9705", "Reading Rail Station"]
 
 
 class _FakeFetch:
@@ -42,21 +42,21 @@ class _FakeFetch:
 @pytest.mark.asyncio
 async def test_coords_success_never_tries_name():
     fetch = _FakeFetch({(COORDS, DEST): 77})
-    assert await route_station_duration(PBO, DEST, fetch=fetch) == 77
+    assert await PBO.route_duration(DEST, fetch=fetch) == 77
     assert fetch.called == [COORDS]
 
 
 @pytest.mark.asyncio
 async def test_coords_failure_falls_back_to_name():
     fetch = _FakeFetch({(COORDS, DEST): None, (NAME, DEST): 100})
-    assert await route_station_duration(PBO, DEST, fetch=fetch) == 100
+    assert await PBO.route_duration(DEST, fetch=fetch) == 100
     assert fetch.called == [COORDS, NAME]
 
 
 @pytest.mark.asyncio
 async def test_both_fail_returns_none():
     fetch = _FakeFetch({(COORDS, DEST): None, (NAME, DEST): None})
-    assert await route_station_duration(PBO, DEST, fetch=fetch) is None
+    assert await PBO.route_duration(DEST, fetch=fetch) is None
 
 
 # ── TflClient.route_duration — the public API the tool routes through ──

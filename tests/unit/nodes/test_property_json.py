@@ -10,11 +10,11 @@ import pytest
 from money import Money
 
 from dag.scheduler import flush_processor
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 
 
 @pytest.fixture(autouse=True)
-def _fake_services(monkeypatch):
+def _fake_services():
     """Set fake singleton services so no real API calls are made."""
     from money import Money
     from pint import Quantity
@@ -22,7 +22,6 @@ def _fake_services(monkeypatch):
     from dag.attempt import Attempt
     from houses.model.domain import Commute, Person, PlaceOfInterest
     from houses.services_provider import _request_services as _sp
-    from houses.tfl_client import TflClient
     from tests.helpers import make_services
 
     class _FakePlanner:
@@ -48,27 +47,32 @@ def _fake_services(monkeypatch):
                 ),
             )
 
-    async def mock_plan(self):
-        return Attempt.succeeded(
-            Commute(
-                person=Person(name="Simon", has_car=False),
-                label="Office",
-                destination=PlaceOfInterest(label="Office", address="SW1V 2QQ"),
-                duration=Quantity(32, "minute"),
-                daily_cost=Money("4.50", "GBP"),
-            ),
-        )
+    class _FakeTflClient:
+        """Canned transit plan — injected via the services client factory."""
 
-    monkeypatch.setattr(TflClient, "plan", mock_plan)
+        def __init__(self, *args, **kwargs):
+            self._plan_override = None
+            self._no_route_detail = ""
 
-    token = _sp.set(make_services(route_planner=_FakePlanner()))
+        async def plan(self):
+            return Attempt.succeeded(
+                Commute(
+                    person=Person(name="Simon", has_car=False),
+                    label="Office",
+                    destination=PlaceOfInterest(label="Office", address="SW1V 2QQ"),
+                    duration=Quantity(32, "minute"),
+                    daily_cost=Money("4.50", "GBP"),
+                ),
+            )
+
+    token = _sp.set(make_services(route_planner=_FakePlanner(), tfl_client_factory=_FakeTflClient))
     yield
     _sp.reset(token)
 
 
 @pytest.fixture
 def prop():
-    from houses.nodes.property import PropertyNodes
+    from houses.nodes.property_nodes import PropertyNodes
 
     p = PropertyNodes("test_shape")
     p.rightmove_price.push(Money("550000", "GBP"), "test")
@@ -330,16 +334,18 @@ class TestSchoolAcceptableFromPersons:
     @pytest.mark.asyncio
     async def test_uses_first_child_acceptable_schools(self):
         """school nodes should receive the acceptable_schools from persons_source."""
-        from houses.geo import GeoPoint
-        from houses.nodes.property import PropertyNodes
+        from houses.geopoint import GeoPoint
+        from houses.nodes.property_nodes import PropertyNodes
         from houses.services_provider import get_services
 
         # Push persons with a child that has specific acceptable_schools
         svc = get_services()
+        from houses.model.domain import Person
+
         svc.persons_source.push(
             [
-                {"name": "Parent", "has_car": True, "is_child": False},
-                {"name": "Child", "has_car": False, "is_child": True, "acceptable_schools": ["girls"]},
+                Person("Parent", has_car=True, is_child=False),
+                Person("Child", has_car=False, is_child=True, acceptable_schools=("girls",)),
             ],
             "test",
         )
@@ -365,13 +371,15 @@ class TestSchoolAcceptableFromPersons:
     @pytest.mark.asyncio
     async def test_defaults_to_mixed_when_no_child(self):
         """When no child is found, acceptable_schools defaults to ('mixed',)."""
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
         from houses.services_provider import get_services
 
         svc = get_services()
+        from houses.model.domain import Person
+
         svc.persons_source.push(
             [
-                {"name": "Parent", "has_car": True, "is_child": False},
+                Person("Parent", has_car=True, is_child=False),
             ],
             "test",
         )

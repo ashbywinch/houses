@@ -7,8 +7,8 @@ from httpx import Response
 
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
-from houses.geo import GeoPoint
-from houses.nodes.geocode import GeocodeNode
+from houses.geopoint import GeoPoint
+from houses.nodes.geocode_node import GeocodeNode
 
 
 @pytest.mark.asyncio

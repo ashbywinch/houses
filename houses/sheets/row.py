@@ -17,7 +17,7 @@ from money import Money
 from pint import Quantity
 
 from dag.measurement import Measurement
-from houses.commute import LegMode, _render_leg_description
+from houses.commute import LegMode, render_leg_description
 from houses.model.domain import Commute
 from houses.property import EnrichedProperty
 from houses.school import School
@@ -211,7 +211,7 @@ class Row:
         parts: list[str] = []
         total = len(all_legs)
         for idx, leg in enumerate(all_legs):
-            desc = _render_leg_description(leg)
+            desc = render_leg_description(leg)
             if leg.mode == LegMode.WALK and idx == total - 1:
                 parts.append(f"walk {int(leg.duration.magnitude)}m")
             else:
@@ -221,7 +221,7 @@ class Row:
     @classmethod
     def _calc_non_rail_cost(cls, commute: Commute) -> Money:
         """Sum of costs from non-TfL cost groups."""
-        total = Money("0", "GBP")
+        total = Money(amount="0", currency="GBP")
         for cg in commute.details:
             if cg.cost is not None and cg.operator != "TfL":
                 if not isinstance(cg.cost, Money):

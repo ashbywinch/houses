@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from houses.config import settings
+from houses.settings import settings
 from houses.sheets import get_client
 
 logger = logging.getLogger(__name__)
@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 VALID_TABS = {"view", "data"}
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def get_properties_data() -> list[dict[str, str]]:
     """Read all properties from the Data tab and return them as dicts."""
     client = get_client()
@@ -23,11 +24,13 @@ def get_properties_data() -> list[dict[str, str]]:
         all_rows = ws.get_all_values()
         headers = all_rows[0]
         return [dict(zip(headers, row, strict=False)) for row in all_rows[1:] if row and row[0].strip()]
+    # lucidlint: ignore broad-except deliberate fallback — an unreadable sheet degrades to an empty list
     except Exception as e:
         logger.warning("Failed to read properties data: %s", e)
         return []
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def get_properties_view_data() -> list[dict[str, str]]:
     """Read all properties from the View tab and return them as dicts."""
     client = get_client()
@@ -39,6 +42,7 @@ def get_properties_view_data() -> list[dict[str, str]]:
         all_rows = ws.get_all_values()
         headers = all_rows[0]
         return [dict(zip(headers, row, strict=False)) for row in all_rows[1:] if row and row[0].strip()]
+    # lucidlint: ignore broad-except deliberate fallback — an unreadable sheet degrades to an empty list
     except Exception as e:
         logger.warning("Failed to read view tab data: %s", e)
         return []

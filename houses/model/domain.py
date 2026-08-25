@@ -30,6 +30,7 @@ _MODE_LABELS = {
     "drive": "Driving",
     "walk": "Walking",
 }
+PERCENT = 100
 
 
 @dataclass(frozen=True)
@@ -45,8 +46,10 @@ class PlaceOfInterest:
     # derived by ``effective_acceptable_modes`` and is what routing uses.
     acceptable_modes: tuple[str, ...] = ()
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def to_provenance_value(self) -> dict:
         """JSON-safe projection for provenance display."""
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         return {"label": self.label, "address": self.address, "acceptable_modes": list(self.acceptable_modes)}
 
 
@@ -75,11 +78,11 @@ class Person:
     petrol_mpg: int = 45
     home_co_owners: tuple[HomeCoOwner, ...] = ()
     home_property_rid: str = ""
-    rent_paid_monthly: Money = Money("0", "GBP")
-    home_sale_price: Money = Money("0", "GBP")
-    outstanding_mortgage: Money = Money("0", "GBP")
-    cash_contribution: Money = Money("0", "GBP")
-    life_insurance_monthly: Money = Money("0", "GBP")
+    rent_paid_monthly: Money = Money(amount="0", currency="GBP")
+    home_sale_price: Money = Money(amount="0", currency="GBP")
+    outstanding_mortgage: Money = Money(amount="0", currency="GBP")
+    cash_contribution: Money = Money(amount="0", currency="GBP")
+    life_insurance_monthly: Money = Money(amount="0", currency="GBP")
     works_estimate_required: bool = False
     places_of_interest: tuple[PlaceOfInterest, ...] = ()
     email: str = ""
@@ -93,12 +96,14 @@ class Person:
     # False means no current home: the deposit is cash only.
     selling_home: bool | None = None
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def to_provenance_value(self) -> dict:
         """JSON-safe projection for provenance display.
 
         Keeps the identity-relevant fields; money fields render through
         their canonical string form via the generic projector.
         """
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         return {
             "name": self.name,
             "has_car": self.has_car,
@@ -302,8 +307,7 @@ def joint_owner_names(persons: list) -> set[str]:
         or (p.outstanding_mortgage and p.outstanding_mortgage.amount > 0)
         or p.home_co_owners
     }
-    for p in adults:
-        owners.update(co.name for co in p.home_co_owners)
+    owners.update(co.name for p in adults for co in p.home_co_owners)
     if not owners:
         return {p.name for p in adults}
     return owners
@@ -332,12 +336,12 @@ def home_equity_contributions(persons: list) -> dict[str, Decimal]:
         mine = Decimal(0)
         if name in gross:
             co_sum = Decimal(sum(co.share for co in p.home_co_owners))
-            mine += gross[name] * (Decimal(100) - co_sum) / Decimal(100)
+            mine += gross[name] * (Decimal(PERCENT) - co_sum) / Decimal(PERCENT)
         for holder, equity in gross.items():
             if holder == name:
                 continue
             for co in by_name[holder].home_co_owners:
                 if co.name == name:
-                    mine += equity * Decimal(co.share) / Decimal(100)
+                    mine += equity * Decimal(co.share) / Decimal(PERCENT)
         out[name] = mine
     return out

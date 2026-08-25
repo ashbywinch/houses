@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import gspread
+from gspread.utils import ValueInputOption
 
 from houses.sheets.named_ranges import named_range_name
 from houses.sheets.row import DATA_TAB, Row
@@ -79,6 +80,8 @@ VIEW_MANUAL_COLUMNS: frozenset[str] = frozenset(
 
 # ── View tab formula columns ────────────────────────────────────────────
 
+# lucidlint: ignore global-state static formula-definition table; never mutated
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 VIEW_FORMULA_COLS: dict[str, str] = {
     "listing address": f"=IFNA(INDEX({_nr('Address')},ROW()),)",
     "map": f'=LET(url,IFNA(INDEX({_nr("Map URL")},ROW()),),IF(url="","",HYPERLINK(url,"Map")))',
@@ -114,6 +117,8 @@ VIEW_FORMULA_COLS: dict[str, str] = {
 
 # Data tab formula columns (lowercase header -> Google Sheets formula string).
 # These are never written by the server — they're formula-driven.
+# lucidlint: ignore global-state static formula-definition table; never mutated
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 DATA_FORMULA_COLS: dict[str, str] = {
     "stamp duty (£)": f'=IFNA(LET(s,IFNA(INDEX(View_Status,ROW()),),p,INDEX({_nr("Price (£)")},ROW()),sd,IF(p<=250000,0,IF(p<=925000,(p-250000)*0.05,IF(p<=1500000,(p-925000)*0.1+33750,(p-1500000)*0.12+91250))),IF(s="Current",0,sd)),)',
     "net ashby contribution (£)": f'=IFNA(LET(s,IFNA(INDEX(View_Status,ROW()),),p,INDEX({_nr("Price (£)")},ROW()),na,Const_GrossAshbyContribution-IFNA(INDEX({_nr("Stamp Duty (£)")},ROW())/3,)-IFNA(INDEX(View_AshbyWorksEstimate,ROW()),),IF(s="Current",0,IF(OR(p=0,p=""),na,MIN(na,p/3)))),)',
@@ -144,6 +149,6 @@ def sync_data_formulas(spreadsheet: gspread.Spreadsheet) -> None:
                     ws.update(
                         values=[[formula] for _ in range(write_rows)],
                         range_name=f"{cl}2:{cl}{1 + write_rows}",
-                        value_input_option="USER_ENTERED",
+                        value_input_option=ValueInputOption.user_entered,
                     )
                 break

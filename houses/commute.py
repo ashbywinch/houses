@@ -11,7 +11,7 @@ from pint import Quantity
 from houses.stations import Station
 
 
-def _render_leg_description(leg: JourneyLeg) -> str:
+def render_leg_description(leg: JourneyLeg) -> str:
     """Build a human-readable leg description from raw fields.
 
     Uses the same format regardless of which API generated the leg,
@@ -105,7 +105,7 @@ class CostGroup:
 
     def leg_descriptions(self) -> tuple[str, ...]:
         """Return operator-appropriate descriptions for each leg."""
-        return tuple(_render_leg_description(leg) for leg in self.legs)
+        return tuple(render_leg_description(leg) for leg in self.legs)
 
 
 @dataclass(frozen=True)

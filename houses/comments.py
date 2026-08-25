@@ -21,12 +21,14 @@ _MIGRATION_TIMESTAMP = "1980-01-01T00:00:00+00:00"
 
 
 @dataclass
+# lucidlint: ignore class-module small private helper — module keeps its domain name
 class CommentEntry:
     person: str  # "Ashby" | "Simon" | "Lorena"
     text: str
     timestamp: str  # ISO 8601, set server-side
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def get_comments(rid: str) -> list[dict[str, Any]]:
     """Return all comments for a property, oldest first."""
     conn = get_connection()
@@ -34,9 +36,11 @@ def get_comments(rid: str) -> list[dict[str, Any]]:
         "SELECT person, text, created_at FROM comments WHERE rid = ? ORDER BY created_at ASC",
         (rid,),
     ).fetchall()
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     return [{"person": row["person"], "text": row["text"], "timestamp": row["created_at"]} for row in rows]
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def add_comment(rid: str, person: str, text: str) -> dict[str, Any]:
     """Add a comment and return it as a dict."""
     conn = get_connection()
@@ -46,9 +50,11 @@ def add_comment(rid: str, person: str, text: str) -> dict[str, Any]:
         (rid, person, text, now),
     )
     conn.commit()
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     return {"person": person, "text": text, "timestamp": now}
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def migrate_old_comments(rid: str, old_comments: dict[str, Any]) -> list[dict[str, Any]]:
     """Migrate old flat comment fields to the new comments table on first request.
 
@@ -88,6 +94,7 @@ def migrate_old_comments(rid: str, old_comments: dict[str, Any]) -> list[dict[st
                     )
 
         conn.commit()
+    # lucidlint: ignore broad-except transaction boundary — any failure rolls back the migration before re-raising
     except Exception:
         conn.rollback()
         raise

@@ -24,7 +24,8 @@ import logging
 import sqlite3
 from pathlib import Path
 
-from houses.config import settings
+import dag.persistence as per
+from houses.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +38,6 @@ _connection_cache: contextvars.ContextVar[sqlite3.Connection | None] = contextva
 def get_connection() -> sqlite3.Connection:
     """Return a context-local SQLite connection with WAL mode enabled."""
     if testing:
-        import dag.persistence as per
-
         conn = per._get_db()
         conn.row_factory = sqlite3.Row
         return conn

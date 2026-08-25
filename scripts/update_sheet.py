@@ -21,6 +21,7 @@ Manual columns (Rightmove URL, Bedrooms, Actual Lat/Lng/Postcode) are preserved.
 import json
 import os
 import sys
+from collections.abc import Iterable
 
 import gspread
 from fastapi.testclient import TestClient
@@ -29,15 +30,17 @@ from google.oauth2.service_account import Credentials
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import contextlib
 
-from houses.config import settings  # noqa: E402
-from houses.server import app  # noqa: E402
-from houses.sheets import COLUMN_HEADERS, col_index, col_letter  # noqa: E402
+from houses.settings import settings
+from houses.property import EnrichedProperty
+from houses.server import app
+from houses.sheets import COLUMN_HEADERS, col_index, col_letter, row_values
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 SHEET_ID = os.environ.get("HOUSES_SHEET_ID", settings.sheet_id)
 DATA_TAB = "Properties Data"
 
 # Columns that the user fills in manually — never overwrite
+# lucidlint: ignore global-state static config set (manually filled columns); never mutated — only membership-tested
 MANUAL_COLS = {
     col_index("Rightmove URL"),
     col_index("Address"),
@@ -47,6 +50,8 @@ MANUAL_COLS = {
     col_index("Actual Latitude"),
     col_index("Actual Longitude"),
 }
+HTTP_OK = 200
+DRY_RUN_DISPLAY_LIMIT = 20
 
 
 def _find_closest_header(name: str) -> str | None:
@@ -86,6 +91,7 @@ def parse_columns(arg: str) -> set[int]:
 # Column header to enrichment field name mapping.
 # When --columns is specified, only the corresponding enrichment modules run,
 # saving API credits on unnecessary lookups.
+# lucidlint: ignore global-state static column → enrichment-field mapping table; never mutated
 _COLUMN_FIELDS: dict[int, str] = {
     col_index("Simon London (min)"): "simon",
     col_index("Simon London Cost (£)"): "simon",
@@ -118,16 +124,13 @@ _COLUMN_FIELDS: dict[int, str] = {
 }
 
 
-def _fields_for_columns(col_indices: set[int]) -> str:
+def _fields_for_columns(col_indices: Iterable[int]) -> str:
     """Derive the ?fields= query string for a set of column indices."""
-    needed = set()
-    for idx in col_indices:
-        if idx in _COLUMN_FIELDS:
-            needed.add(_COLUMN_FIELDS[idx])
-    return ",".join(sorted(needed))
+    return ",".join(sorted({_COLUMN_FIELDS[idx] for idx in col_indices if idx in _COLUMN_FIELDS}))
 
 
-def main():
+# lucidlint: ignore record-shape CLI-parse result triple — a NamedTuple is ceremony for a local argv parse
+def _parse_cli_args() -> tuple[set[int] | None, bool, bool]:
     columns = None
     dry_run = False
     obliterate = False
@@ -142,20 +145,19 @@ def main():
         elif a == "--obliterate":
             obliterate = True
         i += 1
+    return columns, dry_run, obliterate
 
+
+def _connect_sheet():
     creds = Credentials.from_service_account_info(json.loads(settings.service_account_json), scopes=SCOPES)
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(SHEET_ID)
-    ws = sh.worksheet(DATA_TAB)
-    existing = ws.get_all_values()
+    return sh.worksheet(DATA_TAB)
 
-    if not existing or len(existing) < 2:
-        print("Data tab is empty — nothing to update")
-        return
 
-    headers = existing[0]
-
-    # Safety check: refuse to regenerate all enriched columns without explicit consent.
+# lucidlint: ignore record-shape sheet rows matrix — spreadsheet boundary owns the shape
+def _ensure_safe_regeneration(headers: list[str], existing: list[list[str]], columns, obliterate: bool) -> None:
+    """Refuse to regenerate all enriched columns without explicit consent."""
     enriched_cols = [i for i in range(len(headers)) if i not in MANUAL_COLS]
     already_populated = [i for i in enriched_cols if any(len(r) > i and r[i].strip() for r in existing[1:])]
     if not columns and not obliterate and already_populated:
@@ -168,56 +170,137 @@ def main():
             f"  Use --obliterate if you really want to regenerate everything."
         )
         sys.exit(1)
+
+
+# lucidlint: ignore record-shape HTTP payload dict — serialization boundary owns the shape
+def _build_row_payload(row: list[str]) -> dict | None:
+    """Build the /inject-property payload; None when no URL can be derived."""
+    # Read URL from column A (user-provided). If absent, construct from Rightmove ID.
+    url = row[0].strip() if row else ""
+    if not url.startswith("http"):
+        rid = row[col_index("Rightmove ID")] if len(row) > col_index("Rightmove ID") else ""
+        if rid:
+            url = f"https://www.rightmove.co.uk/properties/{rid}"
+        else:
+            return None
+
+    payload = {"url": url}
+    addr_col = col_index("Address")
+    if len(row) > addr_col and row[addr_col]:
+        payload["address"] = row[addr_col]
+    pc_col = col_index("Postcode")
+    if len(row) > pc_col and row[pc_col]:
+        payload["postcode"] = row[pc_col]
+    _add_manual_coordinates(payload, row)
+    return payload
+
+
+# lucidlint: ignore record-shape HTTP payload dict — serialization boundary owns the shape
+def _add_manual_coordinates(payload: dict, row: list[str]) -> None:
+    """Pass user-filled actual values if they exist."""
+    lat_col = col_index("Actual Latitude")
+    lng_col = col_index("Actual Longitude")
+    rid_col = col_index("Rightmove ID")
+    if len(row) > lat_col and row[lat_col]:
+        with contextlib.suppress(ValueError):
+            payload["actual_latitude"] = float(row[lat_col])
+    if len(row) > lng_col and row[lng_col]:
+        with contextlib.suppress(ValueError):
+            payload["actual_longitude"] = float(row[lng_col])
+    if len(row) > rid_col and row[rid_col]:
+        payload["actual_postcode"] = row[rid_col]
+
+
+def _choose_needed_columns(headers: list[str], row: list[str], columns) -> list[int] | None:
+    """Return the enriched columns to request for this row, or None to skip it."""
+    enriched_cols = [i for i in range(len(headers)) if i not in MANUAL_COLS]
+    empty_columns = [i for i in enriched_cols if i < len(row) and not row[i].strip()]
+    if columns is not None:
+        # User specified columns — only those, even if already filled
+        return [i for i in columns if i in enriched_cols]
+    if not empty_columns:
+        # All enriched columns are already populated — nothing to do
+        return None
+    return empty_columns
+
+
+# lucidlint: ignore record-shape (cells, changes) build pair — a NamedTuple is ceremony for a local loop
+def _build_cell_updates(headers, row, new_row, update_cols, row_idx) -> tuple[list, list]:
+    """Return (cells to write, dry-run change rows) for this row."""
+    cells = []
+    changes = []
+    for col_idx in update_cols:
+        if col_idx >= len(new_row):
+            continue
+        old_val = row[col_idx] if col_idx < len(row) else ""
+        new_val = new_row.get(headers[col_idx] if col_idx < len(headers) else "", "")
+        if old_val != new_val:
+            cells.append(
+                {
+                    "range": f"{DATA_TAB}!{col_letter(col_idx)}{row_idx}",
+                    "values": [[new_val]],
+                }
+            )
+            changes.append(
+                (row_idx, headers[col_idx] if col_idx < len(headers) else f"?{col_idx}", old_val[:40], new_val[:40])
+            )
+    return cells, changes
+
+
+# lucidlint: ignore record-shape (rows, cells) accounting pair — a NamedTuple is ceremony for local counters
+def _apply_updates(ws, cells, dry_run: bool) -> tuple[int, int]:
+    """Write cells to the sheet (unless dry-run); return (rows, cells) changed."""
+    if not cells:
+        return 0, 0
+    if not dry_run:
+        ws.spreadsheet.values_batch_update({"valueInputOption": "USER_ENTERED", "data": cells})
+    return 1, len(cells)
+
+
+def _print_summary(dry_run: bool, changed_rows: int, changed_cells: int, dry_run_changes) -> None:
+    if dry_run:
+        print(f"DRY RUN — {changed_rows} rows would change ({changed_cells} cells)")
+        if dry_run_changes:
+            print("\nChanges:")
+            for row_idx, col_header, old_val, new_val in dry_run_changes[:20]:
+                print(f"  Row {row_idx}, {col_header}: '{old_val}' → '{new_val}'")
+            if len(dry_run_changes) > DRY_RUN_DISPLAY_LIMIT:
+                print(f"  ... and {len(dry_run_changes) - DRY_RUN_DISPLAY_LIMIT} more cells")
+    else:
+        print(f"Updated {changed_rows} rows ({changed_cells} cells changed)")
+
+
+def main():
+    columns, dry_run, obliterate = _parse_cli_args()
+
+    ws = _connect_sheet()
+    existing = ws.get_all_values()
+
+    if not existing or len(existing) < 2:
+        print("Data tab is empty — nothing to update")
+        return
+
+    headers = existing[0]
+    _ensure_safe_regeneration(headers, existing, columns, obliterate)
+
     client = TestClient(app)
     changed_rows = 0
     changed_cells = 0
     dry_run_changes: list[tuple[int, str, str, str]] = []  # (row, col_header, old, new)
 
     for row_idx, row in enumerate(existing[1:], 2):
-        # Read URL from column A (user-provided). If absent, construct from Rightmove ID.
-        url = row[0].strip() if row else ""
-        if not url.startswith("http"):
-            rid = row[col_index("Rightmove ID")] if len(row) > col_index("Rightmove ID") else ""
-            if rid:
-                url = f"https://www.rightmove.co.uk/properties/{rid}"
-            else:
-                continue
-
-        payload = {"url": url}
-        addr_col = col_index("Address")
-        if len(row) > addr_col and row[addr_col]:
-            payload["address"] = row[addr_col]
-        pc_col = col_index("Postcode")
-        if len(row) > pc_col and row[pc_col]:
-            payload["postcode"] = row[pc_col]
-        # Pass user-filled actual values if they exist
-        if len(row) > 5 and row[5]:
-            with contextlib.suppress(ValueError):
-                payload["actual_latitude"] = float(row[5])
-        if len(row) > 6 and row[6]:
-            with contextlib.suppress(ValueError):
-                payload["actual_longitude"] = float(row[6])
-        if len(row) > 7 and row[7]:
-            payload["actual_postcode"] = row[7]
-
-        # Determine which enriched columns are empty for this row.
-        # Only request those field groups from the server to avoid wasting API calls.
-        enriched_cols = [i for i in range(len(headers)) if i not in MANUAL_COLS]
-        empty_columns = [i for i in enriched_cols if i < len(row) and not row[i].strip()]
-
-        if columns is not None:
-            # User specified columns — only those, even if already filled
-            needed_cols = [i for i in columns if i in enriched_cols]
-        elif not empty_columns:
-            # All enriched columns are already populated — nothing to do
+        payload = _build_row_payload(row)
+        if payload is None:
             continue
-        else:
-            needed_cols = empty_columns
+
+        needed_cols = _choose_needed_columns(headers, row, columns)
+        if needed_cols is None:
+            continue
 
         needed_fields = _fields_for_columns(needed_cols)
         url_params = f"dry_run=true&fields={needed_fields}"
         resp = client.post(f"/inject-property?{url_params}", json=payload, timeout=30)
-        if resp.status_code != 200:
+        if resp.status_code != HTTP_OK:
             continue
 
         enriched = resp.json().get("data", {})
@@ -225,49 +308,14 @@ def main():
             continue
 
         # Build new row from server response
-        from houses.property import EnrichedProperty
-        from houses.sheets import row_values
-
         new_row = row_values(EnrichedProperty(**enriched))
+        cells, changes = _build_cell_updates(headers, row, new_row, needed_cols, row_idx)
+        dry_run_changes.extend(changes)
+        row_delta, cell_delta = _apply_updates(ws, cells, dry_run)
+        changed_rows += row_delta
+        changed_cells += cell_delta
 
-        update_cols = needed_cols
-
-        cells = []
-        for col_idx in update_cols:
-            if col_idx >= len(new_row):
-                continue
-            old_val = row[col_idx] if col_idx < len(row) else ""
-            new_val = new_row.get(headers[col_idx] if col_idx < len(headers) else "", "")
-            if old_val != new_val:
-                cells.append(
-                    {
-                        "range": f"{DATA_TAB}!{col_letter(col_idx)}{row_idx}",
-                        "values": [[new_val]],
-                    }
-                )
-                dry_run_changes.append(
-                    (row_idx, headers[col_idx] if col_idx < len(headers) else f"?{col_idx}", old_val[:40], new_val[:40])
-                )
-
-        if cells:
-            if dry_run:
-                changed_rows += 1
-                changed_cells += len(cells)
-            else:
-                ws.spreadsheet.values_batch_update({"valueInputOption": "USER_ENTERED", "data": cells})
-                changed_rows += 1
-                changed_cells += len(cells)
-
-    if dry_run:
-        print(f"DRY RUN — {changed_rows} rows would change ({changed_cells} cells)")
-        if dry_run_changes:
-            print("\nChanges:")
-            for row_idx, col_header, old_val, new_val in dry_run_changes[:20]:
-                print(f"  Row {row_idx}, {col_header}: '{old_val}' → '{new_val}'")
-            if len(dry_run_changes) > 20:
-                print(f"  ... and {len(dry_run_changes) - 20} more cells")
-    else:
-        print(f"Updated {changed_rows} rows ({changed_cells} cells changed)")
+    _print_summary(dry_run, changed_rows, changed_cells, dry_run_changes)
 
 
 if __name__ == "__main__":

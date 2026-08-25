@@ -12,10 +12,10 @@ from pint import Quantity
 
 from dag.attempt import Attempt
 from dag.scheduler import flush_processor
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
-from houses.nodes.property import PropertyNodes
-from houses.property_registry import _registry, register_property
+from houses.nodes.property_nodes import PropertyNodes
+from houses.property_registry import register_property
 from tests.helpers import make_services
 
 
@@ -36,15 +36,17 @@ def _fresh_db():
 
 @pytest.fixture(autouse=True)
 def _clear():
-    _registry.clear()
+    from houses.services_provider import get_services
+
+    registry = get_services().property_registry
+    registry.clear()
     yield
-    _registry.clear()
+    registry.clear()
 
 
 @pytest.fixture(autouse=True)
 def _mock():
     from houses.services_provider import _request_services as _sp
-    from houses.tfl_client import TflClient
 
     class _SuccessPlanner:
         async def walk_route(self, origin, destination, max_walk):
@@ -69,8 +71,6 @@ def _mock():
                 )
             )
 
-    from money import Money
-
     canned = Commute(
         person=Person(name="Test", has_car=False),
         label="Test",
@@ -80,12 +80,17 @@ def _mock():
         mode="transit",
     )
 
-    async def mock_plan(self):
-        return Attempt.succeeded(canned)
+    class _FakeTflClient:
+        """Canned transit plan — injected via the services client factory."""
 
-    TflClient.plan = mock_plan
+        def __init__(self, *args, **kwargs):
+            self._plan_override = None
+            self._no_route_detail = ""
 
-    svc = make_services(route_planner=_SuccessPlanner())
+        async def plan(self):
+            return Attempt.succeeded(canned)
+
+    svc = make_services(route_planner=_SuccessPlanner(), tfl_client_factory=_FakeTflClient)
     token = _sp.set(svc)
     yield
     _sp.reset(token)

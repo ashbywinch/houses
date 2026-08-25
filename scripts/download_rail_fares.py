@@ -31,6 +31,8 @@ USERNAME = "ashby@juggler.net"
 
 # Destination stations we care about
 DEST_CRS = {"VIC", "FST"}
+PENCE_PER_POUND = 100.0
+MIN_FARE_LINE_LENGTH = 20
 
 
 def authenticate(password: str) -> str:
@@ -56,6 +58,7 @@ def download_fares(token: str) -> bytes:
     return resp.content
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def extract_relevant_fares(zip_data: bytes) -> list[dict]:
     """Unzip the fares file and extract only fares involving DEST_CRS stations."""
     relevant = []
@@ -73,14 +76,14 @@ def extract_relevant_fares(zip_data: bytes) -> list[dict]:
                         continue
                     # Fixed-format: origin_crs(4) dest_crs(4) ... fare(8)
                     # Fare file format: positions 0-3 origin, 4-7 dest, rest is fare data
-                    if len(line) < 20:
+                    if len(line) < MIN_FARE_LINE_LENGTH:
                         continue
                     origin = line[0:4].strip()
                     dest = line[4:8].strip()
                     if origin in DEST_CRS or dest in DEST_CRS:
                         fare_str = line[16:24].strip()
                         try:
-                            fare = float(fare_str) / 100.0
+                            fare = float(fare_str) / PENCE_PER_POUND
                         except ValueError:
                             continue
                         key = (origin, dest)

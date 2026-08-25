@@ -39,8 +39,8 @@ class LifeInsuranceTotalNode(DerivedNode[Money]):
 
     def compute(self, persons: Attempt[list]) -> Attempt[Money]:
         self._assert_deps_succeeded(persons=persons)
-        zero = Money("0", "GBP")
-        ps = persons.value_or_none()
+        zero = Money(amount="0", currency="GBP")
+        ps = persons.value_or_none() or []
         total = _ZERO
         for p in ps:
             ins = getattr(p, "life_insurance_monthly", zero)

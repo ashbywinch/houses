@@ -21,6 +21,7 @@ from houses.bus_journey import (
     FareProductType,
     cheapest_round_trip,
 )
+from houses.geopoint import GeoPoint
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -261,8 +262,8 @@ class TestBusJourneyRegistry:
         cost = self._cost(
             "Unknown Stop",
             "Another Unknown",
-            {"lat": 51.3, "lon": -0.5},
-            {"lat": 51.31, "lon": -0.49},
+            GeoPoint(51.3, -0.5),
+            GeoPoint(51.31, -0.49),
         )
         assert cost is None
 

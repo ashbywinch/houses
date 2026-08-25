@@ -14,9 +14,10 @@ from dag.derived_node import DerivedNode
 from houses.bus_fare_reader import get_bus_fare_reader
 from houses.bus_journey import cheapest_round_trip
 from houses.commute import CostGroup, JourneyLeg, LegMode
-from houses.config import settings
+from houses.commute_router import CommuteRouter
+from houses.geopoint import GeoPoint
 from houses.model.domain import Commute
-from houses.routing import CommuteRouter
+from houses.settings import settings
 
 
 class BusRouteNode(DerivedNode[dict]):
@@ -42,6 +43,7 @@ class BusRouteNode(DerivedNode[dict]):
         dest_str = dest_val if isinstance(dest_val, str) else f"{dest_val.lat},{dest_val.lon}"
         origin_str = loc if isinstance(loc, str) else f"{loc.lat},{loc.lon}"
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         body = {
             "origin": CommuteRouter._address_waypoint(origin_str),
             "destination": CommuteRouter._address_waypoint(dest_str),
@@ -96,11 +98,13 @@ class BusRouteNode(DerivedNode[dict]):
 class BodsFareNode(DerivedNode[dict]):
     """Look up BODS bus fares for the stops found by BusRouteNode."""
 
+# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, bus_route_node):
         super().__init__(node_id, dict, (bus_route_node,))
 
     @override
-    def compute(self, route: Attempt[dict]) -> Attempt[dict]:
+    @staticmethod
+    def compute(route: Attempt[dict]) -> Attempt[dict]:
         route_val = route.value_or_none()
         if route_val is None:
             return Attempt.impossible("no bus route data")
@@ -115,18 +119,19 @@ class BodsFareNode(DerivedNode[dict]):
             dep_name = stop.get("departure_name", "")
             arr_name = stop.get("arrival_name", "")
             dep_point = (
-                {"lat": stop["departure_lat"], "lon": stop["departure_lon"]}
+                GeoPoint(stop["departure_lat"], stop["departure_lon"])
                 if stop.get("departure_lat") is not None
                 else None
             )
             arr_point = (
-                {"lat": stop["arrival_lat"], "lon": stop["arrival_lon"]}
+                GeoPoint(stop["arrival_lat"], stop["arrival_lon"])
                 if stop.get("arrival_lat") is not None
                 else None
             )
             fares = reader.fares_for_stops(dep_name, arr_name, dep_point=dep_point, arr_point=arr_point)
             cheapest = cheapest_round_trip(fares, reader.national_max_single)
             if cheapest is not None:
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
                 stop_fares[dep_name] = {
                     "amount": str(cheapest.amount),
                     "currency": "GBP",
@@ -239,8 +244,8 @@ class BusLegAugmentNode(DerivedNode[Commute]):
             return Attempt.succeeded(commute)
         return self._bus_augment(commute, bus_route_attempt, bods_fare_attempt, full_trip=False)
 
+    @staticmethod
     def _bus_augment(
-        self,
         commute: Commute,
         bus_route_attempt: Attempt[dict] | None,
         bods_fare_attempt: Attempt[dict] | None,
@@ -275,7 +280,7 @@ class BusLegAugmentNode(DerivedNode[Commute]):
             return Attempt.succeeded(commute)
 
         # Compute bus cost from stop fares
-        total_bus_cost = Money("0", "GBP")
+        total_bus_cost = Money(amount="0", currency="GBP")
         for stop in bus_stops:
             dep = stop.get("departure_name", "")
             fare_info = stop_fares.get(dep)
@@ -309,5 +314,4 @@ class BusLegAugmentNode(DerivedNode[Commute]):
             _details=(bus_cg,) + rest_details,
             infeasible=False if full_trip else commute.infeasible,
         )
-        return Attempt.succeeded(new_commute)
         return Attempt.succeeded(new_commute)

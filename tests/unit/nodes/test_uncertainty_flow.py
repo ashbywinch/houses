@@ -90,7 +90,7 @@ async def test_council_tax_fallback_provenance_notes_estimation():
 
 
 def _total_node(council_info: CouncilTaxInfo):
-    from houses.nodes.total_monthly_housing_cost_node import TotalMonthlyHousingCostNode
+    from houses.nodes.total_monthly_housing_cost_node import HousingCostConfig, TotalMonthlyHousingCostNode
 
     mg = UserInputNode[Money]("a3_mg", Money)
     sf = UserInputNode[Money]("a3_sf", Money)
@@ -102,13 +102,15 @@ def _total_node(council_info: CouncilTaxInfo):
 
     node = TotalMonthlyHousingCostNode(
         "a3_tmc",
-        monthly_mortgage_node=mg,
-        yearly_sinking_fund_node=sf,
-        life_insurance_node=li,
-        rental_income_node=ri,
-        status_node=st,
-        commute_breakdown_node=cb,
-        council_tax_node=ct,
+        config=HousingCostConfig(
+            monthly_mortgage_node=mg,
+            yearly_sinking_fund_node=sf,
+            life_insurance_node=li,
+            rental_income_node=ri,
+            status_node=st,
+            commute_breakdown_node=cb,
+            council_tax_node=ct,
+        ),
     )
     mg.push(Money("1000", "GBP"), "test")
     sf.push(Money("0", "GBP"), "test")

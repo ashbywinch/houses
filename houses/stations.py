@@ -12,7 +12,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 
 logger = logging.getLogger(__name__)
 
@@ -126,12 +126,12 @@ class StationRegistry:
         """
         self._load()
         cleaned = self._clean_name(name).lower()
-        return self._stations.get(cleaned) if self._stations else None  # type: ignore[return-value]
+        return self._stations.get(cleaned) if self._stations else None
 
     def find_by_crs(self, crs: str) -> Station | None:
         """Look up a station by CRS code (case-insensitive)."""
         self._load()
-        return self._by_crs.get(crs.upper()) if self._by_crs else None  # type: ignore[return-value]
+        return self._by_crs.get(crs.upper()) if self._by_crs else None
 
     def nearest(self, point: GeoPoint) -> Station | None:
         """Return the station nearest to *point*."""

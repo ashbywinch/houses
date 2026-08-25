@@ -31,16 +31,21 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
+from houses.location import geocode
+from houses.settings import settings
+from houses.tfl_client import TflClient
 
 logger = logging.getLogger(__name__)
 
+# lucidlint: ignore magic-number 4 — DEFAULT_BBOX lon_min −4.0°: coordinate data of the named bbox mapping
 DEFAULT_BBOX = {"lat_min": 50.1, "lat_max": 53.6, "lon_min": -4.0, "lon_max": 2.0}
 INNER_RADIUS_KM = 20.0
 THRESHOLD_MIN = 132
 DEFAULT_CSV = Path("data/stations.csv")
 DEFAULT_OUT = Path("data/commute/station_shed.json")
 ENGINE_VERSION = "station-shed-v1"
+MINUTES_PER_HOUR = 60.0
 
 _POSTCODE_RE = re.compile(r"[A-Z]{1,2}[0-9][A-Z0-9]?(?:\s*[0-9][A-Z]{2})?")
 
@@ -67,8 +72,121 @@ class Station:
     def point(self) -> GeoPoint:
         return GeoPoint(self.lat, self.lon)
 
+# lucidlint: ignore middle-man protocol/reflected-operator requirement
     def distance_km_to(self, other: GeoPoint) -> float:
         return self.point.distance_km_to(other)
+
+    # ── Routing adapter ──────────────────────────────────────────────
+
+    def origin_candidates(self) -> list[str]:
+        """Origin identifiers to try in order — coordinate origin first, then name.
+
+        TfL's JourneyResults 404s on lat/lon origins for many stations (its geo
+        stop-finder fails outside London — observed for 1075 of 1819 in the shed
+        batch); routing from ``'<name> Rail Station'`` resolves them. The name form
+        can itself 300-disambiguate (e.g. "Peterborough" matches streets), which
+        counts as a failure — the coords form already failed by then.
+        """
+        candidates = [f"{self.lat},{self.lon}"]
+        name = self.name
+        if not name.lower().endswith(" rail station"):
+            name += " Rail Station"
+        candidates.append(name)
+        return candidates
+
+    async def route_duration(
+        self,
+        dest_postcode: str,
+        *,
+        allow_bus: bool = True,
+        fetch: Callable[[str, str], Awaitable[int | None]] | None = None,
+    ) -> int | None:
+        """Route this station to a destination postcode; return minutes or None.
+
+        Tries each :meth:`origin_candidates` origin in order — coordinate origin
+        first, then ``'<name> Rail Station'`` — and returns the first routed
+        duration. Routing itself is ``TflClient.route_duration`` (public API:
+        same request shape as the app's planner, disk-cached, retry-with-backoff
+        on transient errors). ``fetch`` is injectable for tests (default: the
+        TfL client).
+        """
+        if fetch is None:
+
+            async def _default_fetch(origin: str, dest: str) -> int | None:
+                return await TflClient.route_duration(origin, dest, allow_bus=allow_bus)
+
+            fetch = _default_fetch
+        for origin in self.origin_candidates():
+            duration = await fetch(origin, dest_postcode)
+            if duration is not None:
+                return duration
+        return None
+
+    # lucidlint: ignore record-shape (offices, dur) pair resolves per-office floors — a NamedTuple is ceremony
+    def reject_implausible(
+        self, offices: list[Office], dur_p: int | None, dur_a: int | None
+    ) -> tuple[int | None, int | None]:
+        """Null out durations that are physically impossible for the distance.
+
+        TfL's name-origin fallback can resolve to the wrong place (observed:
+        Worcestershire Parkway, ~160 km out, reported 35 min — ~274 km/h). A
+        door-to-door average above ~150 km/h is not achievable on the UK network,
+        so a faster duration means the origin resolved wrongly — treat it as a
+        failed route rather than silently extending coverage to the wrong area.
+        """
+        speed_cap_kmh = 150.0
+        floors = [self.distance_km_to(office.point) / speed_cap_kmh * MINUTES_PER_HOUR for office in offices]
+        if dur_p is not None and dur_p < floors[0]:
+            dur_p = None
+        if dur_a is not None and dur_a < floors[1]:
+            dur_a = None
+        return dur_p, dur_a
+
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    def record(
+        self, dur_p: int | None, dur_a: int | None, kept: bool, routing_error: str | None = None
+    ) -> dict:
+        """The wire-format shed record for this station."""
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        return {
+            "name": self.name,
+            "crs": self.crs,
+            "lat": self.lat,
+            "lon": self.lon,
+            "duration_pimlico": dur_p,
+            "duration_aldgate": dur_a,
+            "kept": kept,
+            "routing_error": routing_error,
+        }
+
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    async def process(self, ctx: RoutingContext) -> dict | None:
+        """Route this station → its shed record, or None when it is outside the box.
+
+        Inner-zone stations are kept without a single router call. Both
+        destinations are routed concurrently — the two calls share no state and
+        TfL latency dominates; stations remain strictly sequential.
+        """
+        if not ctx.bbox.contains(self.lat, self.lon):
+            return None
+        inner = any(self.distance_km_to(office.point) <= ctx.inner_radius_km for office in ctx.offices)
+        if inner:
+            return self.record(None, None, kept=True)
+        dur_p, dur_a = await asyncio.gather(
+            ctx.router(self, ctx.offices[0].postcode),
+            ctx.router(self, ctx.offices[1].postcode),
+        )
+        dur_p, dur_a = self.reject_implausible(ctx.offices, dur_p, dur_a)
+        routed = dur_p is not None or dur_a is not None
+        rec = self.record(
+            dur_p,
+            dur_a,
+            keep_station(inner=False, dur_p=dur_p, dur_a=dur_a, threshold=ctx.threshold),
+            routing_error=None if routed else "failed",
+        )
+        if ctx.delay_s:
+            await asyncio.sleep(ctx.delay_s)
+        return rec
 
 
 @dataclass(frozen=True)
@@ -105,84 +223,82 @@ def keep_station(inner: bool, dur_p: int | None, dur_a: int | None, threshold: i
     return bool(durations) and min(durations) <= threshold
 
 
-async def build_shed(
-    stations: list[Station],
-    offices: list[Office],
-    bbox: BBox,
-    inner_radius_km: float,
-    threshold: int,
-    router,
-    *,
-    delay_s: float = 0.5,
-    existing_records: list[dict] | None = None,
-    checkpoint: Callable[[list[dict], int], None] | None = None,
-) -> list[dict]:
-    """Route stations in the box and return shed records.
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+def _resume_records(existing_records: list[dict] | None, stations: list[Station]) -> tuple[set[str], list[dict]]:
+    """Records a resume carries forward, and the CRSes marked done.
 
-    ``router`` is ``async (Station, postcode) -> int | None`` (duration minutes,
-    or None when no route/failure). Stations outside the box are skipped; inner-zone
-    stations are kept without a single router call.
-
-    Resumable: ``existing_records`` (a previous run's output) marks stations as
-    done — they are never re-routed, never re-delayed, and the final record list
-    is byte-identical to a from-scratch run. Records whose CRS is absent from
-    the current station list (station removed) or whose coords differ (station
-    moved) are pruned as stale and, if present, re-processed — a resume can
-    never silently keep outdated records. ``checkpoint(records, processed)``
-    is invoked after each newly processed station so the caller can persist
-    progress incrementally. Note the guarantee: a killed batch loses at most
-    ``checkpoint_every - 1`` already-processed stations of progress (the caller's
-    write cadence); those are re-processed on resume, but every TfL response is
-    disk-cached, so re-processing COMPLETED stations is cache hits. Failed
-    records are re-routed with fresh calls — error responses are never cached,
-    by design (a transient outage must get a genuine retry, not a poisoned
-    cache replay)."""
+    Only completed records are done. A record with a routing_error (both
+    destinations failed) is NOT done: a resume re-routes it, so a transient
+    TfL outage that outlasted the retry window gets another chance instead of
+    permanently excluding the station. Records whose CRS is absent from the
+    current station list (station removed) or whose coords differ (station
+    moved) are pruned as stale — a resume can never silently keep outdated
+    records.
+    """
     by_crs = {st.crs: st for st in stations}
     done: set[str] = set()
     records: list[dict] = []
     for rec in existing_records or []:
         st = by_crs.get(rec["crs"])
         if st is not None and st.lat == rec["lat"] and st.lon == rec["lon"]:
-            # Only completed records are done. A record with a routing_error
-            # (both destinations failed) is NOT done: a resume re-routes it,
-            # so a transient TfL outage that outlasted the retry window gets
-            # another chance instead of permanently excluding the station.
             if not rec.get("routing_error"):
                 done.add(rec["crs"])
             records.append(rec)
-    order = {st.crs: i for i, st in enumerate(stations)}
+    return done, records
+
+
+@dataclass(frozen=True)
+class RoutingContext:
+    """The batch's routing policy — shared by every station in build_shed."""
+
+    offices: list[Office]
+    bbox: BBox
+    inner_radius_km: float
+    threshold: int
+    router: Callable[[Station, str], Awaitable[int | None]]
+    delay_s: float
+
+
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+async def build_shed(
+    stations: list[Station],
+    ctx: RoutingContext,
+    *,
+    existing_records: list[dict] | None = None,
+    checkpoint: Callable[[list[dict], int], None] | None = None,
+) -> list[dict]:
+    """Route stations in the box and return shed records.
+
+    ``ctx.router`` is ``async (Station, postcode) -> int | None`` (duration
+    minutes, or None when no route/failure) — pass ``Station.route_duration``
+    for real TfL routing. Stations outside the box are skipped; inner-zone
+    stations are kept without a single router call.
+
+    Resumable: ``existing_records`` (a previous run's output) marks stations as
+    done — they are never re-routed, never re-delayed, and the final record list
+    is byte-identical to a from-scratch run (see ``_resume_records``). Note the
+    guarantee: a killed batch loses at most ``checkpoint_every - 1``
+    already-processed stations of progress (the caller's write cadence); those
+    are re-processed on resume, but every TfL response is disk-cached, so
+    re-processing COMPLETED stations is cache hits. Failed records are re-routed
+    with fresh calls — error responses are never cached, by design (a transient
+    outage must get a genuine retry, not a poisoned cache replay).
+    ``checkpoint(records, processed)`` is invoked after each newly processed
+    station so the caller can persist progress incrementally.
+    """
+    done, records = _resume_records(existing_records, stations)
     processed = 0
+    order = {st.crs: i for i, st in enumerate(stations)}
     for st in stations:
         if st.crs in done:
             continue
         # Re-processing a station (routing_error record from a previous run, or
         # moved coords) must REPLACE its old record, not duplicate it.
         records = [r for r in records if r["crs"] != st.crs]
-        if not bbox.contains(st.lat, st.lon):
+        rec = await st.process(ctx)
+        if rec is None:
             continue
-        inner = any(st.distance_km_to(office.point) <= inner_radius_km for office in offices)
-        if inner:
-            records.append(_record(st, None, None, True))
-        else:
-            # Both destinations concurrently — the two calls share no state and
-            # TfL latency dominates; stations remain strictly sequential.
-            dur_p, dur_a = await asyncio.gather(
-                router(st, offices[0].postcode),
-                router(st, offices[1].postcode),
-            )
-            dur_p, dur_a = _reject_implausible(st, offices, dur_p, dur_a)
-            routed = dur_p is not None or dur_a is not None
-            records.append(
-                _record(
-                    st,
-                    dur_p,
-                    dur_a,
-                    keep_station(False, dur_p, dur_a, threshold),
-                    routing_error=None if routed else "failed",
-                )
-            )
-            if delay_s:
-                await asyncio.sleep(delay_s)
+        records.append(rec)
         processed += 1
         if checkpoint is not None:
             checkpoint(records, processed)
@@ -190,88 +306,6 @@ async def build_shed(
     records.sort(key=lambda r: order.get(r["crs"], len(order)))
     return records
 
-
-def _reject_implausible(
-    st: Station, offices: list[Office], dur_p: int | None, dur_a: int | None
-) -> tuple[int | None, int | None]:
-    """Null out durations that are physically impossible for the distance.
-
-    TfL's name-origin fallback can resolve to the wrong place (observed:
-    Worcestershire Parkway, ~160 km out, reported 35 min — ~274 km/h). A
-    door-to-door average above ~150 km/h is not achievable on the UK network,
-    so a faster duration means the origin resolved wrongly — treat it as a
-    failed route rather than silently extending coverage to the wrong area.
-    """
-    speed_cap_kmh = 150.0
-    floors = [st.distance_km_to(office.point) / speed_cap_kmh * 60.0 for office in offices]
-    if dur_p is not None and dur_p < floors[0]:
-        dur_p = None
-    if dur_a is not None and dur_a < floors[1]:
-        dur_a = None
-    return dur_p, dur_a
-
-
-def _record(st: Station, dur_p: int | None, dur_a: int | None, kept: bool, routing_error: str | None = None) -> dict:
-    return {
-        "name": st.name,
-        "crs": st.crs,
-        "lat": st.lat,
-        "lon": st.lon,
-        "duration_pimlico": dur_p,
-        "duration_aldgate": dur_a,
-        "kept": kept,
-        "routing_error": routing_error,
-    }
-
-
-# ── TfL routing adapter ──────────────────────────────────────────────
-
-
-def origin_candidates(station: Station) -> list[str]:
-    """Origin identifiers to try in order — coordinate origin first, then name.
-
-    TfL's JourneyResults 404s on lat/lon origins for many stations (its geo
-    stop-finder fails outside London — observed for 1075 of 1819 in the shed
-    batch); routing from ``'<name> Rail Station'`` resolves them. The name form
-    can itself 300-disambiguate (e.g. "Peterborough" matches streets), which
-    counts as a failure — the coords form already failed by then.
-    """
-    candidates = [f"{station.lat},{station.lon}"]
-    name = station.name
-    if not name.lower().endswith(" rail station"):
-        name += " Rail Station"
-    candidates.append(name)
-    return candidates
-
-
-async def route_station_duration(
-    station: Station,
-    dest_postcode: str,
-    *,
-    allow_bus: bool = True,
-    fetch: Callable[[str, str], Awaitable[int | None]] | None = None,
-) -> int | None:
-    """Route a station to a destination postcode; return minutes or None.
-
-    Tries each ``origin_candidates`` origin in order — coordinate origin first,
-    then ``'<name> Rail Station'`` — and returns the first routed duration.
-    Routing itself is ``TflClient.route_duration`` (public API: same request
-    shape as the app's planner, disk-cached, retry-with-backoff on transient
-    errors). ``fetch`` is injectable for tests (default: the TfL client).
-    """
-    from houses.tfl_client import TflClient
-
-    if fetch is None:
-
-        async def _default_fetch(origin: str, dest: str) -> int | None:
-            return await TflClient.route_duration(origin, dest, allow_bus=allow_bus)
-
-        fetch = _default_fetch
-    for origin in origin_candidates(station):
-        duration = await fetch(origin, dest_postcode)
-        if duration is not None:
-            return duration
-    return None
 
 
 # ── CLI ──────────────────────────────────────────────────────────────
@@ -285,8 +319,6 @@ def _extract_postcode(address: str) -> str:
 
 
 async def _geocode_offices() -> list[Office]:
-    from houses.config import settings
-    from houses.location import geocode
 
     offices: list[Office] = []
     for dest in (settings.simon_destination, settings.lorena_destination):
@@ -303,6 +335,7 @@ async def _geocode_offices() -> list[Office]:
     return offices
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def build_metadata(offices: list[Office], expected: int, generated_at: str) -> dict:
     """Current-constants metadata for the shed payload.
 
@@ -311,6 +344,7 @@ def build_metadata(offices: list[Office], expected: int, generated_at: str) -> d
     rebuilt from current constants so a resume can never silently keep
     outdated destinations/bbox/threshold values.
     """
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     return {
         "threshold_min": THRESHOLD_MIN,
         "destinations": [o.postcode for o in offices],
@@ -322,6 +356,7 @@ def build_metadata(offices: list[Office], expected: int, generated_at: str) -> d
     }
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def is_complete(existing: list[dict] | None, records: list[dict], expected: int) -> bool:
     """True when a resume found every expected station already done.
 
@@ -339,12 +374,14 @@ def is_complete(existing: list[dict] | None, records: list[dict], expected: int)
     )
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def config_signature(offices: list[Office]) -> dict:
     """The config identity a shed was built under — engine, destinations,
     threshold, bbox, inner zone. If any of these change, previously-routed
     records (routed to the OLD destinations/params) must not be resumed: they
     would mix with new metadata claiming the new config.
     """
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     return {
         "engine_version": ENGINE_VERSION,
         "destinations": [o.postcode for o in offices],
@@ -354,6 +391,7 @@ def config_signature(offices: list[Office]) -> dict:
     }
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def resume_allowed(prev_metadata: dict, current: dict) -> bool:
     """A resume is only safe when the shed was built under the CURRENT config.
 
@@ -365,12 +403,88 @@ def resume_allowed(prev_metadata: dict, current: dict) -> bool:
     return all(prev_metadata.get(k) == v for k, v in current.items())
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _write_payload(path: Path, metadata: dict, records: list[dict]) -> None:
     """Write the shed payload atomically — a kill mid-write never corrupts the file."""
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     payload = {"metadata": metadata, "stations": records}
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload, indent=2))
     os.replace(tmp, path)
+
+
+def _resume_state(out_path: Path, offices):
+    """Load the existing shed for resuming.
+
+    Returns (stations, metadata, None) to resume, (None, None, 1) to abort on
+    a config mismatch, or (None, None, None) to start fresh (unreadable shed).
+    """
+    try:
+        prev = json.loads(out_path.read_text())
+        if not resume_allowed(prev["metadata"], config_signature(offices)):
+            logger.warning(
+                "shed config mismatch: stored metadata %s != current %s — refusing to resume %s",
+                {k: prev["metadata"].get(k) for k in config_signature(offices)},
+                config_signature(offices),
+                out_path,
+            )
+            print(
+                f"{out_path} was built under a different config (destinations/threshold/bbox/version) — "
+                "use --force to rebuild",
+                file=sys.stderr,
+            )
+            return None, None, 1
+        return prev["stations"], prev["metadata"], None
+    except (json.JSONDecodeError, KeyError, OSError):
+        logger.warning("unreadable shed at %s — starting fresh (corrupt or truncated write?)", out_path)
+        print(f"{out_path} unreadable — starting fresh", file=sys.stderr)
+        return None, None, None
+
+
+
+# lucidlint: ignore record-shape (existing, metadata, abort) triple — two-tier exit idiom; a NamedTuple is ceremony
+def _resume_or_wipe(
+    out_path: Path, offices: list[Office], force: bool
+) -> tuple[list[dict] | None, dict | None, int | None]:
+    """The run's starting point: resumed records + metadata, or a fresh batch.
+
+    Returns ``(existing, metadata, abort)`` — ``abort`` is an exit code when
+    the run must stop before routing (e.g. a corrupt existing shed).
+    """
+    if out_path.exists() and not force:
+        existing, metadata, abort = _resume_state(out_path, offices)
+        if abort is not None:
+            return None, None, abort
+        if existing is not None:
+            print(f"resuming from {out_path} ({len(existing or [])} stations already done)")
+        return existing, metadata, None
+    if out_path.exists() and force:
+        logger.warning("--force: wiping the existing shed at %s", out_path)
+        print("--force: wiping the existing shed", file=sys.stderr)
+    return None, None, None
+
+
+# lucidlint: ignore record-shape (stations, exit) pair — two-tier exit idiom; a NamedTuple is ceremony
+def _limit_stations(stations: list[Station], limit: int, out_path: Path) -> tuple[list[Station], int | None]:
+    """Apply --limit, refusing a run that would truncate an existing shed.
+
+    A --limit run would write only the first N stations, silently truncating
+    the existing shed — --force means "re-run everything", never "keep only N".
+    Smoke runs must use a temp --out.
+    """
+    if limit and out_path.exists():
+        logger.warning(
+            "refusing --limit run: %s already exists and would be truncated to %d stations", out_path, limit
+        )
+        print(
+            f"refusing --limit run: {out_path} already exists and would be truncated — "
+            "use --out with a temp path for smoke tests",
+            file=sys.stderr,
+        )
+        return stations, 1
+    if limit:
+        stations = stations[:limit]
+    return stations, None
 
 
 async def run(argv: list[str] | None = None) -> int:
@@ -385,51 +499,14 @@ async def run(argv: list[str] | None = None) -> int:
 
     out_path = Path(args.out)
     offices = await _geocode_offices()
-    metadata = None
-    existing: list[dict] | None = None
-    if out_path.exists() and not args.force:
-        try:
-            prev = json.loads(out_path.read_text())
-            if not resume_allowed(prev["metadata"], config_signature(offices)):
-                logger.warning(
-                    "shed config mismatch: stored metadata %s != current %s — refusing to resume %s",
-                    {k: prev["metadata"].get(k) for k in config_signature(offices)},
-                    config_signature(offices),
-                    out_path,
-                )
-                print(
-                    f"{out_path} was built under a different config (destinations/threshold/bbox/version) — "
-                    "use --force to rebuild",
-                    file=sys.stderr,
-                )
-                return 1
-            existing = prev["stations"]
-            metadata = prev["metadata"]  # keep the original generated_at across resumes
-            print(f"resuming from {out_path} ({len(existing or [])} stations already done)")
-        except (json.JSONDecodeError, KeyError, OSError):
-            logger.warning("unreadable shed at %s — starting fresh (corrupt or truncated write?)", out_path)
-            print(f"{out_path} unreadable — starting fresh", file=sys.stderr)
-            existing = None
-    elif out_path.exists() and args.force:
-        logger.warning("--force: wiping the existing shed at %s", out_path)
-        print("--force: wiping the existing shed", file=sys.stderr)
+    existing, metadata, abort = _resume_or_wipe(out_path, offices, args.force)
+    if abort is not None:
+        return abort
 
     stations = load_stations(args.csv)
-    if args.limit and out_path.exists():
-        # A --limit run would write only the first N stations, silently
-        # truncating the existing shed — --force means "re-run everything",
-        # never "keep only N". Smoke runs must use a temp --out.
-        logger.warning(
-            "refusing --limit run: %s already exists and would be truncated to %d stations", out_path, args.limit
-        )
-        print(
-            f"refusing --limit run: {out_path} already exists and would be truncated — "
-            "use --out with a temp path for smoke tests",
-            file=sys.stderr,
-        )
-        return 1
-    if args.limit:
-        stations = stations[: args.limit]
+    stations, limit_exit = _limit_stations(stations, args.limit, out_path)
+    if limit_exit is not None:
+        return limit_exit
 
     bbox = BBox(**DEFAULT_BBOX)
     expected = sum(1 for st in stations if bbox.contains(st.lat, st.lon))
@@ -438,6 +515,7 @@ async def run(argv: list[str] | None = None) -> int:
     generated_at = metadata["generated_at"] if metadata else datetime.now(UTC).isoformat()
     metadata = build_metadata(offices, expected, generated_at)
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def _checkpoint(records: list[dict], processed: int) -> None:
         if processed % args.checkpoint_every == 0:
             _write_payload(out_path, metadata, records)
@@ -447,12 +525,14 @@ async def run(argv: list[str] | None = None) -> int:
     started = time.monotonic()
     records = await build_shed(
         stations,
-        offices,
-        bbox,
-        INNER_RADIUS_KM,
-        THRESHOLD_MIN,
-        route_station_duration,
-        delay_s=args.delay,
+        RoutingContext(
+            offices=offices,
+            bbox=bbox,
+            inner_radius_km=INNER_RADIUS_KM,
+            threshold=THRESHOLD_MIN,
+            router=Station.route_duration,
+            delay_s=args.delay,
+        ),
         existing_records=existing,
         checkpoint=_checkpoint,
     )

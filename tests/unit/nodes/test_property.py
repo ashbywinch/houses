@@ -3,12 +3,12 @@ from __future__ import annotations
 import pytest
 
 from dag.scheduler import flush_processor
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 
 
 class TestProperty:
     def test_creates_user_input_nodes(self):
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
 
         prop = PropertyNodes("prop123")
         assert prop.rid == "prop123"
@@ -18,14 +18,14 @@ class TestProperty:
         assert prop.corrected_address is not None
 
     def test_creates_derived_nodes(self):
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
 
         prop = PropertyNodes("prop123")
         assert prop.best_address is not None
         assert prop.best_location is not None
 
     def test_changed_fires_when_source_updates(self):
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
 
         prop = PropertyNodes("prop123")
         received = []
@@ -37,7 +37,7 @@ class TestProperty:
 
     @pytest.mark.asyncio
     async def test_best_location_uses_precise(self):
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
 
         prop = PropertyNodes("prop123")
         gp = GeoPoint(51.5, -0.1)
@@ -59,8 +59,8 @@ class TestProperty:
         fire so the frontend gets notified via WebSocket."""
         from money import Money
 
-        from houses.geo import GeoPoint
-        from houses.nodes.property import PropertyNodes
+        from houses.geopoint import GeoPoint
+        from houses.nodes.property_nodes import PropertyNodes
 
         prop = PropertyNodes("prop789")
         received = []
@@ -102,7 +102,7 @@ class TestProperty:
 
     @pytest.mark.asyncio
     async def test_to_json_includes_location(self):
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
 
         prop = PropertyNodes("prop123")
         gp = GeoPoint(51.5, -0.1)

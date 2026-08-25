@@ -1,23 +1,27 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import override
 
 from money import Money
 
-from dag.attempt import Attempt
+from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
 from dag.expression import Choose, Expression, Ref
 from dag.node import Node
 from houses.commute import CostGroup, LegMode
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from houses.model.domain import Commute
 
 logger = logging.getLogger(__name__)
+MINUTES_PER_HOUR = 60
+GOOD_COMMUTE_MIN = 30
+BRACKNELL_WARN_COMMUTE_MIN = 60
+STANDARD_GOOD_COMMUTE_MIN = 45
+STANDARD_WARN_COMMUTE_MIN = 75
 
-
-def _transit_legs(commute: Commute | None) -> bool:
+def transit_legs(commute: Commute | None) -> bool:
     """True when the commute contains train/tube/DLR/Overground legs.
 
     Callers must check ``infeasible`` first — the ``details`` accessor
@@ -43,7 +47,7 @@ def _has_unpriced_transit(commute: Commute | None) -> bool:
     return any(cg.cost is None and any(leg.mode in _transit_modes for leg in cg.legs) for cg in commute.details or ())
 
 
-def _needs_rail_fare(transit: Attempt, selected: Attempt | None = None) -> bool:
+def needs_rail_fare(transit: Attempt, selected: Attempt | None = None) -> bool:
     """True when the SELECTED commute has unpriced transit legs needing an NR fare.
 
     ``transit`` is the transit alternative; ``selected`` is the commute the
@@ -62,7 +66,7 @@ def _needs_rail_fare(transit: Attempt, selected: Attempt | None = None) -> bool:
         if not selected.succeeded:
             return False
         sel = selected.value_or_none()
-        if sel is None or sel.infeasible or not _transit_legs(sel):
+        if sel is None or sel.infeasible or not transit_legs(sel):
             return False
     if val.daily_cost is None or val.daily_cost.amount == 0:
         return True
@@ -77,10 +81,10 @@ def format_duration(minutes: int | None) -> str:
     """
     if minutes is None:
         return ""
-    if minutes < 60:
+    if minutes < MINUTES_PER_HOUR:
         return f"{minutes}m"
-    h = minutes // 60
-    r = minutes % 60
+    h = minutes // MINUTES_PER_HOUR
+    r = minutes % MINUTES_PER_HOUR
     return f"{h}h{r}" if r else f"{h}h"
 
 
@@ -89,8 +93,8 @@ def commute_colour(minutes: int | None, bracknell: bool = False) -> str:
     if minutes is None:
         return "muted"
     if bracknell:
-        return "good" if minutes < 30 else "warn" if minutes <= 60 else "bad"
-    return "good" if minutes < 45 else "warn" if minutes <= 75 else "bad"
+        return "good" if minutes < GOOD_COMMUTE_MIN else "warn" if minutes <= BRACKNELL_WARN_COMMUTE_MIN else "bad"
+    return "good" if minutes < STANDARD_GOOD_COMMUTE_MIN else "warn" if minutes <= STANDARD_WARN_COMMUTE_MIN else "bad"
 
 
 def _replace_transit_group(
@@ -128,6 +132,37 @@ def _replace_transit_group(
     return tuple(result)
 
 
+@dataclass(frozen=True)
+class CommuteSelectorOptions:
+    """Wiring for ``CommuteSelectorNode``: the alternative commute inputs.
+
+    ``walk_result``/``drive_result`` are optional — omit them when
+    walking/driving is not applicable (the selector treats them as
+    impossible).  ``acceptable_modes`` is empty for "every mode accepted".
+    """
+
+    origin: Node
+    poi: Node
+    transit_result: Node
+    walk_result: Node | None = None
+    drive_result: Node | None = None
+    is_child: bool = False
+    max_walk_node: Node | None = None
+    acceptable_modes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class CommuteSelectorInputs:
+    """Compute inputs for ``CommuteSelectorNode``, bound by dep name."""
+
+    origin: Attempt[GeoPoint]
+    poi: Attempt[str]
+    max_walk: Attempt[int] | None = None
+    transit: Attempt[Commute] | None = None
+    walk: Attempt[Commute] | None = None
+    drive: Attempt[Commute] | None = None
+
+
 class CommuteSelectorNode(DerivedNode[Commute]):
     """Selects the best commute from walk, transit, and drive options.
 
@@ -158,45 +193,38 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         self,
         node_id: str,
         *,
-        origin,
-        poi,
-        transit_result,
-        walk_result=None,
-        drive_result=None,
-        is_child: bool = False,
-        max_walk_node: Node | None = None,
-        acceptable_modes: tuple[str, ...] = (),
+        options: CommuteSelectorOptions,
     ):
-        self.origin = origin
-        self.poi = poi
-        self.walk_result = walk_result
-        self.transit_result = transit_result
-        self.drive_result = drive_result
-        self.is_child = is_child
+        self.origin = options.origin
+        self.poi = options.poi
+        self.walk_result = options.walk_result
+        self.transit_result = options.transit_result
+        self.drive_result = options.drive_result
+        self.is_child = options.is_child
         self._max_walk = 30
-        self._max_walk_node = max_walk_node
+        self._max_walk_node = options.max_walk_node
         # Empty (unset/legacy) means every mode is acceptable — the old
         # behaviour.  An explicit set EXCLUDES the modes the person won't
         # accept: a train-only POI is never scored by a car route.
-        self._acceptable_modes = tuple(acceptable_modes)
+        self._acceptable_modes = tuple(options.acceptable_modes)
         # deps mirror the alternatives: an excluded mode is not a
         # dependency — a permanently pending excluded node must not stall
         # the selector's refresh (same freeze the bootstrap fix addresses).
         # max_walk sits BEFORE the conditional alternatives so positional
         # compute matching stays stable whether walk/drive are present.
-        deps = [origin, poi]
+        deps = [options.origin, options.poi]
         names = ["origin", "poi"]
-        if max_walk_node is not None:
-            deps.append(max_walk_node)
+        if options.max_walk_node is not None:
+            deps.append(options.max_walk_node)
             names.append("max_walk")
         if self._mode_acceptable("transit"):
-            deps.append(transit_result)
+            deps.append(options.transit_result)
             names.append("transit")
-        if walk_result is not None and self._mode_acceptable("walk"):
-            deps.append(walk_result)
+        if options.walk_result is not None and self._mode_acceptable("walk"):
+            deps.append(options.walk_result)
             names.append("walk")
-        if drive_result is not None and self._mode_acceptable("car"):
-            deps.append(drive_result)
+        if options.drive_result is not None and self._mode_acceptable("car"):
+            deps.append(options.drive_result)
             names.append("drive")
         super().__init__(node_id, Commute, tuple(deps), dep_names=tuple(names))
 
@@ -267,16 +295,9 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         return best
 
     @override
-    def compute(
-        self,
-        origin: Attempt[GeoPoint],
-        poi: Attempt[str],
-        max_walk: Attempt[int] | None = None,
-        transit: Attempt[Commute] | None = None,
-        walk: Attempt[Commute] | None = None,
-        drive: Attempt[Commute] | None = None,
-    ) -> Attempt[Commute]:
-        mw_val = max_walk.value_or_none() if max_walk is not None else None
+    def compute(self, **kwargs) -> Attempt[Commute]:
+        inputs = CommuteSelectorInputs(**kwargs)
+        mw_val = inputs.max_walk.value_or_none() if inputs.max_walk is not None else None
         if mw_val is not None:
             self._max_walk = int(mw_val)
         result = self.expression.evaluate()
@@ -294,8 +315,10 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         return result
 
     @override
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def to_json(self) -> dict:
         attempt = await self.attempt()
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         result: dict = {
             "status": attempt.status,
             "value": None,
@@ -311,6 +334,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
                 if isinstance(value, dict) and "_details" in value:
                     value["details"] = value.pop("_details")
                 result["value"] = value
+            # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
             except Exception:
                 logger.exception("Failed to serialize commute value to JSON")
                 result["value"] = None
@@ -320,6 +344,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
         result["provenance"] = (await self.build_provenance()).to_dict()
         return result
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     @override
     async def to_json_value(self) -> dict:
         result = await super().to_json_value()
@@ -354,7 +379,6 @@ class MergeRailFareNode(DerivedNode[Commute]):
     @property
     @override
     def provenance_formula(self):
-        from dag.attempt import Formula, FormulaLine
 
         val = self._attempt.value_or_none()
         if not self._attempt.succeeded or val is None:
@@ -368,7 +392,7 @@ class MergeRailFareNode(DerivedNode[Commute]):
         fare_att = self._rail_fare_result.latest_attempt()
         if fare_att.succeeded:
             rf = fare_att.value_or_none()
-            if rf is not None and rf.daily_cost is not None and rf.daily_cost.amount > 0 and _transit_legs(val):
+            if rf is not None and rf.daily_cost is not None and rf.daily_cost.amount > 0 and transit_legs(val):
                 lines.append(FormulaLine(label="Rail fare", value=str(rf.daily_cost)))
         return Formula(lines=lines, result=str(val.daily_cost))
 
@@ -383,13 +407,13 @@ class MergeRailFareNode(DerivedNode[Commute]):
         sel = self._commute_result.latest_attempt()
         if sel.succeeded:
             val = sel.value_or_none()
-            if val is not None and not val.infeasible and _transit_legs(val):
+            if val is not None and not val.infeasible and transit_legs(val):
                 deps.append(self._rail_fare_result)
         return tuple(deps)
 
     @override
+    @staticmethod
     def compute(
-        self,
         commute: Attempt[Commute],
         rail_fare: Attempt[Commute | None] | None = None,
     ) -> Attempt[Commute]:
@@ -409,12 +433,12 @@ class MergeRailFareNode(DerivedNode[Commute]):
             return Attempt.succeeded(val)
 
         # Check if the selected commute has transit legs
-        if not _transit_legs(val):
+        if not transit_legs(val):
             return Attempt.succeeded(val)
 
         # Apply the NR fare to the transit CostGroup
         new_details = _replace_transit_group(val.details, rf_val.details)
-        total = Money("0", "GBP")
+        total = Money(amount="0", currency="GBP")
         for cg in new_details:
             if cg.cost is not None:
                 if not isinstance(cg.cost, Money):

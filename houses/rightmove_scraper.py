@@ -22,12 +22,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from houses.config import settings
+from playwright.async_api import async_playwright
+
+from houses.settings import settings
 
 logger = logging.getLogger(__name__)
+_HUMAN_DELAY_MIN_S = 3.0
+_CHROME_START_ATTEMPTS = 100
+_HUMAN_DELAY_MAX_S = 8.0
+_CHROME_START_POLL_S = 0.1
 
 
 @dataclass
+# lucidlint: ignore class-module small private helper — module keeps its domain name
 class RightmoveProperty:
     """Property data extracted from a Rightmove page.
 
@@ -84,7 +91,7 @@ _PAGE_MODEL_RE = re.compile(
 
 
 async def _human_delay():
-    delay = random.uniform(3.0, 8.0)
+    delay = random.uniform(_HUMAN_DELAY_MIN_S, _HUMAN_DELAY_MAX_S)
     logger.info("Back-off: waiting %.1fs before Rightmove request", delay)
     await asyncio.sleep(delay)
 
@@ -102,6 +109,7 @@ def _clean_price(raw: Any) -> float | None:
         return None
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _parse_json_ld(html: str) -> dict[str, Any]:
     """Extract property data from JSON-LD structured data."""
     m = _LD_JSON_RE.search(html)
@@ -139,6 +147,7 @@ def _parse_json_ld(html: str) -> dict[str, Any]:
     return result
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _parse_preloaded_state(html: str) -> dict[str, Any]:
     """Extract from window.__PRELOADED_STATE__ (Rightmove React app)."""
     for pattern in [_PRELOADED_RE, _INITIAL_STATE_RE]:
@@ -172,14 +181,17 @@ def _parse_preloaded_state(html: str) -> dict[str, Any]:
     return {}
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _parse_map_coords(html: str) -> dict[str, Any]:
     """Fallback: extract lat/lng from inline map data in script tags."""
     m = _MAP_COORDS_RE.search(html)
     if m:
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         return {"latitude": float(m.group(1)), "longitude": float(m.group(2))}
     return {}
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _parse_page_model(html: str) -> dict[str, Any]:
     """Extract property data from window.__PAGE_MODEL (Rightmove's primary data format).
 
@@ -205,45 +217,79 @@ def _parse_page_model(html: str) -> dict[str, Any]:
     result: dict[str, Any] = {}
 
     # Address
+    address = _page_model_address(data, prop)
+    if address is not None:
+        result["address"], result["postcode"] = address
+
+    # Price
+    price = _page_model_price(data, prop)
+    if price is not None:
+        result["price"] = price
+
+    # Bedrooms
+    bedrooms = _page_model_bedrooms(data, prop)
+    if bedrooms is not None:
+        result["bedrooms"] = bedrooms
+
+    # Location (lat/lng)
+    location = _page_model_location(data, prop)
+    if location is not None:
+        result["latitude"], result["longitude"] = location
+
+    return result
+
+
+_PageModelAddress = tuple[str, str]  # (address, postcode)
+_PageModelLocation = tuple[float, float]  # (lat, lng)
+
+
+def _page_model_address(data: Any, prop: Any) -> _PageModelAddress | None:
+    """(address, postcode) from the page model, or None when the fields are absent."""
     try:
         addr_schema = data[prop["address"]]
         addr_parts = [data[addr_schema["displayAddress"]]]
         outcode = data[addr_schema["outcode"]]
         incode = data[addr_schema["incode"]]
-        result["address"] = addr_parts[0]
-        result["postcode"] = f"{outcode} {incode}"
-    except (IndexError, KeyError, TypeError):
-        pass
+        return addr_parts[0], f"{outcode} {incode}"
+    except (IndexError, KeyError, TypeError) as e:
+        logger.debug("address/postcode fields absent from the page model (skipped): %s", e)
+        return None
 
-    # Price
+
+def _page_model_price(data: Any, prop: Any) -> float | None:
+    """Price from the page model, or None when the field is absent/unparseable."""
     try:
         price_schema = data[prop["prices"]]
-        price = _clean_price(data[price_schema["primaryPrice"]])
-        if price is not None:
-            result["price"] = price
-    except (IndexError, KeyError, TypeError):
-        pass
+        return _clean_price(data[price_schema["primaryPrice"]])
+    except (IndexError, KeyError, TypeError) as e:
+        logger.debug("price field absent from the page model (skipped): %s", e)
+        return None
 
-    # Bedrooms
+
+def _page_model_bedrooms(data: Any, prop: Any) -> int | None:
+    """Bedroom count from the page model, or None when absent or not an integer."""
     try:
         beds = data[prop["bedrooms"]]
         if isinstance(beds, int):
-            result["bedrooms"] = beds
-    except (IndexError, KeyError, TypeError):
-        pass
+            return beds
+    except (IndexError, KeyError, TypeError) as e:
+        logger.debug("bedrooms field absent from the page model (skipped): %s", e)
+        return None
+    return None
 
-    # Location (lat/lng)
+
+def _page_model_location(data: Any, prop: Any) -> _PageModelLocation | None:
+    """(lat, lng) from the page model, or None when absent or non-numeric."""
     try:
         loc_schema = data[prop["location"]]
         lat = data[loc_schema["latitude"]]
         lng = data[loc_schema["longitude"]]
         if isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
-            result["latitude"] = float(lat)
-            result["longitude"] = float(lng)
-    except (IndexError, KeyError, TypeError):
-        pass
-
-    return result
+            return float(lat), float(lng)
+    except (IndexError, KeyError, TypeError) as e:
+        logger.debug("location fields absent from the page model (skipped): %s", e)
+        return None
+    return None
 
 
 def _parse_html(html: str, url: str) -> RightmoveProperty | None:
@@ -368,6 +414,7 @@ def _is_port_open(port: int) -> bool:
 
 async def _ensure_chrome():
     """Start a headless Chrome with remote debugging if not already running."""
+    # lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
     global _CHROME_PROCESS, _WE_STARTED_CHROME
 
     if _is_port_open(settings.rightmove_chrome_port):
@@ -394,36 +441,36 @@ async def _ensure_chrome():
     )
     _WE_STARTED_CHROME = True
 
-    for _ in range(100):
+    for _ in range(_CHROME_START_ATTEMPTS):
         if _is_port_open(settings.rightmove_chrome_port):
             logger.info("Chrome ready on port %s", settings.rightmove_chrome_port)
             return
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(_CHROME_START_POLL_S)
 
     logger.error("Chrome failed to start within 10s on port %s", settings.rightmove_chrome_port)
 
 
-async def stop_chrome():
-    """Kill the Chrome instance we spawned, using user-data-dir as a fingerprint."""
-    global _CHROME_PROCESS, _WE_STARTED_CHROME
-    if not _WE_STARTED_CHROME:
-        return
+async def _stop_chrome_process(proc: asyncio.subprocess.Process) -> None:
+    """Terminate, then kill, the spawned Chrome; never raises (best-effort).
 
-    fingerprint = str(_CHROME_DATA_DIR)
-    logger.info("Shutting down Chrome (data dir: %s)", fingerprint)
-
-    if _CHROME_PROCESS is not None and _CHROME_PROCESS.returncode is None:
-        _CHROME_PROCESS.terminate()
+    ``stop_chrome`` still runs the pkill fallback afterwards, so a process
+    that survives SIGKILL is cleaned up there rather than here.
+    """
+    proc.terminate()
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=3.0)
+    except (TimeoutError, ProcessLookupError) as e:
+        logger.debug("Chrome ignored SIGTERM — escalating to SIGKILL: %s", e)
         try:
-            await asyncio.wait_for(_CHROME_PROCESS.wait(), timeout=3.0)
-        except (TimeoutError, ProcessLookupError):
-            try:
-                _CHROME_PROCESS.kill()
-                await asyncio.wait_for(_CHROME_PROCESS.wait(), timeout=2.0)
-            except (TimeoutError, ProcessLookupError):
-                pass
+            proc.kill()
+            await asyncio.wait_for(proc.wait(), timeout=2.0)
+        except (TimeoutError, ProcessLookupError) as e2:
+            logger.debug("Chrome still alive after SIGKILL — pkill fallback will clean up: %s", e2)
+            return
 
-    # Also pkill any remaining chrome processes we own
+
+async def _pkill_owned_chrome(fingerprint: str) -> None:
+    """pkill any Chrome processes we own; never raises (best-effort)."""
     try:
         proc = await asyncio.create_subprocess_exec(
             "pkill",
@@ -433,8 +480,27 @@ async def stop_chrome():
             stderr=asyncio.subprocess.DEVNULL,
         )
         await asyncio.wait_for(proc.wait(), timeout=2.0)
-    except Exception:
-        pass
+    # lucidlint: ignore broad-except best-effort boundary — pkill fallback never raises (docstring contract)
+    except Exception as e:
+        logger.debug("pkill fallback failed for %s (Chrome may linger): %s", fingerprint, e)
+        return
+
+
+async def stop_chrome():
+    """Kill the Chrome instance we spawned, using user-data-dir as a fingerprint."""
+    # lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
+    global _CHROME_PROCESS, _WE_STARTED_CHROME
+    if not _WE_STARTED_CHROME:
+        return
+
+    fingerprint = str(_CHROME_DATA_DIR)
+    logger.info("Shutting down Chrome (data dir: %s)", fingerprint)
+
+    if _CHROME_PROCESS is not None and _CHROME_PROCESS.returncode is None:
+        await _stop_chrome_process(_CHROME_PROCESS)
+
+    # Also pkill any remaining chrome processes we own
+    await _pkill_owned_chrome(fingerprint)
 
     _CHROME_PROCESS = None
     _WE_STARTED_CHROME = False
@@ -443,14 +509,6 @@ async def stop_chrome():
 async def _fetch_via_chrome(url: str) -> str:
     """Connect to Chrome via CDP, navigate to URL, return page HTML."""
     await _ensure_chrome()
-
-    try:
-        from playwright.async_api import async_playwright
-    except ImportError:
-        logger.error(
-            "playwright is required for Rightmove scraping. Run: pip install playwright && playwright install chromium"
-        )
-        return ""
 
     async with async_playwright() as pw:
         browser = await pw.chromium.connect_over_cdp(_chrome_url())

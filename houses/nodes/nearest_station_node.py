@@ -5,7 +5,8 @@ from __future__ import annotations
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.node import Node
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
+from houses.rail_fare_registry import get_rail_fare_registry
 from houses.stations import Station
 
 
@@ -16,14 +17,17 @@ class NearestStationNode(DerivedNode[Station | None]):
     and delegates to ``RailFareRegistry.nearest_station`` for the lookup.
     """
 
+# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, best_location: Node[GeoPoint]) -> None:
         super().__init__(node_id, Station | None, (best_location,))
 
-    def compute(self, location: Attempt[GeoPoint]) -> Attempt[Station | None]:
-        from houses.rail_fare_registry import get_rail_fare_registry
-
+    @staticmethod
+    def compute(location: Attempt[GeoPoint]) -> Attempt[Station | None]:
+        loc = location.value_or_none()
+        if loc is None:
+            return Attempt.succeeded(None)
         registry = get_rail_fare_registry()
-        station = registry.nearest_station(location.value_or_none())
+        station = registry.nearest_station(loc)
         if station is None:
             return Attempt.succeeded(None)
         return Attempt.succeeded(station)

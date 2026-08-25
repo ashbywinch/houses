@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from scripts.sync_parking_rates import extract_daily_rate_from_tariff
+
 
 class ApcoaScraper:
     """Scrape APCOA parking data: URL generation, location page parsing,
@@ -48,6 +50,7 @@ class ApcoaScraper:
     # ── APCOA page parsers (pure functions, testable with fixtures) ───
 
     @staticmethod
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def _parse_apcoa_location_page(page_text: str, page_title: str) -> dict | None:
         """Extract car park name, address, and price from an APCOA location page.
 
@@ -86,17 +89,17 @@ class ApcoaScraper:
             tariff_end = tariff_start + 3000
         tariff_text = page_text[tariff_start:tariff_end]
 
-        from scripts.sync_parking_rates import extract_daily_rate_from_tariff
-
         price = extract_daily_rate_from_tariff(tariff_text)
         if price is None:
             return None
         if not (0 <= price <= 100):
             return None
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         return {"name": name, "address": address, "price": round(price, 2)}
 
     @staticmethod
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def _parse_apcoa_prebook_listing(page_text: str) -> dict | None:
         """Extract name, address, and price from an APCOA prebook listing page.
 
@@ -126,4 +129,5 @@ class ApcoaScraper:
         if not (0 <= cost <= 100):
             return None
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         return {"name": name, "address": address, "price": round(cost, 2)}

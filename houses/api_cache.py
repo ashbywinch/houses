@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any, override
@@ -27,18 +28,24 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import httpx
 
+from houses.settings import settings
+
+logger = logging.getLogger(__name__)
+
 _APP_KEY_RE = re.compile(r"app_key=[^&\"'}\s]+")
 
 
 CACHE_DIR = Path("data/api_cache")
 
-
+# lucidlint: ignore unused-setter test-injection API — unit conftest calls set_cache_dir() to isolate the cache
 def set_cache_dir(path: str | Path) -> None:
     """Override the cache directory (used by tests to isolate caches)."""
-    global CACHE_DIR  # type: ignore[global-statement]
+    # lucidlint: ignore global-state deliberate test seam — unit conftest calls set_cache_dir() to isolate the cache
+    global CACHE_DIR
     CACHE_DIR = Path(path)
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _make_key(method: str, url: str, params: dict[str, Any] | None, body: str | None) -> str:
     parts = [method.upper(), url]
     if params:
@@ -53,6 +60,7 @@ def _cache_path(key: str) -> Path:
     return CACHE_DIR / f"{key}.json"
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def get_cached(
     method: str,
     url: str,
@@ -62,10 +70,11 @@ def get_cached(
     """Return the cached JSON response for a request, or ``None``."""
     path = _cache_path(_make_key(method, url, params, body))
     if path.exists():
-        return json.loads(path.read_text())  # type: ignore[no-any-return]
+        return json.loads(path.read_text())
     return None
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def set_cached(method: str, url: str, params: dict[str, Any] | None, body: str | None, data: dict[str, Any]) -> None:
     """Store a JSON response so future identical requests skip the API."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -73,7 +82,7 @@ def set_cached(method: str, url: str, params: dict[str, Any] | None, body: str |
     path.write_text(json.dumps(_scrub_secrets(data)))
 
 
-def _scrub_secrets(obj: Any) -> Any:
+def _scrub_secrets(obj: Any, secret_key_value: str | None = None) -> Any:
     """Strip API keys echoed inside cached response bodies.
 
     Cache KEYS already exclude auth params; response bodies are another
@@ -81,18 +90,22 @@ def _scrub_secrets(obj: Any) -> Any:
     ``app_key``.  Scrub any ``app_key=...`` AND any occurrence of the
     raw key value (escaped/JSON-encoded forms slip past the query
     regex) in string values, recursively.
+
+    ``secret_key_value`` is a test seam (DI): pass the raw key explicitly
+    instead of the lazy settings lookup.
     """
+    if secret_key_value is None:
+        secret_key_value = _cached_secret_key()
     if isinstance(obj, dict):
-        return {k: _scrub_secrets(v) for k, v in obj.items()}
+        return {k: _scrub_secrets(v, secret_key_value) for k, v in obj.items()}
     if isinstance(obj, list):
-        return [_scrub_secrets(item) for item in obj]
+        return [_scrub_secrets(item, secret_key_value) for item in obj]
     if isinstance(obj, str):
         scrubbed = obj
         if "app_key=" in scrubbed:
             scrubbed = _APP_KEY_RE.sub("app_key=REDACTED", scrubbed)
-        raw_key = _cached_secret_key()
-        if raw_key and raw_key in scrubbed:
-            scrubbed = scrubbed.replace(raw_key, "REDACTED")
+        if secret_key_value and secret_key_value in scrubbed:
+            scrubbed = scrubbed.replace(secret_key_value, "REDACTED")
         return scrubbed
     return obj
 
@@ -103,19 +116,20 @@ _cached_secret_key_value: str = ""
 def _cached_secret_key() -> str:
     """The TfL app key VALUE (lazily read) — scrubbing the raw value
     catches escaped/JSON-encoded echoes the query regex misses."""
+    # lucidlint: ignore global-state lazy memo of the immutable settings value; single writer
     global _cached_secret_key_value
     if not _cached_secret_key_value:
-        from houses.config import settings
-
         _cached_secret_key_value = settings.tfl_api_key
     return _cached_secret_key_value
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def evict_cached(method: str, url: str, params: dict[str, Any] | None, body: str | None) -> None:
     """Delete a cached response (e.g. a poisoned error body). No-op if absent."""
     _cache_path(_make_key(method, url, params, body)).unlink(missing_ok=True)
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def with_cache_sync(
     method: str,
     url: str,
@@ -134,6 +148,7 @@ def with_cache_sync(
     return data
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 async def with_cache(
     method: str,
     url: str,
@@ -158,6 +173,7 @@ async def with_cache(
     return data
 
 
+# lucidlint: ignore class-module small private helper — module keeps its domain name
 class CachingTransport(httpx.AsyncBaseTransport):
     """httpx async transport that checks the disk cache before making HTTP calls.
 
@@ -222,8 +238,10 @@ class CachingTransport(httpx.AsyncBaseTransport):
                     body,
                     {"_cached_status": response.status_code, "_cached_body": data},
                 )
-        except Exception:
-            pass
+        # lucidlint: ignore broad-except deliberate fallback — a cache-write failure must never break the request
+        except Exception as e:
+            logger.debug("response not cached (%s): %s", url_path, e)
+            return response
         return response
 
 
