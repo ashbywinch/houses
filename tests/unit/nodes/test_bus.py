@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import override
+from unittest.mock import AsyncMock
 
 import pytest
 from money import Money
@@ -683,3 +684,98 @@ class TestBusAugmentLateRoute:
         assert val is not None
         assert val.duration.magnitude == 13
         assert not val.infeasible
+
+
+class TestBusRouteNodeAgainstRealTransport:
+    """Regression: compute() called the routes-post seam with the stale
+    ``timeout=`` kwarg, which the real Google Routes transport rejects —
+    every bus-leg compute crashed. Wire the node to the genuine transport
+    (HTTP faked at the sanctioned seams: client_factory + set_cached_fn)
+    and assert the parsed outcome, not the call shape."""
+
+    @pytest.mark.asyncio
+    async def test_bus_stops_parsed_through_real_transport(self):
+        from houses.commute_router import CommuteRouter, GoogleRoutesClient
+        from houses.nodes.bus import BusRouteNode
+        from houses.settings import settings
+
+        payload = {
+            "routes": [
+                {
+                    "duration": "900s",
+                    "legs": [
+                        {
+                            "steps": [
+                                {
+                                    "travelMode": "TRANSIT",
+                                    "transitDetails": {
+                                        "transitLine": {"vehicle": {"type": "BUS"}},
+                                        "stopDetails": {
+                                            "departureStop": {
+                                                "name": "Stop A",
+                                                "location": {"latLng": {"latitude": 51.5, "longitude": -0.1}},
+                                            },
+                                            "arrivalStop": {
+                                                "name": "Stop B",
+                                                "location": {"latLng": {"latitude": 51.51, "longitude": -0.11}},
+                                            },
+                                        },
+                                    },
+                                },
+                                {"travelMode": "WALK"},
+                            ]
+                        }
+                    ],
+                }
+            ],
+        }
+
+        fake_resp = AsyncMock()
+        fake_resp.raise_for_status = lambda: None
+        fake_resp.status_code = 200
+        fake_resp.json = lambda: payload
+        fake_client = AsyncMock()
+        fake_client.post = AsyncMock(return_value=fake_resp)
+
+        class _FakeCM:
+            async def __aenter__(self):
+                return fake_client
+
+            async def __aexit__(self, *a):
+                return False
+
+        original_key = settings.google_maps_api_key
+        settings.google_maps_api_key = "fake-key"
+        try:
+            # Real GoogleRoutesClient — only its HTTP client and cache write
+            # are faked, via the constructor seams production already has.
+            transport = GoogleRoutesClient(
+                client_factory=lambda **kw: _FakeCM(),
+                set_cached_fn=lambda *a, **kw: None,
+            )
+            router = CommuteRouter(routes_client=transport)
+            seam = router.google_routes_post
+
+            loc = UserInputNode[GeoPoint]("rt_loc", GeoPoint)
+            poi = UserInputNode[str]("rt_poi", str)
+            loc.push(GeoPoint(51.5, -0.1), "test")
+            poi.push("SW1V 2QQ", "test")
+            node = BusRouteNode("bus_rt", best_location=loc, poi=poi, _google_routes_post=seam)
+            await flush_processor()
+
+            a = await node.attempt()
+        finally:
+            settings.google_maps_api_key = original_key
+
+        assert a.succeeded, f"expected success through the real transport, got {a.status}: {a.error}"
+        result = a.value_or_none()
+        assert result is not None
+        stops = [
+            f"{s['departure_name']} → {s['arrival_name']}"
+            for s in result["bus_stops"]
+        ]
+        assert stops == ["Stop A → Stop B"], (
+            f"expected the departure→arrival pair from the canned response, got {stops}"
+        )
+
+

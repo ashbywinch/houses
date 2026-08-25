@@ -20,15 +20,15 @@ class TestWalkCommuteFailsFast:
         """_google_routes_post must raise ValueError when Google API key is missing."""
         import asyncio
 
-        from houses.commute_router import CommuteRouter
+        from houses.commute_router import GoogleRoutesClient
         from houses.settings import settings
 
-        router = CommuteRouter()
+        client = GoogleRoutesClient()
         original = settings.google_maps_api_key
         try:
             settings.google_maps_api_key = ""
             with pytest.raises(ValueError, match="Google Maps API key not configured"):
-                asyncio.run(router._google_routes_post({}, "test"))
+                asyncio.run(client.post({}, "test"))
         finally:
             settings.google_maps_api_key = original
 
@@ -636,7 +636,7 @@ class TestGoogleRoutesPostReturn:
     async def test_returns_data_on_cache_miss(self):
         from unittest.mock import AsyncMock
 
-        from houses.commute_router import CommuteRouter, GoogleRoutesOptions
+        from houses.commute_router import GoogleRoutesClient, GoogleRoutesOptions
 
 
         fake_resp = AsyncMock()
@@ -654,7 +654,7 @@ class TestGoogleRoutesPostReturn:
                 return False
 
         set_cached_calls = []
-        result = await CommuteRouter()._google_routes_post(
+        result = await GoogleRoutesClient().post(
             {"x": 1},
             "mask",
             options=GoogleRoutesOptions(
@@ -675,7 +675,6 @@ class TestGoogleRouteCommuteErrorReason:
 
     @pytest.mark.asyncio
     async def test_error_reason_included(self):
-        from unittest.mock import patch
 
         import httpx
 
@@ -688,9 +687,12 @@ class TestGoogleRouteCommuteErrorReason:
                 response=httpx.Response(400, request=httpx.Request("POST", "http://example.com")),
             )
 
-        router = CommuteRouter()
-        with patch.object(router, "_google_routes_post", side_effect=boom):
-            result = await router._google_route_commute("51.5,-0.1", "51.6,-0.2", "WALK", max_walk_minutes=30)
+        class _StubClient:
+            async def post(self, body, field_mask, *, options=None):
+                return await boom(body, field_mask, options=options)
+
+        router = CommuteRouter(routes_client=_StubClient())
+        result = await router._google_route_commute("51.5,-0.1", "51.6,-0.2", "WALK", max_walk_minutes=30)
         assert result.impossible
         assert "LatLng cannot be specified" in result.error, f"Got: {result.error}"
 
@@ -701,7 +703,6 @@ class TestGoogleRouteCommuteLegDestination:
 
     @pytest.mark.asyncio
     async def test_walk_leg_has_destination(self):
-        from unittest.mock import patch
 
         from houses.commute import LegMode
         from houses.commute_router import CommuteRouter
@@ -717,11 +718,14 @@ class TestGoogleRouteCommuteLegDestination:
                 ]
             }
 
-        router = CommuteRouter()
-        with patch.object(router, "_google_routes_post", side_effect=fake_routes):
-            result = await router._google_route_commute(
-                "51.5,-0.1", "Larchfield Primary School, Bargeman Road, Maidenhead SL6 4ET", "WALK", max_walk_minutes=60
-            )
+        class _StubClient:
+            async def post(self, body, field_mask, *, options=None):
+                return await fake_routes(body, field_mask, options=options)
+
+        router = CommuteRouter(routes_client=_StubClient())
+        result = await router._google_route_commute(
+            "51.5,-0.1", "Larchfield Primary School, Bargeman Road, Maidenhead SL6 4ET", "WALK", max_walk_minutes=60
+        )
         assert result.succeeded
         commute = result.value_or_none()
         assert commute is not None
@@ -731,7 +735,6 @@ class TestGoogleRouteCommuteLegDestination:
 
     @pytest.mark.asyncio
     async def test_drive_leg_has_destination(self):
-        from unittest.mock import patch
 
         from houses.commute import LegMode
         from houses.commute_router import CommuteRouter
@@ -747,14 +750,51 @@ class TestGoogleRouteCommuteLegDestination:
                 ]
             }
 
-        router = CommuteRouter()
-        with patch.object(router, "_google_routes_post", side_effect=fake_routes):
-            result = await router._google_route_commute(
-                "51.5,-0.1", "Waite House, Doncastle Road, Bracknell RG12 8YA", "DRIVE"
-            )
+        class _StubClient:
+            async def post(self, body, field_mask, *, options=None):
+                return await fake_routes(body, field_mask, options=options)
+
+        router = CommuteRouter(routes_client=_StubClient())
+        result = await router._google_route_commute(
+            "51.5,-0.1", "Waite House, Doncastle Road, Bracknell RG12 8YA", "DRIVE"
+        )
         assert result.succeeded
         commute = result.value_or_none()
         assert commute is not None
         leg = commute.details[0].legs[0]
         assert leg.mode == LegMode.DRIVE
         assert leg.end_station == "Waite House, Doncastle Road, Bracknell RG12 8YA"
+
+
+class TestGoogleRoutesPostSeam:
+    """Regression: the pipeline builder passes ``router.google_routes_post``
+    into BusRouteNode; during the parameter-object refactor the public
+    property vanished (only the private method remained), so every
+    PropertyNodes construction — and therefore app startup — crashed with
+    AttributeError. The router must expose the seam publicly again."""
+
+    def test_router_exposes_public_google_routes_post(self):
+        from houses.commute_router import CommuteRouter
+
+        router = CommuteRouter()
+        assert hasattr(router, "google_routes_post"), (
+            "CommuteRouter must expose the google_routes_post seam the "
+            "pipeline builder passes to BusRouteNode"
+        )
+
+    def test_seam_is_the_bound_post_callable(self):
+        from houses.commute_router import CommuteRouter
+
+        router = CommuteRouter()
+        assert callable(router.google_routes_post)
+        # Bound to the router's own POST implementation.
+        assert router.google_routes_post.__name__ == "post"
+
+    def test_builder_can_pass_seam_into_bus_route_node(self):
+        """The startup path: build_commute_pipeline reads
+        _commute_router().google_routes_post for every person/POI pair."""
+        from houses.commute_router import CommuteRouter
+
+        router = CommuteRouter()
+        seam = router.google_routes_post  # AttributeError here = the regression
+        assert callable(seam)
