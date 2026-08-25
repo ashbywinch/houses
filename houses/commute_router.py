@@ -10,7 +10,7 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import httpx
 import uk_postcodes_parsing as _ukp
@@ -44,12 +44,103 @@ class GoogleRoutesOptions:
     set_cached_fn: Callable[..., Any] | None = None
 
 
+@runtime_checkable
+class RoutesPostClient(Protocol):
+    """Structural type for the transport seam tests stub out."""
+
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    # lucidlint: ignore detached-method protocol declaration — structural stub, no implementation
+    async def post(
+        self, body: dict, field_mask: str, *, options: GoogleRoutesOptions | None = None
+    ) -> dict | None: ...
+
+
+class GoogleRoutesClient:
+    """Owns the raw Google Routes HTTP machinery: auth, caching, POST.
+
+    Split out of ``CommuteRouter`` so the commute orchestration (walk /
+    transit / drive choice) and the HTTP transport evolve independently.
+    """
+
+    GOOGLE_ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        client_factory: Callable[..., Any] | None = None,
+        set_cached_fn: Callable[..., Any] | None = None,
+    ):
+        self.api_key = api_key
+        self.client_factory = client_factory
+        self.set_cached_fn = set_cached_fn
+
+    def _merge_defaults(self, options: GoogleRoutesOptions | None) -> GoogleRoutesOptions:
+        """Constructor seams apply unless a caller overrides per call."""
+        base = options or GoogleRoutesOptions()
+        return GoogleRoutesOptions(
+            timeout=base.timeout,
+            api_key=base.api_key if base.api_key is not None else self.api_key,
+            client_factory=base.client_factory or self.client_factory,
+            set_cached_fn=base.set_cached_fn or self.set_cached_fn,
+        )
+
+    @staticmethod
+    def _raise_with_body(resp: httpx.Response) -> None:
+        """``raise_for_status()`` with the response body appended to the error."""
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            body = resp.text[:1000]
+            raise httpx.HTTPStatusError(f"{e} — {body}", request=e.request, response=e.response) from e
+
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    async def post(
+        self,
+        body: dict,
+        field_mask: str,
+        *,
+        options: GoogleRoutesOptions | None = None,
+    ) -> dict | None:
+        """POST to Google Routes API, caching responses and direct HTTP call.
+
+        Raises ``ValueError`` if the API key is not configured.
+        """
+        options = self._merge_defaults(options)
+        google_key = settings.google_maps_api_key if options.api_key is None else options.api_key
+        if not google_key:
+            raise ValueError("Google Maps API key not configured")
+
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        headers = {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": google_key,
+            "X-Goog-FieldMask": field_mask,
+        }
+        key = json.dumps(body, sort_keys=True)
+        cached = get_cached("POST", self.GOOGLE_ROUTES_URL, None, key)
+        if cached is not None:
+            return cached
+
+        client_factory = options.client_factory or cached_async_client
+        async with client_factory(timeout=options.timeout) as client:
+            resp = await client.post(self.GOOGLE_ROUTES_URL, json=body, headers=headers)
+            if resp.status_code == 429:
+                raise HttpError(429, "rate limited", headers=dict(resp.headers))
+            self._raise_with_body(resp)
+            data = resp.json()
+            (options.set_cached_fn or set_cached)("POST", self.GOOGLE_ROUTES_URL, None, key, data)
+            return data
+
+
+
 class CommuteRouter:
     """Aggregates all commute-routing logic: walk, transit, drive, and bus fallback."""
 
     def __init__(
         self,
         *,
+        routes_client: RoutesPostClient | None = None,
         google_route_fn=None,
         tfl_transit_fn=None,
         congestion_fn=None,
@@ -59,6 +150,7 @@ class CommuteRouter:
         Each function defaults to the real implementation; tests inject
         fakes through these keyword-only parameters.
         """
+        self._google_routes_client = routes_client or GoogleRoutesClient()
         self._google_route_fn = google_route_fn or self._google_route_commute
         self._tfl_transit_fn = tfl_transit_fn or self._tfl_transit_commute
         self._congestion_fn = congestion_fn or self.in_congestion_zone
@@ -157,43 +249,11 @@ class CommuteRouter:
             body = resp.text[:1000]
             raise httpx.HTTPStatusError(f"{e} — {body}", request=e.request, response=e.response) from e
 
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    async def _google_routes_post(
-        self,
-        body: dict,
-        field_mask: str,
-        *,
-        options: GoogleRoutesOptions | None = None,
-    ) -> dict | None:
-        """POST to Google Routes API, caching responses and direct HTTP call.
-
-        Raises ``ValueError`` if the API key is not configured.
-        """
-        options = options or GoogleRoutesOptions()
-        google_key = settings.google_maps_api_key if options.api_key is None else options.api_key
-        if not google_key:
-            raise ValueError("Google Maps API key not configured")
-
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        headers = {
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": google_key,
-            "X-Goog-FieldMask": field_mask,
-        }
-        key = json.dumps(body, sort_keys=True)
-        cached = get_cached("POST", self.GOOGLE_ROUTES_URL, None, key)
-        if cached is not None:
-            return cached
-
-        client_factory = options.client_factory or cached_async_client
-        async with client_factory(timeout=options.timeout) as client:
-            resp = await client.post(self.GOOGLE_ROUTES_URL, json=body, headers=headers)
-            if resp.status_code == 429:
-                raise HttpError(429, "rate limited", headers=dict(resp.headers))
-            self._raise_with_body(resp)
-            data = resp.json()
-            (options.set_cached_fn or set_cached)("POST", self.GOOGLE_ROUTES_URL, None, key, data)
-            return data
+    @property
+    def google_routes_post(self):
+        """The bus node's HTTP seam — passed into BusRouteNode by the
+        pipeline builder (tests override it via the services router)."""
+        return self._google_routes_client.post
 
     @staticmethod
     def _extract_outcode(text: str) -> str | None:
@@ -319,7 +379,7 @@ class CommuteRouter:
         }
         mask = "routes.duration,routes.distanceMeters,routes.legs"
         try:
-            data = await self._google_routes_post(
+            data = await self._google_routes_client.post(
                 body, mask, options=GoogleRoutesOptions(timeout=15.0 if mode == "DRIVE" else 10.0)
             )
         # lucidlint: ignore broad-except Google Routes failure → Attempt.impossible with error + body

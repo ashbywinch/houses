@@ -14,7 +14,7 @@ from dag.derived_node import DerivedNode
 from houses.bus_fare_reader import get_bus_fare_reader
 from houses.bus_journey import cheapest_round_trip
 from houses.commute import CostGroup, JourneyLeg, LegMode
-from houses.commute_router import CommuteRouter
+from houses.commute_router import CommuteRouter, GoogleRoutesOptions
 from houses.geopoint import GeoPoint
 from houses.model.domain import Commute
 from houses.settings import settings
@@ -51,7 +51,11 @@ class BusRouteNode(DerivedNode[dict]):
             "transitPreferences": {"routingPreference": "less_walking"},
             "computeAlternativeRoutes": False,
         }
-        data = await grp(body, "routes.duration,routes.legs", timeout=15.0)
+        data = await grp(
+            body,
+            "routes.duration,routes.legs",
+            options=GoogleRoutesOptions(timeout=15.0),
+        )
         if data is None:
             # No body is a "no bus route" answer, not a failure — the
             # bus augment treats an empty route as pass-through.
