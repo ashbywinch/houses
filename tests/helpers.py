@@ -6,7 +6,7 @@ Every fake returns minimal data so tests don't hit real APIs.
 from __future__ import annotations
 
 import contextlib
-from typing import Any
+from typing import Any, override
 
 from money import Money
 from pint import Quantity
@@ -70,6 +70,7 @@ class FixedCommuteNode(DerivedNode[Commute]):
         super().__init__(node_id, Commute, ())
         self._commute: Commute | None = None
 
+    @override
     def compute(self) -> Attempt[Commute]:
         if self._commute is not None:
             return Attempt.succeeded(self._commute)
@@ -106,14 +107,17 @@ class FakeGeocoder(GeocodingService):
     def call_count(self) -> int:
         return len(self.address_calls) + len(self.postcode_calls)
 
+    @override
     async def geocode_postcode(self, postcode: str) -> Attempt[GeoPoint]:
         self.postcode_calls.append(postcode)
         return Attempt.succeeded(self.result) if self.result else Attempt.impossible("no result")
 
+    @override
     async def geocode_address(self, address: str) -> Attempt[GeoPoint]:
         self.address_calls.append(address)
         return Attempt.succeeded(self.result) if self.result else Attempt.impossible("no result")
 
+    @override
     async def reverse_geocode_town(self, lat: float, lon: float) -> Attempt[str]:
         self.reverse_calls.append((lat, lon))
         if self.reverse_town:
@@ -147,6 +151,7 @@ _DEFAULT_PETROL = Commute(
 class _FakeRoutePlanner(RoutePlanner):
     """Fake route planner for tests — returns a canned commute."""
 
+    @override
     async def walk_route(self, origin, destination, max_walk):
         return Attempt.succeeded(
             Commute(
@@ -158,6 +163,7 @@ class _FakeRoutePlanner(RoutePlanner):
             )
         )
 
+    @override
     async def drive_route(self, origin, destination):
         return Attempt.succeeded(
             Commute(
@@ -200,6 +206,7 @@ class FakeSchoolLookup(SchoolLookupService):
         self.school = school
         self.find_calls: list[tuple[str, int, str, tuple]] = []
 
+    @override
     async def find_nearest(
         self,
         postcode: str,
@@ -210,6 +217,7 @@ class FakeSchoolLookup(SchoolLookupService):
         self.find_calls.append((postcode, child_age, address, acceptable))
         return Attempt.succeeded(self.school)
 
+    @override
     async def school_commute(self, postcode: str, school: School) -> Commute | None:
         from houses.model.domain import Commute, Person, PlaceOfInterest
 
@@ -227,12 +235,14 @@ class FakeWalkability(WalkabilityService):
         self.walk_to_town_minutes = walk_to_town
         self.amenities = amenities
 
+    @override
     async def enrich(self, lat: float, lng: float, address: str) -> dict[str, Any]:
         val = {"value": self.walk_to_town_minutes, "unit": "minute"} if self.walk_to_town_minutes is not None else None
         return {"walk_to_town": val, "amenities": self.amenities}
 
 
 class FakeTownDesc(TownDescService):
+    @override
     async def describe(self, town_name: str, postcode: str) -> Attempt[str]:
         return Attempt.succeeded("A nice town.")
 
@@ -242,6 +252,7 @@ class FakeEPC(EPCLookupService):
         self.band = band
         self.calls: list[tuple[str, str]] = []
 
+    @override
     async def lookup(self, postcode: str, address: str = "") -> Attempt[str]:
         self.calls.append((postcode, address))
         return Attempt.succeeded(self.band)
@@ -252,11 +263,13 @@ class FakeCouncilTax(CouncilTaxService):
         default = CouncilTaxInfo(band="D", yearly_cost=Measurement(Money("2000", "GBP"), 0.0))
         self.result = result or default
 
+    @override
     async def lookup(self, postcode: str, address: str = "") -> Attempt[CouncilTaxInfo]:
         return Attempt.succeeded(self.result)
 
 
 class FakeRailFare(RailFareService):
+    @override
     async def enrich(
         self,
         enabled: set[str] | None,
@@ -282,10 +295,12 @@ class FakeDriveTime(DriveTimeService):
         self.estimate_calls: list[tuple[str, str]] = []
         self.location_calls: list[tuple[Any, str]] = []
 
+    @override
     async def estimate(self, origin_postcode: str, station_name: str) -> int | None:
         self.estimate_calls.append((origin_postcode, station_name))
         return self.minutes
 
+    @override
     async def estimate_from_location(self, origin, station_name: str) -> int | None:
         self.location_calls.append((origin, station_name))
         return self.location_minutes
@@ -312,12 +327,15 @@ class FakeOAuthService(OAuthService):
         }
         self._verify_error = verify_error
 
+    @override
     def create_authorization_url(self, state: str) -> tuple[str, str]:
         return self.auth_url, "fake_code_verifier"
 
+    @override
     def exchange_code(self, code: str, code_verifier: str, state: str) -> dict:
         return self._id_info
 
+    @override
     async def verify_id_token(self, token: str) -> dict:
         if self._verify_error is not None:
             raise self._verify_error

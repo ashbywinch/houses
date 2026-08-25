@@ -14,6 +14,7 @@ import argparse
 import http.server
 import sys
 from pathlib import Path
+from typing import override
 from urllib.parse import urlsplit
 
 PORT = 8123
@@ -56,9 +57,11 @@ def make_handler(directory: Path) -> type[http.server.SimpleHTTPRequestHandler]:
             if with_body:
                 self.wfile.write(body)
 
+        @override
         def do_GET(self) -> None:  # noqa: N802 — http.server API
             self._send_map(with_body=True)
 
+        @override
         def do_HEAD(self) -> None:  # noqa: N802 — http.server API
             # the inherited SimpleHTTPRequestHandler.do_HEAD serves ANY file
             # (confirming existence + sizes of personal-data files) — apply

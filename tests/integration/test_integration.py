@@ -63,7 +63,7 @@ class TestVOACouncilTaxLookup:
 
         try:
             async with VOAClient() as client:
-                page = await client.fetch_page("GU22 8BQ", page=0)
+                page = await client.fetch_page("GU22 8BQ", page=0)  # type: ignore[attr-defined]  # why: uk_property_apis' BaseAPIClient.__aenter__ is annotated `-> BaseAPIClient` (not Self), so the runtime VOAClient's fetch_page is invisible statically — third-party stub limitation
             assert len(page.rows) == 0, "Mock returns empty JSON — no rows expected"
         except ValidationError:
             pass  # Mock returns {} JSON, client can't parse as HTML

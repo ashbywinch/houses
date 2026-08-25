@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, override
 
 from dag.attempt import Attempt, SourceType
 from dag.derived_node import DerivedNode
@@ -18,6 +18,7 @@ class PrimarySchoolNode(DerivedNode[dict]):
         super().__init__(node_id, dict, deps)
         self._acceptable = acceptable
 
+    @override
     async def compute(self, location: Attempt[GeoPoint], address: Attempt[str]) -> Attempt[dict]:
         loc = location.value_or_none()
         if loc is None:
@@ -58,6 +59,7 @@ class SecondarySchoolNode(DerivedNode[dict]):
         super().__init__(node_id, dict, deps)
         self._acceptable = acceptable
 
+    @override
     async def compute(self, location: Attempt[GeoPoint], address: Attempt[str]) -> Attempt[dict]:
         loc = location.value_or_none()
         if loc is None:
@@ -105,6 +107,7 @@ class SchoolLocationNode(DerivedNode[str]):
     def __init__(self, node_id: str, *, school_node):
         super().__init__(node_id, str, (school_node,))
 
+    @override
     def compute(self, school: Attempt[dict]) -> Attempt[str]:
         if not school.succeeded:
             return self._impossible({"school_node": school})

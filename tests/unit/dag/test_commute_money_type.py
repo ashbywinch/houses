@@ -8,6 +8,8 @@ and the node is persisted as ``impossible`` — the frontend shows ``?``.
 
 from __future__ import annotations
 
+from typing import override
+
 import pytest
 from money import Money
 from pint import Quantity
@@ -27,6 +29,7 @@ class _FloatCostNode(DerivedNode[Commute]):
     def __init__(self, node_id: str, deps) -> None:
         super().__init__(node_id, Commute, deps)
 
+    @override
     def compute(self, src: Attempt[str]) -> Attempt[Commute]:
         return Attempt.succeeded(
             Commute(
@@ -34,7 +37,7 @@ class _FloatCostNode(DerivedNode[Commute]):
                 label="Office",
                 destination=PlaceOfInterest(label="Office", address="SW1V 2QQ"),
                 duration=DURATION,
-                daily_cost=7.2,  # raw float — this MUST raise
+                daily_cost=7.2,  # type: ignore[arg-type]  # why: deliberately-wrong type is the fixture — this test asserts a raw float daily_cost raises at to_json() instead of persisting silently
                 mode="transit",
             )
         )
@@ -62,6 +65,7 @@ class _ProperNode(DerivedNode[Commute]):
     def __init__(self, node_id: str, deps) -> None:
         super().__init__(node_id, Commute, deps)
 
+    @override
     def compute(self, src: Attempt[str]) -> Attempt[Commute]:
         return Attempt.succeeded(
             Commute(

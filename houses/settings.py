@@ -1,5 +1,7 @@
 """Configuration — postcodes, API keys, sheet IDs."""
 
+from typing import cast
+
 from pint import Quantity
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,7 +16,7 @@ def _parse_quantity(v: object, default_unit: str) -> Quantity:
     - ``str`` like ``"10 km"`` — parsed by pint (number + optional unit)
     - ``dict`` with ``value`` and optional ``unit`` keys
     """
-    if isinstance(v, Quantity):
+    if isinstance(v, cast(type, Quantity)):
         return v
     if isinstance(v, (int, float)):
         return Quantity(v, default_unit)

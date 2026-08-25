@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import override
+
 from money import Money
 
 from dag.attempt import Attempt, Formula, FormulaLine
@@ -13,6 +15,7 @@ class TotalWorksNode(DerivedNode[Money]):
     with ``works_estimate_required=True`` who is missing from the dict.
     """
 
+    @override
     @property
     def provenance_formula(self) -> Formula | None:
         if not self._attempt.succeeded or self._attempt.value_or_none() is None:
@@ -33,13 +36,14 @@ class TotalWorksNode(DerivedNode[Money]):
         self._persons_source = persons_source
         self._works_estimates_node = works_estimates_node
 
+    @override
     def compute(
         self,
         persons: Attempt[list],
         works_ests: Attempt[dict],
     ) -> Attempt[Money]:
         self._assert_deps_succeeded(persons=persons, works_ests=works_ests)
-        ps = persons.value_or_none()
+        ps = persons.value_or_none() or []
         buyers = [p for p in ps if not getattr(p, "is_child", False)]
         wd = works_ests.value_or_none() or {}
 

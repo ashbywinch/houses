@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import override
 
 from money import Money
 
@@ -13,6 +14,7 @@ _ZERO = Decimal("0")
 class LifeInsuranceTotalNode(DerivedNode[Money]):
     """Total monthly life insurance across all persons."""
 
+    @override
     @property
     def provenance_formula(self) -> Formula | None:
         if not self._attempt.succeeded or self._attempt.value_or_none() is None:
@@ -37,6 +39,7 @@ class LifeInsuranceTotalNode(DerivedNode[Money]):
         super().__init__(node_id, Money, (persons_source,))
         self._persons_source = persons_source
 
+    @override
     def compute(self, persons: Attempt[list]) -> Attempt[Money]:
         self._assert_deps_succeeded(persons=persons)
         zero = Money(amount="0", currency="GBP")

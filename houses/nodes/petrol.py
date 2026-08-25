@@ -10,6 +10,7 @@ household finances.
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import override
 
 from money import Money
 from pint import Quantity
@@ -61,6 +62,7 @@ class PersonPetrolMpgNode(DerivedNode[int]):
         super().__init__(node_id, int, (persons_source,))
         self.display_name = "Petrol MPG"
 
+    @override
     def compute(self, persons: Attempt[list]) -> Attempt[int]:
         if not persons.succeeded:
             return Attempt.impossible(persons.error)
@@ -85,6 +87,7 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         self._cost_node = petrol_cost_per_litre_node
         self.display_name = "Petrol Cost"
 
+    @override
     @property
     def provenance_formula(self):
 
@@ -111,6 +114,7 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
             return None
         return Formula(lines=lines, result=str(commute.daily_cost))
 
+    @override
     @staticmethod
     def compute(commute: Attempt[Commute], mpg_att: Attempt, cost_att: Attempt) -> Attempt[Commute]:
         if not commute.succeeded:
@@ -155,6 +159,7 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         return Attempt.succeeded(new_commute)
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    @override
     async def to_json(self) -> dict:
         result = await super().to_json()
         attempt = await self.attempt()
@@ -165,6 +170,7 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         return result
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    @override
     async def to_json_value(self) -> dict:
         result = await super().to_json_value()
         attempt = await self.attempt()

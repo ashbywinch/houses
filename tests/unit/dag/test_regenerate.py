@@ -8,6 +8,8 @@ results are wrong but timestamps say fresh. ``refresh(force=True)`` and
 
 from __future__ import annotations
 
+from typing import override
+
 import pytest
 
 from dag.attempt import Attempt
@@ -25,6 +27,7 @@ class _Counter(DerivedNode[int]):
     def __init__(self, node_id: str, source):
         super().__init__(node_id, int, (source,))
 
+    @override
     def compute(self, *dep_attempts: Attempt) -> Attempt[int]:
         _Counter.calls += 1
         return Attempt.succeeded(dep_attempts[0].value_or(0) + _Counter.calls)

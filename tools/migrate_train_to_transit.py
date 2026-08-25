@@ -23,7 +23,7 @@ def migrate() -> int:
     for p in persons:
         if not isinstance(p, Person):
             continue
-        pois = []
+        pois: list[PlaceOfInterest] = []
         for poi in p.places_of_interest:
             if not isinstance(poi, PlaceOfInterest):
                 pois.append(poi)

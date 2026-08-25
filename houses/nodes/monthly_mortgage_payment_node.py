@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import override
+
 from money import Money
 
 from dag.attempt import Attempt
@@ -15,6 +17,7 @@ class MonthlyMortgagePaymentNode(DerivedNode[Money]):
     def __init__(self, node_id: str, *, mortgage_required_node, mortgage_rate_node, mortgage_term_node):
         super().__init__(node_id, Money, (mortgage_required_node, mortgage_rate_node, mortgage_term_node))
 
+    @override
     @property
     def expression(self):
         return PMT(
@@ -24,6 +27,7 @@ class MonthlyMortgagePaymentNode(DerivedNode[Money]):
         )
 
 # lucidlint: ignore middle-man protocol/reflected-operator requirement
+    @override
     def compute(
         self,
         mortgage_required: Attempt[Money],

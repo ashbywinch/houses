@@ -136,7 +136,9 @@ class TestBootstrapFromRow:
         a = await sources["corrected_address"].attempt()
         assert a.succeeded
         # Address gets postcode appended
-        assert "SW1V 2QQ" in a.value_or_none()
+        value = a.value_or_none()
+        assert value is not None
+        assert "SW1V 2QQ" in value
 
     @pytest.mark.asyncio
     async def test_pushes_user_entered_address_with_outcode_replace(self):
@@ -156,8 +158,9 @@ class TestBootstrapFromRow:
         await flush_processor()
         a = await sources["user_entered_address"].attempt()
         assert a.succeeded
-        assert a.value_or_none() == "31 Isambard Road, Southall, UB2 4GN"
-        assert "UB2, UB2 4GN" not in a.value_or_none()  # no duplication
+        pushed = a.value_or_none()
+        assert pushed == "31 Isambard Road, Southall, UB2 4GN"
+        assert "UB2, UB2 4GN" not in pushed  # no duplication
 
     @pytest.mark.asyncio
     async def test_skips_user_entered_when_address_unchanged(self):

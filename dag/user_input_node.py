@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from decimal import Decimal as _Decimal
-from typing import Any, Generic, TypeVar, cast
+from typing import Any, Generic, TypeVar, cast, override
 
 from money import Money
 from pint import Quantity
@@ -235,11 +235,13 @@ class UserInputNode(Node[T], Generic[T]):
         self._persist(result_dict)
         self.changed.emit()
 
+    @override
     async def attempt(self) -> Attempt[T]:
         if self._value is not None:
             return Attempt.succeeded(self._value)
         return Attempt.pending()
 
+    @override
     def latest_attempt(self) -> Attempt:
         # During a scenario evaluation (dag.evaluate), the staged
         # hypothetical attempt shadows the real value.
@@ -250,6 +252,7 @@ class UserInputNode(Node[T], Generic[T]):
             return Attempt.succeeded(self._value)
         return Attempt.pending()
 
+    @override
     async def build_provenance(self) -> Provenance:
         # Fall back to persistence timestamp for data that predates freshness tracking
         freshness = self._push_timestamp or self._persisted_at
@@ -288,6 +291,7 @@ class UserInputNode(Node[T], Generic[T]):
         return project_value(self._value)
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    @override
     async def to_json_value(self) -> dict[str, Any]:
         """Return a JSON-safe dict without provenance."""
         if self._value is None:

@@ -8,6 +8,7 @@ users must see clear failures, not infinite spinners.
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import override
 
 import httpx
 import pytest
@@ -29,7 +30,7 @@ async def test_non_transient_403_does_not_schedule_retry():
     node = _CatchAndDecideNode("nt403_result", deps=(src,))
     node.error_to_raise = httpx.HTTPStatusError(
         "forbidden",
-        request=None,
+        request=httpx.Request("GET", "https://transit.test/journey"),
         response=httpx.Response(403),
     )
 
@@ -52,7 +53,7 @@ async def test_transient_429_schedules_retry():
     node = _CatchAndDecideNode("t429_result", deps=(src,))
     node.error_to_raise = httpx.HTTPStatusError(
         "rate limited",
-        request=None,
+        request=httpx.Request("GET", "https://transit.test/journey"),
         response=httpx.Response(429, headers={"Retry-After": "10"}),
     )
 
@@ -75,7 +76,7 @@ async def test_transient_500_schedules_retry():
     node = _CatchAndDecideNode("t500_result", deps=(src,))
     node.error_to_raise = httpx.HTTPStatusError(
         "server error",
-        request=None,
+        request=httpx.Request("GET", "https://transit.test/journey"),
         response=httpx.Response(500),
     )
 
@@ -99,6 +100,7 @@ class _CatchAndDecideNode(DerivedNode[str]):
     def schedule_retry(self, delay: timedelta) -> None:  # type: ignore[override]  # test double: replaces the base -> bool contract with a call-counting stub (return value never consumed here) and omits the repo's @override decorator — the guard targets production dispatch, not test fixtures
         self.schedule_retry_count += 1
 
+    @override
     def compute(self, src: Attempt[str]) -> Attempt[str]:
         if self.error_to_raise is not None:
             exc = self.error_to_raise
@@ -157,13 +159,14 @@ class _ReturnImpossibleNode(DerivedNode[str]):
         self.schedule_retry_count += 1
         return True
 
+    @override
     def compute(self, src: Attempt[str]) -> Attempt[str]:
         if self.permanent:
             return Attempt.impossible("permanent failure")
         try:
             raise httpx.HTTPStatusError(
                 "rate limited",
-                request=None,
+                request=httpx.Request("GET", "https://transit.test/journey"),
                 response=httpx.Response(429, headers={"Retry-After": "10"}),
             )
         except httpx.HTTPStatusError:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import override
 
 from money import Money
 
@@ -47,6 +48,7 @@ class RailFareNode(DerivedNode[Commute]):
             deps = deps + (selector,)
         super().__init__(node_id, Commute, deps)
 
+    @override
     async def compute(
         self,
         transit_attempt: Attempt[Commute],

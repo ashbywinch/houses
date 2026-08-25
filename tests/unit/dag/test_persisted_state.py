@@ -8,6 +8,8 @@ on restart, the frontend shows ``?`` instead of commute data.
 
 from __future__ import annotations
 
+from typing import override
+
 import pytest
 
 from dag.attempt import Attempt
@@ -20,6 +22,7 @@ class _IntNode(DerivedNode[int]):
     def __init__(self, node_id: str, deps) -> None:
         super().__init__(node_id, int, deps)
 
+    @override
     def compute(self, src: Attempt[int]) -> Attempt[int]:
         v = src.value_or_none()
         if v is None or v < 0:

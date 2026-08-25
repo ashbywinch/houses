@@ -11,7 +11,7 @@ helper used by the production ``Services`` constructor.
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, override
 
 from money import Money
 from pint import Quantity
@@ -80,6 +80,7 @@ class SettingsNode(UserInputNode):
     pytest, or an explicitly opted-in script may change family data."""
 
 # lucidlint: ignore detached-method super().push() requires self — cannot be a staticmethod
+    @override
     def push(
         self,
         value: Any,

@@ -67,7 +67,7 @@ class TestCommute:
             line_name="Central",
             end_station="Bank",
         )
-        cost_group = CostGroup(legs=(leg,), operator="TfL", cost=3.50)
+        cost_group = CostGroup(legs=(leg,), operator="TfL", cost=Money("3.50", "GBP"))
         commute = Commute(
             person=person,
             label="Office",
@@ -190,6 +190,7 @@ class TestSchools:
             statutory_high_age=None,
         )
         schools = Schools(primary=primary, secondary=secondary)
+        assert schools.primary is not None and schools.secondary is not None
         assert schools.primary.name == "Test Primary"
         assert schools.secondary.name == "Test Secondary"
 

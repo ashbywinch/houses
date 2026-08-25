@@ -7,11 +7,9 @@ SettingsNode aggregates them into the same dict shape the API expects.
 Services creates the individual nodes; this module defines the IDs,
 defaults, the SettingsNode class, and the API-key mapping.
 """
-
-from __future__ import annotations
-
 from collections.abc import Callable
 from decimal import Decimal
+from typing import override
 
 from money import Money
 
@@ -114,6 +112,7 @@ class SettingsNode(DerivedNode[dict]):
         deps = tuple(setting_nodes.values())
         super().__init__(node_id, dict, deps)
 
+    @override
     def compute(self, *dep_attempts: Attempt) -> Attempt[dict]:
         result = {}
         for node_id, attempt in zip(self._setting_nodes.keys(), dep_attempts, strict=True):

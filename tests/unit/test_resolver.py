@@ -6,6 +6,8 @@ Restored from 52f3fb1^ and rewritten to target the DAG-based
 
 from __future__ import annotations
 
+from typing import override
+
 import pytest
 
 from dag.attempt import Attempt
@@ -24,11 +26,12 @@ class _DoubleNode(DerivedNode[int]):
         super().__init__(node_id, int, deps)
         self.compute_count = 0
 
+    @override
     def compute(self, *dep_attempts: Attempt) -> Attempt[int]:
         self.compute_count += 1
         val = dep_attempts[0]
         if val.succeeded:
-            return Attempt.succeeded(val.value_or_none() * 2)
+            return Attempt.succeeded(val.value_or(0) * 2)
         return Attempt.impossible("dep failed")
 
 
@@ -39,11 +42,11 @@ class _SumNode(DerivedNode[int]):
         super().__init__(node_id, int, deps)
         self.compute_count = 0
 
+    @override
     def compute(self, *dep_attempts: Attempt) -> Attempt[int]:
         self.compute_count += 1
-        vals = [a.value_or_none() for a in dep_attempts]
         if all(a.succeeded for a in dep_attempts):
-            return Attempt.succeeded(sum(vals))
+            return Attempt.succeeded(sum(a.value_or(0) for a in dep_attempts))
         return Attempt.impossible("one or more deps failed")
 
 
@@ -136,6 +139,7 @@ class TestDerivedNodeStaleness:
         await node.attempt()
 
         loaded = latest_node_result("psiaf_double")
+        assert loaded is not None
         assert loaded["stale"] is False
         assert loaded["value"] == 14
 

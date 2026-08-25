@@ -40,7 +40,7 @@ def mock_httpx():
 
         def __init__(self):
             self.calls: list[str] = []
-            self._rules: list[tuple[Callable[[str], bool], Callable] | None] = []
+            self._rules: list[tuple[Callable[[str], bool], Callable]] = []
 
         def add_rule(self, matcher: Callable[[str], bool], responder: Callable) -> None:
             """Register a custom matcher/responder that takes priority."""

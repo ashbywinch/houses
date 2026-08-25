@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import namedtuple
+from typing import override
 from unittest.mock import patch
 
 import pytest
@@ -38,6 +39,7 @@ class FakeVoaClient:
 class _RaisingVoaClient(FakeVoaClient):
     """VOA client whose fetch_page raises — tests the graceful path."""
 
+    @override
     async def fetch_page(self, postcode: str, page: int = 0):
         raise ConnectionError("VOA down")
 

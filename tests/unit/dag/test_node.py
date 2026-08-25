@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import override
 
 import pytest
 
@@ -116,9 +117,11 @@ class _ConcreteNode(Node[str]):
         self._test_attempt = Attempt.impossible("not set")
         self._test_provenance = Provenance(label=node_id)
 
+    @override
     async def attempt(self) -> Attempt:
         return self._test_attempt
 
+    @override
     async def build_provenance(self) -> Provenance:
         return self._test_provenance
 

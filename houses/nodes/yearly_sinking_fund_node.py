@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import override
+
 from money import Money
 
 from dag.attempt import Attempt, SourceType
@@ -18,10 +20,12 @@ class YearlySinkingFundNode(DerivedNode[Money]):
     def __init__(self, node_id: str, *, rightmove_price, sinking_fund_rate_node):
         super().__init__(node_id, Money, (rightmove_price, sinking_fund_rate_node))
 
+    @override
     @property
     def expression(self):
         return Ref(self._deps[0]) * Ref(self._deps[1])
 
 # lucidlint: ignore middle-man protocol/reflected-operator requirement
+    @override
     def compute(self, price: Attempt[Money], rate: Attempt) -> Attempt[Money]:
         return self.expression.evaluate()

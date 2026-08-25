@@ -18,7 +18,7 @@ import logging
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, override
 
 from money import Money
 
@@ -135,9 +135,11 @@ class Literal(Expression[T]):
         self._value = value
         self.description = description
 
+    @override
     def evaluate(self) -> Attempt[T]:
         return Attempt.succeeded(deepcopy(self._value))
 
+    @override
     def to_formula_lines(self) -> list[FormulaLine]:
         return [FormulaLine(label="Value", value=self._format_value(self._value))]
 
@@ -153,6 +155,7 @@ class Ref(Expression[T]):
     def _label(self) -> str:
         return getattr(self.node, "display_name", self.node._id)
 
+    @override
     def evaluate(self) -> Attempt[T]:
         try:
             attempt = self.node.latest_attempt()
@@ -162,6 +165,7 @@ class Ref(Expression[T]):
             return Attempt.impossible(f"Node {self.node._id} not yet computed")
         return attempt
 
+    @override
     def to_formula_lines(self) -> list[FormulaLine]:
         attempt = self.node.latest_attempt()
         label = self._label
@@ -184,6 +188,7 @@ class Add(Expression):
         self.terms = terms
         self.description = description
 
+    @override
     def evaluate(self) -> Attempt:
         total = None
         for term in self.terms:
@@ -208,6 +213,7 @@ class Add(Expression):
             return Attempt.impossible("No terms to add")
         return Attempt.succeeded(total)
 
+    @override
     def to_formula_lines(self) -> list[FormulaLine]:
         return [line for term in self.terms for line in term.to_formula_lines()]
 
@@ -219,6 +225,7 @@ class Sub(Expression):
         self.right = right
         self.description = description
 
+    @override
     def evaluate(self) -> Attempt:
         left_result = self.left.evaluate()
         if not left_result.succeeded:
@@ -235,6 +242,7 @@ class Sub(Expression):
         except TypeError as e:
             return Attempt.impossible(f"Cannot subtract: {e}")
 
+    @override
     def to_formula_lines(self) -> list[FormulaLine]:
         return self.left.to_formula_lines() + self.right.to_formula_lines()
 
@@ -246,6 +254,7 @@ class Negate(Expression):
         self.inner = inner
         self.description = description
 
+    @override
     def evaluate(self) -> Attempt:
         result = self.inner.evaluate()
         if not result.succeeded:
@@ -258,6 +267,7 @@ class Negate(Expression):
         except TypeError as e:
             return Attempt.impossible(f"Cannot negate: {e}")
 
+    @override
     @staticmethod
     def to_formula_lines() -> list[FormulaLine]:
         return [FormulaLine(label="−", value="")]
@@ -271,6 +281,7 @@ class Mul(Expression):
         self.right = right
         self.description = description
 
+    @override
     def evaluate(self) -> Attempt:
         left_result = self.left.evaluate()
         if not left_result.succeeded:
@@ -287,6 +298,7 @@ class Mul(Expression):
         except TypeError as e:
             return Attempt.impossible(f"Cannot multiply: {e}")
 
+    @override
     def to_formula_lines(self) -> list[FormulaLine]:
         return self.left.to_formula_lines() + self.right.to_formula_lines()
 
@@ -299,6 +311,7 @@ class Div(Expression):
         self.right = right
         self.description = description
 
+    @override
     def evaluate(self) -> Attempt:
         left_result = self.left.evaluate()
         if not left_result.succeeded:
@@ -320,6 +333,7 @@ class Div(Expression):
         except (ZeroDivisionError, TypeError) as e:
             return Attempt.impossible(f"Cannot divide: {e}")
 
+    @override
     def to_formula_lines(self) -> list[FormulaLine]:
         return self.left.to_formula_lines() + self.right.to_formula_lines()
 
@@ -357,6 +371,7 @@ class Conditional(Expression):
         self.if_false = if_false
         self.description = description
 
+    @override
     def evaluate(self) -> Attempt:
         try:
             condition = self.predicate()
@@ -385,6 +400,7 @@ class Conditional(Expression):
             )
             return None
 
+    @override
     def to_formula_lines(self) -> list[FormulaLine]:
         condition = self._condition_for_formula()
 
@@ -405,6 +421,7 @@ class Field(Expression):
         self.source = source
         self.key = key
 
+    @override
     def evaluate(self):
         result = self.source.evaluate()
         if not result.succeeded:
@@ -416,6 +433,7 @@ class Field(Expression):
             return Attempt.impossible(f"Key {self.key!r} not found")
         return Attempt.succeeded(val[self.key])
 
+    @override
     def to_formula_lines(self):
         return [FormulaLine(label=self.key, value="")]
 
@@ -427,6 +445,7 @@ class Attr(Expression):
         self.source = source
         self.attr = attr
 
+    @override
     def evaluate(self):
         result = self.source.evaluate()
         if not result.succeeded:
@@ -476,6 +495,7 @@ class Choose(Expression):
         self.last_results: dict[str, Attempt] | None = None
         """Results dict from the most recent evaluate() call, exposed for provenance."""
 
+    @override
     def evaluate(self):
         results: dict[str, Attempt] = {}
         for name, expr in self.alternatives.items():
@@ -506,6 +526,7 @@ class Choose(Expression):
             logger.debug("Choose: selector failed during formula rendering: %s", e)
             return None
 
+    @override
     def to_formula_lines(self):
         if not self.last_results:
             return [FormulaLine(label="Choose", value="not evaluated")]

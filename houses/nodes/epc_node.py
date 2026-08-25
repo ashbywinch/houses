@@ -22,6 +22,7 @@ class EpcNode(DerivedNode[dict]):
     def __init__(self, node_id: str, *, best_address, postcode_node):
         super().__init__(node_id, dict, (best_address, postcode_node))
 
+    @override
     async def compute(self, address: Attempt[str], postcode: Attempt[str]) -> Attempt[dict]:
         if not address.succeeded:
             return self._impossible({"best_address": address})
@@ -54,6 +55,7 @@ class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
     def __init__(self, node_id: str, *, best_address, postcode_node):
         super().__init__(node_id, CouncilTaxInfo, (best_address, postcode_node))
 
+    @override
     async def compute(self, address: Attempt[str], postcode: Attempt[str]) -> Attempt[CouncilTaxInfo]:
         if not address.succeeded or not postcode.succeeded:
             extra = {}

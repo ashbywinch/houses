@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import override
+
 from dag.attempt import Attempt, SourceType
 from dag.derived_node import DerivedNode
 from houses.geopoint import GeoPoint
@@ -11,6 +13,7 @@ class GeocodeNode(DerivedNode[GeoPoint]):
     def __init__(self, node_id: str, *, best_address):
         super().__init__(node_id, GeoPoint, (best_address,))
 
+    @override
     @staticmethod
     async def compute(address: Attempt[str]) -> Attempt[GeoPoint]:
         addr = address.value_or_none() or ""

@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from decimal import Decimal as _Decimal
 from enum import Enum
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, override
 
 from money import Money as _Money
 from pint import Quantity
@@ -33,6 +33,7 @@ _connection_cache = threading.local()
 class DagJSONEncoder(json.JSONEncoder):
     """Handles enums, Decimal, Money, Quantity, and other non-serializable types in DAG node results."""
     # lucidlint: ignore detached-method super().default(o) requires self — json.JSONEncoder dispatches via self.default
+    @override
     def default(self, o):
         if isinstance(o, Enum):
             return o.name.lower()

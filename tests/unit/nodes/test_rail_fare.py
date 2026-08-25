@@ -72,5 +72,6 @@ async def test_rail_fare_graceful_when_no_train_legs():
     # The key assertion: the commute is STILL AVAILABLE (not impossible)
     # even without the rail fare — the result is the original bus commute.
     assert a.succeeded, f"rail fare should succeed gracefully, got {a.status}: {a.error}"
-    assert a.value_or_none() is not None
-    assert a.value_or_none().duration.magnitude == 40
+    commute = a.value_or_none()
+    assert commute is not None
+    assert commute.duration.magnitude == 40
