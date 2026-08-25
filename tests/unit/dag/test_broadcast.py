@@ -7,6 +7,7 @@ property-level events (add/delete) triggered via ``push_rid``.
 
 from __future__ import annotations
 
+from typing import override
 from unittest.mock import patch
 
 import pytest
@@ -21,6 +22,7 @@ class _Node(DerivedNode[str]):
     def __init__(self, node_id: str, deps) -> None:
         super().__init__(node_id, str, deps)
 
+    @override
     def compute(self, src: Attempt[str]) -> Attempt[str]:
         return Attempt.succeeded("computed")
 

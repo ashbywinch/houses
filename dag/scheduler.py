@@ -13,7 +13,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 if TYPE_CHECKING:
     from dag.derived_node import DerivedNode
@@ -90,6 +90,7 @@ class AsyncQueueScheduler(RefreshScheduler):
         self._after_refresh_callback: Callable[[DerivedNode], object] | None = None
         self._respect_time = respect_time
 
+    @override
     def register(self, node: DerivedNode) -> None:
         """Called when a node is created. Schedules it at its stored retry time or immediately."""
         self._registered[node._id] = node
@@ -100,15 +101,18 @@ class AsyncQueueScheduler(RefreshScheduler):
         elif node._attempt.pending or node._is_stale():
             self.schedule(node)
 
+    @override
     def unregister(self, node: DerivedNode) -> None:
         """Called when a node is disconnected (cleanup)."""
         self._scheduled.pop(node._id, None)
         self._registered.pop(node._id, None)
 
+    @override
     def registered_nodes(self) -> dict[str, DerivedNode]:
         """Every DerivedNode currently registered, by node id."""
         return dict(self._registered)
 
+    @override
     def schedule(self, node: DerivedNode) -> None:
         """Schedule for immediate processing. No-op if node already queued."""
         if node._id in self._scheduled:
@@ -119,6 +123,7 @@ class AsyncQueueScheduler(RefreshScheduler):
         self._queue.put_nowait(event)
         self._wakeup.set()
 
+    @override
     def schedule_at(self, node: DerivedNode, dt: datetime) -> None:
         """Schedule for processing at a specific wall-clock time. No-op if already queued."""
         if node._id in self._scheduled:
@@ -128,11 +133,13 @@ class AsyncQueueScheduler(RefreshScheduler):
         self._queue.put_nowait(event)
         self._wakeup.set()
 
+    @override
     def after_refresh(self, node: DerivedNode) -> None:
         """Called after a node completes refresh — delegates to callback if set."""
         if self._after_refresh_callback is not None:
             self._after_refresh_callback(node)
 
+    @override
     async def process_pending(self) -> None:
         """Process all past-due events (or all events when ``_respect_time`` is False)."""
         now_ts = datetime.now(UTC).timestamp() if self._respect_time else float("inf")

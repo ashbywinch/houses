@@ -275,7 +275,9 @@ class TestEnrichmentApi:
 
         result = await staleness_check(RID, nodes="best_address")
         assert result["fresh"]
-        assert not result["nodes"].get("best_address", True)
+        nodes = result["nodes"]
+        assert isinstance(nodes, dict)
+        assert not nodes.get("best_address", True)
 
     @pytest.mark.asyncio
     async def test_detail_includes_enriched_nodes(self):
@@ -378,7 +380,7 @@ class TestEnrichmentBootstrap:
             address="Pembroke Avenue, Hersham, KT12",
             postcode="KT12 4NT",
             bedrooms=3,
-            price=300000,
+            price=300000,  # type: ignore[arg-type]  # why: legacy bare-int price is the fixture — push_enriched_property's non-Money wrap branch (isinstance guard → Money(str(price))) is the behaviour under test
             approx_latitude=None,
             approx_longitude=None,
         )
@@ -426,8 +428,8 @@ class TestEnrichmentBootstrap:
             url="",
             address="Some Road, Hersham",
             postcode="KT12",
-            bedrooms=None,
-            price=None,
+            bedrooms=None,  # type: ignore[arg-type]  # why: push_enriched_property guards `enriched.bedrooms is not None`; None keeps rightmove_bedrooms unpushed (default 0 would wrongly seed it)
+            price=None,  # type: ignore[arg-type]  # why: same guard on price — None keeps rightmove_price unpushed in this location-only test
             approx_latitude=51.37,
             approx_longitude=-0.4,
         )

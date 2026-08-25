@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import override
 
 from money import Money
 
@@ -32,6 +33,7 @@ class PMT(Expression):
         self.term_years = term_years
         self.description = description
 
+    @override
     def evaluate(self) -> Attempt:
         p_result = self.principal.evaluate()
         if not p_result.succeeded:
@@ -63,6 +65,7 @@ class PMT(Expression):
 
         return Attempt.succeeded(payment)
 
+    @override
     def to_formula_lines(self) -> list[FormulaLine]:
         return (
             self.principal.to_formula_lines()
@@ -81,6 +84,7 @@ class StampDutyFn(Expression):
         self.price = price
         self.description = description
 
+    @override
     def evaluate(self) -> Attempt:
         price_result = self.price.evaluate()
         if not price_result.succeeded:
@@ -96,6 +100,7 @@ class StampDutyFn(Expression):
             return Attempt.impossible(f"Stamp duty calculation failed: {e}")
 
 # lucidlint: ignore middle-man protocol/reflected-operator requirement
+    @override
     def to_formula_lines(self) -> list[FormulaLine]:
         return self.price.to_formula_lines()
 
@@ -174,6 +179,7 @@ class TieredRate(Expression):
 
         return tier_tax, tier_tax + prev_tax
 
+    @override
     def evaluate(self) -> Attempt:
         val_result = self.value.evaluate()
         if not val_result.succeeded:
@@ -203,6 +209,7 @@ class TieredRate(Expression):
             return Attempt.succeeded(result_money)
         return Attempt.succeeded(result)  # raw is not None here (guarded above)
 
+    @override
     def to_formula_lines(self) -> list[FormulaLine]:
         val_result = self.value.evaluate()
         if not val_result.succeeded:

@@ -10,6 +10,8 @@ transparently, exactly as they see real values during refresh.
 
 from __future__ import annotations
 
+from typing import override
+
 import pytest
 
 from dag.attempt import Attempt
@@ -32,6 +34,7 @@ class _Double(DerivedNode[int]):
     def __init__(self, node_id: str, source):
         super().__init__(node_id, int, (source,))
 
+    @override
     def compute(self, *dep_attempts: Attempt) -> Attempt[int]:
         src = dep_attempts[0]
         if not src.succeeded:
@@ -49,10 +52,12 @@ class _SumExpr(DerivedNode[int]):
     def __init__(self, node_id: str, a, b):
         super().__init__(node_id, int, (a, b))
 
+    @override
     @property
     def expression(self):
         return Ref(self._deps[0]) + Ref(self._deps[1])
 
+    @override
     def compute(self, *dep_attempts: Attempt) -> Attempt[int]:
         return self.expression.evaluate()
 
@@ -65,6 +70,7 @@ class _Counting(DerivedNode[int]):
     def __init__(self, node_id: str, source):
         super().__init__(node_id, int, (source,))
 
+    @override
     def compute(self, *dep_attempts: Attempt) -> Attempt[int]:
         _Counting.calls += 1
         return Attempt.succeeded(dep_attempts[0].value_or(0) + 1)

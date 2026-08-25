@@ -171,7 +171,9 @@ class TestWorksPropagatesToMortgage:
         # Baseline monthly payment (mortgage = 38k)
         m1 = await mm.attempt()
         assert m1.succeeded
-        baseline_payment = m1.value_or_none().amount
+        baseline_value = m1.value_or_none()
+        assert baseline_value is not None
+        baseline_payment = baseline_value.amount
 
         # Update works
         works.push({"Simon": 0, "Ashby": 20000}, "test")
@@ -182,5 +184,7 @@ class TestWorksPropagatesToMortgage:
         # Verify monthly payment changed (mortgage now = 58k)
         m2 = await mm.attempt()
         assert m2.succeeded
-        updated_payment = m2.value_or_none().amount
+        updated_value = m2.value_or_none()
+        assert updated_value is not None
+        updated_payment = updated_value.amount
         assert updated_payment != baseline_payment, "Monthly mortgage did not change after works update"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import override
 
 import pytest
 from money import Money
@@ -235,12 +236,15 @@ class TestDriveCommuteAlwaysHasCost:
                 super().__init__(node_id, Commute, ())
                 self._att = attempt
 
+            @override
             async def attempt(self):
                 return self._att
 
+            @override
             def latest_attempt(self):
                 return self._att
 
+            @override
             def compute(self, *dep_attempts):
                 raise AssertionError("fixed node should not compute")
 

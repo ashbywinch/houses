@@ -9,6 +9,7 @@ error_traceback, never mixed into the frontend-facing error string.
 from __future__ import annotations
 
 import asyncio
+from typing import override
 
 from dag.attempt import Attempt, Provenance
 from dag.node import Node
@@ -68,9 +69,11 @@ class _ImpossibleNode(Node[str]):
         super().__init__(node_id, str)
         self._test_attempt = attempt
 
+    @override
     async def attempt(self):
         return self._test_attempt
 
+    @override
     async def build_provenance(self):
         return Provenance(label=self._id)
 
@@ -201,9 +204,11 @@ class TestCausesChain:
                 super().__init__("leaf", str)
                 self._a = attempt
 
+            @override
             async def attempt(self):
                 return self._a
 
+            @override
             async def build_provenance(self):
                 from dag.attempt import Provenance
 

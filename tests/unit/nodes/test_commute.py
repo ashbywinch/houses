@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import override
+
 import pytest
 from money import Money
 from pint import Quantity
@@ -826,6 +828,7 @@ class _ImpossibleCommuteNode(DerivedNode[Commute]):
     def __init__(self, node_id: str = "_impossible"):
         super().__init__(node_id, Commute, ())
 
+    @override
     def compute(self):
         return Attempt.impossible("not available")
 
@@ -943,9 +946,11 @@ class TestDerivedNodeProvenance:
         await flush_processor()
 
         class TestNode(DerivedNode[float]):
+            @override
             def compute(self, val):
                 return val
 
+            @override
             def to_json(self):
                 return {"status": "succeeded", "value": self._attempt.value_or_none()}
 
@@ -1006,12 +1011,15 @@ class TestRailFareNode:
                 super().__init__("rf_drive_sel", Commute, ())
                 self._att = Attempt.succeeded(commute)
 
+            @override
             async def attempt(self):
                 return self._att
 
+            @override
             def latest_attempt(self):
                 return self._att
 
+            @override
             def compute(self, *dep_attempts):
                 raise AssertionError("fixed node should not compute")
 
@@ -1263,9 +1271,11 @@ class TestRailFareNodeErrorPropagation:
             def __init__(self):
                 super().__init__("rf_fail", Commute, deps=())
 
+            @override
             def compute(self):
                 raise AssertionError("should not run")
 
+            @override
             async def attempt(self):
                 return Attempt.impossible("TfL API returned 409 Conflict: route planner unavailable")
 
@@ -1320,12 +1330,15 @@ class TestNoRouteCommuteChain:
                 super().__init__("_rf_fixed_transit", Commute, ())
                 self._att = Attempt.succeeded(commute)
 
+            @override
             async def attempt(self):
                 return self._att
 
+            @override
             def latest_attempt(self):
                 return self._att
 
+            @override
             def compute(self, *dep_attempts):
                 raise AssertionError("fixed node should not compute")
 
@@ -1351,12 +1364,15 @@ class TestNoRouteCommuteChain:
             def __init__(self, node_id: str):
                 super().__init__(node_id, Commute, ())
 
+            @override
             async def attempt(self):
                 return Attempt.succeeded(None)
 
+            @override
             def latest_attempt(self):
                 return Attempt.succeeded(None)
 
+            @override
             def compute(self, *dep_attempts):
                 raise AssertionError("fixed node should not compute")
 
@@ -1382,12 +1398,15 @@ class TestNoRouteCommuteChain:
                 super().__init__(node_id, Commute, ())
                 self._att = attempt
 
+            @override
             async def attempt(self):
                 return self._att
 
+            @override
             def latest_attempt(self):
                 return self._att
 
+            @override
             def compute(self, *dep_attempts):
                 raise AssertionError("fixed node should not compute")
 
@@ -1465,12 +1484,15 @@ class TestFareConditionalDependency:
                 super().__init__(node_id, Commute, ())
                 self._att = attempt
 
+            @override
             async def attempt(self):
                 return self._att
 
+            @override
             def latest_attempt(self):
                 return self._att
 
+            @override
             def compute(self, *dep_attempts):
                 raise AssertionError("fixed node should not compute")
 
@@ -1515,6 +1537,7 @@ class TestFareConditionalDependency:
             def __init__(self, node_id: str):
                 super().__init__(node_id, Commute, ())
 
+            @override
             def compute(self, *dep_attempts):
                 raise AssertionError("fare node must never be calculated for a drive selection")
 
@@ -1565,12 +1588,15 @@ class TestFareConditionalDependency:
                 super().__init__(node_id, Commute, ())
                 self._att = attempt
 
+            @override
             async def attempt(self):
                 return self._att
 
+            @override
             def latest_attempt(self):
                 return self._att
 
+            @override
             def compute(self, *dep_attempts):
                 raise AssertionError("fixed node should not compute")
 
@@ -1619,6 +1645,7 @@ class TestFareConditionalDependency:
                 super().__init__(node_id, Commute | None, ())  # type: ignore[arg-type]  # value_type is annotated type[T]; the framework's TypeAdapter deliberately accepts a T | None union so the IfThenElseNode no-branch None round-trips through persist/reload
                 self._att = Attempt.pending()
 
+            @override
             async def attempt(self):
                 if self._att.pending:
                     fare_leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(90, "minute"), end_station="Reading")
@@ -1636,9 +1663,11 @@ class TestFareConditionalDependency:
                     )
                 return self._att
 
+            @override
             def latest_attempt(self):
                 return self._att
 
+            @override
             def compute(self, *dep_attempts):
                 raise AssertionError("fixed node should not compute")
 
@@ -1682,6 +1711,7 @@ class TestCommuteChainProvenanceFormula:
                 super().__init__(node_id, Commute | None, ())  # type: ignore[arg-type]  # value_type is annotated type[T]; the framework's TypeAdapter deliberately accepts a T | None union so the IfThenElseNode no-branch None round-trips through persist/reload
                 self._att = Attempt.pending()
 
+            @override
             async def attempt(self):
                 if self._att.pending:
                     fare_leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(30, "minute"))
@@ -1698,9 +1728,11 @@ class TestCommuteChainProvenanceFormula:
                     )
                 return self._att
 
+            @override
             def latest_attempt(self):
                 return self._att
 
+            @override
             def compute(self, *dep_attempts):
                 raise AssertionError("fixed node should not compute")
 
@@ -1773,6 +1805,7 @@ class _CountingWalkNode(DerivedNode[Commute]):
         self._value = value
         self.calls = 0
 
+    @override
     def compute(self, *dep_attempts: Attempt) -> Attempt[Commute]:
         self.calls += 1
         return Attempt.succeeded(self._value)

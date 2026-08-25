@@ -12,6 +12,7 @@ refactors the wiring, selection logic, or cost merging, these break.
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import override
 
 import pytest
 from money import Money
@@ -112,6 +113,7 @@ class _FakeStationRegistry(StationRegistry):
                     break
             self._by_name[raw.strip()] = s
 
+    @override
     def find(self, name: str) -> Station | None:
         cleaned = name.lower().replace("'", "").strip()
         for suffix in [" rail station", " underground station", " station"]:
@@ -120,6 +122,7 @@ class _FakeStationRegistry(StationRegistry):
                 break
         return self._by_name.get(cleaned.strip())
 
+    @override
     def nearest(self, point: GeoPoint) -> Station | None:
         # Return the station closest to the given point (brute force)
         best: Station | None = None
@@ -138,6 +141,7 @@ class _FakeCarParkRegistry(CarParkRegistry):
         super().__init__()
         self._car_park = car_park
 
+    @override
     def find_car_park(self, station: Station) -> CarPark | None:
         return self._car_park
 

@@ -9,7 +9,7 @@ def test_home_sale_price_int_raises():
     from houses.model.domain import Person
 
     node = UserInputNode[list[Person]]("test", list[Person])
-    p = Person(name="Simon", has_car=True, home_sale_price=500000)
+    p = Person(name="Simon", has_car=True, home_sale_price=500000)  # type: ignore[arg-type]  # why: bare int is the fixture — this test asserts UserInputNode rejects a non-Money home_sale_price at push()
     with pytest.raises((ValueError, TypeError, AssertionError)):
         node.push([p], "test")
 
@@ -48,6 +48,6 @@ def test_cash_contribution_float_raises():
     from houses.model.domain import Person
 
     node = UserInputNode[list[Person]]("test_f", list[Person])
-    p = Person(name="Ashby", has_car=True, cash_contribution=300000.0)
+    p = Person(name="Ashby", has_car=True, cash_contribution=300000.0)  # type: ignore[arg-type]  # why: bare float is the fixture — this test asserts push() rejects a non-Money cash_contribution
     with pytest.raises((ValueError, TypeError)):
         node.push([p], "test")

@@ -4,6 +4,8 @@ impossible attempt. A genuinely failed transit API call is impossible
 and propagates (the framework short-circuits, as it should)."""
 from __future__ import annotations
 
+from typing import override
+
 import pytest
 from money import Money
 from pint import Quantity
@@ -30,12 +32,15 @@ class _FixedNode(DerivedNode[Commute]):
         super().__init__(node_id, Commute, ())
         self._att = attempt
 
+    @override
     async def attempt(self):
         return self._att
 
+    @override
     def latest_attempt(self):
         return self._att
 
+    @override
     def compute(self, *dep_attempts: Attempt) -> Attempt[Commute]:
         raise AssertionError("fixed node should not compute")
 

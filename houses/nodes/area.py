@@ -16,6 +16,7 @@ class WalkabilityNode(DerivedNode[dict]):
         deps: tuple[Node, ...] = (best_location, best_address)
         super().__init__(node_id, dict, deps)
 
+    @override
     @staticmethod
     async def compute(location: Attempt[GeoPoint], address: Attempt[str]) -> Attempt[dict]:
         loc = location.value_or_none()
@@ -53,6 +54,7 @@ class NearestTownNode(DerivedNode[str]):
         deps: tuple[Node, ...] = (best_location,)
         super().__init__(node_id, str, deps)
 
+    @override
     @staticmethod
     async def compute(location: Attempt[GeoPoint]) -> Attempt[str]:
         loc = location.value_or_none()
@@ -80,6 +82,7 @@ class TownDescNode(DerivedNode[dict]):
         deps: tuple[Node, ...] = (best_location, nearest_town, town_name, postcode_node)
         super().__init__(node_id, dict, deps, dep_names=("location", "nearest_town", "town_name", "postcode"))
 
+    @override
     def _get_active_deps(self):
         """The postcode is an optional refinement for the LLM prompt — a
         pending/empty postcode (a property with no known postcode) must
@@ -91,6 +94,7 @@ class TownDescNode(DerivedNode[dict]):
             deps.append(self._postcode_node)
         return tuple(deps)
 
+    @override
     @staticmethod
     async def compute(
         location: Attempt[GeoPoint],
@@ -130,6 +134,7 @@ class TownNode(DerivedNode[str]):
         deps: tuple[Node, ...] = (best_address,)
         super().__init__(node_id, str, deps)
 
+    @override
     @staticmethod
     def compute(address: Attempt[str]) -> Attempt[str]:
         addr = address.value_or_none() or ""

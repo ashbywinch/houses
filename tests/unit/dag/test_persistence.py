@@ -47,6 +47,7 @@ class TestSerialisation:
             y: int
 
         s = _serialize_value(Point(x=1, y=2))
+        assert s is not None
         d = json.loads(s)
         assert d["x"] == 1
         assert d["y"] == 2
@@ -90,11 +91,13 @@ class TestNodeResults:
         deps = {"dep_a": "2024-01-01T00:00:00", "dep_b": "2024-01-02T00:00:00"}
         save_node_result(f"{RID}/n3", {"status": "succeeded", "value": "v"}, deps)
         loaded = latest_node_result(f"{RID}/n3")
+        assert loaded is not None
         assert loaded["_dep_timestamps"] == deps
 
     def test_persisted_at_timestamp(self):
         save_node_result(f"{RID}/n4", {"status": "succeeded", "value": "x"})
         loaded = latest_node_result(f"{RID}/n4")
+        assert loaded is not None
         assert loaded["_persisted_at"] is not None
 
 

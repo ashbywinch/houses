@@ -123,6 +123,7 @@ async def test_school_node_output_has_url():
         a = await sn.attempt()
         assert a.succeeded, f"school failed: {a.error}"
         val = a.value_or_none()
+        assert val is not None, f"school returned no value: {a.error}"
         assert "name" in val, f"missing name: {list(val.keys())}"
         assert val["name"] == "Test School"
         assert val.get("ofsted") == "Good"

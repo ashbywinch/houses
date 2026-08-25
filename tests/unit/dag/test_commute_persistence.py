@@ -7,6 +7,8 @@ loaded from the persisted DAG node result cache.
 
 from __future__ import annotations
 
+from typing import override
+
 import pytest
 from money import Money
 from pint import Quantity
@@ -54,6 +56,7 @@ class _CommutePassthroughNode(DerivedNode[Commute]):
         super().__init__(node_id, Commute, deps)
         self._called = 0
 
+    @override
     def compute(self, src: Attempt[str]) -> Attempt[Commute]:
         self._called += 1
         return Attempt.succeeded(

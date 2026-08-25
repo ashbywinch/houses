@@ -23,7 +23,7 @@ def _make_enriched(url: str, simon_cost: float | None = 10.0) -> EnrichedPropert
         url=url,
         address="123 Test Street, Test Town, TE1 1ST",
         postcode="TE1 1ST",
-        price=500000,
+        price=Money("500000", "GBP"),
         simon_commute=Commute(
             person=Person(name="Simon", has_car=False),
             label="S",

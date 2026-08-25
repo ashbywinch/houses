@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import override
 
 from money import Money
 
@@ -30,10 +31,12 @@ class MortgageRequiredNode(DerivedNode[Money]):
             (rightmove_price, stamp_duty, total_works_node, total_equity_node),
         )
 
+    @override
     @property
     def expression(self):
         return Ref(self._deps[0]) + Ref(self._deps[1]) + Ref(self._deps[2]) - Ref(self._deps[3])
 
+    @override
     def compute(
         self,
         price: Attempt[Money],

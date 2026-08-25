@@ -13,6 +13,7 @@ import logging
 from typing import ClassVar
 
 import gspread
+from gspread.utils import ValueInputOption
 from money import Money
 from pint import Quantity
 
@@ -307,4 +308,6 @@ class Row:
 def ensure_headers(worksheet: gspread.Worksheet) -> None:
     """Write column headers to a worksheet if it's empty."""
     if worksheet.row_count == 0 or not worksheet.get_all_values():
-        worksheet.append_row(Row.HEADERS, value_input_option="USER_ENTEred")
+        # gspread's stubs type value_input_option as the ValueInputOption enum
+        # (same call shape as formulas.py/view.py/named_ranges.py).
+        worksheet.append_row(Row.HEADERS, value_input_option=ValueInputOption.user_entered)

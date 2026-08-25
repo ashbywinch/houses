@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, override
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
@@ -52,6 +52,7 @@ class IfThenElseNode(DerivedNode[T], Generic[T]):
             deps = deps + (options.else_branch,)
         super().__init__(node_id, value_type, deps)
 
+    @override
     def _get_active_deps(self) -> tuple[Node, ...]:
         condition_values = [s.latest_attempt() for s in self._condition_sources]
         if self._condition_fn(*condition_values):
@@ -60,6 +61,7 @@ class IfThenElseNode(DerivedNode[T], Generic[T]):
             return self._condition_sources + (self._else_branch,)
         return self._condition_sources
 
+    @override
     def compute(self, *args: Attempt) -> Attempt[T]:
         # If a branch was activated, the last arg is the branch result.
         if len(args) > len(self._condition_sources):

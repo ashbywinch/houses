@@ -117,7 +117,8 @@ class TestMe:
 
     def test_authenticated_with_session(self):
         cookie = _inject_session(email="simon@example.com")
-        resp = client.get("/api/auth/me", cookies={"session": cookie})
+        client.cookies.set("session", cookie)
+        resp = client.get("/api/auth/me")
         assert resp.status_code == 200
         data = resp.json()
         assert data["authenticated"] is True
@@ -126,7 +127,8 @@ class TestMe:
 
     def test_authenticated_superuser(self):
         cookie = _inject_session(email="simon@example.com", is_superuser=True)
-        resp = client.get("/api/auth/me", cookies={"session": cookie})
+        client.cookies.set("session", cookie)
+        resp = client.get("/api/auth/me")
         assert resp.status_code == 200
         data = resp.json()
         assert data["authenticated"] is True
@@ -134,14 +136,16 @@ class TestMe:
 
     def test_returns_impersonating(self):
         cookie = _inject_session(email="simon@example.com", is_superuser=True, impersonating="Ashby")
-        resp = client.get("/api/auth/me", cookies={"session": cookie})
+        client.cookies.set("session", cookie)
+        resp = client.get("/api/auth/me")
         assert resp.status_code == 200
         data = resp.json()
         assert data["impersonating"] == "Ashby"
 
     def test_returns_impersonating_null_when_not_impersonating(self):
         cookie = _inject_session(email="simon@example.com", is_superuser=True)
-        resp = client.get("/api/auth/me", cookies={"session": cookie})
+        client.cookies.set("session", cookie)
+        resp = client.get("/api/auth/me")
         assert resp.status_code == 200
         data = resp.json()
         assert data["impersonating"] is None
@@ -153,8 +157,10 @@ class TestMe:
 
     def test_tampered_cookie_returns_unauthenticated(self):
         cookie = _inject_session(email="simon@example.com")
+        client.cookies.set("session", cookie)
         tampered = cookie[:-5] + "xxxxx"  # corrupt the signature
-        resp = client.get("/api/auth/me", cookies={"session": tampered})
+        client.cookies.set("session", tampered)
+        resp = client.get("/api/auth/me")
         assert resp.status_code == 200
         assert resp.json()["authenticated"] is False
 
@@ -181,7 +187,8 @@ class TestLiveSuperuserDerivation:
         still report true when the live settings say the person is one."""
         self._push_superuser_person(email="simon@example.com")
         cookie = _inject_session(email="simon@example.com", is_superuser=False)
-        resp = client.get("/api/auth/me", cookies={"session": cookie})
+        client.cookies.set("session", cookie)
+        resp = client.get("/api/auth/me")
         assert resp.status_code == 200
         data = resp.json()
         assert data["authenticated"] is True
@@ -190,7 +197,8 @@ class TestLiveSuperuserDerivation:
     def test_me_keeps_false_when_settings_do_not_promote(self):
         """No live superuser flag → the cookie snapshot stands."""
         cookie = _inject_session(email="simon@example.com", is_superuser=False)
-        resp = client.get("/api/auth/me", cookies={"session": cookie})
+        client.cookies.set("session", cookie)
+        resp = client.get("/api/auth/me")
         assert resp.status_code == 200
         assert resp.json()["is_superuser"] is False
 
@@ -199,10 +207,10 @@ class TestLiveSuperuserDerivation:
         whose cookie predates the promotion, when live settings promote."""
         self._push_superuser_person(email="simon@example.com")
         cookie = _inject_session(email="simon@example.com", is_superuser=False)
+        client.cookies.set("session", cookie)
         resp = client.post(
             "/api/auth/impersonate",
             json={"person": "Ashby"},
-            cookies={"session": cookie},
         )
         assert resp.status_code == 200, f"got {resp.status_code}: {resp.text[:200]}"
 
@@ -210,7 +218,8 @@ class TestLiveSuperuserDerivation:
 class TestLogout:
     def test_logout_clears_cookie(self):
         cookie = _inject_session(email="simon@example.com")
-        resp = client.post("/api/auth/logout", cookies={"session": cookie})
+        client.cookies.set("session", cookie)
+        resp = client.post("/api/auth/logout")
         assert resp.status_code == 200
         set_cookie = resp.headers.get("set-cookie", "")
         assert "session=" in set_cookie
@@ -229,28 +238,28 @@ class TestImpersonate:
 
     def test_403_non_superuser(self):
         cookie = _inject_session(email="simon@example.com", is_superuser=False)
+        client.cookies.set("session", cookie)
         resp = client.post(
             "/api/auth/impersonate",
             json={"person": "Ashby"},
-            cookies={"session": cookie},
         )
         assert resp.status_code == 403
 
     def test_400_non_string_person(self):
         cookie = _inject_session(email="simon@example.com", is_superuser=True)
+        client.cookies.set("session", cookie)
         resp = client.post(
             "/api/auth/impersonate",
             json={"person": 123},
-            cookies={"session": cookie},
         )
         assert resp.status_code == 400
 
     def test_start_impersonating(self):
         cookie = _inject_session(email="simon@example.com", is_superuser=True)
+        client.cookies.set("session", cookie)
         resp = client.post(
             "/api/auth/impersonate",
             json={"person": "Ashby"},
-            cookies={"session": cookie},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -263,20 +272,20 @@ class TestImpersonate:
     def test_cannot_impersonate_a_child(self):
         """Superusers may act as any ADULT — children are off limits."""
         cookie = _inject_session(email="simon@example.com", is_superuser=True)
+        client.cookies.set("session", cookie)
         resp = client.post(
             "/api/auth/impersonate",
             json={"person": "George"},  # a child in the family defaults
-            cookies={"session": cookie},
         )
         assert resp.status_code == 400
         assert "child" in resp.json()["detail"].lower()
 
     def test_stop_impersonating(self):
         cookie = _inject_session(email="simon@example.com", is_superuser=True, impersonating="Ashby")
+        client.cookies.set("session", cookie)
         resp = client.post(
             "/api/auth/impersonate",
             json={"person": None},
-            cookies={"session": cookie},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -302,7 +311,8 @@ class TestProtectedEndpoints:
 
     def test_authenticated_request_succeeds(self):
         cookie = _inject_session()
-        resp = client.get("/api/properties/all", cookies={"session": cookie})
+        client.cookies.set("session", cookie)
+        resp = client.get("/api/properties/all")
         assert resp.status_code == 200
 
     def test_health_is_public(self):
@@ -526,11 +536,11 @@ class TestCommentAuth:
         """Empty text fails Pydantic validation with 422."""
         auth_token = _enable_auth()
         session_cookie = _inject_session()
+        client.cookies.set("session", session_cookie)
         try:
             resp = client.post(
                 "/api/properties/test-rid/comments",
                 json={"text": ""},
-                cookies={"session": session_cookie},
             )
         finally:
             _sp.reset(auth_token)
@@ -539,11 +549,11 @@ class TestCommentAuth:
     def test_post_403_non_superuser_impersonates(self):
         auth_token = _enable_auth()
         session_cookie = _inject_session(email="simon@example.com", is_superuser=False)
+        client.cookies.set("session", session_cookie)
         try:
             resp = client.post(
                 "/api/properties/test-rid/comments",
                 json={"text": "hello"},
-                cookies={"session": session_cookie},
                 headers={"X-Impersonate-Person": "Ashby"},
             )
         finally:
@@ -555,11 +565,11 @@ class TestCommentAuth:
         """Email doesn't match any Person — 400."""
         auth_token = _enable_auth()
         session_cookie = _inject_session(email="unlinked@example.com", is_superuser=False)
+        client.cookies.set("session", session_cookie)
         try:
             resp = client.post(
                 "/api/properties/test-rid/comments",
                 json={"text": "hello"},
-                cookies={"session": session_cookie},
             )
         finally:
             _sp.reset(auth_token)
@@ -586,11 +596,11 @@ class TestCommentAuth:
         svc_token = _sp.set(svc)
 
         session_cookie = _inject_session(email="simon@example.com", is_superuser=False)
+        client.cookies.set("session", session_cookie)
         try:
             resp = client.post(
                 "/api/properties/test-rid/comments",
                 json={"text": "A normal comment"},
-                cookies={"session": session_cookie},
             )
         finally:
             _sp.reset(svc_token)
@@ -620,11 +630,11 @@ class TestCommentAuth:
         svc_token = _sp.set(svc)
 
         session_cookie = _inject_session(email="simon@example.com", is_superuser=True)
+        client.cookies.set("session", session_cookie)
         try:
             resp = client.post(
                 "/api/properties/test-rid/comments",
                 json={"text": "hello from Ashby"},
-                cookies={"session": session_cookie},
                 headers={"X-Impersonate-Person": "Ashby"},
             )
         finally:
@@ -642,8 +652,10 @@ class TestSessionIsolation:
         cookie_a = _inject_session(email="alice@example.com", is_superuser=False)
         cookie_b = _inject_session(email="bob@example.com", is_superuser=True)
 
-        resp_a = client.get("/api/auth/me", cookies={"session": cookie_a})
-        resp_b = client.get("/api/auth/me", cookies={"session": cookie_b})
+        client.cookies.set("session", cookie_a)
+        resp_a = client.get("/api/auth/me")
+        client.cookies.set("session", cookie_b)
+        resp_b = client.get("/api/auth/me")
 
         assert resp_a.json()["email"] == "alice@example.com"
         assert resp_a.json()["is_superuser"] is False

@@ -71,6 +71,7 @@ class TestWalkCommuteFailsFast:
         # The guard catches this: daily_cost_gbp = Money("0", "GBP")
         if attempt.succeeded:
             val = attempt.value_or_none()
+            assert val is not None, f"expected a Commute value, got {val!r}"
             assert isinstance(val.daily_cost, Money), (
                 f"daily_cost must be Money, got {type(val.daily_cost).__name__}. "
                 f"The guard in _process_data should set it to Money('0', 'GBP') "

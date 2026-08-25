@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import override
 
 import pytest
 from money import Money
@@ -157,9 +158,11 @@ class TestLoadReconstructsStructuredError:
             def __init__(self):
                 super().__init__("test_load_recon/x", str)
 
+            @override
             async def attempt(self) -> Attempt[str]:
                 return self._attempt
 
+            @override
             async def build_provenance(self):
                 return Provenance(label="x")
 
@@ -186,9 +189,11 @@ class TestLoadReconstructsStructuredError:
             def __init__(self):
                 super().__init__("test_load_recon/y", str)
 
+            @override
             async def attempt(self) -> Attempt[str]:
                 return self._attempt
 
+            @override
             async def build_provenance(self):
                 return Provenance(label="y")
 

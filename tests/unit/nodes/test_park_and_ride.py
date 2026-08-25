@@ -10,6 +10,8 @@ fall back to the best location.
 
 from __future__ import annotations
 
+from typing import override
+
 import pytest
 from money import Money
 from pint import Quantity
@@ -25,6 +27,7 @@ from houses.stations import StationRegistry
 
 
 class _FakeStationRegistry(StationRegistry):
+    @override
     def find(self, name: str):
         from houses.stations import Station
 
@@ -32,6 +35,7 @@ class _FakeStationRegistry(StationRegistry):
 
 
 class _FakeCarParkRegistry(CarParkRegistry):
+    @override
     def find_car_park(self, station):
         from houses.car_park import CarPark
 
@@ -220,6 +224,7 @@ class TestParkAndRideAugmentNode:
         from tests.helpers import FakeDriveTime, make_services
 
         class _NoCostCarParkRegistry(CarParkRegistry):
+            @override
             def find_car_park(self, station):
                 return CarPark(name="Reading Station Car Park", daily_cost=None)  # unknown cost
 

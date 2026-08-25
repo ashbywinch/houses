@@ -19,6 +19,7 @@ class CommuteBreakdownNode(DerivedNode[dict]):
         super().__init__(node_id, dict, tuple(commute_selectors.values()) + (persons_source,))
         self._persons_source = persons_source
 
+    @override
     @property
     def provenance_formula(self):
 
@@ -43,6 +44,7 @@ class CommuteBreakdownNode(DerivedNode[dict]):
             return None
         return Formula(lines=lines, result=f"£{Decimal(str(v.get('yearly_total_gbp', '0'))):,.2f}/yr")
 
+    @override
     def compute(self, *args: Attempt[dict]) -> Attempt[dict]:
         # Last arg is always persons_source, the rest are commute selectors
         if not args:
@@ -65,6 +67,9 @@ class CommuteBreakdownNode(DerivedNode[dict]):
             daily_amount: Money | None = None
             pois = p.get("places_of_interest", ()) if isinstance(p, dict) else getattr(p, "places_of_interest", ())
             name = p.get("name") if isinstance(p, dict) else getattr(p, "name", "?")
+            if not isinstance(name, str):
+                # A person entry without a usable name still needs a stable dict key.
+                name = "?"
             commutes: list[dict] = []
             for poi in pois or ():
                 key = f"{name}/{poi.label}"

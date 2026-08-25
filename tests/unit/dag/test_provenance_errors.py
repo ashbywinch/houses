@@ -6,6 +6,8 @@ UI can show an error state (matching the designer's four prototype datasets).
 """
 from __future__ import annotations
 
+from typing import override
+
 import pytest
 
 from dag.attempt import Attempt, Provenance, SourceType
@@ -56,12 +58,15 @@ class _ImpossibleNode(DerivedNode[int]):
         self._error = error
         self._attempt = Attempt.impossible(error)
 
+    @override
     async def attempt(self):
         return self._attempt
 
+    @override
     def compute(self):
         raise AssertionError("compute should not run for a pre-set impossible attempt")
 
+    @override
     @property
     def provenance_source_type(self) -> SourceType:
         return SourceType.API
@@ -94,16 +99,20 @@ class TestBuildProvenanceErrorState:
                 super().__init__("parent", int, deps=(child,))
                 self._child = child
 
+            @override
             @property
             def provenance_formula(self):
                 return None
 
+            @override
             def _get_active_deps(self):
                 return (self._child,)
 
+            @override
             def compute(self):
                 return Attempt.succeeded(10)
 
+            @override
             async def attempt(self):
                 return Attempt.succeeded(10)
 

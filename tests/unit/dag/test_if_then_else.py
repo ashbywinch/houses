@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from typing import override
+
 import pytest
 
 from dag.attempt import Attempt
 from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
-from dag.scheduler import AsyncQueueScheduler, flush_processor, set_scheduler
+from dag.scheduler import (
+    AsyncQueueScheduler,
+    flush_processor,
+    reset_scheduler,
+    set_scheduler,
+)
 from dag.user_input_node import UserInputNode
 
 
@@ -14,7 +21,7 @@ from dag.user_input_node import UserInputNode
 def _isolated_scheduler():
     set_scheduler(AsyncQueueScheduler(respect_time=False))
     yield
-    set_scheduler(None)
+    reset_scheduler()
 
 
 class TestIfThenElseNode:
@@ -186,6 +193,7 @@ class TestIfThenElseNode:
                 super().__init__("fc", bool, ())
                 self._attempt = Attempt.impossible("failed")
 
+            @override
             def compute(self):
                 return self._attempt
 

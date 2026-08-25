@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import override
+
 from money import Money
 
 from dag.attempt import Attempt, Formula, FormulaLine
@@ -19,6 +21,7 @@ class MonthlySinkingFundNode(DerivedNode[Money]):
         self._yearly_node = yearly_sinking_fund_node
         super().__init__(node_id, Money, (yearly_sinking_fund_node,))
 
+    @override
     @property
     def provenance_formula(self) -> Formula | None:
         val = self._attempt.value_or_none()
@@ -31,6 +34,7 @@ class MonthlySinkingFundNode(DerivedNode[Money]):
         ]
         return Formula(lines=lines, result=str(val))
 
+    @override
     @staticmethod
     def compute(*dep_attempts: Attempt) -> Attempt[Money]:
         yearly = dep_attempts[0]

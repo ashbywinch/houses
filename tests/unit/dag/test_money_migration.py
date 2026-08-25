@@ -13,6 +13,8 @@ This test reproduces that failure mode:
 
 from __future__ import annotations
 
+from typing import override
+
 import pytest
 
 from dag.attempt import Attempt
@@ -47,6 +49,7 @@ async def test_money_node_loads_old_float_value():
         def __init__(self):
             super().__init__(node_id, Money, (src,))
 
+        @override
         def compute(self, val: Attempt[Money]) -> Attempt[Money]:
             return val
 

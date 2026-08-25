@@ -6,6 +6,8 @@ succeeded attempt with the correct value after flush_processor returns.
 
 from __future__ import annotations
 
+from typing import override
+
 import pytest
 
 from dag.attempt import Attempt
@@ -21,9 +23,9 @@ class AddNode(DerivedNode[int]):
     def __init__(self, node_id: str, deps: tuple[Node, ...]):
         super().__init__(node_id, int, deps)
 
+    @override
     def compute(self, *dep_attempts: Attempt) -> Attempt[int]:
-        vals = [a.value_or_none() for a in dep_attempts if a.succeeded]
-        return Attempt.succeeded(sum(vals))
+        return Attempt.succeeded(sum(a.value_or(0) for a in dep_attempts if a.succeeded))
 
 
 class DoubleNode(DerivedNode[int]):
@@ -32,6 +34,7 @@ class DoubleNode(DerivedNode[int]):
     def __init__(self, node_id: str, deps: tuple[Node, ...]):
         super().__init__(node_id, int, deps)
 
+    @override
     def compute(self, *dep_attempts: Attempt) -> Attempt[int]:
         val = dep_attempts[0].value_or_none()
         if val is None:

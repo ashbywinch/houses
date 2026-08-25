@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import override
+
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.node import Node
@@ -21,6 +23,7 @@ class NearestStationNode(DerivedNode[Station | None]):
     def __init__(self, node_id: str, *, best_location: Node[GeoPoint]) -> None:
         super().__init__(node_id, Station | None, (best_location,))
 
+    @override
     @staticmethod
     def compute(location: Attempt[GeoPoint]) -> Attempt[Station | None]:
         loc = location.value_or_none()

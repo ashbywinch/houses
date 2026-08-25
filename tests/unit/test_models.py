@@ -1,5 +1,7 @@
 """Tests for data models."""
 
+from money import Money
+
 from houses.commute import CommuteBreakdown
 from houses.council_tax_info import CouncilTaxInfo
 from houses.model.domain import Commute, Person, PlaceOfInterest
@@ -13,7 +15,7 @@ def test_property_payload() -> None:
         url="https://www.rightmove.co.uk/properties/123",
         address="High Street, Some Town, RG14 1AA",
         bedrooms=3,
-        price=650000.0,
+        price=Money("650000", "GBP"),
     )
     assert payload.bedrooms == 3
     assert payload.address == "High Street, Some Town, RG14 1AA"
@@ -29,8 +31,6 @@ def test_property_payload_minimal() -> None:
 
 
 def test_enriched_property_defaults() -> None:
-    from money import Money
-
     ep = EnrichedProperty(
         url="https://www.rightmove.co.uk/properties/123",
     )
@@ -51,7 +51,6 @@ def test_enriched_property_defaults() -> None:
 
 
 def test_transit_info() -> None:
-    from money import Money
     from pint import Quantity
 
     t = Commute(

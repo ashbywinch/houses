@@ -570,7 +570,9 @@ class TestMonthlyMortgagePaymentNode:
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded
-        actual = a.value_or_none().amount
+        value = a.value_or_none()
+        assert value is not None
+        actual = value.amount
         assert actual > _ZERO
 
     @pytest.mark.asyncio
