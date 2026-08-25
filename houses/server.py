@@ -72,7 +72,7 @@ def _property_in_sheet(gclient: Any, rid: str) -> bool:
         sh = gclient.open_by_key(settings.sheet_id)
         ws = sh.worksheet("Properties Data")
         return any(row[col_index("Rightmove ID")].strip() == rid for row in ws.get_all_values()[1:])
-    # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+    # lucidlint: ignore broad-except deploy git probe — absence of git or a dirty repo degrades to 'unknown'
     except Exception:
         return False
 
@@ -396,3 +396,4 @@ async def sync_view_formulas_endpoint() -> JSONResponse:
 @app.get("/health")
 async def health() -> JSONResponse:
     return JSONResponse(content={"status": "ok"})
+

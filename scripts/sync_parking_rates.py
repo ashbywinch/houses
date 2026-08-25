@@ -366,7 +366,7 @@ async def _process_station(page, name: str, crs: str, rate_map: dict[str, float 
         rate_map[crs] = rate
         if rate is None:
             logger.info("  → %s: no rate found", name)
-    # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+    # lucidlint: ignore broad-except one station's rate sync failure logs and continues with the rest
     except Exception as e:
         logger.warning("Failed to process %s (%s): %s", name, crs, e)
         rate_map[crs] = None
@@ -439,3 +439,4 @@ async def main():
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     asyncio.run(main())
+

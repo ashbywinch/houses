@@ -322,7 +322,7 @@ class CommuteRouter:
             data = await self._google_routes_post(
                 body, mask, options=GoogleRoutesOptions(timeout=15.0 if mode == "DRIVE" else 10.0)
             )
-        # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+        # lucidlint: ignore broad-except Google Routes failure → Attempt.impossible with error + body
         except Exception as e:
             # Keep the reason — _raise_with_body appends the response body
             # (e.g. "400 … LatLng cannot be specified as an Address Waypoint").
@@ -462,7 +462,7 @@ class CommuteRouter:
             return await self._tfl_transit_fn(origin_str, dest_str, has_car)
         except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException, HttpError):
             raise
-        # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+        # lucidlint: ignore broad-except TfL transit failure → Attempt.impossible; HTTP-class errors re-raise above
         except Exception as e:
             return Attempt.impossible(f"tfl_transit: {e}")
 
@@ -532,3 +532,5 @@ class CommuteRouter:
         best = min(valid_values, key=_tiebreak)
         errors = [a.error for a in candidates if not a.succeeded and a.error]
         return Attempt.succeeded(best, error="; ".join(errors) if errors else "")
+
+

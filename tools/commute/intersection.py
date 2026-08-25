@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -350,8 +351,17 @@ def _validate_committed(out_path: Path) -> int:
     return 0
 
 
-# lucidlint: ignore record-shape (shed, raw, searches) triple — two-tier exit idiom; a NamedTuple is ceremony
-def _load_inputs(args) -> tuple[dict, dict, dict] | int:
+# lucidlint: ignore class-module small private helper — module keeps its function name
+@dataclass(frozen=True)
+class _CommittedInputs:
+    """The three committed payloads the map needs."""
+
+    shed: dict
+    raw: dict
+    searches: dict
+
+
+def _load_inputs(args) -> _CommittedInputs | int:
     """Read the three committed payloads; int exit code when any is missing/unreadable."""
     missing = [(p, hint) for p, hint in (
         (Path(args.shed), "make commute-shed"),
@@ -373,7 +383,7 @@ def _load_inputs(args) -> tuple[dict, dict, dict] | int:
             "Commute data is unreadable — regenerate it with 'make commute-drive'.",
             f"unreadable intersection input: {e}",
         )
-    return shed, drive_raw, drive_searches
+    return _CommittedInputs(shed=shed, raw=drive_raw, searches=drive_searches)
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
@@ -403,10 +413,10 @@ def run(argv: list[str] | None = None) -> int:
     if args.validate:
         return _validate_committed(out_path)
 
-    inputs = _load_inputs(args)
-    if isinstance(inputs, int):
-        return inputs
-    shed, drive_raw, drive_searches = inputs
+    loaded = _load_inputs(args)
+    if isinstance(loaded, int):
+        return loaded
+    shed, drive_raw, drive_searches = loaded.shed, loaded.raw, loaded.searches
 
     try:
         payload = build_payload(

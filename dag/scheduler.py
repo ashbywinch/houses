@@ -164,7 +164,7 @@ class AsyncQueueScheduler(RefreshScheduler):
                 self._scheduled.pop(event.node_id, None)
                 try:
                     await event.node.refresh()
-                # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+                # lucidlint: ignore broad-except loop boundary — one node failure must not kill the processor
                 except Exception as exc:
                     # One node's failure must not kill the background loop —
                     # log it and move on to the next event.
@@ -220,3 +220,4 @@ def start_processor() -> asyncio.Task:
 def set_after_refresh(callback: Callable[[DerivedNode], object]) -> None:
     sched = get_scheduler()
     sched._after_refresh_callback = callback
+
