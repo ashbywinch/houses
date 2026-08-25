@@ -98,7 +98,7 @@ def _serialize_value(val: Any) -> str | None:
             d["_type"] = type(val).__name__
             d["_module"] = type(val).__module__
         return json.dumps(d)
-    # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+    # lucidlint: ignore broad-except serialization failure logs the type then re-raises — never persists silently
     except Exception:
         logger.exception("Failed to serialize %s", type(val).__name__)
         raise
@@ -117,7 +117,7 @@ def _deserialize_value(raw: str | None) -> Any:
             cls = getattr(mod, d["_type"])
             fields = {k: v for k, v in d.items() if not k.startswith("_")}
             return cls(**fields)
-        # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+        # lucidlint: ignore broad-except deserialization failure logs the _type then re-raises
         except Exception:
             logger.exception("Failed to deserialize %s", d.get("_type", "unknown"))
             raise
@@ -270,3 +270,5 @@ def property_rids() -> list[str]:
         "SELECT DISTINCT SUBSTR(node_id, 1, INSTR(node_id, '/') - 1) AS rid FROM node_results WHERE node_id LIKE '%/%'"
     ).fetchall()
     return sorted(set(r[0] for r in rows if r[0] and r[0].isdigit()))
+
+

@@ -130,7 +130,7 @@ def effective_session_user(request: Request) -> dict[str, Any] | None:
             # lucidlint: ignore boolean-arg False is dict.get's default value, not a named flag — no swap risk
             if live is not None and live != session.get("is_superuser", False):
                 session = {**session, "is_superuser": live}
-    # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+    # lucidlint: ignore broad-except live superuser re-derivation failure logs and returns the session unchanged
     except Exception:
         logger.exception("Failed to re-derive superuser flag from settings")
         return session
@@ -353,7 +353,7 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
         _set_session_cookie(response, cookie_value, _is_secure(request))
         return response
 
-    # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+    # lucidlint: ignore broad-except OAuth callback failure redirects to the frontend with an auth_error parameter
     except Exception as e:
         logger.exception("OAuth callback failed")
         return RedirectResponse(url=f"{settings.frontend_url}/?auth_error=" + quote(str(e)))
@@ -403,7 +403,7 @@ async def device(request: Request):
         return JSONResponse(
             status_code=503, content={"detail": "identity provider unreachable, try again"}
         )
-    # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+    # lucidlint: ignore broad-except device-flow id_token verification failure returns a 401 JSON response
     except Exception as e:
         logger.warning("Device-flow id_token verification failed: %s", e)
         return JSONResponse(status_code=401, content={"detail": "invalid id_token"})
@@ -503,3 +503,6 @@ async def impersonate(request: Request, body: dict):
     response = JSONResponse(content={"status": "ok", "impersonating": person})
     _set_session_cookie(response, new_cookie, _is_secure(request))
     return response
+
+
+

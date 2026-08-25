@@ -30,6 +30,7 @@ import os
 import sys
 import time
 from argparse import ArgumentParser
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import NoReturn
@@ -156,7 +157,7 @@ async def _auth_state(page) -> bool | None:
             ".then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))"
             ".then(d => d.authenticated === true)"
         )
-    # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+    # lucidlint: ignore broad-except session check failure prints a warning and continues the login flow
     except Exception as e:
         print(f"  WARNING: could not check session at {page.url}: {e}", file=sys.stderr)
         if not page.url.startswith(FRONTEND_URL):
@@ -167,8 +168,18 @@ async def _auth_state(page) -> bool | None:
         return None
 
 
-# lucidlint: ignore record-shape device-flow quadruple — a NamedTuple is ceremony for one call site
-async def _start_device_flow(client_id: str, client_secret: str) -> tuple[str, str, str, int]:
+# lucidlint: ignore class-module small private helper — module keeps its function name (capture_dom)
+@dataclass(frozen=True)
+class DeviceFlowAuthorization:
+    """The device-flow grant: codes to show the human + the poll cadence."""
+
+    device_code: str
+    user_code: str
+    verification_url: str
+    poll_interval_s: int
+
+
+async def _start_device_flow(client_id: str, client_secret: str) -> "DeviceFlowAuthorization":
     """POST Google's device-authorization endpoint; return the codes to show.
 
     Returns ``(device_code, user_code, verification_url, poll_interval_s)``.
@@ -185,7 +196,9 @@ async def _start_device_flow(client_id: str, client_secret: str) -> tuple[str, s
                 "Couldn't reach Google's sign-in service — check your connection and try again.",
                 f"device-flow setup POST to {GOOGLE_DEVICE_URL} failed: {e}",
             )
-            return "", "", "", POLL_INTERVAL_DEFAULT_S  # unreachable — _fail exits; keeps the swallow gate honest
+            return DeviceFlowAuthorization(
+                device_code="", user_code="", verification_url="", poll_interval_s=POLL_INTERVAL_DEFAULT_S
+            )  # unreachable — _fail exits; keeps the swallow gate honest
         if r.status_code != HTTP_OK:
             _fail(
                 "Couldn't start Google sign-in — the sign-in app isn't allowed to use device sign-in. "
@@ -193,7 +206,9 @@ async def _start_device_flow(client_id: str, client_secret: str) -> tuple[str, s
                 f"Google device flow setup failed ({r.status_code}): {r.text[:300]} — "
                 f"is device flow enabled for OAuth client {client_id}?",
             )
-            return "", "", "", POLL_INTERVAL_DEFAULT_S  # unreachable — _fail exits; keeps the swallow gate honest
+            return DeviceFlowAuthorization(
+                device_code="", user_code="", verification_url="", poll_interval_s=POLL_INTERVAL_DEFAULT_S
+            )  # unreachable — _fail exits; keeps the swallow gate honest
         try:
             info = r.json()
         except ValueError as e:
@@ -201,12 +216,14 @@ async def _start_device_flow(client_id: str, client_secret: str) -> tuple[str, s
                 "Couldn't start Google sign-in — the sign-in service sent an unexpected reply. Try again.",
                 f"device-flow setup response was not JSON: {e}",
             )
-            return "", "", "", POLL_INTERVAL_DEFAULT_S  # unreachable — _fail exits; keeps the swallow gate honest
+            return DeviceFlowAuthorization(
+                device_code="", user_code="", verification_url="", poll_interval_s=POLL_INTERVAL_DEFAULT_S
+            )  # unreachable — _fail exits; keeps the swallow gate honest
         device_code = info["device_code"]
         user_code = info["user_code"]
         verification_url = info.get("verification_url", "https://www.google.com/device")
         interval = int(info.get("interval", POLL_INTERVAL_DEFAULT_S))
-        return device_code, user_code, verification_url, interval
+        return DeviceFlowAuthorization(device_code, user_code, verification_url, interval)
 
 
 async def _poll_for_id_token(client_id: str, client_secret: str, device_code: str, interval: int) -> str:
@@ -351,7 +368,9 @@ async def login(state_file: Path) -> None:
     await wait_for_server(FRONTEND_URL, "frontend")
     print(f"Session state will be saved to: {state_file}")
 
-    device_code, user_code, verification_url, interval = await _start_device_flow(client_id, client_secret)
+    flow = await _start_device_flow(client_id, client_secret)
+    device_code, user_code = flow.device_code, flow.user_code
+    verification_url, interval = flow.verification_url, flow.poll_interval_s
 
     print(f"1) Open {verification_url} in any browser")
     print(f"2) Enter code: {user_code}")
@@ -492,3 +511,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

@@ -569,7 +569,7 @@ class DerivedNode(Node[T], Generic[T]):
         """
         try:
             return await self.to_json()
-        # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+        # lucidlint: ignore broad-except to_json failure degrades to an error-result dict so the attempt still persists
         except Exception as e:
             logger.debug(
                 "%s: to_json failed; persisting an error result for status %r: %s",
@@ -825,3 +825,4 @@ class DerivedNode(Node[T], Generic[T]):
     @staticmethod
     @abstractmethod
     def compute(*dep_attempts: Attempt) -> Attempt[T]: ...
+

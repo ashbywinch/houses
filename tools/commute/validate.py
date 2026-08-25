@@ -206,9 +206,16 @@ def validate(
     return issues
 
 
-# lucidlint: ignore record-shape (controls, missing) resolve pair — a NamedTuple is ceremony for a local step
-def resolve_controls(names: list[str]) -> tuple[list[StationControl], list[str]]:
-    """Resolve station names against stations.csv; returns (controls, missing)."""
+@dataclass(frozen=True)
+class ResolvedControls:
+    """Control stations resolved against stations.csv, plus any names it lacks."""
+
+    controls: list[StationControl]
+    missing: list[str]
+
+
+def resolve_controls(names: list[str]) -> ResolvedControls:
+    """Resolve station names against stations.csv."""
 
     points: list[StationControl] = []
     missing: list[str] = []
@@ -218,7 +225,7 @@ def resolve_controls(names: list[str]) -> tuple[list[StationControl], list[str]]
             missing.append(name)
         else:
             points.append(StationControl(name=st.name, point=GeoPoint(st.location.lat, st.location.lon)))
-    return points, missing
+    return ResolvedControls(points, missing)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -248,9 +255,9 @@ def main(argv: list[str] | None = None) -> int:
     payload = json.loads(searches_path.read_text())
     kept = [r for r in shed["stations"] if r["kept"]]
 
-    positive, missing_pos = resolve_controls(POSITIVE_TOWNS)
-    negative, missing_neg = resolve_controls(NEGATIVE_TOWNS)
-    missing = [(name, "positive") for name in missing_pos] + [(name, "negative") for name in missing_neg]
+    positive = resolve_controls(POSITIVE_TOWNS)
+    negative = resolve_controls(NEGATIVE_TOWNS)
+    missing = [(name, "positive") for name in positive.missing] + [(name, "negative") for name in negative.missing]
 
     issues = validate(
         payload,
@@ -258,8 +265,8 @@ def main(argv: list[str] | None = None) -> int:
         ValidationOptions(
             buffer_km=args.buffer_km,
             bbox=BBox(**shed["metadata"]["bbox"]),
-            positive=positive,
-            negative=negative,
+            positive=positive.controls,
+            negative=negative.controls,
         ),
     )
     for name, kind in missing:

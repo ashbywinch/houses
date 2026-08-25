@@ -195,7 +195,7 @@ class ApcoaCarParkLookup:
                             result["price"],
                         )
                         return result
-                # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+                # lucidlint: ignore broad-except one APCOA location page failure continues to the next station
                 except Exception as e:
                     logger.debug("APCOA location page failed for %s: %s", station.name, e)
                     continue
@@ -424,3 +424,4 @@ class CarParkRegistry:
         # Force reload on next query
         self._by_name = None
         self._by_crs = None
+

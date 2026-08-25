@@ -50,7 +50,7 @@ async def _push_node_update(node) -> None:
     rid = node._id.split("/")[0]
     try:
         data = await node.to_json()
-    # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+    # lucidlint: ignore broad-except a serialisation failure skips the push — the node stays queued
     except Exception:
         return
     msg = json.dumps({"type": "node_updated", "rid": rid, "node_id": node._id, "data": data})
@@ -100,3 +100,4 @@ async def _broadcaster() -> None:
         except Exception as exc:
             logger.warning("Broadcast failed for %s: %s", rid, exc)
             continue
+

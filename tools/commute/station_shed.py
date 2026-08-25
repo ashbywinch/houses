@@ -62,6 +62,14 @@ class BBox:
 
 
 @dataclass(frozen=True)
+class ImplausibleCheck:
+    """Both route durations after the physical-plausibility screen."""
+
+    dur_p: int | None
+    dur_a: int | None
+
+
+@dataclass(frozen=True)
 class Station:
     name: str
     crs: str
@@ -122,10 +130,9 @@ class Station:
                 return duration
         return None
 
-    # lucidlint: ignore record-shape (offices, dur) pair resolves per-office floors — a NamedTuple is ceremony
     def reject_implausible(
         self, offices: list[Office], dur_p: int | None, dur_a: int | None
-    ) -> tuple[int | None, int | None]:
+    ) -> ImplausibleCheck:
         """Null out durations that are physically impossible for the distance.
 
         TfL's name-origin fallback can resolve to the wrong place (observed:
@@ -140,7 +147,7 @@ class Station:
             dur_p = None
         if dur_a is not None and dur_a < floors[1]:
             dur_a = None
-        return dur_p, dur_a
+        return ImplausibleCheck(dur_p=dur_p, dur_a=dur_a)
 
     # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def record(
@@ -176,12 +183,12 @@ class Station:
             ctx.router(self, ctx.offices[0].postcode),
             ctx.router(self, ctx.offices[1].postcode),
         )
-        dur_p, dur_a = self.reject_implausible(ctx.offices, dur_p, dur_a)
-        routed = dur_p is not None or dur_a is not None
+        checked = self.reject_implausible(ctx.offices, dur_p, dur_a)
+        routed = checked.dur_p is not None or checked.dur_a is not None
         rec = self.record(
-            dur_p,
-            dur_a,
-            keep_station(inner=False, dur_p=dur_p, dur_a=dur_a, threshold=ctx.threshold),
+            checked.dur_p,
+            checked.dur_a,
+            keep_station(inner=False, dur_p=checked.dur_p, dur_a=checked.dur_a, threshold=ctx.threshold),
             routing_error=None if routed else "failed",
         )
         if ctx.delay_s:
@@ -413,11 +420,20 @@ def _write_payload(path: Path, metadata: dict, records: list[dict]) -> None:
     os.replace(tmp, path)
 
 
-def _resume_state(out_path: Path, offices):
+@dataclass(frozen=True)
+class ResumeState:
+    """The run's starting point: resumed records and metadata, or an abort exit."""
+
+    existing: list[dict] | None
+    metadata: dict | None
+    abort: int | None
+
+
+def _resume_state(out_path: Path, offices: list[Office]) -> ResumeState:
     """Load the existing shed for resuming.
 
-    Returns (stations, metadata, None) to resume, (None, None, 1) to abort on
-    a config mismatch, or (None, None, None) to start fresh (unreadable shed).
+    Returns a resumable state, an abort exit (config mismatch), or a fresh
+    start (unreadable shed).
     """
     try:
         prev = json.loads(out_path.read_text())
@@ -433,39 +449,43 @@ def _resume_state(out_path: Path, offices):
                 "use --force to rebuild",
                 file=sys.stderr,
             )
-            return None, None, 1
-        return prev["stations"], prev["metadata"], None
+            return ResumeState(None, None, 1)
+        return ResumeState(prev["stations"], prev["metadata"], None)
     except (json.JSONDecodeError, KeyError, OSError):
         logger.warning("unreadable shed at %s — starting fresh (corrupt or truncated write?)", out_path)
         print(f"{out_path} unreadable — starting fresh", file=sys.stderr)
-        return None, None, None
+        return ResumeState(None, None, None)
 
 
 
-# lucidlint: ignore record-shape (existing, metadata, abort) triple — two-tier exit idiom; a NamedTuple is ceremony
-def _resume_or_wipe(
-    out_path: Path, offices: list[Office], force: bool
-) -> tuple[list[dict] | None, dict | None, int | None]:
+def _resume_or_wipe(out_path: Path, offices: list[Office], force: bool) -> ResumeState:
     """The run's starting point: resumed records + metadata, or a fresh batch.
 
-    Returns ``(existing, metadata, abort)`` — ``abort`` is an exit code when
-    the run must stop before routing (e.g. a corrupt existing shed).
+    ``abort`` is an exit code when the run must stop before routing (e.g. a
+    corrupt existing shed).
     """
     if out_path.exists() and not force:
-        existing, metadata, abort = _resume_state(out_path, offices)
-        if abort is not None:
-            return None, None, abort
-        if existing is not None:
-            print(f"resuming from {out_path} ({len(existing or [])} stations already done)")
-        return existing, metadata, None
+        resumed = _resume_state(out_path, offices)
+        if resumed.abort is not None:
+            return ResumeState(None, None, resumed.abort)
+        if resumed.existing is not None:
+            print(f"resuming from {out_path} ({len(resumed.existing)} stations already done)")
+        return resumed
     if out_path.exists() and force:
         logger.warning("--force: wiping the existing shed at %s", out_path)
         print("--force: wiping the existing shed", file=sys.stderr)
-    return None, None, None
+    return ResumeState(None, None, None)
 
 
-# lucidlint: ignore record-shape (stations, exit) pair — two-tier exit idiom; a NamedTuple is ceremony
-def _limit_stations(stations: list[Station], limit: int, out_path: Path) -> tuple[list[Station], int | None]:
+@dataclass(frozen=True)
+class LimitedStations:
+    """The station list after --limit, or the exit code refusing a truncating run."""
+
+    stations: list[Station]
+    exit_code: int | None
+
+
+def _limit_stations(stations: list[Station], limit: int, out_path: Path) -> LimitedStations:
     """Apply --limit, refusing a run that would truncate an existing shed.
 
     A --limit run would write only the first N stations, silently truncating
@@ -481,10 +501,10 @@ def _limit_stations(stations: list[Station], limit: int, out_path: Path) -> tupl
             "use --out with a temp path for smoke tests",
             file=sys.stderr,
         )
-        return stations, 1
+        return LimitedStations(stations, 1)
     if limit:
         stations = stations[:limit]
-    return stations, None
+    return LimitedStations(stations, None)
 
 
 async def run(argv: list[str] | None = None) -> int:
@@ -499,20 +519,21 @@ async def run(argv: list[str] | None = None) -> int:
 
     out_path = Path(args.out)
     offices = await _geocode_offices()
-    existing, metadata, abort = _resume_or_wipe(out_path, offices, args.force)
-    if abort is not None:
-        return abort
+    resume = _resume_or_wipe(out_path, offices, args.force)
+    if resume.abort is not None:
+        return resume.abort
 
     stations = load_stations(args.csv)
-    stations, limit_exit = _limit_stations(stations, args.limit, out_path)
-    if limit_exit is not None:
-        return limit_exit
+    limited = _limit_stations(stations, args.limit, out_path)
+    if limited.exit_code is not None:
+        return limited.exit_code
+    stations = limited.stations
 
     bbox = BBox(**DEFAULT_BBOX)
     expected = sum(1 for st in stations if bbox.contains(st.lat, st.lon))
     # Always rebuild from current constants; preserve only the batch-start
     # timestamp across resumes (a resume must never keep outdated settings).
-    generated_at = metadata["generated_at"] if metadata else datetime.now(UTC).isoformat()
+    generated_at = resume.metadata["generated_at"] if resume.metadata else datetime.now(UTC).isoformat()
     metadata = build_metadata(offices, expected, generated_at)
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
@@ -521,7 +542,7 @@ async def run(argv: list[str] | None = None) -> int:
             _write_payload(out_path, metadata, records)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    prev_count = len(existing) if existing is not None else 0
+    prev_count = len(resume.existing) if resume.existing is not None else 0
     started = time.monotonic()
     records = await build_shed(
         stations,
@@ -533,12 +554,12 @@ async def run(argv: list[str] | None = None) -> int:
             router=Station.route_duration,
             delay_s=args.delay,
         ),
-        existing_records=existing,
+        existing_records=resume.existing,
         checkpoint=_checkpoint,
     )
     elapsed = time.monotonic() - started
 
-    if is_complete(existing, records, metadata.get("expected_stations", len(records))):
+    if is_complete(resume.existing, records, metadata.get("expected_stations", len(records))):
         logger.warning(
             "shed already complete (%d stations) — no stations to process; use --force to re-run", len(records)
         )

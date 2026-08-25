@@ -441,7 +441,7 @@ async def _geocode_postcode(postcode: str, *, services: Any | None = None) -> At
                 return Attempt.impossible("postcode not found (404)")
             logger.warning("Geocode HTTP error for %s: %s", key, e)
             return Attempt.impossible(f"HTTP {e.response.status_code}")
-        # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+        # lucidlint: ignore broad-except unexpected geocode failure logs the key and returns Attempt.impossible
         except Exception:
             logger.exception("Failed to geocode postcode: %s", key)
             return Attempt.impossible("unexpected error")
@@ -594,4 +594,5 @@ class WalkabilityFns:
     walk_duration: Callable | None = None
     reverse_geocode: Callable | None = None
     nearby_amenities: Callable | None = None
+
 

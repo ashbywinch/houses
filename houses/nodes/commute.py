@@ -334,7 +334,7 @@ class CommuteSelectorNode(DerivedNode[Commute]):
                 if isinstance(value, dict) and "_details" in value:
                     value["details"] = value.pop("_details")
                 result["value"] = value
-            # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+            # lucidlint: ignore broad-except serialization failure nulls value; node still succeeds
             except Exception:
                 logger.exception("Failed to serialize commute value to JSON")
                 result["value"] = None
@@ -447,3 +447,4 @@ class MergeRailFareNode(DerivedNode[Commute]):
 
         merged = replace(val, daily_cost=total, _details=new_details)
         return Attempt.succeeded(merged)
+

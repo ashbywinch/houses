@@ -928,11 +928,19 @@ def _validate_committed(out_dir: Path) -> int:
     return 0
 
 
-# lucidlint: ignore record-shape (destinations, threshold, region) triple — two-tier exit idiom; NamedTuple is ceremony
+@dataclass(frozen=True)
+class DestinationConfig:
+    """The loaded drive destinations with the derived shared threshold and region radius."""
+
+    destinations: list[DriveDestination]
+    threshold_min: Quantity
+    region_km: Quantity
+
+
 def _load_destinations(
     config_path: Path, threshold_override_min: int, region_override_km: float
-) -> tuple[list[DriveDestination], Quantity, Quantity] | int:
-    """Config → (destinations, shared threshold, region radius); int exit on failure.
+) -> DestinationConfig | int:
+    """Config → DestinationConfig(destinations, shared threshold, region radius); int exit on failure.
 
     ``threshold_override_min`` (CLI --threshold-min) overrides the config's
     DEFAULT threshold for every destination without an explicit override, so
@@ -956,7 +964,7 @@ def _load_destinations(
         region_km = region_override_km * KM
     else:
         region_km = max(d.threshold_min for d in destinations).to("hour") * (REGION_MULTIPLIER * MINUTES_PER_HOUR * KMH)
-    return destinations, threshold_min, region_km
+    return DestinationConfig(destinations, threshold_min, region_km)
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
@@ -990,7 +998,14 @@ def _expected_signature(
     )
 
 
-# lucidlint: ignore record-shape (raw, exit) reuse pair — two-tier exit idiom; a NamedTuple is ceremony
+@dataclass(frozen=True)
+class RawPayloadResult:
+    """A raw matrix payload when produced or reused, else the exit code aborting the run."""
+
+    raw: dict | None
+    exit_code: int | None
+
+
 def _reuse_raw(
     args,
     destinations: list[DriveDestination],
@@ -998,21 +1013,21 @@ def _reuse_raw(
     *,
     threshold_min,
     region_km,
-) -> tuple[dict | None, int | None]:
+) -> RawPayloadResult:
     """Decide whether the committed raw payload can be reused offline.
 
-    Returns ``(raw, exit_code)``: ``raw`` is the reused payload when the stored
-    signature matches; ``exit_code`` is non-None when the stored payload is
-    unreadable in a way that must abort the run.
+    ``raw`` is the reused payload when the stored signature matches;
+    ``exit_code`` is non-None when the stored payload is unreadable in a way
+    that must abort the run.
     """
     raw_path = Path(args.out_dir) / RAW_FILENAME
     if not raw_path.exists() or args.force:
-        return None, None
+        return RawPayloadResult(None, None)
     prev = _load_raw(raw_path)
     if prev is None:
         print("The saved drive map data is unreadable — regenerating it.", file=sys.stderr)
         logger.warning("%s unreadable (corrupt or truncated write?) — regenerating", raw_path)
-        return None, None
+        return RawPayloadResult(None, None)
     try:
         prev_signature = config_signature(prev)
         if coords is not None:
@@ -1029,20 +1044,19 @@ def _reuse_raw(
             destinations, coords_by_label, threshold_min=threshold_min, region_km=region_km, cell_km=args.cell_km
         )
     except (KeyError, TypeError) as e:
-        return None, _fail(
+        return RawPayloadResult(None, _fail(
             "The saved commute map data is unreadable — rebuild it from scratch with "
             "'make commute-drive FORCE=1'.",
             f"unreadable raw payload {raw_path}: {e}",
-        )
+        ))
     if prev_signature == expected:
         print(f"reusing {raw_path} ({len(prev['destinations'])} destination(s), offline)")
-        return prev, None
+        return RawPayloadResult(prev, None)
     print("The commute settings changed — regenerating the drive map data.", file=sys.stderr)
     logger.warning("config mismatch on %s — regenerating the raw payload", raw_path)
-    return None, None
+    return RawPayloadResult(None, None)
 
 
-# lucidlint: ignore record-shape (raw, exit) fetch pair — two-tier exit idiom; a NamedTuple is ceremony
 async def _fetch_raw(
     destinations: list[DriveDestination],
     coords: list[GeoPoint],
@@ -1050,10 +1064,10 @@ async def _fetch_raw(
     cell_km: Quantity,
     region_km: Quantity,
     key: str,
-) -> tuple[dict | None, int | None]:
+) -> RawPayloadResult:
     """Run the ORS matrix batch; auth/transport failures become two-tier exits."""
     if not key:
-        return None, _fail(
+        return RawPayloadResult(None, _fail(
             user_message=(
                 "The commute map can't be generated without the routing API key — add it to your environment "
                 "configuration and try again."
@@ -1062,7 +1076,7 @@ async def _fetch_raw(
                 "HEIGIT_API_KEY unset — set it in .env "
                 "(it populates settings.ors_api_key, the OpenRouteService key)"
             ),
-        )
+        ))
     try:
         raw = await build_raw(
             destinations,
@@ -1073,14 +1087,14 @@ async def _fetch_raw(
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
             # auth failures never fix themselves by retrying
-            return None, _fail(
+            return RawPayloadResult(None, _fail(
                 "The commute map service rejected the routing key — check it and try again.",
                 f"ORS auth failed ({e.response.status_code}): {e}",
-            )
-        return None, _fail(
+            ))
+        return RawPayloadResult(None, _fail(
             "The commute map service didn't respond — try again in a minute.",
             f"ORS matrix batch failed: {e}",
-        )
+        ))
     except (
         httpx.RequestError,
         httpx.TimeoutException,
@@ -1090,11 +1104,11 @@ async def _fetch_raw(
     ) as e:
         # a 200 with a malformed body (gateway HTML, truncated response)
         # raises from resp.json()/parse_durations, not from httpx
-        return None, _fail(
+        return RawPayloadResult(None, _fail(
             "The commute map service didn't respond — try again in a minute.",
             f"ORS matrix batch failed: {e}",
-        )
-    return raw, None
+        ))
+    return RawPayloadResult(raw, None)
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
@@ -1198,23 +1212,23 @@ async def run(argv: list[str] | None = None, *, geocoder=None, ors_key: str | No
     loaded = _load_destinations(Path(args.config), args.threshold_min, args.region_km)
     if isinstance(loaded, int):
         return loaded
-    destinations, threshold_min, region_km = loaded
     generated_at = datetime.now(UTC).isoformat()
 
     if geocoder is None:
         geocoder = _geocode
-    coords, geocode_error = await _geocode_destinations(geocoder, destinations)
+    coords, geocode_error = await _geocode_destinations(geocoder, loaded.destinations)
 
-    raw, reuse_exit = _reuse_raw(
+    reused = _reuse_raw(
         args,
-        destinations,
+        loaded.destinations,
         coords,
-        threshold_min=threshold_min,
-        region_km=region_km,
+        threshold_min=loaded.threshold_min,
+        region_km=loaded.region_km,
     )
-    if reuse_exit is not None:
-        return reuse_exit
+    if reused.exit_code is not None:
+        return reused.exit_code
 
+    raw = reused.raw
     if raw is None:
         if coords is None:
             # regeneration is actually needed — the deferred geocoding error
@@ -1224,16 +1238,17 @@ async def run(argv: list[str] | None = None, *, geocoder=None, ors_key: str | No
                 f"geocoding failed for a drive destination: {geocode_error}",
             )
         api_key = ors_key if ors_key is not None else settings.ors_api_key
-        raw, fetch_exit = await _fetch_raw(
-            destinations,
+        fetched = await _fetch_raw(
+            loaded.destinations,
             coords,
             cell_km=args.cell_km * KM,
-            region_km=region_km,
+            region_km=loaded.region_km,
             key=api_key,
         )
-        if fetch_exit is not None:
-            return fetch_exit
-        assert raw is not None  # fetch_exit None ⇔ the batch succeeded
+        if fetched.exit_code is not None:
+            return fetched.exit_code
+        raw = fetched.raw
+        assert raw is not None  # exit_code None ⇔ the batch succeeded
         _warn_sheds_touching_region_edge(raw)
 
     searches, searches_exit = _build_searches_or_fail(

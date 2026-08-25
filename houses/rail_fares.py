@@ -62,7 +62,7 @@ class RailFareRegistry:
                 if origin and dest and cost_str:
                     try:
                         fares[frozenset({origin, dest})] = Money(cost_str, "GBP")
-                    # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+                    # lucidlint: ignore broad-except one malformed fare row is skipped; the remaining rows still load
                     except Exception:
                         continue
         self._fares_by_pair = fares
@@ -93,3 +93,4 @@ class RailFareRegistry:
         if not self._fares_by_pair:
             return None
         return self._fares_by_pair.get(frozenset({origin.crs, destination.crs}))
+

@@ -64,7 +64,7 @@ async def _get_drive_minutes_from_location(origin_coords, station_name: str) -> 
             data = resp.json()
             set_cached("POST", ORS_DIRECTIONS_URL, None, json.dumps(body, sort_keys=True), data)
             return round(data["routes"][0]["summary"]["duration"] / SECONDS_PER_MINUTE)
-    # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+    # lucidlint: ignore broad-except ORS park-and-ride lookup logs and falls back
     except Exception:
         logger.warning(
             "Park-and-ride ORS lookup failed for %s \u2192 %s (url=%s)",
@@ -133,3 +133,4 @@ async def apply_park_and_ride_to_journeys(
         old_duration = journey.get("duration", 0)
         journey["duration"] = old_duration - walk_duration + drive_minutes
     return data
+

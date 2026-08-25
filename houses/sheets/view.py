@@ -305,7 +305,7 @@ class View:
                             }
                         )
                     break
-        # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+        # lucidlint: ignore broad-except column-group clear failure logs and returns the delete requests already built
         except Exception as exc:
             logger.warning("Failed to clear column groups: %s", exc)
             return deletes
@@ -395,3 +395,4 @@ def sync_view_formulas(spreadsheet: gspread.Spreadsheet) -> None:
     can use ``from houses.sheets import sync_view_formulas`` unchanged.
     """
     View(spreadsheet).sync()
+

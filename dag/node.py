@@ -95,7 +95,7 @@ class PersistedNodeMixin(Generic[T]):
                 ):
                     value["_details"] = value.pop("details")
                 val = self._adapter.validate_python(value)
-            # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+            # lucidlint: ignore broad-except validation failure → Attempt.impossible carrying the reason
             except Exception as exc:
                 return Attempt.impossible(f"validation error: {exc}")
             return Attempt.succeeded(val)
@@ -324,3 +324,4 @@ Node.__mul__ = _node_mul
 Node.__rmul__ = _node_mul  # same — multiplication is commutative
 Node.__truediv__ = _node_div
 Node.__rtruediv__ = lambda self, other: _to_expr(other) / _to_expr(self)
+

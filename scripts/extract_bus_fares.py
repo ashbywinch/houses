@@ -305,7 +305,7 @@ def main():
                 logger.info("Extracted data for %s, checkpoint saved", display_name)
             else:
                 logger.info("No data extracted for %s (no station-serving routes)", display_name)
-        # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+        # lucidlint: ignore broad-except one operator block failure logs and continues with the next
         except Exception as e:
             logger.error("Failed to extract for %s: %s", display_name, e)
             continue
@@ -322,3 +322,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

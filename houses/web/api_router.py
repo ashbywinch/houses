@@ -690,7 +690,7 @@ def _parse_money(v: object, *, whole_pounds: bool = False, field: str = "amount"
             raise ValueError(f"money value missing 'amount': {v!r}")
         try:
             m = Money(v["amount"], v.get("currency", "GBP"))
-        # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+        # lucidlint: ignore broad-except money coercion re-raises as ValueError with the value
         except Exception as e:
             raise ValueError(f"invalid money value {v!r}: {e}") from e
     else:
@@ -1038,3 +1038,4 @@ async def debug_memory():
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         "top_types": [{"type": t, "count": c} for t, c in top],
     }
+

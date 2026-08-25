@@ -13,6 +13,8 @@ component); each loop is a valid single-polygon search.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from houses.geopoint import GeoPoint
 from tools.commute.tile import Grid, GridCell, rasterize
 
@@ -28,12 +30,20 @@ def union_cells(stations: list[GeoPoint], buffer_km: float, grid: Grid) -> set[G
     return rasterize(stations, buffer_km, grid)
 
 
-# lucidlint: ignore record-shape (start, end) boundary segments — GeoPoint is the record; a wrapper is ceremony
+# lucidlint: ignore class-module small private helper — Segment is internal to the union tracer
+@dataclass(frozen=True)
+class Segment:
+    """One boundary edge of the union: from vertex ``start`` to ``end``."""
+
+    start: GeoPoint
+    end: GeoPoint
+
+
 def _boundary_segments(
     cells: set[GridCell], grid: Grid
-) -> list[tuple[GeoPoint, GeoPoint]]:
-    """Unshared cell sides — each is a boundary segment (lat, lon) -> (lat, lon)."""
-    segs: list[tuple[GeoPoint, GeoPoint]] = []
+) -> list[Segment]:
+    """Unshared cell sides — each is a boundary segment between two corners."""
+    segs: list[Segment] = []
     bbox = grid.bbox
     for cell in cells:
         r, c = cell.row, cell.col
@@ -46,7 +56,7 @@ def _boundary_segments(
         lon0 = bbox.lon_min + c * grid.lon_deg
         lon1 = bbox.lon_min + (c + 1) * grid.lon_deg
         segs.extend(
-            (a, b)
+            Segment(a, b)
             for (nr, nc), a, b in (
                 ((r - 1, c), GeoPoint(lat0, lon0), GeoPoint(lat0, lon1)),  # north side
                 ((r + 1, c), GeoPoint(lat1, lon0), GeoPoint(lat1, lon1)),  # south side
@@ -69,17 +79,16 @@ def _direction(a: GeoPoint, b: GeoPoint) -> tuple[int, int]:
     dlon = 1 if b.lon > a.lon else -1 if b.lon < a.lon else 0
     return (dlat, dlon)
 
-# lucidlint: ignore record-shape (start, end) segment pairs — GeoPoint is the record; a wrapper is ceremony
-def _segment_index(segs: list[tuple[GeoPoint, GeoPoint]]) -> dict[GeoPoint, list[tuple[GeoPoint, int]]]:
+def _segment_index(segs: list[Segment]) -> dict[GeoPoint, list[tuple[GeoPoint, int]]]:
     """Segment adjacency index: every vertex -> [(neighbour, segment id), ...].
 
     Undirected: each segment contributes both directions, so the walk can
     continue through segment ENDS as well as starts.
     """
     by_start: dict[GeoPoint, list[tuple[GeoPoint, int]]] = {}
-    for i, (a, b) in enumerate(segs):
-        by_start.setdefault(a, []).append((b, i))
-        by_start.setdefault(b, []).append((a, i))
+    for i, seg in enumerate(segs):
+        by_start.setdefault(seg.start, []).append((seg.end, i))
+        by_start.setdefault(seg.end, []).append((seg.start, i))
     return by_start
 
 
