@@ -9,9 +9,9 @@ from pint import Quantity
 from dag.attempt import Attempt
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
-from houses.nodes.transit import TflTransitNode
+from houses.nodes.transit import RouteOptions, TflTransitNode, TransitOptions
 
 
 class TestTransitNode:
@@ -22,10 +22,17 @@ class TestTransitNode:
         loc = UserInputNode[GeoPoint]("loc", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi", PlaceOfInterest)
 
-        no_bus = TflTransitNode("t1nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
-        with_bus = TflTransitNode("t1wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
+        no_bus = TflTransitNode(
+            "t1nb", options=TransitOptions(best_location=loc, poi=poi, has_car=False, allow_bus=False)
+        )
+        with_bus = TflTransitNode(
+            "t1wb", options=TransitOptions(best_location=loc, poi=poi, has_car=False, allow_bus=True)
+        )
         node = TransitNode(
-            "tn", best_location=loc, poi=poi, has_car=False, no_bus_node=no_bus, with_bus_node=with_bus
+            "tn",
+            options=TransitOptions(
+                best_location=loc, poi=poi, has_car=False, no_bus_node=no_bus, with_bus_node=with_bus
+            ),
         )
         a = await node.attempt()
         assert a.pending
@@ -39,10 +46,17 @@ class TestTransitNode:
 
         loc.push(GeoPoint(51.5, -0.1), "test")
         await flush_processor()
-        no_bus = TflTransitNode("t2nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
-        with_bus = TflTransitNode("t2wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
+        no_bus = TflTransitNode(
+            "t2nb", options=TransitOptions(best_location=loc, poi=poi, has_car=False, allow_bus=False)
+        )
+        with_bus = TflTransitNode(
+            "t2wb", options=TransitOptions(best_location=loc, poi=poi, has_car=False, allow_bus=True)
+        )
         node = TransitNode(
-            "tn2", best_location=loc, poi=poi, has_car=False, no_bus_node=no_bus, with_bus_node=with_bus
+            "tn2",
+            options=TransitOptions(
+                best_location=loc, poi=poi, has_car=False, no_bus_node=no_bus, with_bus_node=with_bus
+            ),
         )
         a = await node.attempt()
         assert a.pending
@@ -52,7 +66,7 @@ class TestTransitNode:
         """A raw TfL error must never reach the UI: the internal message
         keeps it for logs, display_message is the friendly leaf (walkthrough
         run 3 — a raw 'HTTP 404: {$type: ...}' blob was rendered)."""
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
         from houses.model.domain import Commute, PlaceOfInterest
         from houses.nodes.transit import TransitNode
 
@@ -61,9 +75,14 @@ class TestTransitNode:
         nb = UserInputNode[Commute]("nb_msg", Commute)
         wb = UserInputNode[Commute]("wb_msg", Commute)
         node = TransitNode(
-            "tn_msg", best_location=loc, poi=poi, has_car=False,
-            no_bus_node=nb,  # type: ignore[arg-type]  # placeholders — compute() is called directly
-            with_bus_node=wb,  # type: ignore[arg-type]
+            "tn_msg",
+            options=TransitOptions(
+                best_location=loc,
+                poi=poi,
+                has_car=False,
+                no_bus_node=nb,  # type: ignore[arg-type]  # params are annotated TflTransitNode but the runtime only needs a Node dep — compute() is driven directly with canned Attempts here, so UserInputNode placeholders are the test's contract
+                with_bus_node=wb,  # type: ignore[arg-type]  # annotated TflTransitNode but only a Node dep is needed at runtime — compute() is called directly with canned Attempts
+            ),
         )
         raw = "HTTP 404: {'$type': 'Tfl.Api.Presentation.Entities.ApiError', 'timestampUtc': '...'}"
         a = await node.compute(
@@ -110,15 +129,21 @@ class TestTransitNodeJson:
         loc = UserInputNode[GeoPoint]("loc_tj", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi_tj", PlaceOfInterest)
 
-        no_bus = TflTransitNode("tj_nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
-        with_bus = TflTransitNode("tj_wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
+        no_bus = TflTransitNode(
+            "tj_nb", options=TransitOptions(best_location=loc, poi=poi, has_car=False, allow_bus=False)
+        )
+        with_bus = TflTransitNode(
+            "tj_wb", options=TransitOptions(best_location=loc, poi=poi, has_car=False, allow_bus=True)
+        )
         node = TransitNode(
             "tn_json",
-            best_location=loc,
-            poi=poi,
-            has_car=False,
-            no_bus_node=no_bus,
-            with_bus_node=with_bus,
+            options=TransitOptions(
+                best_location=loc,
+                poi=poi,
+                has_car=False,
+                no_bus_node=no_bus,
+                with_bus_node=with_bus,
+            ),
         )
         j = await node.to_json()
         assert "succeeded" in j, "Missing succeeded field"
@@ -138,22 +163,28 @@ class TestTransitNodeJson:
         This relies on UserInputNode.build_provenance() including value,
         and Provenance.to_dict() serializing it.
         """
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
         from houses.model.domain import PlaceOfInterest
         from houses.nodes.transit import TransitNode
 
         loc = UserInputNode[GeoPoint]("loc_ti", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("poi_ti", PlaceOfInterest)
 
-        no_bus = TflTransitNode("ti_nb", best_location=loc, poi=poi, has_car=False, allow_bus=False)
-        with_bus = TflTransitNode("ti_wb", best_location=loc, poi=poi, has_car=False, allow_bus=True)
+        no_bus = TflTransitNode(
+            "ti_nb", options=TransitOptions(best_location=loc, poi=poi, has_car=False, allow_bus=False)
+        )
+        with_bus = TflTransitNode(
+            "ti_wb", options=TransitOptions(best_location=loc, poi=poi, has_car=False, allow_bus=True)
+        )
         TransitNode(
             "tn_inputs",
-            best_location=loc,
-            poi=poi,
-            has_car=False,
-            no_bus_node=no_bus,
-            with_bus_node=with_bus,
+            options=TransitOptions(
+                best_location=loc,
+                poi=poi,
+                has_car=False,
+                no_bus_node=no_bus,
+                with_bus_node=with_bus,
+            ),
         )
 
 
@@ -166,7 +197,7 @@ class TestTransitNodeNoRoute:
             person=Person(name="", has_car=False),
             label=label,
             destination=PlaceOfInterest(label=label, address="RG12 8YA"),
-            duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+            duration=Quantity(0, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="transit",
             _details=(),
@@ -178,7 +209,7 @@ class TestTransitNodeNoRoute:
             person=Person(name="", has_car=False),
             label="Route",
             destination=PlaceOfInterest(label="Route", address="SW1V 2QQ"),
-            duration=Quantity(minutes, "minute"),  # type: ignore[arg-type]
+            duration=Quantity(minutes, "minute"),
             daily_cost=Money("5", "GBP"),
             mode="transit",
             _details=(),
@@ -187,7 +218,7 @@ class TestTransitNodeNoRoute:
     async def _pick(self, has_car, no_bus, with_bus):
         from typing import cast
 
-        from houses.nodes.transit import TflTransitNode, TransitNode
+        from houses.nodes.transit import TflTransitNode, TransitNode, TransitOptions
 
         def _dummy(nid: str) -> TflTransitNode:
             return cast(TflTransitNode, UserInputNode[Commute](nid, Commute))
@@ -195,9 +226,14 @@ class TestTransitNodeNoRoute:
         loc = UserInputNode[GeoPoint]("nrl_loc", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("nrl_poi", PlaceOfInterest)
         node = TransitNode(
-            "nrl", best_location=loc, poi=poi, has_car=has_car,
-            no_bus_node=_dummy("nrl_nb"),
-            with_bus_node=_dummy("nrl_wb"),
+            "nrl",
+            options=TransitOptions(
+                best_location=loc,
+                poi=poi,
+                has_car=has_car,
+                no_bus_node=_dummy("nrl_nb"),
+                with_bus_node=_dummy("nrl_wb"),
+            ),
         )
         return await node.compute(
             Attempt.succeeded(GeoPoint(51.5, -0.1)),
@@ -215,7 +251,7 @@ class TestTransitNodeNoRoute:
 
         loc = UserInputNode[GeoPoint]("nc_loc", GeoPoint)
         poi = UserInputNode[PlaceOfInterest]("nc_poi", PlaceOfInterest)
-        node = DriveNode("nc", best_location=loc, poi=poi, has_car=False)
+        node = DriveNode("nc", options=RouteOptions(best_location=loc, poi=poi, has_car=False))
         a = await node.compute(
             Attempt.succeeded(GeoPoint(51.5, -0.1)),
             Attempt.succeeded(PlaceOfInterest(label="X", address="SW1V 2QQ")),
@@ -288,9 +324,9 @@ class TestTflClientNoRoute:
 
     @pytest.mark.asyncio
     async def test_process_data_without_journey_is_infeasible_not_impossible(self):
-        from houses.tfl_client import TflClient
+        from houses.tfl_client import TflClient, TflRouteOptions
 
-        client = TflClient("SW1V 2QQ", "RG12 8YA", "Bracknell", park_and_ride=True)
+        client = TflClient("SW1V 2QQ", "RG12 8YA", "Bracknell", options=TflRouteOptions(park_and_ride=True))
         a = await client._process_data({})
         assert a.succeeded, f"no-journey answer must be succeeded, got: {a.status}: {a.error}"
         _v = a.value_or_none()
@@ -304,7 +340,7 @@ class TestTflClientNoRoute:
         answer — the client must yield succeeded-infeasible, never an
         impossible attempt that poisons the transit branch."""
         from dag.http_error import HttpError
-        from houses.tfl_client import TflClient
+        from houses.tfl_client import TflClient, TflRouteOptions
 
         async def raise_404(url, params):
             raise HttpError(
@@ -314,7 +350,10 @@ class TestTflClientNoRoute:
             )
 
         client = TflClient(
-            "51.5788804,-0.7648387", "RG12 8YA", "Bracknell", park_and_ride=True, cached_call=raise_404
+            "51.5788804,-0.7648387",
+            "RG12 8YA",
+            "Bracknell",
+            options=TflRouteOptions(park_and_ride=True, cached_call=raise_404),
         )
         data = await client._fetch_data()
         assert data is None
@@ -336,12 +375,12 @@ class TestTflClientNoRoute:
         import pytest
 
         from dag.http_error import HttpError
-        from houses.tfl_client import TflClient
+        from houses.tfl_client import TflClient, TflRouteOptions
 
         async def raise_409(url, params):
             raise HttpError(409, message="route planner unavailable", body="{}")
 
-        client = TflClient("SW1V 2QQ", "RG12 8YA", "Bracknell", cached_call=raise_409)
+        client = TflClient("SW1V 2QQ", "RG12 8YA", "Bracknell", options=TflRouteOptions(cached_call=raise_409))
         with pytest.raises(HttpError) as excinfo:
             await client._fetch_data()
         assert excinfo.value.status == 409
@@ -352,15 +391,15 @@ class TestTflClientNoRoute:
         after the 404 conversion) and with_bus succeeds — TransitNode must
         pick with_bus.  An impossible no_bus would short-circuit refresh
         before compute and poison the branch."""
-        from houses.nodes.transit import TflTransitNode, TransitNode
-        from houses.tfl_client import TflClient
+        from houses.nodes.transit import TflTransitNode, TransitNode, TransitOptions
+        from houses.tfl_client import TflClient, TflRouteOptions
 
         def _infeasible():
             return Commute(
                 person=Person(name="", has_car=True),
                 label="no route",
                 destination=PlaceOfInterest(label="Bracknell", address="RG12 8YA"),
-                duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+                duration=Quantity(0, "minute"),
                 daily_cost=Money("0", "GBP"),
                 mode="transit",
                 _details=(),
@@ -373,7 +412,7 @@ class TestTflClientNoRoute:
                 person=Person(name="", has_car=True),
                 label="Bracknell",
                 destination=PlaceOfInterest(label="Bracknell", address="RG12 8YA"),
-                duration=Quantity(minutes, "minute"),  # type: ignore[arg-type]
+                duration=Quantity(minutes, "minute"),
                 daily_cost=Money("5", "GBP"),
                 mode="transit",
                 _details=(),
@@ -389,22 +428,40 @@ class TestTflClientNoRoute:
         loc.push(GeoPoint(51.5, -0.1), "test")
         poi.push(PlaceOfInterest(label="Bracknell", address="RG12 8YA"), "test")
 
-        def make_client(origin, dest, label, park_and_ride=False, allow_bus=False):
-            return TflClient(origin, dest, label, park_and_ride=park_and_ride, allow_bus=allow_bus, plan_override=plan)
+        def make_client(origin, dest, label, options=None):
+            opts = options or TflRouteOptions()
+            return TflClient(
+                origin,
+                dest,
+                label,
+                options=TflRouteOptions(
+                    park_and_ride=opts.park_and_ride,
+                    allow_bus=opts.allow_bus,
+                    plan_override=plan,
+                ),
+            )
 
         no_bus = TflTransitNode(
-            "t404_nb", best_location=loc, poi=poi, has_car=True, allow_bus=False, client_factory=make_client
+            "t404_nb",
+            options=TransitOptions(
+                best_location=loc, poi=poi, has_car=True, allow_bus=False, client_factory=make_client
+            ),
         )
         with_bus = TflTransitNode(
-            "t404_wb", best_location=loc, poi=poi, has_car=True, allow_bus=True, client_factory=make_client
+            "t404_wb",
+            options=TransitOptions(
+                best_location=loc, poi=poi, has_car=True, allow_bus=True, client_factory=make_client
+            ),
         )
         node = TransitNode(
             "t404",
-            best_location=loc,
-            poi=poi,
-            has_car=True,
-            no_bus_node=no_bus,
-            with_bus_node=with_bus,
+            options=TransitOptions(
+                best_location=loc,
+                poi=poi,
+                has_car=True,
+                no_bus_node=no_bus,
+                with_bus_node=with_bus,
+            ),
         )
 
         await flush_processor()

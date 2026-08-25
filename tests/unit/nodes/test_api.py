@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pytest
 
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from tests.unit.conftest import flush_all
 
 
@@ -26,16 +26,17 @@ class TestPropertyApi:
     def _setup(self):
         from fastapi.testclient import TestClient
 
-        from houses.property_registry import _registry
         from houses.server import app
+        from houses.services_provider import get_services
 
-        _registry.clear()
+        registry = get_services().property_registry
+        registry.clear()
         client = TestClient(app)
         _inject_session(client)
-        return client, _registry
+        return client, registry
 
     def test_get_property_returns_json(self):
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
 
         client, reg = self._setup()
         prop = PropertyNodes("prop123")
@@ -44,7 +45,7 @@ class TestPropertyApi:
         prop.user_entered_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
         prop.corrected_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
         prop.rightmove_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
-        reg["prop123"] = prop
+        reg.register("prop123", prop)
         flush_all()
 
         resp = client.get("/api/properties/prop123")
@@ -57,12 +58,12 @@ class TestPropertyApi:
     def test_patch_address_recomputes_best_address(self):
         """PATCH /properties/{rid}/address must surface the corrected
         address in the immediate detail refetch (the C2 edit flow)."""
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
 
         client, reg = self._setup()
         prop = PropertyNodes("prop123")
         prop.rightmove_address.push("10 High St", "Rightmove")
-        reg["prop123"] = prop
+        reg.register("prop123", prop)
         flush_all()
 
         detail_before = client.get("/api/properties/prop123/detail").json()
@@ -78,14 +79,14 @@ class TestPropertyApi:
         """The PATCH must recompute the downstream DAG (council tax, EPC)
         BEFORE responding — the frontend refetches immediately and would
         otherwise race the background cascade and show stale figures."""
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
         from houses.services_provider import get_services
 
         client, reg = self._setup()
         prop = PropertyNodes("prop123")
         prop.rightmove_address.push("10 High St", "Rightmove")
         prop.postcode.push("SW1V 2QQ", "Rightmove")
-        reg["prop123"] = prop
+        reg.register("prop123", prop)
         flush_all()
 
         from tests.helpers import FakeEPC
@@ -108,11 +109,11 @@ class TestPropertyApi:
     def test_patch_council_tax_rejects_non_bool_ignored(self):
         """`"ignored": "false"` (a string) or 1 must be a 422 — bool("false")
         is True and would silently hide the annexe."""
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
 
         client, reg = self._setup()
         prop = PropertyNodes("prop124")
-        reg["prop124"] = prop
+        reg.register("prop124", prop)
         flush_all()
 
         for bad in ("false", 1, "true", None):
@@ -124,11 +125,11 @@ class TestPropertyApi:
     def test_patch_council_tax_validates_all_fields_before_any_push(self):
         """A body with valid payers but an invalid ignored must 422
         WITHOUT persisting the payer choices (no partial updates)."""
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
 
         client, reg = self._setup()
         prop = PropertyNodes("prop127")
-        reg["prop127"] = prop
+        reg.register("prop127", prop)
         flush_all()
 
         resp = client.patch(
@@ -143,11 +144,11 @@ class TestPropertyApi:
         """The default-push guard must only fire when the node was NEVER
         set — a saved payer choice persists across PropertyNodes
         reconstruction (the persisted row loads eagerly in __init__)."""
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
 
         client, reg = self._setup()
         prop = PropertyNodes("prop125")
-        reg["prop125"] = prop
+        reg.register("prop125", prop)
         flush_all()
 
         resp = client.patch(
@@ -170,7 +171,7 @@ class TestPropertyApi:
         dicts/attrs, not direct attributes of the property."""
         from dag.scheduler import flush_processor
         from houses.model.domain import HomeCoOwner, Person, PlaceOfInterest
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
 
@@ -189,7 +190,7 @@ class TestPropertyApi:
             client, reg = self._setup()
             prop = PropertyNodes("prop126")
             prop.rightmove_address.push("1 Test St", "test")
-            reg["prop126"] = prop
+            reg.register("prop126", prop)
             await flush_processor()
 
             assert prop.commute_selectors, "a person with a POI must build commute selectors"
@@ -215,7 +216,7 @@ class TestPropertyApi:
         from dag.attempt import Attempt
         from dag.measurement import Measurement
         from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
 
@@ -240,7 +241,7 @@ class TestPropertyApi:
             prop = PropertyNodes("prop123")
             prop.rightmove_address.push("10 High St", "Rightmove")
             prop.postcode.push("SW1V 2QQ", "Rightmove")
-            reg["prop123"] = prop
+            reg.register("prop123", prop)
             flush_all()
 
             detail = client.get("/api/properties/prop123/detail").json()
@@ -271,7 +272,7 @@ class TestPropertyApi:
         from dag.measurement import Measurement
         from houses.council_tax_info import AnnexeDwelling, CouncilTaxInfo
         from houses.model.domain import HomeCoOwner, Person
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
 
@@ -298,11 +299,11 @@ class TestPropertyApi:
                 Person(
                     name="Simon",
                     has_car=True,
-                    bus_walk_penalty=Quantity(20, "minute"),  # type: ignore[arg-type]
+                    bus_walk_penalty=Quantity(20, "minute"),
                     home_co_owners=(HomeCoOwner(name="Lorena", share=50),),
                 ),
-                Person(name="Lorena", has_car=False, bus_walk_penalty=Quantity(15, "minute")),  # type: ignore[arg-type]
-                Person(name="Ashby", has_car=True, bus_walk_penalty=Quantity(10, "minute")),  # type: ignore[arg-type]
+                Person(name="Lorena", has_car=False, bus_walk_penalty=Quantity(15, "minute")),
+                Person(name="Ashby", has_car=True, bus_walk_penalty=Quantity(10, "minute")),
             )
             client, reg = self._setup()
             rid = "42345679"
@@ -313,7 +314,7 @@ class TestPropertyApi:
             prop.works_estimates.push({}, "test")
             prop.rental_income.push(Money("0", "GBP"), "test")
             prop.comment_status.push("", "test")
-            reg[rid] = prop
+            reg.register(rid, prop)
 
             flush_all()
 
@@ -370,11 +371,11 @@ class TestPropertyApi:
         assert resp.status_code == 404
 
     def test_list_properties(self):
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
 
         client, reg = self._setup()
-        reg["a"] = PropertyNodes("a")
-        reg["b"] = PropertyNodes("b")
+        reg.register("a", PropertyNodes("a"))
+        reg.register("b", PropertyNodes("b"))
 
         resp = client.get("/api/properties/all")
         assert resp.status_code == 200
@@ -403,7 +404,7 @@ class TestPropertyApi:
         still returns that property."""
         from money import Money
 
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
         from houses.property_registry import register_property
 
         client, _ = self._setup()
@@ -471,8 +472,8 @@ def _seed_property() -> str:
     without cross-class self reuse."""
     from money import Money
 
-    from houses.geo import GeoPoint
-    from houses.nodes.property import PropertyNodes
+    from houses.geopoint import GeoPoint
+    from houses.nodes.property_nodes import PropertyNodes
     from houses.property_registry import register_property
 
     rid = "42345678"
@@ -518,13 +519,14 @@ class TestProvenanceUserFriendly:
     def _setup(self):
         from fastapi.testclient import TestClient
 
-        from houses.property_registry import _registry
         from houses.server import app
+        from houses.services_provider import get_services
 
-        _registry.clear()
+        registry = get_services().property_registry
+        registry.clear()
         client = TestClient(app)
         _inject_session(client)
-        return client, _registry
+        return client, registry
 
     def _seed(self):
         client, reg = self._setup()
@@ -901,7 +903,7 @@ class TestPatchPersonApi:
         from houses.services_provider import get_services
 
         node = get_services().persons_source
-        node.push([*list(node.latest_attempt().value_or_none() or []), {"name": "Legacy", "has_car": True}], "user")  # type: ignore[arg-type]
+        node.push([*list(node.latest_attempt().value_or_none() or []), {"name": "Legacy", "has_car": True}], "user")  # type: ignore[arg-type]  # push is typed with the declared value type (list[Person]); the legacy dict entry is the behavior under test — /api/settings must match persons by name and tolerate dict rows
         resp = client.get("/api/settings")
         assert resp.status_code == 200, resp.text[:200]
 
@@ -933,7 +935,7 @@ class TestPatchPersonApi:
                 name="Ashby",
                 has_car=True,
                 email="emily.winch@gmail.com",
-                bus_walk_penalty=Quantity(10, "minute"),  # type: ignore[arg-type]
+                bus_walk_penalty=Quantity(10, "minute"),
                 works_estimate_required=True,
                 cash_contribution=Money("300000", "GBP"),
             )
@@ -1132,7 +1134,8 @@ class TestSettingsPropagationApi:
                 cash_contribution=Money("300000", "GBP"),
             ),
         ]
-        deposit_persons, total, lines = _deposit_breakdown(persons)
+        breakdown = _deposit_breakdown(persons)
+        deposit_persons, total, lines = breakdown.persons, breakdown.total, breakdown.lines
         assert deposit_persons["Simon"] == {"amount": "88500.00", "currency": "GBP"}
         assert deposit_persons["Lorena"] == {"amount": "88500.00", "currency": "GBP"}
         assert deposit_persons["Ashby"] == {"amount": "300000.00", "currency": "GBP"}
@@ -1167,7 +1170,8 @@ class TestSettingsPropagationApi:
                 cash_contribution=Money("999999", "GBP"),  # must be ignored
             ),
         ]
-        deposit_persons, total, lines = _deposit_breakdown(persons)
+        breakdown = _deposit_breakdown(persons)
+        deposit_persons, total, lines = breakdown.persons, breakdown.total, breakdown.lines
         assert "George" not in deposit_persons
         assert "George" not in [line["label"] for line in lines]
         assert total.amount == _Decimal("227000.00")
@@ -1257,8 +1261,8 @@ class TestWhatIfApi:
         from money import Money
 
         from houses.model.domain import Person
-        from houses.property_registry import _registry
         from houses.server import app
+        from houses.services_provider import get_services
 
         _push_persons(
             Person(
@@ -1272,16 +1276,17 @@ class TestWhatIfApi:
             Person(name="Lorena", has_car=False, email="lorena@example.com"),
             Person(name="Ashby", has_car=True, cash_contribution=Money("300000", "GBP")),
         )
-        _registry.clear()
+        registry = get_services().property_registry
+        registry.clear()
         client = TestClient(app)
         _inject_session(client)
-        return client, _registry
+        return client, registry
 
     def _seed(self, reg):
         from money import Money
 
-        from houses.geo import GeoPoint
-        from houses.nodes.property import PropertyNodes
+        from houses.geopoint import GeoPoint
+        from houses.nodes.property_nodes import PropertyNodes
 
         prop = PropertyNodes("whatif1")
         prop.rightmove_price.push(Money("500000", "GBP"), "test")
@@ -1295,7 +1300,7 @@ class TestWhatIfApi:
         prop.works_estimates.push({}, "test")
         prop.rental_income.push(Money("0", "GBP"), "test")
         prop.comment_status.push("", "test")
-        reg["whatif1"] = prop
+        reg.register("whatif1", prop)
         return prop
 
     def test_what_if_changes_totals_without_persisting(self):
@@ -1367,18 +1372,19 @@ class TestRegenerateApi:
     def _setup(self):
         from fastapi.testclient import TestClient
 
-        from houses.property_registry import _registry
         from houses.server import app
+        from houses.services_provider import get_services
 
-        _registry.clear()
+        registry = get_services().property_registry
+        registry.clear()
         client = TestClient(app)
-        return client, _registry
+        return client, registry
 
     def _seed(self, reg):
         from money import Money
 
-        from houses.geo import GeoPoint
-        from houses.nodes.property import PropertyNodes
+        from houses.geopoint import GeoPoint
+        from houses.nodes.property_nodes import PropertyNodes
 
         prop = PropertyNodes("77777777")
         prop.rightmove_price.push(Money("500000", "GBP"), "test")
@@ -1392,7 +1398,7 @@ class TestRegenerateApi:
         prop.works_estimates.push({}, "test")
         prop.rental_income.push(Money("0", "GBP"), "test")
         prop.comment_status.push("", "test")
-        reg["77777777"] = prop
+        reg.register("77777777", prop)
         return prop
 
     def test_requires_superuser(self):
@@ -1479,7 +1485,7 @@ class TestWorksEstimateApi:
 
     def test_patch_works_estimate_updates_value(self):
         """PATCH must update the works_estimates dict and return 200."""
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
         from houses.property_registry import register_property
 
         rid = "12345678"
@@ -1497,7 +1503,7 @@ class TestWorksEstimateApi:
 
     def test_works_estimate_rejects_pence(self):
         """Works estimates are whole pounds — pence fail fast (400)."""
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
         from houses.property_registry import register_property
 
         rid = "12345679"
@@ -1523,8 +1529,8 @@ class TestWorksEstimateApi:
         WITHOUT requiring an explicit flush."""
         from money import Money
 
-        from houses.geo import GeoPoint
-        from houses.nodes.property import PropertyNodes
+        from houses.geopoint import GeoPoint
+        from houses.nodes.property_nodes import PropertyNodes
         from houses.property_registry import register_property
 
         rid = "22345678"

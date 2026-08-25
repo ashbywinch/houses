@@ -11,10 +11,18 @@ comments table:
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from pathlib import Path
 
-from houses.config import settings
+from houses.comments import migrate_old_comments
+from houses.database import get_connection as get_app_connection
+from houses.database import init_db
+from houses.settings import settings
+
+logger = logging.getLogger(__name__)
+
+
 
 
 def _get_dag_db() -> sqlite3.Connection:
@@ -33,10 +41,9 @@ def get_property_rids(dag: sqlite3.Connection) -> list[str]:
     rows = dag.execute(
         "SELECT DISTINCT substr(node_id, 1, instr(node_id, '/') - 1) AS rid FROM node_results WHERE node_id LIKE '%/%'"
     ).fetchall()
-    rids = sorted({row["rid"] for row in rows if row["rid"]})
-    return rids
+    return sorted({row["rid"] for row in rows if row["rid"]})
 
-
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def get_old_comments(dag: sqlite3.Connection, rid: str) -> dict:
     """Read old-style comment nodes from the DAG database."""
     result: dict = {}
@@ -49,8 +56,9 @@ def get_old_comments(dag: sqlite3.Connection, rid: str) -> dict:
             try:
                 data = json.loads(row["result_json"])
                 result[field] = data
-            except (json.JSONDecodeError, TypeError):
-                pass
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.debug("corrupt comment payload for %s (skipping field): %s", field, e)
+                continue
     return result
 
 
@@ -67,8 +75,6 @@ def main() -> None:
     print(f"DAG database: {db_path}")
 
     # Initialise the comments table
-    from houses.database import get_connection as get_app_connection
-    from houses.database import init_db
 
     init_db()
     app_conn = get_app_connection()
@@ -84,7 +90,6 @@ def main() -> None:
         return
 
     # Read old comments from DAG and migrate each property
-    from houses.comments import migrate_old_comments
 
     migrated = 0
     comment_rows = 0

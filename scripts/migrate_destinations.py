@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dag.scheduler import flush_processor
 from houses.model.domain import Person, PlaceOfInterest
-from houses.services import _SETTINGS_SOURCE_CACHE
+from houses.services import SETTINGS_SOURCE_CACHE
 from houses.services_provider import get_services
 
 # POI label → new full address
@@ -31,7 +31,7 @@ _NEW_ADDRESSES: dict[str, str] = {
 
 async def migrate() -> None:
     # Clear cache so _make_settings_source loads fresh from DB
-    _SETTINGS_SOURCE_CACHE.clear()
+    SETTINGS_SOURCE_CACHE.clear()
     svc = get_services()
     persons_node = svc.persons_source
 

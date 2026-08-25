@@ -11,23 +11,35 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
+from google.auth.exceptions import TransportError
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token
+from google.oauth2 import id_token as google_id_token
+from google_auth_oauthlib.flow import Flow
+
+import houses.transit_route as _transit_route
 from dag.attempt import Attempt
 from dag.persistence import latest_node_result
 from dag.user_input_node import UserInputNode
-from houses.config import settings
+from houses.commute_router import CommuteRouter
 from houses.council_tax import lookup_council_tax
 from houses.council_tax_info import CouncilTaxInfo
 from houses.epc import lookup_epc
-from houses.geo import GeoPoint
-from houses.location import _geocode_address, find_nearest_town_name, geocode
+from houses.geopoint import GeoPoint
+from houses.location import find_nearest_town_name, geocode, geocode_address
 from houses.model.domain import Commute, Person
+from houses.nodes.settings import SettingsNode as SettingsInputNode
 from houses.nodes.settings import make_default_persons, make_default_thresholds
-from houses.routing import CommuteRouter
+from houses.nodes.settings_node import SETTING_DEFAULTS, SettingsNode
+from houses.property_registry import DEFAULT_REGISTRY, PropertyRegistry
 from houses.school import School
 from houses.school_gender import SchoolGender
-from houses.schools import compute_school_commute, find_nearest
+from houses.schools import SchoolLookupOptions, compute_school_commute, find_nearest
+from houses.settings import settings
+from houses.tfl_client import TflClient
 from houses.town_desc import generate_town_description
 from houses.walkability import enrich_walkability
 
@@ -38,50 +50,61 @@ class GeocodingService(Protocol):
     """Resolve a postcode or address to geographic coordinates,
     and reverse-geocode coordinates to the nearest town name."""
 
-    async def geocode_postcode(self, postcode: str) -> Attempt[GeoPoint]: ...
+    @staticmethod
+    async def geocode_postcode(postcode: str) -> Attempt[GeoPoint]: ...
 
-    async def geocode_address(self, address: str) -> Attempt[GeoPoint]: ...
+    @staticmethod
+    async def geocode_address(address: str) -> Attempt[GeoPoint]: ...
 
-    async def reverse_geocode_town(self, lat: float, lon: float) -> Attempt[str]: ...
+    @staticmethod
+    async def reverse_geocode_town(lat: float, lon: float) -> Attempt[str]: ...
 
 
 class RoutePlanner(Protocol):
     """Plan a single-mode route (walk or drive)."""
 
-    async def walk_route(self, origin: GeoPoint, destination: str, max_walk: int) -> Attempt[Commute]: ...
+    @staticmethod
+    async def walk_route(origin: GeoPoint, destination: str, max_walk: int) -> Attempt[Commute]: ...
 
-    async def drive_route(self, origin: GeoPoint, destination: str) -> Attempt[Commute]: ...
+    @staticmethod
+    async def drive_route(origin: GeoPoint, destination: str) -> Attempt[Commute]: ...
 
 
 class SchoolLookupService(Protocol):
     """Find nearest suitable school and compute its commute."""
 
+    @staticmethod
     async def find_nearest(
-        self,
         postcode: str,
         child_age: int,
         address: str = "",
         acceptable: tuple[SchoolGender, ...] = (SchoolGender.MIXED,),
     ) -> Attempt[School | None]: ...
 
-    async def school_commute(self, postcode: str, school: School) -> Commute | None: ...
+    @staticmethod
+    async def school_commute(postcode: str, school: School) -> Commute | None: ...
 
 
 class OAuthService(Protocol):
     """Generate an OAuth authorization URL and exchange an authorization code
     for user identity information."""
 
-    def create_authorization_url(self, state: str) -> tuple[str, str]:
+    @staticmethod
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    def create_authorization_url(state: str) -> tuple[str, str]:
         """Return (authorization_url, code_verifier)."""
         ...
 
-    def exchange_code(self, code: str, code_verifier: str, state: str) -> dict:
+    @staticmethod
+    def exchange_code(code: str, code_verifier: str, state: str) -> Mapping[str, Any]:
         """Exchange an authorization code for user info.
         Returns a dict with keys: email, name, picture, etc.
         """
         ...
 
-    async def verify_id_token(self, token: str) -> dict:
+    @staticmethod
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    async def verify_id_token(token: str) -> dict:
         """Verify a Google id_token (device flow) and return its claims."""
         ...
 
@@ -89,32 +112,38 @@ class OAuthService(Protocol):
 class WalkabilityService(Protocol):
     """Walk time to town centre and nearby amenities."""
 
-    async def enrich(self, lat: float, lng: float, address: str) -> dict[str, Any]: ...
+    @staticmethod
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    async def enrich(lat: float, lng: float, address: str) -> dict[str, Any]: ...
 
 
 class TownDescService(Protocol):
     """LLM-generated description of a town or area."""
 
-    async def describe(self, town_name: str, postcode: str) -> Attempt[str]: ...
+    @staticmethod
+    async def describe(town_name: str, postcode: str) -> Attempt[str]: ...
 
 
 class EPCLookupService(Protocol):
     """Energy Performance Certificate band lookup."""
 
-    async def lookup(self, postcode: str, address: str = "") -> Attempt[str]: ...
+    @staticmethod
+    async def lookup(postcode: str, address: str = "") -> Attempt[str]: ...
 
 
 class CouncilTaxService(Protocol):
     """Council tax band and yearly cost lookup."""
 
-    async def lookup(self, postcode: str, address: str = "") -> Attempt[CouncilTaxInfo]: ...
+    @staticmethod
+    async def lookup(postcode: str, address: str = "") -> Attempt[CouncilTaxInfo]: ...
 
 
 class RailFareService(Protocol):
     """National Rail fare fallback for commute costs."""
 
+    @staticmethod
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def enrich(
-        self,
         enabled: set[str] | None,
         postcode: str,
         address: str,
@@ -132,30 +161,31 @@ class DriveTimeService(Protocol):
     location.
     """
 
-    async def estimate(self, origin_postcode: str, station_name: str) -> int | None: ...
+    @staticmethod
+    async def estimate(origin_postcode: str, station_name: str) -> int | None: ...
 
-    async def estimate_from_location(self, origin, station_name: str) -> int | None: ...
+    @staticmethod
+    async def estimate_from_location(origin, station_name: str) -> int | None: ...
 
 
 class _DefaultDriveTimeService:
-    async def estimate(self, origin_postcode: str, station_name: str) -> int | None:
-        from houses.transit_route import _get_drive_minutes
+    @staticmethod
+    async def estimate(origin_postcode: str, station_name: str) -> int | None:
+        return await _transit_route._get_drive_minutes(origin_postcode, station_name)
 
-        return await _get_drive_minutes(origin_postcode, station_name)
-
-    async def estimate_from_location(self, origin, station_name: str) -> int | None:
-        from houses.transit_route import _get_drive_minutes_from_location
-
-        return await _get_drive_minutes_from_location(origin, station_name)
+    @staticmethod
+    async def estimate_from_location(origin, station_name: str) -> int | None:
+        return await _transit_route._get_drive_minutes_from_location(origin, station_name)
 
 
 class _DefaultOAuthService:
     """Real Google OAuth implementation."""
 
-    def create_authorization_url(self, state: str) -> tuple[str, str]:
-        from google_auth_oauthlib.flow import Flow
-
+    @staticmethod
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    def create_authorization_url(state: str) -> tuple[str, str]:
         client_config = {
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             "web": {
                 "client_id": settings.web_client_id,
                 "client_secret": settings.web_client_secret,
@@ -178,15 +208,14 @@ class _DefaultOAuthService:
             include_granted_scopes="false",
             state=state,
         )
-        code_verifier: str = getattr(flow, "code_verifier", None) or ""  # type: ignore[arg-type]
+        code_verifier: str = getattr(flow, "code_verifier", None) or ""  # type: ignore[arg-type]  # google-auth sets code_verifier inside authorization_url() (PKCE); the library types don't declare the attribute, so getattr's None default is flagged — at this point in the flow it is always populated
         return authorization_url, code_verifier
 
-    def exchange_code(self, code: str, code_verifier: str, state: str) -> dict:
-        from google.auth.transport import requests as google_requests
-        from google.oauth2 import id_token
-        from google_auth_oauthlib.flow import Flow
+    @staticmethod
+    def exchange_code(code: str, code_verifier: str, state: str) -> Mapping[str, Any]:
 
         client_config = {
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             "web": {
                 "client_id": settings.web_client_id,
                 "client_secret": settings.web_client_secret,
@@ -206,14 +235,21 @@ class _DefaultOAuthService:
         flow.redirect_uri = settings.public_url.rstrip("/") + "/api/auth/callback"
         flow.code_verifier = code_verifier
         flow.fetch_token(code=code)
+        # google_auth_oauthlib is untyped and its inferred Credentials union
+        # hides the runtime id_token property — read it defensively.
+        id_token_str = getattr(flow.credentials, "id_token", None)
+        if not id_token_str:
+            raise ValueError("OAuth exchange returned no id_token")
         id_info = id_token.verify_oauth2_token(
-            flow.credentials.id_token,
+            id_token_str,
             google_requests.Request(),
             settings.web_client_id,
         )
         return id_info
 
-    async def verify_id_token(self, token: str) -> dict:
+    @staticmethod
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    async def verify_id_token(token: str) -> dict:
         """Verify a Google id_token (device flow) and return its claims.
 
         Bound strictly to the device-flow client: a web-flow id_token (easy
@@ -225,13 +261,11 @@ class _DefaultOAuthService:
         cert fetch surfaces as TransportError (→ endpoint 503) instead of
         hanging the request forever.
         """
-        from google.auth.exceptions import TransportError
-        from google.auth.transport import requests as google_requests
-        from google.oauth2 import id_token as google_id_token
 
         if not settings.device_client_id:
             raise ValueError("device_client_id not configured for device-flow login")
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         def _verify_in_thread() -> dict:
             # Build the cert-fetch session inside the worker thread so it is
             # created and used in one thread — requests.Session isn't
@@ -258,21 +292,27 @@ class _DefaultOAuthService:
 # instance is returned on every Services() construction.  This means
 # a PATCH to /api/settings/financial updates the canonical node that
 # all PropertyNodes reference, without needing a server restart.
-_SETTINGS_SOURCE_CACHE: dict[str, UserInputNode] = {}
+# lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
+SETTINGS_SOURCE_CACHE: dict[str, UserInputNode] = {}
 
 
 def _reset_settings_cache():
     """Clear the settings source cache for test isolation."""
-    _SETTINGS_SOURCE_CACHE.clear()
+    SETTINGS_SOURCE_CACHE.clear()
 
 
-def _make_settings_source(node_id: str, value_type: type, default_factory):
-    if node_id in _SETTINGS_SOURCE_CACHE:
-        return _SETTINGS_SOURCE_CACHE[node_id]
-    from houses.nodes.settings import SettingsNode
-
-    node = SettingsNode(node_id, value_type)
-    persisted = latest_node_result(node_id)
+def _make_settings_source(
+    node_id: str,
+    value_type: type,
+    default_factory,
+    latest_node_result_fn: Callable[[str], dict[str, Any] | None] | None = None,
+):
+    if node_id in SETTINGS_SOURCE_CACHE:
+        return SETTINGS_SOURCE_CACHE[node_id]
+    node = SettingsInputNode(node_id, value_type)
+    if latest_node_result_fn is None:
+        latest_node_result_fn = latest_node_result
+    persisted = latest_node_result_fn(node_id)
     if persisted and persisted.get("status") == "succeeded":
         source_label = persisted.get("source_label", "db")
         if source_label in ("tests", "test"):
@@ -287,73 +327,107 @@ def _make_settings_source(node_id: str, value_type: type, default_factory):
         node._source_label = source_label
     else:
         node.push(default_factory(), "config")
-    _SETTINGS_SOURCE_CACHE[node_id] = node
+    SETTINGS_SOURCE_CACHE[node_id] = node
     return node
 
 
 # ── Default implementations (thin wrappers around real modules) ────────
-
+#
+# houses.services_provider does NOT import houses.services (it loads it lazily
+# via importlib), so houses.location and houses.commute_router can import
+# get_services at module top and these wrappers can import their modules here
+# without a cycle. The default geocoder/route-planner receive the Services
+# container and thread it into the location functions.
 
 class _DefaultGeocoder:
+    """Real geocoder wrapper — forwards to houses.location, threading the
+    services container so geocode state/cache live on the injected instance."""
+
+    def __init__(self, services: Services | None = None):
+        self._services = services
+
     async def geocode_postcode(self, postcode: str) -> Attempt[GeoPoint]:
-        return await geocode(postcode)
+        return await geocode(postcode, services=self._services)
 
     async def geocode_address(self, address: str) -> Attempt[GeoPoint]:
-        return await _geocode_address(address)
+        return await geocode_address(address, services=self._services)
 
-    async def reverse_geocode_town(self, lat: float, lon: float) -> Attempt[str]:
+    @staticmethod
+    async def reverse_geocode_town(lat: float, lon: float) -> Attempt[str]:
         return await find_nearest_town_name(lat, lon)
 
 
 class _DefaultRoutePlanner:
     """Default route planner — wraps CommuteRouter."""
 
-    async def walk_route(self, origin: GeoPoint, destination: str, max_walk: int) -> Attempt[Commute]:
-
+    @staticmethod
+    async def walk_route(origin: GeoPoint, destination: str, max_walk: int) -> Attempt[Commute]:
         return await CommuteRouter()._google_route_commute(origin, destination, "WALK", max_walk)
 
-    async def drive_route(self, origin: GeoPoint, destination: str) -> Attempt[Commute]:
-
+    @staticmethod
+    async def drive_route(origin: GeoPoint, destination: str) -> Attempt[Commute]:
         return await CommuteRouter()._google_route_commute(origin, destination, "DRIVE")
 
 
+def _default_commute_router() -> Any:
+    """The routing aggregate the DAG builder reads."""
+    return CommuteRouter()
+
+
+def _default_tfl_client_factory() -> Callable[..., Any]:
+    """The default TfL client factory — the real client class."""
+    return TflClient
+
+
 class _DefaultSchoolLookup:
+    @staticmethod
     async def find_nearest(
-        self,
         postcode: str,
         child_age: int,
         address: str = "",
         acceptable: tuple[SchoolGender, ...] = (SchoolGender.MIXED,),
     ) -> Attempt[School | None]:
-        return await find_nearest(postcode, child_age=child_age, address=address, acceptable=acceptable)
+        return await find_nearest(
+            postcode,
+            child_age=child_age,
+            address=address,
+            options=SchoolLookupOptions(acceptable=acceptable),
+        )
 
-    async def school_commute(self, postcode: str, school: School) -> Commute | None:
+    @staticmethod
+    async def school_commute(postcode: str, school: School) -> Commute | None:
         return await compute_school_commute(postcode, school)
 
 
 class _DefaultWalkability:
-    async def enrich(self, lat: float, lng: float, address: str) -> dict[str, Any]:
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    @staticmethod
+    async def enrich(lat: float, lng: float, address: str) -> dict[str, Any]:
         return await enrich_walkability(lat, lng, address)
 
 
 class _DefaultTownDesc:
-    async def describe(self, town_name: str, postcode: str) -> Attempt[str]:
+    @staticmethod
+    async def describe(town_name: str, postcode: str) -> Attempt[str]:
         return await generate_town_description(town_name, postcode)
 
 
 class _DefaultEPCLookup:
-    async def lookup(self, postcode: str, address: str = "") -> Attempt[str]:
+    @staticmethod
+    async def lookup(postcode: str, address: str = "") -> Attempt[str]:
         return await lookup_epc(postcode, address)
 
 
 class _DefaultCouncilTax:
-    async def lookup(self, postcode: str, address: str = "") -> Attempt[CouncilTaxInfo]:
+    @staticmethod
+    async def lookup(postcode: str, address: str = "") -> Attempt[CouncilTaxInfo]:
         return await lookup_council_tax(postcode, address)
 
 
 class _DefaultRailFare:
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    @staticmethod
     async def enrich(
-        self,
         enabled: set[str] | None,
         postcode: str,
         address: str,
@@ -376,6 +450,8 @@ class Services:
     auth_enabled: bool = dataclasses.field(default_factory=_default_auth_enabled)
     geocoder: GeocodingService = dataclasses.field(default_factory=_DefaultGeocoder)
     route_planner: RoutePlanner = dataclasses.field(default_factory=_DefaultRoutePlanner)
+    tfl_client_factory: Callable[..., Any] = dataclasses.field(default_factory=_default_tfl_client_factory)
+    commute_router: Any = dataclasses.field(default_factory=_default_commute_router)
     school_lookup: SchoolLookupService = dataclasses.field(default_factory=_DefaultSchoolLookup)
     walkability_service: WalkabilityService = dataclasses.field(default_factory=_DefaultWalkability)
     town_desc_service: TownDescService = dataclasses.field(default_factory=_DefaultTownDesc)
@@ -384,6 +460,9 @@ class Services:
     rail_fare_service: RailFareService = dataclasses.field(default_factory=_DefaultRailFare)
     drive_time_service: DriveTimeService = dataclasses.field(default_factory=_DefaultDriveTimeService)
     oauth_service: OAuthService = dataclasses.field(default_factory=_DefaultOAuthService)
+    # Test seam: injected reader for the settings persistence lookup
+    # (None = use dag.persistence.latest_node_result).
+    latest_node_result_fn: Callable[[str], dict[str, Any] | None] | None = None
     persons_source: UserInputNode[list[Person]] = dataclasses.field(
         default_factory=lambda: _make_settings_source("persons", list[Person], make_default_persons)
     )
@@ -400,15 +479,42 @@ class Services:
     geo_cache: dict | None = None
     bus_fare_registry: Any | None = None
     rail_fare_registry: Any | None = None
+    # The live PropertyNodes registry — shared app-wide by default (startup
+    # seeding and per-request reads must see one registry), injectable per test.
+    property_registry: PropertyRegistry = dataclasses.field(default_factory=lambda: DEFAULT_REGISTRY)
 
     def __post_init__(self):
-        from houses.nodes.settings_node import SETTING_DEFAULTS
-
+        if self.latest_node_result_fn is not None:
+            # The dataclass field factories ran with the real reader —
+            # rebuild the settings sources against the injected reader.
+            SETTINGS_SOURCE_CACHE.pop("persons", None)
+            SETTINGS_SOURCE_CACHE.pop("commute_thresholds", None)
+            self.persons_source = _make_settings_source(
+                "persons",
+                list[Person],
+                make_default_persons,
+                self.latest_node_result_fn,
+            )
+            self.commute_thresholds_source = _make_settings_source(
+                "commute_thresholds",
+                dict,
+                make_default_thresholds,
+                self.latest_node_result_fn,
+            )
         # Create individual setting nodes
         if not self.setting_nodes:
             self.setting_nodes = {}
             for node_id, (val_type, default_fn) in SETTING_DEFAULTS.items():
-                self.setting_nodes[node_id] = _make_settings_source(node_id, val_type, default_fn)
+                self.setting_nodes[node_id] = _make_settings_source(
+                    node_id,
+                    val_type,
+                    default_fn,
+                    self.latest_node_result_fn,
+                )
+        # Bind the container into the default geocoder so it threads services
+        # explicitly instead of re-resolving the request container.
+        if isinstance(self.geocoder, _DefaultGeocoder):
+            self.geocoder._services = self
 
     @property
     def settings_view(self):
@@ -418,16 +524,13 @@ class Services:
         shape as financial_source did. Created once per Services instance.
         """
         if self._settings_view is None:
-            from houses.nodes.settings_node import SettingsNode
-
             self._settings_view = SettingsNode(
                 "financial_aggregate",
                 setting_nodes=self.setting_nodes,
             )
         return self._settings_view
 
-    async def tfl_plan(self, origin: str, destination: str, label: str) -> Attempt[Commute]:
+    @staticmethod
+    async def tfl_plan(origin: str, destination: str, label: str) -> Attempt[Commute]:
         """Plan a TfL transit route. Wraps the real client for DI."""
-        from houses.tfl_client import TflClient
-
         return await TflClient(origin, destination, label).plan()

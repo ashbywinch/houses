@@ -12,6 +12,7 @@ import pytest
 from tools.commute.serve import make_handler
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_serve_serves_only_the_map(tmp_path):
     """Regression: data/commute holds personal data (destination postcodes,
     raw durations, search payloads) — the LAN server must serve ONLY the map

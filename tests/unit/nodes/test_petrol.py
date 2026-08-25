@@ -224,11 +224,11 @@ class TestDriveCommuteAlwaysHasCost:
         drive commute whose daily_cost > 0."""
         from dag.attempt import Attempt
         from dag.derived_node import DerivedNode
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
         from houses.nodes.bus import BusLegAugmentNode  # noqa: F401
-        from houses.nodes.commute import CommuteSelectorNode, MergeRailFareNode
+        from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions, MergeRailFareNode
         from houses.nodes.petrol import PetrolCostAugmentNode
-        from houses.nodes.transit import DriveNode
+        from houses.nodes.transit import DriveNode, RouteOptions
 
         class _Fixed(DerivedNode[Commute]):
             def __init__(self, node_id: str, attempt: Attempt[Commute]):
@@ -249,7 +249,7 @@ class TestDriveCommuteAlwaysHasCost:
                 person=Person(name="Simon", has_car=True),
                 label=label,
                 destination=PlaceOfInterest(label=label, address="RG12 8YA"),
-                duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+                duration=Quantity(0, "minute"),
                 daily_cost=Money("0", "GBP"),
                 mode="transit",
                 _details=(),
@@ -260,15 +260,15 @@ class TestDriveCommuteAlwaysHasCost:
             """A real drive route — duration 16 min, 16 km, WITH drive details."""
             leg = JourneyLeg(
                 mode=LegMode.DRIVE,
-                duration=Quantity(16, "minute"),  # type: ignore[arg-type]
-                distance=Quantity(16.0, "km"),  # type: ignore[arg-type]
+                duration=Quantity(16, "minute"),
+                distance=Quantity(16.0, "km"),
             )
             return Attempt.succeeded(
                 Commute(
                     person=Person(name="Simon", has_car=True),
                     label="Bracknell",
                     destination=PlaceOfInterest(label="Bracknell", address=dest),
-                    duration=Quantity(16, "minute"),  # type: ignore[arg-type]
+                    duration=Quantity(16, "minute"),
                     daily_cost=Money("0", "GBP"),
                     mode="drive",
                     _details=(CostGroup(legs=(leg,), cost=Money("0", "GBP")),),
@@ -282,17 +282,21 @@ class TestDriveCommuteAlwaysHasCost:
 
         transit = _Fixed("dcc_transit", Attempt.succeeded(_infeasible("transit")))
         walk = _Fixed("dcc_walk", Attempt.succeeded(_infeasible("walk")))
-        drive = DriveNode("dcc_drive", best_location=origin, poi=poi, has_car=True, route_fn=_drive_route)
+        drive = DriveNode(
+            "dcc_drive", options=RouteOptions(best_location=origin, poi=poi, has_car=True, route_fn=_drive_route)
+        )
 
         selector = CommuteSelectorNode(
             "dcc/commute",
-            origin=origin,
-            poi=poi,
-            transit_result=transit,
-            walk_result=walk,
-            drive_result=drive,
-            is_child=False,
-            max_walk_node=_mw(30),
+            options=CommuteSelectorOptions(
+                origin=origin,
+                poi=poi,
+                transit_result=transit,
+                walk_result=walk,
+                drive_result=drive,
+                is_child=False,
+                max_walk_node=_mw(30),
+            ),
         )
         merge = MergeRailFareNode(
             "dcc/merge", commute_result=selector, rail_fare_result=_Fixed("dcc_fare", Attempt.succeeded(None))

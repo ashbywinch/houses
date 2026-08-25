@@ -53,8 +53,8 @@ async def test_after_refresh_does_not_broadcast():
 
 def _get_async_queue_scheduler():
     from dag.scheduler import AsyncQueueScheduler as _AsyncQS
-    from dag.scheduler import _get_scheduler
+    from dag.scheduler import get_scheduler
 
-    s = _get_scheduler()
+    s = get_scheduler()
     assert isinstance(s, _AsyncQS)
     return s

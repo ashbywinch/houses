@@ -178,7 +178,7 @@ def _isolated_scheduler():
 class TestSelectionNodes:
     @pytest.mark.asyncio
     async def test_if_then_else_true_passes_winner_measurement_unchanged(self):
-        from dag.if_then_else import IfThenElseNode
+        from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
         from dag.scheduler import flush_processor
         from dag.user_input_node import UserInputNode
 
@@ -189,10 +189,12 @@ class TestSelectionNodes:
         node = IfThenElseNode(
             "ite_a2",
             Measurement[Money],
-            condition_sources=(cond,),
-            condition_fn=lambda a: a.value_or(False),
-            then_branch=then_src,
-            else_branch=else_src,
+            options=IfThenElseOptions(
+                condition_sources=(cond,),
+                condition_fn=lambda a: a.value_or(False),
+                then_branch=then_src,
+                else_branch=else_src,
+            ),
         )
 
         cond.push(True, "user")
@@ -210,7 +212,7 @@ class TestSelectionNodes:
 
     @pytest.mark.asyncio
     async def test_if_then_else_false_passes_else_measurement_unchanged(self):
-        from dag.if_then_else import IfThenElseNode
+        from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
         from dag.scheduler import flush_processor
         from dag.user_input_node import UserInputNode
 
@@ -221,10 +223,12 @@ class TestSelectionNodes:
         node = IfThenElseNode(
             "ite_a2b",
             Measurement[Money],
-            condition_sources=(cond,),
-            condition_fn=lambda a: a.value_or(False),
-            then_branch=then_src,
-            else_branch=else_src,
+            options=IfThenElseOptions(
+                condition_sources=(cond,),
+                condition_fn=lambda a: a.value_or(False),
+                then_branch=then_src,
+                else_branch=else_src,
+            ),
         )
 
         cond.push(False, "user")

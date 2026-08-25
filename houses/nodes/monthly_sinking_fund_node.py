@@ -31,7 +31,8 @@ class MonthlySinkingFundNode(DerivedNode[Money]):
         ]
         return Formula(lines=lines, result=str(val))
 
-    def compute(self, *dep_attempts: Attempt) -> Attempt[Money]:
+    @staticmethod
+    def compute(*dep_attempts: Attempt) -> Attempt[Money]:
         yearly = dep_attempts[0]
         if not yearly.succeeded:
             return yearly

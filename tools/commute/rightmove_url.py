@@ -23,14 +23,18 @@ def encode_polyline(coords: list[Coord]) -> str:
     out: list[str] = []
     prev_lat = prev_lon = 0
     for lat, lon in coords:
+        # lucidlint: ignore magic-number 1e5 — polyline precision factor of the Google polyline encode (spec constant)
         lat5, lon5 = round(lat * 1e5), round(lon * 1e5)
         dlat, dlon = lat5 - prev_lat, lon5 - prev_lon
         prev_lat, prev_lon = lat5, lon5
         for v in (dlat, dlon):
             v = ~(v << 1) if v < 0 else v << 1
+            # lucidlint: ignore magic-number 0x20 — continuation bit of the Google polyline encode (spec constant)
             while v >= 0x20:
+                # lucidlint: ignore magic-number 0x20/0x1F/63 — polyline chunk bits + ASCII-63 offset (spec)
                 out.append(chr((0x20 | (v & 0x1F)) + 63))
                 v >>= 5
+            # lucidlint: ignore magic-number 63 — ASCII base-63 offset of the Google polyline encode (spec constant)
             out.append(chr(v + 63))
     return "".join(out)
 
@@ -44,10 +48,13 @@ def decode_polyline(encoded: str) -> list[Coord]:
         for is_lat in (True, False):
             shift = result = 0
             while True:
+                # lucidlint: ignore magic-number 63 — ASCII base-63 offset of the Google polyline decode (spec constant)
                 b = ord(encoded[i]) - 63
                 i += 1
+                # lucidlint: ignore magic-number 0x1F — 5-bit chunk mask of the Google polyline decode (spec constant)
                 result |= (b & 0x1F) << shift
                 shift += 5
+                # lucidlint: ignore magic-number 0x20 — continuation bit of the Google polyline decode (spec constant)
                 if b < 0x20:
                     break
             d = ~(result >> 1) if result & 1 else result >> 1
@@ -55,6 +62,7 @@ def decode_polyline(encoded: str) -> list[Coord]:
                 lat += d
             else:
                 lon += d
+        # lucidlint: ignore magic-number 1e5 — polyline precision factor of the Google polyline decode (spec constant)
         coords.append((lat / 1e5, lon / 1e5))
     return coords
 
@@ -78,6 +86,7 @@ def build_search_url(
     max_price: int | None = None,
 ) -> str:
     """Build a Rightmove map search URL for the drawn polygon."""
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     params = {
         "searchType": "MAP",
         "locationIdentifier": location_identifier(coords),

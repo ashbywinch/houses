@@ -37,14 +37,19 @@ class RefreshScheduler:
     Production: ``AsyncQueueScheduler`` — background ``asyncio.PriorityQueue``.
     Tests: provide an isolated instance with ``set_scheduler()``.
     """
-
-    def register(self, node: DerivedNode) -> None:
+    # Set per-instance via set_after_refresh(); AsyncQueueScheduler.after_refresh
+    # delegates to it when non-None.
+    _after_refresh_callback: Callable[[DerivedNode], object] | None = None
+    @staticmethod
+    def register(node: DerivedNode) -> None:
         """Called when a DerivedNode is created."""
 
-    def unregister(self, node: DerivedNode) -> None:
+    @staticmethod
+    def unregister(node: DerivedNode) -> None:
         """Called when a DerivedNode is disconnected (cleanup)."""
 
-    def registered_nodes(self) -> dict[str, DerivedNode]:
+    @staticmethod
+    def registered_nodes() -> dict[str, DerivedNode]:
         """Every DerivedNode currently registered, by node id.
 
         The default scheduler does not track nodes; production's
@@ -52,16 +57,20 @@ class RefreshScheduler:
         """
         return {}
 
-    def schedule(self, node: DerivedNode) -> None:
+    @staticmethod
+    def schedule(node: DerivedNode) -> None:
         """Request that *node* be refreshed when convenient."""
 
-    def schedule_at(self, node: DerivedNode, dt: datetime) -> None:
+    @staticmethod
+    def schedule_at(node: DerivedNode, dt: datetime) -> None:
         """Schedule *node* for refresh at wall-clock time *dt*."""
 
-    async def process_pending(self) -> None:
+    @staticmethod
+    async def process_pending() -> None:
         """Synchronously process all currently scheduled nodes."""
 
-    def after_refresh(self, node: DerivedNode) -> None:
+    @staticmethod
+    def after_refresh(node: DerivedNode) -> None:
         """Called after a node completes refresh (no-op default)."""
 
 
@@ -148,8 +157,13 @@ class AsyncQueueScheduler(RefreshScheduler):
                 self._scheduled.pop(event.node_id, None)
                 try:
                     await event.node.refresh()
+                # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
                 except Exception as exc:
+                    # One node's failure must not kill the background loop —
+                    # log it and move on to the next event.
                     logger.exception("DAG processor failed for %s: %s", event.node_id, exc)
+                    await asyncio.sleep(0)
+                    continue
             else:
                 await self._queue.put(event)
                 self._wakeup.clear()
@@ -164,11 +178,12 @@ _default_scheduler: RefreshScheduler = AsyncQueueScheduler()
 _scheduler_var: contextvars.ContextVar[RefreshScheduler | None] = contextvars.ContextVar("_dag_scheduler", default=None)
 
 
-def _get_scheduler() -> RefreshScheduler:
+def get_scheduler() -> RefreshScheduler:
     override = _scheduler_var.get()
     return override if override is not None else _default_scheduler
 
 
+# lucidlint: ignore unused-setter test-injection API — isolation_fixtures and dag tests call set_scheduler()
 def set_scheduler(scheduler: RefreshScheduler) -> None:
     """Override the scheduler (used by tests to inject an isolated one)."""
     _scheduler_var.set(scheduler)
@@ -183,17 +198,18 @@ def reset_scheduler() -> None:
 
 
 async def flush_processor() -> None:
-    await _get_scheduler().process_pending()
+    await get_scheduler().process_pending()
 
 
 def start_processor() -> asyncio.Task:
     """Start the background refresh loop. Returns the asyncio Task."""
-    sched = _get_scheduler()
+    sched = get_scheduler()
     if isinstance(sched, AsyncQueueScheduler):
         return asyncio.create_task(sched._background_loop())
     raise TypeError(f"Cannot start background processor on {type(sched).__name__}")
 
 
+# lucidlint: ignore unused-setter wired from houses/server.py lifespan (_on_node_refreshed)
 def set_after_refresh(callback: Callable[[DerivedNode], object]) -> None:
-    sched = _get_scheduler()
+    sched = get_scheduler()
     sched._after_refresh_callback = callback

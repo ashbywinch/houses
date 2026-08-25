@@ -26,7 +26,7 @@ class TestSchoolNodes:
     @pytest.mark.asyncio
     async def test_secondary_calls_find_nearest_with_correct_params(self):
         from dag.user_input_node import UserInputNode
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
         from houses.nodes.schools import SecondarySchoolNode
 
         loc = UserInputNode[GeoPoint]("loc", GeoPoint)
@@ -58,7 +58,7 @@ class TestSchoolNodes:
     @pytest.mark.asyncio
     async def test_primary_calls_find_nearest_with_boys_and_age_7(self):
         from dag.user_input_node import UserInputNode
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
         from houses.nodes.schools import PrimarySchoolNode
 
         loc = UserInputNode[GeoPoint]("loc", GeoPoint)
@@ -212,11 +212,11 @@ class TestTownName:
     """Town name extraction from best_address."""
 
     def test_extract_town_from_address(self):
-        from houses.walkability import _extract_town
+        from houses.walkability import extract_town
 
-        assert _extract_town("48 Acacia Avenue, Southall, UB2 5AD") == "Southall"
+        assert extract_town("48 Acacia Avenue, Southall, UB2 5AD") == "Southall"
 
     def test_extract_town_maidenhead(self):
-        from houses.walkability import _extract_town
+        from houses.walkability import extract_town
 
-        assert _extract_town("Some Road, Maidenhead, SL6 1AA") == "Maidenhead"
+        assert extract_town("Some Road, Maidenhead, SL6 1AA") == "Maidenhead"

@@ -1,9 +1,9 @@
 {
  "errors": [
   {
-   "line": 130,
+   "line": 138,
    "column": 9,
-   "stop_line": 130,
+   "stop_line": 138,
    "stop_column": 17,
    "path": "dag/expression.py",
    "code": -2,
@@ -13,9 +13,9 @@
    "severity": "error"
   },
   {
-   "line": 133,
+   "line": 141,
    "column": 9,
-   "stop_line": 133,
+   "stop_line": 141,
    "stop_column": 25,
    "path": "dag/expression.py",
    "code": -2,
@@ -25,9 +25,9 @@
    "severity": "error"
   },
   {
-   "line": 150,
+   "line": 156,
    "column": 9,
-   "stop_line": 150,
+   "stop_line": 156,
    "stop_column": 17,
    "path": "dag/expression.py",
    "code": -2,
@@ -37,9 +37,9 @@
    "severity": "error"
   },
   {
-   "line": 159,
+   "line": 165,
    "column": 9,
-   "stop_line": 159,
+   "stop_line": 165,
    "stop_column": 25,
    "path": "dag/expression.py",
    "code": -2,
@@ -49,9 +49,9 @@
    "severity": "error"
   },
   {
-   "line": 181,
+   "line": 187,
    "column": 9,
-   "stop_line": 181,
+   "stop_line": 187,
    "stop_column": 17,
    "path": "dag/expression.py",
    "code": -2,
@@ -61,9 +61,9 @@
    "severity": "error"
   },
   {
-   "line": 205,
+   "line": 211,
    "column": 9,
-   "stop_line": 205,
+   "stop_line": 211,
    "stop_column": 25,
    "path": "dag/expression.py",
    "code": -2,
@@ -73,9 +73,9 @@
    "severity": "error"
   },
   {
-   "line": 220,
+   "line": 222,
    "column": 9,
-   "stop_line": 220,
+   "stop_line": 222,
    "stop_column": 17,
    "path": "dag/expression.py",
    "code": -2,
@@ -85,21 +85,9 @@
    "severity": "error"
   },
   {
-   "line": 228,
-   "column": 38,
-   "stop_line": 228,
-   "stop_column": 76,
-   "path": "dag/expression.py",
-   "code": -2,
-   "name": "unsupported-operation",
-   "description": "`-` is not supported between `None` and `None`\n  Cannot find `__sub__` or `__rsub__`",
-   "concise_description": "`-` is not supported between `None` and `None`",
-   "severity": "error"
-  },
-  {
-   "line": 232,
+   "line": 238,
    "column": 9,
-   "stop_line": 232,
+   "stop_line": 238,
    "stop_column": 25,
    "path": "dag/expression.py",
    "code": -2,
@@ -109,9 +97,9 @@
    "severity": "error"
   },
   {
-   "line": 243,
+   "line": 249,
    "column": 9,
-   "stop_line": 243,
+   "stop_line": 249,
    "stop_column": 17,
    "path": "dag/expression.py",
    "code": -2,
@@ -121,21 +109,9 @@
    "severity": "error"
   },
   {
-   "line": 248,
-   "column": 38,
-   "stop_line": 248,
-   "stop_column": 51,
-   "path": "dag/expression.py",
-   "code": -2,
-   "name": "unsupported-operation",
-   "description": "Unary `-` is not supported on `None`",
-   "concise_description": "Unary `-` is not supported on `None`",
-   "severity": "error"
-  },
-  {
-   "line": 252,
+   "line": 262,
    "column": 9,
-   "stop_line": 252,
+   "stop_line": 262,
    "stop_column": 25,
    "path": "dag/expression.py",
    "code": -2,
@@ -145,9 +121,9 @@
    "severity": "error"
   },
   {
-   "line": 264,
+   "line": 274,
    "column": 9,
-   "stop_line": 264,
+   "stop_line": 274,
    "stop_column": 17,
    "path": "dag/expression.py",
    "code": -2,
@@ -157,21 +133,9 @@
    "severity": "error"
   },
   {
-   "line": 272,
-   "column": 38,
-   "stop_line": 272,
-   "stop_column": 76,
-   "path": "dag/expression.py",
-   "code": -2,
-   "name": "unsupported-operation",
-   "description": "`*` is not supported between `None` and `None`\n  Cannot find `__mul__` or `__rmul__`",
-   "concise_description": "`*` is not supported between `None` and `None`",
-   "severity": "error"
-  },
-  {
-   "line": 276,
+   "line": 290,
    "column": 9,
-   "stop_line": 276,
+   "stop_line": 290,
    "stop_column": 25,
    "path": "dag/expression.py",
    "code": -2,
@@ -181,9 +145,9 @@
    "severity": "error"
   },
   {
-   "line": 288,
+   "line": 302,
    "column": 9,
-   "stop_line": 288,
+   "stop_line": 302,
    "stop_column": 17,
    "path": "dag/expression.py",
    "code": -2,
@@ -193,33 +157,9 @@
    "severity": "error"
   },
   {
-   "line": 305,
-   "column": 38,
-   "stop_line": 305,
-   "stop_column": 58,
-   "path": "dag/expression.py",
-   "code": -2,
-   "name": "unsupported-operation",
-   "description": "`/` is not supported between `None` and `Money`\n  Cannot find `__truediv__` or `__rtruediv__`",
-   "concise_description": "`/` is not supported between `None` and `Money`",
-   "severity": "error"
-  },
-  {
-   "line": 305,
-   "column": 38,
-   "stop_line": 305,
-   "stop_column": 58,
-   "path": "dag/expression.py",
-   "code": -2,
-   "name": "unsupported-operation",
-   "description": "`/` is not supported between `None` and `None`\n  Cannot find `__truediv__` or `__rtruediv__`",
-   "concise_description": "`/` is not supported between `None` and `None`",
-   "severity": "error"
-  },
-  {
-   "line": 309,
+   "line": 323,
    "column": 9,
-   "stop_line": 309,
+   "stop_line": 323,
    "stop_column": 25,
    "path": "dag/expression.py",
    "code": -2,
@@ -229,9 +169,9 @@
    "severity": "error"
   },
   {
-   "line": 346,
+   "line": 360,
    "column": 9,
-   "stop_line": 346,
+   "stop_line": 360,
    "stop_column": 17,
    "path": "dag/expression.py",
    "code": -2,
@@ -241,9 +181,9 @@
    "severity": "error"
   },
   {
-   "line": 359,
+   "line": 388,
    "column": 9,
-   "stop_line": 359,
+   "stop_line": 388,
    "stop_column": 25,
    "path": "dag/expression.py",
    "code": -2,
@@ -253,9 +193,9 @@
    "severity": "error"
   },
   {
-   "line": 382,
+   "line": 408,
    "column": 9,
-   "stop_line": 382,
+   "stop_line": 408,
    "stop_column": 17,
    "path": "dag/expression.py",
    "code": -2,
@@ -265,9 +205,9 @@
    "severity": "error"
   },
   {
-   "line": 393,
+   "line": 419,
    "column": 9,
-   "stop_line": 393,
+   "stop_line": 419,
    "stop_column": 25,
    "path": "dag/expression.py",
    "code": -2,
@@ -277,9 +217,9 @@
    "severity": "error"
   },
   {
-   "line": 404,
+   "line": 430,
    "column": 9,
-   "stop_line": 404,
+   "stop_line": 430,
    "stop_column": 17,
    "path": "dag/expression.py",
    "code": -2,
@@ -289,9 +229,9 @@
    "severity": "error"
   },
   {
-   "line": 453,
+   "line": 479,
    "column": 9,
-   "stop_line": 453,
+   "stop_line": 479,
    "stop_column": 17,
    "path": "dag/expression.py",
    "code": -2,
@@ -301,9 +241,9 @@
    "severity": "error"
   },
   {
-   "line": 472,
+   "line": 509,
    "column": 9,
-   "stop_line": 472,
+   "stop_line": 509,
    "stop_column": 25,
    "path": "dag/expression.py",
    "code": -2,
@@ -313,11 +253,11 @@
    "severity": "error"
   },
   {
-   "line": 43,
+   "line": 55,
    "column": 9,
-   "stop_line": 43,
+   "stop_line": 55,
    "stop_column": 25,
-   "path": "dag/if_then_else.py",
+   "path": "dag/if_then_else_node.py",
    "code": -2,
    "name": "missing-override-decorator",
    "description": "Class member `IfThenElseNode._get_active_deps` overrides a member in a parent class but is missing an `@override` decorator",
@@ -325,11 +265,11 @@
    "severity": "error"
   },
   {
-   "line": 51,
+   "line": 63,
    "column": 9,
-   "stop_line": 51,
+   "stop_line": 63,
    "stop_column": 16,
-   "path": "dag/if_then_else.py",
+   "path": "dag/if_then_else_node.py",
    "code": -2,
    "name": "missing-override-decorator",
    "description": "Class member `IfThenElseNode.compute` overrides a member in a parent class but is missing an `@override` decorator",
@@ -337,9 +277,9 @@
    "severity": "error"
   },
   {
-   "line": 32,
+   "line": 36,
    "column": 9,
-   "stop_line": 32,
+   "stop_line": 36,
    "stop_column": 16,
    "path": "dag/persistence.py",
    "code": -2,
@@ -349,21 +289,9 @@
    "severity": "error"
   },
   {
-   "line": 45,
-   "column": 26,
-   "stop_line": 45,
-   "stop_column": 28,
-   "path": "dag/persistence.py",
-   "code": -2,
-   "name": "invalid-argument",
-   "description": "Expected class object, got `type[QuantityT]`",
-   "concise_description": "Expected class object, got `type[QuantityT]`",
-   "severity": "error"
-  },
-  {
-   "line": 84,
+   "line": 93,
    "column": 9,
-   "stop_line": 84,
+   "stop_line": 93,
    "stop_column": 17,
    "path": "dag/scheduler.py",
    "code": -2,
@@ -373,9 +301,9 @@
    "severity": "error"
   },
   {
-   "line": 94,
+   "line": 103,
    "column": 9,
-   "stop_line": 94,
+   "stop_line": 103,
    "stop_column": 19,
    "path": "dag/scheduler.py",
    "code": -2,
@@ -385,9 +313,9 @@
    "severity": "error"
   },
   {
-   "line": 99,
+   "line": 108,
    "column": 9,
-   "stop_line": 99,
+   "stop_line": 108,
    "stop_column": 25,
    "path": "dag/scheduler.py",
    "code": -2,
@@ -397,9 +325,9 @@
    "severity": "error"
   },
   {
-   "line": 103,
+   "line": 112,
    "column": 9,
-   "stop_line": 103,
+   "stop_line": 112,
    "stop_column": 17,
    "path": "dag/scheduler.py",
    "code": -2,
@@ -409,9 +337,9 @@
    "severity": "error"
   },
   {
-   "line": 113,
+   "line": 122,
    "column": 9,
-   "stop_line": 113,
+   "stop_line": 122,
    "stop_column": 20,
    "path": "dag/scheduler.py",
    "code": -2,
@@ -421,9 +349,9 @@
    "severity": "error"
   },
   {
-   "line": 122,
+   "line": 131,
    "column": 9,
-   "stop_line": 122,
+   "stop_line": 131,
    "stop_column": 22,
    "path": "dag/scheduler.py",
    "code": -2,
@@ -433,9 +361,9 @@
    "severity": "error"
   },
   {
-   "line": 127,
+   "line": 136,
    "column": 15,
-   "stop_line": 127,
+   "stop_line": 136,
    "stop_column": 30,
    "path": "dag/scheduler.py",
    "code": -2,
@@ -445,45 +373,9 @@
    "severity": "error"
   },
   {
-   "line": 199,
-   "column": 5,
-   "stop_line": 199,
-   "stop_column": 34,
-   "path": "dag/scheduler.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `RefreshScheduler` has no attribute `_after_refresh_callback`",
-   "concise_description": "Object of class `RefreshScheduler` has no attribute `_after_refresh_callback`",
-   "severity": "error"
-  },
-  {
-   "line": 68,
-   "column": 13,
-   "stop_line": 68,
-   "stop_column": 27,
-   "path": "dag/signals.py",
-   "code": -2,
-   "name": "not-callable",
-   "description": "Expected a callable, got `None`",
-   "concise_description": "Expected a callable, got `None`",
-   "severity": "error"
-  },
-  {
-   "line": 94,
-   "column": 34,
-   "stop_line": 94,
-   "stop_column": 42,
-   "path": "dag/user_input_node.py",
-   "code": -2,
-   "name": "invalid-argument",
-   "description": "Expected class object, got `type[QuantityT]`",
-   "concise_description": "Expected class object, got `type[QuantityT]`",
-   "severity": "error"
-  },
-  {
-   "line": 204,
+   "line": 238,
    "column": 15,
-   "stop_line": 204,
+   "stop_line": 238,
    "stop_column": 22,
    "path": "dag/user_input_node.py",
    "code": -2,
@@ -493,9 +385,9 @@
    "severity": "error"
   },
   {
-   "line": 209,
+   "line": 243,
    "column": 9,
-   "stop_line": 209,
+   "stop_line": 243,
    "stop_column": 23,
    "path": "dag/user_input_node.py",
    "code": -2,
@@ -505,9 +397,9 @@
    "severity": "error"
   },
   {
-   "line": 219,
+   "line": 253,
    "column": 15,
-   "stop_line": 219,
+   "stop_line": 253,
    "stop_column": 31,
    "path": "dag/user_input_node.py",
    "code": -2,
@@ -517,9 +409,9 @@
    "severity": "error"
   },
   {
-   "line": 256,
+   "line": 291,
    "column": 15,
-   "stop_line": 256,
+   "stop_line": 291,
    "stop_column": 28,
    "path": "dag/user_input_node.py",
    "code": -2,
@@ -529,117 +421,9 @@
    "severity": "error"
   },
   {
-   "line": 245,
-   "column": 32,
-   "stop_line": 245,
-   "stop_column": 48,
-   "path": "houses/bus_journey.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `items`",
-   "concise_description": "Object of class `NoneType` has no attribute `items`",
-   "severity": "error"
-  },
-  {
-   "line": 272,
-   "column": 32,
-   "stop_line": 272,
-   "stop_column": 48,
-   "path": "houses/bus_journey.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `items`",
-   "concise_description": "Object of class `NoneType` has no attribute `items`",
-   "severity": "error"
-  },
-  {
-   "line": 324,
-   "column": 23,
-   "stop_line": 324,
-   "stop_column": 33,
-   "path": "houses/bus_journey.py",
-   "code": -2,
-   "name": "not-iterable",
-   "description": "Type `None` is not iterable",
-   "concise_description": "Type `None` is not iterable",
-   "severity": "error"
-  },
-  {
-   "line": 327,
-   "column": 39,
-   "stop_line": 327,
-   "stop_column": 57,
-   "path": "houses/bus_journey.py",
-   "code": -2,
-   "name": "unsupported-operation",
-   "description": "`None` is not subscriptable",
-   "concise_description": "`None` is not subscriptable",
-   "severity": "error"
-  },
-  {
-   "line": 381,
-   "column": 23,
-   "stop_line": 381,
-   "stop_column": 33,
-   "path": "houses/bus_journey.py",
-   "code": -2,
-   "name": "not-iterable",
-   "description": "Type `None` is not iterable",
-   "concise_description": "Type `None` is not iterable",
-   "severity": "error"
-  },
-  {
-   "line": 396,
-   "column": 19,
-   "stop_line": 396,
-   "stop_column": 33,
-   "path": "houses/bus_journey.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `get`",
-   "concise_description": "Object of class `NoneType` has no attribute `get`",
-   "severity": "error"
-  },
-  {
-   "line": 17,
-   "column": 22,
-   "stop_line": 17,
-   "stop_column": 30,
-   "path": "houses/config.py",
-   "code": -2,
-   "name": "invalid-argument",
-   "description": "Expected class object, got `type[QuantityT]`",
-   "concise_description": "Expected class object, got `type[QuantityT]`",
-   "severity": "error"
-  },
-  {
-   "line": 193,
-   "column": 30,
-   "stop_line": 193,
-   "stop_column": 31,
-   "path": "houses/location.py",
-   "code": -2,
-   "name": "bad-index",
-   "description": "Cannot index into `dict[str, Any]`\n  Argument `Literal[0]` is not assignable to parameter `key` with type `str` in function `dict.__getitem__`",
-   "concise_description": "Cannot index into `dict[str, Any]`",
-   "severity": "error"
-  },
-  {
-   "line": 194,
-   "column": 30,
-   "stop_line": 194,
-   "stop_column": 31,
-   "path": "houses/location.py",
-   "code": -2,
-   "name": "bad-index",
-   "description": "Cannot index into `dict[str, Any]`\n  Argument `Literal[0]` is not assignable to parameter `key` with type `str` in function `dict.__getitem__`",
-   "concise_description": "Cannot index into `dict[str, Any]`",
-   "severity": "error"
-  },
-  {
-   "line": 18,
+   "line": 20,
    "column": 15,
-   "stop_line": 18,
+   "stop_line": 20,
    "stop_column": 22,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -649,45 +433,9 @@
    "severity": "error"
   },
   {
-   "line": 21,
-   "column": 55,
-   "stop_line": 21,
-   "stop_column": 62,
-   "path": "houses/nodes/area.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `lat`",
-   "concise_description": "Object of class `NoneType` has no attribute `lat`",
-   "severity": "error"
-  },
-  {
-   "line": 21,
-   "column": 64,
-   "stop_line": 21,
-   "stop_column": 71,
-   "path": "houses/nodes/area.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `lon`",
-   "concise_description": "Object of class `NoneType` has no attribute `lon`",
-   "severity": "error"
-  },
-  {
-   "line": 42,
-   "column": 9,
-   "stop_line": 42,
-   "stop_column": 31,
-   "path": "houses/nodes/area.py",
-   "code": -2,
-   "name": "missing-override-decorator",
-   "description": "Class member `WalkabilityNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
-   "concise_description": "Class member `WalkabilityNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
-   "severity": "error"
-  },
-  {
-   "line": 53,
+   "line": 57,
    "column": 15,
-   "stop_line": 53,
+   "stop_line": 57,
    "stop_column": 22,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -697,21 +445,9 @@
    "severity": "error"
   },
   {
-   "line": 68,
+   "line": 83,
    "column": 9,
-   "stop_line": 68,
-   "stop_column": 31,
-   "path": "houses/nodes/area.py",
-   "code": -2,
-   "name": "missing-override-decorator",
-   "description": "Class member `NearestTownNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
-   "concise_description": "Class member `NearestTownNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
-   "severity": "error"
-  },
-  {
-   "line": 81,
-   "column": 9,
-   "stop_line": 81,
+   "stop_line": 83,
    "stop_column": 25,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -721,9 +457,9 @@
    "severity": "error"
   },
   {
-   "line": 92,
+   "line": 95,
    "column": 15,
-   "stop_line": 92,
+   "stop_line": 95,
    "stop_column": 22,
    "path": "houses/nodes/area.py",
    "code": -2,
@@ -733,39 +469,15 @@
    "severity": "error"
   },
   {
-   "line": 123,
+   "line": 134,
    "column": 9,
-   "stop_line": 123,
-   "stop_column": 31,
-   "path": "houses/nodes/area.py",
-   "code": -2,
-   "name": "missing-override-decorator",
-   "description": "Class member `TownDescNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
-   "concise_description": "Class member `TownDescNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
-   "severity": "error"
-  },
-  {
-   "line": 132,
-   "column": 9,
-   "stop_line": 132,
+   "stop_line": 134,
    "stop_column": 16,
    "path": "houses/nodes/area.py",
    "code": -2,
    "name": "missing-override-decorator",
    "description": "Class member `TownNode.compute` overrides a member in a parent class but is missing an `@override` decorator",
    "concise_description": "Class member `TownNode.compute` overrides a member in a parent class but is missing an `@override` decorator",
-   "severity": "error"
-  },
-  {
-   "line": 140,
-   "column": 9,
-   "stop_line": 140,
-   "stop_column": 31,
-   "path": "houses/nodes/area.py",
-   "code": -2,
-   "name": "missing-override-decorator",
-   "description": "Class member `TownNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
-   "concise_description": "Class member `TownNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
    "severity": "error"
   },
   {
@@ -781,9 +493,9 @@
    "severity": "error"
   },
   {
-   "line": 47,
+   "line": 46,
    "column": 9,
-   "stop_line": 47,
+   "stop_line": 46,
    "stop_column": 16,
    "path": "houses/nodes/commute_breakdown_node.py",
    "code": -2,
@@ -805,51 +517,15 @@
    "severity": "error"
   },
   {
-   "line": 172,
-   "column": 33,
-   "stop_line": 172,
-   "stop_column": 39,
-   "path": "houses/nodes/commute_pipeline_builder.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `UserInputNode[str]` is not assignable to parameter `then_branch` with type `Node[Commute | str | None]` in function `dag.if_then_else.IfThenElseNode.__init__`",
-   "concise_description": "Argument `UserInputNode[str]` is not assignable to parameter `then_branch` with type `Node[Commute | str | None]` in function `dag.if_then_else.IfThenElseNode.__init__`",
-   "severity": "error"
-  },
-  {
-   "line": 197,
-   "column": 33,
-   "stop_line": 197,
-   "stop_column": 47,
-   "path": "houses/nodes/commute_pipeline_builder.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `RailFareNode` is not assignable to parameter `then_branch` with type `Node[Commute | None]` in function `dag.if_then_else.IfThenElseNode.__init__`",
-   "concise_description": "Argument `RailFareNode` is not assignable to parameter `then_branch` with type `Node[Commute | None]` in function `dag.if_then_else.IfThenElseNode.__init__`",
-   "severity": "error"
-  },
-  {
-   "line": 24,
+   "line": 25,
    "column": 15,
-   "stop_line": 24,
+   "stop_line": 25,
    "stop_column": 22,
    "path": "houses/nodes/epc_node.py",
    "code": -2,
    "name": "missing-override-decorator",
    "description": "Class member `EpcNode.compute` overrides a member in a parent class but is missing an `@override` decorator",
    "concise_description": "Class member `EpcNode.compute` overrides a member in a parent class but is missing an `@override` decorator",
-   "severity": "error"
-  },
-  {
-   "line": 41,
-   "column": 9,
-   "stop_line": 41,
-   "stop_column": 31,
-   "path": "houses/nodes/epc_node.py",
-   "code": -2,
-   "name": "missing-override-decorator",
-   "description": "Class member `EpcNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
-   "concise_description": "Class member `EpcNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
    "severity": "error"
   },
   {
@@ -865,9 +541,9 @@
    "severity": "error"
   },
   {
-   "line": 33,
+   "line": 35,
    "column": 9,
-   "stop_line": 33,
+   "stop_line": 35,
    "stop_column": 17,
    "path": "houses/nodes/expressions.py",
    "code": -2,
@@ -877,9 +553,9 @@
    "severity": "error"
   },
   {
-   "line": 64,
+   "line": 66,
    "column": 9,
-   "stop_line": 64,
+   "stop_line": 66,
    "stop_column": 25,
    "path": "houses/nodes/expressions.py",
    "code": -2,
@@ -889,9 +565,9 @@
    "severity": "error"
   },
   {
-   "line": 86,
+   "line": 84,
    "column": 9,
-   "stop_line": 86,
+   "stop_line": 84,
    "stop_column": 17,
    "path": "houses/nodes/expressions.py",
    "code": -2,
@@ -901,9 +577,9 @@
    "severity": "error"
   },
   {
-   "line": 100,
+   "line": 99,
    "column": 9,
-   "stop_line": 100,
+   "stop_line": 99,
    "stop_column": 25,
    "path": "houses/nodes/expressions.py",
    "code": -2,
@@ -913,9 +589,9 @@
    "severity": "error"
   },
   {
-   "line": 161,
+   "line": 177,
    "column": 9,
-   "stop_line": 161,
+   "stop_line": 177,
    "stop_column": 17,
    "path": "houses/nodes/expressions.py",
    "code": -2,
@@ -925,9 +601,9 @@
    "severity": "error"
   },
   {
-   "line": 190,
+   "line": 206,
    "column": 9,
-   "stop_line": 190,
+   "stop_line": 206,
    "stop_column": 25,
    "path": "houses/nodes/expressions.py",
    "code": -2,
@@ -937,11 +613,11 @@
    "severity": "error"
   },
   {
-   "line": 13,
+   "line": 15,
    "column": 15,
-   "stop_line": 13,
+   "stop_line": 15,
    "stop_column": 22,
-   "path": "houses/nodes/geocode.py",
+   "path": "houses/nodes/geocode_node.py",
    "code": -2,
    "name": "missing-override-decorator",
    "description": "Class member `GeocodeNode.compute` overrides a member in a parent class but is missing an `@override` decorator",
@@ -949,23 +625,11 @@
    "severity": "error"
   },
   {
-   "line": 20,
-   "column": 9,
-   "stop_line": 20,
-   "stop_column": 31,
-   "path": "houses/nodes/geocode.py",
-   "code": -2,
-   "name": "missing-override-decorator",
-   "description": "Class member `GeocodeNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
-   "concise_description": "Class member `GeocodeNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
-   "severity": "error"
-  },
-  {
    "line": 17,
    "column": 9,
    "stop_line": 17,
    "stop_column": 27,
-   "path": "houses/nodes/life_insurance_node.py",
+   "path": "houses/nodes/life_insurance_total_node.py",
    "code": -2,
    "name": "missing-override-decorator",
    "description": "Class member `LifeInsuranceTotalNode.provenance_formula` overrides a member in a parent class but is missing an `@override` decorator",
@@ -977,7 +641,7 @@
    "column": 9,
    "stop_line": 40,
    "stop_column": 16,
-   "path": "houses/nodes/life_insurance_node.py",
+   "path": "houses/nodes/life_insurance_total_node.py",
    "code": -2,
    "name": "missing-override-decorator",
    "description": "Class member `LifeInsuranceTotalNode.compute` overrides a member in a parent class but is missing an `@override` decorator",
@@ -985,21 +649,9 @@
    "severity": "error"
   },
   {
-   "line": 45,
-   "column": 18,
-   "stop_line": 45,
-   "stop_column": 20,
-   "path": "houses/nodes/life_insurance_node.py",
-   "code": -2,
-   "name": "not-iterable",
-   "description": "Type `None` is not iterable",
-   "concise_description": "Type `None` is not iterable",
-   "severity": "error"
-  },
-  {
-   "line": 18,
+   "line": 19,
    "column": 9,
-   "stop_line": 18,
+   "stop_line": 19,
    "stop_column": 19,
    "path": "houses/nodes/monthly_mortgage_payment_node.py",
    "code": -2,
@@ -1009,9 +661,9 @@
    "severity": "error"
   },
   {
-   "line": 25,
+   "line": 27,
    "column": 9,
-   "stop_line": 25,
+   "stop_line": 27,
    "stop_column": 16,
    "path": "houses/nodes/monthly_mortgage_payment_node.py",
    "code": -2,
@@ -1033,9 +685,9 @@
    "severity": "error"
   },
   {
-   "line": 34,
+   "line": 35,
    "column": 9,
-   "stop_line": 34,
+   "stop_line": 35,
    "stop_column": 16,
    "path": "houses/nodes/monthly_sinking_fund_node.py",
    "code": -2,
@@ -1045,9 +697,9 @@
    "severity": "error"
   },
   {
-   "line": 33,
+   "line": 34,
    "column": 9,
-   "stop_line": 33,
+   "stop_line": 34,
    "stop_column": 19,
    "path": "houses/nodes/mortgage_required_node.py",
    "code": -2,
@@ -1057,9 +709,9 @@
    "severity": "error"
   },
   {
-   "line": 36,
+   "line": 37,
    "column": 9,
-   "stop_line": 36,
+   "stop_line": 37,
    "stop_column": 16,
    "path": "houses/nodes/mortgage_required_node.py",
    "code": -2,
@@ -1069,9 +721,21 @@
    "severity": "error"
   },
   {
-   "line": 61,
+   "line": 25,
    "column": 9,
-   "stop_line": 61,
+   "stop_line": 25,
+   "stop_column": 16,
+   "path": "houses/nodes/nearest_station_node.py",
+   "code": -2,
+   "name": "missing-override-decorator",
+   "description": "Class member `NearestStationNode.compute` overrides a member in a parent class but is missing an `@override` decorator",
+   "concise_description": "Class member `NearestStationNode.compute` overrides a member in a parent class but is missing an `@override` decorator",
+   "severity": "error"
+  },
+  {
+   "line": 64,
+   "column": 9,
+   "stop_line": 64,
    "stop_column": 16,
    "path": "houses/nodes/petrol.py",
    "code": -2,
@@ -1081,9 +745,9 @@
    "severity": "error"
   },
   {
-   "line": 86,
+   "line": 89,
    "column": 9,
-   "stop_line": 86,
+   "stop_line": 89,
    "stop_column": 27,
    "path": "houses/nodes/petrol.py",
    "code": -2,
@@ -1093,9 +757,9 @@
    "severity": "error"
   },
   {
-   "line": 112,
+   "line": 115,
    "column": 9,
-   "stop_line": 112,
+   "stop_line": 115,
    "stop_column": 16,
    "path": "houses/nodes/petrol.py",
    "code": -2,
@@ -1105,9 +769,9 @@
    "severity": "error"
   },
   {
-   "line": 154,
+   "line": 158,
    "column": 15,
-   "stop_line": 154,
+   "stop_line": 158,
    "stop_column": 22,
    "path": "houses/nodes/petrol.py",
    "code": -2,
@@ -1117,9 +781,9 @@
    "severity": "error"
   },
   {
-   "line": 163,
+   "line": 168,
    "column": 15,
-   "stop_line": 163,
+   "stop_line": 168,
    "stop_column": 28,
    "path": "houses/nodes/petrol.py",
    "code": -2,
@@ -1129,51 +793,15 @@
    "severity": "error"
   },
   {
-   "line": 37,
-   "column": 9,
-   "stop_line": 37,
-   "stop_column": 31,
-   "path": "houses/nodes/rail_fare_node.py",
-   "code": -2,
-   "name": "missing-override-decorator",
-   "description": "Class member `RailFareNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
-   "concise_description": "Class member `RailFareNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
-   "severity": "error"
-  },
-  {
-   "line": 49,
+   "line": 50,
    "column": 15,
-   "stop_line": 49,
+   "stop_line": 50,
    "stop_column": 22,
    "path": "houses/nodes/rail_fare_node.py",
    "code": -2,
    "name": "missing-override-decorator",
    "description": "Class member `RailFareNode.compute` overrides a member in a parent class but is missing an `@override` decorator",
    "concise_description": "Class member `RailFareNode.compute` overrides a member in a parent class but is missing an `@override` decorator",
-   "severity": "error"
-  },
-  {
-   "line": 96,
-   "column": 43,
-   "stop_line": 96,
-   "stop_column": 67,
-   "path": "houses/nodes/rail_fare_node.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `GeoPoint | None` is not assignable to parameter `point` with type `GeoPoint` in function `houses.rail_fares.RailFareRegistry.nearest_station`\n  The declared type does not allow `None`. Consider narrowing the value with an `is not None` check.",
-   "concise_description": "Argument `GeoPoint | None` is not assignable to parameter `point` with type `GeoPoint` in function `houses.rail_fares.RailFareRegistry.nearest_station`",
-   "severity": "error"
-  },
-  {
-   "line": 13,
-   "column": 9,
-   "stop_line": 13,
-   "stop_column": 31,
-   "path": "houses/nodes/schools.py",
-   "code": -2,
-   "name": "missing-override-decorator",
-   "description": "Class member `PrimarySchoolNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
-   "concise_description": "Class member `PrimarySchoolNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
    "severity": "error"
   },
   {
@@ -1189,33 +817,9 @@
    "severity": "error"
   },
   {
-   "line": 49,
-   "column": 29,
-   "stop_line": 49,
-   "stop_column": 46,
-   "path": "houses/nodes/schools.py",
-   "code": -2,
-   "name": "bad-assignment",
-   "description": "`float` is not assignable to dict key `lat` with type `str | None`",
-   "concise_description": "`float` is not assignable to dict key `lat` with type `str | None`",
-   "severity": "error"
-  },
-  {
-   "line": 50,
-   "column": 29,
-   "stop_line": 50,
-   "stop_column": 46,
-   "path": "houses/nodes/schools.py",
-   "code": -2,
-   "name": "bad-assignment",
-   "description": "`float` is not assignable to dict key `lon` with type `str | None`",
-   "concise_description": "`float` is not assignable to dict key `lon` with type `str | None`",
-   "severity": "error"
-  },
-  {
-   "line": 60,
+   "line": 61,
    "column": 15,
-   "stop_line": 60,
+   "stop_line": 61,
    "stop_column": 22,
    "path": "houses/nodes/schools.py",
    "code": -2,
@@ -1225,45 +829,9 @@
    "severity": "error"
   },
   {
-   "line": 88,
-   "column": 29,
-   "stop_line": 88,
-   "stop_column": 46,
-   "path": "houses/nodes/schools.py",
-   "code": -2,
-   "name": "bad-assignment",
-   "description": "`float` is not assignable to dict key `lat` with type `str | None`",
-   "concise_description": "`float` is not assignable to dict key `lat` with type `str | None`",
-   "severity": "error"
-  },
-  {
-   "line": 89,
-   "column": 29,
-   "stop_line": 89,
-   "stop_column": 46,
-   "path": "houses/nodes/schools.py",
-   "code": -2,
-   "name": "bad-assignment",
-   "description": "`float` is not assignable to dict key `lon` with type `str | None`",
-   "concise_description": "`float` is not assignable to dict key `lon` with type `str | None`",
-   "severity": "error"
-  },
-  {
-   "line": 93,
+   "line": 108,
    "column": 9,
-   "stop_line": 93,
-   "stop_column": 31,
-   "path": "houses/nodes/schools.py",
-   "code": -2,
-   "name": "missing-override-decorator",
-   "description": "Class member `SecondarySchoolNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
-   "concise_description": "Class member `SecondarySchoolNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
-   "severity": "error"
-  },
-  {
-   "line": 107,
-   "column": 9,
-   "stop_line": 107,
+   "stop_line": 108,
    "stop_column": 16,
    "path": "houses/nodes/schools.py",
    "code": -2,
@@ -1273,9 +841,9 @@
    "severity": "error"
   },
   {
-   "line": 63,
+   "line": 83,
    "column": 9,
-   "stop_line": 63,
+   "stop_line": 83,
    "stop_column": 13,
    "path": "houses/nodes/settings.py",
    "code": -2,
@@ -1285,51 +853,15 @@
    "severity": "error"
   },
   {
-   "line": 36,
-   "column": 41,
-   "stop_line": 36,
-   "stop_column": 49,
-   "path": "houses/nodes/settings_node.py",
-   "code": -2,
-   "name": "not-a-type",
-   "description": "Expected a type form, got instance of `(obj: object, /) -> TypeIs[(...) -> object]`",
-   "concise_description": "Expected a type form, got instance of `(obj: object, /) -> TypeIs[(...) -> object]`",
-   "severity": "error"
-  },
-  {
-   "line": 112,
+   "line": 117,
    "column": 9,
-   "stop_line": 112,
+   "stop_line": 117,
    "stop_column": 16,
    "path": "houses/nodes/settings_node.py",
    "code": -2,
    "name": "missing-override-decorator",
    "description": "Class member `SettingsNode.compute` overrides a member in a parent class but is missing an `@override` decorator",
    "concise_description": "Class member `SettingsNode.compute` overrides a member in a parent class but is missing an `@override` decorator",
-   "severity": "error"
-  },
-  {
-   "line": 22,
-   "column": 9,
-   "stop_line": 22,
-   "stop_column": 16,
-   "path": "houses/nodes/station.py",
-   "code": -2,
-   "name": "missing-override-decorator",
-   "description": "Class member `NearestStationNode.compute` overrides a member in a parent class but is missing an `@override` decorator",
-   "concise_description": "Class member `NearestStationNode.compute` overrides a member in a parent class but is missing an `@override` decorator",
-   "severity": "error"
-  },
-  {
-   "line": 26,
-   "column": 44,
-   "stop_line": 26,
-   "stop_column": 68,
-   "path": "houses/nodes/station.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `GeoPoint | None` is not assignable to parameter `point` with type `GeoPoint` in function `houses.rail_fares.RailFareRegistry.nearest_station`\n  The declared type does not allow `None`. Consider narrowing the value with an `is not None` check.",
-   "concise_description": "Argument `GeoPoint | None` is not assignable to parameter `point` with type `GeoPoint` in function `houses.rail_fares.RailFareRegistry.nearest_station`",
    "severity": "error"
   },
   {
@@ -1369,21 +901,9 @@
    "severity": "error"
   },
   {
-   "line": 16,
+   "line": 22,
    "column": 9,
-   "stop_line": 16,
-   "stop_column": 31,
-   "path": "houses/nodes/yearly_sinking_fund_node.py",
-   "code": -2,
-   "name": "missing-override-decorator",
-   "description": "Class member `YearlySinkingFundNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
-   "concise_description": "Class member `YearlySinkingFundNode.provenance_source_type` overrides a member in a parent class but is missing an `@override` decorator",
-   "severity": "error"
-  },
-  {
-   "line": 23,
-   "column": 9,
-   "stop_line": 23,
+   "stop_line": 22,
    "stop_column": 19,
    "path": "houses/nodes/yearly_sinking_fund_node.py",
    "code": -2,
@@ -1405,195 +925,15 @@
    "severity": "error"
   },
   {
-   "line": 433,
-   "column": 16,
-   "stop_line": 433,
-   "stop_column": 26,
-   "path": "houses/routing.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `duration`",
-   "concise_description": "Object of class `NoneType` has no attribute `duration`",
-   "severity": "error"
-  },
-  {
-   "line": 459,
-   "column": 21,
-   "stop_line": 459,
-   "stop_column": 49,
-   "path": "houses/routing.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `infeasible`",
-   "concise_description": "Object of class `NoneType` has no attribute `infeasible`",
-   "severity": "error"
-  },
-  {
-   "line": 460,
-   "column": 17,
-   "stop_line": 460,
-   "stop_column": 43,
-   "path": "houses/routing.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `duration`",
-   "concise_description": "Object of class `NoneType` has no attribute `duration`",
-   "severity": "error"
-  },
-  {
-   "line": 470,
-   "column": 19,
-   "stop_line": 470,
-   "stop_column": 70,
-   "path": "houses/routing.py",
-   "code": -2,
-   "name": "no-matching-overload",
-   "description": "No matching overload found for function `min` called with arguments: (Generator[Commute | None], key=(c: Commute) -> tuple[int, float])\n  Possible overloads:\n    (arg1: SupportsRichComparisonT, arg2: SupportsRichComparisonT, /, *_args: SupportsRichComparisonT, *, key: None = None) -> SupportsRichComparisonT\n    (arg1: _T, arg2: _T, /, *_args: _T, *, key: (_T) -> SupportsRichComparison) -> _T\n    (iterable: Iterable[SupportsRichComparisonT], /, *, key: None = None) -> SupportsRichComparisonT\n    (iterable: Iterable[_T], /, *, key: (_T) -> SupportsRichComparison) -> _T [closest match]\n    (iterable: Iterable[SupportsRichComparisonT], /, *, key: None = None, ...) -> SupportsRichComparisonT | _T\n    (iterable: Iterable[_T1], /, *, key: (_T1) -> SupportsRichComparison, ...) -> _T1 | _T2\n  Argument `(c: Commute) -> tuple[int, float]` is not assignable to parameter `key` with type `(Commute | None) -> SupportsRichComparison` in function `min`",
-   "concise_description": "No matching overload found for function `min` called with arguments: (Generator[Commute | None], key=(c: Commute) -> tuple[int, float])",
-   "severity": "error"
-  },
-  {
-   "line": 136,
-   "column": 44,
-   "stop_line": 136,
-   "stop_column": 69,
-   "path": "houses/school.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `Unknown | None` is not assignable to parameter `raw` with type `str` in function `School._try_int`\n  The declared type does not allow `None`. Consider narrowing the value with an `is not None` check.",
-   "concise_description": "Argument `Unknown | None` is not assignable to parameter `raw` with type `str` in function `School._try_int`",
-   "severity": "error"
-  },
-  {
-   "line": 137,
-   "column": 45,
-   "stop_line": 137,
-   "stop_column": 71,
-   "path": "houses/school.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `Unknown | None` is not assignable to parameter `raw` with type `str` in function `School._try_int`\n  The declared type does not allow `None`. Consider narrowing the value with an `is not None` check.",
-   "concise_description": "Argument `Unknown | None` is not assignable to parameter `raw` with type `str` in function `School._try_int`",
-   "severity": "error"
-  },
-  {
-   "line": 93,
-   "column": 20,
-   "stop_line": 93,
-   "stop_column": 35,
-   "path": "houses/schools.py",
-   "code": -2,
-   "name": "bad-return",
-   "description": "Returned type `Attempt[GeoPoint]` is not assignable to declared return type `Attempt[School | None]`",
-   "concise_description": "Returned type `Attempt[GeoPoint]` is not assignable to declared return type `Attempt[School | None]`",
-   "severity": "error"
-  },
-  {
-   "line": 98,
-   "column": 20,
-   "stop_line": 98,
-   "stop_column": 32,
-   "path": "houses/schools.py",
-   "code": -2,
-   "name": "bad-return",
-   "description": "Returned type `Attempt[GeoPoint]` is not assignable to declared return type `Attempt[School | None]`",
-   "concise_description": "Returned type `Attempt[GeoPoint]` is not assignable to declared return type `Attempt[School | None]`",
-   "severity": "error"
-  },
-  {
-   "line": 207,
-   "column": 6,
-   "stop_line": 207,
-   "stop_column": 38,
-   "path": "houses/server.py",
-   "code": -2,
-   "name": "bad-return",
-   "description": "Function declared to return `JSONResponse | StreamingResponse`, but one or more paths are missing an explicit `return`",
-   "concise_description": "Function declared to return `JSONResponse | StreamingResponse`, but one or more paths are missing an explicit `return`",
-   "severity": "error"
-  },
-  {
-   "line": 267,
-   "column": 41,
-   "stop_line": 267,
-   "stop_column": 54,
-   "path": "houses/server.py",
-   "code": -2,
-   "name": "bad-assignment",
-   "description": "`float` is not assignable to attribute `price` with type `Money | None`",
-   "concise_description": "`float` is not assignable to attribute `price` with type `Money | None`",
-   "severity": "error"
-  },
-  {
-   "line": 281,
+   "line": 17,
    "column": 22,
-   "stop_line": 281,
-   "stop_column": 115,
-   "path": "houses/server.py",
+   "stop_line": 17,
+   "stop_column": 30,
+   "path": "houses/settings.py",
    "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `int | None` is not assignable to parameter `bedrooms` with type `int` in function `houses.property.EnrichedProperty.__init__`\n  The declared type does not allow `None`. Consider narrowing the value with an `is not None` check.",
-   "concise_description": "Argument `int | None` is not assignable to parameter `bedrooms` with type `int` in function `houses.property.EnrichedProperty.__init__`",
-   "severity": "error"
-  },
-  {
-   "line": 282,
-   "column": 19,
-   "stop_line": 282,
-   "stop_column": 103,
-   "path": "houses/server.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `Money | float | None` is not assignable to parameter `price` with type `Money` in function `houses.property.EnrichedProperty.__init__`\n  The declared type does not allow `None`. Consider narrowing the value with an `is not None` check.",
-   "concise_description": "Argument `Money | float | None` is not assignable to parameter `price` with type `Money` in function `houses.property.EnrichedProperty.__init__`",
-   "severity": "error"
-  },
-  {
-   "line": 210,
-   "column": 13,
-   "stop_line": 210,
-   "stop_column": 38,
-   "path": "houses/services.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `Credentials` has no attribute `id_token`",
-   "concise_description": "Object of class `Credentials` has no attribute `id_token`",
-   "severity": "error"
-  },
-  {
-   "line": 214,
-   "column": 16,
-   "stop_line": 214,
-   "stop_column": 23,
-   "path": "houses/services.py",
-   "code": -2,
-   "name": "bad-return",
-   "description": "Returned type `Mapping[str, Any]` is not assignable to declared return type `dict[Unknown, Unknown]`",
-   "concise_description": "Returned type `Mapping[str, Any]` is not assignable to declared return type `dict[Unknown, Unknown]`",
-   "severity": "error"
-  },
-  {
-   "line": 147,
-   "column": 44,
-   "stop_line": 147,
-   "stop_column": 58,
-   "path": "houses/sheets/formulas.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `Literal['USER_ENTERED']` is not assignable to parameter `value_input_option` with type `ValueInputOption | None` in function `gspread.worksheet.Worksheet.update`\n  Did you mean `ValueInputOption.user_entered`?",
-   "concise_description": "Argument `Literal['USER_ENTERED']` is not assignable to parameter `value_input_option` with type `ValueInputOption | None` in function `gspread.worksheet.Worksheet.update`",
-   "severity": "error"
-  },
-  {
-   "line": 70,
-   "column": 66,
-   "stop_line": 70,
-   "stop_column": 80,
-   "path": "houses/sheets/named_ranges.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `Literal['USER_ENTERED']` is not assignable to parameter `value_input_option` with type `ValueInputOption | None` in function `gspread.worksheet.Worksheet.update`\n  Did you mean `ValueInputOption.user_entered`?",
-   "concise_description": "Argument `Literal['USER_ENTERED']` is not assignable to parameter `value_input_option` with type `ValueInputOption | None` in function `gspread.worksheet.Worksheet.update`",
+   "name": "invalid-argument",
+   "description": "Expected class object, got `type[QuantityT]`",
+   "concise_description": "Expected class object, got `type[QuantityT]`",
    "severity": "error"
   },
   {
@@ -1609,117 +949,9 @@
    "severity": "error"
   },
   {
-   "line": 46,
-   "column": 56,
-   "stop_line": 46,
-   "stop_column": 74,
-   "path": "houses/sheets/tab.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `str` is not assignable to parameter `value_input_option` with type `ValueInputOption` in function `gspread.worksheet.Worksheet.append_row`",
-   "concise_description": "Argument `str` is not assignable to parameter `value_input_option` with type `ValueInputOption` in function `gspread.worksheet.Worksheet.append_row`",
-   "severity": "error"
-  },
-  {
-   "line": 72,
-   "column": 44,
-   "stop_line": 72,
-   "stop_column": 58,
-   "path": "houses/sheets/view.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `Literal['USER_ENTEred']` is not assignable to parameter `value_input_option` with type `ValueInputOption | None` in function `gspread.worksheet.Worksheet.update`",
-   "concise_description": "Argument `Literal['USER_ENTEred']` is not assignable to parameter `value_input_option` with type `ValueInputOption | None` in function `gspread.worksheet.Worksheet.update`",
-   "severity": "error"
-  },
-  {
-   "line": 14,
-   "column": 1,
-   "stop_line": 14,
-   "stop_column": 44,
-   "path": "scripts/deploy_script.py",
-   "code": -2,
-   "name": "missing-import",
-   "description": "Cannot find module `googleapiclient.discovery`\n  Looked in these locations (from config in `/home/ashby/Documents/code/houses/pyrefly.toml`):\n  Import root (inferred from project layout): \"/home/ashby/Documents/code/houses\"\n  Site package path queried from interpreter: [\"/home/ashby/Documents/code/houses/.venv/lib/python3.12/site-packages\", \"__editable__.houses-0.1.0.finder.__path_hook__\"]",
-   "concise_description": "Cannot find module `googleapiclient.discovery`",
-   "severity": "error"
-  },
-  {
-   "line": 43,
-   "column": 29,
-   "stop_line": 43,
-   "stop_column": 52,
-   "path": "scripts/migrate_destinations.py",
-   "code": -2,
-   "name": "bad-assignment",
-   "description": "`Unknown | None` is not assignable to `list[Person]`\n  The declared type does not allow `None`. Consider narrowing the value with an `is not None` check or changing the declared type to `list[Person] | None`.",
-   "concise_description": "`Unknown | None` is not assignable to `list[Person]`",
-   "severity": "error"
-  },
-  {
-   "line": 53,
-   "column": 12,
-   "stop_line": 53,
-   "stop_column": 25,
-   "path": "scripts/migrate_settings.py",
-   "code": -2,
-   "name": "bad-return",
-   "description": "Returned type `int | None` is not assignable to declared return type `int`\n  The declared type does not allow `None`. Consider narrowing the value with an `is not None` check or changing the declared type to `int | None`.",
-   "concise_description": "Returned type `int | None` is not assignable to declared return type `int`",
-   "severity": "error"
-  },
-  {
-   "line": 394,
-   "column": 42,
-   "stop_line": 394,
-   "stop_column": 53,
-   "path": "scripts/parse_netex_fares.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `str | None` is not assignable to parameter `x` with type `Buffer | SupportsFloat | SupportsIndex | str` in function `float.__new__`\n  Protocol `Buffer` requires attribute `__buffer__`\n  The declared type does not allow `None`. Consider narrowing the value with an `is not None` check.",
-   "concise_description": "Argument `str | None` is not assignable to parameter `x` with type `Buffer | SupportsFloat | SupportsIndex | str` in function `float.__new__`",
-   "severity": "error"
-  },
-  {
-   "line": 475,
-   "column": 30,
-   "stop_line": 475,
-   "stop_column": 40,
-   "path": "scripts/parse_netex_fares.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `str | None` is not assignable to parameter `x` with type `Buffer | SupportsFloat | SupportsIndex | str` in function `float.__new__`\n  Protocol `Buffer` requires attribute `__buffer__`\n  The declared type does not allow `None`. Consider narrowing the value with an `is not None` check.",
-   "concise_description": "Argument `str | None` is not assignable to parameter `x` with type `Buffer | SupportsFloat | SupportsIndex | str` in function `float.__new__`",
-   "severity": "error"
-  },
-  {
-   "line": 602,
-   "column": 40,
-   "stop_line": 602,
-   "stop_column": 45,
-   "path": "scripts/parse_netex_fares.py",
-   "code": -2,
-   "name": "unsupported-operation",
-   "description": "Cannot set item in `dict[str, float]`\n  Argument `str | None` is not assignable to parameter `key` with type `str` in function `dict.__setitem__`\n  The declared type does not allow `None`. Consider narrowing the value with an `is not None` check.",
-   "concise_description": "Cannot set item in `dict[str, float]`",
-   "severity": "error"
-  },
-  {
-   "line": 217,
-   "column": 45,
-   "stop_line": 217,
-   "stop_column": 56,
-   "path": "scripts/update_sheet.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `list[int]` is not assignable to parameter `col_indices` with type `set[int]` in function `_fields_for_columns`",
-   "concise_description": "Argument `list[int]` is not assignable to parameter `col_indices` with type `set[int]` in function `_fields_for_columns`",
-   "severity": "error"
-  },
-  {
-   "line": 50,
+   "line": 73,
    "column": 9,
-   "stop_line": 50,
+   "stop_line": 73,
    "stop_column": 16,
    "path": "tests/helpers.py",
    "code": -2,
@@ -1729,9 +961,9 @@
    "severity": "error"
   },
   {
-   "line": 86,
+   "line": 109,
    "column": 15,
-   "stop_line": 86,
+   "stop_line": 109,
    "stop_column": 31,
    "path": "tests/helpers.py",
    "code": -2,
@@ -1741,9 +973,9 @@
    "severity": "error"
   },
   {
-   "line": 90,
+   "line": 113,
    "column": 15,
-   "stop_line": 90,
+   "stop_line": 113,
    "stop_column": 30,
    "path": "tests/helpers.py",
    "code": -2,
@@ -1753,9 +985,9 @@
    "severity": "error"
   },
   {
-   "line": 94,
+   "line": 117,
    "column": 15,
-   "stop_line": 94,
+   "stop_line": 117,
    "stop_column": 35,
    "path": "tests/helpers.py",
    "code": -2,
@@ -1765,9 +997,9 @@
    "severity": "error"
   },
   {
-   "line": 127,
+   "line": 150,
    "column": 15,
-   "stop_line": 127,
+   "stop_line": 150,
    "stop_column": 25,
    "path": "tests/helpers.py",
    "code": -2,
@@ -1777,9 +1009,9 @@
    "severity": "error"
   },
   {
-   "line": 138,
+   "line": 161,
    "column": 15,
-   "stop_line": 138,
+   "stop_line": 161,
    "stop_column": 26,
    "path": "tests/helpers.py",
    "code": -2,
@@ -1789,9 +1021,9 @@
    "severity": "error"
   },
   {
-   "line": 161,
+   "line": 203,
    "column": 15,
-   "stop_line": 161,
+   "stop_line": 203,
    "stop_column": 27,
    "path": "tests/helpers.py",
    "code": -2,
@@ -1801,9 +1033,9 @@
    "severity": "error"
   },
   {
-   "line": 171,
+   "line": 213,
    "column": 15,
-   "stop_line": 171,
+   "stop_line": 213,
    "stop_column": 29,
    "path": "tests/helpers.py",
    "code": -2,
@@ -1813,9 +1045,9 @@
    "severity": "error"
   },
   {
-   "line": 188,
+   "line": 230,
    "column": 15,
-   "stop_line": 188,
+   "stop_line": 230,
    "stop_column": 21,
    "path": "tests/helpers.py",
    "code": -2,
@@ -1825,9 +1057,9 @@
    "severity": "error"
   },
   {
-   "line": 194,
+   "line": 236,
    "column": 15,
-   "stop_line": 194,
+   "stop_line": 236,
    "stop_column": 23,
    "path": "tests/helpers.py",
    "code": -2,
@@ -1837,9 +1069,9 @@
    "severity": "error"
   },
   {
-   "line": 203,
+   "line": 245,
    "column": 15,
-   "stop_line": 203,
+   "stop_line": 245,
    "stop_column": 21,
    "path": "tests/helpers.py",
    "code": -2,
@@ -1849,9 +1081,9 @@
    "severity": "error"
   },
   {
-   "line": 213,
+   "line": 255,
    "column": 15,
-   "stop_line": 213,
+   "stop_line": 255,
    "stop_column": 21,
    "path": "tests/helpers.py",
    "code": -2,
@@ -1861,9 +1093,9 @@
    "severity": "error"
   },
   {
-   "line": 218,
+   "line": 260,
    "column": 15,
-   "stop_line": 218,
+   "stop_line": 260,
    "stop_column": 21,
    "path": "tests/helpers.py",
    "code": -2,
@@ -1873,9 +1105,9 @@
    "severity": "error"
   },
   {
-   "line": 243,
+   "line": 285,
    "column": 15,
-   "stop_line": 243,
+   "stop_line": 285,
    "stop_column": 23,
    "path": "tests/helpers.py",
    "code": -2,
@@ -1885,9 +1117,9 @@
    "severity": "error"
   },
   {
-   "line": 247,
+   "line": 289,
    "column": 15,
-   "stop_line": 247,
+   "stop_line": 289,
    "stop_column": 37,
    "path": "tests/helpers.py",
    "code": -2,
@@ -1897,9 +1129,9 @@
    "severity": "error"
   },
   {
-   "line": 273,
+   "line": 315,
    "column": 9,
-   "stop_line": 273,
+   "stop_line": 315,
    "stop_column": 33,
    "path": "tests/helpers.py",
    "code": -2,
@@ -1909,9 +1141,9 @@
    "severity": "error"
   },
   {
-   "line": 276,
+   "line": 318,
    "column": 9,
-   "stop_line": 276,
+   "stop_line": 318,
    "stop_column": 22,
    "path": "tests/helpers.py",
    "code": -2,
@@ -1921,9 +1153,9 @@
    "severity": "error"
   },
   {
-   "line": 279,
+   "line": 321,
    "column": 15,
-   "stop_line": 279,
+   "stop_line": 321,
    "stop_column": 30,
    "path": "tests/helpers.py",
    "code": -2,
@@ -1945,111 +1177,15 @@
    "severity": "error"
   },
   {
-   "line": 93,
-   "column": 20,
-   "stop_line": 93,
-   "stop_column": 27,
+   "line": 41,
+   "column": 15,
+   "stop_line": 41,
+   "stop_column": 25,
    "path": "tests/integration/test_council_tax.py",
    "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `band`",
-   "concise_description": "Object of class `NoneType` has no attribute `band`",
-   "severity": "error"
-  },
-  {
-   "line": 94,
-   "column": 20,
-   "stop_line": 94,
-   "stop_column": 34,
-   "path": "tests/integration/test_council_tax.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `yearly_cost`",
-   "concise_description": "Object of class `NoneType` has no attribute `yearly_cost`",
-   "severity": "error"
-  },
-  {
-   "line": 95,
-   "column": 40,
-   "stop_line": 95,
-   "stop_column": 55,
-   "path": "tests/integration/test_council_tax.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `evidence_url`",
-   "concise_description": "Object of class `NoneType` has no attribute `evidence_url`",
-   "severity": "error"
-  },
-  {
-   "line": 274,
-   "column": 20,
-   "stop_line": 274,
-   "stop_column": 47,
-   "path": "tests/integration/test_council_tax.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `band`",
-   "concise_description": "Object of class `NoneType` has no attribute `band`",
-   "severity": "error"
-  },
-  {
-   "line": 297,
-   "column": 20,
-   "stop_line": 297,
-   "stop_column": 47,
-   "path": "tests/integration/test_council_tax.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `band`",
-   "concise_description": "Object of class `NoneType` has no attribute `band`",
-   "severity": "error"
-  },
-  {
-   "line": 309,
-   "column": 20,
-   "stop_line": 309,
-   "stop_column": 27,
-   "path": "tests/integration/test_council_tax.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `band`",
-   "concise_description": "Object of class `NoneType` has no attribute `band`",
-   "severity": "error"
-  },
-  {
-   "line": 310,
-   "column": 20,
-   "stop_line": 310,
-   "stop_column": 34,
-   "path": "tests/integration/test_council_tax.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `yearly_cost`",
-   "concise_description": "Object of class `NoneType` has no attribute `yearly_cost`",
-   "severity": "error"
-  },
-  {
-   "line": 311,
-   "column": 20,
-   "stop_line": 311,
-   "stop_column": 35,
-   "path": "tests/integration/test_council_tax.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `evidence_url`",
-   "concise_description": "Object of class `NoneType` has no attribute `evidence_url`",
-   "severity": "error"
-  },
-  {
-   "line": 352,
-   "column": 20,
-   "stop_line": 352,
-   "stop_column": 47,
-   "path": "tests/integration/test_council_tax.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `band`",
-   "concise_description": "Object of class `NoneType` has no attribute `band`",
+   "name": "missing-override-decorator",
+   "description": "Class member `_RaisingVoaClient.fetch_page` overrides a member in a parent class but is missing an `@override` decorator",
+   "concise_description": "Class member `_RaisingVoaClient.fetch_page` overrides a member in a parent class but is missing an `@override` decorator",
    "severity": "error"
   },
   {
@@ -2233,9 +1369,9 @@
    "severity": "error"
   },
   {
-   "line": 177,
+   "line": 189,
    "column": 17,
-   "stop_line": 177,
+   "stop_line": 189,
    "stop_column": 24,
    "path": "tests/unit/dag/test_if_then_else.py",
    "code": -2,
@@ -2605,45 +1741,9 @@
    "severity": "error"
   },
   {
-   "line": 409,
-   "column": 16,
-   "stop_line": 409,
-   "stop_column": 65,
-   "path": "tests/unit/nodes/test_commute.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `daily_cost`",
-   "concise_description": "Object of class `NoneType` has no attribute `daily_cost`",
-   "severity": "error"
-  },
-  {
-   "line": 414,
-   "column": 16,
-   "stop_line": 414,
-   "stop_column": 65,
-   "path": "tests/unit/nodes/test_commute.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `daily_cost`",
-   "concise_description": "Object of class `NoneType` has no attribute `daily_cost`",
-   "severity": "error"
-  },
-  {
-   "line": 481,
-   "column": 18,
-   "stop_line": 481,
-   "stop_column": 22,
-   "path": "tests/unit/nodes/test_commute.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `None` is not assignable to parameter `value` with type `Commute` in function `tests.helpers.FixedCommuteNode.push`",
-   "concise_description": "Argument `None` is not assignable to parameter `value` with type `Commute` in function `tests.helpers.FixedCommuteNode.push`",
-   "severity": "error"
-  },
-  {
-   "line": 796,
+   "line": 829,
    "column": 9,
-   "stop_line": 796,
+   "stop_line": 829,
    "stop_column": 16,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2653,9 +1753,9 @@
    "severity": "error"
   },
   {
-   "line": 911,
+   "line": 946,
    "column": 17,
-   "stop_line": 911,
+   "stop_line": 946,
    "stop_column": 24,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2665,9 +1765,9 @@
    "severity": "error"
   },
   {
-   "line": 914,
+   "line": 949,
    "column": 17,
-   "stop_line": 914,
+   "stop_line": 949,
    "stop_column": 24,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2677,9 +1777,9 @@
    "severity": "error"
   },
   {
-   "line": 974,
+   "line": 1009,
    "column": 23,
-   "stop_line": 974,
+   "stop_line": 1009,
    "stop_column": 30,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2689,9 +1789,9 @@
    "severity": "error"
   },
   {
-   "line": 977,
+   "line": 1012,
    "column": 17,
-   "stop_line": 977,
+   "stop_line": 1012,
    "stop_column": 31,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2701,9 +1801,9 @@
    "severity": "error"
   },
   {
-   "line": 980,
+   "line": 1015,
    "column": 17,
-   "stop_line": 980,
+   "stop_line": 1015,
    "stop_column": 24,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2713,9 +1813,9 @@
    "severity": "error"
   },
   {
-   "line": 1226,
+   "line": 1266,
    "column": 17,
-   "stop_line": 1226,
+   "stop_line": 1266,
    "stop_column": 24,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2725,9 +1825,9 @@
    "severity": "error"
   },
   {
-   "line": 1229,
+   "line": 1269,
    "column": 23,
-   "stop_line": 1229,
+   "stop_line": 1269,
    "stop_column": 30,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2737,9 +1837,9 @@
    "severity": "error"
   },
   {
-   "line": 1283,
+   "line": 1323,
    "column": 23,
-   "stop_line": 1283,
+   "stop_line": 1323,
    "stop_column": 30,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2749,9 +1849,9 @@
    "severity": "error"
   },
   {
-   "line": 1286,
+   "line": 1326,
    "column": 17,
-   "stop_line": 1286,
+   "stop_line": 1326,
    "stop_column": 31,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2761,9 +1861,9 @@
    "severity": "error"
   },
   {
-   "line": 1289,
+   "line": 1329,
    "column": 17,
-   "stop_line": 1289,
+   "stop_line": 1329,
    "stop_column": 24,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2773,9 +1873,9 @@
    "severity": "error"
   },
   {
-   "line": 1314,
+   "line": 1354,
    "column": 23,
-   "stop_line": 1314,
+   "stop_line": 1354,
    "stop_column": 30,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2785,9 +1885,9 @@
    "severity": "error"
   },
   {
-   "line": 1317,
+   "line": 1357,
    "column": 17,
-   "stop_line": 1317,
+   "stop_line": 1357,
    "stop_column": 31,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2797,9 +1897,9 @@
    "severity": "error"
   },
   {
-   "line": 1320,
+   "line": 1360,
    "column": 17,
-   "stop_line": 1320,
+   "stop_line": 1360,
    "stop_column": 24,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2809,9 +1909,9 @@
    "severity": "error"
   },
   {
-   "line": 1345,
+   "line": 1385,
    "column": 23,
-   "stop_line": 1345,
+   "stop_line": 1385,
    "stop_column": 30,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2821,9 +1921,9 @@
    "severity": "error"
   },
   {
-   "line": 1348,
+   "line": 1388,
    "column": 17,
-   "stop_line": 1348,
+   "stop_line": 1388,
    "stop_column": 31,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2833,9 +1933,9 @@
    "severity": "error"
   },
   {
-   "line": 1351,
+   "line": 1391,
    "column": 17,
-   "stop_line": 1351,
+   "stop_line": 1391,
    "stop_column": 24,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2845,21 +1945,9 @@
    "severity": "error"
   },
   {
-   "line": 1382,
-   "column": 25,
-   "stop_line": 1382,
-   "stop_column": 57,
-   "path": "tests/unit/nodes/test_commute.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `DerivedNode[Commute]` is not assignable to parameter `then_branch` with type `Node[Commute | None]` in function `dag.if_then_else.IfThenElseNode.__init__`",
-   "concise_description": "Argument `DerivedNode[Commute]` is not assignable to parameter `then_branch` with type `Node[Commute | None]` in function `dag.if_then_else.IfThenElseNode.__init__`",
-   "severity": "error"
-  },
-  {
-   "line": 1424,
+   "line": 1468,
    "column": 23,
-   "stop_line": 1424,
+   "stop_line": 1468,
    "stop_column": 30,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2869,9 +1957,9 @@
    "severity": "error"
   },
   {
-   "line": 1427,
+   "line": 1471,
    "column": 17,
-   "stop_line": 1427,
+   "stop_line": 1471,
    "stop_column": 31,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2881,9 +1969,9 @@
    "severity": "error"
   },
   {
-   "line": 1430,
+   "line": 1474,
    "column": 17,
-   "stop_line": 1430,
+   "stop_line": 1474,
    "stop_column": 24,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2893,9 +1981,9 @@
    "severity": "error"
   },
   {
-   "line": 1472,
+   "line": 1518,
    "column": 17,
-   "stop_line": 1472,
+   "stop_line": 1518,
    "stop_column": 24,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2905,21 +1993,9 @@
    "severity": "error"
   },
   {
-   "line": 1481,
-   "column": 25,
-   "stop_line": 1481,
-   "stop_column": 34,
-   "path": "tests/unit/nodes/test_commute.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `TestFareConditionalDependency.test_drive_selection_never_activates_fare_dependency._WouldFailFare` is not assignable to parameter `then_branch` with type `Node[Commute | None]` in function `dag.if_then_else.IfThenElseNode.__init__`",
-   "concise_description": "Argument `TestFareConditionalDependency.test_drive_selection_never_activates_fare_dependency._WouldFailFare` is not assignable to parameter `then_branch` with type `Node[Commute | None]` in function `dag.if_then_else.IfThenElseNode.__init__`",
-   "severity": "error"
-  },
-  {
-   "line": 1520,
+   "line": 1568,
    "column": 23,
-   "stop_line": 1520,
+   "stop_line": 1568,
    "stop_column": 30,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2929,9 +2005,9 @@
    "severity": "error"
   },
   {
-   "line": 1523,
+   "line": 1571,
    "column": 17,
-   "stop_line": 1523,
+   "stop_line": 1571,
    "stop_column": 31,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2941,9 +2017,9 @@
    "severity": "error"
   },
   {
-   "line": 1526,
+   "line": 1574,
    "column": 17,
-   "stop_line": 1526,
+   "stop_line": 1574,
    "stop_column": 24,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2953,9 +2029,9 @@
    "severity": "error"
   },
   {
-   "line": 1572,
+   "line": 1622,
    "column": 23,
-   "stop_line": 1572,
+   "stop_line": 1622,
    "stop_column": 30,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2965,9 +2041,9 @@
    "severity": "error"
   },
   {
-   "line": 1589,
+   "line": 1639,
    "column": 17,
-   "stop_line": 1589,
+   "stop_line": 1639,
    "stop_column": 31,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2977,9 +2053,9 @@
    "severity": "error"
   },
   {
-   "line": 1592,
+   "line": 1642,
    "column": 17,
-   "stop_line": 1592,
+   "stop_line": 1642,
    "stop_column": 24,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -2989,21 +2065,9 @@
    "severity": "error"
   },
   {
-   "line": 1600,
-   "column": 25,
-   "stop_line": 1600,
-   "stop_column": 42,
-   "path": "tests/unit/nodes/test_commute.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `TestFareConditionalDependency.test_transit_selection_activates_fare_dependency._Fare` is not assignable to parameter `then_branch` with type `Node[Commute | None]` in function `dag.if_then_else.IfThenElseNode.__init__`",
-   "concise_description": "Argument `TestFareConditionalDependency.test_transit_selection_activates_fare_dependency._Fare` is not assignable to parameter `then_branch` with type `Node[Commute | None]` in function `dag.if_then_else.IfThenElseNode.__init__`",
-   "severity": "error"
-  },
-  {
-   "line": 1633,
+   "line": 1685,
    "column": 23,
-   "stop_line": 1633,
+   "stop_line": 1685,
    "stop_column": 30,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -3013,9 +2077,9 @@
    "severity": "error"
   },
   {
-   "line": 1649,
+   "line": 1701,
    "column": 17,
-   "stop_line": 1649,
+   "stop_line": 1701,
    "stop_column": 31,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -3025,9 +2089,9 @@
    "severity": "error"
   },
   {
-   "line": 1652,
+   "line": 1704,
    "column": 17,
-   "stop_line": 1652,
+   "stop_line": 1704,
    "stop_column": 24,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -3037,9 +2101,9 @@
    "severity": "error"
   },
   {
-   "line": 1724,
+   "line": 1776,
    "column": 9,
-   "stop_line": 1724,
+   "stop_line": 1776,
    "stop_column": 16,
    "path": "tests/unit/nodes/test_commute.py",
    "code": -2,
@@ -3049,63 +2113,39 @@
    "severity": "error"
   },
   {
-   "line": 284,
+   "line": 115,
    "column": 9,
-   "stop_line": 284,
-   "stop_column": 44,
+   "stop_line": 115,
+   "stop_column": 13,
    "path": "tests/unit/nodes/test_commute_pipeline.py",
    "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `RoutePlanner` has no attribute `routes`",
-   "concise_description": "Object of class `RoutePlanner` has no attribute `routes`",
+   "name": "missing-override-decorator",
+   "description": "Class member `_FakeStationRegistry.find` overrides a member in a parent class but is missing an `@override` decorator",
+   "concise_description": "Class member `_FakeStationRegistry.find` overrides a member in a parent class but is missing an `@override` decorator",
    "severity": "error"
   },
   {
-   "line": 357,
-   "column": 30,
-   "stop_line": 362,
-   "stop_column": 14,
-   "path": "tests/unit/nodes/test_commute_pipeline.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `_FakeStationRegistry` is not assignable to parameter `station_registry` with type `StationRegistry | None` in function `houses.nodes.park_and_ride.ParkAndRideAugmentNode.__init__`",
-   "concise_description": "Argument `_FakeStationRegistry` is not assignable to parameter `station_registry` with type `StationRegistry | None` in function `houses.nodes.park_and_ride.ParkAndRideAugmentNode.__init__`",
-   "severity": "error"
-  },
-  {
-   "line": 363,
-   "column": 31,
-   "stop_line": 365,
-   "stop_column": 14,
-   "path": "tests/unit/nodes/test_commute_pipeline.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `_FakeCarParkRegistry` is not assignable to parameter `car_park_registry` with type `CarParkRegistry | None` in function `houses.nodes.park_and_ride.ParkAndRideAugmentNode.__init__`",
-   "concise_description": "Argument `_FakeCarParkRegistry` is not assignable to parameter `car_park_registry` with type `CarParkRegistry | None` in function `houses.nodes.park_and_ride.ParkAndRideAugmentNode.__init__`",
-   "severity": "error"
-  },
-  {
-   "line": 405,
+   "line": 123,
    "column": 9,
-   "stop_line": 405,
-   "stop_column": 33,
+   "stop_line": 123,
+   "stop_column": 16,
    "path": "tests/unit/nodes/test_commute_pipeline.py",
    "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `RoutePlanner` has no attribute `routes`",
-   "concise_description": "Object of class `RoutePlanner` has no attribute `routes`",
+   "name": "missing-override-decorator",
+   "description": "Class member `_FakeStationRegistry.nearest` overrides a member in a parent class but is missing an `@override` decorator",
+   "concise_description": "Class member `_FakeStationRegistry.nearest` overrides a member in a parent class but is missing an `@override` decorator",
    "severity": "error"
   },
   {
-   "line": 505,
-   "column": 25,
-   "stop_line": 505,
-   "stop_column": 33,
+   "line": 141,
+   "column": 9,
+   "stop_line": 141,
+   "stop_column": 22,
    "path": "tests/unit/nodes/test_commute_pipeline.py",
    "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `FixedCommuteNode` is not assignable to parameter `then_branch` with type `Node[Commute | None]` in function `dag.if_then_else.IfThenElseNode.__init__`",
-   "concise_description": "Argument `FixedCommuteNode` is not assignable to parameter `then_branch` with type `Node[Commute | None]` in function `dag.if_then_else.IfThenElseNode.__init__`",
+   "name": "missing-override-decorator",
+   "description": "Class member `_FakeCarParkRegistry.find_car_park` overrides a member in a parent class but is missing an `@override` decorator",
+   "concise_description": "Class member `_FakeCarParkRegistry.find_car_park` overrides a member in a parent class but is missing an `@override` decorator",
    "severity": "error"
   },
   {
@@ -3133,9 +2173,9 @@
    "severity": "error"
   },
   {
-   "line": 221,
+   "line": 223,
    "column": 17,
-   "stop_line": 221,
+   "stop_line": 223,
    "stop_column": 30,
    "path": "tests/unit/nodes/test_park_and_ride.py",
    "code": -2,
@@ -3205,30 +2245,6 @@
    "severity": "error"
   },
   {
-   "line": 340,
-   "column": 13,
-   "stop_line": 343,
-   "stop_column": 14,
-   "path": "tests/unit/nodes/test_property_json.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `list[dict[str, bool | list[str] | str] | dict[str, bool | str]]` is not assignable to parameter `value` with type `list[Person]` in function `dag.user_input_node.UserInputNode.push`",
-   "concise_description": "Argument `list[dict[str, bool | list[str] | str] | dict[str, bool | str]]` is not assignable to parameter `value` with type `list[Person]` in function `dag.user_input_node.UserInputNode.push`",
-   "severity": "error"
-  },
-  {
-   "line": 373,
-   "column": 13,
-   "stop_line": 375,
-   "stop_column": 14,
-   "path": "tests/unit/nodes/test_property_json.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `list[dict[str, bool | str]]` is not assignable to parameter `value` with type `list[Person]` in function `dag.user_input_node.UserInputNode.push`",
-   "concise_description": "Argument `list[dict[str, bool | str]]` is not assignable to parameter `value` with type `list[Person]` in function `dag.user_input_node.UserInputNode.push`",
-   "severity": "error"
-  },
-  {
    "line": 76,
    "column": 12,
    "stop_line": 76,
@@ -3286,78 +2302,6 @@
    "name": "missing-attribute",
    "description": "Object of class `NoneType` has no attribute `get`",
    "concise_description": "Object of class `NoneType` has no attribute `get`",
-   "severity": "error"
-  },
-  {
-   "line": 688,
-   "column": 16,
-   "stop_line": 688,
-   "stop_column": 43,
-   "path": "tests/unit/nodes/test_schools.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `name`",
-   "concise_description": "Object of class `NoneType` has no attribute `name`",
-   "severity": "error"
-  },
-  {
-   "line": 688,
-   "column": 91,
-   "stop_line": 688,
-   "stop_column": 118,
-   "path": "tests/unit/nodes/test_schools.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `name`",
-   "concise_description": "Object of class `NoneType` has no attribute `name`",
-   "severity": "error"
-  },
-  {
-   "line": 739,
-   "column": 16,
-   "stop_line": 739,
-   "stop_column": 43,
-   "path": "tests/unit/nodes/test_schools.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `name`",
-   "concise_description": "Object of class `NoneType` has no attribute `name`",
-   "severity": "error"
-  },
-  {
-   "line": 740,
-   "column": 41,
-   "stop_line": 740,
-   "stop_column": 68,
-   "path": "tests/unit/nodes/test_schools.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `name`",
-   "concise_description": "Object of class `NoneType` has no attribute `name`",
-   "severity": "error"
-  },
-  {
-   "line": 790,
-   "column": 16,
-   "stop_line": 790,
-   "stop_column": 43,
-   "path": "tests/unit/nodes/test_schools.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `name`",
-   "concise_description": "Object of class `NoneType` has no attribute `name`",
-   "severity": "error"
-  },
-  {
-   "line": 889,
-   "column": 16,
-   "stop_line": 889,
-   "stop_column": 43,
-   "path": "tests/unit/nodes/test_schools.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `name`",
-   "concise_description": "Object of class `NoneType` has no attribute `name`",
    "severity": "error"
   },
   {
@@ -3433,222 +2377,6 @@
    "severity": "error"
   },
   {
-   "line": 37,
-   "column": 38,
-   "stop_line": 37,
-   "stop_column": 53,
-   "path": "tests/unit/test_auth.py",
-   "code": -2,
-   "name": "unsupported-operation",
-   "description": "Cannot set item in `dict[str, PropertyNodes]`\n  Argument `_FakeProperty` is not assignable to parameter `value` with type `PropertyNodes` in function `dict.__setitem__`",
-   "concise_description": "Cannot set item in `dict[str, PropertyNodes]`",
-   "severity": "error"
-  },
-  {
-   "line": 275,
-   "column": 16,
-   "stop_line": 275,
-   "stop_column": 34,
-   "path": "tests/unit/test_bus_fares.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `get`",
-   "concise_description": "Object of class `NoneType` has no attribute `get`",
-   "severity": "error"
-  },
-  {
-   "line": 145,
-   "column": 22,
-   "stop_line": 145,
-   "stop_column": 42,
-   "path": "tests/unit/test_car_park.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `amount`",
-   "concise_description": "Object of class `NoneType` has no attribute `amount`",
-   "severity": "error"
-  },
-  {
-   "line": 347,
-   "column": 44,
-   "stop_line": 347,
-   "stop_column": 52,
-   "path": "tests/unit/test_car_park.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `CarPark | None` is not assignable to parameter `car_park` with type `CarPark` in function `houses.car_park.CarParkRegistry.load_costs`\n  The declared type does not allow `None`. Consider narrowing the value with an `is not None` check.",
-   "concise_description": "Argument `CarPark | None` is not assignable to parameter `car_park` with type `CarPark` in function `houses.car_park.CarParkRegistry.load_costs`",
-   "severity": "error"
-  },
-  {
-   "line": 374,
-   "column": 16,
-   "stop_line": 374,
-   "stop_column": 29,
-   "path": "tests/unit/test_car_park.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `name`",
-   "concise_description": "Object of class `NoneType` has no attribute `name`",
-   "severity": "error"
-  },
-  {
-   "line": 375,
-   "column": 16,
-   "stop_line": 375,
-   "stop_column": 35,
-   "path": "tests/unit/test_car_park.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `daily_cost`",
-   "concise_description": "Object of class `NoneType` has no attribute `daily_cost`",
-   "severity": "error"
-  },
-  {
-   "line": 376,
-   "column": 16,
-   "stop_line": 376,
-   "stop_column": 32,
-   "path": "tests/unit/test_car_park.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `address`",
-   "concise_description": "Object of class `NoneType` has no attribute `address`",
-   "severity": "error"
-  },
-  {
-   "line": 97,
-   "column": 37,
-   "stop_line": 97,
-   "stop_column": 53,
-   "path": "tests/unit/test_commute_combined_map.py",
-   "code": -2,
-   "name": "invalid-argument",
-   "description": "Expected a mapping, got int | list[list[float]] | str | dict[str, float | str]",
-   "concise_description": "Expected a mapping, got int | list[list[float]] | str | dict[str, float | str]",
-   "severity": "error"
-  },
-  {
-   "line": 192,
-   "column": 35,
-   "stop_line": 192,
-   "stop_column": 51,
-   "path": "tests/unit/test_commute_combined_map.py",
-   "code": -2,
-   "name": "invalid-argument",
-   "description": "Expected a mapping, got int | list[list[float]] | str | dict[str, float | str]",
-   "concise_description": "Expected a mapping, got int | list[list[float]] | str | dict[str, float | str]",
-   "severity": "error"
-  },
-  {
-   "line": 93,
-   "column": 64,
-   "stop_line": 93,
-   "stop_column": 89,
-   "path": "tests/unit/test_commute_intersection.py",
-   "code": -2,
-   "name": "bad-index",
-   "description": "Cannot index into `int`\n  Object of class `int` has no attribute `__getitem__`",
-   "concise_description": "Cannot index into `int`",
-   "severity": "error"
-  },
-  {
-   "line": 93,
-   "column": 64,
-   "stop_line": 93,
-   "stop_column": 89,
-   "path": "tests/unit/test_commute_intersection.py",
-   "code": -2,
-   "name": "bad-index",
-   "description": "Cannot index into `list[list[float]]`\n  No matching overload found for function `list.__getitem__` called with arguments: (Literal['label'])\n  Possible overloads:\n    (i: SupportsIndex, /) -> list[float] [closest match]\n    (s: slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | Unknown | None], /) -> list[list[float]]\n  Argument `Literal['label']` is not assignable to parameter `i` with type `SupportsIndex` in function `list.__getitem__`",
-   "concise_description": "Cannot index into `list[list[float]]`",
-   "severity": "error"
-  },
-  {
-   "line": 93,
-   "column": 64,
-   "stop_line": 93,
-   "stop_column": 89,
-   "path": "tests/unit/test_commute_intersection.py",
-   "code": -2,
-   "name": "bad-index",
-   "description": "Cannot index into `str`\n  No matching overload found for function `str.__getitem__` called with arguments: (Literal['label'])\n  Possible overloads:\n    (key: SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | Unknown | None], /) -> LiteralString\n    (key: SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | Unknown | None], /) -> str [closest match]\n  Argument `Literal['label']` is not assignable to parameter `key` with type `SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | Unknown | None]` in function `str.__getitem__`",
-   "concise_description": "Cannot index into `str`",
-   "severity": "error"
-  },
-  {
-   "line": 94,
-   "column": 25,
-   "stop_line": 94,
-   "stop_column": 28,
-   "path": "tests/unit/test_commute_intersection.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `list[int | list[list[float]] | str | dict[str, float | str]]` is not assignable to parameter `polygons` with type `list[list[tuple[float, float]]]` in function `tools.commute.intersection.drive_cells`",
-   "concise_description": "Argument `list[int | list[list[float]] | str | dict[str, float | str]]` is not assignable to parameter `polygons` with type `list[list[tuple[float, float]]]` in function `tools.commute.intersection.drive_cells`",
-   "severity": "error"
-  },
-  {
-   "line": 179,
-   "column": 63,
-   "stop_line": 179,
-   "stop_column": 88,
-   "path": "tests/unit/test_commute_intersection.py",
-   "code": -2,
-   "name": "bad-index",
-   "description": "Cannot index into `int`\n  Object of class `int` has no attribute `__getitem__`",
-   "concise_description": "Cannot index into `int`",
-   "severity": "error"
-  },
-  {
-   "line": 179,
-   "column": 63,
-   "stop_line": 179,
-   "stop_column": 88,
-   "path": "tests/unit/test_commute_intersection.py",
-   "code": -2,
-   "name": "bad-index",
-   "description": "Cannot index into `list[list[float]]`\n  No matching overload found for function `list.__getitem__` called with arguments: (Literal['label'])\n  Possible overloads:\n    (i: SupportsIndex, /) -> list[float] [closest match]\n    (s: slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | Unknown | None], /) -> list[list[float]]\n  Argument `Literal['label']` is not assignable to parameter `i` with type `SupportsIndex` in function `list.__getitem__`",
-   "concise_description": "Cannot index into `list[list[float]]`",
-   "severity": "error"
-  },
-  {
-   "line": 179,
-   "column": 63,
-   "stop_line": 179,
-   "stop_column": 88,
-   "path": "tests/unit/test_commute_intersection.py",
-   "code": -2,
-   "name": "bad-index",
-   "description": "Cannot index into `str`\n  No matching overload found for function `str.__getitem__` called with arguments: (Literal['label'])\n  Possible overloads:\n    (key: SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | Unknown | None], /) -> LiteralString\n    (key: SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | Unknown | None], /) -> str [closest match]\n  Argument `Literal['label']` is not assignable to parameter `key` with type `SupportsIndex | slice[SupportsIndex | None, SupportsIndex | None, SupportsIndex | Unknown | None]` in function `str.__getitem__`",
-   "concise_description": "Cannot index into `str`",
-   "severity": "error"
-  },
-  {
-   "line": 152,
-   "column": 26,
-   "stop_line": 152,
-   "stop_column": 36,
-   "path": "tests/unit/test_commute_searches.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `bool | float | int | str` is not assignable to parameter `lat` with type `float` in function `houses.geo.GeoPoint.__init__`",
-   "concise_description": "Argument `bool | float | int | str` is not assignable to parameter `lat` with type `float` in function `houses.geo.GeoPoint.__init__`",
-   "severity": "error"
-  },
-  {
-   "line": 152,
-   "column": 38,
-   "stop_line": 152,
-   "stop_column": 48,
-   "path": "tests/unit/test_commute_searches.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `bool | float | int | str` is not assignable to parameter `lon` with type `float` in function `houses.geo.GeoPoint.__init__`",
-   "concise_description": "Argument `bool | float | int | str` is not assignable to parameter `lon` with type `float` in function `houses.geo.GeoPoint.__init__`",
-   "severity": "error"
-  },
-  {
    "line": 70,
    "column": 66,
    "stop_line": 70,
@@ -3682,174 +2410,6 @@
    "name": "missing-attribute",
    "description": "Object of class `NoneType` has no attribute `name`",
    "concise_description": "Object of class `NoneType` has no attribute `name`",
-   "severity": "error"
-  },
-  {
-   "line": 155,
-   "column": 16,
-   "stop_line": 155,
-   "stop_column": 28,
-   "path": "tests/unit/test_enricher.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `duration`",
-   "concise_description": "Object of class `NoneType` has no attribute `duration`",
-   "severity": "error"
-  },
-  {
-   "line": 156,
-   "column": 16,
-   "stop_line": 156,
-   "stop_column": 30,
-   "path": "tests/unit/test_enricher.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `daily_cost`",
-   "concise_description": "Object of class `NoneType` has no attribute `daily_cost`",
-   "severity": "error"
-  },
-  {
-   "line": 282,
-   "column": 16,
-   "stop_line": 282,
-   "stop_column": 40,
-   "path": "tests/unit/test_enricher.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `person`",
-   "concise_description": "Object of class `NoneType` has no attribute `person`",
-   "severity": "error"
-  },
-  {
-   "line": 339,
-   "column": 16,
-   "stop_line": 339,
-   "stop_column": 44,
-   "path": "tests/unit/test_enricher.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `daily_cost`",
-   "concise_description": "Object of class `NoneType` has no attribute `daily_cost`",
-   "severity": "error"
-  },
-  {
-   "line": 493,
-   "column": 16,
-   "stop_line": 493,
-   "stop_column": 28,
-   "path": "tests/unit/test_enricher.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `duration`",
-   "concise_description": "Object of class `NoneType` has no attribute `duration`",
-   "severity": "error"
-  },
-  {
-   "line": 494,
-   "column": 22,
-   "stop_line": 494,
-   "stop_column": 36,
-   "path": "tests/unit/test_enricher.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `daily_cost`",
-   "concise_description": "Object of class `NoneType` has no attribute `daily_cost`",
-   "severity": "error"
-  },
-  {
-   "line": 495,
-   "column": 16,
-   "stop_line": 495,
-   "stop_column": 25,
-   "path": "tests/unit/test_enricher.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `label`",
-   "concise_description": "Object of class `NoneType` has no attribute `label`",
-   "severity": "error"
-  },
-  {
-   "line": 520,
-   "column": 31,
-   "stop_line": 520,
-   "stop_column": 40,
-   "path": "tests/unit/test_enricher.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `dict[str, UserInputNode[Commute]]` is not assignable to parameter `commute_selectors` with type `dict[str, Node[Unknown]]` in function `houses.nodes.commute_breakdown_node.CommuteBreakdownNode.__init__`",
-   "concise_description": "Argument `dict[str, UserInputNode[Commute]]` is not assignable to parameter `commute_selectors` with type `dict[str, Node[Unknown]]` in function `houses.nodes.commute_breakdown_node.CommuteBreakdownNode.__init__`",
-   "severity": "error"
-  },
-  {
-   "line": 555,
-   "column": 16,
-   "stop_line": 555,
-   "stop_column": 39,
-   "path": "tests/unit/test_enricher.py",
-   "code": -2,
-   "name": "unsupported-operation",
-   "description": "`None` is not subscriptable",
-   "concise_description": "`None` is not subscriptable",
-   "severity": "error"
-  },
-  {
-   "line": 575,
-   "column": 31,
-   "stop_line": 575,
-   "stop_column": 40,
-   "path": "tests/unit/test_enricher.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `dict[str, UserInputNode[Commute]]` is not assignable to parameter `commute_selectors` with type `dict[str, Node[Unknown]]` in function `houses.nodes.commute_breakdown_node.CommuteBreakdownNode.__init__`",
-   "concise_description": "Argument `dict[str, UserInputNode[Commute]]` is not assignable to parameter `commute_selectors` with type `dict[str, Node[Unknown]]` in function `houses.nodes.commute_breakdown_node.CommuteBreakdownNode.__init__`",
-   "severity": "error"
-  },
-  {
-   "line": 619,
-   "column": 16,
-   "stop_line": 619,
-   "stop_column": 39,
-   "path": "tests/unit/test_enricher.py",
-   "code": -2,
-   "name": "unsupported-operation",
-   "description": "`None` is not subscriptable",
-   "concise_description": "`None` is not subscriptable",
-   "severity": "error"
-  },
-  {
-   "line": 640,
-   "column": 16,
-   "stop_line": 640,
-   "stop_column": 53,
-   "path": "tests/unit/test_enricher.py",
-   "code": -2,
-   "name": "unsupported-operation",
-   "description": "`None` is not subscriptable",
-   "concise_description": "`None` is not subscriptable",
-   "severity": "error"
-  },
-  {
-   "line": 660,
-   "column": 31,
-   "stop_line": 660,
-   "stop_column": 40,
-   "path": "tests/unit/test_enricher.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `dict[str, UserInputNode[Commute]]` is not assignable to parameter `commute_selectors` with type `dict[str, Node[Unknown]]` in function `houses.nodes.commute_breakdown_node.CommuteBreakdownNode.__init__`",
-   "concise_description": "Argument `dict[str, UserInputNode[Commute]]` is not assignable to parameter `commute_selectors` with type `dict[str, Node[Unknown]]` in function `houses.nodes.commute_breakdown_node.CommuteBreakdownNode.__init__`",
-   "severity": "error"
-  },
-  {
-   "line": 691,
-   "column": 16,
-   "stop_line": 691,
-   "stop_column": 53,
-   "path": "tests/unit/test_enricher.py",
-   "code": -2,
-   "name": "unsupported-operation",
-   "description": "`None` is not subscriptable",
-   "concise_description": "`None` is not subscriptable",
    "severity": "error"
   },
   {
@@ -3898,42 +2458,6 @@
    "name": "bad-argument-type",
    "description": "Argument `None` is not assignable to parameter `price` with type `Money` in function `houses.property.EnrichedProperty.__init__`",
    "concise_description": "Argument `None` is not assignable to parameter `price` with type `Money` in function `houses.property.EnrichedProperty.__init__`",
-   "severity": "error"
-  },
-  {
-   "line": 32,
-   "column": 38,
-   "stop_line": 32,
-   "stop_column": 42,
-   "path": "tests/unit/test_extract_bus_fares.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `None` is not assignable to parameter `location` with type `GeoPoint` in function `houses.stations.Station.__init__`",
-   "concise_description": "Argument `None` is not assignable to parameter `location` with type `GeoPoint` in function `houses.stations.Station.__init__`",
-   "severity": "error"
-  },
-  {
-   "line": 42,
-   "column": 41,
-   "stop_line": 42,
-   "stop_column": 57,
-   "path": "tests/unit/test_extract_bus_fares.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `list[houses.stations.Station]` is not assignable to parameter `stations` with type `list[scripts.parse_netex_fares.Station]` in function `scripts.parse_netex_fares.parse_netex_fares`",
-   "concise_description": "Argument `list[houses.stations.Station]` is not assignable to parameter `stations` with type `list[scripts.parse_netex_fares.Station]` in function `scripts.parse_netex_fares.parse_netex_fares`",
-   "severity": "error"
-  },
-  {
-   "line": 56,
-   "column": 41,
-   "stop_line": 56,
-   "stop_column": 57,
-   "path": "tests/unit/test_extract_bus_fares.py",
-   "code": -2,
-   "name": "bad-argument-type",
-   "description": "Argument `list[houses.stations.Station]` is not assignable to parameter `stations` with type `list[scripts.parse_netex_fares.Station]` in function `scripts.parse_netex_fares.parse_netex_fares`",
-   "concise_description": "Argument `list[houses.stations.Station]` is not assignable to parameter `stations` with type `list[scripts.parse_netex_fares.Station]` in function `scripts.parse_netex_fares.parse_netex_fares`",
    "severity": "error"
   },
   {
@@ -4213,138 +2737,6 @@
    "severity": "error"
   },
   {
-   "line": 123,
-   "column": 12,
-   "stop_line": 123,
-   "stop_column": 39,
-   "path": "tests/unit/test_routing.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `name`",
-   "concise_description": "Object of class `NoneType` has no attribute `name`",
-   "severity": "error"
-  },
-  {
-   "line": 231,
-   "column": 16,
-   "stop_line": 231,
-   "stop_column": 47,
-   "path": "tests/unit/test_routing.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `duration`",
-   "concise_description": "Object of class `NoneType` has no attribute `duration`",
-   "severity": "error"
-  },
-  {
-   "line": 251,
-   "column": 16,
-   "stop_line": 251,
-   "stop_column": 47,
-   "path": "tests/unit/test_routing.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `duration`",
-   "concise_description": "Object of class `NoneType` has no attribute `duration`",
-   "severity": "error"
-  },
-  {
-   "line": 283,
-   "column": 16,
-   "stop_line": 283,
-   "stop_column": 47,
-   "path": "tests/unit/test_routing.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `duration`",
-   "concise_description": "Object of class `NoneType` has no attribute `duration`",
-   "severity": "error"
-  },
-  {
-   "line": 315,
-   "column": 16,
-   "stop_line": 315,
-   "stop_column": 47,
-   "path": "tests/unit/test_routing.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `duration`",
-   "concise_description": "Object of class `NoneType` has no attribute `duration`",
-   "severity": "error"
-  },
-  {
-   "line": 341,
-   "column": 16,
-   "stop_line": 341,
-   "stop_column": 47,
-   "path": "tests/unit/test_routing.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `duration`",
-   "concise_description": "Object of class `NoneType` has no attribute `duration`",
-   "severity": "error"
-  },
-  {
-   "line": 391,
-   "column": 16,
-   "stop_line": 391,
-   "stop_column": 31,
-   "path": "tests/unit/test_routing.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `daily_cost`",
-   "concise_description": "Object of class `NoneType` has no attribute `daily_cost`",
-   "severity": "error"
-  },
-  {
-   "line": 435,
-   "column": 16,
-   "stop_line": 435,
-   "stop_column": 47,
-   "path": "tests/unit/test_routing.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `duration`",
-   "concise_description": "Object of class `NoneType` has no attribute `duration`",
-   "severity": "error"
-  },
-  {
-   "line": 436,
-   "column": 46,
-   "stop_line": 436,
-   "stop_column": 77,
-   "path": "tests/unit/test_routing.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `duration`",
-   "concise_description": "Object of class `NoneType` has no attribute `duration`",
-   "severity": "error"
-  },
-  {
-   "line": 468,
-   "column": 16,
-   "stop_line": 468,
-   "stop_column": 47,
-   "path": "tests/unit/test_routing.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `duration`",
-   "concise_description": "Object of class `NoneType` has no attribute `duration`",
-   "severity": "error"
-  },
-  {
-   "line": 469,
-   "column": 48,
-   "stop_line": 469,
-   "stop_column": 79,
-   "path": "tests/unit/test_routing.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `duration`",
-   "concise_description": "Object of class `NoneType` has no attribute `duration`",
-   "severity": "error"
-  },
-  {
    "line": 26,
    "column": 15,
    "stop_line": 26,
@@ -4357,21 +2749,9 @@
    "severity": "error"
   },
   {
-   "line": 378,
-   "column": 16,
-   "stop_line": 378,
-   "stop_column": 49,
-   "path": "tools/capture_dom.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `strip`",
-   "concise_description": "Object of class `NoneType` has no attribute `strip`",
-   "severity": "error"
-  },
-  {
-   "line": 58,
+   "line": 59,
    "column": 13,
-   "stop_line": 58,
+   "stop_line": 59,
    "stop_column": 19,
    "path": "tools/commute/serve.py",
    "code": -2,
@@ -4381,9 +2761,9 @@
    "severity": "error"
   },
   {
-   "line": 61,
+   "line": 62,
    "column": 13,
-   "stop_line": 61,
+   "stop_line": 62,
    "stop_column": 20,
    "path": "tools/commute/serve.py",
    "code": -2,
@@ -4429,54 +2809,6 @@
    "severity": "error"
   },
   {
-   "line": 29,
-   "column": 51,
-   "stop_line": 29,
-   "stop_column": 59,
-   "path": "tools/migrate_node_results_to_quantity.py",
-   "code": -2,
-   "name": "bad-assignment",
-   "description": "`float` is not assignable to dict value type `int | str`",
-   "concise_description": "`float` is not assignable to dict value type `int | str`",
-   "severity": "error"
-  },
-  {
-   "line": 41,
-   "column": 32,
-   "stop_line": 41,
-   "stop_column": 38,
-   "path": "tools/migrate_node_results_to_quantity.py",
-   "code": -2,
-   "name": "unsupported-operation",
-   "description": "Cannot set item in `dict[str, dict[str, int | str]]`\n  Argument `str` is not assignable to parameter `value` with type `dict[str, int | str]` in function `dict.__setitem__`",
-   "concise_description": "Cannot set item in `dict[str, dict[str, int | str]]`",
-   "severity": "error"
-  },
-  {
-   "line": 45,
-   "column": 38,
-   "stop_line": 45,
-   "stop_column": 55,
-   "path": "tools/migrate_node_results_to_quantity.py",
-   "code": -2,
-   "name": "unsupported-operation",
-   "description": "Cannot set item in `dict[str, dict[str, int | str]]`\n  Argument `dict[str, dict[str, int | str]] | list[dict[str, dict[Unknown, Unknown]] | list[dict[Unknown, Unknown] | list[Unknown] | Unknown] | Unknown] | Unknown` is not assignable to parameter `value` with type `dict[str, int | str]` in function `dict.__setitem__`",
-   "concise_description": "Cannot set item in `dict[str, dict[str, int | str]]`",
-   "severity": "error"
-  },
-  {
-   "line": 47,
-   "column": 28,
-   "stop_line": 47,
-   "stop_column": 45,
-   "path": "tools/migrate_node_results_to_quantity.py",
-   "code": -2,
-   "name": "unsupported-operation",
-   "description": "Cannot set item in `dict[str, dict[str, int | str]]`\n  Argument `dict[str, dict[str, int | str]] | list[dict[str, dict[Unknown, Unknown]] | list[dict[Unknown, Unknown] | list[Unknown] | Unknown] | Unknown] | Unknown` is not assignable to parameter `value` with type `dict[str, int | str]` in function `dict.__setitem__`",
-   "concise_description": "Cannot set item in `dict[str, dict[str, int | str]]`",
-   "severity": "error"
-  },
-  {
    "line": 34,
    "column": 25,
    "stop_line": 34,
@@ -4486,30 +2818,6 @@
    "name": "bad-argument-type",
    "description": "Argument `PlaceOfInterest` is not assignable to parameter `object` with type `Never` in function `list.append`",
    "concise_description": "Argument `PlaceOfInterest` is not assignable to parameter `object` with type `Never` in function `list.append`",
-   "severity": "error"
-  },
-  {
-   "line": 157,
-   "column": 43,
-   "stop_line": 157,
-   "stop_column": 49,
-   "path": "tools/update_school_coords.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `lat`",
-   "concise_description": "Object of class `NoneType` has no attribute `lat`",
-   "severity": "error"
-  },
-  {
-   "line": 158,
-   "column": 44,
-   "stop_line": 158,
-   "stop_column": 50,
-   "path": "tools/update_school_coords.py",
-   "code": -2,
-   "name": "missing-attribute",
-   "description": "Object of class `NoneType` has no attribute `lon`",
-   "concise_description": "Object of class `NoneType` has no attribute `lon`",
    "severity": "error"
   }
  ]

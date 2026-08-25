@@ -207,7 +207,7 @@ class TestLifeInsurancePerPerson:
     @pytest.mark.asyncio
     async def test_formula_lists_each_person(self):
         from houses.model.domain import Person
-        from houses.nodes.life_insurance_node import LifeInsuranceTotalNode
+        from houses.nodes.life_insurance_total_node import LifeInsuranceTotalNode
         from tests.helpers import make_services
 
         svc = make_services()
@@ -333,7 +333,7 @@ class TestValueProjection:
             person=Person(name="", has_car=True),
             label="Pimlico",
             destination=PlaceOfInterest(label="Pimlico", address="SW1V 2QQ"),
-            duration=Quantity(68, "minute"),  # type: ignore[arg-type]
+            duration=Quantity(68, "minute"),  # type: ignore[arg-type]  # pint's stub types Quantity(68, "minute") as PlainQuantity, not assignable to Commute.duration's bare Quantity[Unknown] (invariant generic); PlainQuantity is a pint Quantity at runtime
             daily_cost=Money("27", "GBP"),
         )
         # The node path projects before constructing Provenance.
@@ -397,7 +397,7 @@ class TestValueProjection:
             person=Person(name="", has_car=True),
             label="Pimlico",
             destination=PlaceOfInterest(label="Pimlico", address="SW1V 2QQ"),
-            duration=Quantity(68, "minute"),  # type: ignore[arg-type]
+            duration=Quantity(68, "minute"),  # type: ignore[arg-type]  # pint's stub types Quantity(68, "minute") as PlainQuantity, not assignable to Commute.duration's bare Quantity[Unknown] (invariant generic); PlainQuantity is a pint Quantity at runtime
             daily_cost=Money("27", "GBP"),
         )
         node = UserInputNode("proj_test", Commute)

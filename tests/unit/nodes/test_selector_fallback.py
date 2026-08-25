@@ -12,9 +12,9 @@ from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
-from houses.nodes.commute import CommuteSelectorNode
+from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions
 
 
 def _mw(value: int):
@@ -44,7 +44,7 @@ def _commute(duration_min: int, cost_gbp: float, *, infeasible: bool = False) ->
         person=Person(name="Simon", has_car=True),
         label="x",
         destination=PlaceOfInterest(label="x", address="SW1V 2QQ"),
-        duration=Quantity(duration_min, "minute"),  # type: ignore[arg-type]
+        duration=Quantity(duration_min, "minute"),
         daily_cost=Money(str(cost_gbp), "GBP"),
         mode="transit",
         infeasible=infeasible,
@@ -57,13 +57,15 @@ def _selector(node_id: str, transit: Attempt, walk: Attempt | None, drive: Attem
     poi.push("RG12 8YA", "test")
     return CommuteSelectorNode(
         f"{node_id}/commute",
-        origin=origin,
-        poi=poi,
-        transit_result=_FixedNode(f"{node_id}_transit", transit),
-        walk_result=None if walk is None else _FixedNode(f"{node_id}_walk", walk),
-        drive_result=None if drive is None else _FixedNode(f"{node_id}_drive", drive),
-        is_child=False,
-        max_walk_node=_mw(30),
+        options=CommuteSelectorOptions(
+            origin=origin,
+            poi=poi,
+            transit_result=_FixedNode(f"{node_id}_transit", transit),
+            walk_result=None if walk is None else _FixedNode(f"{node_id}_walk", walk),
+            drive_result=None if drive is None else _FixedNode(f"{node_id}_drive", drive),
+            is_child=False,
+            max_walk_node=_mw(30),
+        ),
     )
 
 @pytest.mark.asyncio
@@ -144,13 +146,15 @@ async def test_selector_keeps_walk_when_it_is_the_only_option():
     walk = _FixedNode("lro_walk", Attempt.succeeded(_commute(37, 0)))
     selector = CommuteSelectorNode(
         "lro/commute",
-        origin=origin,
-        poi=poi,
-        transit_result=transit,
-        walk_result=walk,
-        drive_result=None,  # child — no car
-        is_child=True,
-        max_walk_node=_mw(30),
+        options=CommuteSelectorOptions(
+            origin=origin,
+            poi=poi,
+            transit_result=transit,
+            walk_result=walk,
+            drive_result=None,  # child — no car
+            is_child=True,
+            max_walk_node=_mw(30),
+        ),
     )
     await flush_processor()
     a = await selector.attempt()

@@ -7,12 +7,14 @@ project-agnostic (enforced by tests/unit/dag/test_architecture.py).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal
 
 from money import Money
 
 from dag.attempt import Attempt, FormulaLine
-from dag.expression import Expression, Literal
+from dag.expression import Expression, Literal, Ref
+from houses.stamp_duty import stamp_duty_land_tax
 
 
 class PMT(Expression):
@@ -62,15 +64,11 @@ class PMT(Expression):
         return Attempt.succeeded(payment)
 
     def to_formula_lines(self) -> list[FormulaLine]:
-        lines: list[FormulaLine] = []
-        lines.extend(self.principal.to_formula_lines())
-        rate_lines = self.annual_rate.to_formula_lines()
-        for rl in rate_lines:
-            lines.append(FormulaLine(label=rl.label + " ÷ 12", value=rl.value))
-        term_lines = self.term_years.to_formula_lines()
-        for tl in term_lines:
-            lines.append(FormulaLine(label=tl.label + " × 12", value=tl.value))
-        return lines
+        return (
+            self.principal.to_formula_lines()
+            + [FormulaLine(label=rl.label + " ÷ 12", value=rl.value) for rl in self.annual_rate.to_formula_lines()]
+            + [FormulaLine(label=tl.label + " × 12", value=tl.value) for tl in self.term_years.to_formula_lines()]
+        )
 
 class StampDutyFn(Expression):
     """Calculate UK Stamp Duty Land Tax from a property price."""
@@ -90,22 +88,34 @@ class StampDutyFn(Expression):
         price = price_result.value_or_none()
         if price is None:
             return Attempt.impossible("No price available for stamp duty calculation")
-        from houses.stamp_duty import stamp_duty_land_tax
 
         try:
             return Attempt.succeeded(stamp_duty_land_tax(price))
+        # lucidlint: ignore broad-except boundary — stamp-duty calculation failure converts to an impossible attempt
         except Exception as e:
             return Attempt.impossible(f"Stamp duty calculation failed: {e}")
 
+# lucidlint: ignore middle-man protocol/reflected-operator requirement
     def to_formula_lines(self) -> list[FormulaLine]:
         return self.price.to_formula_lines()
+
+@dataclass(frozen=True)
+class TaxTier:
+    """One marginal band: ``rate_from`` inclusive, ``rate_to`` exclusive
+    (``None`` for the final open-ended tier), ``rate`` the marginal rate."""
+
+    rate_from: int | Decimal
+    rate_to: int | Decimal | None
+    rate: int | Decimal
+
 
 class TieredRate(Expression):
     """Marginal tax/rate calculation across multiple bands.
 
-    Each tier is ``(from_inclusive, to_exclusive, rate)`` where ``to_exclusive``
-    can be ``None`` for the final open-ended tier. The expression finds which
-    tier the value falls in and computes:
+    Each tier is a ``TaxTier`` record (``rate_from`` inclusive,
+    ``rate_to`` exclusive, ``rate``) where ``rate_to`` can be ``None`` for
+    the final open-ended tier. The expression finds which tier the value
+    falls in and computes:
 
         tax = (value - tier_start) * rate + tax_at_tier_start
 
@@ -115,23 +125,22 @@ class TieredRate(Expression):
     Example — stamp duty:
 
         TieredRate(self._price_node, tiers=[
-            (0, 250000, 0),
-            (250000, 925000, Decimal("0.05")),
-            (925000, 1500000, Decimal("0.10")),
-            (1500000, None, Decimal("0.12")),
+            TaxTier(0, 250000, 0),
+            TaxTier(250000, 925000, Decimal("0.05")),
+            TaxTier(925000, 1500000, Decimal("0.10")),
+            TaxTier(1500000, None, Decimal("0.12")),
         ])
     """
 
     def __init__(
         self,
         value,
-        tiers: list[tuple],
+        tiers: list[TaxTier],
         description: str = "",
     ):
         if isinstance(value, Expression):
             self.value = value
         elif hasattr(value, "latest_attempt"):
-            from dag.expression import Ref
 
             self.value = Ref(value)
         else:
@@ -139,22 +148,29 @@ class TieredRate(Expression):
         self.tiers = tiers
         self.description = description
 
+    # lucidlint: ignore record-shape (tier, cumulative) tax pair — a NamedTuple is ceremony for a local step
     def _tax_at(self, price: Decimal, tier_idx: int) -> tuple[Decimal, Decimal]:
         """Compute tax for a value in the given tier.
 
         Returns (tax_at_this_tier, cumulative_tax_including_this_tier).
         """
-        lo, hi, rate = self.tiers[tier_idx]
-        effective = Decimal(str(hi)) if hi is not None and price > Decimal(str(hi)) else price
-        taxable = effective - Decimal(str(lo))
-        tier_tax = taxable * Decimal(str(rate))
+        tier = self.tiers[tier_idx]
+        effective = (
+            Decimal(str(tier.rate_to)) if tier.rate_to is not None and price > Decimal(str(tier.rate_to)) else price
+        )
+        taxable = effective - Decimal(str(tier.rate_from))
+        tier_tax = taxable * Decimal(str(tier.rate))
 
         # Tax from all previous tiers at their maximum
         prev_tax = Decimal("0")
         for i in range(tier_idx):
-            plo, phi, prate = self.tiers[i]
-            pwidth = Decimal(str(phi)) - Decimal(str(plo)) if phi is not None else Decimal("0")
-            prev_tax += pwidth * Decimal(str(prate))
+            prev = self.tiers[i]
+            pwidth = (
+                Decimal(str(prev.rate_to)) - Decimal(str(prev.rate_from))
+                if prev.rate_to is not None
+                else Decimal("0")
+            )
+            prev_tax += pwidth * Decimal(str(prev.rate))
 
         return tier_tax, tier_tax + prev_tax
 
@@ -167,9 +183,9 @@ class TieredRate(Expression):
             return Attempt.impossible("value missing")
         price = Decimal(str(raw.amount)) if hasattr(raw, "amount") else Decimal(str(raw))
 
-        for i, (lo, hi, _rate) in enumerate(self.tiers):
-            lo_d = Decimal(str(lo))
-            hi_d = Decimal(str(hi)) if hi is not None else None
+        for i, tier in enumerate(self.tiers):
+            lo_d = Decimal(str(tier.rate_from))
+            hi_d = Decimal(str(tier.rate_to)) if tier.rate_to is not None else None
 
             if price < lo_d:
                 continue
@@ -200,34 +216,41 @@ class TieredRate(Expression):
         lines: list[FormulaLine] = []
         lines.append(FormulaLine(label="Property price", value=self._format_value(raw)))
 
-        for i, (lo, hi, rate) in enumerate(self.tiers):
-            lo_d = Decimal(str(lo))
-            hi_d = Decimal(str(hi)) if hi is not None else None
+        for i, tier in enumerate(self.tiers):
+            lo_d = Decimal(str(tier.rate_from))
+            hi_d = Decimal(str(tier.rate_to)) if tier.rate_to is not None else None
 
             if price_d < lo_d:
                 continue
             if hi_d is not None and price_d > hi_d:
                 continue
 
-            if lo_d == 0 and rate == 0:
+            if lo_d == 0 and tier.rate == 0:
                 lines.append(FormulaLine(label=f"First £{hi_d:,.0f} at 0%", value="£0.00"))
             else:
                 prev_total = Decimal("0")
                 for j in range(i):
-                    plo, phi, prate = self.tiers[j]
-                    pwidth = Decimal(str(phi)) - Decimal(str(plo)) if phi is not None else Decimal("0")
-                    prev_total += pwidth * Decimal(str(prate))
-                    if prate > 0:
+                    prev = self.tiers[j]
+                    pwidth = (
+                        Decimal(str(prev.rate_to)) - Decimal(str(prev.rate_from))
+                        if prev.rate_to is not None
+                        else Decimal("0")
+                    )
+                    prev_total += pwidth * Decimal(str(prev.rate))
+                    if prev.rate > 0:
                         lines.append(
                             FormulaLine(
-                                label=f"  £{plo:,.0f} to £{phi:,.0f} at {float(prate) * 100:.0f}%",
+                                label=(
+                                    f"  £{prev.rate_from:,.0f} to £{prev.rate_to:,.0f}"
+                                    f" at {float(prev.rate) * 100:.0f}%"
+                                ),
                                 value=self._format_value(Money(str(prev_total), "GBP")),
                             )
                         )
 
                 taxable = price_d - lo_d
-                tier_tax = taxable * Decimal(str(rate))
-                pct = float(rate) * 100
+                tier_tax = taxable * Decimal(str(tier.rate))
+                pct = float(tier.rate) * 100
                 lines.append(
                     FormulaLine(
                         label=f"£{lo_d:,.0f} to £{price_d:,.0f} at {pct:.0f}%",

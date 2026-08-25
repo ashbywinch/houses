@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 
 
 @pytest.fixture(autouse=True)

@@ -13,11 +13,12 @@ from houses.services_provider import get_services
 
 # Fallback when the council tax lookup fails: a Band D estimate with a
 # spread, so the total can show "≈" instead of a bare "?" (Part A).
-_FALLBACK_YEARLY_COST = Money("1200", "GBP")
+_FALLBACK_YEARLY_COST = Money(amount="1200", currency="GBP")
 _FALLBACK_STDDEV = 50.0
 
 
 class EpcNode(DerivedNode[dict]):
+# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, best_address, postcode_node):
         super().__init__(node_id, dict, (best_address, postcode_node))
 
@@ -37,9 +38,7 @@ class EpcNode(DerivedNode[dict]):
         # can show it — not a generic "no EPC data".
         return Attempt.impossible(result.error or "no EPC data")
 
-    @property
-    def provenance_source_type(self) -> SourceType:
-        return SourceType.API
+    provenance_source_type = SourceType.API
 
     @override
     async def build_provenance(self) -> Provenance:
@@ -51,6 +50,7 @@ class EpcNode(DerivedNode[dict]):
 
 
 class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
+# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, best_address, postcode_node):
         super().__init__(node_id, CouncilTaxInfo, (best_address, postcode_node))
 
@@ -85,10 +85,7 @@ class CouncilTaxNode(DerivedNode[CouncilTaxInfo]):
             )
         )
 
-    @property
-    @override
-    def provenance_source_type(self) -> SourceType:
-        return SourceType.API
+    provenance_source_type = SourceType.API
 
     @override
     async def build_provenance(self) -> Provenance:

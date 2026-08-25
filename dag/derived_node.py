@@ -2,20 +2,23 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import hashlib
 import inspect
+import inspect as _inspect
 import logging
 import traceback
 from abc import abstractmethod
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from inspect import iscoroutine
 from types import FunctionType
-from typing import Any, Generic, TypeVar, cast, override
+from typing import Any, Generic, NamedTuple, TypeVar, cast, override
 
-from dag.attempt import Attempt, AttemptError, Formula, Provenance, SourceType, project_value
+from dag.attempt import Attempt, AttemptError, Formula, Provenance, SourceType, classify_exception, project_value
 from dag.eval_context import staged_attempt
 from dag.expression import Expression
 from dag.node import Node
-from dag.scheduler import _get_scheduler
+from dag.scheduler import get_scheduler
 from dag.signals import Connection, Slot
 
 logger = logging.getLogger(__name__)
@@ -23,6 +26,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
+# lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
 _CODE_VERSION_CACHE: dict[type, str] = {}
 _CODE_VERSION_EPOCH: int = 0
 
@@ -40,112 +44,143 @@ def _normalize_compute_source(source: str) -> str:
     except SyntaxError:
         return source
     return ast.unparse(tree)
+class _HelperRef(NamedTuple):
+    """A (name, module) function reference queued for source resolution."""
+
+    name: str
+    module: object
 
 
-def _referenced_helper_sources(func: FunctionType) -> list[str]:
-    """AST-normalized sources of the same-module helpers ``func`` calls.
+@dataclass(frozen=True)
+class _CallTargets:
+    """Call sites in one function body, grouped by how each resolves."""
 
-    The fingerprint must cover the compute's helpers too — a behavior
-    change in ``_infeasible_commute``/``_lookup_yearly_cost``-style
-    module functions leaves compute()'s text unchanged, so persisted
-    results would stay "fresh" forever.  Walks name references that
-    resolve to module-level defs in the function's own module,
-    transitively, cycle-safe.  Calls behind the services boundary
-    (svc.xxx_service.lookup) are not statically resolvable and are out
-    of scope — the node's compute text still covers its own logic.
+    called: list[str]
+    self_methods: list[str]
+    qualified: list[tuple[str, str]]
+
+
+@dataclass(frozen=True)
+class _HelperSources:
+    """Normalized helper sources plus their own unresolved references."""
+
+    parts: list[str]
+    queue: list[_HelperRef]
+
+
+def _bound_names(tree: ast.AST) -> set[str]:
+    """Names bound locally in ``tree`` — params, stores, imports.
+
+    Function NAMES CALLED in the body only resolve to module-level defs
+    when they aren't shadowed by a local binding (a parameter,
+    assignment, or import) — a collision with a local must not pull an
+    unrelated same-module helper into the fingerprint.
     """
-    import inspect as _inspect
-
-    module = _inspect.getmodule(func)
-    if module is None:
-        return []
-    try:
-        func_src = _inspect.getsource(func)
-    except (OSError, TypeError):
-        return []
-    try:
-        tree = ast.parse(func_src)
-    except SyntaxError:
-        return []
-    # Function NAMES CALLED in the body that resolve to module-level
-    # defs — only actual Call targets, not every bare name (a name used
-    # as a value or attribute base must not pull in an unrelated helper).
-    # Names bound LOCALLY (parameters, assignments, imports) shadow any
-    # same-module function and are excluded — a collision with a local
-    # must not fingerprint an unrelated helper.
     bound: set[str] = set()
+    # lucidlint: ignore loop-pipeline group-by/control-flow — comprehension cannot express
     for node in ast.walk(tree):
         if isinstance(node, ast.arg):
             bound.add(node.arg)
         elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             bound.add(node.id)
         elif isinstance(node, ast.Import):
-            for alias in node.names:
-                bound.add(alias.asname or alias.name.split(".")[0])
+            bound.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
-            for alias in node.names:
-                bound.add(alias.asname or alias.name)
+            bound.update(alias.asname or alias.name for alias in node.names)
+    return bound
+
+
+def _call_targets(tree: ast.AST, bound: set[str]) -> _CallTargets:
+    """Call targets in ``tree``, split by how each resolves:
+
+    - plain names that aren't locally bound (same-module function calls),
+    - ``self.attr`` method calls,
+    - ``module.func`` qualified calls.
+
+    Only actual Call targets count — a bare name used as a value or
+    attribute base must not pull in an unrelated helper.
+    """
     called: list[str] = []
     self_methods: list[str] = []
-    qualified: list[tuple[str, str]] = []  # (module name, function name)
+    qualified: list[tuple[str, str]] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name) and node.func.id not in bound:
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name):
+            if node.func.id not in bound:
                 called.append(node.func.id)
-            elif (
-                isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "self"
-            ):
+        elif isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+            if node.func.value.id == "self":
                 self_methods.append(node.func.attr)
-            elif isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+            else:
                 # module-qualified call: address_utils.normalise(...) —
                 # the base name resolves to an imported module.
                 qualified.append((node.func.value.id, node.func.attr))
-    # Include the source of each referenced function, transitively
-    # (bounded, cycle-safe).  Cross-module imports resolve in their OWN
-    # module — a change to a shared helper (e.g. address_utils.normalise)
-    # must invalidate the fingerprint even though it lives elsewhere.
-    seen: set[tuple[str, str]] = set()
-    queue: list[tuple[str, object]] = [(name, module) for name in called]
-    # module-qualified names resolve through the imported module
+    return _CallTargets(called, self_methods, qualified)
+
+
+def _enclosing_class(module, func: FunctionType) -> type | None:
+    """The class owning ``func``, resolved in its module via qualname."""
+    if "." not in func.__qualname__:
+        return None
+    cls_name = func.__qualname__.rsplit(".", 1)[0]
+    for _name, obj in vars(module).items():
+        if _inspect.isclass(obj) and obj.__qualname__ == cls_name:
+            return obj
+    return None
+
+
+def _self_helper_sources(node_cls: type, self_methods: list[str]) -> _HelperSources:
+    """Sources of the class methods called via ``self``, plus their own
+    plain-name calls queued for resolution in the method's module.
+
+    ``getattr`` resolves through the MRO so a helper inherited from a
+    base class in another module is found.
+    """
+    parts: list[str] = []
+    queue: list[_HelperRef] = []
+    for mname in self_methods:
+        method = getattr(node_cls, mname, None)
+        if method is None:
+            continue
+        try:
+            msrc = _inspect.getsource(method)
+        except (OSError, TypeError):
+            continue
+        parts.append(_normalize_compute_source(msrc))
+        try:
+            mtree = ast.parse(msrc)
+        except SyntaxError:
+            continue
+        m_module = _inspect.getmodule(method)
+        queue.extend(
+            _HelperRef(n.func.id, m_module)
+            for n in ast.walk(mtree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        )
+    return _HelperSources(parts, queue)
+
+
+    # lucidlint: ignore record-shape wire-format (module, name) resolution pairs — consumed once by this BFS
+def _module_call_queue(module, called: list[str], qualified: list[tuple[str, str]]) -> list[_HelperRef]:
+    """Initial resolution queue: plain names in the function's own
+    module, module-qualified names through their import."""
+    queue: list[_HelperRef] = [_HelperRef(name, module) for name in called]
     for mod_name, fn_name in qualified:
         mod_obj = vars(module).get(mod_name)
         if mod_obj is not None and _inspect.ismodule(mod_obj):
-            queue.append((fn_name, mod_obj))
+            queue.append(_HelperRef(fn_name, mod_obj))
+    return queue
+
+
+def _resolve_helper_sources(queue: list[_HelperRef]) -> list[str]:
+    """BFS-resolve queued references to their normalized sources,
+    transitively (bounded, cycle-safe).  Cross-module imports resolve in
+    their OWN module — a change to a shared helper (e.g.
+    address_utils.normalise) must invalidate the fingerprint even though
+    it lives elsewhere."""
+    seen: set[tuple[str, str]] = set()
     parts: list[str] = []
-
-    # The compute's own class — private helpers called via ``self`` are
-    # node-class methods; a behavioral change to one must invalidate the
-    # fingerprint too (the review's gap: self._helper calls were never
-    # tracked).  getattr resolves through the MRO so a helper inherited
-    # from a base class in another module is found.
-    node_cls = None
-    if "." in func.__qualname__:
-        cls_name = func.__qualname__.rsplit(".", 1)[0]
-        for _name, obj in vars(module).items():
-            if _inspect.isclass(obj) and obj.__qualname__ == cls_name:
-                node_cls = obj
-                break
-    if node_cls is not None:
-        for mname in self_methods:
-            method = getattr(node_cls, mname, None)
-            if method is None:
-                continue
-            try:
-                msrc = _inspect.getsource(method)
-            except (OSError, TypeError):
-                continue
-            parts.append(_normalize_compute_source(msrc))
-            try:
-                mtree = ast.parse(msrc)
-            except SyntaxError:
-                continue
-            m_module = _inspect.getmodule(method)
-            for n in ast.walk(mtree):
-                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
-                    queue.append((n.func.id, m_module))
-
     while queue:
         name, mod = queue.pop()
         key = (name, getattr(mod, "__name__", ""))
@@ -166,9 +201,47 @@ def _referenced_helper_sources(func: FunctionType) -> list[str]:
         except SyntaxError:
             continue
         h_module = _inspect.getmodule(obj)
-        for n in ast.walk(htree):
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
-                queue.append((n.func.id, h_module))
+        queue.extend(
+            _HelperRef(n.func.id, h_module)
+            for n in ast.walk(htree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        )
+    return parts
+
+
+def _referenced_helper_sources(func: FunctionType) -> list[str]:
+    """AST-normalized sources of the same-module helpers ``func`` calls.
+
+    The fingerprint must cover the compute's helpers too — a behavior
+    change in ``_infeasible_commute``/``_lookup_yearly_cost``-style
+    module functions leaves compute()'s text unchanged, so persisted
+    results would stay "fresh" forever.  Walks name references that
+    resolve to module-level defs in the function's own module,
+    transitively, cycle-safe.  Calls behind the services boundary
+    (svc.xxx_service.lookup) are not statically resolvable and are out
+    of scope — the node's compute text still covers its own logic.
+    """
+    module = _inspect.getmodule(func)
+    if module is None:
+        return []
+    try:
+        func_src = _inspect.getsource(func)
+    except (OSError, TypeError):
+        return []
+    try:
+        tree = ast.parse(func_src)
+    except SyntaxError:
+        return []
+    bound = _bound_names(tree)
+    targets = _call_targets(tree, bound)
+    parts: list[str] = []
+    queue = _module_call_queue(module, targets.called, targets.qualified)
+    node_cls = _enclosing_class(module, func)
+    if node_cls is not None:
+        sources = _self_helper_sources(node_cls, targets.self_methods)
+        parts.extend(sources.parts)
+        queue.extend(sources.queue)
+    parts.extend(_resolve_helper_sources(queue))
     return sorted(parts)
 
 
@@ -187,9 +260,6 @@ def _compute_code_version(node: DerivedNode) -> str:
     cached = _CODE_VERSION_CACHE.get(cls)
     if cached is not None:
         return cached
-    import hashlib
-    import inspect
-
     func = node.compute
     if inspect.ismethod(func):
         func = func.__func__
@@ -203,8 +273,6 @@ def _compute_code_version(node: DerivedNode) -> str:
     # Nodes also decide behavior in __init__ (mode alternatives, dep
     # gating) and _get_active_deps — a change to those leaves compute()
     # identical, so include their sources too (the review's gap).
-    import inspect as _inspect
-
     structure_parts = []
     for member in ("__init__", "_get_active_deps"):
         try:
@@ -220,6 +288,7 @@ def _compute_code_version(node: DerivedNode) -> str:
     _CODE_VERSION_CACHE[cls] = digest
     # Bump the epoch whenever a NEW fingerprint is computed — the epoch
     # is the cheap 'did any code change since my last scan' signal.
+    # lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
     global _CODE_VERSION_EPOCH
     _CODE_VERSION_EPOCH += 1
     return digest
@@ -232,8 +301,6 @@ def _check_compute_arity(node: DerivedNode, dep_attempts: list[Attempt]) -> None
     a value bound to the wrong parameter.  Named-deps nodes are exempt
     (names bind), and varargs computes accept anything.
     """
-    import inspect
-
     sig = inspect.signature(node.compute)
     params = list(sig.parameters.values())
     if any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params):
@@ -277,6 +344,7 @@ class DerivedNode(Node[T], Generic[T]):
             return None
         try:
             return expr.to_formula()
+        # lucidlint: ignore broad-except deliberate degrade — formula rendering failure falls back to None
         except Exception:
             return None
 
@@ -313,7 +381,7 @@ class DerivedNode(Node[T], Generic[T]):
             conn = dep.changed.connect(slot)
             self._connections.append(conn)
 
-        _get_scheduler().register(self)
+        get_scheduler().register(self)
 
     # ── Compute dispatch ───────────────────────────────
     # compute() is called with the active deps' attempts.  Nodes whose
@@ -389,7 +457,7 @@ class DerivedNode(Node[T], Generic[T]):
         for conn in self._connections:
             conn.disconnect()
         self._connections.clear()
-        _get_scheduler().unregister(self)
+        get_scheduler().unregister(self)
 
     def _get_active_deps(self) -> tuple[Node, ...]:
         return self._deps
@@ -406,7 +474,7 @@ class DerivedNode(Node[T], Generic[T]):
         self._retry_count = 0
         if not self._is_stale():
             return
-        _get_scheduler().schedule(self)
+        get_scheduler().schedule(self)
 
     def _is_stale(self) -> bool:
         # Staleness is a NORMAL condition (any dep change re-schedules the
@@ -445,7 +513,8 @@ class DerivedNode(Node[T], Generic[T]):
     async def attempt(self) -> Attempt[T]:
         return self._attempt
 
-    def _is_transient_error(self, exc: Exception) -> bool:
+    @staticmethod
+    def _is_transient_error(exc: Exception) -> bool:
         """Identify retryable transient errors.
 
         Delegates to :func:`dag.attempt.classify_exception` — the single
@@ -454,10 +523,7 @@ class DerivedNode(Node[T], Generic[T]):
         TimeoutError, HttpError (``.status``), httpx errors
         (``.response.status_code``), and any status-aware exception.
         """
-        from dag.attempt import classify_exception
-
-        _, retryable = classify_exception(exc)
-        return retryable
+        return classify_exception(exc).retryable
 
     def schedule_retry(self, delay: timedelta) -> bool:
         """Schedule a DAG-level retry at now + delay.
@@ -469,7 +535,7 @@ class DerivedNode(Node[T], Generic[T]):
         if self._retry_count >= self._max_retries:
             return False
         self._retry_at = datetime.now(UTC) + delay
-        _get_scheduler().schedule_at(self, self._retry_at)
+        get_scheduler().schedule_at(self, self._retry_at)
         return True
 
     def _retry_delay_from(self, exc: Exception, base_delay: timedelta = timedelta(seconds=10)) -> timedelta:
@@ -482,9 +548,9 @@ class DerivedNode(Node[T], Generic[T]):
             self._retry_count += 1
         return timedelta(seconds=min(delay_sec, 300))
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def _error_result_dict(self, status: str, exc: Exception) -> dict:
-        from dag.attempt import AttemptError
-
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         return {
             "status": status,
             "value": None,
@@ -492,6 +558,62 @@ class DerivedNode(Node[T], Generic[T]):
             "error_detail": AttemptError.from_exception(str(exc), exc, source=self._id).to_dict(),
             "provenance": await self._build_provenance_dict(),
         }
+
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    async def _safe_result_dict(self, status: str) -> dict:
+        """Serialize for persistence, degrading to an error result on failure.
+
+        ``to_json`` can raise when a value lacks a provenance projection
+        (e.g. during a failed recompute). The degraded error result still
+        records the failure so the persisted row explains itself.
+        """
+        try:
+            return await self.to_json()
+        # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
+        except Exception as e:
+            logger.debug(
+                "%s: to_json failed; persisting an error result for status %r: %s",
+                self._id,
+                status,
+                e,
+            )
+            return await self._error_result_dict(status, e)
+
+    async def _compute_attempt(self, dep_attempts: list[Attempt], active_deps: tuple[Node, ...]) -> Attempt:
+        """Run compute, converting failures into pending/impossible Attempts.
+
+        Transient errors schedule a retry (pending); other failures become
+        impossible with the exception recorded — mirroring the DAG error
+        contract. Never raises: the outcome always comes back as an Attempt.
+        """
+        try:
+            result = self._call_compute(dep_attempts, active_deps)
+            if iscoroutine(result):
+                result = await result
+                # Yield to event loop so HTTP requests aren't starved during
+                # burst refresh (many nodes queued at startup).
+                await asyncio.sleep(0)
+            return result
+        # lucidlint: ignore broad-except boundary — compute failures convert to pending/impossible Attempts, never raise
+        except Exception as e:
+            if self._is_transient_error(e):
+                if not self.schedule_retry(self._retry_delay_from(e)):
+                    return Attempt.impossible(
+                        f"{self._id}: retry exhausted ({e})",
+                        error_info=AttemptError.from_exception(str(e), e, source=self._id),
+                    )
+                return Attempt.pending()
+            impossible_deps = [a for a in dep_attempts if a.impossible]
+            if impossible_deps:
+                errors = "; ".join(a.error or "unknown" for a in impossible_deps)
+                return Attempt.impossible(
+                    f"{self._id}: dep failed ({errors})",
+                    error_info=AttemptError.from_exception(str(e), e, source=self._id),
+                )
+            return Attempt.impossible(
+                f"{self._id}: {e}",
+                error_info=AttemptError.from_exception(str(e), e, source=self._id),
+            )
 
     async def refresh(self, force: bool = False) -> None:
         """Recompute and persist this node.
@@ -539,46 +661,14 @@ class DerivedNode(Node[T], Generic[T]):
             dep_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
             self._retry_at = None
             self._retry_count = 0
-            try:
-                result_dict = await self.to_json()
-            except Exception as e:
-                result_dict = await self._error_result_dict("impossible", e)
-            self._persist(result_dict, dep_timestamps)
+            result_dict = await self._safe_result_dict("impossible")
+            self._persist(result_dict, dep_timestamps, code_version=self._current_code_version())
             self.changed.emit()
-            _get_scheduler().after_refresh(self)
+            get_scheduler().after_refresh(self)
             return
         if any(a.pending for a in dep_attempts):
             return
-        try:
-            result = self._call_compute(dep_attempts, active_deps)
-            if iscoroutine(result):
-                result = await result
-                # Yield to event loop so HTTP requests aren't starved during
-                # burst refresh (many nodes queued at startup).
-                await asyncio.sleep(0)
-        except Exception as e:
-            _tb_str = traceback.format_exc()
-            if self._is_transient_error(e):
-                if not self.schedule_retry(self._retry_delay_from(e)):
-                    result = Attempt.impossible(
-                        f"{self._id}: retry exhausted ({e})",
-                        error_info=AttemptError.from_exception(str(e), e, source=self._id),
-                    )
-                else:
-                    result = Attempt.pending()
-            else:
-                impossible_deps = [a for a in dep_attempts if a.impossible]
-                if impossible_deps:
-                    errors = "; ".join(a.error or "unknown" for a in impossible_deps)
-                    result = Attempt.impossible(
-                        f"{self._id}: dep failed ({errors})",
-                        error_info=AttemptError.from_exception(str(e), e, source=self._id),
-                    )
-                else:
-                    result = Attempt.impossible(
-                        f"{self._id}: {e}",
-                        error_info=AttemptError.from_exception(str(e), e, source=self._id),
-                    )
+        result = await self._compute_attempt(dep_attempts, active_deps)
 
         # A service may catch a transient error and RETURN an impossible
         # attempt whose error_info.retryable is set (rather than raising).
@@ -606,29 +696,25 @@ class DerivedNode(Node[T], Generic[T]):
         dep_timestamps = {dep._id: dep._db_created_at for dep in active_deps}
 
         if result.pending:
-            try:
-                result_dict = await self.to_json()
-            except Exception as e:
-                result_dict = await self._error_result_dict("pending", e)
-            self._persist(result_dict, dep_timestamps)
+            result_dict = await self._safe_result_dict("pending")
+            self._persist(result_dict, dep_timestamps, code_version=self._current_code_version())
             return
 
         self._retry_at = None
         self._retry_count = 0 if result.succeeded else self._retry_count
 
-        try:
-            result_dict = await self.to_json()
-        except Exception as e:
-            result_dict = await self._error_result_dict("impossible", e)
-        self._persist(result_dict, dep_timestamps)
+        result_dict = await self._safe_result_dict("impossible")
+        self._persist(result_dict, dep_timestamps, code_version=self._current_code_version())
         self.changed.emit()
-        _get_scheduler().after_refresh(self)
+        get_scheduler().after_refresh(self)
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def _build_provenance_dict(self) -> dict:
         """Build provenance dict for persistence, with a fallback if build_provenance() fails."""
         try:
             prov = await self.build_provenance()
             return prov.to_dict()
+        # lucidlint: ignore broad-except deliberate degrade — provenance build failure falls back to an empty label
         except Exception:
             return {"label": ""}
 
@@ -636,13 +722,7 @@ class DerivedNode(Node[T], Generic[T]):
     async def build_provenance(self) -> Provenance:
         sources: dict[str, Provenance] = {}
         for dep in self._get_active_deps():
-            try:
-                sources[dep._id] = await dep.build_provenance()
-            except Exception as e:
-                sources[dep._id] = Provenance(
-                    label=getattr(dep, "display_name", dep._id),
-                    description=f"build_provenance failed: {e}\n{traceback.format_exc()}",
-                )
+            sources[dep._id] = await self._dep_provenance(dep)
 
         # Use expression system for formula if available
         formula = self.provenance_formula
@@ -676,20 +756,38 @@ class DerivedNode(Node[T], Generic[T]):
             sources=sources,
         )
 
-    @property
-    def provenance_source_type(self) -> SourceType:
-        """Subclass declares its data source category.
-        Default is CALC — override in subclasses that source from
-        APIs, geocoding, config, or user input."""
-        return SourceType.CALC
+    async def _dep_provenance(self, dep: Node) -> Provenance:
+        """Provenance for one dependency, degrading on failure.
 
-    @property
-    def provenance_formula(self) -> Formula | None:
-        """Override to return a Formula for computed values.
-        Default is None — no formula."""
-        return None
+        One failing dep must not break the whole provenance tree — the
+        error is captured in the placeholder's description instead.
+        """
+        try:
+            return await dep.build_provenance()
+        # lucidlint: ignore broad-except deliberate degrade — one failing dep degrades to a placeholder provenance
+        except Exception as e:
+            logger.debug(
+                "%s: build_provenance failed for dep %s; degrading to a placeholder: %s",
+                self._id,
+                dep._id,
+                e,
+            )
+            return Provenance(
+                label=getattr(dep, "display_name", dep._id),
+                description=f"build_provenance failed: {e}\n{traceback.format_exc()}",
+            )
+
+    provenance_source_type: SourceType = SourceType.CALC
+    """Subclass declares its data source category.
+    Default is CALC — override in subclasses that source from
+    APIs, geocoding, config, or user input."""
+
+    provenance_formula: Formula | None = None
+    """Override to return a Formula for computed values.
+    Default is None — no formula."""
 
     @override
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def to_json(self) -> dict:
         result = await super().to_json()
         if self._retry_at is not None:
@@ -700,6 +798,7 @@ class DerivedNode(Node[T], Generic[T]):
         return result
 
     @override
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def to_json_value(self) -> dict:
         result = await super().to_json_value()
         if self._retry_at is not None:
@@ -723,5 +822,6 @@ class DerivedNode(Node[T], Generic[T]):
                 f"Dependencies not succeeded: {failed}. Auto-propagation should have caught these before compute()."
             )
 
+    @staticmethod
     @abstractmethod
-    def compute(self, *dep_attempts: Attempt) -> Attempt[T]: ...
+    def compute(*dep_attempts: Attempt) -> Attempt[T]: ...

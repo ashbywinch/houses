@@ -246,7 +246,7 @@ class TestNearestTownNode:
     @pytest.mark.asyncio
     async def test_returns_town_name(self):
         from dag.scheduler import flush_processor
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
         from houses.nodes.area import NearestTownNode
 
         loc = UserInputNode[GeoPoint]("loc_nt2", GeoPoint)
@@ -274,7 +274,7 @@ class TestTownDescNode:
     @pytest.mark.asyncio
     async def test_prefers_address_town_over_nearest(self):
         from dag.scheduler import flush_processor
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
         from houses.nodes.area import TownDescNode
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
@@ -312,7 +312,7 @@ class TestTownDescNode:
     @pytest.mark.asyncio
     async def test_falls_back_to_nearest_when_address_has_no_town(self):
         from dag.scheduler import flush_processor
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
         from houses.nodes.area import TownDescNode
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
@@ -347,7 +347,7 @@ class TestTownDescNode:
 class TestGeocodeNode:
     @pytest.mark.asyncio
     async def test_impossible_without_address(self):
-        from houses.nodes.geocode import GeocodeNode
+        from houses.nodes.geocode_node import GeocodeNode
 
         addr = UserInputNode[str]("addr_gc", str)
         node = GeocodeNode("gc", best_address=addr)
@@ -359,14 +359,17 @@ class TestParkAndRideAugmentNode:
     @pytest.mark.asyncio
     async def test_impossible_without_transit(self):
         from dag.user_input_node import UserInputNode
-        from houses.geo import GeoPoint
-        from houses.nodes.park_and_ride import ParkAndRideAugmentNode
+        from houses.geopoint import GeoPoint
+        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
 
         transit = UserInputNode[Commute]("t_pr3", Commute)
         loc = UserInputNode[GeoPoint]("loc_pr3", GeoPoint)
         pc = UserInputNode[str]("pc_pr3", str)
         node = ParkAndRideAugmentNode(
-            "pr3", transit_node=transit, best_location=loc, postcode_node=pc, has_car=True, max_walk_node=_mw(20)
+            "pr3",
+            options=ParkAndRideOptions(
+                transit_node=transit, best_location=loc, postcode_node=pc, has_car=True, max_walk_node=_mw(20)
+            ),
         )
         a = await node.attempt()
         assert not a.succeeded
@@ -406,15 +409,17 @@ class TestParkAndRideAugmentNode:
         if pc_node is None:
             pc_node = UserInputNode[str]("pc_dummy", str)
             pc_node.push("SW1V 2QQ", "test")
-        from houses.nodes.park_and_ride import ParkAndRideAugmentNode
+        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
 
         return ParkAndRideAugmentNode(
             "pr_test",
-            transit_node=transit,
-            best_location=loc,
-            postcode_node=pc_node,
-            has_car=has_car,
-            max_walk_node=mw,
+            options=ParkAndRideOptions(
+                transit_node=transit,
+                best_location=loc,
+                postcode_node=pc_node,
+                has_car=has_car,
+                max_walk_node=mw,
+            ),
         )
 
     @pytest.mark.asyncio
@@ -423,7 +428,7 @@ class TestParkAndRideAugmentNode:
         from money import Money
 
         from dag.scheduler import flush_processor
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
 
@@ -470,8 +475,8 @@ class TestParkAndRideAugmentNode:
         from dag.scheduler import flush_processor
         from houses.car_park import CarPark, CarParkRegistry
         from houses.commute import CostGroup, JourneyLeg, LegMode
-        from houses.geo import GeoPoint
-        from houses.nodes.park_and_ride import ParkAndRideAugmentNode
+        from houses.geopoint import GeoPoint
+        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
         from houses.services_provider import _request_services as _sp
         from houses.stations import StationRegistry
         from tests.helpers import make_services
@@ -533,13 +538,15 @@ class TestParkAndRideAugmentNode:
 
             node = ParkAndRideAugmentNode(
                 "pr_mcg",
-                transit_node=transit,
-                best_location=loc,
-                postcode_node=pc_node,
-                has_car=True,
-                max_walk_node=_mw(20),
-                station_registry=_FakeStationRegistry(),
-                car_park_registry=_FakeCarParkRegistry(),
+                options=ParkAndRideOptions(
+                    transit_node=transit,
+                    best_location=loc,
+                    postcode_node=pc_node,
+                    has_car=True,
+                    max_walk_node=_mw(20),
+                    station_registry=_FakeStationRegistry(),
+                    car_park_registry=_FakeCarParkRegistry(),
+                ),
             )
             await flush_processor()
 
@@ -566,7 +573,7 @@ class TestParkAndRideAugmentNode:
     async def test_skips_short_walk(self):
         """10min walk, max_walk=20 — walk stays as walk, no parking."""
         from dag.scheduler import flush_processor
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
 
         transit = UserInputNode[Commute]("pr_sw", Commute)
         loc = UserInputNode[GeoPoint]("loc_sw", GeoPoint)
@@ -594,7 +601,7 @@ class TestParkAndRideAugmentNode:
 
         from dag.scheduler import flush_processor
         from houses.commute import CostGroup, JourneyLeg, LegMode
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
 
         train_leg = JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(20, "minute"), end_station="London Paddington")
         walk_leg = JourneyLeg(mode=LegMode.WALK, duration=Quantity(5, "minute"), end_station="Platform 1")
@@ -627,7 +634,7 @@ class TestParkAndRideAugmentNode:
     async def test_skips_when_drive_lookup_fails(self):
         """Drive lookup fails (returns None) — walk stays as walk."""
         from dag.scheduler import flush_processor
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
 
@@ -660,7 +667,7 @@ class TestParkAndRideAugmentNode:
     async def test_format_includes_drive_in_route_after_park_and_ride(self):
         """Provenance description mentions parking after park-and-ride."""
         from dag.scheduler import flush_processor
-        from houses.geo import GeoPoint
+        from houses.geopoint import GeoPoint
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
 
@@ -698,8 +705,8 @@ class TestTransitCostAttribution:
 
         from dag.user_input_node import UserInputNode
         from houses.commute import CostGroup, JourneyLeg, LegMode
-        from houses.geo import GeoPoint
-        from houses.nodes.park_and_ride import ParkAndRideAugmentNode
+        from houses.geopoint import GeoPoint
+        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
 
@@ -734,11 +741,13 @@ class TestTransitCostAttribution:
 
             node = ParkAndRideAugmentNode(
                 "t_cta_pr",
-                transit_node=transit,
-                best_location=loc,
-                postcode_node=pc,
-                has_car=True,
-                max_walk_node=_mw(20),
+                options=ParkAndRideOptions(
+                    transit_node=transit,
+                    best_location=loc,
+                    postcode_node=pc,
+                    has_car=True,
+                    max_walk_node=_mw(20),
+                ),
             )
 
             # Call refresh directly — no global queue dependency
@@ -776,8 +785,8 @@ class TestTransitCostAttribution:
 
         from dag.user_input_node import UserInputNode
         from houses.commute import CostGroup, JourneyLeg, LegMode
-        from houses.geo import GeoPoint
-        from houses.nodes.park_and_ride import ParkAndRideAugmentNode
+        from houses.geopoint import GeoPoint
+        from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
         from houses.services_provider import _request_services as _sp
         from tests.helpers import make_services
 
@@ -812,11 +821,13 @@ class TestTransitCostAttribution:
 
             node = ParkAndRideAugmentNode(
                 "t_cta_zero_pr",
-                transit_node=transit,
-                best_location=loc,
-                postcode_node=pc,
-                has_car=True,
-                max_walk_node=_mw(20),
+                options=ParkAndRideOptions(
+                    transit_node=transit,
+                    best_location=loc,
+                    postcode_node=pc,
+                    has_car=True,
+                    max_walk_node=_mw(20),
+                ),
             )
 
             await node.refresh()

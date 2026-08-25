@@ -121,3 +121,7 @@ Numbered: the change + where it goes + which confusion(s) it resolves.
    prompt.
 3. The evaluator's report is the run result. Re-run after UX changes to
    confirm the confusions are gone (P13).
+
+## Run reports
+
+- [Run 2 (2026-08-06)](ux-walkthrough-evaluation-2.md)

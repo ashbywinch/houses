@@ -17,11 +17,11 @@ from pint import Quantity
 
 from dag.attempt import Attempt
 from dag.scheduler import flush_processor
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.nodes.commute import commute_colour, format_duration
-from houses.nodes.property import PropertyNodes
-from houses.property_registry import _registry, register_property
+from houses.nodes.property_nodes import PropertyNodes
+from houses.property_registry import register_property
 from houses.web.api_router import _score_from_summary
 from tests.helpers import make_services
 
@@ -29,10 +29,9 @@ from tests.helpers import make_services
 
 
 @pytest.fixture(autouse=True)
-def _mock(monkeypatch):
+def _mock():
     """Set fake services with a commute router that returns canned data."""
     from houses.services_provider import _request_services as _sp
-    from houses.tfl_client import TflClient
 
     class _CannedPlanner:
         async def walk_route(self, origin, destination, max_walk):
@@ -66,12 +65,17 @@ def _mock(monkeypatch):
         mode="transit",
     )
 
-    async def mock_plan(self):
-        return Attempt.succeeded(canned)
+    class _FakeTflClient:
+        """Canned transit plan — injected via the services client factory."""
 
-    monkeypatch.setattr(TflClient, "plan", mock_plan)
+        def __init__(self, *args, **kwargs):
+            self._plan_override = None
+            self._no_route_detail = ""
 
-    svc = make_services(route_planner=_CannedPlanner())
+        async def plan(self):
+            return Attempt.succeeded(canned)
+
+    svc = make_services(route_planner=_CannedPlanner(), tfl_client_factory=_FakeTflClient)
     token = _sp.set(svc)
     yield
     _sp.reset(token)
@@ -79,9 +83,12 @@ def _mock(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _clear():
-    _registry.clear()
+    from houses.services_provider import get_services
+
+    registry = get_services().property_registry
+    registry.clear()
     yield
-    _registry.clear()
+    registry.clear()
 
 
 @pytest.fixture

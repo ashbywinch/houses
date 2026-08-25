@@ -14,10 +14,13 @@ from dataclasses import replace
 from money import Money
 from pint import Quantity
 
-from dag.attempt import Attempt
+from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
 from houses.commute import JourneyLeg, LegMode
 from houses.model.domain import Commute
+
+MINUTES_PER_HOUR = 60.0
+AVERAGE_DRIVE_SPEED_KMH = 48.0
 
 
 def _fuel_cost_for(drive_legs: list[JourneyLeg], mpg: int, cost_per_litre: float) -> Money | None:
@@ -34,7 +37,7 @@ def _fuel_cost_for(drive_legs: list[JourneyLeg], mpg: int, cost_per_litre: float
         total_drive_min = sum(int(leg.duration.magnitude) for leg in drive_legs)
         if total_drive_min <= 0:
             return None
-        round_trip_km = (total_drive_min / 60.0) * 48.0 * 2
+        round_trip_km = (total_drive_min / MINUTES_PER_HOUR) * AVERAGE_DRIVE_SPEED_KMH * 2
 
     # Fuel calculation using pint for proper Imperial gallon -> litre conversion
     # 1 imperial gallon = 4.54609 litres; US gallon is 3.78541 litres
@@ -84,7 +87,6 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
 
     @property
     def provenance_formula(self):
-        from dag.attempt import Formula, FormulaLine
 
         commute = self._attempt.value_or_none()
         if not self._attempt.succeeded or commute is None:
@@ -109,7 +111,8 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
             return None
         return Formula(lines=lines, result=str(commute.daily_cost))
 
-    def compute(self, commute: Attempt[Commute], mpg_att: Attempt, cost_att: Attempt) -> Attempt[Commute]:
+    @staticmethod
+    def compute(commute: Attempt[Commute], mpg_att: Attempt, cost_att: Attempt) -> Attempt[Commute]:
         if not commute.succeeded:
             return commute
         val = commute.value_or_none()
@@ -151,6 +154,7 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
         )
         return Attempt.succeeded(new_commute)
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def to_json(self) -> dict:
         result = await super().to_json()
         attempt = await self.attempt()
@@ -160,6 +164,7 @@ class PetrolCostAugmentNode(DerivedNode[Commute]):
                 result["is_child"] = val.is_child
         return result
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def to_json_value(self) -> dict:
         result = await super().to_json_value()
         attempt = await self.attempt()

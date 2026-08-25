@@ -15,8 +15,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from houses.config import settings
 from houses.database import get_connection
+from houses.settings import settings
 from houses.sheets import get_client
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 VIEW_TAB = "Properties View"
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def read_view_comments() -> dict[str, dict[str, str]]:
     """Read Ashby comments and Group Notes from the View tab.
 
@@ -58,6 +59,7 @@ def read_view_comments() -> dict[str, dict[str, str]]:
         ashby_val = (row[ashby_idx] or "").strip()
         group_val = (row[group_idx] or "").strip()
         if ashby_val or group_val:
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             result[rid] = {"ashby": ashby_val, "group": group_val}
 
     logger.info("Read %d properties with comments from View tab", len(result))

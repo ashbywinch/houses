@@ -35,15 +35,27 @@ from pathlib import Path
 from typing import NoReturn
 
 import httpx
+from playwright.async_api import async_playwright
+
+from houses.settings import settings
 
 FRONTEND_URL = "http://localhost:5173"
 BACKEND_URL = "http://localhost:8765"
 LAUNCH_OPTS = {"headless": True, "args": ["--no-sandbox", "--disable-gpu"]}
-LOGIN_TIMEOUT_S = 10 * 60
+LOGIN_TIMEOUT_MINUTES = 10
+SECONDS_PER_MINUTE = 60
+LOGIN_TIMEOUT_S = LOGIN_TIMEOUT_MINUTES * SECONDS_PER_MINUTE
 GOOGLE_DEVICE_URL = "https://oauth2.googleapis.com/device/code"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_DEVICE_SCOPE = "openid email profile"
 AUTH_HINT = "Session expired or invalid — run 'python tools/capture_dom.py --login'"
+HTTP_OK = 200
+HTTP_4XX_START = 400
+HTTP_5XX_START = 500
+HTTP_SERVICE_UNAVAILABLE = 503
+POLL_INTERVAL_DEFAULT_S = 5
+STATE_FILE_MODE = 0o600
+PAGE_SETTLE_DELAY_MS = 5000
 
 logger = logging.getLogger("capture_dom")
 
@@ -76,10 +88,13 @@ def _default_state_file() -> Path:
     return Path(__file__).resolve().parent / ".auth-state.json"
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _storage_state(session_cookie: str) -> dict:
     """Playwright storageState carrying only the localhost session cookie."""
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     return {
         "cookies": [
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             {
                 "name": "session",
                 "value": session_cookie,
@@ -104,10 +119,12 @@ async def wait_for_server(url: str, label: str, timeout: float = 30) -> None:
     while time.monotonic() < deadline:
         try:
             r = await httpx.AsyncClient(timeout=3).get(url)
-            if r.status_code < 500:
-                return
-        except (httpx.ConnectError, httpx.TimeoutException):
-            pass
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            logger.debug("server %s not ready yet (retrying): %s", url, e)
+            await asyncio.sleep(1)
+            continue
+        if r.status_code < HTTP_5XX_START:
+            return
         await asyncio.sleep(1)
     _fail(
         f"The {label} isn't responding — start the app with `make run`, wait for it to be ready, then try again.",
@@ -116,10 +133,10 @@ async def wait_for_server(url: str, label: str, timeout: float = 30) -> None:
 
 
 async def get_browser():
+    # lucidlint: ignore global-state process-wide Playwright singleton; single writer get_browser
     global _browser, _playwright
     if _browser and _browser.is_connected():
         return _browser
-    from playwright.async_api import async_playwright
 
     _playwright = await async_playwright().start()
     _browser = await _playwright.chromium.launch(**LAUNCH_OPTS)
@@ -139,6 +156,7 @@ async def _auth_state(page) -> bool | None:
             ".then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))"
             ".then(d => d.authenticated === true)"
         )
+    # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
     except Exception as e:
         print(f"  WARNING: could not check session at {page.url}: {e}", file=sys.stderr)
         if not page.url.startswith(FRONTEND_URL):
@@ -149,42 +167,16 @@ async def _auth_state(page) -> bool | None:
         return None
 
 
-async def login(state_file: Path) -> None:
-    """Google OAuth device flow; serialize the app session to state_file.
+# lucidlint: ignore record-shape device-flow quadruple — a NamedTuple is ceremony for one call site
+async def _start_device_flow(client_id: str, client_secret: str) -> tuple[str, str, str, int]:
+    """POST Google's device-authorization endpoint; return the codes to show.
 
-    Prints a verification code and polls Google until the human approves from
-    any device (their browser's saved credentials + 2FA do the signing — no
-    credentials are entered on or stored by this machine). The resulting
-    id_token is exchanged with the backend for the app's session cookie,
-    saved as localhost-only Playwright storageState. Works on a headless box.
+    Returns ``(device_code, user_code, verification_url, poll_interval_s)``.
     """
-    from houses.config import settings
-
-    client_id = settings.device_client_id
-    if not client_id:
-        _fail(
-            "Google sign-in isn't set up on this machine — run the sign-in command again once it's been configured.",
-            "HOUSES_GOOGLE_DEVICE_CLIENT_ID unset: create a 'TVs and Limited Input devices' OAuth client "
-            "in Google Cloud Console (no redirect URIs needed) and add its ID to .env",
-        )
-    # Device-flow clients may have a client secret (some console-created
-    # clients issue one) or none. Send it only when configured — an empty
-    # client_secret in the token request can make Google reject it with
-    # invalid_client.
-    client_secret = settings.device_client_secret
-
-    print("Waiting for servers …")
-    await wait_for_server(BACKEND_URL + "/api/auth/me", "backend")
-    await wait_for_server(FRONTEND_URL, "frontend")
-    print(f"Session state will be saved to: {state_file}")
-
     async with httpx.AsyncClient(timeout=30) as client:
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         device_data = {"client_id": client_id, "scope": GOOGLE_DEVICE_SCOPE}
         if client_secret:
-            # Confidential clients must authenticate on the device-authorization
-            # endpoint too (RFC 8628 §3.1); harmless for public clients — Google
-            # accepts the secret here (live-verified) and omitting it can make a
-            # confidential client fail with invalid_client.
             device_data["client_secret"] = client_secret
         try:
             r = await client.post(GOOGLE_DEVICE_URL, data=device_data)
@@ -193,13 +185,15 @@ async def login(state_file: Path) -> None:
                 "Couldn't reach Google's sign-in service — check your connection and try again.",
                 f"device-flow setup POST to {GOOGLE_DEVICE_URL} failed: {e}",
             )
-        if r.status_code != 200:
+            return "", "", "", POLL_INTERVAL_DEFAULT_S  # unreachable — _fail exits; keeps the swallow gate honest
+        if r.status_code != HTTP_OK:
             _fail(
                 "Couldn't start Google sign-in — the sign-in app isn't allowed to use device sign-in. "
                 "Nothing you did wrong; try again once it's fixed.",
                 f"Google device flow setup failed ({r.status_code}): {r.text[:300]} — "
                 f"is device flow enabled for OAuth client {client_id}?",
             )
+            return "", "", "", POLL_INTERVAL_DEFAULT_S  # unreachable — _fail exits; keeps the swallow gate honest
         try:
             info = r.json()
         except ValueError as e:
@@ -207,18 +201,24 @@ async def login(state_file: Path) -> None:
                 "Couldn't start Google sign-in — the sign-in service sent an unexpected reply. Try again.",
                 f"device-flow setup response was not JSON: {e}",
             )
+            return "", "", "", POLL_INTERVAL_DEFAULT_S  # unreachable — _fail exits; keeps the swallow gate honest
         device_code = info["device_code"]
         user_code = info["user_code"]
         verification_url = info.get("verification_url", "https://www.google.com/device")
-        interval = int(info.get("interval", 5))
+        interval = int(info.get("interval", POLL_INTERVAL_DEFAULT_S))
+        return device_code, user_code, verification_url, interval
 
-    print(f"1) Open {verification_url} in any browser")
-    print(f"2) Enter code: {user_code}")
-    print("3) Approve with your Google account (2FA if asked)")
-    print(f"Waiting for approval (up to {LOGIN_TIMEOUT_S // 60} min) …")
 
+async def _poll_for_id_token(client_id: str, client_secret: str, device_code: str, interval: int) -> str:
+    """Poll Google until the human approves; return the id_token.
+
+    Hard rejections (4xx non-JSON, access_denied, expired_token) and the
+    approval deadline fail fast — a timeout must never be misreported as
+    'no one approved'.
+    """
     async with httpx.AsyncClient(timeout=30) as client:
         deadline = time.monotonic() + LOGIN_TIMEOUT_S
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         token_data = {
             "client_id": client_id,
             "device_code": device_code,
@@ -229,19 +229,20 @@ async def login(state_file: Path) -> None:
         while time.monotonic() < deadline:
             try:
                 r = await client.post(GOOGLE_TOKEN_URL, data=token_data)
-                data = r.json()
             except httpx.HTTPError as e:
                 # Transient network blip: keep polling — the deadline below
                 # bounds the retry; log so a silent loop is diagnosable.
                 logger.warning("device-flow token poll failed (retrying): %s", e)
                 await asyncio.sleep(interval)
                 continue
+            try:
+                data = r.json()
             except ValueError:
                 # Non-JSON body: a 4xx is a hard rejection (e.g. Google's
                 # invalid_client served as an HTML page) — fail fast instead
                 # of polling to the deadline and misreporting as 'no one
                 # approved'. 5xx non-JSON stays a transient retry.
-                if 400 <= r.status_code < 500:
+                if HTTP_4XX_START <= r.status_code < HTTP_5XX_START:
                     _fail(
                         "Google sign-in failed — nothing was signed in. Try again.",
                         f"Google device flow token exchange failed ({r.status_code}): {r.text[:200]}",
@@ -252,7 +253,7 @@ async def login(state_file: Path) -> None:
                 )
                 await asyncio.sleep(interval)
                 continue
-            if r.status_code == 200:
+            if r.status_code == HTTP_OK:
                 id_token = data.get("id_token")
                 if not id_token:
                     _fail(
@@ -261,7 +262,7 @@ async def login(state_file: Path) -> None:
                         f"Google returned no id_token on device flow — is the 'openid email profile' scope "
                         f"enabled for client {client_id}?",
                     )
-                break
+                return id_token
             err = data.get("error")
             if err == "authorization_pending":
                 pass
@@ -280,44 +281,93 @@ async def login(state_file: Path) -> None:
                     f"Google device flow error: {err} {desc or r.text[:200]}".strip(),
                 )
             await asyncio.sleep(interval)
-        else:
-            _fail(
-                f"No one approved the sign-in within {LOGIN_TIMEOUT_S // 60} minutes — nothing was signed in. "
-                f"Run the command again when you can approve it.",
-                f"no device-flow approval after {LOGIN_TIMEOUT_S // 60} min",
-            )
+    _fail(
+        f"No one approved the sign-in within {LOGIN_TIMEOUT_S // SECONDS_PER_MINUTE} minutes — "
+        "nothing was signed in. "
+        f"Run the command again when you can approve it.",
+        f"no device-flow approval after {LOGIN_TIMEOUT_S // SECONDS_PER_MINUTE} min",
+    )
+    return ""  # unreachable — _fail exits; keeps the swallow gate honest
 
-        # Exchange the id_token for the app's signed session cookie
-        try:
-            r = await client.post(BACKEND_URL + "/api/auth/device", json={"id_token": id_token})
-        except httpx.HTTPError as e:
+
+async def _exchange_for_session_cookie(client: httpx.AsyncClient, id_token: str) -> str:
+    """Trade the Google id_token for the app's signed session cookie."""
+    try:
+        r = await client.post(BACKEND_URL + "/api/auth/device", json={"id_token": id_token})
+    except httpx.HTTPError as e:
+        _fail(
+            "Couldn't reach the app to finish signing in — check that it's running, then try again.",
+            f"device login POST to {BACKEND_URL}/api/auth/device failed: {e}",
+        )
+        return ""  # unreachable — _fail exits; keeps the swallow gate honest
+    if r.status_code != HTTP_OK:
+        if r.status_code == HTTP_SERVICE_UNAVAILABLE:
             _fail(
-                "Couldn't reach the app to finish signing in — check that it's running, then try again.",
-                f"device login POST to {BACKEND_URL}/api/auth/device failed: {e}",
+                "Couldn't complete the sign-in — the sign-in service was unreachable. "
+                "Check your connection and try again.",
+                f"Backend device login returned 503 (identity provider unreachable): {r.text[:300]}",
             )
-        if r.status_code != 200:
-            if r.status_code == 503:
-                _fail(
-                    "Couldn't complete the sign-in — the sign-in service was unreachable. "
-                    "Check your connection and try again.",
-                    f"Backend device login returned 503 (identity provider unreachable): {r.text[:300]}",
-                )
-            _fail(
-                "The app refused the sign-in — check that the app is running and up to date, then try again.",
-                f"Backend rejected device login ({r.status_code}): {r.text[:300]}",
-            )
-        session_cookie = r.cookies.get("session")
-        if not session_cookie:
-            _fail(
-                "Sign-in completed but the app didn't create a session — try again.",
-                "Backend set no session cookie on POST /api/auth/device",
-            )
+        _fail(
+            "The app refused the sign-in — check that the app is running and up to date, then try again.",
+            f"Backend rejected device login ({r.status_code}): {r.text[:300]}",
+        )
+    session_cookie = r.cookies.get("session")
+    if not session_cookie:
+        _fail(
+            user_message="Sign-in completed but the app didn't create a session — try again.",
+            dev_detail="Backend set no session cookie on POST /api/auth/device",
+        )
+        return ""  # unreachable — _fail exits; keeps the swallow gate honest
+    return session_cookie
+
+
+async def login(state_file: Path) -> None:
+    """Google OAuth device flow; serialize the app session to state_file.
+
+    Prints a verification code and polls Google until the human approves from
+    any device (their browser's saved credentials + 2FA do the signing — no
+    credentials are entered on or stored by this machine). The resulting
+    id_token is exchanged with the backend for the app's session cookie,
+    saved as localhost-only Playwright storageState. Works on a headless box.
+    """
+
+    client_id = settings.device_client_id
+    if not client_id:
+        _fail(
+            user_message=(
+                "Google sign-in isn't set up on this machine — run the sign-in command again once it's been configured."
+            ),
+            dev_detail="HOUSES_GOOGLE_DEVICE_CLIENT_ID unset: create a 'TVs and Limited Input devices' OAuth client "
+            "in Google Cloud Console (no redirect URIs needed) and add its ID to .env",
+        )
+    # Device-flow clients may have a client secret (some console-created
+    # clients issue one) or none. Send it only when configured — an empty
+    # client_secret in the token request can make Google reject it with
+    # invalid_client.
+    client_secret = settings.device_client_secret
+
+    print("Waiting for servers …")
+    await wait_for_server(BACKEND_URL + "/api/auth/me", "backend")
+    await wait_for_server(FRONTEND_URL, "frontend")
+    print(f"Session state will be saved to: {state_file}")
+
+    device_code, user_code, verification_url, interval = await _start_device_flow(client_id, client_secret)
+
+    print(f"1) Open {verification_url} in any browser")
+    print(f"2) Enter code: {user_code}")
+    print("3) Approve with your Google account (2FA if asked)")
+    print(f"Waiting for approval (up to {LOGIN_TIMEOUT_S // SECONDS_PER_MINUTE} min) …")
+
+    id_token = await _poll_for_id_token(client_id, client_secret, device_code, interval)
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        session_cookie = await _exchange_for_session_cookie(client, id_token)
 
     state_file.parent.mkdir(parents=True, exist_ok=True)
     # Create owner-only from the start: write_text() would briefly create the
     # file with the default umask before chmod runs. 0o600 is still masked by
     # umask, so this can only be more restrictive, never less.
-    fd = os.open(state_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = os.open(state_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, STATE_FILE_MODE)
     with os.fdopen(fd, "w") as f:
         json.dump(_storage_state(session_cookie), f, indent=2)
     print(f"Session saved → {state_file} (localhost session cookie only)")
@@ -342,7 +392,7 @@ async def capture_page(url: str, output_dir: str | Path, label: str, state_file:
     page.on("pageerror", lambda e: errors.append(f"PAGE: {str(e)[:300]}"))
 
     await page.goto(url, wait_until="networkidle", timeout=30000)
-    await page.wait_for_timeout(5000)
+    await page.wait_for_timeout(PAGE_SETTLE_DELAY_MS)
 
     auth = await _auth_state(page)
     if auth is None:
@@ -375,7 +425,7 @@ async def capture_page(url: str, output_dir: str | Path, label: str, state_file:
     cards = await page.query_selector_all(".card")
     print(f"  Cards: {len(cards)}")
     for i, card in enumerate(cards[:2]):
-        text = (await card.text_content()).strip()[:500]
+        text = (await card.text_content() or "").strip()[:500]
         print(f"\n  --- Card {i} ---")
         print(f"  {text}")
 

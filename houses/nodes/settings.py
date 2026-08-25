@@ -18,12 +18,15 @@ from pint import Quantity
 
 from dag import persistence as _persistence
 from dag.user_input_node import UserInputNode
-from houses.config import settings
 from houses.model.domain import Person, PlaceOfInterest
+from houses.settings import settings
 
 _app_mode = False
+SIMON_BUS_WALK_PENALTY = 20
+LORENA_BUS_WALK_PENALTY = 15
+ASHBY_BUS_WALK_PENALTY = 10
 
-
+# lucidlint: ignore unused-setter called from the FastAPI lifespan (houses/server.py:57)
 def set_app_mode() -> None:
     """Mark this process as the running app.
 
@@ -31,11 +34,17 @@ def set_app_mode() -> None:
     reloader respawn) runs the lifespan; an ad-hoc script or REPL kernel
     that merely imports the app modules does not.
     """
+    # lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
     global _app_mode
     _app_mode = True
 
 
-def guard_settings_write() -> None:
+def guard_settings_write(
+    *,
+    testing: bool | None = None,
+    app_mode: bool | None = None,
+    scripts_may_write: bool | None = None,
+) -> None:
     """Block silent settings writes from non-app, non-test processes.
 
     The settings nodes (persons/financial/thresholds) hold real family
@@ -43,25 +52,48 @@ def guard_settings_write() -> None:
     not the running app, yet can silently replace the whole config —
     which is exactly how the family emails were wiped.  Deliberate
     data-fix scripts must opt in explicitly.
+
+    The keyword args are DI seams: tests pass explicit flags instead of
+    monkeypatching the module state.  ``None`` reads the real state
+    (``dag.persistence.testing``, the app-mode flag, the env var).
     """
-    if _persistence.testing:
+    if testing is None:
+        testing = _persistence.testing
+    if app_mode is None:
+        app_mode = _app_mode
+    if scripts_may_write is None:
+        scripts_may_write = os.environ.get("HOUSES_SCRIPTS_MAY_WRITE") == "1"
+    if testing:
         return  # pytest isolation fixtures
-    if _app_mode:
+    if app_mode:
         return  # the running uvicorn app (lifespan set the flag)
-    if os.environ.get("HOUSES_SCRIPTS_MAY_WRITE") == "1":
+    if scripts_may_write:
         return  # explicit opt-in for deliberate data-fix scripts
     raise RuntimeError(
         "Refusing to write settings from a non-app process. "
         "Set HOUSES_SCRIPTS_MAY_WRITE=1 to run a deliberate data-fix script."
     )
 
-
+# lucidlint: ignore class-module small private helper — module keeps its domain name
 class SettingsNode(UserInputNode):
     """A settings input node whose writes are guarded — only the app,
     pytest, or an explicitly opted-in script may change family data."""
 
-    def push(self, value: Any, source_label: str = "") -> None:
-        guard_settings_write()
+# lucidlint: ignore detached-method super().push() requires self — cannot be a staticmethod
+    def push(
+        self,
+        value: Any,
+        source_label: str = "",
+        *,
+        testing: bool | None = None,
+        app_mode: bool | None = None,
+        scripts_may_write: bool | None = None,
+    ) -> None:
+        guard_settings_write(
+            testing=testing,
+            app_mode=app_mode,
+            scripts_may_write=scripts_may_write,
+        )
         super().push(value, source_label)
 
 
@@ -74,10 +106,10 @@ def make_default_persons() -> list[Person]:
             is_superuser=False,
             has_car=True,
             selling_home=True,
-            bus_walk_penalty=Quantity(20, "minute"),
-            home_sale_price=Money("550000", "GBP"),
-            outstanding_mortgage=Money("373000", "GBP"),
-            life_insurance_monthly=Money("150", "GBP"),
+            bus_walk_penalty=Quantity(SIMON_BUS_WALK_PENALTY, "minute"),
+            home_sale_price=Money(amount="550000", currency="GBP"),
+            outstanding_mortgage=Money(amount="373000", currency="GBP"),
+            life_insurance_monthly=Money(amount="150", currency="GBP"),
             places_of_interest=(
                 PlaceOfInterest(
                     label="Pimlico",
@@ -108,7 +140,7 @@ def make_default_persons() -> list[Person]:
             is_superuser=False,
             selling_home=False,
             has_car=False,
-            bus_walk_penalty=Quantity(15, "minute"),
+            bus_walk_penalty=Quantity(LORENA_BUS_WALK_PENALTY, "minute"),
             places_of_interest=(
                 PlaceOfInterest(
                     label="Aldgate",
@@ -125,8 +157,8 @@ def make_default_persons() -> list[Person]:
             is_superuser=False,
             selling_home=False,
             has_car=True,
-            bus_walk_penalty=Quantity(10, "minute"),
-            cash_contribution=Money("300000", "GBP"),
+            bus_walk_penalty=Quantity(ASHBY_BUS_WALK_PENALTY, "minute"),
+            cash_contribution=Money(amount="300000", currency="GBP"),
             works_estimate_required=True,
             places_of_interest=(),
         ),
@@ -155,6 +187,7 @@ def make_default_persons() -> list[Person]:
     ]
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def make_default_thresholds() -> dict[str, dict[str, int]]:
     return {
         "Simon": {"good_max_minutes": 30, "fine_max_minutes": 45},

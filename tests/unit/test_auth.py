@@ -7,10 +7,10 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from houses.property_registry import _registry as _property_registry
 from houses.server import app
 from houses.services_provider import _request_services as _sp
-from houses.web.auth import _make_session_cookie, _oauth_states, get_session_user
+from houses.services_provider import get_services
+from houses.web.auth import _make_session_cookie, _oauth_states, _OAuthState, get_session_user
 from tests.helpers import FakeOAuthService, make_services
 
 client = TestClient(app)
@@ -34,11 +34,12 @@ class _FakeProperty:
 @pytest.fixture(autouse=True)
 def _fake_registry():
     """Insert a minimal fake property so endpoints that validate RIDs don't 404."""
-    _property_registry["test-rid"] = _FakeProperty()
+    registry = get_services().property_registry
+    registry.register("test-rid", _FakeProperty())
     try:
         yield
     finally:
-        _property_registry.pop("test-rid", None)
+        registry.clear()
 
 
 def _enable_auth():
@@ -103,9 +104,8 @@ class TestLogin:
         assert len(_oauth_states) == 1
         state_key = next(iter(_oauth_states))
         state_data = _oauth_states[state_key]
-        assert isinstance(state_data, dict)
-        assert "code_verifier" in state_data
-        assert len(state_data["code_verifier"]) > 0
+        assert isinstance(state_data, _OAuthState)
+        assert len(state_data.code_verifier) > 0
         _oauth_states.clear()
 
 
@@ -322,7 +322,7 @@ class TestCallback:
         assert "auth_error=missing_params" in location
 
     def test_rejects_invalid_state(self):
-        _oauth_states["valid_state"] = {"code_verifier": "abc"}
+        _oauth_states["valid_state"] = _OAuthState(code_verifier="abc", created_at=0.0)
         resp = client.get("/api/auth/callback?code=abc&state=invalid", follow_redirects=False)
         assert resp.status_code == 307
         location = resp.headers.get("location", "")
@@ -336,7 +336,7 @@ class TestCallback:
 
     def test_state_replay_is_rejected(self):
         """Once consumed, the same state token cannot be reused (CSRF+replay protection)."""
-        _oauth_states["s1"] = {"code_verifier": "v1"}
+        _oauth_states["s1"] = _OAuthState(code_verifier="v1", created_at=0.0)
         # First call succeeds with FakeOAuthService
         client.get("/api/auth/callback?code=c1&state=s1", follow_redirects=False)
         # Second call with same state should be rejected
@@ -347,7 +347,7 @@ class TestCallback:
 
     def test_success_creates_session(self):
         """Happy path: FakeOAuthService returns id_info, creates session cookie."""
-        _oauth_states["test_state"] = {"code_verifier": "test_verifier"}
+        _oauth_states["test_state"] = _OAuthState(code_verifier="test_verifier", created_at=0.0)
 
         id_info = {
             "email": "ashby@example.com",
@@ -382,7 +382,7 @@ class TestCallback:
         class _FakeRequest:
             cookies = {"session": cookie_value}
 
-        session = get_session_user(_FakeRequest())  # type: ignore[arg-type]
+        session = get_session_user(_FakeRequest())  # type: ignore[arg-type]  # request is annotated starlette Request but the function only reads .cookies — the duck-typed _FakeRequest supplies exactly that
         assert session is not None
         assert session["email"] == "ashby@example.com"
         assert session["name"] == "Ashby"
@@ -414,7 +414,7 @@ class TestDevice:
         assert resp2.status_code == 400
 
     def test_rejects_invalid_token(self):
-        from houses.config import settings
+        from houses.settings import settings
 
         token = _sp.set(
             make_services(oauth_service=FakeOAuthService(verify_error=ValueError("bad")))
@@ -430,7 +430,7 @@ class TestDevice:
 
     def test_mints_session_cookie(self):
         # autouse _fake_oauth fixture provides FakeOAuthService (id_info ashby@example.com)
-        from houses.config import settings
+        from houses.settings import settings
 
         saved = settings.device_client_id
         settings.device_client_id = "fake-device-client"
@@ -452,7 +452,7 @@ class TestDevice:
             settings.device_client_id = saved
 
     def test_503_when_device_client_not_configured(self):
-        from houses.config import settings
+        from houses.settings import settings
 
         saved = settings.device_client_id
         settings.device_client_id = ""
@@ -466,7 +466,7 @@ class TestDevice:
         """A transient Google transport failure is retryable 503, not a 401."""
         from google.auth.exceptions import TransportError
 
-        from houses.config import settings
+        from houses.settings import settings
 
         token = _sp.set(
             make_services(oauth_service=FakeOAuthService(verify_error=TransportError("no network")))
@@ -482,7 +482,7 @@ class TestDevice:
 
     def test_rejects_cross_origin_request(self):
         """A malicious page must not be able to mint a session for the victim."""
-        from houses.config import settings
+        from houses.settings import settings
 
         saved = settings.device_client_id
         settings.device_client_id = "fake-device-client"
@@ -498,7 +498,7 @@ class TestDevice:
 
     def test_accepts_app_origin(self):
         """Requests from the app's own origins (or no Origin, e.g. the CLI) pass."""
-        from houses.config import settings
+        from houses.settings import settings
 
         saved = settings.device_client_id
         settings.device_client_id = "fake-device-client"

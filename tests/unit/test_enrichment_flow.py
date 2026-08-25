@@ -13,7 +13,7 @@ from money import Money
 
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 
 RID = "test123"
 
@@ -227,7 +227,7 @@ class TestEnrichmentApi:
     @pytest.mark.asyncio
     async def test_get_property_returns_expected_fields(self):
         """GET /api/properties/{rid} returns DAG node JSON for registered property."""
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
         from houses.property_registry import register_property
         from houses.web.api_router import get_property
 
@@ -260,7 +260,7 @@ class TestEnrichmentApi:
     @pytest.mark.asyncio
     async def test_staleness_check_returns_fresh_when_all_deps_met(self):
         """After seeding data and flushing, staleness reports a fresh node."""
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
         from houses.property_registry import register_property
         from houses.web.api_router import staleness_check
 
@@ -280,7 +280,7 @@ class TestEnrichmentApi:
     @pytest.mark.asyncio
     async def test_detail_includes_enriched_nodes(self):
         """GET /api/properties/{rid}/detail includes school / commute / cost nodes."""
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
         from houses.property_registry import register_property
         from houses.web.api_router import get_property_detail
 
@@ -302,7 +302,7 @@ class TestEnrichmentApi:
     @pytest.mark.asyncio
     async def test_list_properties_returns_registered_rid(self):
         """A registered property appears in the property registry."""
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
         from houses.property_registry import list_properties as registry_list
         from houses.property_registry import register_property
 
@@ -366,7 +366,7 @@ class TestEnrichmentBootstrap:
     async def test_push_enriched_property_seeds_nodes(self):
         """push_enriched_property correctly pushes to the right UserInputNodes."""
         from houses.nodes.cutover import push_enriched_property
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
 
         prop = PropertyNodes(RID * 2)
 
@@ -452,7 +452,7 @@ class TestEnrichmentBootstrap:
     async def test_precise_location_overrides_approx(self):
         """When both approx (rightmove_location) and precise_location are set,
         precise wins."""
-        from houses.nodes.property import PropertyNodes
+        from houses.nodes.property_nodes import PropertyNodes
 
         prop = PropertyNodes(f"{RID}_precise")
 

@@ -7,11 +7,9 @@ with the reason preserved.
 """
 from __future__ import annotations
 
-from unittest.mock import patch
-
 import pytest
 
-from houses.location import find_nearest_town_name
+from houses.location import ReverseGeocodeOptions, find_nearest_town_name
 from houses.town_desc import generate_town_description
 
 
@@ -38,13 +36,16 @@ class TestFindNearestTownName:
             def json(self):
                 return {"features": [{"properties": {"locality": "Southall"}}]}
 
-        with (
-            patch("houses.location.get_cached", return_value=None),
-            patch("houses.location.cached_async_client", return_value=_FakeCM()),
-            patch("houses.location.settings.ors_api_key", "key"),
-            patch("houses.location.set_cached"),
-        ):
-            result = await find_nearest_town_name(51.5, -0.1)
+        result = await find_nearest_town_name(
+            51.5,
+            -0.1,
+            options=ReverseGeocodeOptions(
+                api_key="key",
+                get_cached_fn=lambda *a, **k: None,
+                set_cached_fn=lambda *a, **k: None,
+                client_factory=lambda **k: _FakeCM(),
+            ),
+        )
 
         assert result.succeeded
         assert result.value_or_none() == "Southall"
@@ -71,13 +72,16 @@ class TestFindNearestTownName:
             def json(self):
                 return {"features": []}
 
-        with (
-            patch("houses.location.get_cached", return_value=None),
-            patch("houses.location.cached_async_client", return_value=_FakeCM()),
-            patch("houses.location.settings.ors_api_key", "key"),
-            patch("houses.location.set_cached"),
-        ):
-            result = await find_nearest_town_name(51.5, -0.1)
+        result = await find_nearest_town_name(
+            51.5,
+            -0.1,
+            options=ReverseGeocodeOptions(
+                api_key="key",
+                get_cached_fn=lambda *a, **k: None,
+                set_cached_fn=lambda *a, **k: None,
+                client_factory=lambda **k: _FakeCM(),
+            ),
+        )
 
         assert result.impossible
         assert "no town found" in result.error
@@ -97,12 +101,16 @@ class TestFindNearestTownName:
             async def get(self, url, params=None, headers=None):
                 raise httpx.TimeoutException("timed out")
 
-        with (
-            patch("houses.location.get_cached", return_value=None),
-            patch("houses.location.cached_async_client", return_value=_FakeCM()),
-            patch("houses.location.settings.ors_api_key", "key"),pytest.raises(httpx.TimeoutException)
-        ):
-            await find_nearest_town_name(51.5, -0.1)
+        with pytest.raises(httpx.TimeoutException):
+            await find_nearest_town_name(
+                51.5,
+                -0.1,
+                options=ReverseGeocodeOptions(
+                    api_key="key",
+                    get_cached_fn=lambda *a, **k: None,
+                    client_factory=lambda **k: _FakeCM(),
+                ),
+            )
 
 
 class TestGenerateTownDescription:
@@ -133,11 +141,12 @@ class TestGenerateTownDescription:
         async def _fake_cache(*a, **k):
             return _FakeResp().json()
 
-        with (
-            patch("houses.town_desc.cached_async_client", return_value=_FakeCM()),
-            patch("houses.town_desc.with_cache", new=_fake_cache),
-        ):
-            result = await generate_town_description("Southall", "UB2 4GN")
+        result = await generate_town_description(
+            "Southall",
+            "UB2 4GN",
+            client_factory=lambda **k: _FakeCM(),
+            with_cache_fn=_fake_cache,
+        )
 
         assert result.succeeded
         assert result.value_or_none() == "A leafy suburb."

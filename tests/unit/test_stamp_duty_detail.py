@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 from money import Money
 
-from houses.geo import GeoPoint
-from houses.nodes.property import PropertyNodes
-from houses.property_registry import _registry, register_property
+from houses.geopoint import GeoPoint
+from houses.nodes.property_nodes import PropertyNodes
+from houses.property_registry import register_property
 from tests.helpers import make_services
 
 
@@ -27,7 +27,9 @@ def _fresh_db():
 
 
 def _clear():
-    _registry.clear()
+    from houses.services_provider import get_services
+
+    get_services().property_registry.clear()
 
 
 def _mock():

@@ -2,7 +2,7 @@
 
 import uvicorn
 
-from houses.config import settings
+from houses.settings import settings
 
 
 def main() -> None:

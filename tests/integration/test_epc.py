@@ -5,8 +5,8 @@ from unittest.mock import patch
 import pytest
 from httpx import AsyncClient, MockTransport, Response
 
-from houses.config import settings
 from houses.epc import _match_cert, _should_lookup_epc, lookup_epc
+from houses.settings import settings
 
 
 @pytest.fixture(autouse=True)

@@ -39,6 +39,11 @@ DEST_NLCS = {
 # Off-Peak Single) with no restriction code is valid anytime.
 SINGLE_CODES = {"SDS", "SVS", "SOS", "SSS", "ADS", "FDS", "SDR", "SOR", "TKR"}
 RETURN_CODES = {"CDR", "SVR", "FOR", "FDR", "OR2", "OR1"}
+PENCE_PER_POUND = 100.0
+MIN_RT_LINE_LENGTH = 22
+MIN_FFL_LINE_LENGTH = 30
+CRS_CODE_LENGTH = 3
+MIN_LOC_LINE_LENGTH = 60
 
 
 def main():
@@ -47,88 +52,107 @@ def main():
         sys.exit(1)
 
     with zipfile.ZipFile(sys.argv[1]) as z:
-        # Build NLC->CRS from LOC
-        nlc_crs = {}
-        loc_name = [n for n in z.namelist() if ".LOC" in n][0]
-        for raw in z.open(loc_name):
-            line = raw.decode("latin-1")
-            if line.startswith("/") or not line.startswith("RL") or len(line) < 60:
-                continue
-            nlc = line[36:40].strip()
-            crs = line[56:59].strip()
-            name = line[40:55].strip()
-            if nlc.isdigit() and len(crs) == 3 and crs.isupper():
-                nlc_crs[nlc] = (crs, name.strip())
-        logger.info("LOC: %d stations", len(nlc_crs))
-
-        # Pass 1: Scan RF records for flows to VIC/FST
+        nlc_crs = _load_nlc_crs(z)
         ffl_name = [n for n in z.namelist() if ".FFL" in n][0]
-        dest_flows = {}  # flow_id -> (origin_nlc, dest_crs)
-        total_rf = 0
-
-        for raw in z.open(ffl_name):
-            line = raw.decode("latin-1")
-            if line.startswith("/") or len(line) < 30:
-                continue
-            if not line.startswith("RF"):
-                continue
-            total_rf += 1
-            origin = line[2:6].strip().lstrip("0")
-            dest = line[6:10].strip().lstrip("0")
-            flow_id = line[42:49].strip().lstrip("0")
-            if dest in DEST_NLCS:
-                dest_flows[flow_id] = (origin, DEST_NLCS[dest])
-
-        logger.info("FFL: %d RF records, %d flows to destinations", total_rf, len(dest_flows))
-
-        # Pass 2: Scan RT records for fares matching those flows
-        total_rt = 0
-        fares = {}  # (origin_nlc, dest_crs) -> (single_equiv_price, ticket_code)
-        for raw in z.open(ffl_name):
-            line = raw.decode("latin-1")
-            if line.startswith("/") or len(line) < 22:
-                continue
-            if not line.startswith("RT"):
-                continue
-            total_rt += 1
-            flow_id = line[2:9].strip().lstrip("0")
-            if flow_id not in dest_flows:
-                continue
-            ticket = line[9:12].strip()
-            if ticket not in SINGLE_CODES and ticket not in RETURN_CODES:
-                continue
-            # Skip tickets with time restrictions — only use unrestricted (peak-valid) fares
-            rest = line[20:22].strip()
-            if rest:
-                continue
-            fare_str = line[12:20].strip()
-            if not fare_str.isdigit():
-                continue
-            price = float(fare_str) / 100.0
-            origin_nlc, dest_crs = dest_flows[flow_id]
-            key = (origin_nlc, dest_crs)
-
-            # Convert return tickets to single-equivalent for comparison
-            if ticket in RETURN_CODES:
-                price = round(price / 2, 2)
-
-            # Keep cheapest single-equivalent fare
-            if key not in fares or price < fares[key][0]:
-                fares[key] = (price, ticket)
-
-        logger.info("FFL: %d RT records, %d unique fares extracted", total_rt, len(fares))
-
-        # Write output
+        dest_flows, total_rf = _scan_destination_flows(z, ffl_name)
+        fares, total_rt = _scan_fares(z, ffl_name, dest_flows)
         output = "data/rail_fares.csv"
-        with open(output, "w", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["origin_crs", "dest_crs", "single_fare_gbp", "ticket_code"])
-            for (nlc, dest), (price, ticket) in sorted(fares.items()):
-                crs, name = nlc_crs.get(nlc, ("", ""))
-                w.writerow([crs, dest, price, ticket])
-
-        logger.info("Wrote %d fares to %s", len(fares), output)
+        _write_fares_csv(output, fares, nlc_crs)
         print(f"\nDone! {len(fares)} fares to {output}")
+
+
+# lucidlint: ignore record-shape NLC→(CRS, name) station map — wire-format dict (coding-standards.md)
+def _load_nlc_crs(z) -> dict[str, tuple[str, str]]:
+    # Build NLC->CRS from LOC
+    nlc_crs = {}
+    loc_name = [n for n in z.namelist() if ".LOC" in n][0]
+    for raw in z.open(loc_name):
+        line = raw.decode("latin-1")
+        if line.startswith("/") or not line.startswith("RL") or len(line) < MIN_LOC_LINE_LENGTH:
+            continue
+        nlc = line[36:40].strip()
+        crs = line[56:59].strip()
+        name = line[40:55].strip()
+        if nlc.isdigit() and len(crs) == CRS_CODE_LENGTH and crs.isupper():
+            nlc_crs[nlc] = (crs, name.strip())
+    logger.info("LOC: %d stations", len(nlc_crs))
+    return nlc_crs
+
+
+# lucidlint: ignore record-shape flow_id→(origin, dest) map — wire-format dict (coding-standards.md)
+def _scan_destination_flows(z, ffl_name) -> tuple[dict, int]:
+    # Pass 1: Scan RF records for flows to VIC/FST
+    dest_flows = {}  # flow_id -> (origin_nlc, dest_crs)
+    total_rf = 0
+
+    for raw in z.open(ffl_name):
+        line = raw.decode("latin-1")
+        if line.startswith("/") or len(line) < MIN_FFL_LINE_LENGTH:
+            continue
+        if not line.startswith("RF"):
+            continue
+        total_rf += 1
+        origin = line[2:6].strip().lstrip("0")
+        dest = line[6:10].strip().lstrip("0")
+        flow_id = line[42:49].strip().lstrip("0")
+        if dest in DEST_NLCS:
+            dest_flows[flow_id] = (origin, DEST_NLCS[dest])
+
+    logger.info("FFL: %d RF records, %d flows to destinations", total_rf, len(dest_flows))
+    return dest_flows, total_rf
+
+
+# lucidlint: ignore record-shape key→(price, ticket) fare map — wire-format dict (coding-standards.md)
+def _scan_fares(z, ffl_name, dest_flows) -> tuple[dict, int]:
+    # Pass 2: Scan RT records for fares matching those flows
+    total_rt = 0
+    fares = {}  # (origin_nlc, dest_crs) -> (single_equiv_price, ticket_code)
+    for raw in z.open(ffl_name):
+        line = raw.decode("latin-1")
+        if line.startswith("/") or len(line) < MIN_RT_LINE_LENGTH:
+            continue
+        if not line.startswith("RT"):
+            continue
+        total_rt += 1
+        flow_id = line[2:9].strip().lstrip("0")
+        if flow_id not in dest_flows:
+            continue
+        ticket = line[9:12].strip()
+        if ticket not in SINGLE_CODES and ticket not in RETURN_CODES:
+            continue
+        # Skip tickets with time restrictions — only use unrestricted (peak-valid) fares
+        rest = line[20:22].strip()
+        if rest:
+            continue
+        fare_str = line[12:20].strip()
+        if not fare_str.isdigit():
+            continue
+        price = float(fare_str) / PENCE_PER_POUND
+        origin_nlc, dest_crs = dest_flows[flow_id]
+        key = (origin_nlc, dest_crs)
+
+        # Convert return tickets to single-equivalent for comparison
+        if ticket in RETURN_CODES:
+            price = round(price / 2, 2)
+
+        # Keep cheapest single-equivalent fare
+        if key not in fares or price < fares[key][0]:
+            fares[key] = (price, ticket)
+
+    logger.info("FFL: %d RT records, %d unique fares extracted", total_rt, len(fares))
+    return fares, total_rt
+
+
+def _write_fares_csv(output: str, fares, nlc_crs) -> None:
+    # Write output
+    with open(output, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["origin_crs", "dest_crs", "single_fare_gbp", "ticket_code"])
+        for (nlc, dest), (price, ticket) in sorted(fares.items()):
+            crs, name = nlc_crs.get(nlc, ("", ""))
+            w.writerow([crs, dest, price, ticket])
+
+    logger.info("Wrote %d fares to %s", len(fares), output)
 
 
 if __name__ == "__main__":

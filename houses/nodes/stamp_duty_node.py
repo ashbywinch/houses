@@ -8,7 +8,7 @@ from money import Money
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.expression import Conditional, Literal
-from houses.nodes.expressions import TieredRate
+from houses.nodes.expressions import TaxTier, TieredRate
 
 
 class StampDutyNode(DerivedNode[Money]):
@@ -37,14 +37,14 @@ class StampDutyNode(DerivedNode[Money]):
                 .lower()
                 == "current"
             ),
-            if_true=Literal(Money("0", "GBP")),
+            if_true=Literal(Money(amount="0", currency="GBP")),
             if_false=TieredRate(
                 self._price_node,
                 tiers=[
-                    (0, 250000, 0),
-                    (250000, 925000, Decimal("0.05")),
-                    (925000, 1500000, Decimal("0.10")),
-                    (1500000, None, Decimal("0.12")),
+                    TaxTier(0, 250000, 0),
+                    TaxTier(250000, 925000, Decimal("0.05")),
+                    TaxTier(925000, 1500000, Decimal("0.10")),
+                    TaxTier(1500000, None, Decimal("0.12")),
                 ],
                 description="Stamp Duty Land Tax: 0% up to £250k, "
                 "5% on £250k–£925k, 10% on £925k–£1.5M, 12% above £1.5M",
@@ -59,6 +59,7 @@ class StampDutyNode(DerivedNode[Money]):
         return (self._price_node,)
 
     @override
+# lucidlint: ignore middle-man protocol/reflected-operator requirement
     def compute(
         self,
         price: Attempt[Money],

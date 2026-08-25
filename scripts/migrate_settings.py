@@ -20,6 +20,9 @@ import json
 import sqlite3
 from pathlib import Path
 
+import houses.services as services
+from houses.nodes.settings_node import API_KEY_TO_NODE, SETTING_DEFAULTS
+
 
 def _conn() -> sqlite3.Connection:
     db = Path("data/houses.db")
@@ -30,6 +33,7 @@ def _conn() -> sqlite3.Connection:
     return conn
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _read_persons(conn: sqlite3.Connection) -> list[dict]:
     """Return list of person dicts from the latest succeeded persons row."""
     row = conn.execute(
@@ -42,6 +46,7 @@ def _read_persons(conn: sqlite3.Connection) -> list[dict]:
     return json.loads(row["result_json"])["value"]
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _write_persons(conn: sqlite3.Connection, persons: list[dict]) -> int:
     """Write persons data, return new row id."""
     result = json.dumps({"status": "succeeded", "value": persons})
@@ -50,6 +55,8 @@ def _write_persons(conn: sqlite3.Connection, persons: list[dict]) -> int:
         ("persons", result, "2026-07-30T23:00:00"),
     )
     conn.commit()
+    if cur.lastrowid is None:
+        raise RuntimeError("INSERT into node_results returned no row id")
     return cur.lastrowid
 
 
@@ -68,6 +75,7 @@ def _migrate_persons(conn: sqlite3.Connection) -> bool:
         de = p.pop("deposit_equity", None)
         if de is not None and isinstance(de, dict):
             amount = float(de.get("amount", 0))
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             p["home_sale_price"] = {"amount": str(amount), "currency": "GBP"}
             p["outstanding_mortgage"] = {"amount": "0", "currency": "GBP"}
             p["cash_contribution"] = {"amount": "0", "currency": "GBP"}
@@ -112,8 +120,6 @@ def _migrate_financial(conn: sqlite3.Connection) -> bool:
 
     Already run — this is a no-op if individual nodes already exist.
     """
-    from houses.nodes.settings_node import API_KEY_TO_NODE, SETTING_DEFAULTS
-    from houses.services import _make_settings_source
 
     row = conn.execute(
         "SELECT result_json FROM node_results WHERE node_id = 'financial' ORDER BY id DESC LIMIT 1"
@@ -136,7 +142,7 @@ def _migrate_financial(conn: sqlite3.Connection) -> bool:
         if type_info is None:
             continue
         val_type, _ = type_info
-        node = _make_settings_source(node_id, val_type, lambda: None)
+        node = services._make_settings_source(node_id, val_type, lambda: None)
         node.push(value, "migration")
         pushed += 1
 

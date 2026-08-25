@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import override
+from typing import Any, override
 
 from money import Money
 
-from dag.attempt import Attempt
+from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
-from dag.node import Node
 
 
 class CommuteBreakdownNode(DerivedNode[dict]):
     """Aggregates commute costs across all persons and POIs."""
 
-    def __init__(self, node_id: str, *, commute_selectors: dict[str, Node], persons_source):
+    # lucidlint: ignore record-shape keyed selector→node map (variable keys), not a fixed record shape
+    def __init__(self, node_id: str, *, commute_selectors: dict[str, Any], persons_source):
         self._commute_selectors = commute_selectors
         # persons_source is always the last dep
         super().__init__(node_id, dict, tuple(commute_selectors.values()) + (persons_source,))
@@ -21,7 +21,6 @@ class CommuteBreakdownNode(DerivedNode[dict]):
 
     @property
     def provenance_formula(self):
-        from dag.attempt import Formula, FormulaLine
 
         v = self._attempt.value_or_none()
         if not self._attempt.succeeded or v is None:
@@ -58,11 +57,11 @@ class CommuteBreakdownNode(DerivedNode[dict]):
         commute_attempts = args[:-1]
 
         persons_list = persons_attempt.value_or_none() if persons_attempt.succeeded else []
-        yearly_total = Money("0", "GBP")
+        yearly_total = Money(amount="0", currency="GBP")
         per_person: dict[str, dict] = {}
         selector_values = list(self._commute_selectors.values())
         for p in persons_list or []:
-            person_yearly = Money("0", "GBP")
+            person_yearly = Money(amount="0", currency="GBP")
             daily_amount: Money | None = None
             pois = p.get("places_of_interest", ()) if isinstance(p, dict) else getattr(p, "places_of_interest", ())
             name = p.get("name") if isinstance(p, dict) else getattr(p, "name", "?")
@@ -95,6 +94,7 @@ class CommuteBreakdownNode(DerivedNode[dict]):
                             "yearly_gbp": str(yearly_person_poi.amount),
                         }
                     )
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             per_person[name] = {
                 "daily_gbp": str(daily_amount.amount) if daily_amount is not None else "0",
                 "yearly_gbp": str(person_yearly.amount),

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import re
+import zipfile
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
@@ -24,8 +26,10 @@ def _dataset_cache_path(dataset_id: int, filename: str) -> Path:
     return CACHE_DIR / f"dataset_{dataset_id}_{safe}.xml"
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def get_bods_datasets(noc: str, api_key: str) -> list[dict]:
     url = f"{BODS_BASE}fares/dataset/"
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     params: dict[str, Any] = {"noc": noc, "limit": 50, "api_key": api_key}
 
     resp = httpx.get(url, params=params, timeout=30)
@@ -61,8 +65,6 @@ def download_dataset(dataset_id: int, api_key: str, cached_only: bool = False) -
     content_type = resp.headers.get("content-type", "")
 
     if "zip" in content_type or content[:2] == b"PK":
-        import io
-        import zipfile
 
         with zipfile.ZipFile(io.BytesIO(content)) as zf:
             xml_names = sorted([n for n in zf.namelist() if n.endswith(".xml")])
@@ -80,6 +82,6 @@ def download_dataset(dataset_id: int, api_key: str, cached_only: bool = False) -
         yield resp.text
 
 
-def _checkpoint_path(display_name: str) -> Path:
+def checkpoint_path(display_name: str) -> Path:
     safe_name = display_name.replace(" ", "_").replace("/", "_")
     return CHECKPOINT_DIR / f"{safe_name}.json"

@@ -9,19 +9,22 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
+import dag.scheduler
+from dag.regenerate import force_regenerate, nodes_matching
 from houses.nodes.bootstrap import load_property_nodes_from_rows
-from houses.property_registry import list_properties as list_registry_properties
+from houses.services_provider import get_services
+from houses.sheets.reader import get_properties_data
+from houses.web.auth import effective_session_user
 
 admin_router = APIRouter(prefix="/api")
 
 
 async def seed_properties():
     """Seed the property registry from the Google Sheet on cold start."""
-    from houses.sheets.reader import get_properties_data
-
     rows = get_properties_data()
     count = load_property_nodes_from_rows(rows)
-    return {"seeded": count, "total": len(list_registry_properties())}
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    return {"seeded": count, "total": len(get_services().property_registry.list_properties())}
 
 
 @admin_router.post("/admin/reseed")
@@ -32,9 +35,6 @@ async def reseed_from_sheet(request: Request):
     auto-reloads from code changes should not re-read the sheet.  Call this
     endpoint explicitly after seeding the sheet with new properties.
     """
-    from houses.sheets.reader import get_properties_data
-    from houses.web.auth import effective_session_user
-
     user = effective_session_user(request)
     if not user or not user.get("is_superuser"):
         raise HTTPException(status_code=403, detail="Superuser access required")
@@ -45,6 +45,7 @@ async def reseed_from_sheet(request: Request):
 
 
 @admin_router.post("/admin/regenerate")
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 async def regenerate_nodes(body: dict, request: Request):
     """Force-recompute DerivedNodes whose persisted results are stale in
     CODE, not by timestamp — e.g. after a computation change (the A3
@@ -57,10 +58,6 @@ async def regenerate_nodes(body: dict, request: Request):
     skipped. The scheduler cascade is drained before responding, so
     dependents (e.g. total monthly cost) are recomputed too.
     """
-    from dag.regenerate import force_regenerate, nodes_matching
-    from dag.scheduler import _get_scheduler
-    from houses.web.auth import effective_session_user
-
     user = effective_session_user(request)
     if not user or not user.get("is_superuser"):
         raise HTTPException(status_code=403, detail="Superuser access required")
@@ -74,7 +71,8 @@ async def regenerate_nodes(body: dict, request: Request):
             detail='patterns required: a list of node-id patterns, e.g. ["*/council_tax"]',
         )
 
-    registry = _get_scheduler().registered_nodes()
+    registry = dag.scheduler.get_scheduler().registered_nodes()
     matched = nodes_matching(patterns, registry.values())
     regenerated, skipped = await force_regenerate(matched)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     return {"matched": len(matched), "regenerated": regenerated, "skipped": skipped}

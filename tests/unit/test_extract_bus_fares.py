@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from houses.stations import Station
+from scripts.parse_netex_fares import Station
 
 
 class TestParseNeTExFares:
@@ -25,15 +25,20 @@ class TestParseNeTExFares:
             cls._STATIONS_CACHE = []
             with Path("data/stations.csv").open(newline="") as f:
                 for row in csv.DictReader(f):
-                    cls._STATIONS_CACHE.append(
-                        Station(
-                            name=row["stationName"],
-                            crs=row["crsCode"],
-                            location=None,
+                    try:
+                        cls._STATIONS_CACHE.append(
+                            Station(
+                                name=row["stationName"],
+                                crs=row["crsCode"],
+                                lat=float(row["lat"]),
+                                long=float(row["long"]),
+                            )
                         )
-                    )
+                    except (ValueError, KeyError):
+                        continue
         return cls._STATIONS_CACHE
 
+    # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
     def test_parses_scso_stops_and_zones(self):
         """Stagecoach South dataset should find stops and zones."""
         xml = (Path("tests/fixtures/bods") / "scso_sample.xml").read_text()
@@ -43,6 +48,7 @@ class TestParseNeTExFares:
         assert result is not None
         assert len(result.get("stop_zones", {})) >= 1
 
+    # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
     def test_parses_scso_zone_prices(self):
         """Stagecoach South dataset should extract adult_single prices for zone pairs.
 

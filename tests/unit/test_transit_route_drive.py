@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 
 
 class _FakeDirectionsClient:
@@ -52,7 +52,7 @@ async def test_drive_minutes_from_location_posts_origin_coords():
         patch("houses.transit_route.set_cached"),
         patch("houses.transit_route.settings.ors_api_key", "fake-key"),
         patch("houses.transit_route.find_station") as find_station,
-        patch("houses.transit_route._geocode_address") as geocode_address,
+        patch("houses.transit_route.geocode_address") as geocode_address,
     ):
         find_station.return_value = type("S", (), {"location": GeoPoint(51.4, -0.97)})()
         geocode_address.return_value = None  # station found in registry, no geocode needed
@@ -81,7 +81,7 @@ async def test_drive_minutes_from_postcode_geocodes_then_estimates():
         patch("houses.transit_route.settings.ors_api_key", "fake-key"),
         patch("houses.transit_route.geocode") as geocode,
         patch("houses.transit_route.find_station") as find_station,
-        patch("houses.transit_route._geocode_address") as geocode_address,
+        patch("houses.transit_route.geocode_address") as geocode_address,
     ):
         geocode.return_value = Attempt.succeeded(GeoPoint(51.5, -0.1))
         find_station.return_value = type("S", (), {"location": GeoPoint(51.4, -0.97)})()
@@ -105,7 +105,7 @@ async def test_drive_minutes_from_postcode_returns_none_when_ungeocodable():
 
     with (
         patch("houses.transit_route.geocode") as geocode,
-        patch("houses.transit_route._geocode_address") as geocode_address,
+        patch("houses.transit_route.geocode_address") as geocode_address,
     ):
         geocode.return_value = Attempt.impossible("no geo")
         geocode_address.return_value = Attempt.impossible("no geo")

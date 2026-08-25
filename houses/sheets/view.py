@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
 import gspread
+from gspread.utils import ValueInputOption
 
 from houses.sheet_presentation import apply_color_rules, apply_data_validations
 from houses.sheets.formulas import VIEW_FORMULA_COLS
@@ -19,6 +21,9 @@ from houses.sheets.named_ranges import ensure_named_ranges
 from houses.sheets.row import Row
 
 logger = logging.getLogger(__name__)
+
+# Google Sheets API batch requests — opaque wire objects validated by the API.
+_SheetRequests = list[dict[str, Any]]
 
 # Conditional formatting colors (RGB 0-1 floats for Google Sheets API)
 GREY_TEXT = {"red": 0.6, "green": 0.6, "blue": 0.6}
@@ -69,7 +74,7 @@ class View:
                     self._ws.update(
                         values=[[formula] for _ in range(write_rows)],
                         range_name=f"{cl}2:{cl}{1 + write_rows}",
-                        value_input_option="USER_ENTEred",
+                        value_input_option=ValueInputOption.user_entered,
                     )
 
     # ── Cell formatting ─────────────────────────────────────────────
@@ -228,13 +233,13 @@ class View:
             self._spreadsheet.batch_update({"requests": fmt_requests})
 
     # ── Conditional formatting ──────────────────────────────────────
+    def _existing_format_clear_requests(self) -> _SheetRequests | None:
+        """deleteConditionalFormatRule requests for the View tab's existing rules.
 
-    def _apply_conditional_formatting(self) -> None:
-        """Clear existing conditional formats and re-apply domain-specific rules."""
-        extra_requests: list[dict] = []
-
-        # Clear existing conditional formatting rules for the View tab
-        # Must delete from highest index to lowest since batch processes in order
+        None when the sheet metadata is unreadable — the caller then skips
+        clearing and just re-applies the domain rules.
+        """
+        deletes: list[dict] = []
         try:
             sheet_data = self._spreadsheet.client.request(
                 "get",
@@ -245,44 +250,36 @@ class View:
             for s in parsed.get("sheets", []):
                 if s["properties"]["sheetId"] == self._sid:
                     rule_count = len(s.get("conditionalFormats", []))
-                    for i in range(rule_count - 1, -1, -1):
-                        extra_requests.append({"deleteConditionalFormatRule": {"sheetId": self._sid, "index": i}})
+                    deletes.extend(
+                        {"deleteConditionalFormatRule": {"sheetId": self._sid, "index": i}}
+                        for i in range(rule_count - 1, -1, -1)
+                    )
                     break
+        # lucidlint: ignore broad-except deliberate degrade — failure to clear rules returns None (no deletes)
         except Exception as exc:
             logger.warning("Failed to clear existing conditional formatting rules: %s", exc)
+            return None
+        return deletes
+
+    def _apply_conditional_formatting(self) -> None:
+        """Clear existing conditional formats and re-apply domain-specific rules."""
+        extra_requests: list[dict] = []
+
+        # Clear existing conditional formatting rules for the View tab
+        # Must delete from highest index to lowest since batch processes in order
+        clear_requests = self._existing_format_clear_requests()
+        if clear_requests:
+            extra_requests.extend(clear_requests)
 
         apply_color_rules(extra_requests, self._sid, self._headers, Row.letter_of)
         apply_data_validations(extra_requests, self._sid, self._headers)
 
         if extra_requests:
             self._spreadsheet.batch_update({"requests": extra_requests})
-
     # ── Column groups and borders ───────────────────────────────────
-
-    def _apply_column_groups(self) -> None:
-        """Apply visual zone separators, column grouping, and gap column widths."""
-        requests: list[dict] = []
-
-        # Visual zone separators — thick right borders between column groups
-        zone_boundaries = [5, 14, 25, 32]  # last column index of each zone (pre-gap)
-        for col in zone_boundaries:
-            requests.append(
-                {
-                    "updateBorders": {
-                        "range": {
-                            "sheetId": self._sid,
-                            "startColumnIndex": col,
-                            "endColumnIndex": col + 1,
-                        },
-                        "right": {
-                            "style": "SOLID_MEDIUM",
-                            "color": {"red": 0.5, "green": 0.5, "blue": 0.5},
-                        },
-                    }
-                }
-            )
-
-        # Delete existing column groups first to avoid accumulation
+    def _existing_column_group_deletes(self) -> _SheetRequests:
+        """deleteDimensionGroup requests for the View tab's existing column groups."""
+        deletes: list[dict] = []
         try:
             existing_sheet = json.loads(
                 self._spreadsheet.client.request(
@@ -295,7 +292,7 @@ class View:
                 if s["properties"]["sheetId"] == self._sid:
                     for cg in sorted(s.get("columnGroups", []), key=lambda x: x.get("depth", 0), reverse=True):
                         r = cg["range"]
-                        requests.append(
+                        deletes.append(
                             {
                                 "deleteDimensionGroup": {
                                     "range": {
@@ -308,8 +305,40 @@ class View:
                             }
                         )
                     break
+        # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
         except Exception as exc:
             logger.warning("Failed to clear column groups: %s", exc)
+            return deletes
+        return deletes
+
+
+
+    def _apply_column_groups(self) -> None:
+        """Apply visual zone separators, column grouping, and gap column widths."""
+        requests: list[dict] = []
+
+        # Visual zone separators — thick right borders between column groups
+        zone_boundaries = [5, 14, 25, 32]  # last column index of each zone (pre-gap)
+        requests.extend(
+            {
+                "updateBorders": {
+                    "range": {
+                        "sheetId": self._sid,
+                        "startColumnIndex": col,
+                        "endColumnIndex": col + 1,
+                    },
+                    "right": {
+                        "style": "SOLID_MEDIUM",
+                        "color": {"red": 0.5, "green": 0.5, "blue": 0.5},
+                    },
+                }
+            }
+            for col in zone_boundaries
+        )
+
+
+        # Delete existing column groups first to avoid accumulation
+        requests.extend(self._existing_column_group_deletes())
 
         if requests:
             self._spreadsheet.batch_update({"requests": requests})
@@ -323,37 +352,37 @@ class View:
             (27, 33),
             (34, 41),
         ]
-        for start, end in zones:
-            requests.append(
-                {
-                    "addDimensionGroup": {
-                        "range": {
-                            "sheetId": self._sid,
-                            "dimension": "COLUMNS",
-                            "startIndex": start,
-                            "endIndex": end,
-                        }
+        requests.extend(
+            {
+                "addDimensionGroup": {
+                    "range": {
+                        "sheetId": self._sid,
+                        "dimension": "COLUMNS",
+                        "startIndex": start,
+                        "endIndex": end,
                     }
                 }
-            )
+            }
+            for start, end in zones
+        )
 
         # Gap columns: very narrow width
         gap_cols = {6, 15, 26, 33}
-        for gc in gap_cols:
-            requests.append(
-                {
-                    "updateDimensionProperties": {
-                        "range": {
-                            "sheetId": self._sid,
-                            "dimension": "COLUMNS",
-                            "startIndex": gc,
-                            "endIndex": gc + 1,
-                        },
-                        "properties": {"pixelSize": 16},
-                        "fields": "pixelSize",
-                    }
+        requests.extend(
+            {
+                "updateDimensionProperties": {
+                    "range": {
+                        "sheetId": self._sid,
+                        "dimension": "COLUMNS",
+                        "startIndex": gc,
+                        "endIndex": gc + 1,
+                    },
+                    "properties": {"pixelSize": 16},
+                    "fields": "pixelSize",
                 }
-            )
+            }
+            for gc in gap_cols
+        )
 
         if requests:
             self._spreadsheet.batch_update({"requests": requests})

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from tools.commute.station_shed import (
     BBox,
     Office,
+    RoutingContext,
     Station,
     build_shed,
     keep_station,
@@ -99,6 +100,17 @@ DEST_P = "SW1V 2QQ"
 DEST_A = "EC3A 7LP"
 
 
+def _routing_ctx(router) -> RoutingContext:
+    return RoutingContext(
+        offices=OFFICES,
+        bbox=BBOX,
+        inner_radius_km=20.0,
+        threshold=THRESHOLD,
+        router=router,
+        delay_s=0.5,
+    )
+
+
 def _make_stations() -> list[Station]:
     return [
         Station("Reading", "RDG", 51.4599, -0.9705),
@@ -119,7 +131,10 @@ async def test_build_shed_routes_only_non_inner_in_bbox():
             ("EXD", DEST_P): 150, ("EXD", DEST_A): 155,
         }
     )
-    shed = await build_shed(_make_stations(), OFFICES, BBOX, 20.0, THRESHOLD, router)
+    ctx = RoutingContext(
+        offices=OFFICES, bbox=BBOX, inner_radius_km=20.0, threshold=THRESHOLD, router=router, delay_s=0.5
+    )
+    shed = await build_shed(_make_stations(), ctx)
 
     by_crs = {r["crs"]: r for r in shed}
 
@@ -145,7 +160,10 @@ async def test_build_shed_routes_only_non_inner_in_bbox():
 @pytest.mark.asyncio
 async def test_build_shed_failed_route_dropped():
     router = _CountingRouter({("RDG", DEST_P): None, ("RDG", DEST_A): None})
-    shed = await build_shed(_make_stations(), OFFICES, BBOX, 20.0, THRESHOLD, router)
+    ctx = RoutingContext(
+        offices=OFFICES, bbox=BBOX, inner_radius_km=20.0, threshold=THRESHOLD, router=router, delay_s=0.5
+    )
+    shed = await build_shed(_make_stations(), ctx)
     by_crs = {r["crs"]: r for r in shed}
     assert by_crs["RDG"]["kept"] is False
 
@@ -155,14 +173,15 @@ async def test_build_shed_deterministic():
     async def router(station, dest):
         return 60
 
-    a = await build_shed(_make_stations(), OFFICES, BBOX, 20.0, THRESHOLD, router)
-    b = await build_shed(_make_stations(), OFFICES, BBOX, 20.0, THRESHOLD, router)
+    a = await build_shed(_make_stations(), _routing_ctx(router))
+    b = await build_shed(_make_stations(), _routing_ctx(router))
     assert a == b
 
 
 # ── CSV loading ──────────────────────────────────────────────────────
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_load_stations_parses_csv(tmp_path):
     csv_path = tmp_path / "stations.csv"
     csv_path.write_text(STATIONS_CSV)

@@ -11,7 +11,7 @@ from pint import Quantity
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
 from houses.bus_journey import BusJourneyRegistry
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 
 
 def _mw(value: int):
@@ -494,7 +494,7 @@ class TestBusLegAugmentInfeasible:
             person=Person(name="", has_car=False),
             label="NoRoute",
             destination=PlaceOfInterest(label="", address=""),
-            duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+            duration=Quantity(0, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="transit",
             _details=(),
@@ -553,7 +553,7 @@ class TestBusFallbackForNoTflRoute:
             person=Person(name="George", has_car=False, is_child=True),
             label="Secondary School",
             destination=PlaceOfInterest(label="Secondary School", address="51.6053205,-1.2749334"),
-            duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+            duration=Quantity(0, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="transit",
             _details=(),
@@ -631,7 +631,7 @@ class TestBusAugmentLateRoute:
             person=Person(name="George", has_car=False, is_child=True),
             label="Secondary School",
             destination=PlaceOfInterest(label="Secondary School", address="51.6053205,-1.2749334"),
-            duration=Quantity(0, "minute"),  # type: ignore[arg-type]
+            duration=Quantity(0, "minute"),
             daily_cost=Money("0", "GBP"),
             mode="transit",
             _details=(),

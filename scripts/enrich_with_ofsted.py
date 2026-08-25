@@ -47,17 +47,33 @@ _UNGRADED_GRADE_MAP: dict[str, str] = {
     "significant improvement": "Good",
 }
 
+OEIF_DIMS = [
+    ("Quality", "Latest OEIF quality of education"),
+    ("Behaviour", "Latest OEIF behaviour and attitudes"),
+    ("Personal development", "Latest OEIF personal development"),
+    ("Leadership", "Latest OEIF effectiveness of leadership and management"),
+]
+S5_DIMS = [
+    ("Achievement", "Achievement"),
+    ("Curriculum", "Curriculum and teaching"),
+    ("Leadership", "Leadership and governance"),
+    ("Personal development", "Personal development and wellbeing"),
+    ("Attendance", "Attendance and behaviour"),
+]
+UK_DATE_PARTS = 3
+
 
 def _extract_year(date_str: str) -> str:
     """Extract year from a UK-format date string like '13/01/2026'."""
     if not date_str or date_str == "NULL":
         return ""
     parts = date_str.split("/")
-    if len(parts) == 3:
+    if len(parts) == UK_DATE_PARTS:
         return parts[2]
     return ""
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _best_inspection_year(row: dict) -> str:
     """Find the most relevant inspection year from available date fields."""
     # Priority: OEIF graded inspection > old full inspection > ungraded
@@ -82,6 +98,7 @@ def _s5_score(grade: str) -> int:
     return {"Strong standard": 4, "Expected standard": 3, "Needs attention": 2, "Cause for concern": 1}.get(grade, 0)
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _determine_effective_rating(row: dict) -> tuple[str, str]:
     """Determine the most accurate rating and a highlights string.
 
@@ -94,59 +111,13 @@ def _determine_effective_rating(row: dict) -> tuple[str, str]:
     - Ungraded monitoring visits (rating only, no year/framework noise)
     - "Not judged" or missing overall grade → infer from dimension grades
     """
-    oeif_dims = [
-        ("Quality", "Latest OEIF quality of education"),
-        ("Behaviour", "Latest OEIF behaviour and attitudes"),
-        ("Personal development", "Latest OEIF personal development"),
-        ("Leadership", "Latest OEIF effectiveness of leadership and management"),
-    ]
-    s5_dims = [
-        ("Achievement", "Achievement"),
-        ("Curriculum", "Curriculum and teaching"),
-        ("Leadership", "Leadership and governance"),
-        ("Personal development", "Personal development and wellbeing"),
-        ("Attendance", "Attendance and behaviour"),
-    ]
-
-    oeif_raw = (row.get("Latest OEIF overall effectiveness") or "").strip()
-    oeif_rating = OEIF_RATING_MAP.get(oeif_raw, "") if oeif_raw and oeif_raw != "NULL" else ""
-
-    # Collect OEIF dimension grades
-    oeif_grades: list[tuple[str, str]] = []
-    for label, col in oeif_dims:
-        val = (row.get(col) or "").strip()
-        if val and val != "NULL":
-            oeif_grades.append((label, OEIF_RATING_MAP.get(val, val)))
-
-    # If we have OEIF dimension grades but no overall rating, infer from dimensions
-    if not oeif_rating and oeif_grades:
-        scores = [_grade_score(g) for _, g in oeif_grades]
-        avg = sum(scores) / len(scores) if scores else 0
-        oeif_rating = {4: "Outstanding", 3: "Good", 2: "Requires Improvement", 1: "Inadequate"}.get(round(avg), "")
-
+    oeif_rating, oeif_grades = _collect_oeif_rating(row)
     if oeif_rating:
-        highlights = []
-        for label, grade in oeif_grades:
-            if _grade_score(grade) > _grade_score(oeif_rating):
-                highlights.append(f"{label} {grade}")
-        # S5 data available as supplement
-        s5_data = {label: (row.get(col) or "").strip() for label, col in s5_dims}
-        s5_data = {k: v for k, v in s5_data.items() if v and v != "NULL"}
-        if not highlights and s5_data:
-            worst = min(s5_data, key=lambda k: _s5_score(s5_data[k]))
-            highlights.append(f"{worst} {s5_data[worst]}")
-        highlights_str = ", ".join(highlights) if highlights else ""
-        return oeif_rating, highlights_str
+        return oeif_rating, _oeif_highlights(oeif_grades, oeif_rating, _collect_s5_data(row))
 
-    # Old-format S5 inspection
-    s5_data = {label: (row.get(col) or "").strip() for label, col in s5_dims}
-    s5_data = {k: v for k, v in s5_data.items() if v and v != "NULL"}
+    s5_data = _collect_s5_data(row)
     if s5_data:
-        scores = [_s5_score(v) for v in s5_data.values()]
-        avg = sum(scores) / len(scores) if scores else 0
-        rating = {4: "Outstanding", 3: "Good", 2: "Requires Improvement", 1: "Inadequate"}.get(round(avg), "")
-        worst = min(s5_data, key=lambda k: _s5_score(s5_data[k]))
-        return rating, f"{worst} {s5_data[worst]}"
+        return _s5_rating_and_worst(s5_data)
 
     # Ungraded monitoring visit — just the rating, that's all we know
     ungraded = (row.get("Ungraded inspection overall outcome") or "").strip()
@@ -158,6 +129,53 @@ def _determine_effective_rating(row: dict) -> tuple[str, str]:
     return "", ""
 
 
+# lucidlint: ignore record-shape (rating, grades) parse pair — a NamedTuple is ceremony for a local step
+def _collect_oeif_rating(row: dict) -> tuple[str, list[tuple[str, str]]]:
+    oeif_raw = (row.get("Latest OEIF overall effectiveness") or "").strip()
+    oeif_rating = OEIF_RATING_MAP.get(oeif_raw, "") if oeif_raw and oeif_raw != "NULL" else ""
+
+    # Collect OEIF dimension grades
+    oeif_grades: list[tuple[str, str]] = []
+    for label, col in OEIF_DIMS:
+        val = (row.get(col) or "").strip()
+        if val and val != "NULL":
+            oeif_grades.append((label, OEIF_RATING_MAP.get(val, val)))
+
+    # If we have OEIF dimension grades but no overall rating, infer from dimensions
+    if not oeif_rating and oeif_grades:
+        scores = [_grade_score(g) for _, g in oeif_grades]
+        avg = sum(scores) / len(scores) if scores else 0
+        oeif_rating = {4: "Outstanding", 3: "Good", 2: "Requires Improvement", 1: "Inadequate"}.get(round(avg), "")
+    return oeif_rating, oeif_grades
+
+
+# lucidlint: ignore record-shape row dict — CSV boundary owns the shape
+def _collect_s5_data(row: dict) -> dict[str, str]:
+    s5_data = {label: (row.get(col) or "").strip() for label, col in S5_DIMS}
+    return {k: v for k, v in s5_data.items() if v and v != "NULL"}
+
+
+def _oeif_highlights(oeif_grades, oeif_rating: str, s5_data: dict[str, str]) -> str:
+    highlights = [
+        f"{label} {grade}" for label, grade in oeif_grades if _grade_score(grade) > _grade_score(oeif_rating)
+    ]
+    # S5 data available as supplement
+    if not highlights and s5_data:
+        worst = min(s5_data, key=lambda k: _s5_score(s5_data[k]))
+        highlights.append(f"{worst} {s5_data[worst]}")
+    return ", ".join(highlights) if highlights else ""
+
+
+# lucidlint: ignore record-shape (rating, worst-area) pair — a NamedTuple is ceremony for a local step
+def _s5_rating_and_worst(s5_data: dict[str, str]) -> tuple[str, str]:
+    scores = [_s5_score(v) for v in s5_data.values()]
+    avg = sum(scores) / len(scores) if scores else 0
+    rating = {4: "Outstanding", 3: "Good", 2: "Requires Improvement", 1: "Inadequate"}.get(round(avg), "")
+    worst = min(s5_data, key=lambda k: _s5_score(s5_data[k]))
+    return rating, f"{worst} {s5_data[worst]}"
+
+
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _generate_ofsted_cell(row: dict) -> str:
     """Build a single-column Ofsted rating that's scannable and jargon-free.
 
@@ -232,8 +250,7 @@ def main():
         "InspectionSummary",
     }
     existing = set(fieldnames)
-    for col in sorted(new_cols - existing):
-        fieldnames.append(col)
+    fieldnames.extend(sorted(new_cols - existing))
 
     matched = 0
     for school in schools:

@@ -11,6 +11,7 @@ from houses.nodes.expressions import PMT
 class MonthlyMortgagePaymentNode(DerivedNode[Money]):
     """Monthly mortgage payment via PMT formula."""
 
+# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, mortgage_required_node, mortgage_rate_node, mortgage_term_node):
         super().__init__(node_id, Money, (mortgage_required_node, mortgage_rate_node, mortgage_term_node))
 
@@ -22,6 +23,7 @@ class MonthlyMortgagePaymentNode(DerivedNode[Money]):
             term_years=Ref(self._deps[2]),
         )
 
+# lucidlint: ignore middle-man protocol/reflected-operator requirement
     def compute(
         self,
         mortgage_required: Attempt[Money],

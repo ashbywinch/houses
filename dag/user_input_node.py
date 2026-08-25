@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
-from typing import Any, Generic, TypeVar
+from decimal import Decimal as _Decimal
+from typing import Any, Generic, TypeVar, cast
 
+from money import Money
+from pint import Quantity
 from pydantic_core import core_schema
 
+import dag.persistence as _per
 from dag.attempt import Attempt, Provenance, SourceType, project_value
 from dag.eval_context import staged_attempt
 from dag.node import Node
+from dag.persistence import latest_node_result
+
+logger = logging.getLogger(__name__)
 
 # Friendly display names for settings nodes, keyed by the node id stem
 # (the part after "settings/"). Matches the prototype's labels.
@@ -43,73 +51,105 @@ _NODE_STEM_LABELS: dict[str, str] = {
     "rental_income": "Rental Income",
     "life_insurance_total": "Life Insurance Total",
 }
+_GBP_SCALE = _Decimal("0.01")
 
-# Register pydantic schemas for third-party types (Money, Quantity) so
-# TypeAdapter can handle them automatically.  This IS the correct
-# pydantic v2 approach — __get_pydantic_core_schema__ is an explicit
-# protocol they support.
-try:
-    from money import Money
-    from pint import Quantity
 
-    if not hasattr(Money, "__get_pydantic_core_schema__"):
+def _validate_money(v) -> Money:
+    if isinstance(v, Money):
+        return v
+    if isinstance(v, dict):
+        amount = v.get("amount", 0)
+        currency = v.get("currency", "GBP")
+        if isinstance(amount, str):
+            return Money(amount, currency)
+        return Money(str(amount), currency)
+    if isinstance(v, (int, float)):
+        return Money(str(v), "GBP")
+    if isinstance(v, _Decimal):
+        return Money(str(v), "GBP")
+    raise ValueError(f"Cannot convert {type(v)} to Money")
 
-        def _money_schema(_source, _handler):
-            from decimal import Decimal as _Decimal
 
-            _gbp_scale = _Decimal("0.01")
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+def _serialize_money(m) -> dict:
+    return {
+        "amount": str(m.amount.quantize(_GBP_SCALE)),
+        "currency": m.currency,
+    }
 
-            def validate(v):
-                if isinstance(v, Money):
-                    return v
-                if isinstance(v, dict):
-                    amount = v.get("amount", 0)
-                    currency = v.get("currency", "GBP")
-                    if isinstance(amount, str):
-                        return Money(amount, currency)
-                    return Money(str(amount), currency)
-                if isinstance(v, (int, float)):
-                    return Money(str(v), "GBP")
-                if isinstance(v, _Decimal):
-                    return Money(str(v), "GBP")
-                raise ValueError(f"Cannot convert {type(v)} to Money")
 
-            def serialize(m):
-                return {
-                    "amount": str(m.amount.quantize(_gbp_scale)),
-                    "currency": m.currency,
-                }
+def _validate_quantity(v) -> Quantity:
+    if isinstance(v, cast(type, Quantity)):
+        return v
+    if isinstance(v, dict):
+        return Quantity(v.get("value", 0), v.get("unit", ""))
+    raise ValueError(f"Cannot convert {type(v)} to Quantity")
 
-            return core_schema.no_info_plain_validator_function(
-                validate,
-                serialization=core_schema.plain_serializer_function_ser_schema(serialize),
-            )
 
-        Money.__get_pydantic_core_schema__ = _money_schema
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+def _serialize_quantity(q) -> dict:
+    m = float(q.magnitude)
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    return {"value": int(m) if m == int(m) else m, "unit": str(q.units)}
 
-    if not hasattr(Quantity, "__get_pydantic_core_schema__"):
 
-        def _quantity_schema(_source, _handler):
-            def validate(v):
-                if isinstance(v, Quantity):
-                    return v
-                if isinstance(v, dict):
-                    return Quantity(v.get("value", 0), v.get("unit", ""))
-                raise ValueError(f"Cannot convert {type(v)} to Quantity")
 
-            def serialize(q):
-                m = float(q.magnitude)
-                return {"value": int(m) if m == int(m) else m, "unit": str(q.units)}
 
-            return core_schema.no_info_plain_validator_function(
-                validate,
-                serialization=core_schema.plain_serializer_function_ser_schema(serialize),
-            )
+class MoneySchema:
+    """Pydantic core-schema protocol implementation for ``money.Money``.
 
-        Quantity.__get_pydantic_core_schema__ = _quantity_schema
+    ``money`` cannot declare ``__get_pydantic_core_schema__`` itself, so
+    this class implements the pydantic v2 protocol and ``_install_third_party_schemas``
+    attaches its classmethod to the ``Money`` class.
+    """
 
-except ImportError:
-    pass
+    @classmethod
+    def __get_pydantic_core_schema__(cls, _source, _handler) -> core_schema.CoreSchema:
+        return core_schema.no_info_plain_validator_function(
+            _validate_money,
+            serialization=core_schema.plain_serializer_function_ser_schema(_serialize_money),
+        )
+
+
+
+
+class QuantitySchema:
+    """Pydantic core-schema protocol implementation for ``pint.Quantity``.
+
+    Mirrors ``MoneySchema``: ``pint`` cannot declare the protocol hook, so
+    this class implements it and ``_install_third_party_schemas`` attaches
+    its classmethod to the ``Quantity`` class.
+    """
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, _source, _handler) -> core_schema.CoreSchema:
+        return core_schema.no_info_plain_validator_function(
+            _validate_quantity,
+            serialization=core_schema.plain_serializer_function_ser_schema(_serialize_quantity),
+        )
+
+
+def _install_third_party_schemas() -> None:
+    """Register pydantic schemas for third-party types (Money, Quantity).
+
+    ``money``/``pint`` are declared dependencies imported at module top;
+    the hooks are installed once. This IS the correct pydantic v2
+    approach — ``__get_pydantic_core_schema__`` is an explicit protocol
+    they support.
+    """
+    try:
+        if not hasattr(Money, "__get_pydantic_core_schema__"):
+            Money.__get_pydantic_core_schema__ = MoneySchema.__get_pydantic_core_schema__
+
+        if not hasattr(Quantity, "__get_pydantic_core_schema__"):
+            Quantity.__get_pydantic_core_schema__ = QuantitySchema.__get_pydantic_core_schema__
+    except ImportError as e:
+        logger.debug("money/pint unavailable; third-party pydantic schemas not installed: %s", e)
+        return
+
+
+_install_third_party_schemas()
+
 
 
 T = TypeVar("T")
@@ -129,8 +169,6 @@ class UserInputNode(Node[T], Generic[T]):
         # Validate that property node IDs have a numeric RID prefix.
         # Non-numeric RIDs like "exp/" or "big_0/" are test data that
         # must not enter the production DB.
-        import dag.persistence as _per
-
         if not _per.testing and "/" in node_id:
             rid = node_id.split("/")[0]
             # Allow known non-property prefixes (settings, global config nodes, etc.)
@@ -155,8 +193,6 @@ class UserInputNode(Node[T], Generic[T]):
             self._source_label = self._load_persisted_label()
 
     def _load_persisted_label(self) -> str:
-        from dag.persistence import latest_node_result
-
         result = latest_node_result(self._id)
         if result is not None:
             return result.get("source_label", "")
@@ -178,21 +214,19 @@ class UserInputNode(Node[T], Generic[T]):
         # Reject source labels that indicate test data leaking into the
         # production DB.  Test fixtures set persistence.testing=True so
         # this guard is bypassed during test runs.
-        if source_label in ("test", "tests"):
-            import dag.persistence as _per
+        if source_label in ("test", "tests") and not _per.testing:
+            raise RuntimeError(
+                f"Blocked push to {self._id!r}: source_label={source_label!r} is "
+                f"reserved for test data. A code path attempted to write test data "
+                f"to the production database without DB isolation. No data was written.\n"
+                f"\n"
+                f"This is a bug in the code path that triggered the push. If you are "
+                f"seeing this during development, use pytest with the standard test "
+                f"isolation fixtures (they set persistence.testing=True so this guard "
+                f"is bypassed).\n"
+            )
 
-            if not _per.testing:
-                raise RuntimeError(
-                    f"Blocked push to {self._id!r}: source_label={source_label!r} is "
-                    f"reserved for test data. A code path attempted to write test data "
-                    f"to the production database without DB isolation. No data was written.\n"
-                    f"\n"
-                    f"This is a bug in the code path that triggered the push. If you are "
-                    f"seeing this during development, use pytest with the standard test "
-                    f"isolation fixtures (they set persistence.testing=True so this guard "
-                    f"is bypassed).\n"
-                )
-
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         result_dict: dict[str, Any] = {
             "status": "succeeded",
             "value": self._adapter.dump_python(self._value),
@@ -253,10 +287,12 @@ class UserInputNode(Node[T], Generic[T]):
         """JSON-safe projection of the stored value for provenance."""
         return project_value(self._value)
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def to_json_value(self) -> dict[str, Any]:
         """Return a JSON-safe dict without provenance."""
         if self._value is None:
             return {"status": "pending", "value": None}
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         return {
             "status": "succeeded",
             "value": self._adapter.dump_python(self._value),

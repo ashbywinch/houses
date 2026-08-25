@@ -20,7 +20,8 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from houses.sheets import col_letter  # noqa: E402
+from houses.settings import settings
+from houses.sheets import col_letter
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
@@ -37,7 +38,6 @@ def _get_service_account_json() -> str:
     )
     if raw:
         return raw
-    from houses.config import settings
 
     return settings.service_account_json
 
@@ -46,7 +46,6 @@ def _get_sheet_id() -> str:
     sid = os.environ.get("HOUSES_SHEET_ID")
     if sid:
         return sid
-    from houses.config import settings
 
     return settings.sheet_id
 
@@ -55,6 +54,7 @@ def _build_header_index(headers: list[str]) -> dict[str, int]:
     return {h.strip().lower(): i for i, h in enumerate(headers)}
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _parse_status(raw: str) -> tuple[str, str]:
     """Return (status, reason) from Properties tab status text.
 
@@ -77,7 +77,7 @@ def _parse_status(raw: str) -> tuple[str, str]:
     return ("No", text)
 
 
-def main() -> None:
+def _connect():
     raw_json = _get_service_account_json()
     if not raw_json:
         logger.error(
@@ -87,12 +87,12 @@ def main() -> None:
 
     creds = Credentials.from_service_account_info(json.loads(raw_json), scopes=SCOPES)
     gc = gspread.authorize(creds)
-    sheet_id = _get_sheet_id()
-    sh = gc.open_by_key(sheet_id)
+    sh = gc.open_by_key(_get_sheet_id())
+    return sh, sh.worksheet(PROPS_TAB), sh.worksheet(VIEW_TAB)
 
-    props_ws = sh.worksheet(PROPS_TAB)
-    view_ws = sh.worksheet(VIEW_TAB)
 
+def _ensure_status_reason_column(sh, view_ws):
+    """Insert a 'Status Reason' column after 'Status' when missing; return fresh headers/index."""
     view_headers = view_ws.get_all_values()[0]
     view_cols = _build_header_index(view_headers)
 
@@ -121,6 +121,61 @@ def main() -> None:
         logger.info("Inserted 'Status Reason' column after 'Status'")
     elif "status reason" not in view_cols:
         logger.warning("'Status' column not found in View tab; cannot insert 'Status Reason'")
+    return view_headers, view_cols
+
+
+def _find_view_row(view_data, view_cols, rid: str) -> int | None:
+    rid_col = view_cols.get("rightmove id")
+    for i, vrow in enumerate(view_data[1:], 2):
+        if rid_col is not None and len(vrow) > rid_col and vrow[rid_col].strip() == rid:
+            return i
+    return None
+
+
+def _append_field_update(updates, row, view_row_num, src_col, dst_col) -> None:
+    """Copy one source column cell to a view column when both exist and are populated."""
+    if src_col is not None and src_col < len(row) and row[src_col].strip() and dst_col is not None:
+        cl = col_letter(dst_col)
+        updates.append({"range": f"'{VIEW_TAB}'!{cl}{view_row_num}", "values": [[row[src_col]]]})
+
+
+def _build_updates_for_row(row, view_row_num, props_cols, view_cols) -> list:
+    updates = []
+    _append_field_update(
+        updates,
+        row,
+        view_row_num,
+        props_cols.get("group notes / whatsapp comments"),
+        view_cols.get("group notes / whatsapp"),
+    )
+    _append_field_update(
+        updates,
+        row,
+        view_row_num,
+        props_cols.get("ashby comments"),
+        view_cols.get("ashby comments"),
+    )
+
+    status_col = props_cols.get("status")
+    if status_col is not None and status_col < len(row):
+        raw_status = row[status_col].strip() if row[status_col] else ""
+        status_val, reason_val = _parse_status(raw_status)
+
+        dst_status_col = view_cols.get("status")
+        if dst_status_col is not None:
+            cl = col_letter(dst_status_col)
+            updates.append({"range": f"'{VIEW_TAB}'!{cl}{view_row_num}", "values": [[status_val]]})
+
+        dst_reason_col = view_cols.get("status reason")
+        if dst_reason_col is not None:
+            cl = col_letter(dst_reason_col)
+            updates.append({"range": f"'{VIEW_TAB}'!{cl}{view_row_num}", "values": [[reason_val]]})
+    return updates
+
+
+def main() -> None:
+    sh, props_ws, view_ws = _connect()
+    view_headers, view_cols = _ensure_status_reason_column(sh, view_ws)
 
     props_data = props_ws.get_all_values()
     props_headers = props_data[0]
@@ -147,53 +202,13 @@ def main() -> None:
             skipped += 1
             continue
 
-        view_row_num = None
-        for i, vrow in enumerate(view_data[1:], 2):
-            rid_col = view_cols.get("rightmove id")
-            if rid_col is not None and len(vrow) > rid_col and vrow[rid_col].strip() == rid:
-                view_row_num = i
-                break
-
+        view_row_num = _find_view_row(view_data, view_cols, rid)
         if view_row_num is None:
             logger.warning("Rightmove ID %s not found in View tab", rid)
             skipped += 1
             continue
 
-        updates = []
-
-        comments_col = props_cols.get("group notes / whatsapp comments")
-        if comments_col is not None and comments_col < len(row) and row[comments_col].strip():
-            dst_col = view_cols.get("group notes / whatsapp")
-            if dst_col is not None:
-                cl = col_letter(dst_col)
-                range_str = f"'{VIEW_TAB}'!{cl}{view_row_num}"
-                updates.append({"range": range_str, "values": [[row[comments_col]]]})
-
-        ashby_col = props_cols.get("ashby comments")
-        if ashby_col is not None and ashby_col < len(row) and row[ashby_col].strip():
-            dst_col = view_cols.get("ashby comments")
-            if dst_col is not None:
-                cl = col_letter(dst_col)
-                range_str = f"'{VIEW_TAB}'!{cl}{view_row_num}"
-                updates.append({"range": range_str, "values": [[row[ashby_col]]]})
-
-        status_col = props_cols.get("status")
-        if status_col is not None and status_col < len(row):
-            raw_status = row[status_col].strip() if row[status_col] else ""
-            status_val, reason_val = _parse_status(raw_status)
-
-            dst_status_col = view_cols.get("status")
-            if dst_status_col is not None:
-                cl = col_letter(dst_status_col)
-                range_str = f"'{VIEW_TAB}'!{cl}{view_row_num}"
-                updates.append({"range": range_str, "values": [[status_val]]})
-
-            dst_reason_col = view_cols.get("status reason")
-            if dst_reason_col is not None:
-                cl = col_letter(dst_reason_col)
-                range_str = f"'{VIEW_TAB}'!{cl}{view_row_num}"
-                updates.append({"range": range_str, "values": [[reason_val]]})
-
+        updates = _build_updates_for_row(row, view_row_num, props_cols, view_cols)
         if updates:
             view_ws.spreadsheet.values_batch_update({"valueInputOption": "USER_ENTERED", "data": updates})
             copied += 1

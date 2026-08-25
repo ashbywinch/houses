@@ -8,7 +8,7 @@ from decimal import Decimal
 from money import Money
 
 from dag.attempt import Attempt
-from houses.nodes.expressions import TieredRate
+from houses.nodes.expressions import TaxTier, TieredRate
 
 
 @dataclass
@@ -25,17 +25,20 @@ class FakeNode:
         return _node_add(self, other)
 
 
+STAMP_DUTY_TIERS = [
+    TaxTier(0, 250000, 0),
+    TaxTier(250000, 925000, Decimal("0.05")),
+    TaxTier(925000, 1500000, Decimal("0.10")),
+    TaxTier(1500000, None, Decimal("0.12")),
+]
+
+
 class TestTieredRate:
     def test_stamp_duty_at_200k(self):
         """£200,000 — below threshold, £0 stamp duty."""
         price = FakeNode(_id="price", display_name="price",
                          _attempt=Attempt.succeeded(Money("200000", "GBP")))
-        expr = TieredRate(price, tiers=[
-            (0, 250000, 0),
-            (250000, 925000, Decimal("0.05")),
-            (925000, 1500000, Decimal("0.10")),
-            (1500000, None, Decimal("0.12")),
-        ])
+        expr = TieredRate(price, tiers=STAMP_DUTY_TIERS)
         result = expr.evaluate()
         assert result.succeeded
         assert result.value == Money("0", "GBP")
@@ -44,12 +47,7 @@ class TestTieredRate:
         """£500,000 — £250k at 0% + £250k at 5% = £12,500."""
         price = FakeNode(_id="price", display_name="price",
                          _attempt=Attempt.succeeded(Money("500000", "GBP")))
-        expr = TieredRate(price, tiers=[
-            (0, 250000, 0),
-            (250000, 925000, Decimal("0.05")),
-            (925000, 1500000, Decimal("0.10")),
-            (1500000, None, Decimal("0.12")),
-        ])
+        expr = TieredRate(price, tiers=STAMP_DUTY_TIERS)
         result = expr.evaluate()
         assert result.succeeded
         assert result.value == Money("12500", "GBP")
@@ -58,12 +56,7 @@ class TestTieredRate:
         """£800,000 — £250k at 0% + £550k at 5% = £27,500."""
         price = FakeNode(_id="price", display_name="price",
                          _attempt=Attempt.succeeded(Money("800000", "GBP")))
-        expr = TieredRate(price, tiers=[
-            (0, 250000, 0),
-            (250000, 925000, Decimal("0.05")),
-            (925000, 1500000, Decimal("0.10")),
-            (1500000, None, Decimal("0.12")),
-        ])
+        expr = TieredRate(price, tiers=STAMP_DUTY_TIERS)
         result = expr.evaluate()
         assert result.succeeded
         assert result.value == Money("27500", "GBP")
@@ -72,12 +65,7 @@ class TestTieredRate:
         """£1,000,000 — £250k at 0% + £675k at 5% + £75k at 10% = £41,250."""
         price = FakeNode(_id="price", display_name="price",
                          _attempt=Attempt.succeeded(Money("1000000", "GBP")))
-        expr = TieredRate(price, tiers=[
-            (0, 250000, 0),
-            (250000, 925000, Decimal("0.05")),
-            (925000, 1500000, Decimal("0.10")),
-            (1500000, None, Decimal("0.12")),
-        ])
+        expr = TieredRate(price, tiers=STAMP_DUTY_TIERS)
         result = expr.evaluate()
         assert result.succeeded
         # 0 + 33750 + (1000000-925000)*0.10 = 33750 + 7500 = 41250
@@ -87,12 +75,7 @@ class TestTieredRate:
         """£2,000,000 — hits all 4 tiers: 0 + 33750 + 57500 + 60000 = 151,250."""
         price = FakeNode(_id="price", display_name="price",
                          _attempt=Attempt.succeeded(Money("2000000", "GBP")))
-        expr = TieredRate(price, tiers=[
-            (0, 250000, 0),
-            (250000, 925000, Decimal("0.05")),
-            (925000, 1500000, Decimal("0.10")),
-            (1500000, None, Decimal("0.12")),
-        ])
+        expr = TieredRate(price, tiers=STAMP_DUTY_TIERS)
         result = expr.evaluate()
         assert result.succeeded
         assert result.value == Money("151250", "GBP")
@@ -101,7 +84,7 @@ class TestTieredRate:
         """If the price node is impossible, the expression fails."""
         price = FakeNode(_id="price", display_name="price",
                          _attempt=Attempt.impossible("no price"))
-        expr = TieredRate(price, tiers=[(0, None, 0)])
+        expr = TieredRate(price, tiers=[TaxTier(0, None, 0)])
         result = expr.evaluate()
         assert result.impossible
 
@@ -109,12 +92,7 @@ class TestTieredRate:
         """Formula should show the tiers and highlight the active one."""
         price = FakeNode(_id="price", display_name="price",
                          _attempt=Attempt.succeeded(Money("800000", "GBP")))
-        expr = TieredRate(price, tiers=[
-            (0, 250000, 0),
-            (250000, 925000, Decimal("0.05")),
-            (925000, 1500000, Decimal("0.10")),
-            (1500000, None, Decimal("0.12")),
-        ])
+        expr = TieredRate(price, tiers=STAMP_DUTY_TIERS)
         lines = expr.to_formula_lines()
         assert len(lines) >= 2  # price + at least one tier
         assert any("800,000" in _l.value for _l in lines)

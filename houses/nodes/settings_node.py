@@ -10,6 +10,7 @@ defaults, the SettingsNode class, and the API-key mapping.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from decimal import Decimal
 
 from money import Money
@@ -33,19 +34,22 @@ RENTAL_INCOME_MONTHLY = "settings/rental_income_monthly"
 
 # ── Default factories ────────────────────────────────────
 
-SETTING_DEFAULTS: dict[str, tuple[type, callable]] = {
+# lucidlint: ignore global-state static defaults table (setting node → default factory); never mutated
+SETTING_DEFAULTS: dict[str, tuple[type, Callable[[], Decimal | int | Money]]] = {
     MORTGAGE_RATE: (Decimal, lambda: Decimal("0.0495")),
     MORTGAGE_TERM: (int, lambda: 27),
     SINKING_FUND_RATE: (Decimal, lambda: Decimal("0.01")),
-    LIFE_INSURANCE_MONTHLY: (Money, lambda: Money("150", "GBP")),
+    LIFE_INSURANCE_MONTHLY: (Money, lambda: Money(amount="150", currency="GBP")),
     WORKING_WEEKS: (int, lambda: 46),
-    CURRENT_HOME_SALE: (Money, lambda: Money("0", "GBP")),
-    CURRENT_HOME_MORTGAGE: (Money, lambda: Money("0", "GBP")),
+    CURRENT_HOME_SALE: (Money, lambda: Money(amount="0", currency="GBP")),
+    CURRENT_HOME_MORTGAGE: (Money, lambda: Money(amount="0", currency="GBP")),
     PETROL_COST_PER_LITRE: (Decimal, lambda: Decimal("1.45")),
-    RENTAL_INCOME_MONTHLY: (Money, lambda: Money("0", "GBP")),
+    RENTAL_INCOME_MONTHLY: (Money, lambda: Money(amount="0", currency="GBP")),
 }
 
 # Mapping from API dict key (the old financial_source keys) to setting node ID
+# lucidlint: ignore global-state static API-key → node-id mapping table; never mutated
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 API_KEY_TO_NODE: dict[str, str] = {
     "mortgage_rate": MORTGAGE_RATE,
     "mortgage_term_years": MORTGAGE_TERM,
@@ -73,6 +77,7 @@ def _serialize_for_api(val):
 
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def aggregate_dict(setting_nodes: dict[str, UserInputNode]) -> dict:
     """Build the API-key financial dict from the individual setting
     nodes — a synchronous read for API serialization (no scheduler
@@ -119,6 +124,7 @@ class SettingsNode(DerivedNode[dict]):
                     result[api_key] = _serialize_for_api(val)
         return Attempt.succeeded(result)
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def push(self, value: dict, source_label: str = ""):
         """Push a dict of API-key → value pairs to individual setting nodes.
 

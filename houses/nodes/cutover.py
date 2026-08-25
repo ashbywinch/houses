@@ -14,7 +14,7 @@ import logging
 from money import Money
 
 from dag.user_input_node import UserInputNode
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from houses.property import EnrichedProperty
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,11 @@ def push_enriched_property(rid: str, enriched: EnrichedProperty, sources: dict[s
     if enriched.bedrooms is not None:
         sources["rightmove_bedrooms"].push(str(enriched.bedrooms), "Rightmove")
     if enriched.price is not None:
-        sources["rightmove_price"].push(Money(str(enriched.price or "0"), "GBP"), "Rightmove")
+        # Never double-wrap a Money — the enriched price may already be a
+        # Money (server.py converts scraped prices); the node needs the
+        # amount string either way.
+        price = enriched.price if isinstance(enriched.price, Money) else Money(str(enriched.price or "0"), "GBP")
+        sources["rightmove_price"].push(price, "Rightmove")
     if enriched.approx_latitude is not None and enriched.approx_longitude is not None:
         sources["rightmove_location"].push(
             GeoPoint(
@@ -46,10 +50,14 @@ def push_enriched_property(rid: str, enriched: EnrichedProperty, sources: dict[s
         )
     if enriched.postcode and "postcode" in sources:
         sources["postcode"].push(enriched.postcode, "Rightmove")
+    _push_precise_location(enriched, sources)
+    if enriched.actual_postcode and "actual_postcode" in sources:
+        sources["actual_postcode"].push(enriched.actual_postcode, "Rightmove")
+
+
+def _push_precise_location(enriched, sources):
     if enriched.actual_latitude is not None and enriched.actual_longitude is not None and "precise_location" in sources:
         sources["precise_location"].push(
             GeoPoint(lat=enriched.actual_latitude, lon=enriched.actual_longitude),
             "User location",
         )
-    if enriched.actual_postcode and "actual_postcode" in sources:
-        sources["actual_postcode"].push(enriched.actual_postcode, "Rightmove")

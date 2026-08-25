@@ -8,7 +8,7 @@ import subprocess
 
 import pytest
 
-from tools.commute.combined_map import _COLORS, build_html, write_map
+from tools.commute.combined_map import _COLORS, MapAssets, build_html, write_map
 
 UNION = {
     "components": [
@@ -16,7 +16,7 @@ UNION = {
         {"outline": [[52.0, 0.0], [52.0, 0.1], [52.1, 0.1], [52.1, 0.0]], "rightmove_url": "u2"},
     ]
 }
-DRIVE = {
+DRIVE: dict = {
     "metadata": {"destinations": ["Dad", "Bracknell"], "count": 2},
     "searches": [
         {
@@ -56,7 +56,10 @@ def _html(
     intersection: dict | None = None,
 ) -> str:
     return build_html(
-        UNION, DRIVE, leaflet_js=leaflet_js, leaflet_css=leaflet_css, icons=icons, intersection=intersection
+        UNION,
+        DRIVE,
+        assets=MapAssets(leaflet_js=leaflet_js, leaflet_css=leaflet_css, icons=icons),
+        intersection=intersection,
     )
 
 
@@ -97,7 +100,7 @@ def test_malicious_labels_cannot_break_out_of_script_or_popup():
             {**s, "destination": {**s["destination"], "label": evil}} for s in DRIVE["searches"]
         ],
     }
-    html = build_html(UNION, drive, leaflet_js=LEAFLET_JS, leaflet_css=LEAFLET_CSS, icons=ICONS)
+    html = build_html(UNION, drive, assets=MapAssets(leaflet_js=LEAFLET_JS, leaflet_css=LEAFLET_CSS, icons=ICONS))
     # the payload text survives, but only ESCAPED — no raw breakout sequence,
     # no executable attribute
     assert "</script><script>" not in html
@@ -200,7 +203,7 @@ def test_drive_colours_never_collide_with_transit():
             for i, s in enumerate(DRIVE["searches"] * 3)
         ],
     }
-    html = build_html(UNION, drive, leaflet_js=LEAFLET_JS, leaflet_css=LEAFLET_CSS, icons=ICONS)
+    html = build_html(UNION, drive, assets=MapAssets(leaflet_js=LEAFLET_JS, leaflet_css=LEAFLET_CSS, icons=ICONS))
     # extract the embedded layer JSON and check every drive layer's colour
     import re
 
@@ -213,6 +216,7 @@ def test_build_html_without_intersection_has_no_layer():
     assert "Where we could live" not in _html()
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_write_map_does_not_churn_identical(tmp_path):
     out = tmp_path / "commute_map.html"
     write_map("abc", out)

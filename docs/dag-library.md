@@ -37,7 +37,9 @@ status = attempt.error_info.exc.status   # actual HttpError
 
 `display_message` resolution: explicit `user_message` → deepest cause's message → `message`. Dep-failure chains surface the leaf reason, never ids.
 
-`classify_exception(exc) → (code, retryable)` is the ONE source of truth for retryability — used by both `AttemptError` and the DAG retry machinery.
+`classify_exception(exc) → ExceptionClassification(code, retryable)` is the
+ONE source of truth for retryability — used by both `AttemptError` and the
+DAG retry machinery.
 
 ### Error propagation contract
 

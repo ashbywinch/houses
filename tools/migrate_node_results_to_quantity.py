@@ -19,36 +19,44 @@ def _migrate_value(val):
     """Recursively walk a deserialized JSON value and rename fields."""
     if isinstance(val, dict):
         rewritten = {}
-        for k, v in val.items():
-            # `duration_minutes: N` → `duration: {"value": N, "unit": "minute"}`
-            if k == "duration_minutes" and isinstance(v, (int, float)):
-                rewritten["duration"] = {"value": int(v), "unit": "minute"}
-                continue
-            # `distance_km: N` → `distance: {"value": N, "unit": "km"}`
-            if k == "distance_km" and isinstance(v, (int, float)):
-                rewritten["distance"] = {"value": float(v), "unit": "km"}
-                continue
-            # `bus_walk_penalty_minutes: N` → `bus_walk_penalty: {"value": N, "unit": "minute"}`
-            if k == "bus_walk_penalty_minutes" and isinstance(v, (int, float)):
-                rewritten["bus_walk_penalty"] = {"value": int(v), "unit": "minute"}
-                continue
-            # `walk_to_town_minutes: N` → `walk_to_town: {"value": N, "unit": "minute"}`
-            if k == "walk_to_town_minutes" and isinstance(v, (int, float)):
-                rewritten["walk_to_town"] = {"value": int(v), "unit": "minute"}
-                continue
-            # `daily_cost: {"amount": float, ...}` → string amount (pre-Money migration)
-            if k == "amount" and isinstance(v, (int, float)) and not isinstance(v, bool):
-                rewritten[k] = str(v)
-                continue
-            # `{"magnitude": N, ...}` → `{"value": N, ...}` (first migration pass used "magnitude")
-            if k == "magnitude":
-                rewritten["value"] = _migrate_value(v)
-                continue
-            rewritten[k] = _migrate_value(v)
+        _rewrite_legacy_fields(rewritten, val)
         return rewritten
     if isinstance(val, list):
         return [_migrate_value(item) for item in val]
     return val
+
+
+def _rewrite_legacy_fields(rewritten, val):
+    for k, v in val.items():
+        # `duration_minutes: N` → `duration: {"value": N, "unit": "minute"}`
+        if k == "duration_minutes" and isinstance(v, (int, float)):
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+            rewritten["duration"] = {"value": int(v), "unit": "minute"}
+            continue
+        # `distance_km: N` → `distance: {"value": N, "unit": "km"}`
+        if k == "distance_km" and isinstance(v, (int, float)):
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+            rewritten["distance"] = {"value": float(v), "unit": "km"}
+            continue
+        # `bus_walk_penalty_minutes: N` → `bus_walk_penalty: {"value": N, "unit": "minute"}`
+        if k == "bus_walk_penalty_minutes" and isinstance(v, (int, float)):
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+            rewritten["bus_walk_penalty"] = {"value": int(v), "unit": "minute"}
+            continue
+        # `walk_to_town_minutes: N` → `walk_to_town: {"value": N, "unit": "minute"}`
+        if k == "walk_to_town_minutes" and isinstance(v, (int, float)):
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+            rewritten["walk_to_town"] = {"value": int(v), "unit": "minute"}
+            continue
+        # `daily_cost: {"amount": float, ...}` → string amount (pre-Money migration)
+        if k == "amount" and isinstance(v, (int, float)) and not isinstance(v, bool):
+            rewritten[k] = str(v)
+            continue
+        # `{"magnitude": N, ...}` → `{"value": N, ...}` (first migration pass used "magnitude")
+        if k == "magnitude":
+            rewritten["value"] = _migrate_value(v)
+            continue
+        rewritten[k] = _migrate_value(v)
 
 
 def migrate_node_results(db_path: str | Path) -> int:

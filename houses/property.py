@@ -10,11 +10,11 @@ from pint import Quantity
 
 from houses.commute import CommuteBreakdown
 from houses.council_tax_info import CouncilTaxInfo
-from houses.location import resolve_house_location
+from houses.location import HouseLocationInputs, resolve_house_location
 from houses.school import School
 
 if TYPE_CHECKING:
-    from houses.geo import GeoPoint
+    from houses.geopoint import GeoPoint
     from houses.model.domain import Commute
 
 
@@ -48,12 +48,12 @@ class Property:
     async def location(self) -> GeoPoint | None:
         """Return the best spatial coordinate for this property."""
         return await resolve_house_location(
-            postcode=self.postcode,
-            address=self.address,
-            actual_latitude=self.actual_latitude,
-            actual_longitude=self.actual_longitude,
-            approx_lat=None,
-            approx_lng=None,
+            HouseLocationInputs(
+                postcode=self.postcode,
+                address=self.address,
+                actual_latitude=self.actual_latitude,
+                actual_longitude=self.actual_longitude,
+            )
         )
 
 
@@ -66,7 +66,7 @@ class EnrichedProperty:
     address: str = ""
     postcode: str = ""
     bedrooms: int = 0
-    price: Money = Money("0", "GBP")
+    price: Money = Money(amount="0", currency="GBP")
 
     # Commute enrichment
     simon_commute: Commute | None = None

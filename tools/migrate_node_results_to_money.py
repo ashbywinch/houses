@@ -55,6 +55,7 @@ def migrate_node_results(db_path: str | Path) -> int:
                 amount = str(Decimal(str(value)))
             except (ValueError, TypeError):
                 continue
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             result["value"] = {"amount": amount, "currency": "GBP"}
         else:
             continue

@@ -12,9 +12,9 @@ from houses.sheets import (
     VIEW_FORMULA_COLS,
     VIEW_HEADERS,
     VIEW_MANUAL_COLUMNS,
-    _const_range_name,
     col_index,
     col_letter,
+    const_range_name,
     named_range_name,
 )
 from houses.stamp_duty import stamp_duty_land_tax
@@ -70,15 +70,15 @@ def test_view_formulas_use_named_ranges():
 
 
 def test_const_range_name_generates_correct_prefix():
-    assert _const_range_name("Sinking Fund Rate (annual)") == "Const_SinkingFundRateAnnual"
-    assert _const_range_name("Current Sale Price (£)") == "Const_CurrentSalePrice"
-    assert _const_range_name("Mortgage Interest Rate") == "Const_MortgageInterestRate"
+    assert const_range_name("Sinking Fund Rate (annual)") == "Const_SinkingFundRateAnnual"
+    assert const_range_name("Current Sale Price (£)") == "Const_CurrentSalePrice"
+    assert const_range_name("Mortgage Interest Rate") == "Const_MortgageInterestRate"
 
 
 def test_const_range_name_is_deterministic():
     for label, _ in CONSTANTS_VALUES:
-        assert _const_range_name(label).startswith("Const_")
-        assert _const_range_name(label) == _const_range_name(label)
+        assert const_range_name(label).startswith("Const_")
+        assert const_range_name(label) == const_range_name(label)
 
 
 def test_constants_values_match_constants_headers():

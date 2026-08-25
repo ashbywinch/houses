@@ -35,6 +35,7 @@ NS = {
     "table": "urn:oasis:names:tc:opendocument:xmlns:table:1.0",
     "text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0",
 }
+BYTES_PER_MB = 1e6
 
 
 def _cell_text(cell) -> str:
@@ -47,9 +48,10 @@ def download_ods(url: str, dest: Path) -> None:
     resp = httpx.get(url, follow_redirects=True, timeout=60)
     resp.raise_for_status()
     dest.write_bytes(resp.content)
-    logger.info("Saved %s (%.1f MB)", dest, len(resp.content) / 1e6)
+    logger.info("Saved %s (%.1f MB)", dest, len(resp.content) / BYTES_PER_MB)
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def extract_rates(ods_path: Path) -> list[dict[str, str]]:
     with zipfile.ZipFile(ods_path) as z, z.open("content.xml") as f:
         tree = ET.parse(f)
@@ -58,6 +60,7 @@ def extract_rates(ods_path: Path) -> list[dict[str, str]]:
     # Table 8 (index 8) is "Table 5: Band D area council tax for local authorities"
     # This table has the TOTAL bill (including county, police, fire precepts),
     # unlike Table 1 which only has individual precept portions.
+# lucidlint: ignore magic-number Band D table index in the published ODS — document layout data, documented above
     table = tables[8]
     rows = table.findall(".//table:table-row", NS)
 
@@ -85,7 +88,9 @@ def extract_rates(ods_path: Path) -> list[dict[str, str]]:
 
         code = _cell_text(cells[0])
         auth = _cell_text(cells[2])
+# lucidlint: ignore magic-number positional ODS row column — layout is source-document data, like cells[0]/[2]
         current = _cell_text(cells[3])
+# lucidlint: ignore magic-number positional ODS row column — layout is source-document data, like cells[0]/[2]
         cls = _cell_text(cells[4])
         rate_raw = _cell_text(cells[year_col])
 

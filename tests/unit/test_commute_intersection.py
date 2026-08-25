@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from houses.geopoint import GeoPoint
 from tools.commute.intersection import (
+    IntersectionOptions,
     build_payload,
     common_grid,
     drive_cells,
@@ -12,7 +14,7 @@ from tools.commute.intersection import (
     validate_payload,
 )
 from tools.commute.rightmove_url import parse_search_url
-from tools.commute.tile import Grid
+from tools.commute.tile import Grid, GridCell
 from tools.commute.units import KM
 
 NOW = "2026-08-03T09:00:00+00:00"
@@ -35,7 +37,7 @@ DRIVE_RAW = {
     ],
 }
 # Dad's shed: lat 50.8-51.4, lon -1.2..-0.6; Bracknell's: lat 50.8-51.3, lon -1.2..-0.7
-DRIVE_SEARCHES = {
+DRIVE_SEARCHES: dict = {
     "metadata": {"destinations": ["Dad", "Bracknell"]},
     "searches": [
         {
@@ -79,7 +81,7 @@ def test_transit_cells_use_station_buffer_predicate():
     kept = transit_cells([s for s in SHED["stations"] if s["kept"]], grid, 5.0 * KM)
     assert kept
     # the cell CONTAINING the Centre station is trivially within 5 km → kept
-    assert (9, 10) in kept
+    assert GridCell(9, 10) in kept
 
 
 def _all_centers(grid: Grid):
@@ -90,12 +92,20 @@ def _all_centers(grid: Grid):
 
 def test_drive_cells_are_cell_centers_inside_polygons():
     grid = _grid()
-    dad = [s["polygon"] for s in DRIVE_SEARCHES["searches"] if s["destination"]["label"] == "Dad"]
+    dad = [
+        [GeoPoint(lat, lon) for lat, lon in s["polygon"]]
+        for s in DRIVE_SEARCHES["searches"]
+        if s["destination"]["label"] == "Dad"
+    ]
     cells = drive_cells(dad, grid)
     assert cells
-    inside = {(r, c) for r, c, lat, lon in _all_centers(grid) if 50.8 < lat < 51.4 and -1.2 < lon < -0.6}
+    inside = {
+        GridCell(cell.row, cell.col)
+        for cell in _all_centers(grid)
+        if 50.8 < cell.lat < 51.4 and -1.2 < cell.lon < -0.6
+    }
     assert inside & cells == inside  # every centre inside the square is a member
-    outside = {(r, c) for r, c, lat, lon in _all_centers(grid) if lat > 51.45}
+    outside = {GridCell(cell.row, cell.col) for cell in _all_centers(grid) if cell.lat > 51.45}
     assert not (outside & cells)
 
 
@@ -104,7 +114,7 @@ def test_intersection_is_transit_and_every_drive_shed():
         shed=SHED,
         drive_raw=DRIVE_RAW,
         drive_searches=DRIVE_SEARCHES,
-        generated_at=NOW,
+        options=IntersectionOptions(generated_at=NOW),
     )
     assert payload["metadata"]["count"] == len(payload["searches"]) == 1
     poly = payload["searches"][0]["polygon"]
@@ -120,7 +130,9 @@ def test_intersection_is_transit_and_every_drive_shed():
 
 
 def test_payload_schema_and_filters():
-    payload = build_payload(shed=SHED, drive_raw=DRIVE_RAW, drive_searches=DRIVE_SEARCHES, generated_at=NOW)
+    payload = build_payload(
+        shed=SHED, drive_raw=DRIVE_RAW, drive_searches=DRIVE_SEARCHES, options=IntersectionOptions(generated_at=NOW)
+    )
     s = payload["searches"][0]
     assert s["id"] == "intersection-090"
     assert s["name"] == "All commutes"
@@ -130,19 +142,28 @@ def test_payload_schema_and_filters():
 
 
 def test_deterministic_modulo_timestamp():
-    a = build_payload(shed=SHED, drive_raw=DRIVE_RAW, drive_searches=DRIVE_SEARCHES, generated_at=NOW)
+    a = build_payload(
+        shed=SHED, drive_raw=DRIVE_RAW, drive_searches=DRIVE_SEARCHES, options=IntersectionOptions(generated_at=NOW)
+    )
     b = build_payload(
-        shed=SHED, drive_raw=DRIVE_RAW, drive_searches=DRIVE_SEARCHES, generated_at="2026-08-03T10:00:00+00:00"
+        shed=SHED,
+        drive_raw=DRIVE_RAW,
+        drive_searches=DRIVE_SEARCHES,
+        options=IntersectionOptions(generated_at="2026-08-03T10:00:00+00:00"),
     )
     assert a["searches"] == b["searches"]
 
 
 def test_validate_payload_passes_and_catches():
-    payload = build_payload(shed=SHED, drive_raw=DRIVE_RAW, drive_searches=DRIVE_SEARCHES, generated_at=NOW)
+    payload = build_payload(
+        shed=SHED, drive_raw=DRIVE_RAW, drive_searches=DRIVE_SEARCHES, options=IntersectionOptions(generated_at=NOW)
+    )
     assert validate_payload(payload) == []
     payload["metadata"]["count"] = 99
     assert any("count" in i for i in validate_payload(payload))
-    payload = build_payload(shed=SHED, drive_raw=DRIVE_RAW, drive_searches=DRIVE_SEARCHES, generated_at=NOW)
+    payload = build_payload(
+        shed=SHED, drive_raw=DRIVE_RAW, drive_searches=DRIVE_SEARCHES, options=IntersectionOptions(generated_at=NOW)
+    )
     payload["searches"][0]["polygon"][0] = (57.0, -1.0)
     assert any("bounding box" in i for i in validate_payload(payload))
 
@@ -159,13 +180,17 @@ def test_small_intersection_keeps_main_component():
     searches = copy.deepcopy(DRIVE_SEARCHES)
     for s in searches["searches"]:
         s["polygon"] = poly
-    payload = build_payload(shed=SHED, drive_raw=DRIVE_RAW, drive_searches=searches, generated_at=NOW)
+    payload = build_payload(
+        shed=SHED, drive_raw=DRIVE_RAW, drive_searches=searches, options=IntersectionOptions(generated_at=NOW)
+    )
     assert payload["searches"], "a tiny valid intersection must not be empty"
 
 
 def test_no_intersection_yields_empty_searches():
     shed = {"metadata": {}, "stations": [{"name": "Nowhere", "crs": "NOW", "lat": 55.0, "lon": -5.0, "kept": True}]}
-    payload = build_payload(shed=shed, drive_raw=DRIVE_RAW, drive_searches=DRIVE_SEARCHES, generated_at=NOW)
+    payload = build_payload(
+        shed=shed, drive_raw=DRIVE_RAW, drive_searches=DRIVE_SEARCHES, options=IntersectionOptions(generated_at=NOW)
+    )
     assert payload["searches"] == []
     assert payload["metadata"]["count"] == 0
 
@@ -178,7 +203,9 @@ def test_missing_destination_shed_makes_intersection_empty():
         "metadata": DRIVE_SEARCHES["metadata"],
         "searches": [s for s in DRIVE_SEARCHES["searches"] if s["destination"]["label"] == "Dad"],
     }
-    payload = build_payload(shed=SHED, drive_raw=DRIVE_RAW, drive_searches=dad_only, generated_at=NOW)
+    payload = build_payload(
+        shed=SHED, drive_raw=DRIVE_RAW, drive_searches=dad_only, options=IntersectionOptions(generated_at=NOW)
+    )
     assert payload["searches"] == []
     assert payload["metadata"]["count"] == 0
 
@@ -200,7 +227,9 @@ def test_stale_drive_destination_raises():
         }
     )
     with pytest.raises(ValueError, match="stale drive data"):
-        build_payload(shed=SHED, drive_raw=DRIVE_RAW, drive_searches=stale_searches, generated_at=NOW)
+        build_payload(
+            shed=SHED, drive_raw=DRIVE_RAW, drive_searches=stale_searches, options=IntersectionOptions(generated_at=NOW)
+        )
 
 
 def test_common_grid_rejects_no_destinations():
@@ -214,6 +243,7 @@ def test_common_grid_rejects_no_destinations():
         common_grid(empty)
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 async def test_run_fails_cleanly_with_no_drive_destinations(tmp_path):
     """run() must exit with the two-tier message, not a traceback, when the
     drive payload has no destinations."""
@@ -244,6 +274,7 @@ async def test_run_fails_cleanly_with_no_drive_destinations(tmp_path):
     assert not (out_dir / "intersection.json").exists()
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_missing_inputs_reported_in_one_pass(tmp_path, capsys):
     """With all three inputs missing, the user gets the complete fix list in
     one run — not one file per invocation."""
@@ -265,6 +296,7 @@ def test_missing_inputs_reported_in_one_pass(tmp_path, capsys):
     assert "commute-drive" in err
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_validate_fails_cleanly_on_dict_shaped_intersection(tmp_path):
     """--validate with a dict-shaped "searches" value must exit with the
     two-tier message, not crash."""
@@ -279,6 +311,7 @@ def test_validate_fails_cleanly_on_dict_shaped_intersection(tmp_path):
     assert code == 1
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_validate_fails_cleanly_on_missing_searches_key(tmp_path):
     """A payload without a 'searches' key must be flagged, not crash the
     success print with a KeyError."""
@@ -293,6 +326,7 @@ def test_validate_fails_cleanly_on_missing_searches_key(tmp_path):
     assert code == 1
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_validate_fails_cleanly_on_null_metadata(tmp_path):
     """--validate with "metadata": null must exit with the two-tier message,
     not an AttributeError at metadata.get."""
@@ -307,6 +341,7 @@ def test_validate_fails_cleanly_on_null_metadata(tmp_path):
     assert code == 1
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_validate_fails_cleanly_on_list_shaped_intersection(tmp_path):
     """--validate with a top-level-list intersection.json must exit with
     the two-tier message, not an AttributeError."""
@@ -319,6 +354,7 @@ def test_validate_fails_cleanly_on_list_shaped_intersection(tmp_path):
     assert code == 1
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_validate_fails_cleanly_on_corrupt_intersection(tmp_path):
     """--validate with a truncated intersection.json must exit with the
     two-tier message, not a JSONDecodeError traceback."""
@@ -331,6 +367,7 @@ def test_validate_fails_cleanly_on_corrupt_intersection(tmp_path):
     assert code == 1
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_run_fails_cleanly_on_list_shaped_drive_searches(tmp_path):
     """A top-level-list drive_searches.json (truncated/hand-edited) must exit
     with the two-tier message, not an AttributeError at list.get."""
@@ -359,6 +396,7 @@ def test_run_fails_cleanly_on_list_shaped_drive_searches(tmp_path):
     assert not (out_dir / "intersection.json").exists()
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_run_fails_cleanly_on_malformed_shed(tmp_path):
     """A shed file that is valid JSON but missing the 'stations' key must
     exit with the two-tier message, not a KeyError traceback."""

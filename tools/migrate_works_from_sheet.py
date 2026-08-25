@@ -10,11 +10,13 @@ After this, edits flow through the PATCH endpoint and sheet sync.
 
 import logging
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from houses.config import settings
+from dag.persistence import save_node_result
+from houses.settings import settings
 from houses.sheets import get_client
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -33,6 +35,7 @@ def read_view_tab_works() -> dict[str, str]:
 
     try:
         ws = sh.worksheet(VIEW_TAB)
+    # lucidlint: ignore broad-except deliberate fallback — an unreadable View tab is skipped (migration tool)
     except Exception:
         logger.warning("View tab not found, skipping")
         return {}
@@ -62,11 +65,9 @@ def read_view_tab_works() -> dict[str, str]:
 
 def push_to_dag(rid: str, value: float) -> bool:
     """Push a works estimate dict to the property's DAG node."""
-    from datetime import UTC, datetime
-
-    from dag.persistence import save_node_result
 
     node_id = f"{rid}/works_estimates"
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     result_dict = {
         "status": "succeeded",
         "value": {"Ashby": value},
@@ -79,6 +80,7 @@ def push_to_dag(rid: str, value: float) -> bool:
     try:
         save_node_result(node_id, result_dict, dep_timestamps, created_at=now)
         return True
+    # lucidlint: ignore broad-except boundary — DAG-save failures return False instead of raising
     except Exception as e:
         logger.warning("Failed to push for %s: %s", rid, e)
         return False

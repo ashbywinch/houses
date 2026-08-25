@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Any, ClassVar
 
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from houses.school_gender import SchoolGender
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -69,14 +72,15 @@ class School:
         return self.type_of_establishment.lower() in self._FEE_PAYING_TYPES
 
     @staticmethod
-    def _try_int(raw: str) -> int | None:
+    def _try_int(raw: Any) -> int | None:
+        """Parse a raw GIAS row value as an int; None when absent/malformed."""
         try:
             return int(raw)
         except (ValueError, TypeError):
             return None
 
     @classmethod
-    def from_GIAS_row(cls, row: dict) -> School:  # noqa: N802
+    def from_GIAS_row(cls, row: dict) -> School:  # noqa: N802  # from_GIAS_row deliberately mirrors the GIAS acronym from the source dataset
         """Parse a GIAS CSV row into a School.
 
         ``coords`` is set to the corrected (building-level) coordinates
@@ -97,21 +101,14 @@ class School:
 
         coords: GeoPoint | None = None
         if corr_lat and corr_lng:
-            try:
-                corrected = GeoPoint(float(corr_lat), float(corr_lng))
-            except (ValueError, TypeError):
-                corrected = None
+            corrected = _try_geopoint(corr_lat, corr_lng)
             if corrected is not None and original is not None:
                 if original.distance_km_to(corrected) < 100:
                     coords = corrected
             elif corrected is not None:
                 coords = corrected
-
         raw_gender = (row.get(cls._COL_GENDER) or "").strip().lower()
-        try:
-            gender = SchoolGender(raw_gender)
-        except ValueError:
-            gender = SchoolGender.UNKNOWN
+        gender = _parse_gender(raw_gender)
         urn = (row.get(cls._COL_URN) or "").strip()
         # Assemble a full postal address from the GIAS columns — this is
         # the display destination for walk/drive legs, captured when the
@@ -167,3 +164,21 @@ class School:
         too_young = self.statutory_low_age is not None and child_age < self.statutory_low_age
         too_old = self.statutory_high_age is not None and child_age > self.statutory_high_age
         return not too_young and not too_old
+
+
+def _try_geopoint(lat: str, lng: str) -> GeoPoint | None:
+    """Parse a GIAS coordinate pair; None when the cells aren't numeric."""
+    try:
+        return GeoPoint(float(lat), float(lng))
+    except (ValueError, TypeError) as e:
+        logger.debug("non-numeric GIAS coordinates lat=%s lng=%s ignored: %s", lat, lng, e)
+        return None
+
+
+def _parse_gender(raw: str) -> SchoolGender:
+    """Map a GIAS gender label to SchoolGender; unknown labels become UNKNOWN."""
+    try:
+        return SchoolGender(raw)
+    except ValueError as e:
+        logger.debug("unrecognised school gender %r — defaulting to UNKNOWN: %s", raw, e)
+        return SchoolGender.UNKNOWN

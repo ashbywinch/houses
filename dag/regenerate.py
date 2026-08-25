@@ -37,6 +37,7 @@ def nodes_matching(patterns: Iterable[str], nodes: Iterable[Node]) -> list[Node]
     return [n for n in nodes if any(rx.match(n._id) for rx in regexes)]
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 async def force_regenerate(nodes: Iterable[Node]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Force-recompute every matched DerivedNode and drain the cascade.
 

@@ -1,11 +1,11 @@
 """Tests for the FastAPI server endpoints — pure unit tests, no API calls."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from fastapi.testclient import TestClient
 
-from houses.config import settings
 from houses.server import app, extract_postcode
+from houses.settings import settings
 
 client = TestClient(app)
 
@@ -73,6 +73,7 @@ class TestInjectProperty:
         forever and every has-car commute (park_and_ride depends on
         postcode) was permanently stuck 'pending' instead of computing."""
         from houses.property_registry import get_property as get_registry_property
+        from tests.helpers import inject_server_deps
 
         fake_scrape = MagicMock()
         fake_scrape.address = "Penwood Lane, Marlow, Buckinghamshire, SL7 2AP"
@@ -83,14 +84,14 @@ class TestInjectProperty:
         fake_scrape.longitude = -0.7842
         fake_scrape.url = "https://www.rightmove.co.uk/properties/89498715"
 
-        with patch("houses.server.scrape_rightmove", return_value=fake_scrape) as mock_scrape, \
-             patch("houses.server.get_client", return_value=None):
+        scrape_fn = AsyncMock(return_value=fake_scrape)
+        with inject_server_deps(scrape_fn=scrape_fn, get_client_fn=lambda: None):
             resp = client.post(
                 "/api/properties",
                 json={"url": "https://www.rightmove.co.uk/properties/89498715"},
             )
         assert resp.status_code == 200, resp.text
-        mock_scrape.assert_called_once()
+        scrape_fn.assert_called_once()
 
         # The postcode node must have the scraped value — NOT stay pending
         prop = get_registry_property("89498715")
@@ -113,6 +114,8 @@ class TestBackfillView:
             settings.sheet_id = original
 
     def test_skips_row_without_rightmove_id(self):
+        from tests.helpers import inject_server_deps
+
         original = settings.sheet_id
         settings.sheet_id = "fake-id"
         try:
@@ -128,7 +131,7 @@ class TestBackfillView:
             mock_sh.worksheet.side_effect = _worksheet
             mock_client = MagicMock()
             mock_client.open_by_key.return_value = mock_sh
-            with patch("houses.server.get_client", return_value=mock_client):
+            with inject_server_deps(get_client_fn=lambda: mock_client):
                 resp = client.post("/api/properties")
             assert resp.status_code == 200
         finally:

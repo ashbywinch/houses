@@ -7,6 +7,7 @@ from money import Money
 
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.derived_node import DerivedNode
+from houses.model.domain import home_equity_contributions
 
 _ZERO = Decimal("0")
 
@@ -60,8 +61,6 @@ class EquityTotalNode(DerivedNode[Money]):
 
         is_current = status is not None and (status.value_or_none() or "").strip().lower() == "current"
 
-        from houses.model.domain import home_equity_contributions
-
         ps = persons.value_or_none() or []
         contributions = home_equity_contributions(ps)
         total = _ZERO
@@ -71,7 +70,7 @@ class EquityTotalNode(DerivedNode[Money]):
                 continue  # children / legacy entries never contribute
             share = contributions[name]
             if not is_current:
-                cash = getattr(p, "cash_contribution", Money("0", "GBP"))
+                cash = getattr(p, "cash_contribution", Money(amount="0", currency="GBP"))
                 share += cash.amount if isinstance(cash, Money) else Decimal(str(cash))
             total += share
         return Attempt.succeeded(Money(str(total), "GBP"))

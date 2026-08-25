@@ -12,7 +12,7 @@ import gspread
 import pytest
 from google.oauth2.service_account import Credentials
 
-from houses.config import settings
+from houses.settings import settings
 from houses.sheets import (
     COLUMN_HEADERS,
     DATA_TAB,
@@ -315,6 +315,7 @@ class TestViewFormulasOnTestSheet:
 
         time.sleep(5)
 
+    # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
     def test_formulas_produce_correct_values(self, sh):
         """Google Sheets evaluates our formula strings correctly."""
         # First verify Data tab headers match COLUMN_HEADERS

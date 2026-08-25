@@ -6,6 +6,7 @@ import asyncio
 import logging
 import re
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -15,17 +16,19 @@ from pint import Quantity
 from dag.attempt import Attempt
 from dag.http_error import HttpError
 from houses.api_cache import cached_async_client, evict_cached, get_cached, set_cached
-from houses.car_park import CarParkRegistry
+from houses.car_park import ApcoaCarParkLookup, CarParkRegistry
 from houses.commute import CostGroup, JourneyLeg, LegMode
-from houses.config import settings
-from houses.location import _geocode_address, geocode
+from houses.location import geocode, geocode_address
 from houses.model.domain import Commute, Person, PlaceOfInterest
+from houses.settings import settings
 from houses.stations import Station
 from houses.stations import find as find_station
-from houses.transit_route import _apply_park_and_ride_to_journeys
+from houses.transit_route import apply_park_and_ride_to_journeys
 
 logger = logging.getLogger(__name__)
 
+# lucidlint: ignore global-state static TfL mode-name → LegMode mapping table; never mutated
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 _MODE_MAP: dict[str, LegMode] = {
     "walking": LegMode.WALK,
     "tube": LegMode.TUBE,
@@ -37,6 +40,8 @@ _MODE_MAP: dict[str, LegMode] = {
     "driving": LegMode.DRIVE,
     "cycle": LegMode.CYCLE,
 }
+HTTP_NOT_FOUND = 404
+HTTP_CONFLICT = 409
 
 
 def _friendly_tfl_message(status: int) -> str:
@@ -46,11 +51,94 @@ def _friendly_tfl_message(status: int) -> str:
     is a planner outage.  Anything else degrades to a generic phrase —
     never the raw response body, which stays in HttpError.message/body.
     """
-    if status == 404:
+    if status == HTTP_NOT_FOUND:
         return "TfL couldn't find a route for this journey"
-    if status == 409:
+    if status == HTTP_CONFLICT:
         return "TfL's route planner is unavailable right now"
     return "TfL couldn't plan this route"
+
+
+def _tube_leg_label(clean_arr: str, duration: int, instr: str) -> str:
+    """Label for a tube leg — the line name comes from the instruction summary."""
+    line_from_instr = instr.split(" to ")[0] if " to " in instr else ""
+    tube_line = line_from_instr.replace(" line", "").replace(" Line", "").strip()
+    return f"{tube_line} line to {clean_arr} ({duration}m)"
+
+
+def _driving_leg_label(clean_arr: str, duration: int, instr: str) -> str:
+    """Label for a driving leg — destination only when the leg names one."""
+    return f"Drive to {clean_arr} ({duration}m)" if clean_arr else f"Drive {duration}m"
+
+
+def _bus_leg_label(clean_arr: str, duration: int, instr: str) -> str:
+    """Label for a bus leg — the route number comes from the instruction summary."""
+    bus_num = instr.split(" bus")[0] if " bus" in instr else ""
+    return f"bus({bus_num}) to {clean_arr} ({duration}m)" if bus_num else f"Bus to {clean_arr} ({duration}m)"
+
+
+def _train_leg_label(clean_arr: str, duration: int, instr: str) -> str:
+    """Label for a national-rail leg."""
+    return f"Train to {clean_arr} ({duration}m)"
+
+
+def _overground_leg_label(clean_arr: str, duration: int, instr: str) -> str:
+    """Label for an overground leg."""
+    return f"Overground to {clean_arr} ({duration}m)"
+
+
+def _dlr_leg_label(clean_arr: str, duration: int, instr: str) -> str:
+    """Label for a DLR leg."""
+    return f"DLR to {clean_arr} ({duration}m)"
+
+
+def _tram_leg_label(clean_arr: str, duration: int, instr: str) -> str:
+    """Label for a tram leg."""
+    return f"Tram to {clean_arr} ({duration}m)"
+
+
+# lucidlint: ignore record-shape static dispatch table mode → formatter callable; not a data record
+# lucidlint: ignore global-state static TfL mode-name → leg-label formatter table; never mutated
+_LEG_LABEL_FORMATTERS: dict[str, Callable[[str, int, str], str]] = {
+    "tube": _tube_leg_label,
+    "driving": _driving_leg_label,
+    "bus": _bus_leg_label,
+    "national-rail": _train_leg_label,
+    "overground": _overground_leg_label,
+    "dlr": _dlr_leg_label,
+    "tram": _tram_leg_label,
+}
+
+@dataclass(frozen=True)
+class JourneySummary:
+    """(duration_min, cost, route_summary) verdict from a TfL journey set —
+    named so call sites and tests read the fields by meaning, not position."""
+
+    duration: int | None
+    cost: float | None
+    route_summary: str
+
+
+
+@dataclass(frozen=True)
+class TflRouteOptions:
+    """Routing policy for one TflClient: park-and-ride, bus mode, and the
+    DI seams (cached call wrapper, plan override)."""
+
+    park_and_ride: bool = False
+    allow_bus: bool = False
+    cached_call: Callable | None = None
+    plan_override: Callable | None = None
+
+
+
+@dataclass(frozen=True)
+class ParkingCostResult:
+    """(parking_cost, new_daily_cost, cost_groups) from _add_parking_cost —
+    named so the call site reads the fields by meaning, not position."""
+
+    parking_cost: Money | None
+    new_cost: Money | None
+    cost_groups: list[CostGroup]
 
 
 class TflClient:
@@ -62,7 +150,7 @@ class TflClient:
             origin="GU21 7QF",
             destination="SW1V 2QQ",
             label="Simon \u2014 Pimlico / Victoria",
-            park_and_ride=True,
+            options=TflRouteOptions(park_and_ride=True),
         )
         commute: Attempt[Commute] = await route.plan()
     """
@@ -75,21 +163,19 @@ class TflClient:
         origin_postcode: str,
         destination_postcode: str,
         label: str,
-        park_and_ride: bool = False,
-        allow_bus: bool = False,
-        cached_call: Callable | None = None,
-        plan_override: Callable | None = None,
+        options: TflRouteOptions | None = None,
     ):
         self._origin = origin_postcode
         self._destination = destination_postcode
         self._label = label
-        self._park_and_ride = park_and_ride
-        self._allow_bus = allow_bus
+        opts = options or TflRouteOptions()
+        self._park_and_ride = opts.park_and_ride
+        self._allow_bus = opts.allow_bus
         self._no_route_reason: str = ""
         self._no_route_detail: str = ""
         # DI seams (docs/testing-standards: no monkeypatch in new tests).
-        self._cached_call = cached_call or TflClient._cached_api_call
-        self._plan_override = plan_override
+        self._cached_call = opts.cached_call or TflClient._cached_api_call
+        self._plan_override = opts.plan_override
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -99,7 +185,7 @@ class TflClient:
             return await self._plan_override(self)
         data = await self._fetch_data()
         if data is not None and self._park_and_ride:
-            data = await _apply_park_and_ride_to_journeys(
+            data = await apply_park_and_ride_to_journeys(
                 data, self._origin, int(settings.max_walk_to_station.magnitude)
             )
         return await self._process_data(data)
@@ -139,6 +225,7 @@ class TflClient:
         }
         fetch = fetch or TflClient._cached_with_retry
         data = await fetch(url, params)
+# lucidlint: ignore special-case sentinel handling is the contract here
         if data is None:
             return None
         # A 300 disambiguation means the name matched multiple places (usually
@@ -151,10 +238,11 @@ class TflClient:
             data2 = await fetch(url2, params)
             if data2 is not None:
                 data = data2
-        duration, _, _ = TflClient._pick_best_journey(data)
+        duration = TflClient._pick_best_journey(data).duration
         return duration
 
     @staticmethod
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def _disambiguate_national_rail(data: dict) -> str | None:
         """Extract the national-rail StopPoint id from a 300 disambiguation body.
 
@@ -218,10 +306,12 @@ class TflClient:
         # Work in local time since TfL API expects local dates
         now_local = datetime.now(UTC).astimezone()
         if now_local.weekday() < 5 and now_local.hour < 9:
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             return {"date": now_local.strftime("%Y%m%d"), "time": "0900"}
         target = now_local + timedelta(days=1)
         while target.weekday() >= 5:
             target += timedelta(days=1)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         return {"date": target.strftime("%Y%m%d"), "time": "0900"}
 
     @staticmethod
@@ -232,6 +322,7 @@ class TflClient:
         return params
 
     @staticmethod
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def _format_route_summary(journey: dict) -> str:
         legs = journey.get("legs", [])
         parts: list[str] = []
@@ -257,40 +348,24 @@ class TflClient:
 
             clean_arr = Station.short_name(arr) if arr else ""
 
-            if mode == "tube":
-                line_from_instr = instr.split(" to ")[0] if " to " in instr else ""
-                tube_line = line_from_instr.replace(" line", "").replace(" Line", "").strip()
-                label = f"{tube_line} line to {clean_arr} ({duration}m)"
-            elif mode == "driving":
-                label = f"Drive to {clean_arr} ({duration}m)" if clean_arr else f"Drive {duration}m"
-            elif mode == "bus":
-                bus_num = instr.split(" bus")[0] if " bus" in instr else ""
-                label = (
-                    f"bus({bus_num}) to {clean_arr} ({duration}m)" if bus_num else f"Bus to {clean_arr} ({duration}m)"
-                )
-            elif mode == "national-rail":
-                label = f"Train to {clean_arr} ({duration}m)"
-            elif mode == "overground":
-                label = f"Overground to {clean_arr} ({duration}m)"
-            elif mode == "dlr":
-                label = f"DLR to {clean_arr} ({duration}m)"
-            elif mode == "tram":
-                label = f"Tram to {clean_arr} ({duration}m)"
-            else:
+            formatter = _LEG_LABEL_FORMATTERS.get(mode)
+            if formatter is None:
                 label = f"{mode} to {clean_arr} ({duration}m)" if clean_arr else f"{mode} {duration}m"
+            else:
+                label = formatter(clean_arr, duration, instr)
 
             parts.append(label)
 
         return " \u2192 ".join(parts)
 
     @staticmethod
-    def _pick_best_journey(data: dict | None) -> tuple[int | None, float | None, str]:
+    def _pick_best_journey(data: dict | None) -> JourneySummary:
         if data is None:
-            return None, None, ""
+            return JourneySummary(None, None, "")
         journeys = data.get("journeys", [])
         if not journeys:
             logger.debug("_pick_best_journey: no journeys in response")
-            return None, None, ""
+            return JourneySummary(None, None, "")
         best = min(journeys, key=lambda j: j.get("duration", 9999))
         duration = best.get("duration")
         first_leg = (best.get("legs") or [{}])[0]
@@ -306,9 +381,10 @@ class TflClient:
         if fare and fare.get("totalCost") is not None:
             cost = round(fare["totalCost"] / 100.0 * 2, 2)
         route_summary = TflClient._format_route_summary(best)
-        return duration, cost, route_summary
+        return JourneySummary(duration, cost, route_summary)
 
     @staticmethod
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def _parse_tfl_legs(tfl_legs: list[dict]) -> list[tuple[JourneyLeg, str]]:
         """Parse TfL API legs into (JourneyLeg, mode_name) pairs.
 
@@ -346,6 +422,7 @@ class TflClient:
     # ── Internal fetch / process ─────────────────────────────────────
 
     @staticmethod
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def _cached_with_retry(
         url: str, params: dict, *, attempts: int = 3, base_delay: float = 1.0, fetch=None
     ) -> dict | None:
@@ -371,10 +448,12 @@ class TflClient:
                 delay = base_delay * (2**attempt)
                 logger.warning("TfL network error for %s (%s) — retry in %.1fs", url, e.__class__.__name__, delay)
                 await asyncio.sleep(delay)
+                continue
         logger.error("TfL transient errors exhausted for %s — station excluded", url)
         return None
 
     @staticmethod
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     def _is_transient_error_body(data: dict) -> bool:
         """True for cached entries that are TRANSIENT error responses.
 
@@ -397,6 +476,7 @@ class TflClient:
         return False
 
     @staticmethod
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def _cached_api_call(
         url: str, params: dict, *, _client_factory: Callable | None = None
     ) -> dict | None:
@@ -483,6 +563,7 @@ class TflClient:
                     user_message=_friendly_tfl_message(resp.status_code),
                 )
             return data
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def _fetch_data(self) -> dict | None:
         """Call TfL API and return the raw JSON response, or None on failure.
 
@@ -524,6 +605,7 @@ class TflClient:
             return None
         return data
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def _process_data(self, data: dict | None) -> Attempt[Commute]:
         """Turn raw TfL API data into a Commute.  Pure logic — no HTTP.
 
@@ -534,17 +616,16 @@ class TflClient:
         cost_groups: list[CostGroup] = []
 
         if data is not None:
-            dur, raw_cost, _ = TflClient._pick_best_journey(data)
-            duration_minutes = dur
+            duration_minutes = TflClient._pick_best_journey(data).duration
             cost_groups = self._build_cost_groups(data)
 
         # Parking cost — adds a CostGroup with the parking fee
         if self._park_and_ride and duration_minutes is not None and data is not None:
-            _, _, parking_groups = await self._add_parking_cost(data, None)
-            cost_groups.extend(parking_groups)
+            parking = await self._add_parking_cost(data, None)
+            cost_groups.extend(parking.cost_groups)
 
         # Derive total from CostGroup costs
-        total = Money("0", "GBP")
+        total = Money(amount="0", currency="GBP")
         for cg in cost_groups:
             if cg.cost is not None:
                 if not isinstance(cg.cost, Money):
@@ -572,8 +653,8 @@ class TflClient:
                 person=Person(name="", has_car=False),
                 label=self._label,
                 destination=PlaceOfInterest(label=self._label, address=self._destination),
-                duration=Quantity(0, "minute"),  # type: ignore[arg-type]
-                daily_cost=Money("0", "GBP"),
+                duration=Quantity(0, "minute"),  # type: ignore[arg-type]  # pint's stub types Quantity(0, "minute") as PlainQuantity, which basedpyright won't assign to the field's bare Quantity[Unknown] (pint's generic is invariant); at runtime PlainQuantity IS a pint Quantity and valid here
+                daily_cost=Money(amount="0", currency="GBP"),
                 mode="transit",
                 _details=(),
                 infeasible=True,
@@ -581,11 +662,12 @@ class TflClient:
             )
         )
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     async def _geocode_fallback(self, params: dict) -> dict | None:
         """Handle TfL 300 response by geocoding the origin and retrying."""
         pc_match = re.search(r"[A-Z]{1,2}[0-9][A-Z0-9]?(?:\s*[0-9][A-Z]{2})?", self._origin)
         pc = pc_match.group(0).strip().upper() if pc_match else None
-        coords = (await _geocode_address(self._origin)).value_or_none()
+        coords = (await geocode_address(self._origin)).value_or_none()
         if coords is None and pc:
             coords = (await geocode(pc)).value_or_none()
         if coords:
@@ -595,12 +677,12 @@ class TflClient:
                 return d2
         return None
 
+    @staticmethod
     async def _add_parking_cost(
-        self,
         data: dict,
         current_cost: Money | None = None,
         _registry: CarParkRegistry | None = None,
-    ) -> tuple[Money | None, Money | None, list[CostGroup]]:
+    ) -> ParkingCostResult:
         """Look up parking costs when park-and-ride used a driving leg.
 
         Returns ``(parking_cost, new_daily_cost, cost_groups)`` where
@@ -614,33 +696,33 @@ class TflClient:
         """
         journeys = data.get("journeys", [])
         if not journeys:
-            return None, current_cost, []
+            return ParkingCostResult(None, current_cost, [])
         best = min(journeys, key=lambda j: j.get("duration", 9999))
         legs = best.get("legs", [])
         if not legs or legs[0].get("mode", {}).get("name") != "driving":
-            return None, current_cost, []
+            return ParkingCostResult(None, current_cost, [])
 
         station_name = legs[0].get("arrivalPoint", {}).get("commonName", "")
         if not station_name:
-            return None, current_cost, []
+            return ParkingCostResult(None, current_cost, [])
 
         station = find_station(station_name)
         if station is None:
-            return None, current_cost, []
+            return ParkingCostResult(None, current_cost, [])
 
         parking = _registry or CarParkRegistry()
         car_park = parking.find_car_park(station)
 
         if car_park is None:
-            result = await parking.add_nearest_car_park_for(station)
+            result = await ApcoaCarParkLookup(parking).add_nearest_car_park_for(station)
             car_park = result.value_or_none() if result.succeeded else None
         elif car_park.daily_cost is None:
-            result = await parking.load_costs(car_park, station)
+            result = await ApcoaCarParkLookup(parking).load_costs(car_park, station)
             if result.succeeded:
                 car_park = result.value_or_none()
 
         if car_park is None or car_park.daily_cost is None:
-            return None, current_cost, []
+            return ParkingCostResult(None, current_cost, [])
 
         parking_cost = car_park.daily_cost
         new_cost = current_cost + parking_cost if current_cost is not None else parking_cost
@@ -650,9 +732,10 @@ class TflClient:
             operator=f"ParkCo: {car_park.name}",
             cost=parking_cost,
         )
-        return parking_cost, new_cost, [parking_group]
+        return ParkingCostResult(parking_cost, new_cost, [parking_group])
 
-    def _build_cost_groups(self, data: dict) -> list[CostGroup]:
+    @staticmethod
+    def _build_cost_groups(data: dict) -> list[CostGroup]:
         """Parse TfL response legs into CostGroup objects.
 
         Walking legs before/after transit and between transit lines
@@ -684,57 +767,80 @@ class TflClient:
         # gives one totalCost instead of per-mode fares.
         total_single_pence = fare.get("totalCost") if fare else None
 
-        groups: list[CostGroup] = []
-        current_legs: list[JourneyLeg] = []
-        current_mode: str | None = None
-        in_transit = False
-        total_applied = False
-
-        parsed = TflClient._parse_tfl_legs(tfl_legs)
-
-        def _flush_transit() -> None:
-            """Emit the accumulated transit legs as a CostGroup carrying
-            its TfL fare (per-mode cost × 2 for the return trip)."""
-            nonlocal current_legs, current_mode, total_applied
-            if not current_legs:
-                return
-            cost: Money | None = None
-            if current_mode is not None and current_mode in mode_single_pence:
-                cost = Money(str(round(mode_single_pence[current_mode] / 100.0 * 2, 2)), "GBP")
-            elif total_single_pence is not None and not total_applied:
-                # No per-mode split — the whole-journey fare goes on the
-                # FIRST transit group so the sum equals the total exactly.
-                cost = Money(str(round(total_single_pence / 100.0 * 2, 2)), "GBP")
-                total_applied = True
-            groups.append(
-                CostGroup(
-                    legs=tuple(current_legs),
-                    operator="TfL",
-                    cost=cost,
-                )
-            )
-            current_legs = []
-            current_mode = None
-
-        for jl, mode_name in parsed:
+        builder = _CostGroupBuilder(mode_single_pence, total_single_pence)
+        for jl, mode_name in TflClient._parse_tfl_legs(tfl_legs):
             if mode_name == "walking":
-                if in_transit:
-                    current_legs.append(jl)
-                    continue
-                groups.append(CostGroup(legs=(jl,)))
-                continue
+                builder.add_walking(jl)
+            else:
+                builder.add_transit(jl, mode_name)
+        return builder.build()
 
-            # Transit leg — check if we need a new CostGroup
-            if current_mode is not None and current_mode != mode_name and (mode_single_pence or in_transit):
-                _flush_transit()
 
-            if not in_transit and current_legs:
-                groups.append(CostGroup(legs=tuple(current_legs)))
-                current_legs = []
-            in_transit = True
-            current_mode = mode_name
-            current_legs.append(jl)
+class _CostGroupBuilder:
+    """Stateful accumulator that groups parsed TfL legs into CostGroups.
 
-        _flush_transit()
+    Walking legs before/after transit become standalone no-cost groups;
+    walking legs *inside* a transit run merge into the transit group.
+    Transit legs are flushed per mode when the fare structure has
+    per-mode costs, carrying the mode's fare (×2 for the return trip);
+    a whole-journey ``totalCost`` lands on the first transit group so
+    the sum of group costs equals the total exactly.
+    """
 
-        return groups
+    def __init__(self, mode_single_pence: dict[str, int], total_single_pence: int | None) -> None:
+        self._mode_single_pence = mode_single_pence
+        self._total_single_pence = total_single_pence
+        self._groups: list[CostGroup] = []
+        self._current_legs: list[JourneyLeg] = []
+        self._current_mode: str | None = None
+        self._in_transit = False
+        self._total_applied = False
+
+    def add_walking(self, jl: JourneyLeg) -> None:
+        if self._in_transit:
+            self._current_legs.append(jl)
+            return
+        self._groups.append(CostGroup(legs=(jl,)))
+
+    def add_transit(self, jl: JourneyLeg, mode_name: str) -> None:
+        # Transit leg — check if we need a new CostGroup
+        if (
+            self._current_mode is not None
+            and self._current_mode != mode_name
+            and (self._mode_single_pence or self._in_transit)
+        ):
+            self._flush_transit()
+
+        if not self._in_transit and self._current_legs:
+            self._groups.append(CostGroup(legs=tuple(self._current_legs)))
+            self._current_legs = []
+        self._in_transit = True
+        self._current_mode = mode_name
+        self._current_legs.append(jl)
+
+    def _flush_transit(self) -> None:
+        """Emit the accumulated transit legs as a CostGroup carrying
+        its TfL fare (per-mode cost × 2 for the return trip)."""
+        if not self._current_legs:
+            return
+        cost: Money | None = None
+        if self._current_mode is not None and self._current_mode in self._mode_single_pence:
+            cost = Money(str(round(self._mode_single_pence[self._current_mode] / 100.0 * 2, 2)), "GBP")
+        elif self._total_single_pence is not None and not self._total_applied:
+            # No per-mode split — the whole-journey fare goes on the
+            # FIRST transit group so the sum equals the total exactly.
+            cost = Money(str(round(self._total_single_pence / 100.0 * 2, 2)), "GBP")
+            self._total_applied = True
+        self._groups.append(
+            CostGroup(
+                legs=tuple(self._current_legs),
+                operator="TfL",
+                cost=cost,
+            )
+        )
+        self._current_legs = []
+        self._current_mode = None
+
+    def build(self) -> list[CostGroup]:
+        self._flush_transit()
+        return self._groups

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from dag.attempt import Attempt
-from dag.if_then_else import IfThenElseNode
+from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
 from dag.scheduler import AsyncQueueScheduler, flush_processor, set_scheduler
 from dag.user_input_node import UserInputNode
 
@@ -30,10 +30,12 @@ class TestIfThenElseNode:
         node = IfThenElseNode(
             "ite1",
             str,
-            condition_sources=(cond,),
-            condition_fn=lambda a: a.value_or(False),
-            then_branch=then_src,
-            else_branch=else_src,
+            options=IfThenElseOptions(
+                condition_sources=(cond,),
+                condition_fn=lambda a: a.value_or(False),
+                then_branch=then_src,
+                else_branch=else_src,
+            ),
         )
 
         cond.push(True, "user")
@@ -56,10 +58,12 @@ class TestIfThenElseNode:
         node = IfThenElseNode(
             "ite2",
             str,
-            condition_sources=(cond,),
-            condition_fn=lambda a: a.value_or(False),
-            then_branch=then_src,
-            else_branch=else_src,
+            options=IfThenElseOptions(
+                condition_sources=(cond,),
+                condition_fn=lambda a: a.value_or(False),
+                then_branch=then_src,
+                else_branch=else_src,
+            ),
         )
 
         cond.push(False, "user")
@@ -81,9 +85,11 @@ class TestIfThenElseNode:
         node = IfThenElseNode(
             "ite3",
             str,
-            condition_sources=(cond,),
-            condition_fn=lambda a: a.value_or(False),
-            then_branch=then_src,
+            options=IfThenElseOptions(
+                condition_sources=(cond,),
+                condition_fn=lambda a: a.value_or(False),
+                then_branch=then_src,
+            ),
         )
 
         then_src.push("then_value", "user")
@@ -103,9 +109,11 @@ class TestIfThenElseNode:
         node = IfThenElseNode(
             "ite4",
             str,
-            condition_sources=(cond,),
-            condition_fn=lambda a: a.value_or(False),
-            then_branch=then_src,
+            options=IfThenElseOptions(
+                condition_sources=(cond,),
+                condition_fn=lambda a: a.value_or(False),
+                then_branch=then_src,
+            ),
         )
 
         cond.push(True, "user")
@@ -125,9 +133,11 @@ class TestIfThenElseNode:
         node = IfThenElseNode(
             "ite5",
             str,
-            condition_sources=(cond,),
-            condition_fn=lambda a: a.value_or(False),
-            then_branch=then_src,
+            options=IfThenElseOptions(
+                condition_sources=(cond,),
+                condition_fn=lambda a: a.value_or(False),
+                then_branch=then_src,
+            ),
         )
 
         cond.push(False, "user")
@@ -149,9 +159,11 @@ class TestIfThenElseNode:
         node = IfThenElseNode(
             "ite6",
             str,
-            condition_sources=(a_src, b_src),
-            condition_fn=lambda a, b: a.value_or(False) and b.value_or(False),
-            then_branch=then_src,
+            options=IfThenElseOptions(
+                condition_sources=(a_src, b_src),
+                condition_fn=lambda a, b: a.value_or(False) and b.value_or(False),
+                then_branch=then_src,
+            ),
         )
 
         a_src.push(True, "user")
@@ -184,10 +196,12 @@ class TestIfThenElseNode:
         node = IfThenElseNode(
             "ite7",
             str,
-            condition_sources=(cond,),
-            condition_fn=lambda a: a.succeeded and bool(a.value),  # safe for impossible
-            then_branch=then_src,
-            else_branch=else_src,
+            options=IfThenElseOptions(
+                condition_sources=(cond,),
+                condition_fn=lambda a: a.succeeded and bool(a.value),  # safe for impossible
+                then_branch=then_src,
+                else_branch=else_src,
+            ),
         )
 
         then_src.push("then_val", "user")

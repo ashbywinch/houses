@@ -3,13 +3,28 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Generic, TypeVar
+from dataclasses import dataclass
+from typing import Any, Generic, TypeVar
 
 from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.node import Node
 
 T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class IfThenElseOptions:
+    """Wiring for an ``IfThenElseNode``: the branch predicate and sources.
+
+    ``condition_fn`` receives the condition sources' ``Attempt`` values (in
+    order); ``then_branch``/``else_branch`` provide the activated result.
+    """
+
+    condition_sources: tuple[Node, ...]
+    condition_fn: Callable[..., bool]
+    then_branch: Node[Any]
+    else_branch: Node[Any] | None = None
 
 
 class IfThenElseNode(DerivedNode[T], Generic[T]):
@@ -25,19 +40,16 @@ class IfThenElseNode(DerivedNode[T], Generic[T]):
         node_id: str,
         value_type: type[T],
         *,
-        condition_sources: tuple[Node, ...],
-        condition_fn: Callable[..., bool],
-        then_branch: Node[T],
-        else_branch: Node[T] | None = None,
+        options: IfThenElseOptions,
     ) -> None:
-        self._condition_sources = condition_sources
-        self._condition_fn = condition_fn
-        self._then_branch = then_branch
-        self._else_branch = else_branch
+        self._condition_sources = options.condition_sources
+        self._condition_fn = options.condition_fn
+        self._then_branch = options.then_branch
+        self._else_branch = options.else_branch
 
-        deps = condition_sources + (then_branch,)
-        if else_branch is not None:
-            deps = deps + (else_branch,)
+        deps = options.condition_sources + (options.then_branch,)
+        if options.else_branch is not None:
+            deps = deps + (options.else_branch,)
         super().__init__(node_id, value_type, deps)
 
     def _get_active_deps(self) -> tuple[Node, ...]:

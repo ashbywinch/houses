@@ -5,7 +5,7 @@ from pathlib import Path
 import uvicorn
 from fastapi.staticfiles import StaticFiles
 
-from houses.config import settings
+from houses.settings import settings
 from houses.server import app
 
 build_dir = Path("houses/frontend/dist")

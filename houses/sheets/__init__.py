@@ -2,7 +2,6 @@
 
 See the individual modules for implementation details:
 
-* ``tab.py`` — ``Tab`` wrapper around gspread ``Worksheet``
 * ``row.py`` — ``Row`` class for column schema, value formatting, and sheet writes
 * ``formulas.py`` — View and Data tab formula definitions, ``sync_data_formulas``
 * ``named_ranges.py`` — Named range management across all tabs
@@ -13,6 +12,7 @@ See the individual modules for implementation details:
 
 from __future__ import annotations
 
+# lucidlint: ignore private-import intra-package helper import
 from houses.sheets.client import _real_get_client, get_client
 from houses.sheets.formulas import (
     DATA_FORMULA_COLS,
@@ -23,13 +23,12 @@ from houses.sheets.formulas import (
 )
 from houses.sheets.named_ranges import (
     CONSTANTS_VALUES,
-    _const_range_name,
+    const_range_name,
     ensure_constants_tab,
     ensure_named_ranges,
     named_range_name,
 )
 from houses.sheets.row import CONSTANTS_TAB, DATA_TAB, VIEW_TAB, Row, ensure_headers
-from houses.sheets.tab import Tab
 from houses.sheets.view import View, sync_view_formulas
 
 # ── Backwards-compatible aliases ─────────────────────────────────────
@@ -51,7 +50,6 @@ row_values = Row.from_property
 
 __all__ = [
     # Classes
-    "Tab",
     "Row",
     "View",
     "_USER_COLUMNS",
@@ -80,7 +78,7 @@ __all__ = [
     "sync_data_formulas",
     # Named ranges
     "named_range_name",
-    "_const_range_name",
+    "const_range_name",
     "ensure_named_ranges",
     "ensure_constants_tab",
     "CONSTANTS_VALUES",

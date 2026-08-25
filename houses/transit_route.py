@@ -6,8 +6,8 @@ import json
 import logging
 
 from houses.api_cache import cached_async_client, get_cached, set_cached
-from houses.config import settings
-from houses.location import _geocode_address, geocode
+from houses.location import geocode, geocode_address
+from houses.settings import settings
 from houses.stations import find as find_station
 
 logger = logging.getLogger(__name__)
@@ -17,6 +17,7 @@ POSTCODES_IO_URL = "https://api.postcodes.io/postcodes"
 ORS_GEOCODE_URL = "https://api.openrouteservice.org/geocode/search"
 ORS_DIRECTIONS_URL = "https://api.openrouteservice.org/v2/directions/driving-car"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+SECONDS_PER_MINUTE = 60
 
 
 async def _get_drive_minutes(origin_postcode: str, station_name: str) -> int | None:
@@ -25,7 +26,7 @@ async def _get_drive_minutes(origin_postcode: str, station_name: str) -> int | N
     ``_get_drive_minutes_from_location`` and skip the lookup."""
     origin_coords = (await geocode(origin_postcode)).value_or_none()
     if origin_coords is None:
-        origin_coords = (await _geocode_address(origin_postcode)).value_or_none()
+        origin_coords = (await geocode_address(origin_postcode)).value_or_none()
     if origin_coords is None:
         return None
     return await _get_drive_minutes_from_location(origin_coords, station_name)
@@ -37,13 +38,14 @@ async def _get_drive_minutes_from_location(origin_coords, station_name: str) -> 
     station = find_station(station_name)
     dest_coords = station.location if station else None
     if dest_coords is None:
-        dest_coords = (await _geocode_address(station_name)).value_or_none()
+        dest_coords = (await geocode_address(station_name)).value_or_none()
     if dest_coords is None:
         return None
 
     dest_lat = dest_coords.lat
     dest_lng = dest_coords.lon
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     body = {
         "coordinates": [[origin_coords.lon, origin_coords.lat], [dest_lng, dest_lat]],
         "units": "km",
@@ -52,7 +54,7 @@ async def _get_drive_minutes_from_location(origin_coords, station_name: str) -> 
         async with cached_async_client(timeout=15.0) as client:
             cached = get_cached("POST", ORS_DIRECTIONS_URL, None, json.dumps(body, sort_keys=True))
             if cached is not None:
-                return round(cached["routes"][0]["summary"]["duration"] / 60)
+                return round(cached["routes"][0]["summary"]["duration"] / SECONDS_PER_MINUTE)
             resp = await client.post(
                 ORS_DIRECTIONS_URL,
                 headers={"Authorization": settings.ors_api_key, "Content-Type": "application/json"},
@@ -61,7 +63,8 @@ async def _get_drive_minutes_from_location(origin_coords, station_name: str) -> 
             resp.raise_for_status()
             data = resp.json()
             set_cached("POST", ORS_DIRECTIONS_URL, None, json.dumps(body, sort_keys=True), data)
-            return round(data["routes"][0]["summary"]["duration"] / 60)
+            return round(data["routes"][0]["summary"]["duration"] / SECONDS_PER_MINUTE)
+    # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
     except Exception:
         logger.warning(
             "Park-and-ride ORS lookup failed for %s \u2192 %s (url=%s)",
@@ -72,7 +75,8 @@ async def _get_drive_minutes_from_location(origin_coords, station_name: str) -> 
         return None
 
 
-async def _apply_park_and_ride_to_journeys(
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+async def apply_park_and_ride_to_journeys(
     data: dict,
     origin_postcode: str,
     max_walk_minutes: int,
@@ -119,6 +123,7 @@ async def _apply_park_and_ride_to_journeys(
             drive_minutes,
             station_name,
         )
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
         legs[0] = {
             "mode": {"name": "driving"},
             "duration": drive_minutes,

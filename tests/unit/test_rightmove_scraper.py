@@ -15,6 +15,7 @@ SAMPLE_URL = "https://www.rightmove.co.uk/properties/123456789"
 
 
 class TestParseHtml:
+    # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
     def test_extracts_all_fields(self):
         html = SAMPLE_HTML.read_text(encoding="utf-8")
         result = _parse_html(html, SAMPLE_URL)
@@ -98,6 +99,7 @@ class TestScrapeWithSamplePage:
         result = await scrape(SAMPLE_URL, _page_path="/nonexistent/file.html")
         assert result is None
 
+    # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
     def test_scrape_uses_cache_when_present(self):
         """scrape() reads from the page cache, ignoring the sample page."""
         SCRAPER_CACHE.mkdir(parents=True, exist_ok=True)
@@ -113,7 +115,7 @@ class TestScrapeWithSamplePage:
 
     def test_scrape_offline_returns_none_for_uncached(self):
         """scrape() returns None for an uncached RID when offline mode is on."""
-        from houses.config import settings
+        from houses.settings import settings
 
         saved = settings.rightmove_scraper_offline
         settings.rightmove_scraper_offline = True

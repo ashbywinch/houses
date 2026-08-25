@@ -5,6 +5,7 @@ Every fake returns minimal data so tests don't hit real APIs.
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 from money import Money
@@ -14,7 +15,7 @@ from dag.attempt import Attempt
 from dag.derived_node import DerivedNode
 from dag.measurement import Measurement
 from houses.council_tax_info import CouncilTaxInfo
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.school import School
 from houses.school_gender import SchoolGender
@@ -31,6 +32,28 @@ from houses.services import (
     TownDescService,
     WalkabilityService,
 )
+
+
+@contextlib.contextmanager
+def inject_server_deps(*, scrape_fn=None, get_client_fn=None):
+    """Temporarily inject per-request server dependencies.
+
+    ``scrape_fn`` replaces the Rightmove scraper and ``get_client_fn`` the
+    sheets client factory used by the FastAPI endpoints (the
+    ``houses.context`` seam) — no monkeypatching of module globals.
+    """
+    from houses import context as _ctx
+
+    saved = []
+    if scrape_fn is not None:
+        saved.append((_ctx._request_scrape_fn, _ctx._request_scrape_fn.set(scrape_fn)))
+    if get_client_fn is not None:
+        saved.append((_ctx._request_get_client_fn, _ctx._request_get_client_fn.set(get_client_fn)))
+    try:
+        yield
+    finally:
+        for var, token in reversed(saved):
+            var.reset(token)
 
 # ── Individual Fake Services ──────────────────────────────────────────
 
@@ -55,9 +78,9 @@ class FixedCommuteNode(DerivedNode[Commute]):
     def set(self, commute: Commute) -> None:
         self._commute = commute
         self._attempt = Attempt.pending()
-        from dag.scheduler import _get_scheduler
+        from dag.scheduler import get_scheduler
 
-        _get_scheduler().schedule(self)
+        get_scheduler().schedule(self)
         self.changed.emit()
 
     def push(self, value: Commute, source_label: str = "") -> None:
@@ -145,6 +168,25 @@ class _FakeRoutePlanner(RoutePlanner):
                 daily_cost=Money("5.50", "GBP"),
             )
         )
+
+
+class _NoRoutesRouter:
+    """CommuteRouter stand-in whose google_routes_post is disabled — the
+    bus-route node gets no HTTP POST in unit tests (DI, no monkeypatch)."""
+
+    google_routes_post = None
+
+
+class _NoPlanTflClient:
+    """TfL client factory default for unit tests — transit planning is
+    impossible unless a test injects its own canned plan."""
+
+    def __init__(self, *args, **kwargs):
+        self._plan_override = None
+        self._no_route_detail = ""
+
+    async def plan(self):
+        return Attempt.impossible("mocked — unit test")
 
 
 class FakeSchoolLookup(SchoolLookupService):
@@ -329,6 +371,8 @@ def make_services(
     base: dict[str, Any] = dict(
         geocoder=FakeGeocoder(),
         route_planner=_FakeRoutePlanner(),
+        tfl_client_factory=_NoPlanTflClient,
+        commute_router=_NoRoutesRouter(),
         school_lookup=FakeSchoolLookup(school=_DEFAULT_SCHOOL),
         walkability_service=FakeWalkability(walk_to_town=10, amenities="Shops, cafe"),
         town_desc_service=FakeTownDesc(),

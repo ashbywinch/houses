@@ -4,7 +4,7 @@ from pathlib import Path
 
 from money import Money
 
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from houses.rail_fares import RailFare
 from houses.rail_fares import RailFareRegistry as Registry
 from houses.stations import StationRegistry
@@ -30,6 +30,7 @@ def test_rail_fare_dataclass():
 # ── fare_between ────────────────────────────────────────────────────────
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_fare_between_exact_match(tmp_path):
     csv = tmp_path / "fares.csv"
     csv.write_text("origin_crs,dest_crs,single_fare_gbp\nWOK,VIC,17.00\n")
@@ -43,6 +44,7 @@ def test_fare_between_exact_match(tmp_path):
     assert reg.fare_between(origin, dest) == Money("17.00", "GBP")
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_fare_between_reverse_match(tmp_path):
     csv = tmp_path / "fares.csv"
     csv.write_text("origin_crs,dest_crs,single_fare_gbp\nVIC,WOK,17.00\n")
@@ -56,6 +58,7 @@ def test_fare_between_reverse_match(tmp_path):
     assert reg.fare_between(origin, dest) == Money("17.00", "GBP")
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_fare_between_no_match(tmp_path):
     csv = tmp_path / "fares.csv"
     csv.write_text("origin_crs,dest_crs,single_fare_gbp\nWOK,PAD,15.00\n")
@@ -77,6 +80,7 @@ def test_fare_between_no_match(tmp_path):
 # ── nearest_station ─────────────────────────────────────────────────────
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_nearest_station_returns_station(tmp_path):
     csv = tmp_path / "stations.csv"
     csv.write_text("stationName,crsCode,lat,long\nWoking,WOK,51.317,-0.556\n")
@@ -90,6 +94,7 @@ def test_nearest_station_returns_station(tmp_path):
     assert result.name == "Woking"
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_nearest_station_returns_closest(tmp_path):
     csv = tmp_path / "stations.csv"
     csv.write_text("stationName,crsCode,lat,long\nWoking,WOK,51.317,-0.556\nBrookwood,BKO,51.303,-0.636\n")
@@ -102,6 +107,7 @@ def test_nearest_station_returns_closest(tmp_path):
     assert result.crs == "WOK"
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_nearest_station_no_data(tmp_path):
     csv = tmp_path / "stations.csv"
     csv.write_text("stationName,crsCode,lat,long\n")  # header only, no data

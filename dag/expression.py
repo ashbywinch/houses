@@ -14,17 +14,23 @@ not a string name. No values dict, no zipping, no indirection.
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from decimal import Decimal
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from money import Money
 
 from dag.attempt import Attempt, Formula, FormulaLine
 from dag.measurement import Measurement
 
+if TYPE_CHECKING:
+    from dag.node import Node as _Node
+
 T = TypeVar("T")
+
+logger = logging.getLogger(__name__)
 
 
 class Expression(ABC, Generic[T]):
@@ -33,8 +39,9 @@ class Expression(ABC, Generic[T]):
     description: str = ""
     """Plain-English explanation of what this expression does."""
 
+    @staticmethod
     @abstractmethod
-    def evaluate(self) -> Attempt[T]:
+    def evaluate() -> Attempt[T]:
         """Evaluate this expression.
 
         Walks the expression tree, calling ``latest_attempt()`` on any
@@ -58,7 +65,8 @@ class Expression(ABC, Generic[T]):
             return f"{v:,.2f}"
         return str(v)
 
-    def to_formula_lines(self) -> list[FormulaLine]:
+    @staticmethod
+    def to_formula_lines() -> list[FormulaLine]:
         """Produce formula lines showing how this expression was evaluated.
 
         Called AFTER the node's ``compute()`` has run, so ``latest_attempt()``
@@ -138,8 +146,6 @@ class Ref(Expression[T]):
     """Reference a dependency Node. Calls ``latest_attempt()`` directly."""
 
     def __init__(self, node, description: str = ""):
-        from dag.node import Node as _Node
-
         self.node: _Node = node
         self.description = description
 
@@ -203,11 +209,7 @@ class Add(Expression):
         return Attempt.succeeded(total)
 
     def to_formula_lines(self) -> list[FormulaLine]:
-        lines: list[FormulaLine] = []
-        for term in self.terms:
-            lines.extend(term.to_formula_lines())
-        return lines
-
+        return [line for term in self.terms for line in term.to_formula_lines()]
 
 class Sub(Expression):
     """Subtract right from left."""
@@ -224,8 +226,12 @@ class Sub(Expression):
         right_result = self.right.evaluate()
         if not right_result.succeeded:
             return Attempt.impossible(right_result.error or "right operand failed")
+        left_value = left_result.value_or_none()
+        right_value = right_result.value_or_none()
+        if left_value is None or right_value is None:
+            return Attempt.impossible("operand missing")
         try:
-            return Attempt.succeeded(left_result.value - right_result.value)
+            return Attempt.succeeded(left_value - right_value)
         except TypeError as e:
             return Attempt.impossible(f"Cannot subtract: {e}")
 
@@ -244,12 +250,16 @@ class Negate(Expression):
         result = self.inner.evaluate()
         if not result.succeeded:
             return result
+        value = result.value_or_none()
+        if value is None:
+            return Attempt.impossible("operand missing")
         try:
-            return Attempt.succeeded(-result.value)
+            return Attempt.succeeded(-value)
         except TypeError as e:
             return Attempt.impossible(f"Cannot negate: {e}")
 
-    def to_formula_lines(self) -> list[FormulaLine]:
+    @staticmethod
+    def to_formula_lines() -> list[FormulaLine]:
         return [FormulaLine(label="−", value="")]
 
 
@@ -268,8 +278,12 @@ class Mul(Expression):
         right_result = self.right.evaluate()
         if not right_result.succeeded:
             return Attempt.impossible(right_result.error or "right operand failed")
+        left_value = left_result.value_or_none()
+        right_value = right_result.value_or_none()
+        if left_value is None or right_value is None:
+            return Attempt.impossible("operand missing")
         try:
-            return Attempt.succeeded(left_result.value * right_result.value)
+            return Attempt.succeeded(left_value * right_value)
         except TypeError as e:
             return Attempt.impossible(f"Cannot multiply: {e}")
 
@@ -292,16 +306,16 @@ class Div(Expression):
         right_result = self.right.evaluate()
         if not right_result.succeeded:
             return Attempt.impossible(right_result.error or "right operand failed")
+        left_val = left_result.value_or_none()
+        right_val = right_result.value_or_none()
+        if left_val is None or right_val is None:
+            return Attempt.impossible("operand missing")
         try:
-            left_val = left_result.value
-            right_val = right_result.value
             # Handle string values that look like money ("124.80") by converting to Money
             if isinstance(left_val, str):
-                from money import Money as _Money
-                left_val = _Money(left_val, "GBP")
+                left_val = Money(left_val, "GBP")
             if isinstance(right_val, str):
-                from money import Money as _Money
-                right_val = _Money(right_val, "GBP")
+                right_val = Money(right_val, "GBP")
             return Attempt.succeeded(left_val / right_val)
         except (ZeroDivisionError, TypeError) as e:
             return Attempt.impossible(f"Cannot divide: {e}")
@@ -346,6 +360,7 @@ class Conditional(Expression):
     def evaluate(self) -> Attempt:
         try:
             condition = self.predicate()
+        # lucidlint: ignore broad-except boundary — predicate failure converts to an impossible attempt
         except Exception as e:
             return Attempt.impossible(f"Condition failed: {e}")
 
@@ -356,11 +371,22 @@ class Conditional(Expression):
         else:
             return Attempt.succeeded(None)
 
-    def to_formula_lines(self) -> list[FormulaLine]:
+    def _condition_for_formula(self) -> bool | None:
+        """Predicate for formula rendering; None when it cannot be evaluated
+        (the display degrades to the false branch)."""
         try:
-            condition = self.predicate()
-        except Exception:
-            condition = None
+            return self.predicate()
+        # lucidlint: ignore broad-except deliberate degrade — predicate failure during formula rendering yields None
+        except Exception as e:
+            logger.debug(
+                "Conditional %r: predicate failed during formula rendering; treating as unknown: %s",
+                self.description,
+                e,
+            )
+            return None
+
+    def to_formula_lines(self) -> list[FormulaLine]:
+        condition = self._condition_for_formula()
 
         lines: list[FormulaLine] = []
         if condition is True:
@@ -458,6 +484,7 @@ class Choose(Expression):
 
         try:
             winner = self.selector(results)
+        # lucidlint: ignore broad-except boundary — selector failure converts to an impossible attempt
         except Exception as e:
             return Attempt.impossible(f"Choose selector failed: {e}")
 
@@ -469,16 +496,23 @@ class Choose(Expression):
 
         return results[winner]
 
+    def _formula_winner(self) -> str | None:
+        """Re-run the selector for formula display; None when it fails
+        (no alternative is then marked as the winner)."""
+        try:
+            return self.selector(self.last_results)
+        # lucidlint: ignore broad-except deliberate degrade — selector failure during formula rendering yields None
+        except Exception as e:
+            logger.debug("Choose: selector failed during formula rendering: %s", e)
+            return None
+
     def to_formula_lines(self):
         if not self.last_results:
             return [FormulaLine(label="Choose", value="not evaluated")]
 
         lines: list[FormulaLine] = []
         # Determine winner by re-running selector on stored results
-        try:
-            winner = self.selector(self.last_results)
-        except Exception:
-            winner = None
+        winner = self._formula_winner()
 
         for name, attempt in self.last_results.items():
             if attempt.succeeded:

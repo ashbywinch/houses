@@ -1,18 +1,32 @@
 from __future__ import annotations
 
-from dag.if_then_else import IfThenElseNode
+from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
 from dag.user_input_node import UserInputNode
+from houses.commute_router import CommuteRouter
 from houses.model.domain import Commute, effective_acceptable_modes
 from houses.nodes.bus import BodsFareNode, BusLegAugmentNode, BusRouteNode
-from houses.nodes.commute import CommuteSelectorNode, MergeRailFareNode, _needs_rail_fare
+from houses.nodes.commute import CommuteSelectorNode, CommuteSelectorOptions, MergeRailFareNode, needs_rail_fare
 from houses.nodes.commute_breakdown_node import CommuteBreakdownNode
-from houses.nodes.park_and_ride import ParkAndRideAugmentNode
+from houses.nodes.park_and_ride_augment_node import ParkAndRideAugmentNode, ParkAndRideOptions
 from houses.nodes.petrol import PersonPetrolMpgNode, PetrolCostAugmentNode
+from houses.nodes.rail_fare_node import RailFareNode
 from houses.nodes.schools import SchoolLocationNode
-from houses.nodes.transit import DriveNode, PersonMaxWalkNode, TflTransitNode, TransitNode, WalkNode
-from houses.routing import CommuteRouter
+from houses.nodes.transit import (
+    DriveNode,
+    PersonMaxWalkNode,
+    RouteOptions,
+    TflTransitNode,
+    TransitNode,
+    TransitOptions,
+    WalkNode,
+)
+from houses.services_provider import get_services
 
-_router = CommuteRouter()
+
+def _commute_router():
+    """The routing aggregate, read from the DI container (lazy)."""
+
+    return get_services().commute_router
 
 
 def build_commute_pipeline(prop) -> None:
@@ -60,10 +74,12 @@ def build_commute_pipeline(prop) -> None:
 
             walk_node = WalkNode(
                 f"{prop.rid}/{key}/walk",
-                best_location=prop.best_location,
-                poi=poi_src,
-                max_walk=int(p_info.bus_walk_penalty.magnitude),
-                poi_info=poi,
+                options=RouteOptions(
+                    best_location=prop.best_location,
+                    poi=poi_src,
+                    max_walk=int(p_info.bus_walk_penalty.magnitude),
+                    poi_info=poi,
+                ),
             )
             # The walking TOLERANCE is a node read (like MPG): the gate
             # nodes depend on it so a settings/what-if change re-scores
@@ -81,54 +97,64 @@ def build_commute_pipeline(prop) -> None:
             if p_info.has_car:
                 drive_node = DriveNode(
                     f"{prop.rid}/{key}/drive",
-                    best_location=prop.best_location,
-                    poi=poi_src,
-                    has_car=True,
-                    poi_info=poi,
+                    options=RouteOptions(
+                        best_location=prop.best_location,
+                        poi=poi_src,
+                        has_car=True,
+                        poi_info=poi,
+                    ),
                 )
             else:
                 drive_node = None
             no_bus_node = TflTransitNode(
                 f"{prop.rid}/{key}/tfl_no_bus",
-                best_location=prop.best_location,
-                poi=poi_src,
-                has_car=p_info.has_car,
-                allow_bus=False,
-                poi_info=poi,
+                options=TransitOptions(
+                    best_location=prop.best_location,
+                    poi=poi_src,
+                    has_car=p_info.has_car,
+                    allow_bus=False,
+                    poi_info=poi,
+                ),
             )
             with_bus_node = TflTransitNode(
                 f"{prop.rid}/{key}/tfl_with_bus",
-                best_location=prop.best_location,
-                poi=poi_src,
-                has_car=p_info.has_car,
-                allow_bus=True,
-                poi_info=poi,
+                options=TransitOptions(
+                    best_location=prop.best_location,
+                    poi=poi_src,
+                    has_car=p_info.has_car,
+                    allow_bus=True,
+                    poi_info=poi,
+                ),
             )
             transit_node = TransitNode(
                 f"{prop.rid}/{key}/computed_transit",
-                best_location=prop.best_location,
-                poi=poi_src,
-                has_car=p_info.has_car,
-                no_bus_node=no_bus_node,
-                with_bus_node=with_bus_node,
-                poi_info=poi,
+                options=TransitOptions(
+                    best_location=prop.best_location,
+                    poi=poi_src,
+                    has_car=p_info.has_car,
+                    no_bus_node=no_bus_node,
+                    with_bus_node=with_bus_node,
+                    poi_info=poi,
+                ),
             )
             prop._transit_nodes.append(transit_node)
 
             park_and_ride = ParkAndRideAugmentNode(
                 f"{prop.rid}/{key}/park_and_ride",
-                transit_node=transit_node,
-                best_location=prop.best_location,
-                postcode_node=prop.postcode,
-                has_car=p_info.has_car,
-                max_walk_node=max_walk_node,
+                options=ParkAndRideOptions(
+                    transit_node=transit_node,
+                    best_location=prop.best_location,
+                    postcode_node=prop.postcode,
+                    has_car=p_info.has_car,
+                    max_walk_node=max_walk_node,
+                ),
             )
 
             bus_route_node = BusRouteNode(
                 f"{prop.rid}/{key}/bus_route",
                 best_location=prop.best_location,
                 poi=poi_src,
-                _google_routes_post=_router.google_routes_post,
+                _google_routes_post=_commute_router().google_routes_post,
             )
 
             bods_fare_node = BodsFareNode(
@@ -151,14 +177,16 @@ def build_commute_pipeline(prop) -> None:
 
             selector = CommuteSelectorNode(
                 f"{prop.rid}/{key}/commute",
-                origin=prop.best_location,
-                poi=poi_src,
-                walk_result=walk_node,
-                transit_result=bus_augment,
-                drive_result=None if in_zone else drive_node,
-                is_child=is_child,
-                max_walk_node=max_walk_node,
-                acceptable_modes=effective_acceptable_modes(poi),
+                options=CommuteSelectorOptions(
+                    origin=prop.best_location,
+                    poi=poi_src,
+                    walk_result=walk_node,
+                    transit_result=bus_augment,
+                    drive_result=None if in_zone else drive_node,
+                    is_child=is_child,
+                    max_walk_node=max_walk_node,
+                    acceptable_modes=effective_acceptable_modes(poi),
+                ),
             )
 
             if is_child:
@@ -167,12 +195,13 @@ def build_commute_pipeline(prop) -> None:
                 rail_fare_result = IfThenElseNode(
                     f"{prop.rid}/{key}/rail_fare_noop",
                     Commute | None,
-                    condition_sources=(),
-                    condition_fn=lambda: False,
-                    then_branch=_dummy,
+                    options=IfThenElseOptions(
+                        condition_sources=(),
+                        condition_fn=lambda: False,
+                        then_branch=_dummy,
+                    ),
                 )
             else:
-                from houses.nodes.rail_fare_node import RailFareNode
 
                 # The fare node knows the SELECTED commute: when the choice
                 # is drive/walk it passes the transit commute through
@@ -192,9 +221,11 @@ def build_commute_pipeline(prop) -> None:
                 rail_fare_result = IfThenElseNode(
                     f"{prop.rid}/{key}/rail_fare_if",
                     Commute | None,
-                    condition_sources=(transit_node, selector),
-                    condition_fn=_needs_rail_fare,
-                    then_branch=rail_fare_node,
+                    options=IfThenElseOptions(
+                        condition_sources=(transit_node, selector),
+                        condition_fn=needs_rail_fare,
+                        then_branch=rail_fare_node,
+                    ),
                 )
 
             merge_node = MergeRailFareNode(

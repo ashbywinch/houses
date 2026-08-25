@@ -8,7 +8,7 @@ import pytest
 
 from dag.scheduler import flush_processor
 from houses.nodes.bootstrap import bootstrap_from_row
-from houses.nodes.property import PropertyNodes
+from houses.nodes.property_nodes import PropertyNodes
 from houses.property_registry import register_property
 from tests.helpers import make_services
 
@@ -29,7 +29,7 @@ def _fresh_db():
 
 
 @pytest.fixture(autouse=True)
-def _mock(monkeypatch):
+def _mock():
     from money import Money
     from pint import Quantity
 
@@ -46,18 +46,17 @@ def _mock(monkeypatch):
         mode="transit",
     )
 
-    async def fake_route(*_, **__):
-        return Attempt.succeeded(canned)
+    class _FakeTflClient:
+        """Canned transit plan — injected via the services client factory."""
 
-    from houses.tfl_client import TflClient
+        def __init__(self, *args, **kwargs):
+            self._plan_override = None
+            self._no_route_detail = ""
 
-    async def mock_plan(self):
-        return Attempt.succeeded(canned)
+        async def plan(self):
+            return Attempt.succeeded(canned)
 
-    monkeypatch.setattr(TflClient, "plan", mock_plan)
-    monkeypatch.setattr("houses.routing.CommuteRouter._google_route_commute", fake_route)
-
-    svc = make_services()
+    svc = make_services(tfl_client_factory=_FakeTflClient)
     token = _sp.set(svc)
     yield
     _sp.reset(token)

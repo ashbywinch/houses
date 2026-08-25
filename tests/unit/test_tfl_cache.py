@@ -301,20 +301,18 @@ async def test_transport_evicts_raw_transient_body(isolated_cache):
     assert entry is None or "httpStatusCode" not in entry
 
 
-def test_scrub_removes_raw_key_value_even_escaped(isolated_cache, monkeypatch):
+def test_scrub_removes_raw_key_value_even_escaped(isolated_cache):
     """The query regex misses escaped/JSON-encoded echoes — the raw key
     VALUE must be scrubbed too (the security review's incomplete-scrub
     finding)."""
     from houses import api_cache
-
-    monkeypatch.setattr(api_cache, "_cached_secret_key_value", "super-secret-key")
 
     blob = {
         "message": "the url was /path?app_key=super-secret-key",
         "json": '{"url": "https://api.tfl.gov.uk/?app_key=super-secret-key"}',
         "plain": "no key here",
     }
-    out = api_cache._scrub_secrets(blob)
+    out = api_cache._scrub_secrets(blob, secret_key_value="super-secret-key")
     assert "super-secret-key" not in json.dumps(out)
     assert "REDACTED" in out["message"]
     assert "REDACTED" in out["json"]

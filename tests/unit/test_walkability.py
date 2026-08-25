@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from houses.walkability import _extract_town
+from houses.walkability import extract_town
 
 
 class TestExtractTown:
-    """_extract_town parses the town name from a property address."""
+    """extract_town parses the town name from a property address."""
 
     @pytest.mark.parametrize(
         ("address", "expected"),
@@ -29,32 +29,32 @@ class TestExtractTown:
             ("", ""),
         ],
     )
-    def test_extract_town(self, address: str, expected: str) -> None:
-        assert _extract_town(address) == expected
+    def testextract_town(self, address: str, expected: str) -> None:
+        assert extract_town(address) == expected
 
     def test_removes_counties(self) -> None:
-        assert _extract_town("Hawkins Way, Fleet, Hampshire, GU52 7JX") == "Fleet"
-        assert _extract_town("Park Road, Didcot, Oxfordshire, OX11 8QP") == "Didcot"
+        assert extract_town("Hawkins Way, Fleet, Hampshire, GU52 7JX") == "Fleet"
+        assert extract_town("Park Road, Didcot, Oxfordshire, OX11 8QP") == "Didcot"
 
     def test_strips_trailing_descriptions(self) -> None:
-        assert _extract_town("Bourne End - Backing the River Wye, SL8 5HR") == "Bourne End"
+        assert extract_town("Bourne End - Backing the River Wye, SL8 5HR") == "Bourne End"
 
     def test_handles_postcode_embedded_in_segment(self) -> None:
         """e.g. 'Surrey. KT9 2HN' where postcode is not at segment start."""
-        assert _extract_town("Leatherhead Road, Chessington, Surrey. KT9 2HN") == "Chessington"
+        assert extract_town("Leatherhead Road, Chessington, Surrey. KT9 2HN") == "Chessington"
 
     def test_returns_empty_for_address_with_only_postcode(self) -> None:
-        assert _extract_town("SW1V 2QQ") == ""
+        assert extract_town("SW1V 2QQ") == ""
 
     def test_returns_empty_for_empty_address(self) -> None:
-        assert _extract_town("") == ""
-        assert _extract_town("  ") == ""
+        assert extract_town("") == ""
+        assert extract_town("  ") == ""
 
     @pytest.mark.asyncio
     async def test_reverse_geocode_fallback(self) -> None:
         """When address-based town fails, reverse geocode should provide a fallback."""
-        from houses.geo import GeoPoint
-        from houses.walkability import enrich_walkability
+        from houses.geopoint import GeoPoint
+        from houses.walkability import WalkabilityFns, enrich_walkability
 
         async def mock_centre_fails(_lat, _lng, _town):
             return None  # address-based town resolution fails
@@ -72,10 +72,12 @@ class TestExtractTown:
             51.5,
             -0.1,
             "Some Street, SW1V 2QQ",
-            _extract_town_centre_fn=mock_centre_fails,
-            _walk_duration_fn=mock_dur,
-            _reverse_geocode_fn=mock_rev,
-            _nearby_amenities_fn=mock_amen,
+            fns=WalkabilityFns(
+                extract_town_centre=mock_centre_fails,
+                walk_duration=mock_dur,
+                reverse_geocode=mock_rev,
+                nearby_amenities=mock_amen,
+            ),
         )
         # Address branch produced no time, so the fallback supplied 15
         assert result["walk_to_town"]["value"] == 15, (
@@ -85,8 +87,8 @@ class TestExtractTown:
     @pytest.mark.asyncio
     async def test_reverse_geocode_not_needed_when_address_works(self) -> None:
         """When address-based town gives a valid walk time, don't call reverse geocode."""
-        from houses.geo import GeoPoint
-        from houses.walkability import enrich_walkability
+        from houses.geopoint import GeoPoint
+        from houses.walkability import WalkabilityFns, enrich_walkability
 
         rev_called = False
 
@@ -108,10 +110,12 @@ class TestExtractTown:
             51.5,
             -0.1,
             "Some Street, Southall, UB2 4GN",
-            _extract_town_centre_fn=mock_extract,
-            _walk_duration_fn=mock_dur,
-            _reverse_geocode_fn=mock_rev,
-            _nearby_amenities_fn=mock_amen,
+            fns=WalkabilityFns(
+                extract_town_centre=mock_extract,
+                walk_duration=mock_dur,
+                reverse_geocode=mock_rev,
+                nearby_amenities=mock_amen,
+            ),
         )
         assert result["walk_to_town"]["value"] == 10
         assert not rev_called, "Reverse geocode should NOT be called when address works"

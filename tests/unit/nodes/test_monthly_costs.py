@@ -96,7 +96,7 @@ class TestYearlySinkingFundNode:
 class TestTotalMonthlyHousingCostNode:
     @pytest.mark.asyncio
     async def test_returns_zero_when_no_data(self):
-        from houses.nodes.total_monthly_housing_cost_node import TotalMonthlyHousingCostNode
+        from houses.nodes.total_monthly_housing_cost_node import HousingCostConfig, TotalMonthlyHousingCostNode
 
         mg = UserInputNode[Money]("tmg", Money)
         sf = UserInputNode[Money]("tsf", Money)
@@ -107,13 +107,15 @@ class TestTotalMonthlyHousingCostNode:
         ct = UserInputNode[CouncilTaxInfo]("tct", CouncilTaxInfo)
         node = TotalMonthlyHousingCostNode(
             "tmc",
-            monthly_mortgage_node=mg,
+            config=HousingCostConfig(
+monthly_mortgage_node=mg,
             yearly_sinking_fund_node=sf,
             life_insurance_node=li,
             rental_income_node=ri,
             status_node=st,
             commute_breakdown_node=cb,
             council_tax_node=ct,
+            ),
         )
         mg.push(Money("0", "GBP"), "test")
         sf.push(Money("0", "GBP"), "test")
@@ -133,7 +135,7 @@ class TestTotalMonthlyHousingCostNode:
 
     @pytest.mark.asyncio
     async def test_computes_total_from_components(self):
-        from houses.nodes.total_monthly_housing_cost_node import TotalMonthlyHousingCostNode
+        from houses.nodes.total_monthly_housing_cost_node import HousingCostConfig, TotalMonthlyHousingCostNode
 
         mg = UserInputNode[Money]("tmg2", Money)
         sf = UserInputNode[Money]("tsf2", Money)
@@ -144,13 +146,15 @@ class TestTotalMonthlyHousingCostNode:
         ct = UserInputNode[CouncilTaxInfo]("tct2", CouncilTaxInfo)
         node = TotalMonthlyHousingCostNode(
             "tmc2",
-            monthly_mortgage_node=mg,
+            config=HousingCostConfig(
+monthly_mortgage_node=mg,
             yearly_sinking_fund_node=sf,
             life_insurance_node=li,
             rental_income_node=ri,
             status_node=st,
             commute_breakdown_node=cb,
             council_tax_node=ct,
+            ),
         )
         mg.push(Money("2000", "GBP"), "test")
         sf.push(Money("6000", "GBP"), "test")

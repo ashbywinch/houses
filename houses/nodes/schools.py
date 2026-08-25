@@ -1,17 +1,17 @@
 from __future__ import annotations
 
+from typing import Any
+
 from dag.attempt import Attempt, SourceType
 from dag.derived_node import DerivedNode
 from dag.node import Node
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 from houses.school_gender import SchoolGender
 from houses.services_provider import get_services
 
 
 class PrimarySchoolNode(DerivedNode[dict]):
-    @property
-    def provenance_source_type(self) -> SourceType:
-        return SourceType.API
+    provenance_source_type = SourceType.API
 
     def __init__(self, node_id: str, *, best_location, best_address, acceptable: tuple[str, ...] = ("mixed",)):
         deps: tuple[Node, ...] = (best_location, best_address)
@@ -37,7 +37,8 @@ class PrimarySchoolNode(DerivedNode[dict]):
         school = attempt.value_or_none()
         if school is None:
             return Attempt.impossible("no primary school found within search radius")
-        result = {
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        result: dict[str, Any] = {
             "name": school.name,
             "ofsted": school.ofsted_rating,
             "walk": None,
@@ -76,7 +77,8 @@ class SecondarySchoolNode(DerivedNode[dict]):
         school = attempt.value_or_none()
         if school is None:
             return Attempt.impossible("no secondary school found within search radius")
-        result = {
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        result: dict[str, Any] = {
             "name": school.name,
             "ofsted": school.ofsted_rating,
             "walk": None,
@@ -89,9 +91,7 @@ class SecondarySchoolNode(DerivedNode[dict]):
             result["lon"] = school.coords.lon
         return Attempt.succeeded(result)
 
-    @property
-    def provenance_source_type(self) -> SourceType:
-        return SourceType.API
+    provenance_source_type = SourceType.API
 
 
 class SchoolLocationNode(DerivedNode[str]):
@@ -101,6 +101,7 @@ class SchoolLocationNode(DerivedNode[str]):
     the address is what the legs should display — never a bare lat/lon.
     """
 
+# lucidlint: ignore detached-method staticmethod would break instantiation/super()
     def __init__(self, node_id: str, *, school_node):
         super().__init__(node_id, str, (school_node,))
 

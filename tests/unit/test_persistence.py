@@ -19,7 +19,7 @@ from dag.persistence import (
     latest_node_result,
     save_node_result,
 )
-from houses.geo import GeoPoint
+from houses.geopoint import GeoPoint
 
 RID = "prop123"
 
@@ -39,7 +39,7 @@ class TestGeoPointSerialisation:
         s = _serialize_value(gp)
         d = json.loads(s)
         assert d["_type"] == "GeoPoint"
-        assert d["_module"] == "houses.geo"
+        assert d["_module"] == "houses.geopoint"
         assert d["lat"] == 51.5
         assert d["lon"] == -0.1
 

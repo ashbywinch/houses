@@ -178,7 +178,7 @@ async def _staged_lookup(node_id: str) -> Attempt | None:
 async def test_get_active_deps_honors_overridden_condition():
     """IfThenElseNode's _get_active_deps reads the condition via
     latest_attempt — an overridden condition must flip the branch."""
-    from dag.if_then_else import IfThenElseNode
+    from dag.if_then_else_node import IfThenElseNode, IfThenElseOptions
 
     cond = UserInputNode[bool]("eval_g1", bool)
     then_src = UserInputNode[int]("eval_g2", int)
@@ -186,10 +186,12 @@ async def test_get_active_deps_honors_overridden_condition():
     node = IfThenElseNode(
         "eval_g4",
         int,
-        condition_sources=(cond,),
-        condition_fn=lambda a: a.value_or(False),
-        then_branch=then_src,
-        else_branch=else_src,
+        options=IfThenElseOptions(
+            condition_sources=(cond,),
+            condition_fn=lambda a: a.value_or(False),
+            then_branch=then_src,
+            else_branch=else_src,
+        ),
     )
     cond.push(False, "user")
     then_src.push(100, "user")

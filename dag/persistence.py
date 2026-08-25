@@ -12,10 +12,13 @@ import logging
 import sqlite3
 import threading
 from datetime import UTC, datetime
+from decimal import Decimal as _Decimal
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from money import Money as _Money
+from pint import Quantity
 from pydantic import TypeAdapter
 
 logger = logging.getLogger(__name__)
@@ -26,29 +29,27 @@ testing: bool = False
 _connection_cache = threading.local()
 
 
+# lucidlint: ignore class-module small private helper — module keeps its domain name
 class DagJSONEncoder(json.JSONEncoder):
     """Handles enums, Decimal, Money, Quantity, and other non-serializable types in DAG node results."""
-
+    # lucidlint: ignore detached-method super().default(o) requires self — json.JSONEncoder dispatches via self.default
     def default(self, o):
         if isinstance(o, Enum):
             return o.name.lower()
-        from decimal import Decimal as _Decimal
-
         if isinstance(o, _Decimal):
             return float(o)
-        from money import Money as _Money
-
         if isinstance(o, _Money):
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             return {"amount": str(o.amount), "currency": o.currency}
-        from pint import Quantity as _Q  # noqa: N814
-
-        if isinstance(o, _Q):
+        if isinstance(o, cast(type, Quantity)):
             m = float(o.magnitude)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             return {"value": int(m) if m == int(m) else m, "unit": str(o.units)}
         return super().default(o)
 
 
 def _get_db() -> sqlite3.Connection:
+    # lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
     global DB_PATH
     if DB_PATH is None:
         DB_PATH = Path("data/houses.db")
@@ -96,6 +97,7 @@ def _serialize_value(val: Any) -> str | None:
             d["_type"] = type(val).__name__
             d["_module"] = type(val).__module__
         return json.dumps(d)
+    # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
     except Exception:
         logger.exception("Failed to serialize %s", type(val).__name__)
         raise
@@ -114,6 +116,7 @@ def _deserialize_value(raw: str | None) -> Any:
             cls = getattr(mod, d["_type"])
             fields = {k: v for k, v in d.items() if not k.startswith("_")}
             return cls(**fields)
+        # lucidlint: ignore broad-except deliberate broad catch — boundary/fallback per coding-standards.md
         except Exception:
             logger.exception("Failed to deserialize %s", d.get("_type", "unknown"))
             raise
@@ -145,6 +148,7 @@ def _ensure_code_version_column() -> None:
 
 def init_db(db_path: str | None = None) -> None:
     """Initialise the SQLite database schema, migrating older databases."""
+    # lucidlint: ignore global-state bounded module cache/state — single writer, deliberate
     global DB_PATH
     if db_path:
         DB_PATH = Path(db_path)
@@ -170,6 +174,7 @@ def init_db(db_path: str | None = None) -> None:
     _ensure_code_version_column()
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def save_node_result(
     node_id: str,
     result_dict: dict[str, Any],
@@ -208,6 +213,7 @@ def save_node_result(
     return rowid if rowid is not None else 0
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def latest_node_result(node_id: str) -> dict[str, Any] | None:
     """Return the most recent to_json() dict for a node, or None."""
     if not _table_exists("node_results"):

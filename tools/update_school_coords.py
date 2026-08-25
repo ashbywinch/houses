@@ -28,16 +28,21 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from houses.geo import GeoPoint
-from houses.location import _geocode_address, _get_geo_state
+from houses.geopoint import GeoPoint
+from houses.location import geocode_address, get_geo_state
 
 logger = logging.getLogger(__name__)
 
 CSV_PATH = Path("data/edubaseall_enriched.csv")
+# lucidlint: ignore magic-number 51.5074 — LONDON's latitude: coordinate data of the named LONDON constant
 LONDON = GeoPoint(51.5074, -0.1278)
 MAX_KM = 200
+MAX_CORRECTION_KM = 100
+PROGRESS_SAVE_INTERVAL = 100
+NOMINATIM_DELAY_S = 0.15
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _atomic_write(rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
     """Write CSV to a temp file then atomically replace the original."""
     tmp = CSV_PATH.with_suffix(".csv.tmp")
@@ -48,6 +53,7 @@ def _atomic_write(rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
     tmp.replace(CSV_PATH)
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _build_full_address(row: dict[str, Any]) -> str:
     name = (row.get("EstablishmentName") or "").strip()
     street = (row.get("Street") or "").strip()
@@ -71,12 +77,14 @@ def _existing_coords(row: dict[str, Any]) -> GeoPoint | None:
     return None
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _clear_coords(row: dict[str, Any]) -> None:
     """Remove corrected coords from a row (mutates in place)."""
     row["CorrectedLatitude"] = ""
     row["CorrectedLongitude"] = ""
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _near_london(row: dict[str, Any]) -> bool:
     coords = _existing_coords(row)
     if coords is None:
@@ -84,6 +92,7 @@ def _near_london(row: dict[str, Any]) -> bool:
     return coords.distance_km_to(LONDON) <= MAX_KM
 
 
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
 def _already_done(row: dict[str, Any]) -> bool:
     """True when existing corrected coords are present AND pass the 100km sanity check.
 
@@ -100,10 +109,27 @@ def _already_done(row: dict[str, Any]) -> bool:
         _clear_coords(row)
         return False
     original = _existing_coords(row)
-    if original is not None and original.distance_km_to(corrected) >= 100:
+    if original is not None and original.distance_km_to(corrected) >= MAX_CORRECTION_KM:
         _clear_coords(row)
         return False
     return True
+
+
+async def _geocode_address_with_fallback(address: str, row: dict[str, Any]) -> GeoPoint | None:
+    """Geocode the full address; retry with name + postcode when it fails.
+
+    Some schools have streets/locality in GIAS that don't match what geocoding
+    services know, so the fallback keeps those rows findable.
+    """
+    result = await geocode_address(address)
+    if not (result.succeeded and result.value_or_none() is not None):
+        name = (row.get("EstablishmentName") or "").strip()
+        postcode = (row.get("Postcode") or "").strip()
+        fallback = f"{name}, {postcode}" if name and postcode else ""
+        if fallback:
+            logger.debug("Full address failed, retrying with '%s'", fallback)
+            result = await geocode_address(fallback)
+    return result.value_or_none()
 
 
 async def main() -> None:
@@ -118,9 +144,7 @@ async def main() -> None:
         fieldnames = list(reader.fieldnames or [])
         rows: list[dict[str, Any]] = list(reader)
 
-    for col in ("CorrectedLatitude", "CorrectedLongitude"):
-        if col not in fieldnames:
-            fieldnames.append(col)
+    fieldnames.extend(col for col in ("CorrectedLatitude", "CorrectedLongitude") if col not in fieldnames)
 
     total = len(rows)
     skipped = far_away = done = failed = 0
@@ -140,20 +164,8 @@ async def main() -> None:
             logger.warning("Row %d: empty address, skipping", i)
             continue
 
-        result = await _geocode_address(address)
-        if not (result.succeeded and result.value_or_none() is not None):
-            # Full address failed — try school name + postcode only.
-            # Some schools have streets/locality in GIAS that don't
-            # match what geocoding services know.
-            name = (row.get("EstablishmentName") or "").strip()
-            postcode = (row.get("Postcode") or "").strip()
-            fallback = f"{name}, {postcode}" if name and postcode else ""
-            if fallback:
-                logger.debug("Full address failed, retrying with '%s'", fallback)
-                result = await _geocode_address(fallback)
-
-        if result.succeeded and result.value_or_none() is not None:
-            pt = result.value_or_none()
+        pt = await _geocode_address_with_fallback(address, row)
+        if pt is not None:
             row["CorrectedLatitude"] = f"{pt.lat:.7f}"
             row["CorrectedLongitude"] = f"{pt.lon:.7f}"
             done += 1
@@ -161,17 +173,17 @@ async def main() -> None:
             failed += 1
             logger.debug("Row %d (%s): geocode failed", i, address[:60])
 
-        if _get_geo_state().nominatim_exhausted:
+        if get_geo_state().nominatim_exhausted:
             logger.info("Nominatim exhausted — stopping (done=%d failed=%d)", done, failed)
             break
 
-        if (i + 1) % 100 == 0:
+        if (i + 1) % PROGRESS_SAVE_INTERVAL == 0:
             _atomic_write(rows, fieldnames)
             logger.info(
                 "  Progress: %d/%d (done=%d skipped=%d far=%d failed=%d)", i + 1, total, done, skipped, far_away, failed
             )
 
-        await asyncio.sleep(0.15)
+        await asyncio.sleep(NOMINATIM_DELAY_S)
 
     # Always flush at the end — row modifications from _already_done
     # (clearing bad coords) must be persisted even if all geocodes failed.

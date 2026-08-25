@@ -135,7 +135,12 @@ class TestAttemptCreatedAt:
 
     def test_created_at_can_be_overridden_for_testing(self):
         fixed = datetime(2024, 1, 15, 14, 23, tzinfo=UTC)
-        a = Attempt.succeeded(42, _now=lambda: fixed)
+        original = Attempt._now
+        Attempt._now = lambda: fixed
+        try:
+            a = Attempt.succeeded(42)
+        finally:
+            Attempt._now = original
         assert a.created_at == fixed
 
     def test_created_at_set_on_pending(self):

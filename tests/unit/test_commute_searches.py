@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from tools.commute.rightmove_url import parse_search_url
 from tools.commute.searches import (
+    SearchOptions,
     build_searches,
     nearest_station_name,
     shed_to_searches,
@@ -26,6 +27,8 @@ NOW = "2026-08-02T09:00:00+00:00"
 
 def _payload(**overrides):
     kwargs = {
+        "cell_km": 11.1,
+        "buffer_km": 5.0,
         "threshold_min": 132,
         "destinations": DESTINATIONS,
         "min_beds": 2,
@@ -34,7 +37,7 @@ def _payload(**overrides):
         "engine_version": "v1",
     }
     kwargs.update(overrides)
-    return build_searches(RECTS, KEPT_STATIONS, **kwargs)
+    return build_searches(RECTS, KEPT_STATIONS, options=SearchOptions(**kwargs))
 
 
 def test_build_searches_schema():
@@ -76,6 +79,7 @@ def test_nearest_station_name_picks_closest():
     assert nearest_station_name(rect, KEPT_STATIONS) == "Reading area"
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_write_searches_does_not_churn_identical_content(tmp_path):
     from tools.commute.searches import _same_searches
 
@@ -95,6 +99,7 @@ def test_write_searches_does_not_churn_identical_content(tmp_path):
     assert (tmp_path / "searches.json").read_text() != first
 
 
+# lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
 def test_write_searches_regenerates_stale_txt(tmp_path):
     from tools.commute.searches import write_searches
 
@@ -128,20 +133,22 @@ BBOX = BBox(lat_min=50.1, lat_max=53.6, lon_min=-4.0, lon_max=2.0)
 
 
 def test_shed_to_searches_covers_all_kept_stations():
-    from houses.geo import GeoPoint
+    from houses.geopoint import GeoPoint
     from tools.commute.tile import point_to_rect_distance_km
 
     payload = shed_to_searches(
         SHED_RECORDS,
         BBOX,
-        cell_km=11.1,
-        buffer_km=5.0,
-        min_beds=2,
-        property_type="houses",
-        generated_at=NOW,
-        engine_version="v1",
-        threshold_min=132,
-        destinations=DESTINATIONS,
+        options=SearchOptions(
+            cell_km=11.1,
+            buffer_km=5.0,
+            min_beds=2,
+            property_type="houses",
+            generated_at=NOW,
+            engine_version="v1",
+            threshold_min=132,
+            destinations=DESTINATIONS,
+        ),
     )
     searches = payload["searches"]
     assert len(searches) <= 100
@@ -149,7 +156,7 @@ def test_shed_to_searches_covers_all_kept_stations():
     for rec in SHED_RECORDS:
         if not rec["kept"]:
             continue
-        point = GeoPoint(rec["lat"], rec["lon"])
+        point = GeoPoint(float(rec["lat"]), float(rec["lon"]))
         assert any(point_to_rect_distance_km(point, r) <= 5.0 + 1e-6 for r in rects), rec["name"]
     # Exeter is not kept — but may still sit inside a neighbouring cell; only
     # assert that its exclusion does not break the coverage of kept stations.
@@ -161,14 +168,16 @@ def test_shed_to_searches_rectangles_disjoint():
     payload = shed_to_searches(
         SHED_RECORDS,
         BBOX,
-        cell_km=11.1,
-        buffer_km=5.0,
-        min_beds=2,
-        property_type="houses",
-        generated_at=NOW,
-        engine_version="v1",
-        threshold_min=132,
-        destinations=DESTINATIONS,
+        options=SearchOptions(
+            cell_km=11.1,
+            buffer_km=5.0,
+            min_beds=2,
+            property_type="houses",
+            generated_at=NOW,
+            engine_version="v1",
+            threshold_min=132,
+            destinations=DESTINATIONS,
+        ),
     )
 
     def _polygon_to_rect(poly):
@@ -194,13 +203,15 @@ def test_shed_to_searches_excludes_non_kept_station_cells():
     payload = shed_to_searches(
         records,
         BBOX,
-        cell_km=11.1,
-        buffer_km=5.0,
-        min_beds=2,
-        property_type="houses",
-        generated_at=NOW,
-        engine_version="v1",
-        threshold_min=132,
-        destinations=DESTINATIONS,
+        options=SearchOptions(
+            cell_km=11.1,
+            buffer_km=5.0,
+            min_beds=2,
+            property_type="houses",
+            generated_at=NOW,
+            engine_version="v1",
+            threshold_min=132,
+            destinations=DESTINATIONS,
+        ),
     )
     assert payload["searches"] == []
