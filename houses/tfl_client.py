@@ -263,6 +263,8 @@ class TflClient:
         from_station: Station,
         to_postcode: str,
         _data: dict | None = None,
+        *,
+        _client_factory: Callable | None = None,
     ) -> Money | None:
         """Get the peak single fare for a tube journey between a station and a postcode.
 
@@ -270,7 +272,10 @@ class TflClient:
         which is within the zone 1 peak window of 06:30\u201309:30 on weekdays).
         Returns a ``Money`` single fare, or ``None`` if TfL can't route the
         journey (walking distance from the NR terminus to the destination)
-        or if the API call fails.
+        or if the API call fails.  A deterministic no-route 404 converts to
+        ``None`` (the caller applies its fallback fare) — out-of-area
+        destinations legitimately 404 here; transient errors (429/5xx)
+        still raise for DAG retry.  ``_client_factory`` is injectable for tests.
         """
         if _data is not None:
             return TflClient._parse_tube_fare(_data)
@@ -279,7 +284,12 @@ class TflClient:
         params["nationalSearch"] = "false"
         params.update(TflClient._tfl_auth_params())
 
-        data = await TflClient._cached_api_call(url, params)
+        try:
+            data = await TflClient._cached_api_call(url, params, _client_factory=_client_factory)
+        except HttpError as e:
+            if e.status != 404:
+                raise
+            return None
         if data is None:
             return None
         return TflClient._parse_tube_fare(data)
