@@ -1,0 +1,90 @@
+name: Release
+
+# Blue/green release, driven from GitHub.
+#
+#   deploy  — checkout the ref on the STANDBY box side, snapshot the live DB
+#             into the standby's smoke copy, start it, run authenticated
+#             smoke checks. The live side and live DB are untouched. The
+#             standby is then publicly reachable at the smoke hostname
+#             (https://houses-smoke.blueumbrella.net) for human eyeballing.
+#   switch  — flip: stop the live side, start the (smoke-verified) standby on
+#             the live DB, swap the tunnel hostnames. Run this AFTER the
+#             standby has been smoke-tested (automated + your eyes).
+#   rollback — undo the last switch (previous code + pre-flip DB snapshot).
+#
+# Triggers: push a tag v* (deploys automatically) or workflow_dispatch with
+# the action of your choice.
+#
+# Requires GitHub secrets: BOX_HOST (public IP or hostname), BOX_USER,
+# BOX_SSH_KEY (private key of the restricted deploy key; see
+# tools/deploy/provision.md).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'git ref to release (SHA, branch, or tag)'
+        required: false
+        default: 'main'
+      action:
+        description: 'deploy to standby | switch over | rollback'
+        required: false
+        default: 'deploy'
+        type: choice
+        options: ['deploy', 'switch', 'rollback']
+
+jobs:
+  deploy:
+    if: github.event_name == 'push' || inputs.action == 'deploy'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy ref to standby and smoke-test it
+        env:
+          BOX_HOST: ${{ secrets.BOX_HOST }}
+          BOX_USER: ${{ secrets.BOX_USER }}
+          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          REF="${{ github.event_name == 'push' && github.ref_name || inputs.ref }}"
+          echo "Deploying $REF to the standby..."
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
+            "$BOX_USER@$BOX_HOST" "sudo /opt/houses/release.sh '$REF'"
+        timeout-minutes: 40
+
+  switch:
+    if: inputs.action == 'switch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Switch traffic to the smoke-verified standby
+        env:
+          BOX_HOST: ${{ secrets.BOX_HOST }}
+          BOX_USER: ${{ secrets.BOX_USER }}
+          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
+            "$BOX_USER@$BOX_HOST" "sudo /opt/houses/switch.sh"
+        timeout-minutes: 20
+
+  rollback:
+    if: inputs.action == 'rollback'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Roll back to the previous side
+        env:
+          BOX_HOST: ${{ secrets.BOX_HOST }}
+          BOX_USER: ${{ secrets.BOX_USER }}
+          BOX_SSH_KEY: ${{ secrets.BOX_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$BOX_SSH_KEY" > /tmp/deploy.key
+          chmod 600 /tmp/deploy.key
+          ssh -i /tmp/deploy.key -o StrictHostKeyChecking=accept-new \
+            "$BOX_USER@$BOX_HOST" "sudo /opt/houses/switch.sh --rollback"
+        timeout-minutes: 20

@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from houses.server import app, extract_postcode
@@ -25,6 +26,42 @@ def _inject_session(c: TestClient) -> None:
 
 
 _inject_session(client)
+
+
+class TestLifespanDbWiring:
+    """The DAG persistence layer must honor HOUSES_SQLITE_PATH — the
+    blue/green standby's smoke isolation depends on it (a standby that
+    writes the live DB would corrupt prod during pre-switch testing)."""
+
+    @pytest.mark.asyncio
+    async def test_lifespan_wires_dag_db_to_settings_path(self):
+        """Regression: startup called init_dag_db() bare, so the DAG
+        persistence fell back to its hardcoded data/houses.db and ignored
+        settings.sqlite_path — a standby's writes landed in the LIVE DB.
+        After startup, DAG writes must go to settings.sqlite_path.  The
+        lifespan runs for real (its background tasks are canceled on exit);
+        the two module globals it sets are restored in finally so nothing
+        leaks to later tests."""
+        from pathlib import Path
+
+        import dag.scheduler as scheduler_mod
+        import houses.server as server_mod
+        from dag import persistence as p
+        from houses.nodes import settings as nodes_settings
+        from houses.settings import settings
+
+        prev_app_mode = nodes_settings._app_mode
+        prev_after_refresh = scheduler_mod.get_scheduler()._after_refresh_callback
+        p.DB_PATH = None  # module state, deliberately: assert what startup wires
+        try:
+            async with server_mod.lifespan(server_mod.app):
+                assert Path(settings.sqlite_path) == p.DB_PATH, (
+                    f"DAG persistence DB_PATH={p.DB_PATH!r} — startup must wire "
+                    "init_dag_db(settings.sqlite_path)"
+                )
+        finally:
+            nodes_settings._app_mode = prev_app_mode
+            scheduler_mod.get_scheduler()._after_refresh_callback = prev_after_refresh
 
 
 class TestExtractPostcode:

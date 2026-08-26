@@ -1,0 +1,13 @@
+# /etc/systemd/system/houses-chrome.service — headless browser for the
+# Rightmove scraper. One shared instance on :9222; both blue and green use it.
+[Unit]
+Description=Headless browser for the Rightmove scraper
+
+[Service]
+User=ubuntu
+ExecStart=/usr/bin/google-chrome --headless=new --disable-dev-shm-usage --remote-debugging-port=9222 --user-data-dir=/var/lib/houses-chrome about:blank
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
