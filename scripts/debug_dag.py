@@ -77,7 +77,9 @@ def inspect_rid(rid: str):
             except ValueError as e:
                 logger.debug("corrupt result_json for %s (shown as _corrupt): %s", nid, e)
                 nodes[nid] = {"_corrupt": str(r["result_json"][:200])}
-                continue
+                continue  # corrupt row: recorded, printed via the sorted pass below
+
+    for nid in sorted(nodes):
         data = nodes[nid]
         short = nid.replace(f"{rid}/", "", 1)
         status = data.get("status", "?")

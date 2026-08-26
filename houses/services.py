@@ -486,9 +486,10 @@ class Services:
     def __post_init__(self):
         if self.latest_node_result_fn is not None:
             # The dataclass field factories ran with the real reader —
-            # rebuild the settings sources against the injected reader.
-            SETTINGS_SOURCE_CACHE.pop("persons", None)
-            SETTINGS_SOURCE_CACHE.pop("commute_thresholds", None)
+            # invalidate the whole settings-source cache and rebuild every
+            # source against the injected reader, or the cached financial
+            # nodes silently ignore the fake.
+            SETTINGS_SOURCE_CACHE.clear()
             self.persons_source = _make_settings_source(
                 "persons",
                 list[Person],
