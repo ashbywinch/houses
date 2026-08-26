@@ -112,7 +112,7 @@ make stop                       # Stop dev server + frontend
 | `houses/server.py` | FastAPI app, endpoints, `_run_enrichment()` orchestration |
 | `houses/services.py` | Service protocols + `Services` DI container (real/fake) |
 | `houses/context.py` | ContextVar per-request state (bus fares, geo state, sheets client) |
-| `houses/config.py` | Env-var configuration |
+| `houses/settings.py` | Env-var configuration |
 | `houses/sheets/` | gspread integration, column schema (`Row`), View tab sync (`View`), formulas |
 | `tests/helpers.py` | Reusable fakes: `FakeCommuteRouter`, `FakeEPC`, `make_services()` |
 | `houses/nodes/` | New DAG node implementations (replaces old `houses/model/` DAG) |

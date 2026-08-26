@@ -8,7 +8,7 @@
 make setup        # Create venv, install deps
 ```
 
-Config: `pydantic-settings`, `HOUSES_` prefix (see `houses/config.py` and `.env.example`).
+Config: `pydantic-settings`, `HOUSES_` prefix (see `houses/settings.py` and `.env.example`).
 
 **API keys live in the shell environment** (`.zshrc`, `.bashrc`), NOT in `.env` or code. `.env` is for non-secret defaults only. Never read, log, echo, or store keys in files.
 

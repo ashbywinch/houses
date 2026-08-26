@@ -40,5 +40,5 @@
 
 Follow the pattern of existing modules: fail gracefully (log warning,
 return None/default on errors), use the shared cache infrastructure, and
-add config fields to `houses/config.py` if new API keys or settings are
+add config fields to `houses/settings.py` if new API keys or settings are
 needed.
