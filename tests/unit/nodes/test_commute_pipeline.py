@@ -308,7 +308,6 @@ class TestFullCommutePipeline:
         _services.routes["SW1V 2QQ"] = _pimlico_commute()
 
         await flush_processor()
-        await flush_processor()
 
         a = await merge_node.attempt()
         assert a.succeeded, f"got {a.status}: {a.error}"
@@ -450,7 +449,6 @@ class TestFullCommutePipeline:
         _services.routes["RG12 8YA"] = _maidenhead_commute()
 
         await flush_processor()
-        await flush_processor()
 
         # Inspect provenance of each node in the chain
         import json
@@ -590,7 +588,6 @@ class TestFullCommutePipeline:
             petrol_cost_per_litre_node=svc.setting_nodes.get("settings/petrol_cost_per_litre"),
         )
 
-        await flush_processor()
         await flush_processor()
 
         a = await final_fuel.attempt()

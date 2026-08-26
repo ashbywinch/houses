@@ -50,7 +50,6 @@ class TestSchoolNodes:
             from dag.scheduler import flush_processor
 
             await flush_processor()
-            await flush_processor()
             await node.attempt()
         finally:
             _sp.reset(token)
@@ -81,7 +80,6 @@ class TestSchoolNodes:
         try:
             from dag.scheduler import flush_processor
 
-            await flush_processor()
             await flush_processor()
             await node.attempt()
         finally:
@@ -126,7 +124,6 @@ class TestCouncilTaxNode:
             from dag.scheduler import flush_processor
 
             await flush_processor()
-            await flush_processor()
             await node.attempt()
             assert captured.get("postcode") == "UB2 4GN", f"Expected 'UB2 4GN', got {captured.get('postcode')!r}"
         finally:
@@ -143,7 +140,6 @@ class TestCouncilTaxNode:
         addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
         from dag.scheduler import flush_processor
 
-        await flush_processor()
         await flush_processor()
         a = await node.attempt()
         assert a.pending
@@ -191,7 +187,6 @@ class TestTownNode:
         addr.push("48 Acacia Avenue, Southall, UB2 5AD", "test")
         from dag.scheduler import flush_processor
 
-        await flush_processor()
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded

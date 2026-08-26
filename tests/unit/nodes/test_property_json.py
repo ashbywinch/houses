@@ -92,7 +92,6 @@ class TestSummaryShape:
     @pytest.mark.asyncio
     async def test_has_expected_keys(self, prop):
         await flush_processor()
-        await flush_processor()
         s = await prop.to_json_summary()
         assert s["rid"] == "test_shape"
         assert "best_address" in s
@@ -106,7 +105,6 @@ class TestSummaryShape:
 
     @pytest.mark.asyncio
     async def test_every_value_is_wrapped(self, prop):
-        await flush_processor()
         await flush_processor()
         s = await prop.to_json_summary()
         for key in (
@@ -135,7 +133,6 @@ class TestDetailShape:
     @pytest.mark.asyncio
     async def test_has_all_sections(self, prop):
         await flush_processor()
-        await flush_processor()
         d = await prop.to_json_detail()
         assert d["rid"] == "test_shape"
         for section in ("location", "commutes", "schools", "affordability", "area", "comments", "settings"):
@@ -143,7 +140,6 @@ class TestDetailShape:
 
     @pytest.mark.asyncio
     async def test_affordability_keys(self, prop):
-        await flush_processor()
         await flush_processor()
         d = await prop.to_json_detail()
         af = d["affordability"]
@@ -166,7 +162,6 @@ class TestDetailShape:
     @pytest.mark.asyncio
     async def test_comments_keys(self, prop):
         await flush_processor()
-        await flush_processor()
         d = await prop.to_json_detail()
         cm = d["comments"]
         expected = (
@@ -183,7 +178,6 @@ class TestDetailShape:
     @pytest.mark.asyncio
     async def test_location_keys(self, prop):
         await flush_processor()
-        await flush_processor()
         d = await prop.to_json_detail()
         loc = d["location"]
         expected = ("best_location", "geocode", "rightmove_location", "precise_location")
@@ -193,7 +187,6 @@ class TestDetailShape:
     @pytest.mark.asyncio
     async def test_settings_keys(self, prop):
         await flush_processor()
-        await flush_processor()
         d = await prop.to_json_detail()
         s = d["settings"]
         assert "persons" in s
@@ -201,7 +194,6 @@ class TestDetailShape:
 
     @pytest.mark.asyncio
     async def test_schools_keys(self, prop):
-        await flush_processor()
         await flush_processor()
         d = await prop.to_json_detail()
         sc = d["schools"]
@@ -212,7 +204,6 @@ class TestDetailShape:
 
     @pytest.mark.asyncio
     async def test_monthly_sinking_is_monthly_not_yearly(self, prop):
-        await flush_processor()
         await flush_processor()
         d = await prop.to_json_detail()
         sf = d["affordability"]["monthly_sinking_fund"]
@@ -232,7 +223,6 @@ class TestCommuteData:
     @pytest.mark.asyncio
     async def test_commute_data_has_duration_with_value_and_unit(self, prop):
         await flush_processor()
-        await flush_processor()
         assert prop.commute_selectors, "no commute selectors — pipeline must create them"
         for key, selector in prop.commute_selectors.items():
             j = await selector.to_json()
@@ -244,7 +234,6 @@ class TestCommuteData:
     @pytest.mark.asyncio
     async def test_commute_data_has_daily_cost_with_amount_and_currency(self, prop):
         await flush_processor()
-        await flush_processor()
         assert prop.commute_selectors, "no commute selectors — pipeline must create them"
         for key, selector in prop.commute_selectors.items():
             j = await selector.to_json()
@@ -255,7 +244,6 @@ class TestCommuteData:
 
     @pytest.mark.asyncio
     async def test_commute_data_has_label(self, prop):
-        await flush_processor()
         await flush_processor()
         assert prop.commute_selectors, "no commute selectors — pipeline must create them"
         for key, selector in prop.commute_selectors.items():
@@ -269,7 +257,6 @@ class TestCommuteData:
     @pytest.mark.asyncio
     async def test_commute_duration_appears_in_summary(self, prop):
         """List page PropertyCard accesses c.commute.value.duration.value."""
-        await flush_processor()
         await flush_processor()
         s = await prop.to_json_summary()
         assert s["commutes"], "summary must contain commutes"
@@ -293,7 +280,6 @@ class TestFinancialSettingsPropagation:
         from houses.services_provider import get_services
 
         await flush_processor()
-        await flush_processor()
 
         # Read detail baseline
         d1 = await prop.to_json_detail()
@@ -312,7 +298,6 @@ class TestFinancialSettingsPropagation:
             if nid and nid in svc.setting_nodes:
                 svc.setting_nodes[nid].push(val, "user")
 
-        await flush_processor()
         await flush_processor()
 
         # Re-read — must reflect the new rate
@@ -361,7 +346,6 @@ class TestSchoolAcceptableFromPersons:
         p.user_entered_address.push("31 Isambard Rd, SW1V 2QQ", "test")
 
         await flush_processor()
-        await flush_processor()
 
         # The school nodes should have acceptable=("girls",)
         # We can check this by examining the node's _acceptable attribute
@@ -393,7 +377,6 @@ class TestSchoolAcceptableFromPersons:
         p.postcode.push("SW1V 2QQ", "test")
         p.user_entered_address.push("31 Isambard Rd, SW1V 2QQ", "test")
 
-        await flush_processor()
         await flush_processor()
 
         assert p.primary_school._acceptable == ("mixed",)

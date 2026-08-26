@@ -34,7 +34,8 @@ def flush_all() -> None:
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-    loop.run_until_complete(flush_processor())
+    # ONE drain: a node's refresh queues its dependents inside the same
+    # drain loop, so a second call could only mask a queue bug.
     loop.run_until_complete(flush_processor())
 
 

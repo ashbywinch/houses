@@ -75,7 +75,6 @@ class TestWorksPropagatesToMortgage:
         term.push(27, "test")
 
         await flush_processor()
-        await flush_processor()
 
         # ── Baseline: no works yet ────────────────────────────────
         a1 = await mr.attempt()
@@ -88,7 +87,6 @@ class TestWorksPropagatesToMortgage:
         # ── Update works estimate ──────────────────────────────────
         works.push({"Simon": 0, "Ashby": 20000}, "test")
 
-        await flush_processor()
         await flush_processor()
 
         # ── Verify mortgage changed ───────────────────────────────
@@ -166,7 +164,6 @@ class TestWorksPropagatesToMortgage:
         term.push(27, "test")
 
         await flush_processor()
-        await flush_processor()
 
         # Baseline monthly payment (mortgage = 38k)
         m1 = await mm.attempt()
@@ -178,7 +175,6 @@ class TestWorksPropagatesToMortgage:
         # Update works
         works.push({"Simon": 0, "Ashby": 20000}, "test")
 
-        await flush_processor()
         await flush_processor()
 
         # Verify monthly payment changed (mortgage now = 58k)

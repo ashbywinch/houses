@@ -228,7 +228,6 @@ class TestLifeInsurancePerPerson:
         from dag.scheduler import flush_processor
 
         await flush_processor()
-        await flush_processor()
         a = await node.attempt()
         assert a.succeeded, f"life insurance failed: {a.error}"
         formula = node.provenance_formula
@@ -296,7 +295,6 @@ class TestTotalWorksPerPerson:
         works.push({"Ashby": Money("20000", "GBP"), "Simon": Money("5000", "GBP")}, "user")
         from dag.scheduler import flush_processor
 
-        await flush_processor()
         await flush_processor()
         a = await node.attempt()
         assert a.succeeded, f"total works failed: {a.error}"

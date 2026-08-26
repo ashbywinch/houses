@@ -155,7 +155,6 @@ async def test_secondary_school_returns_impossible_when_no_school_found():
         loc.push(GeoPoint(51.5, -0.1), "test")
         addr.push("10 High St, London, SW1V 2QQ", "test")
         await flush_processor()
-        await flush_processor()
         a = await node.attempt()
         assert not a.succeeded
         assert "no secondary school found" in a.error
@@ -177,7 +176,6 @@ async def test_primary_school_returns_impossible_when_no_school_found():
         node = PrimarySchoolNode("ps3", best_location=loc, best_address=addr)
         loc.push(GeoPoint(51.5, -0.1), "test")
         addr.push("10 High St, London, SW1V 2QQ", "test")
-        await flush_processor()
         await flush_processor()
         a = await node.attempt()
         assert not a.succeeded
@@ -278,7 +276,6 @@ class TestSchoolNodeAcceptable:
             loc.push(GeoPoint(51.5, -0.37), "test")
             addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
             await flush_processor()
-            await flush_processor()
             assert seen_acceptable is not None
             assert set(seen_acceptable) == {SchoolGender.BOYS, SchoolGender.GIRLS}
         finally:
@@ -309,7 +306,6 @@ class TestSchoolNodeAcceptable:
             SecondarySchoolNode("ss_acc", best_location=loc, best_address=addr, acceptable=("girls",))
             loc.push(GeoPoint(51.5, -0.37), "test")
             addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
-            await flush_processor()
             await flush_processor()
             assert seen_acceptable is not None
             assert list(seen_acceptable) == [SchoolGender.GIRLS]
@@ -342,7 +338,6 @@ class TestSchoolNodeAcceptable:
             loc.push(GeoPoint(51.5, -0.37), "test")
             addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
             await flush_processor()
-            await flush_processor()
             assert seen == (SchoolGender.MIXED,)
         finally:
             _sp.reset(token)
@@ -372,7 +367,6 @@ class TestSchoolNodeAcceptable:
             SecondarySchoolNode("ss_def", best_location=loc, best_address=addr)
             loc.push(GeoPoint(51.5, -0.37), "test")
             addr.push("31 Isambard Road, Southall, UB2 4GN", "test")
-            await flush_processor()
             await flush_processor()
             assert seen == (SchoolGender.MIXED,)
         finally:
@@ -1049,7 +1043,6 @@ class TestSchoolErrorPropagation:
             loc.push(GeoPoint(51.5, -0.1), "test")
             addr.push("10 High St, London, SW1V 2QQ", "test")
             await flush_processor()
-            await flush_processor()
             a = await node.attempt()
             assert not a.succeeded
             assert "postcode not found (404)" in a.error, f"Expected geocode reason, got: {a.error}"
@@ -1070,7 +1063,6 @@ class TestSchoolErrorPropagation:
             node = PrimarySchoolNode("pe2", best_location=loc, best_address=addr)
             loc.push(GeoPoint(51.5, -0.1), "test")
             addr.push("10 High St, London, SW1V 2QQ", "test")
-            await flush_processor()
             await flush_processor()
             a = await node.attempt()
             assert not a.succeeded

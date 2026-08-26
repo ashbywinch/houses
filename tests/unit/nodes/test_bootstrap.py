@@ -19,7 +19,6 @@ class TestBootstrapFromRow:
         row = {"Address": "10 High St, London SW1V 2QQ"}
         bootstrap_from_row(row, sources)
         await flush_processor()
-        await flush_processor()
         a = await sources["rightmove_address"].attempt()
         assert a.value_or_none() == "10 High St, London SW1V 2QQ"
 
@@ -33,7 +32,6 @@ class TestBootstrapFromRow:
         row = {"Rightmove URL": "https://www.rightmove.co.uk/properties/12345"}
         bootstrap_from_row(row, sources)
         await flush_processor()
-        await flush_processor()
         a = await sources["rightmove_url"].attempt()
         assert a.value_or_none() == "https://www.rightmove.co.uk/properties/12345"
 
@@ -46,7 +44,6 @@ class TestBootstrapFromRow:
         }
         row = {"Bedrooms": "3"}
         bootstrap_from_row(row, sources)
-        await flush_processor()
         await flush_processor()
         a = await sources["rightmove_bedrooms"].attempt()
         assert a.value_or_none() == "3"
@@ -78,7 +75,6 @@ class TestBootstrapFromRow:
         }
         bootstrap_from_row(row, sources)
         await flush_processor()
-        await flush_processor()
         a = await sources["rightmove_location"].attempt()
         assert a.succeeded
         assert a.value_or_none() == GeoPoint(51.5, -0.1)
@@ -96,7 +92,6 @@ class TestBootstrapFromRow:
         }
         bootstrap_from_row(row, sources)
         await flush_processor()
-        await flush_processor()
         assert not (await sources["rightmove_location"].attempt()).succeeded
 
     @pytest.mark.asyncio
@@ -112,7 +107,6 @@ class TestBootstrapFromRow:
             "Postcode": "SW1V 2QQ",
         }
         bootstrap_from_row(row, sources)
-        await flush_processor()
         await flush_processor()
         a = await sources["precise_location"].attempt()
         assert a.succeeded
@@ -131,7 +125,6 @@ class TestBootstrapFromRow:
             "Postcode": "SW1V 2QQ",
         }
         bootstrap_from_row(row, sources)
-        await flush_processor()
         await flush_processor()
         a = await sources["corrected_address"].attempt()
         assert a.succeeded
@@ -155,7 +148,6 @@ class TestBootstrapFromRow:
         }
         bootstrap_from_row(row, sources)
         await flush_processor()
-        await flush_processor()
         a = await sources["user_entered_address"].attempt()
         assert a.succeeded
         pushed = a.value_or_none()
@@ -175,7 +167,6 @@ class TestBootstrapFromRow:
             "Postcode": "SW1V 2QQ",
         }
         bootstrap_from_row(row, sources)
-        await flush_processor()
         await flush_processor()
         a = await sources["user_entered_address"].attempt()
         assert not a.succeeded  # not pushed because upgraded == address
@@ -221,7 +212,6 @@ class TestBootstrapFromRow:
             "user_entered_address": user,
         }
         bootstrap_from_row(row, sources)
-        await flush_processor()
         await flush_processor()
 
         a = await best_loc.attempt()
