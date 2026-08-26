@@ -1,0 +1,11 @@
+# Example values — copy to terraform.tfvars and fill in (terraform.tfvars is
+# gitignored). All OCIDs/fingerprints come from the console after the API
+# key upload (see tools/deploy/provision.md Step 1).
+#
+#   region                 = "eu-frankfurt-1"
+#   tenancy_ocid           = "ocid1.tenancy.oc1..aaaa..."
+#   user_ocid              = "ocid1.user.oc1..aaaa..."
+#   compartment_ocid       = "ocid1.compartment.oc1..aaaa..."   # or leave "" for root
+#   api_key_fingerprint    = "aa:bb:cc:dd:..."
+#   api_key_path           = "/home/you/.oci/oci_api_key.pem"
+#   ssh_public_key_path    = "/home/you/.ssh/oracle.pub"
