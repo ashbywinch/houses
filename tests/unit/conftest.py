@@ -45,7 +45,7 @@ def _make_mock_services():
 
 
 @pytest.fixture(autouse=True)
-def _mock_google_routes():
+def _mock_google_routes(_sqlite_memory, _reset_global_state, _isolate_settings_sources):  # noqa: F811
     """Prevent WalkNode, DriveNode, BusRouteNode, and TflTransitNode from making real API calls.
 
     WalkNode/DriveNode call through ``get_services().route_planner`` — the
@@ -53,6 +53,10 @@ def _mock_google_routes():
     builds its client via ``get_services().tfl_client_factory`` — the
     default fake returns impossible. BusRouteNode receives
     ``google_routes_post`` from the services ``commute_router`` (no post).
+
+    Depends on the isolation fixtures explicitly: make_services() pushes
+    default settings through the guarded SettingsNode.push, which needs
+    test mode armed (and the settings cache empty) or it refuses.
     """
     from houses.services_provider import _request_services as _sp
 
