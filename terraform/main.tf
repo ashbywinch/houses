@@ -32,41 +32,48 @@ provider "oci" {
 
 # ── identity ────────────────────────────────────────────────────────────
 
+locals {
+  compartment_ocid = var.compartment_ocid != "" ? var.compartment_ocid : var.tenancy_ocid
+}
+
+
 data "oci_identity_availability_domains" "ads" {
-  compartment_id = var.compartment_ocid
+  compartment_id = local.compartment_ocid
 }
 
 data "oci_core_images" "ubuntu_arm64" {
-  compartment_id           = var.compartment_ocid
-  operating_system         = "Canonical Ubuntu"
-  operating_system_version = "24.04"
-  shape                    = "VM.Standard.A1.Flex"
-  sort_by                  = "TIMECREATED"
-  sort_order               = "DESC"
+  compartment_id   = local.compartment_ocid
+  operating_system = "Canonical Ubuntu"
+  shape            = "VM.Standard.A1.Flex"
+  sort_by          = "TIMECREATED"
+  sort_order       = "DESC"
 
+  # Newest non-minimal 24.04 ARM image.  OCI names ARM images
+  # "…-aarch64-<date>-0"; the regex skips the "-Minimal-" variants.
   filter {
-    name   = "architecture"
-    values = ["ARM64"]
+    name   = "display_name"
+    values = ["^Canonical-Ubuntu-24.04-aarch64-[0-9]"]
+    regex  = true
   }
 }
 
 # ── networking ──────────────────────────────────────────────────────────
 
 resource "oci_core_vcn" "houses" {
-  compartment_id = var.compartment_ocid
+  compartment_id = local.compartment_ocid
   cidr_blocks    = ["10.0.0.0/16"]
   display_name   = "houses-vcn"
   dns_label      = "houses"
 }
 
 resource "oci_core_internet_gateway" "houses" {
-  compartment_id = var.compartment_ocid
+  compartment_id = local.compartment_ocid
   vcn_id         = oci_core_vcn.houses.id
   display_name   = "houses-igw"
 }
 
 resource "oci_core_route_table" "houses" {
-  compartment_id = var.compartment_ocid
+  compartment_id = local.compartment_ocid
   vcn_id         = oci_core_vcn.houses.id
   display_name   = "houses-rt"
   route_rules {
@@ -77,7 +84,7 @@ resource "oci_core_route_table" "houses" {
 }
 
 resource "oci_core_subnet" "public" {
-  compartment_id = var.compartment_ocid
+  compartment_id = local.compartment_ocid
   vcn_id         = oci_core_vcn.houses.id
   cidr_block     = "10.0.0.0/24"
   display_name   = "houses-public"
@@ -86,7 +93,7 @@ resource "oci_core_subnet" "public" {
 }
 
 resource "oci_core_security_list" "houses" {
-  compartment_id = var.compartment_ocid
+  compartment_id = local.compartment_ocid
   vcn_id         = oci_core_vcn.houses.id
   display_name   = "houses-security-list"
 
@@ -112,7 +119,7 @@ resource "oci_core_security_list" "houses" {
 
 resource "oci_core_instance" "houses" {
   availability_domain = data.oci_identity_availability_domains.ads.availability_domains[0].name
-  compartment_id      = var.compartment_ocid
+  compartment_id      = local.compartment_ocid
   shape               = "VM.Standard.A1.Flex"
   display_name        = "houses"
 
@@ -142,7 +149,7 @@ resource "oci_core_instance" "houses" {
 # Reserved public IP attached to the instance's primary private IP — stable
 # across reboots (and instance replacement, since it is a separate resource).
 data "oci_core_vnic_attachments" "houses" {
-  compartment_id = var.compartment_ocid
+  compartment_id = local.compartment_ocid
   instance_id    = oci_core_instance.houses.id
 }
 
@@ -156,7 +163,7 @@ data "oci_core_private_ips" "houses_primary" {
 }
 
 resource "oci_core_public_ip" "houses_reserved" {
-  compartment_id = var.compartment_ocid
+  compartment_id = local.compartment_ocid
   lifetime       = "RESERVED"
   display_name   = "houses-reserved"
   private_ip_id  = data.oci_core_private_ips.houses_primary.private_ips[0].id
