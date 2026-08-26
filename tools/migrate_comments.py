@@ -15,6 +15,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
+from dag.persistence import decompress_result
 from houses.comments import migrate_old_comments
 from houses.database import get_connection as get_app_connection
 from houses.database import init_db
@@ -54,7 +55,7 @@ def get_old_comments(dag: sqlite3.Connection, rid: str) -> dict:
         ).fetchone()
         if row is not None:
             try:
-                data = json.loads(row["result_json"])
+                data = json.loads(decompress_result(row["result_json"]))
                 result[field] = data
             except (json.JSONDecodeError, TypeError) as e:
                 logger.debug("corrupt comment payload for %s (skipping field): %s", field, e)

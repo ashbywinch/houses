@@ -12,6 +12,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from dag.persistence import decompress_result
+
 DB_PATH = Path("data/houses.db")
 
 
@@ -75,7 +77,7 @@ def migrate_node_results(db_path: str | Path) -> int:
 
     for row in rows:
         try:
-            result = json.loads(row["result_json"])
+            result = json.loads(decompress_result(row["result_json"]))
         except (json.JSONDecodeError, TypeError) as e:
             print(f"SKIP {row['node_id']}: {e}", file=sys.stderr)
             continue

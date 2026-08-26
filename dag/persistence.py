@@ -11,6 +11,7 @@ import json
 import logging
 import sqlite3
 import threading
+import zlib
 from datetime import UTC, datetime
 from decimal import Decimal as _Decimal
 from enum import Enum
@@ -47,6 +48,27 @@ class DagJSONEncoder(json.JSONEncoder):
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
             return {"value": int(m) if m == int(m) else m, "unit": str(o.units)}
         return super().default(o)
+
+
+_ZLIB_LEVEL = 6
+"""zlib level for result_json compression.  Level 6 vs 9 trades ~2% ratio
+for ~4x faster compress — the money-cascade provenance blobs (the bulk of
+the table) compress ~25x either way."""
+
+
+def compress_result(text: str) -> bytes:
+    """zlib-compress a result_json payload for storage."""
+    return zlib.compress(text.encode("utf-8"), _ZLIB_LEVEL)
+
+
+def decompress_result(raw: str | bytes) -> str:
+    if isinstance(raw, bytes) and raw[:1] == b"\x78":
+        return zlib.decompress(raw).decode("utf-8")
+    if isinstance(raw, bytes):
+        # Degenerate: a BLOB that is not a zlib stream.  JSON text never
+        # starts with 0x78, so this only happens with a foreign write.
+        return raw.decode("utf-8")
+    return raw
 
 
 def _get_db() -> sqlite3.Connection:
@@ -203,7 +225,7 @@ def save_node_result(
         " VALUES (?, ?, ?, ?, ?)",
         (
             node_id,
-            json.dumps(result_dict, cls=DagJSONEncoder),
+            compress_result(json.dumps(result_dict, cls=DagJSONEncoder)),
             json.dumps(dep_timestamps, cls=DagJSONEncoder) if dep_timestamps else None,
             now,
             code_version,
@@ -229,12 +251,11 @@ def latest_node_result(node_id: str) -> dict[str, Any] | None:
     ).fetchone()
     if row is None:
         return None
-    result = json.loads(row["result_json"])
+    result = json.loads(decompress_result(row["result_json"]))
     result["_dep_timestamps"] = json.loads(row["dep_timestamps"]) if row["dep_timestamps"] else {}
     result["_persisted_at"] = row["created_at"]
     result["_code_version"] = row["code_version"]
     return result
-
 
 def _table_exists(name: str) -> bool:
     conn = _get_db()

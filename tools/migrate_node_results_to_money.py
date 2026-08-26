@@ -15,6 +15,8 @@ import sys
 from decimal import Decimal
 from pathlib import Path
 
+from dag.persistence import decompress_result
+
 MONEY_NODES = {
     "rightmove_price",
     "stamp_duty",
@@ -39,7 +41,7 @@ def migrate_node_results(db_path: str | Path) -> int:
             continue
 
         try:
-            result = json.loads(row["result_json"])
+            result = json.loads(decompress_result(row["result_json"]))
         except (json.JSONDecodeError, TypeError):
             continue
 
