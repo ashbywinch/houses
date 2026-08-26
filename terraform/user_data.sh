@@ -10,13 +10,12 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y \
   python3-venv unzip curl ca-certificates sqlite3 rsync age rclone file \
-  nodejs npm git make \
+  nodejs npm git make stress-ng \
   fonts-liberation libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
   libxkbcommon0 libxcomposite1 libxdamage1 libgbm1 libasound2
 
 # uv — install for the ubuntu service user (the app runs as ubuntu)
 sudo -u ubuntu -H sh -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'
-
 # Chrome for the scraper (arm64). Sanity-checked so a failed fetch can't
 # silently leave the box browserless; falls back to Ubuntu's chromium.
 CHROME_BIN=/usr/bin/google-chrome
