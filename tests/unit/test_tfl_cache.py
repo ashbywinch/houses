@@ -443,3 +443,50 @@ async def test_retry_recovers_after_network_error():
     assert data is not None
     assert data["journeys"][0]["duration"] == 11
     assert len(calls) == 2
+
+
+# ── get_tube_leg_fare: 404 → None (fallback fare), transient → raise ──
+
+
+@pytest.mark.asyncio
+async def test_get_tube_leg_fare_returns_none_on_404(isolated_cache):
+    """TfL 404 on the tube-leg fare lookup (out-of-area destination — e.g.
+    a Newbury property) must return None so RailFareNode applies its
+    fallback fare, instead of raising HttpError and poisoning the
+    rail_fare → merge → final_fuel chain ('TfL couldn't find a route'
+    surfaced on the commute card)."""
+    from houses.geopoint import GeoPoint
+    from houses.stations import Station
+
+    def client_404(**kwargs):
+        return httpx.AsyncClient(
+            transport=CachingTransport(inner=_FakeInner(httpx.Response(404, json={"message": "no route"})))
+        )
+
+    fare = await TflClient.get_tube_leg_fare(
+        Station("London Paddington", "PAD", GeoPoint(51.52, -0.18)),
+        "",
+        _client_factory=client_404,
+    )
+    assert fare is None
+
+
+@pytest.mark.asyncio
+async def test_get_tube_leg_fare_raises_transient_errors(isolated_cache):
+    """Non-404 client errors stay exceptions: the DAG retry layer owns
+    transient handling; only deterministic no-route (404) converts to None."""
+    from houses.geopoint import GeoPoint
+    from houses.stations import Station
+
+    def client_429(**kwargs):
+        return httpx.AsyncClient(
+            transport=CachingTransport(inner=_FakeInner(httpx.Response(429, json={"message": "slow down"})))
+        )
+
+    with pytest.raises(HttpError) as excinfo:
+        await TflClient.get_tube_leg_fare(
+            Station("London Paddington", "PAD", GeoPoint(51.52, -0.18)),
+            "",
+            _client_factory=client_429,
+        )
+    assert excinfo.value.status == 429

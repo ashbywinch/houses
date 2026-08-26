@@ -1170,6 +1170,107 @@ class TestRailFareNode:
         assert transit_cg.cost is not None, "TfL CostGroup should have cost attributed"
         assert float(transit_cg.cost.amount) == 39.60, f"Expected TfL CostGroup cost £39.60, got {transit_cg.cost}"
 
+    @pytest.mark.asyncio
+    # lucidlint: ignore fakefs deterministic tmp_path test — the house testing standard (no pyfakefs)
+    async def test_tube_fare_404_falls_back_instead_of_poisoning(self, tmp_path):
+        """Regression (property 90970053, Newbury): the real
+        get_tube_leg_fare raised HttpError(404) on out-of-area lookups,
+        making rail_fare → rail_fare_if → merge impossible with 'TfL
+        couldn't find a route' on the card. The documented contract is
+        None-on-no-route so the £2.80 fallback fare applies."""
+        from functools import partial
+
+        import httpx
+
+        from houses.api_cache import CachingTransport
+        from houses.nodes.rail_fare_node import RailFareNode
+        from houses.rail_fares import RailFareRegistry
+        from houses.services_provider import get_services
+        from houses.stations import StationRegistry
+        from houses.tfl_client import TflClient
+
+        stations_csv = tmp_path / "stations.csv"
+        stations_csv.write_text(
+            "stationName,crsCode,lat,long\nWoking,WOK,51.317,-0.556\nFenchurch Street,FST,51.511,-0.079\n"
+        )
+        fares_csv = tmp_path / "fares.csv"
+        fares_csv.write_text("origin_crs,dest_crs,single_fare_gbp\nWOK,FST,17.00\n")
+        reg = RailFareRegistry(
+            station_registry=StationRegistry(_stations_csv=stations_csv),
+            _fares_csv=fares_csv,
+        )
+        get_services().rail_fare_registry = reg
+
+        transit = UserInputNode[Commute]("rf_tube404", Commute)
+        location = UserInputNode[GeoPoint]("rf_tube404_loc", GeoPoint)
+
+        office = PlaceOfInterest("Office", "EC3A 7LP")
+        person = Person("Lorena", True, places_of_interest=(office,))
+        commute = Commute(
+            person=person,
+            label=office.label,
+            destination=office,
+            duration=Quantity(78, "minute"),
+            daily_cost=Money("0", "GBP"),
+            _details=(
+                CostGroup(
+                    legs=(
+                        JourneyLeg(
+                            mode=LegMode.BUS,
+                            duration=Quantity(10, "minute"),
+                            start_station="",
+                            end_station="",
+                            line_name="",
+                        ),
+                        JourneyLeg(
+                            mode=LegMode.TRAIN,
+                            duration=Quantity(30, "minute"),
+                            start_station="WOK",
+                            end_station="Fenchurch Street",
+                            line_name="Great Western Railway",
+                        ),
+                    ),
+                    operator="TfL",
+                    cost=Money("0", "GBP"),
+                ),
+            ),
+        )
+        transit.push(commute)
+        location.push(GeoPoint(51.317, -0.556), "geocode")
+
+        def client_404(**kwargs):
+            return httpx.AsyncClient(
+                transport=CachingTransport(
+                    inner=httpx.MockTransport(lambda req: httpx.Response(404, json={"message": "no route"}))
+                )
+            )
+
+        node = RailFareNode(
+            "rf_tube404_test",
+            transit_result=transit,
+            best_location=location,
+            tube_fare_fn=partial(TflClient.get_tube_leg_fare, _client_factory=client_404),
+        )
+        # The real _cached_api_call writes its deterministic-response cache;
+        # point it at this test's tmp_path (same pattern as
+        # tests/unit/test_tfl_cache.py::isolated_cache) and restore after,
+        # so the autouse empty-cache assertion stays honest.
+        from houses import api_cache
+
+        previous_cache_dir = api_cache.CACHE_DIR
+        api_cache.set_cache_dir(tmp_path)
+        try:
+            await flush_processor()
+            a = await node.attempt()
+        finally:
+            api_cache.set_cache_dir(previous_cache_dir)
+
+        assert a.succeeded, f"tube-leg 404 must fall back to the standard fare, got {a.status}: {a.error}"
+        val = a.value_or_none()
+        assert val is not None
+        # (17.00 NR fare + 2.80 fallback tube single) × 2 = 39.60
+        assert float(val.daily_cost.amount) == 39.60
+
 @pytest.mark.asyncio
 async def test_commute_selector_impossible_without_bus():
     """When transit fails and bus_result is not an active dep
