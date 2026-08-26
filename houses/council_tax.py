@@ -316,9 +316,8 @@ async def _fetch_voa_results(
     cached VOA client, normalized to plain dicts.
 
     ``page_fetcher`` may return a page or a coroutine for one; the async
-    context managers are the real ``CachedVOAClient`` path.  Errors are
-    left to the caller's try/except (ImportError when uk-property-apis is
-    missing, httpx for transient failures).
+    context managers are the real ``CachedVOAClient`` path.  httpx errors
+    propagate for the caller's retry handling.
     """
     if page_fetcher is not None:
         page = page_fetcher(postcode, 0)
@@ -621,9 +620,6 @@ async def lookup_council_tax(
         rate_lookup = _lookup_yearly_cost
     try:
         results_raw = await _fetch_voa_results(postcode, page_fetcher, voa_client_factory)
-    except ImportError:
-        logger.warning("uk-property-apis not installed; skipping council tax lookup")
-        return Attempt.impossible("uk-property-apis not installed")
     except (httpx.HTTPStatusError, httpx.RequestError, httpx.TimeoutException):
         raise  # transient — let DAG retry handle it
     # lucidlint: ignore broad-except boundary — unknown VOA failures convert to an impossible attempt, never raise

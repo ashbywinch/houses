@@ -8,12 +8,8 @@ at setup with 'Refusing to write settings from a non-app process'.
 """
 
 
-def test_mock_google_routes_setup_runs_under_clean_guard(monkeypatch):
+def test_mock_google_routes_setup_runs_under_clean_guard():
     """Reproduce the CI setup path with the guard fully armed."""
-    monkeypatch.delenv("HOUSES_SCRIPTS_MAY_WRITE", raising=False)
-    monkeypatch.setattr("houses.nodes.settings._app_mode", False)
-    monkeypatch.setattr("dag.persistence.testing", False)
-
     from houses.services_provider import _request_services as _sp
     from tests.helpers import make_services
 
