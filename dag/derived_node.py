@@ -825,4 +825,3 @@ class DerivedNode(Node[T], Generic[T]):
     @staticmethod
     @abstractmethod
     def compute(*dep_attempts: Attempt) -> Attempt[T]: ...
-

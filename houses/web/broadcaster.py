@@ -50,7 +50,7 @@ async def _push_node_update(node) -> None:
     rid = node._id.split("/")[0]
     try:
         data = await node.to_json()
-    # lucidlint: ignore broad-except a serialisation failure skips the push — the node stays queued
+    # lucidlint: ignore broad-except serialisation failure silently drops this push; clients refresh on next change
     except Exception:
         return
     msg = json.dumps({"type": "node_updated", "rid": rid, "node_id": node._id, "data": data})

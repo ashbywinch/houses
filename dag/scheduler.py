@@ -220,4 +220,3 @@ def start_processor() -> asyncio.Task:
 def set_after_refresh(callback: Callable[[DerivedNode], object]) -> None:
     sched = get_scheduler()
     sched._after_refresh_callback = callback
-
