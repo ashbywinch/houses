@@ -47,7 +47,6 @@ class TestProperty:
         prop.corrected_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
         prop.rightmove_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
         await flush_processor()
-        await flush_processor()
 
         a = await prop.best_location.attempt()
         assert a.succeeded
@@ -77,7 +76,6 @@ class TestProperty:
         prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
 
         await flush_processor()
-        await flush_processor()
 
         # Reset the counter — we only care about changes after setup
         received.clear()
@@ -90,7 +88,6 @@ class TestProperty:
         before_flush = len(received)
 
         # Flush the DAG so the chain processes
-        await flush_processor()
         await flush_processor()
 
         # After flush, mortgage_required should have recomputed.
@@ -111,7 +108,6 @@ class TestProperty:
         prop.user_entered_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
         prop.corrected_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
         prop.rightmove_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
-        await flush_processor()
         await flush_processor()
 
         j = await prop.to_json()

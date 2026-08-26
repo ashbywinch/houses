@@ -555,7 +555,6 @@ class TestCouncilTaxNodeProvenance:
 
             node = CouncilTaxNode("ct/council_tax", best_address=addr, postcode_node=postcode)
             await flush_processor()
-            await flush_processor()
             j = await node.to_json()
         finally:
             _sp.reset(token)

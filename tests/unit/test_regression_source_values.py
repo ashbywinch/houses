@@ -94,7 +94,6 @@ async def test_push_happens_without_old_table():
     bootstrap_from_row(row, source_dict)
 
     await flush_processor()
-    await flush_processor()
 
     register_property(rid, prop)
     sm = await prop.to_json_summary()

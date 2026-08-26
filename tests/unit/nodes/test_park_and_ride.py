@@ -295,7 +295,6 @@ class TestParkAndRideAugmentNode:
             # Postcode arrives later → node must recompute with it
             postcode.push("SL6 3YZ", "test")
             await flush_processor()
-            await flush_processor()
             a = await node.attempt()
             assert a.succeeded
             assert fake_drive.estimate_calls == [("SL6 3YZ", "Maidenhead Rail Station")]

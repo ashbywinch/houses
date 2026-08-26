@@ -123,7 +123,6 @@ async def test_production_commute_flow():
     prop.postcode.push("TE1 1ST", "test")
 
     # Run processor — this is what the production _processor task does
-    await flush_processor()
     await flush_processor()  # second pass for transitive deps
 
     summary = await prop.to_json_summary()
@@ -166,7 +165,6 @@ async def test_school_commutes_resolve():
     prop.postcode.push("TE1 1ST", "test")
     register_property(rid, prop)
 
-    await flush_processor()
     await flush_processor()
 
     summary = await prop.to_json_summary()

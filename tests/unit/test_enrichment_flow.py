@@ -46,7 +46,6 @@ class TestBestLocationFlow:
         rm_loc.push(gp, "Rightmove map")
         best_addr.push("10 High St", "Rightmove")
         await flush_processor()
-        await flush_processor()
 
         j = await node.to_json()
         assert j["status"] == "succeeded"
@@ -86,7 +85,6 @@ class TestBestLocationFlow:
             best_address=best_addr,
         )
         await flush_processor()
-        await flush_processor()
 
         a = await node.attempt()
         assert a.impossible
@@ -111,12 +109,10 @@ class TestBestLocationFlow:
         best_addr.push("Some Road, London", "Rightmove")
         rm_loc.push(gp1, "Rightmove map")
         await flush_processor()
-        await flush_processor()
         assert (await node.attempt()).value_or_none() == gp1
 
         gp2 = GeoPoint(51.5, -0.1)
         rm_loc.push(gp2, "Rightmove map")
-        await flush_processor()
         await flush_processor()
         assert (await node.attempt()).value_or_none() == gp2
 
@@ -146,7 +142,6 @@ class TestBestAddressFlow:
         rightmove.push("Rightmove St", "Rightmove")
         corrected.push("User Rd", "User correction")
         await flush_processor()
-        await flush_processor()
 
         a = await node.attempt()
         assert a.succeeded
@@ -169,7 +164,6 @@ class TestBestAddressFlow:
             rightmove_address=rightmove,
         )
         rightmove.push("10 High St", "Rightmove")
-        await flush_processor()
         await flush_processor()
 
         j = await node.to_json()
@@ -209,11 +203,9 @@ class TestBestAddressFlow:
 
         rightmove.push("Old address", "Rightmove")
         await flush_processor()
-        await flush_processor()
         assert (await node.attempt()).value_or_none() == "Old address"
 
         rightmove.push("New address", "Rightmove")
-        await flush_processor()
         await flush_processor()
         assert (await node.attempt()).value_or_none() == "New address"
 
@@ -237,7 +229,6 @@ class TestEnrichmentApi:
         prop.rightmove_address.push("10 High St", "Rightmove")
         prop.rightmove_bedrooms.push("3", "Rightmove")
         prop.rightmove_price.push(Money("250000", "GBP"), "Rightmove")
-        await flush_processor()
         await flush_processor()
 
         result = await get_property(RID)
@@ -271,7 +262,6 @@ class TestEnrichmentApi:
         prop.rightmove_bedrooms.push("3", "Rightmove")
         prop.rightmove_price.push(Money("250000", "GBP"), "Rightmove")
         await flush_processor()
-        await flush_processor()
 
         result = await staleness_check(RID, nodes="best_address")
         assert result["fresh"]
@@ -292,7 +282,6 @@ class TestEnrichmentApi:
         prop.rightmove_address.push("10 High St, Southall, UB2 5AD", "Rightmove")
         prop.rightmove_bedrooms.push("3", "Rightmove")
         prop.rightmove_price.push(Money("250000", "GBP"), "Rightmove")
-        await flush_processor()
         await flush_processor()
 
         detail = await get_property_detail(RID)
@@ -357,7 +346,6 @@ class TestEnrichmentBootstrap:
         )
 
         rightmove.push("Imported Address", "Rightmove")
-        await flush_processor()
         await flush_processor()
 
         a = await node.attempt()
@@ -444,7 +432,6 @@ class TestEnrichmentBootstrap:
         rm_addr.push("Some Road, Hersham", "Rightmove")
 
         await flush_processor()
-        await flush_processor()
 
         j = await node.to_json()
         assert j["status"] == "succeeded"
@@ -462,7 +449,6 @@ class TestEnrichmentBootstrap:
         prop.rightmove_location.push(GeoPoint(51.37, -0.4), "Rightmove map")
         prop.precise_location.push(GeoPoint(51.38, -0.41), "User location")
 
-        await flush_processor()
         await flush_processor()
 
         a = await prop.best_location.attempt()

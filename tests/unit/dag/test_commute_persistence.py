@@ -31,7 +31,6 @@ async def test_commute_survives_node_recreation():
 
     src.push("go", "test")
     await flush_processor()
-    await flush_processor()
 
     j1 = await node.to_json()
     assert j1["status"] == "succeeded", f"Phase 1 should succeed, got {j1['status']}"

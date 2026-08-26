@@ -179,7 +179,6 @@ class TestTransitCommute:
             ),
         )
         await flush_processor()
-        await flush_processor()
 
         a = await node.attempt()
         assert a.succeeded, f"Expected succeeded, got {a.status}: {a.error}"
@@ -228,7 +227,6 @@ class TestTransitCommute:
                 with_bus_node=with_bus,
             ),
         )
-        await flush_processor()
         await flush_processor()
 
         a = await node.attempt()
@@ -310,7 +308,6 @@ class TestTransitCommute:
             ),
         )
         await flush_processor()
-        await flush_processor()
 
         a = await node.attempt()
         assert a.succeeded
@@ -357,7 +354,6 @@ class TestTransitCommute:
                 with_bus_node=with_bus,
             ),
         )
-        await flush_processor()
         await flush_processor()
 
         a = await node.attempt()
@@ -644,7 +640,6 @@ class TestCommuteBreakdown:
             "test",
         )
         await flush_processor()
-        await flush_processor()
 
         a = await node.attempt()
         assert a.succeeded
@@ -710,7 +705,6 @@ class TestCommuteBreakdown:
             "test",
         )
         await flush_processor()
-        await flush_processor()
 
         a = await node.attempt()
         assert a.succeeded
@@ -735,7 +729,6 @@ class TestCommuteBreakdown:
         )
 
         persons.push([Person("Simon", True)], "test")
-        await flush_processor()
         await flush_processor()
 
         a = await node.attempt()

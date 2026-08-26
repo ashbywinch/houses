@@ -254,7 +254,6 @@ class TestSummaryShape:
     @pytest.mark.asyncio
     async def test_has_expected_top_level_keys(self, prop):
         await flush_processor()
-        await flush_processor()
         s = await prop.to_json_summary()
 
         assert s["rid"] == "test_card"
@@ -274,7 +273,6 @@ class TestSummaryShape:
     @pytest.mark.asyncio
     async def test_every_wrapped_value_has_status_and_value(self, prop):
         """Every node-backed field wraps its value in a standard envelope (no provenance in summary)."""
-        await flush_processor()
         await flush_processor()
         s = await prop.to_json_summary()
 
@@ -299,13 +297,11 @@ class TestCommuteData:
     @pytest.mark.asyncio
     async def test_commutes_is_dict(self, prop):
         await flush_processor()
-        await flush_processor()
         s = await prop.to_json_summary()
         assert isinstance(s["commutes"], dict)
 
     @pytest.mark.asyncio
     async def test_each_commute_has_commute_key(self, prop):
-        await flush_processor()
         await flush_processor()
         s = await prop.to_json_summary()
 
@@ -317,7 +313,6 @@ class TestCommuteData:
 
     @pytest.mark.asyncio
     async def test_successful_commute_has_duration_and_cost(self, prop):
-        await flush_processor()
         await flush_processor()
         s = await prop.to_json_summary()
 
@@ -342,7 +337,6 @@ class TestCommuteData:
     @pytest.mark.asyncio
     async def test_commute_has_is_child_flag(self, prop):
         await flush_processor()
-        await flush_processor()
         s = await prop.to_json_summary()
 
         for key, cd in s["commutes"].items():
@@ -352,7 +346,6 @@ class TestCommuteData:
     @pytest.mark.asyncio
     async def test_child_commutes_marked_is_child(self, prop):
         """School commutes (George/Primary School etc.) carry is_child=True."""
-        await flush_processor()
         await flush_processor()
         s = await prop.to_json_summary()
 
@@ -368,7 +361,6 @@ class TestSchoolData:
     @pytest.mark.asyncio
     async def test_schools_has_primary_and_secondary(self, prop):
         await flush_processor()
-        await flush_processor()
         s = await prop.to_json_summary()
 
         schools = s.get("schools", {})
@@ -379,7 +371,6 @@ class TestSchoolData:
 
     @pytest.mark.asyncio
     async def test_each_school_has_name_ofsted_and_url(self, prop):
-        await flush_processor()
         await flush_processor()
         s = await prop.to_json_summary()
 
@@ -395,7 +386,6 @@ class TestSchoolData:
     @pytest.mark.asyncio
     async def test_school_data_envelope(self, prop):
         """School nodes themselves have a status/value/provenance envelope."""
-        await flush_processor()
         await flush_processor()
         s = await prop.to_json_summary()
 
@@ -413,7 +403,6 @@ class TestScoring:
 
     @pytest.mark.asyncio
     async def test_score_is_integer(self, prop):
-        await flush_processor()
         await flush_processor()
         s = await prop.to_json_summary()
         score = _score_from_summary(s)

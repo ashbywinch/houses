@@ -65,7 +65,6 @@ async def test_school_location_node_returns_geopoint():
         from dag.scheduler import flush_processor
 
         await flush_processor()
-        await flush_processor()
         a = await school_loc.attempt()
         assert a.succeeded, f"school loc failed: {a.error}"
     finally:
@@ -118,7 +117,6 @@ async def test_school_node_output_has_url():
     try:
         from dag.scheduler import flush_processor
 
-        await flush_processor()
         await flush_processor()
         a = await sn.attempt()
         assert a.succeeded, f"school failed: {a.error}"
