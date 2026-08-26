@@ -72,7 +72,7 @@ def _property_in_sheet(gclient: Any, rid: str) -> bool:
         sh = gclient.open_by_key(settings.sheet_id)
         ws = sh.worksheet("Properties Data")
         return any(row[col_index("Rightmove ID")].strip() == rid for row in ws.get_all_values()[1:])
-    # lucidlint: ignore broad-except deploy git probe — absence of git or a dirty repo degrades to 'unknown'
+    # lucidlint: ignore broad-except sheet read failure counts as not-present so the upsert proceeds
     except Exception:
         return False
 

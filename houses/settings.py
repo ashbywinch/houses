@@ -16,6 +16,7 @@ def _parse_quantity(v: object, default_unit: str) -> Quantity:
     - ``str`` like ``"10 km"`` — parsed by pint (number + optional unit)
     - ``dict`` with ``value`` and optional ``unit`` keys
     """
+    # type: ignore[invalid-argument-type]  # pint's stubs don't expose Quantity as a runtime class; isinstance needs the real class
     if isinstance(v, cast(type, Quantity)):
         return v
     if isinstance(v, (int, float)):

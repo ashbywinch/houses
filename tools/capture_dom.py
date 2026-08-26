@@ -180,9 +180,10 @@ class DeviceFlowAuthorization:
 
 
 async def _start_device_flow(client_id: str, client_secret: str) -> "DeviceFlowAuthorization":
-    """POST Google's device-authorization endpoint; return the codes to show.
+    """POST Google's device-authorization endpoint.
 
-    Returns ``(device_code, user_code, verification_url, poll_interval_s)``.
+    Returns a ``DeviceFlowAuthorization`` with the codes to show the human
+    and the poll cadence.
     """
     async with httpx.AsyncClient(timeout=30) as client:
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)

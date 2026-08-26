@@ -270,5 +270,3 @@ def property_rids() -> list[str]:
         "SELECT DISTINCT SUBSTR(node_id, 1, INSTR(node_id, '/') - 1) AS rid FROM node_results WHERE node_id LIKE '%/%'"
     ).fetchall()
     return sorted(set(r[0] for r in rows if r[0] and r[0].isdigit()))
-
-

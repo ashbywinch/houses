@@ -447,4 +447,3 @@ class MergeRailFareNode(DerivedNode[Commute]):
 
         merged = replace(val, daily_cost=total, _details=new_details)
         return Attempt.succeeded(merged)
-
