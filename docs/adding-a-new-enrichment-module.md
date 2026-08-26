@@ -19,17 +19,11 @@
    result = await svc.my_service.lookup(...)
    ```
 
-5. **Add columns** to `Row.HEADERS` in `houses/sheets/row.py` and update
-   ``Row.from_property()`` to format the new fields.
-
-6. **Run `POST /sync-view-formulas`** if the View tab needs new XLOOKUP
-   formulas.
-
-7. **Add a fake** in `tests/helpers.py` following the existing pattern
+5. **Add a fake** in `tests/helpers.py` following the existing pattern
    (e.g. ``FakeEPC``, ``FakeCouncilTax``).  Make sure ``make_services()``
    passes the new fake by default.
 
-8. **Write tests** using the DI patterns in `tests/helpers.py`:
+6. **Write tests** using the DI patterns in `tests/helpers.py`:
 
    ```python
    from tests.helpers import make_services, FakeMyService

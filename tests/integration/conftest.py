@@ -1,4 +1,4 @@
-"""Integration test configuration — isolated temp cache, no sheet writes, offline scraper."""
+"""Integration test configuration — isolated temp cache, offline scraper."""
 
 import tempfile
 from collections.abc import Callable
@@ -170,10 +170,3 @@ def _mock_http_requests():
 
 
 
-@pytest.fixture(autouse=True)
-def _no_sheet_writes():
-    """Prevent integration tests from touching a real Google Sheet."""
-    saved = settings.sheet_id
-    settings.sheet_id = ""
-    yield
-    settings.sheet_id = saved

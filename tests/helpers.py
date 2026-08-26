@@ -35,20 +35,17 @@ from houses.services import (
 
 
 @contextlib.contextmanager
-def inject_server_deps(*, scrape_fn=None, get_client_fn=None):
+def inject_server_deps(*, scrape_fn=None):
     """Temporarily inject per-request server dependencies.
 
-    ``scrape_fn`` replaces the Rightmove scraper and ``get_client_fn`` the
-    sheets client factory used by the FastAPI endpoints (the
-    ``houses.context`` seam) — no monkeypatching of module globals.
+    ``scrape_fn`` replaces the Rightmove scraper (the ``houses.context``
+    seam) — no monkeypatching of module globals.
     """
     from houses import context as _ctx
 
     saved = []
     if scrape_fn is not None:
         saved.append((_ctx._request_scrape_fn, _ctx._request_scrape_fn.set(scrape_fn)))
-    if get_client_fn is not None:
-        saved.append((_ctx._request_get_client_fn, _ctx._request_get_client_fn.set(get_client_fn)))
     try:
         yield
     finally:

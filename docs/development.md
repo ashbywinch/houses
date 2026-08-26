@@ -1,7 +1,5 @@
 # Development Guide
 
-> **Production Sheet Access** — use existing scripts/endpoints to modify the production sheet. If existing tools can't do it, extend them or build a well-designed new tool.
-
 ## Setup & Config
 
 ```bash
@@ -43,14 +41,6 @@ make format       # Auto-fix formatting
 ```
 
 `pyproject.toml` holds the tool config (line length, Python target).
-
-## Sheet Setup
-
-```bash
-uv run python scripts/setup_sheet.py
-```
-
-Idempotent. Creates Properties Data + Properties View tabs. Data tab cleared once on first run, never again.
 
 ## Capturing the Frontend DOM
 
@@ -99,7 +89,7 @@ The session cookie lasts 30 days. On expiry the tool fails with a "Session expir
 
 ## Bus Fare Data Pipeline
 
-Extraction/troubleshooting: `docs/bus-fares.md` (extraction process, flags, sheet update).
+Extraction/troubleshooting: `docs/bus-fares.md` (extraction process, flags).
 
 ## Fixing Bugs — Write the Contract Test First
 

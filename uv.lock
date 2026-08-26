@@ -569,19 +569,6 @@ wheels = [
 ]
 
 [[package]]
-name = "gspread"
-version = "6.2.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "google-auth" },
-    { name = "google-auth-oauthlib" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/91/83/42d1d813822ed016d77aabadc99b09de3b5bd68532fd6bae23fd62347c41/gspread-6.2.1.tar.gz", hash = "sha256:2c7c99f7c32ebea6ec0d36f2d5cbe8a2be5e8f2a48bde87ad1ea203eff32bd03", size = 82590, upload-time = "2025-05-14T15:56:25.254Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/27/76/563fb20dedd0e12794d9a12cfe0198458cc0501fdc7b034eee2166d035d5/gspread-6.2.1-py3-none-any.whl", hash = "sha256:6d4ec9f1c23ae3c704a9219026dac01f2b328ac70b96f1495055d453c4c184db", size = 59977, upload-time = "2025-05-14T15:56:24.014Z" },
-]
-
-[[package]]
 name = "h11"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -597,7 +584,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "google-auth" },
-    { name = "gspread" },
+    { name = "google-auth-oauthlib" },
     { name = "httpx" },
     { name = "httpx2" },
     { name = "itsdangerous" },
@@ -637,7 +624,7 @@ requires-dist = [
     { name = "coverage", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "google-auth", specifier = ">=2.38.0" },
-    { name = "gspread", specifier = ">=6.2.0" },
+    { name = "google-auth-oauthlib", specifier = ">=1.2.0" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.0" },
     { name = "httpx2", specifier = ">=2.9.1" },

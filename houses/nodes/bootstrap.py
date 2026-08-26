@@ -12,7 +12,6 @@ from dag.user_input_node import UserInputNode
 from houses.geopoint import GeoPoint
 from houses.nodes.property_nodes import PropertyNodes
 from houses.property_registry import register_property
-from houses.sheets.reader import get_properties_view_data
 
 logger = logging.getLogger(__name__)
 
@@ -71,15 +70,6 @@ def _push_geo_coords(sources: dict[str, UserInputNode], key: str, lat: str, lng:
         logger.warning("Invalid %s coords: lat=%s lng=%s (%s)", what, lat, lng, exc)
         return False
 
-
-def _push_works_estimate(prop: PropertyNodes, raw_rid: str, ws_value: str) -> None:
-    """Push a View-tab works estimate onto the property; skips non-numeric cells."""
-    try:
-        parsed = float(ws_value.replace(",", "").replace("£", ""))
-        prop.works_estimates.push({"Ashby": Money(str(parsed), "GBP")}, "Sheet")
-    except (ValueError, TypeError) as exc:
-        logger.warning("Invalid works estimate for RID %s: %s (%s)", raw_rid, ws_value, exc)
-        return
 def _push_cell(
     sources: dict[str, UserInputNode],
     row: dict[str, str],
@@ -219,59 +209,3 @@ def load_property_nodes_from_db() -> int:
     logger.info("Loaded %d properties from DB", count)
     return count
 
-
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-def load_property_nodes_from_rows(rows: list[dict[str, Any]]) -> int:
-    """Create PropertyNodes from sheet rows and push source values.
-    Called on cold start (empty DB) or explicit reseed.
-    """
-
-    # Read View tab data for works_estimates (merged by Rightmove ID)
-    view_rows = get_properties_view_data()
-    works_by_rid: dict[str, str] = {}
-    for vr in view_rows:
-        vm_id = (vr.get("Rightmove ID") or "").strip()
-        if vm_id:
-            works_by_rid[vm_id] = (vr.get("Ashby Works Estimate (£)") or "").strip()
-
-    count = 0
-    for row in rows:
-        raw_rid = (row.get("Rightmove ID") or "").strip()
-        if not raw_rid:
-            continue
-        prop = PropertyNodes(raw_rid)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-        source_dict = {
-            "rightmove_address": prop.rightmove_address,
-            "rightmove_url": prop.rightmove_url,
-            "rightmove_bedrooms": prop.rightmove_bedrooms,
-            "rightmove_price": prop.rightmove_price,
-            "rightmove_location": prop.rightmove_location,
-            "precise_location": prop.precise_location,
-            "corrected_address": prop.corrected_address,
-            "user_entered_address": prop.user_entered_address,
-            "postcode": prop.postcode,
-            "comment_status": prop.comment_status,
-            "comment_status_reason": prop.comment_status_reason,
-            "comment_group_notes": prop.comment_group_notes,
-            "comment_ashby_comments": prop.comment_ashby_comments,
-            "comment_design_needed": prop.comment_design_needed,
-            "comment_planning_needed": prop.comment_planning_needed,
-        }
-        bootstrap_from_row(row, source_dict)
-
-        # Push works_estimates from View tab data
-        ws_value = works_by_rid.get(raw_rid, "")
-        if ws_value:
-            _push_works_estimate(prop, raw_rid, ws_value)
-        # Default empty works estimates / rental income / comment status so
-        # the money chain resolves even when a sheet cell was empty (a
-        # pending input permanently blocks the cascade).  Never overwrites
-        # a value the user or a source already set.
-        _seed_input_defaults(prop)
-
-        register_property(raw_rid, prop)
-        count += 1
-
-    logger.info("Seeded %d properties from sheet", count)
-    return count

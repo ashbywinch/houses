@@ -20,7 +20,7 @@ The watcher runs as a persistent background process (`crg-watch`). No manual
 
 # AGENTS.md — Houses
 
-**Browser-to-Spreadsheet Ingestion & Enrichment Engine.**
+**Property Listing Scraper & Enrichment Engine.**
 
 ## Quick Start
 
@@ -51,7 +51,7 @@ make stop                       # Stop dev server + frontend
   - The DB is backed by ``node_results``, ``source_values``, and other tables
     that persist property data. Deleting it erases real data irrecoverably.
   - Every property's DAG state, commute results, EPC data, and user settings
-    live in the DB. Re-seeding from the sheet only restores raw addresses —
+    live in the DB. Re-seeding restores only raw scraped addresses —
     computed data is gone.
   - Test failures, server errors, and unexpected behavior are **always** caused
     by code bugs, never by a "corrupted" or "stale" database.
@@ -87,7 +87,6 @@ make stop                       # Stop dev server + frontend
 - **Coding standards / conventions**: [docs/coding-standards.md](docs/coding-standards.md)
 - **Writing tests**: [docs/testing-standards.md](docs/testing-standards.md)
 - **Architecture overview**: [docs/architecture.md](docs/architecture.md)
-- **Add a column**: [docs/column-reference.md](docs/column-reference.md)
 - **Add an enrichment module**: [docs/adding-a-new-enrichment-module.md](docs/adding-a-new-enrichment-module.md)
 - **Enrichment modules (index)**: [docs/enrichment-modules.md](docs/enrichment-modules.md)
 - **Bus fares (TfL stop fares, zones, extraction)**: [docs/bus-fares.md](docs/bus-fares.md)
@@ -111,9 +110,8 @@ make stop                       # Stop dev server + frontend
 |------|---------|
 | `houses/server.py` | FastAPI app, endpoints, `_run_enrichment()` orchestration |
 | `houses/services.py` | Service protocols + `Services` DI container (real/fake) |
-| `houses/context.py` | ContextVar per-request state (bus fares, geo state, sheets client) |
+| `houses/context.py` | ContextVar per-request state (Rightmove scrape fn) |
 | `houses/settings.py` | Env-var configuration |
-| `houses/sheets/` | gspread integration, column schema (`Row`), View tab sync (`View`), formulas |
 | `tests/helpers.py` | Reusable fakes: `FakeCommuteRouter`, `FakeEPC`, `make_services()` |
 | `houses/nodes/` | New DAG node implementations (replaces old `houses/model/` DAG) |
 | `dag/` | DAG library: `Node`, `DerivedNode`, `UserInputNode`, `Attempt`, `Provenance` — see [docs/dag-library.md](docs/dag-library.md) |

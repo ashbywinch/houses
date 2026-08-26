@@ -3,9 +3,7 @@
 from money import Money
 from pint import Quantity
 
-from houses.commute import LegMode
 from houses.model.domain import Commute, Person, PlaceOfInterest
-from houses.sheets.row import Row
 
 
 def test_daily_cost_money_type():
@@ -20,25 +18,3 @@ def test_daily_cost_money_type():
     )
     assert isinstance(c.daily_cost, Money)
 
-
-def test_cost_groups_tfl_cost_sum():
-    """CostGroup with TfL operator should not be counted in non-rail cost by Row."""
-    from houses.commute import CostGroup, JourneyLeg
-
-    commute = Commute(
-        person=Person(name="Simon", has_car=False),
-        label="Office",
-        destination=PlaceOfInterest(label="Office", address="SW1A 1AA"),
-        duration=Quantity(45, "minute"),
-        daily_cost=Money("15.00", "GBP"),
-        mode="transit",
-        _details=(
-            CostGroup(
-                legs=(JourneyLeg(mode=LegMode.TRAIN, duration=Quantity(45, "minute")),),
-                operator="TfL",
-                cost=Money("15.00", "GBP"),
-            ),
-        ),
-    )
-    non_rail = Row._calc_non_rail_cost(commute)
-    assert non_rail == Money("0", "GBP")

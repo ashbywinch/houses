@@ -1,8 +1,7 @@
-"""Admin-only endpoints that interact directly with the Google Sheet.
+"""Admin-only maintenance endpoints.
 
-These are kept separate from ``api_router.py`` to enforce the layering
-rule that the main HTTP layer (``houses/web/*.py``) must not import from
-``houses/sheets/``.
+These are kept separate from ``api_router.py`` so the main HTTP layer
+stays focused on the property/user API surface.
 """
 
 from __future__ import annotations
@@ -11,37 +10,9 @@ from fastapi import APIRouter, HTTPException, Request
 
 import dag.scheduler
 from dag.regenerate import force_regenerate, nodes_matching
-from houses.nodes.bootstrap import load_property_nodes_from_rows
-from houses.services_provider import get_services
-from houses.sheets.reader import get_properties_data
 from houses.web.auth import effective_session_user
 
 admin_router = APIRouter(prefix="/api")
-
-
-async def seed_properties():
-    """Seed the property registry from the Google Sheet on cold start."""
-    rows = get_properties_data()
-    count = load_property_nodes_from_rows(rows)
-# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
-    return {"seeded": count, "total": len(get_services().property_registry.list_properties())}
-
-
-@admin_router.post("/admin/reseed")
-async def reseed_from_sheet(request: Request):
-    """Re-seed the property registry from the Google Sheet.
-
-    Superuser-only.  This is intentionally NOT automatic on server start —
-    auto-reloads from code changes should not re-read the sheet.  Call this
-    endpoint explicitly after seeding the sheet with new properties.
-    """
-    user = effective_session_user(request)
-    if not user or not user.get("is_superuser"):
-        raise HTTPException(status_code=403, detail="Superuser access required")
-
-    rows = get_properties_data()
-    load_property_nodes_from_rows(rows)
-    return {"status": "ok"}
 
 
 @admin_router.post("/admin/regenerate")

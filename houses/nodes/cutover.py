@@ -1,10 +1,7 @@
-"""Cutover bridge — push enriched data to the new DAG's UserInputNodes.
+"""Push enrichment results into the DAG's UserInputNodes.
 
-This module contains the glue code that pushes enrichment results to the
-new dag/ library's UserInputNodes. It runs alongside the existing
-write_enriched_row() calls and old DAG persistence.
-
-No existing enrichment modules, sheet writes, or houses/sheets/ are modified.
+The glue between the Rightmove enrichment result and the property's
+input nodes; the scheduler cascade and DB persistence take it from there.
 """
 
 from __future__ import annotations

@@ -1,7 +1,6 @@
 """Tests for the FastAPI server endpoints."""
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -69,62 +68,21 @@ class TestInjectProperty:
         resp = client.post("/api/properties", json=payload)
         assert resp.status_code == 200
 
-    def test_rejects_existing_property_without_fields(self):
-        """Re-enriching an existing property must specify which fields to update."""
-        from houses.settings import settings
-        from houses.sheets import col_index
-        from tests.helpers import inject_server_deps
-
-        rid_index = col_index("Rightmove ID")
-
-        # Build a fake row that looks like the sheet's row 2
-        fake_row = [""] * 38
-        fake_row[rid_index] = "88375569"
-
-        # Mock get_client to return a sheet with this row
-        fake_cell_data = [[f"header {i}" for i in range(38)]] + [fake_row]
-        mock_ws = MagicMock()
-        mock_ws.get_all_values.return_value = fake_cell_data
-
-        mock_sh = MagicMock()
-        mock_sh.worksheet.return_value = mock_ws
-
-        mock_client = MagicMock()
-        mock_client.open_by_key.return_value = mock_sh
-
-        original_sheet_id = settings.sheet_id
-        settings.sheet_id = "fake-sheet-id-for-test"
-        try:
-            with inject_server_deps(get_client_fn=lambda: mock_client):
-                resp = client.post(
-                    "/api/properties",
-                    json={"url": "https://www.rightmove.co.uk/properties/88375569"},
-                )
-            assert resp.status_code == 400, f"Expected 400, got {resp.status_code}: {resp.text[:100]}"
-            body = resp.json()
-            assert "already exists" in body.get("error", ""), f"Missing 'already exists' message: {body}"
-            assert "fields=" in body.get("error", ""), f"Missing fields= hint: {body}"
-        finally:
-            settings.sheet_id = original_sheet_id
-
     def test_rejects_property_already_in_database(self):
         """Re-adding a Rightmove property whose RID already has DAG rows
-        in the database must be rejected even when the sheet is
-        unreachable — the DB is the source of truth for duplicates."""
+        in the database must be rejected — the DB is the source of truth
+        for duplicates."""
         from dag.persistence import save_node_result
-        from tests.helpers import inject_server_deps
         rid = "88375570"
 
         save_node_result(
             f"{rid}/rightmove_address",
             {"status": "succeeded", "value": "12 Test Street, Testown RG1 1AA", "succeeded": True},
         )
-        # No sheet client at all — dedupe must come from the DB, not the sheet.
-        with inject_server_deps(get_client_fn=lambda: None):
-            resp = client.post(
-                "/api/properties",
-                json={"url": f"https://www.rightmove.co.uk/properties/{rid}"},
-            )
+        resp = client.post(
+            "/api/properties",
+            json={"url": f"https://www.rightmove.co.uk/properties/{rid}"},
+        )
         assert resp.status_code == 400, f"Expected 400, got {resp.status_code}: {resp.text[:100]}"
         body = resp.json()
         assert "already exists" in body.get("error", ""), f"Missing 'already exists' message: {body}"

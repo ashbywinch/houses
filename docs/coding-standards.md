@@ -52,20 +52,20 @@ Named after the class. Exception: a module grouping closely related small datacl
 
 ### What belongs in the DAG
 
-Every enrichment module producing a property value stores it as a source_value node. Every display/sheet-write reads derived values. **No module re-implements a priority chain or combines raw inputs — the DAG resolver does that once.**
+Every enrichment module producing a property value pushes it into a source node. Every display reads derived values. **No module re-implements a priority chain or combines raw inputs — the DAG resolver does that once.**
 
 | Code | Does | Never does |
 |---|---|---|
-| Sheet import | calls `insert_source_value()`, `resolve_property()` | re-implements priority/validation |
-| Card/display | reads resolved values via `load_property_data()`/`resolve_property()` | decides which value is "best" |
-| Enrichment runners | write source values, call `resolve_property()` | make priority decisions |
+| Bootstrap/import | pushes source nodes via `bootstrap_from_row()` / `UserInputNode.push()` | re-implements priority/validation |
+| Card/display | reads resolved values via the property registry / node JSON | decides which value is "best" |
+| Enrichment runners | push source values, drain the scheduler | make priority decisions |
 
 ### Design for new nodes
 
 1. Declare **source nodes** in `houses/nodes/` for each raw input.
 2. Declare **derived nodes** for resolved values.
-3. **Enrichment module** writes to source_values via `insert_source_value()`.
-4. **Templates/sheet writes** read derived_values via `load_property_data()`/`resolve_property()`.
+3. **Enrichment module** pushes raw data into the source node.
+4. **Templates/API responses** read derived values via `PropertyNodes.to_json()` / the property registry.
 
 Staleness, re-computation, priority are the DAG's job. See `docs/dag-library.md` for node patterns.
 
@@ -83,14 +83,6 @@ A business rule needed in two places (e.g. "user correction overrides Rightmove"
 4. **From DB**: `fromisoformat` may return naive. After parsing, check `dt.tzinfo is None` → `dt.replace(tzinfo=UTC)`.
 
 Naive datetimes are a systemic bug source: aware↔naive comparisons raise `TypeError`; arithmetic is wrong across DST.
-
-### Sheet rules
-
-**Never clear/regenerate the whole sheet.** Manual data (addresses, notes, status) is irreplaceable. `ws.clear()` + backfill is forbidden — destroys manual data, breaks View tab formulas. Use `POST /properties?fields=...&force=true` for specific columns.
-
-**Column migrations** — `scripts/sheet_tool.py` only (`add`, `move`, `rename`, `delete`). Never call `insert_cols`/`deleteDimension`/`add_cols`/`clear` directly. After a change: `POST /sync-view-formulas`; update `Row.HEADERS` + `Row.from_property()` in `houses/sheets/row.py` (the canonical column source); batch refresh to populate. Delete one-off migration scripts after running (git log preserves history).
-
-**User columns never overwritten** — Rightmove URL, Address, Postcode, Bedrooms, Price, Actual Lat/Long/Postcode: server never writes them. Rightmove ID column is the server's stable lookup key; `write_enriched_row` finds rows by it and writes only non-empty cells.
 
 ### API keys & secrets
 
@@ -171,7 +163,7 @@ Three DI patterns (implementations in `houses/services.py`, `houses/context.py`;
 | Pattern | When |
 |---------|------|
 | **`Services` container** | Replace an entire enrichment module (EPC, council tax, commute) |
-| **Context vars** | Per-request singletons (bus fares, sheets client, geo state) |
+| **Context vars** | Per-request singletons (Rightmove scrape fn) |
 | **Local `_kwarg`** | Leaf-level data objects (car park data, HTML fixtures) |
 
 Reusable fakes in `tests/helpers.py`; `make_services()` builds a `Services` with all fakes at sensible defaults.

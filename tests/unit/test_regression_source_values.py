@@ -1,5 +1,5 @@
-"""Regression: after removing dead source_values table, seed_registry_from_sheet()
-must push source values for every property so the DAG computes derived nodes.
+"""Regression: bootstrap_from_row() must push source values for every
+property so the DAG computes derived nodes.
 """
 
 from __future__ import annotations
@@ -63,9 +63,9 @@ def _mock():
 
 
 @pytest.mark.asyncio
-async def test_push_happens_without_old_table():
-    """seed_registry_from_sheet() no longer checks source_values (dead table).
-    Every property gets source values pushed, triggering DAG computation."""
+async def test_bootstrap_pushes_sources_and_dag_computes():
+    """bootstrap_from_row() pushes every source value, triggering DAG
+    computation — no dead table gates the push."""
     rid = "push_test"
     prop = PropertyNodes(rid)
     source_dict = {
