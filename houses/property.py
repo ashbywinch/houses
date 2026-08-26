@@ -41,7 +41,6 @@ class Property:
     tab: str = "Properties Data"
     actual_latitude: float | None = None
     actual_longitude: float | None = None
-    actual_postcode: str = ""
 
     # ── Location resolution ─────────────────────────────────────────
 
@@ -99,7 +98,6 @@ class EnrichedProperty:
     # User-provided overrides (from Actual Latitude/Longitude columns)
     actual_latitude: float | None = None
     actual_longitude: float | None = None
-    actual_postcode: str = ""
 
     # Cached approximate values (from geocoding)
     approx_latitude: float | None = None

@@ -48,8 +48,6 @@ def push_enriched_property(rid: str, enriched: EnrichedProperty, sources: dict[s
     if enriched.postcode and "postcode" in sources:
         sources["postcode"].push(enriched.postcode, "Rightmove")
     _push_precise_location(enriched, sources)
-    if enriched.actual_postcode and "actual_postcode" in sources:
-        sources["actual_postcode"].push(enriched.actual_postcode, "Rightmove")
 
 
 def _push_precise_location(enriched, sources):

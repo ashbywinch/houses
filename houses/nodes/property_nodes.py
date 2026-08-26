@@ -69,7 +69,6 @@ class PropertyNodes:
         self.corrected_address = UserInputNode[str](f"{rid}/corrected_address", str)
         self.user_entered_address = UserInputNode[str](f"{rid}/user_entered_address", str)
         self.postcode = UserInputNode[str](f"{rid}/postcode", str)
-        self.actual_postcode = UserInputNode[str](f"{rid}/actual_postcode", str)
 
         # Comments from View tab
         self.comment_status = UserInputNode[str](f"{rid}/status", str)

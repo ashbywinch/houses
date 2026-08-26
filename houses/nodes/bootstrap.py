@@ -22,7 +22,6 @@ SOURCE_LABELS: dict[str, str] = {
     "rightmove_price": "Rightmove",
     "rightmove_location": "Rightmove map",
     "precise_location": "User location",
-    "actual_postcode": "Rightmove",
     "corrected_address": "User correction",
     "user_entered_address": "User correction",
 }
@@ -166,7 +165,6 @@ def bootstrap_from_row(row: dict[str, Any], sources: dict[str, UserInputNode]) -
 
     pushed += _push_upgraded_address(sources, row)
     pushed += _push_cell(sources, row, col_name="Postcode", source_key="postcode")
-    pushed += _push_cell(sources, row, col_name="Actual Postcode", source_key="actual_postcode")
     pushed += _push_comment_cells(sources, row)
     return pushed
 
