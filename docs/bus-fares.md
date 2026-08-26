@@ -8,12 +8,19 @@ Bus fare data comes from **BODS** (Bus Open Data Service) NeTEx fare datasets. `
 - Accumulates network fares (day/return passes) and applies them across files.
 - Writes per-operator checkpoints to `data/.bus_fares_checkpoints/`, merged into `data/bus_fares.json` — so extraction is resumable, not from-scratch each time.
 
-## Updating the sheet after re-extracting
+## Recomputing after re-extracting
 
 1. Re-run extraction: `uv run python scripts/extract_bus_fares.py --cached-only`
 2. Server picks up the new `bus_fares.json` on next restart.
-3. Trigger a batch refresh for affected properties:
+3. Persisted commute nodes keep their old fares until regenerated — force a
+   recompute with the superuser endpoint:
 
 ```bash
-curl -X POST "http://localhost:8765/api/properties?fields=simon,lorena&force=true"
+curl -X POST "http://localhost:8765/api/admin/regenerate" \
+     -H "Content-Type: application/json" \
+     -b "session=<admin session cookie>" \
+     -d '{"patterns": ["*/bus_route", "*/bods_fare"]}'
 ```
+
+Dependents (cheapest fare, monthly costs) cascade automatically — the
+scheduler is drained before the endpoint responds.

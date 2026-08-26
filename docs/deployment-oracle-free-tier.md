@@ -426,9 +426,6 @@ the WebSocket stays connected.
   failure) is a total loss.
 - Monitoring: `journalctl -u houses -f` for errors; systemd restart policy
   handles crashes.
-- The `HOUSES_SHEET_ID` / service-account entries become inert once the
-  sheets code is removed — harmless until then.
-
 ## Phase 7 — domain cutover (later, ~15 min)
 
 A record `houses.<yourdomain> → <public-ip>`. With Cloudflare proxy in

@@ -1,38 +1,25 @@
 # API Reference
 
-All endpoints live on port 8765 (`make run`). **The source of truth is the running server's auto-docs at `/docs`** (FastAPI generates them from `houses/web/api_router.py`). This page records the non-obvious behaviour — query-param semantics and response shapes — that the code doesn't explain by itself.
+All endpoints live on port 8765 (`make run`). **The source of truth is the running server's auto-docs at `/docs`** (FastAPI generates them from the routers). This page records the non-obvious behaviour that the code doesn't explain by itself.
 
 | Endpoint | What's non-obvious |
 |----------|--------------------|
-| `GET /properties`, `GET /properties/{rid}` | **Require `?tab=view` or `?tab=data`** — missing tab is an error |
-| `GET /properties/{rid}` | Detects duplicate RIDs → `409 Conflict` |
-| `POST /api/properties` | Single-property upsert (scrape a Rightmove URL) **or** batch refresh (see below) |
-| `POST /properties/compare` | No-write re-enrich → TSV diff of sheet vs fresh values |
-| `POST /sync-view-formulas` | Refresh View tab XLOOKUPs after column changes; idempotent |
+| `GET /properties` | Lists every property from the DB-backed DAG registry. Legacy `?tab=view\|data` param is accepted and ignored — both serve the same rows |
+| `POST /api/properties` | Single-property upsert (scrape a Rightmove URL); re-adds of an existing RID are rejected unless `fields=` is passed |
+| `POST /api/admin/regenerate` | Superuser-only force-recompute of derived nodes matching id patterns |
 
-## POST /properties — batch refresh
+## POST /api/properties
 
-With `rids`: reads View tab, matches to Data tab, enriches, writes back. Output is streamed newline-delimited JSON, **always ending with**:
+Single-property mode: JSON body `{url, address?, postcode?, bedrooms?, price?}`. Always scrapes/enriches and seeds the DAG; responds with `{status, rid, data}`.
 
-```json
-{"type": "summary", "updated": 40, "skipped": 1, "created": 0, "errors": 0}
-```
+Duplicates: the **database** is the source of truth. Re-posting a RID that already has DAG rows returns `400 {"error": "Property <rid> already exists. Use fields= to re-enrich specific fields."}`. Passing `fields=` bypasses the rejection.
 
-Query params:
+Legacy contract: a call with **no JSON body** answers `200 null` — it used to be the sheet batch-refresh entry point and is kept as a no-op so old callers don't error. The old batch query params (`rids`, `force`, `no_write`) are accepted but inert.
 
-| Param | Type | Default | Semantics |
-|-------|------|---------|-----------|
-| `fields` | list | all | enrichment groups: `simon,lorena,petrol,schools,walk_time,amenities,town,epc,council_tax,geo` |
-| `rids` | str | all | comma-separated RIDs |
-| `force` | bool | false | `true` = overwrite existing cells; `false` = fill blanks only |
-| `no_write` | bool | false | enrich without writing to the sheet |
+## POST /api/admin/regenerate
 
-Example — force refresh Simon/Lorena for specific rows: `curl -X POST "http://localhost:8765/api/properties?fields=simon,lorena&force=true&rids=88275093,173431283"`.
-
-## POST /properties/compare
-
-No-write re-enrich of every property → TSV diff: `RID  Field  Old (sheet)  New (enriched)`. Used to verify refactoring didn't change output. Params: `rids`, `fields`.
+Superuser-only. Body: `{"patterns": ["*/council_tax"]}` where `*` matches any run of characters (a pattern without `*` is an exact node id). Matched input nodes have no computation and are reported as skipped; dependents cascade because the scheduler is drained before responding. See `houses/admin_router.py`.
 
 ## Troubleshooting
 
-Batch endpoints fail in non-obvious ways (streaming, `--reload` kills, `force` propagation) — see `docs/troubleshooting-endpoints.md`.
+Long requests die unobviously when `uvicorn --reload` restarts mid-flight — see `docs/troubleshooting-endpoints.md`.

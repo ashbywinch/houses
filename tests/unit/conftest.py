@@ -1,4 +1,4 @@
-"""Pytest configuration — prevents external API calls and sheet writes."""
+"""Pytest configuration — prevents external API calls."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ import pytest
 from dag.scheduler import flush_processor
 from houses.api_cache import set_cache_dir
 from houses.nodes.bus import BusRouteNode
-from houses.settings import settings
 from tests.helpers import FakeSchoolLookup, make_services
 from tests.unit.isolation_fixtures import (  # noqa: F401, F811
     _inject_test_scheduler,
@@ -74,13 +73,6 @@ def _isolate_api_cache():
         files = list(Path(tmp).iterdir())
         assert not files, f"Unit test created {len(files)} cache file(s): {[f.name for f in files]}"
 
-
-@pytest.fixture(autouse=True)
-def _no_sheet_writes():
-    saved = settings.sheet_id
-    settings.sheet_id = ""
-    yield
-    settings.sheet_id = saved
 
 
 @pytest.fixture(autouse=True)

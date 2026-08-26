@@ -654,16 +654,6 @@ class TestSettingsApi:
         resp = client.put("/api/settings/persons", json=[{"name": "Simon", "has_car": True}])
         assert resp.status_code == 404, f"Expected 404 (endpoint removed), got {resp.status_code}"
 
-    def test_reseed_endpoint_exists(self):
-        """POST /api/admin/reseed must return a JSON response."""
-        from unittest.mock import patch
-
-        with patch("houses.sheets.reader.get_properties_data", return_value=[]):
-            client = self._setup()
-            resp = client.post("/api/admin/reseed")
-        assert resp.status_code == 200
-        assert resp.json() == {"status": "ok"}
-
 
 def _push_persons(*persons) -> None:
     """Seed the persons settings node directly (module-level cache)."""

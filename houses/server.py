@@ -23,11 +23,11 @@ from dag.persistence import property_rids
 from dag.scheduler import set_after_refresh
 from dag.scheduler import start_processor as _start_processor
 from houses.admin_router import admin_router
-from houses.context import get_client_factory, get_scrape_fn
+from houses.context import get_scrape_fn
 from houses.database import close_db as close_app_db
 from houses.database import init_db as init_app_db
 from houses.location import extract_postcode
-from houses.nodes.bootstrap import load_property_nodes_from_db, load_property_nodes_from_rows
+from houses.nodes.bootstrap import load_property_nodes_from_db
 from houses.nodes.cutover import push_enriched_property
 from houses.nodes.property_nodes import PropertyNodes
 from houses.nodes.settings import set_app_mode
@@ -35,11 +35,6 @@ from houses.property import EnrichedProperty, Property
 from houses.rightmove_scraper import RightmoveProperty, stop_chrome
 from houses.services import Services
 from houses.settings import settings
-from houses.sheets import (
-    col_index,
-    sync_view_formulas,
-)
-from houses.sheets.reader import get_properties_data, resolve_tab
 from houses.web.api_router import api_router
 from houses.web.auth import auth_router, get_session_user
 from houses.web.json_utils import asdict_serializable
@@ -61,20 +56,6 @@ def _deploy_hash() -> str:
     except (OSError, subprocess.TimeoutExpired):
         return ""
     return ""
-
-
-def _property_in_sheet(gclient: Any, rid: str) -> bool:
-    """True if *rid* already appears in the Properties Data sheet.
-
-    Sheet errors count as "not present" so the upsert can proceed.
-    """
-    try:
-        sh = gclient.open_by_key(settings.sheet_id)
-        ws = sh.worksheet("Properties Data")
-        return any(row[col_index("Rightmove ID")].strip() == rid for row in ws.get_all_values()[1:])
-    # lucidlint: ignore broad-except sheet read failure counts as not-present so the upsert proceeds
-    except Exception:
-        return False
 
 
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
@@ -156,12 +137,7 @@ async def lifespan(_app: FastAPI):
     _broadcaster_mod._reset()
     _town_desc._reset()
 
-    if property_rids():
-        load_property_nodes_from_db()
-    else:
-        # Cold start: seed from the Google Sheet
-        rows = get_properties_data()
-        load_property_nodes_from_rows(rows)
+    load_property_nodes_from_db()
     # Start the background stale-node processor and the WebSocket broadcaster.
     # The processor eagerly recomputes nodes whose dependencies have changed;
     # the broadcaster pushes fresh property summaries to connected clients.
@@ -234,14 +210,26 @@ async def _require_auth(request, call_next):
 
 
 @app.get("/properties")
-async def list_properties(tab: str = Query(description="Tab: 'view' or 'data'")):
-    """List all properties.
+async def list_properties(
+    tab: str = Query(default="view", description="Legacy selector ('view'|'data'); both serve the same registry rows"),
+):
+    """List all properties from the DB-backed DAG registry.
+
+    Each row is a PropertyNodes JSON document (``rid`` plus node JSON for
+    best_address / best_location / rightmove_url / rightmove_price /
+    rightmove_bedrooms / postcode), sourced from the SQLite database via
+    the property registry — the sheet is gone.
 
     Query parameters:
-    - **tab** (required): ``"view"`` or ``"data"``.
+    - **tab** (legacy): accepted for backwards compatibility; the registry
+      is the same regardless of tab.
     """
-    resolve_tab(tab)
-    props = get_properties_data()
+    props = []
+    for rid in _property_registry.list_properties():
+        prop = _property_registry.get_property(rid)
+        if prop is None:
+            continue
+        props.append(await prop.to_json())
 # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     return {"tab": tab, "properties": props}
 
@@ -250,21 +238,11 @@ def _duplicate_error(payload, rid: str, fields) -> JSONResponse | None:
     """A 400 response when the property already exists; None to proceed.
 
     The DATABASE is the source of truth for duplicates (a re-added
-    Rightmove URL must not create a second property), with the sheet as a
-    secondary guard.
+    Rightmove URL must not create a second property).
     """
     if fields or not rid:
         return None
     if rid in property_rids():
-        return JSONResponse(
-            content={
-                "status": "error",
-                "error": f"Property {rid} already exists. Use fields= to re-enrich specific fields.",
-            },
-            status_code=400,
-        )
-    gclient = get_client_factory()()
-    if gclient and settings.sheet_id and _property_in_sheet(gclient, rid):
         return JSONResponse(
             content={
                 "status": "error",
@@ -314,7 +292,7 @@ def _enriched_price(payload, scraped) -> Money:
 
 
 def _build_enriched(payload, scraped, address: str, postcode: str) -> EnrichedProperty:
-    """Seed the DAG — a fresh enrichment with no sheet writes."""
+    """Seed the DAG — a fresh enrichment."""
     return EnrichedProperty(
         url=payload.url or (scraped.url if scraped else ""),
         address=address or (scraped.address if scraped else ""),
@@ -334,14 +312,14 @@ async def upsert_property(
     rids: Annotated[str | None, Query()] = None,
     force: bool = Query(default=False),
 ) -> JSONResponse | StreamingResponse:
-    """Upsert a property — enrich it and write to the sheet.
+    """Upsert a property — enrich it and seed the DAG.
 
     Two modes:
     1. **Single property** — provide a JSON body with url/address/postcode.
     2. **Batch re-enrich** — use query params ``rids``, ``fields``, ``no_write``.
 
     Always runs enrichment. Use ``no_write=true`` to cache results without
-    writing to the sheet.
+    persisting to the database.
     """
     if not payload:
         # No payload — the batch/backfill call is a no-op that must still
@@ -360,7 +338,7 @@ async def upsert_property(
     scraped, scrape_error, address = await _scrape_for_address(payload)
     postcode = payload.postcode or extract_postcode(address)
 
-    # ── Seed the DAG (no sheet writes, no old enrichment) ─────────
+    # ── Seed the DAG ─────────────────────────────────────────────
     enriched = _build_enriched(payload, scraped, address, postcode)
     rid2 = rid or enriched.rid
     if rid2:
@@ -372,26 +350,6 @@ async def upsert_property(
         extra["scrape_warning"] = scrape_error
         dump["_scrape_warning"] = scrape_error
     return JSONResponse(content={"status": "ok", "rid": rid2, "data": dump, **extra}, status_code=200)
-
-
-@app.post("/sync-view-formulas")
-async def sync_view_formulas_endpoint() -> JSONResponse:
-    """Refresh View tab formulas and named ranges to match the current Data tab."""
-    if not settings.sheet_id:
-        return JSONResponse(content={"status": "ok", "note": "Sheets not configured"})
-    gclient = get_client_factory()()
-    if gclient is None:
-        return JSONResponse(content={"status": "ok", "note": "Sheets not configured"})
-    try:
-        sh = gclient.open_by_key(settings.sheet_id)
-        sync_view_formulas(sh)
-        logger.info("View formulas synced")
-        return JSONResponse(content={"status": "ok", "message": "View formulas synced"})
-    # lucidlint: ignore broad-except endpoint boundary — any sync failure returns a 500 JSON response, never raises
-    except Exception as exc:
-        logger.error("Failed to sync view formulas: %s", exc)
-        return JSONResponse(content={"status": "error", "error": str(exc)}, status_code=500)
-
 
 @app.get("/health")
 async def health() -> JSONResponse:

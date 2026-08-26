@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
 
 from houses.server import app, extract_postcode
-from houses.settings import settings
 
 client = TestClient(app)
 
@@ -85,7 +84,7 @@ class TestInjectProperty:
         fake_scrape.url = "https://www.rightmove.co.uk/properties/89498715"
 
         scrape_fn = AsyncMock(return_value=fake_scrape)
-        with inject_server_deps(scrape_fn=scrape_fn, get_client_fn=lambda: None):
+        with inject_server_deps(scrape_fn=scrape_fn):
             resp = client.post(
                 "/api/properties",
                 json={"url": "https://www.rightmove.co.uk/properties/89498715"},
@@ -104,35 +103,9 @@ class TestInjectProperty:
 
 
 class TestBackfillView:
-    def test_no_sheet_id(self):
-        original = settings.sheet_id
-        settings.sheet_id = ""
-        try:
-            resp = client.post("/api/properties")
-            assert resp.status_code == 200
-        finally:
-            settings.sheet_id = original
-
-    def test_skips_row_without_rightmove_id(self):
-        from tests.helpers import inject_server_deps
-
-        original = settings.sheet_id
-        settings.sheet_id = "fake-id"
-        try:
-            mock_view_ws = MagicMock()
-            mock_view_ws.get_all_values.return_value = [["Listing Address", "Rightmove Link", "Rightmove ID"]]
-            mock_data_ws = MagicMock()
-            mock_data_ws.id = 12345
-            mock_sh = MagicMock()
-
-            def _worksheet(name):
-                return mock_view_ws if name == "Properties View" else mock_data_ws
-
-            mock_sh.worksheet.side_effect = _worksheet
-            mock_client = MagicMock()
-            mock_client.open_by_key.return_value = mock_sh
-            with inject_server_deps(get_client_fn=lambda: mock_client):
-                resp = client.post("/api/properties")
-            assert resp.status_code == 200
-        finally:
-            settings.sheet_id = original
+    def test_no_payload_returns_legacy_200(self):
+        """POST /api/properties with no JSON body used to be the sheet
+        batch-refresh entry point; it is now a no-op but must still answer
+        200 (legacy endpoint contract)."""
+        resp = client.post("/api/properties")
+        assert resp.status_code == 200

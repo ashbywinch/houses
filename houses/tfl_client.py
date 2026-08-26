@@ -685,10 +685,9 @@ class TflClient:
     ) -> ParkingCostResult:
         """Look up parking costs when park-and-ride used a driving leg.
 
-        Returns ``(parking_cost, new_daily_cost, cost_groups)`` where
-        ``cost_groups`` contains a single ``CostGroup`` with the parking
-        fee (operator ``"ParkCo"``) so that ``non_rail_cost()`` on the
-        resulting commute reflects the parking cost.
+        Returns a ``ParkingCostResult`` whose ``cost_groups`` contains a
+        single ``CostGroup`` with the parking fee (operator ``"ParkCo"``)
+        so that the resulting commute's daily cost reflects parking.
 
         ``_registry`` \u2014 optional ``CarParkRegistry`` instance.  When
         omitted (production), a default registry loaded from CSV is used.
