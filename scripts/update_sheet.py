@@ -200,15 +200,15 @@ def _add_manual_coordinates(payload: dict, row: list[str]) -> None:
     """Pass user-filled actual values if they exist."""
     lat_col = col_index("Actual Latitude")
     lng_col = col_index("Actual Longitude")
-    rid_col = col_index("Rightmove ID")
     if len(row) > lat_col and row[lat_col]:
         with contextlib.suppress(ValueError):
             payload["actual_latitude"] = float(row[lat_col])
     if len(row) > lng_col and row[lng_col]:
         with contextlib.suppress(ValueError):
             payload["actual_longitude"] = float(row[lng_col])
-    if len(row) > rid_col and row[rid_col]:
-        payload["actual_postcode"] = row[rid_col]
+    postcode_col = col_index("Actual Postcode")
+    if len(row) > postcode_col and row[postcode_col]:
+        payload["actual_postcode"] = row[postcode_col]
 
 
 def _choose_needed_columns(headers: list[str], row: list[str], columns) -> list[int] | None:
