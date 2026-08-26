@@ -58,7 +58,7 @@ Requirements:
   non-TfL buses at property level. **TfL is a free public API with no hard quota** — the
   quota constraint that matters is Google/BODS, which phase 1 does not touch.
 - `data/stations.csv`: 2606 UK stations with name, CRS, lat/lon (committed).
-- Office destinations are already in `houses/config.py`:
+- Office destinations are already in `houses/settings.py`:
   `simon_destination` = "1 Drummond Gate, Pimlico, London SW1V 2QQ",
   `lorena_destination` = "Eastgate House, 40 Dukes Place, Aldgate, London EC3A 7LP".
 - Rightmove supports draw-area searches; the drawn polygon is encoded as a URL parameter
@@ -86,7 +86,7 @@ This is the only new API usage and it never repeats (results committed). Real si
 ~2960 calls (1819 stations in the box, ~1481 outside the inner zone, ×2 destinations)
 ≈ 50 minutes once. TfL is a free public API; this is a polite one-off, not quota burn.
 
-- **Inputs pinned**: route to the two office postcodes from `houses/config.py`
+- **Inputs pinned**: route to the two office postcodes from `houses/settings.py`
   (SW1V 2QQ / EC3A 7LP), `nationalSearch=true`, `timeIs=arriving` 09:00 weekday,
   `allow_bus=True` (TfL's default mode list excludes bus; the shed must not).
 - **Origin**: route from station **lat,lon** (stations.csv coordinates) — TfL accepts
@@ -134,7 +134,7 @@ scraper input):
   rightmove_url }` plus metadata: `threshold_min: 132`, `destinations: [Pimlico,
   Aldgate]`, `generated_at`, engine version.
 - **Filters pinned for phase 1**: `min_beds: 2`, `property_type: house`, **no price
-  cap** (no price setting exists in `houses/config.py`; price bands are a phase-2 knob
+  cap** (no price setting exists in `houses/settings.py`; price bands are a phase-2 knob
   and the result-cap splitting mechanism — see Risks).
 - Also emit `data/commute/searches.txt` (one URL per line) for manual entry. No HTML
   page in phase 1 — Rightmove accepts full search URLs directly in the browser.

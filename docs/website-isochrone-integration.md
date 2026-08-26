@@ -384,7 +384,7 @@ The client only sorts and renders; it never computes commute-derived values.
 
 | Today (hard-coded) | Becomes |
 |---|---|
-| Transit offices = `simon_destination`/`lorena_destination` in `houses/config.py` | POIs whose modes include train (drawn regardless of car) |
+| Transit offices = `simon_destination`/`lorena_destination` in `houses/settings.py` | POIs whose modes include train (drawn regardless of car) |
 | `data/commute/drive_destinations.json` (hand-maintained) | **generated** from POIs whose modes include car |
 | No walk areas | POIs whose modes include walk AND not car → small disk around the POI (max walk time) |
 | Thresholds 132/90 min | new `isochrone` settings block: `{transit_min: 132, drive_min: 90}`, per-POI override |
@@ -406,7 +406,7 @@ Data model changes:
 - `Person.is_child` exists; add `Person.editable_by: list[str]` (default `[self]`,
   superuser implied; child default = all adults).
 - `stations.csv`/TfL destinations: `station_shed.py` gains a `--config` input
-  (destinations + threshold) instead of reading `houses/config.py` — the app's
+  (destinations + threshold) instead of reading `houses/settings.py` — the app's
   derived config is the new source.
 
 ### Intersection semantics ("where we could live")

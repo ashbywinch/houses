@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 from money import Money
+from uk_property_apis.voa import VOAClient
 
 from dag.attempt import Attempt
 from dag.measurement import Measurement
@@ -277,7 +278,6 @@ class CachedVOAClient:
         self._inner: VOAClient | None = None
 
     async def __aenter__(self):
-
         self._inner = VOAClient()
         await self._inner.__aenter__()
         return self
