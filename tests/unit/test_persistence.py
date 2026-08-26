@@ -178,3 +178,55 @@ class TestGeoPointPersistence:
         assert loaded is not None
         reconstructed = _deserialize_value(json.dumps(loaded["value"]))
         assert reconstructed == GeoPoint(lat=3.0, lon=4.0)
+
+class TestCompressedStorage:
+    """result_json is zlib-compressed on disk; readers never see it."""
+
+    def test_stored_result_json_is_compressed_and_roundtrips(self):
+        """A persisted row stores zlib bytes (magic 0x78), meaningfully
+        smaller than the raw JSON; latest_node_result returns the identical
+        dict — compression is invisible to readers."""
+        from dag import persistence as p
+
+        big = {
+            "status": "succeeded",
+            "value": {"x": "y" * 500},
+            "provenance": {"label": "L", "sources": {"a": {"value": "z" * 500}}},
+        }
+        node_id = f"{RID}/compressed"
+        save_node_result(node_id, big)
+        conn = p._get_db()
+        raw = conn.execute(
+            "SELECT result_json FROM node_results WHERE node_id=?", (node_id,)
+        ).fetchone()[0]
+        assert isinstance(raw, bytes), f"expected zlib bytes on disk, got {type(raw).__name__}"
+        assert raw[:1] == b"\x78", "expected zlib magic prefix"
+        assert len(raw) < len(json.dumps(big)) // 2, "compression must be meaningful"
+        loaded = latest_node_result(node_id)
+        assert loaded is not None
+        assert loaded["status"] == "succeeded"
+        assert loaded["value"] == big["value"]
+        assert loaded["provenance"] == big["provenance"]
+
+    def test_legacy_uncompressed_rows_still_load(self):
+        """Rows written before compression (plain JSON text) still read —
+        the migration must not break the existing 200k-row database."""
+        from dag import persistence as p
+
+        node_id = f"{RID}/legacy"
+        conn = p._get_db()
+        conn.execute(
+            "INSERT INTO node_results (node_id, result_json, dep_timestamps, created_at, code_version)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (
+                node_id,
+                json.dumps({"status": "succeeded", "value": {"legacy": True}}),
+                None,
+                "2026-01-01T00:00:00+00:00",
+                None,
+            ),
+        )
+        conn.commit()
+        loaded = latest_node_result(node_id)
+        assert loaded is not None
+        assert loaded["value"] == {"legacy": True}
