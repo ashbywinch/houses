@@ -120,6 +120,8 @@ def inspect_rid(rid: str):
             v = _json_or_raw(row["value"])
             print(f"    {short:30s} src={row['source']:20s} val={str(v)[:80]}")
 
+    _print_derived_values(conn, rid)
+
     conn.close()
 
 
