@@ -1,0 +1,20 @@
+# /etc/systemd/system/houses-blue.service — houses instance (blue side).
+# See tools/deploy/run-instance.sh for the live/smoke mode logic and
+# tools/deploy/provision.md for the full box setup.
+[Unit]
+Description=Houses app (blue instance)
+After=network-online.target houses-chrome.service
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/opt/houses/blue
+# Secrets come from a root-only env file (chmod 600 — a systemd unit file is
+# world-readable, so never put secrets in Environment= lines here). Must be
+# STRICT KEY=VALUE: no quotes, no export, no $ references.
+EnvironmentFile=/etc/houses.env
+ExecStart=/bin/sh /opt/houses/run-instance.sh blue
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

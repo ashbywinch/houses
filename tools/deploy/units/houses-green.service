@@ -1,0 +1,17 @@
+# /etc/systemd/system/houses-green.service — houses instance (green side).
+# See tools/deploy/run-instance.sh for the live/smoke mode logic and
+# tools/deploy/provision.md for the full box setup.
+[Unit]
+Description=Houses app (green instance)
+After=network-online.target houses-chrome.service
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/opt/houses/green
+EnvironmentFile=/etc/houses.env
+ExecStart=/bin/sh /opt/houses/run-instance.sh green
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

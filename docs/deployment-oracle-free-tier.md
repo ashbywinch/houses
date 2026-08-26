@@ -214,110 +214,54 @@ curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 || { echo "Ch
 - Frontend: the built `dist/` is committed in the repo — no build step
   needed; `run-prod` serves it from FastAPI on 8765.
 
-## Phase 4 — systemd service
+## Phase 4 — blue/green instances (supersedes the old single houses.service)
 
-Create the launcher script (systemd `ExecStart` must be a single line).
-It delegates to the repo's own `make run-prod` target
-([Makefile](https://github.com/ashbywinch/houses/blob/main/Makefile#L140-L145))
-so there is ONE source of truth for the launch command — no inline copy
-to drift:
+The box runs TWO app instances — `houses-blue` (:8765) and `houses-green`
+(:8766) — around ONE shared live DB (`/opt/houses/data/houses.db`). Only the
+ACTIVE side (per `/opt/houses/ACTIVE`) writes the live DB. The standby, when
+started by the release pipeline, serves **its own snapshot copy** of the DB
+(`/opt/houses/<side>-smoke.db`) — a fully working prod replica whose writes
+land in the copy, never the live DB. That is the pre-switch smoke target.
 
-```bash
-# /opt/houses/run_prod.sh
-cat > /opt/houses/run_prod.sh <<'EOF'
-#!/bin/sh
-cd /opt/houses
-# systemd's default PATH lacks ~/.local/bin (uv) — make's UV fallback
-# handles it, but be explicit so make/npm resolve identically to a shell
-export PATH="$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-# wait for the scraper browser's CDP endpoint before serving (the app
-# can start either way, but property adds need it live) — and fail
-# loudly if it never comes up
-for i in $(seq 1 30); do curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 && break; sleep 1; done
-curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 || { echo "scraper browser not reachable on :9222"; exit 1; }
-exec make run-prod
-EOF
-chmod +x /opt/houses/run_prod.sh
-```
+Everything lives in `tools/deploy/` in the repo (copy onto the box):
 
-Two things `make run-prod` needs from the environment on a server:
-`make run-prod` binds `settings.host` (127.0.0.1 by default) and
-re-runs `setup` + `frontend-build` (a few seconds on a warmed cache).
-Put `HOUSES_HOST=0.0.0.0` in `/etc/houses.env` (the unit's
-`EnvironmentFile` — process env wins over the repo `.env`), start and
-enable the app: `sudo systemctl daemon-reload && sudo systemctl enable
---now houses.service`, and after start verify the listener answers
-externally: `curl -s --max-time 10 -o /dev/null -w 'listener answered with HTTP %{http_code}\n' http://<public-ip>:8765/api/auth/me || { echo 'app unreachable externally — check HOUSES_HOST and the security list'; exit 1; }` and
-`ssh ubuntu@<ip> "ss -tlnp | grep -E '(0\.0\.0\.0|\[::\]):8765' || { echo 'houses bound to loopback — HOUSES_HOST=0.0.0.0 not applied'; exit 1; }"`. Expect a short boot before
-the port answers.
+| File | Role |
+|---|---|
+| `run-instance.sh` | One launcher for both sides; derives live/smoke DB path + port from `ACTIVE`. Installed as `/opt/houses/run-instance.sh`. |
+| `release.sh` | Deploy a git ref to the STANDBY: `git checkout`, `uv sync`, snapshot live DB → smoke copy, `systemctl restart houses-<side>`, authenticated smoke checks (`/health`, `/api/properties/all`, a property detail, the frontend). Live side untouched. |
+| `switch.sh` | Flip: pre-flip DB snapshot → stop old side → start new side on the live DB (`init_db` migrates schema) → swap the Cloudflare tunnel hostname→port mapping → verify through the tunnel. `--rollback` reverses with the pre-flip snapshot. |
+| `units/houses-blue.service` / `houses-green.service` | systemd units, `EnvironmentFile=/etc/houses.env`, `ExecStart=/bin/sh /opt/houses/run-instance.sh <side>`. |
+| `units/houses-chrome.service` | One shared headless Chrome on :9222 (both sides scrape through it). |
+| `provision.md` | The full manual walkthrough: Oracle box, DNS/tunnel for `houses.blueumbrella.net`, Google OAuth redirect URIs, GitHub secrets, first release. |
 
-**Negative check — the ingress rule must be verified, not assumed.**
-The positive curl above succeeds whether the security list is restricted
-to the family's egress IPs or mistakenly left `0.0.0.0/0`, and a
-wide-open rule serves the family's financial data over sniffable HTTP
-to anyone who scans the port. Before the app is used, confirm from a
-network that is NOT allowlisted (e.g. the phone on cellular) that
-`curl -s --max-time 5 http://<public-ip>:8765/` is refused or times
-out; if it answers, fix the VCN security-list ingress for 8765/tcp
-before proceeding.
+Releases are GitHub-driven: push a `v*` tag → `.github/workflows/release.yml`
+deploys to the standby and smoke-tests it; a `switch` dispatch flips traffic;
+`rollback` undoes the last flip. The standby is publicly reachable during
+smoke at `https://houses-smoke.blueumbrella.net` for human eyeballing before
+the switch.
 
-`houses.service` (env from `.env`, WorkingDirectory `/opt/houses`,
-`Restart=always`):
+**The VCN no longer needs 8765/8766 ingress at all** — public traffic comes
+through the Cloudflare tunnel (outbound-only from the box). Only SSH (22)
+is open. The old "negative check for a wide-open security list" below is
+therefore obsolete.
 
-```ini
-# /etc/systemd/system/houses.service
-[Unit]
-Description=Houses app (FastAPI + Vue + scraper)
-After=network-online.target
-Wants=network-online.target
+## Phase 5 — OAuth + tunnel hostnames
 
-[Service]
-User=ubuntu
-WorkingDirectory=/opt/houses
-# Secrets come from a root-only env file (chmod 600 — a systemd unit
-# file is world-readable, so never put secrets in Environment= lines
-# here). /etc/houses.env must be STRICT KEY=VALUE: no quotes, no
-# export, no $ references (systemd's parser is not a dotenv parser).
-# The app's pydantic reads process env first, then ./.env, so these
-# win over anything in the repo.
-EnvironmentFile=/etc/houses.env
-ExecStart=/bin/sh /opt/houses/run_prod.sh
-Restart=always
+Google rejects plain-`http://` redirect URIs for public hosts. With the
+tunnel up, add these to the existing web client in the Google console
+(no new credentials — same project the LAN `.env` uses):
 
-[Install]
-WantedBy=multi-user.target
-```
+- `https://houses.blueumbrella.net/api/auth/callback`
+- `https://houses-smoke.blueumbrella.net/api/auth/callback`
 
-## Phase 5 — OAuth + no-domain launch
+Set `HOUSES_PUBLIC_URL` / `HOUSES_FRONTEND_URL` to
+`https://houses.blueumbrella.net` in `/etc/houses.env` so every link the app
+generates points at the public hostname. The smoke instance shares the same
+env — its links point at the main hostname too, which is fine for eyeballing
+(or add a per-side override in run-instance.sh if it ever matters).
 
-Google rejects plain-`http://` redirect URIs for **public** hosts, and
-the app carries family financial data — plain HTTP on a public IP is
-sniffable regardless of allowlisting. **HTTPS is required from the
-start.** Since you already own a domain, the primary path is:
-
-- **Primary: Cloudflare Tunnel to your existing domain — HTTPS from day
-  one.** `cloudflared tunnel create houses`, route
-  `houses.<yourdomain>` to it, and let the tunnel publish the origin
-  port (it reaches any port, so 8765 stays). The origin speaks plain
-  HTTP **inside** the tunnel, never on the public internet. Register
-  `https://houses.<yourdomain>/api/auth/callback` in Google and the
-  normal "Sign in with Google" button works immediately — no device
-  flow, no interim. Set `HOUSES_PUBLIC_URL` /
-  `HOUSES_FRONTEND_URL` to `https://houses.<yourdomain>`.
-- **Fallback (accepting the risk): no-domain sslip.io over plain HTTP
-  with the device flow.** Only if you accept on-path eavesdropping of
-  the family's financial data and session cookies on a public IP —
-  restrict the security list to trusted networks, treat it as strictly
-  temporary, and migrate to the tunnel before anyone uses the app from
-  an untrusted network. The app's device flow (`make login` on the box)
-  works with no HTTPS and no redirect URI; the "Sign in with Google"
-  button stays dead until the tunnel/domain lands.
-
-Restart `houses.service`, then verify from a whitelisted network (your
-home WiFi — or add the phone's **cellular egress IP** to the security
-list temporarily, since a carrier NAT address is not on the family-IP
-allowlist): page loads → sign-in completes → a property detail opens →
-the WebSocket stays connected.
+The sslip.io plain-HTTP fallback from the old plan is dead: the tunnel gives
+HTTPS from day one with no extra cost or risk.
 
 ## Phase 6 — safety net (the part that matters)
 

@@ -130,7 +130,7 @@ async def lifespan(_app: FastAPI):
         logger.error("HOUSES_SESSION_SECRET is empty. Set a non-empty value in .env.")
         raise RuntimeError("Session secret not configured")
 
-    init_dag_db()
+    init_dag_db(settings.sqlite_path)
     init_app_db()
     _services_mod._reset_settings_cache()
     _property_registry._reset()
