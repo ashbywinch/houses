@@ -26,99 +26,71 @@ exposes 8765/8766. **Only SSH (22) is open to the internet.**
 
 ---
 
-## 1. Oracle Cloud Free Tier box (~30–60 min, may span days for A1)
+## 1. Oracle Cloud Free Tier box — Terraform (account + API key are the only manual bits)
 
-1. Create the tenancy at cloud.oracle.com (pay-as-you-go with free-tier
-   resources, or the always-free tenancy).
-2. **Compute → Instances → Create instance**:
-   - Image: **Ubuntu 24.04 (arm64)**, Shape: **VM.Standard.A1.Flex**,
-     4 OCPU / 24 GB RAM (the free ARM shape — the only free shape that runs
-     Chrome comfortably). Boot volume 150–200 GB.
-   - If "out of capacity": retry over the day, or try a different region.
-     A1 is frequently sold out; do not fight it — the fallback is a $4–6 VPS
-     with ≥4 GB RAM (the plan's Phase 0 note).
-   - **Reserved public IP** (allocate at creation so it survives reboots —
-     the tunnel hostnames and Google OAuth URIs reference it indirectly, but
-     the IP must be stable for SSH).
-   - SSH key pair: download the `.pem`, `chmod 600`, keep it safe.
-3. **VCN security list**: one ingress rule — **22/tcp from 0.0.0.0/0** is
-   acceptable ONLY because SSH is key-only (see step 3 of §2; no password
-   auth). If you'd rather restrict, GitHub publishes its runner IP ranges
-   (api.github.com/meta) — but they rotate; key-only SSH is the simpler
-   posture. No other ingress. The tunnel makes outbound-only the norm.
-4. SSH in: `ssh -i ~/.ssh/oracle.pem ubuntu@<public-ip>`.
+The whole Oracle side (VCN, security list, instance, reserved IP, cloud-init
+box setup) is `terraform/` in the repo. Your only manual steps:
 
-## 2. Box setup (one-time, ~30 min)
+1. **Create the account** at cloud.oracle.com (**Start for free**; credit
+   card for identity only — Free Tier doesn't charge it).
+2. **The API signing key** (one console touch, ~5 min):
+   ```bash
+   mkdir -p ~/.oci && cd ~/.oci
+   openssl genrsa -out oci_api_key.pem 2048 && chmod 600 oci_api_key.pem
+   openssl rsa -pubout -in oci_api_key.pem -out oci_api_key_public.pem
+   ```
+   Console → your profile → **API keys → Add API key** → upload
+   `oci_api_key_public.pem`. It shows a **fingerprint** (copy it). Also copy
+   your **Tenancy OCID** (profile → Tenancy) and **User OCID** (profile →
+   User settings). Region: pick one with A1 capacity (US regions usually;
+   eu-frankfurt-1 often works) — retry over a day if `apply` says
+   out-of-capacity; the fallback is a $4–6 VPS with ≥4 GB RAM.
+3. **The SSH key** for the box (this machine):
+   ```bash
+   ssh-keygen -t ed25519 -f ~/.ssh/oracle -N "" -C "oracle-houses"
+   ```
+4. **Fill the variables** and apply (terraform on this machine — install
+   once: `brew install terraform` or the HashiCorp binary):
+   ```bash
+   cd terraform
+   cp terraform.tfvars.example terraform.tfvars   # fill the OCIDs/fingerprint/paths
+   terraform init
+   terraform plan     # read it — security list is SSH-only, shape is A1.Flex
+   terraform apply
+   terraform output ssh_command   # -> ssh -i ~/.ssh/oracle ubuntu@<ip>
+   ```
+   `apply` runs cloud-init: apt deps, Chrome, cloudflared, uv, the two
+   checkouts (/opt/houses/blue + green), units, ACTIVE=blue. It can take
+   ~5–10 min after the instance boots (watch with
+   `ssh ubuntu@<ip> "sudo tail -f /var/log/cloud-init-output.log"`).
 
-Run these on the box as `ubuntu`:
+## 2. Secrets + data cutover (the manual part that stays manual)
 
-```bash
-# deps (same list as the plan doc Phase 2)
-sudo apt update && sudo apt install -y python3-venv unzip curl ca-certificates sqlite3 rsync age rclone file nodejs npm git make \
-  fonts-liberation libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 \
-  libxcomposite1 libxdamage1 libgbm1 libasound2
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-Chrome for the scraper (arm64 .deb, sanity-checked like the plan doc):
-```bash
-curl -fL --retry 3 -Lo /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_arm64.deb
-file /tmp/chrome.deb | grep -q "Debian binary package" || { echo "bad chrome download"; exit 1; }
-sudo dpkg -i /tmp/chrome.deb || sudo apt -f install -y
-/usr/bin/google-chrome --headless=new --version || { echo "chrome does not launch headless"; exit 1; }
-sudo mkdir -p /var/lib/houses-chrome && sudo chown ubuntu:ubuntu /var/lib/houses-chrome
-sudo cp /opt/houses/source/tools/deploy/units/houses-chrome.service /etc/systemd/system/ 2>/dev/null || true
-sudo systemctl daemon-reload && sudo systemctl enable --now houses-chrome.service
-```
-
-Layout + both checkouts + the deploy tooling:
-```bash
-sudo mkdir -p /opt/houses/data
-sudo chown -R ubuntu:ubuntu /opt/houses
-cd /opt/houses
-git clone https://github.com/ashbywinch/houses.git blue
-git clone https://github.com/ashbywinch/houses.git green
-cp blue/tools/deploy/run-instance.sh blue/tools/deploy/release.sh blue/tools/deploy/switch.sh .
-chmod +x run-instance.sh release.sh switch.sh
-echo blue > ACTIVE          # blue is live from day one
-sudo cp blue/tools/deploy/units/houses-blue.service /etc/systemd/system/
-sudo cp blue/tools/deploy/units/houses-green.service /etc/systemd/system/
-```
-
-Secrets — install the LAN `.env` as root-only `/etc/houses.env`. Use the
-cutover pipeline from `docs/deployment-oracle-free-tier.md` Phase 3 (grep out
-the sheet-era keys — they crash pydantic at boot). At minimum the critical
-keys must be present and non-empty:
-
-```bash
-sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env   # paste STRICT KEY=VALUE
-# required keys: HOUSES_SESSION_SECRET, HOUSES_GOOGLE_WEB_CLIENT_ID/SECRET,
-#                HOUSES_GOOGLE_DEVICE_CLIENT_ID/SECRET, TFL_API_KEY,
-#                HEIGIT_API_KEY, PLACES_API_KEY, EPC_BEARER_TOKEN
-# plus: HOUSES_HOST=0.0.0.0  HOUSES_PORT=<8765 or 8766 per side — see below>
-```
-
-Wait — ports: the run-instance.sh script sets HOUSES_PORT itself (8765/8766
-per side), so **do not put HOUSES_PORT in /etc/houses.env** (a value there
-would be overridden anyway — process env wins — but keep the file clean).
-
-Copy the live data + DB (from your LAN machine, `make stop` the LAN app
-first so the snapshot is the last word — same machinery as the plan doc
-Phase 3; the DB will be ~520 MB now that it is compressed):
-
-```bash
-sqlite3 data/houses.db ".backup '/tmp/houses-backup.db'"
-cat /tmp/houses-backup.db | ssh ubuntu@<ip> "umask 077; cat > /opt/houses/data/houses.db && chmod 600 /opt/houses/data/houses.db && sqlite3 /opt/houses/data/houses.db 'PRAGMA integrity_check;' | grep -q '^ok$'"
-rsync -a --exclude 'houses.db*' data/ ubuntu@<ip>:/opt/houses/data/
-rm -f /tmp/houses-backup.db
-```
-
-Start the live side:
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now houses-blue
-curl -s --max-time 10 -o /dev/null -w 'blue: %{http_code}\n' http://localhost:8765/health
-```
+1. **Install the secrets**: the LAN `.env` as root-only `/etc/houses.env`,
+   using the cutover pipeline from `docs/deployment-oracle-free-tier.md`
+   Phase 3 (grep out the sheet-era keys — they crash pydantic at boot).
+   Critical keys must be present and non-empty:
+   ```bash
+   sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env   # STRICT KEY=VALUE
+   # required: HOUSES_SESSION_SECRET, HOUSES_GOOGLE_WEB_CLIENT_ID/SECRET,
+   #           HOUSES_GOOGLE_DEVICE_CLIENT_ID/SECRET, TFL_API_KEY,
+   #           HEIGIT_API_KEY, PLACES_API_KEY, EPC_BEARER_TOKEN
+   ```
+   **Do not put HOUSES_PORT in /etc/houses.env** — run-instance.sh sets it
+   per side (8765/8766). Add the tunnel vars too (Step 3's env block).
+2. **Copy the live data + DB** (from the LAN machine, `make stop` the LAN
+   app first — same machinery as the plan doc Phase 3; the DB is ~520 MB
+   now that it is compressed):
+   ```bash
+   sqlite3 data/houses.db ".backup '/tmp/houses-backup.db'"
+   cat /tmp/houses-backup.db | ssh ubuntu@<ip> "umask 077; cat > /opt/houses/data/houses.db && chmod 600 /opt/houses/data/houses.db && sqlite3 /opt/houses/data/houses.db 'PRAGMA integrity_check;' | grep -q '^ok$'"
+   rsync -a --exclude 'houses.db*' data/ ubuntu@<ip>:/opt/houses/data/
+   rm -f /tmp/houses-backup.db
+   ```
+3. **Start the live side**:
+   ```bash
+   ssh ubuntu@<ip> "sudo systemctl enable --now houses-blue && curl -s --max-time 10 -o /dev/null -w 'blue: %{http_code}\n' http://localhost:8765/health"
+   ```
 
 ## 3. Cloudflare tunnel + DNS (where blueumbrella.net lives — find out)
 

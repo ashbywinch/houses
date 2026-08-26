@@ -91,3 +91,9 @@ houses/frontend/public/vue.global.js
 .lucidlint-cache/
 .omp/local/
 backups/
+
+# terraform
+terraform/.terraform/
+terraform/terraform.tfvars
+terraform/*.tfstate
+terraform/*.tfstate.*
