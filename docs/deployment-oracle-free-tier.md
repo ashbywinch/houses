@@ -157,12 +157,17 @@ curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 || { echo "Ch
   # newline / backslash / quote are rejected (they would split or
   # re-quote into a malformed line — systemd's EnvironmentFile parser
   # differs from dotenv's, so round-tripping them is not safe).
-  cat .env | ssh ubuntu@<ip> "set -o pipefail && sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; vals = dotenv_values(stream=sys.stdin, interpolate=False); bad = [k for k, v in vals.items() if v is not None and any(c in v for c in (chr(10), chr(92), chr(34), chr(39)))]; assert not bad, 'unsafe character (newline/backslash/quote) in value: ' + ', '.join(bad); [print(f'{k}={v}') for k, v in vals.items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
+  # Strip sheet-era keys BEFORE the conversion: the sheet integration was
+  # removed and pydantic now REJECTS unknown env keys (extra_forbidden) —
+  # a leftover HOUSES_SHEET_ID / GOOGLE_SHEETS_SERVICE_ACCOUNT in the
+  # streamed .env would crash the service on every boot. Filter them out
+  # of the stdin stream first.
+  grep -vE '^(HOUSES_SHEET_ID|GOOGLE_SHEETS_SERVICE_ACCOUNT)=' .env | ssh ubuntu@<ip> "set -o pipefail && sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; vals = dotenv_values(stream=sys.stdin, interpolate=False); bad = [k for k, v in vals.items() if v is not None and any(c in v for c in (chr(10), chr(92), chr(34), chr(39)))]; assert not bad, 'unsafe character (newline/backslash/quote) in value: ' + ', '.join(bad); [print(f'{k}={v}') for k, v in vals.items() if v is not None]\" | sudo install -o root -g root -m 600 /dev/stdin /etc/houses.env"
   # values are written PLAIN KEY=VALUE — no quotes (the doc's own rule,
   # and systemd's EnvironmentFile keeps everything after the '='), so
   # nothing mangled reaches the app; interpolate=False prevents a \$VAR
   # in any value from being silently rewritten mid-cutover.
-  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; src = dotenv_values(stream=sys.stdin, interpolate=False); got = dotenv_values('/etc/houses.env', interpolate=False); keys = ('HOUSES_SESSION_SECRET', 'HOUSES_GOOGLE_WEB_CLIENT_ID', 'HOUSES_GOOGLE_WEB_CLIENT_SECRET', 'HOUSES_GOOGLE_DEVICE_CLIENT_ID', 'HOUSES_GOOGLE_DEVICE_CLIENT_SECRET', 'HOUSES_SHEET_ID'); ok = all(src.get(k) == got.get(k) for k in keys); print('all critical values match' if ok else 'value mismatch'); exit(0 if ok else 1)\""
+  cat .env | ssh ubuntu@<ip> "sudo /opt/houses/.venv/bin/python -c \"import sys; from dotenv import dotenv_values; src = dotenv_values(stream=sys.stdin, interpolate=False); got = dotenv_values('/etc/houses.env', interpolate=False); keys = ('HOUSES_SESSION_SECRET', 'HOUSES_GOOGLE_WEB_CLIENT_ID', 'HOUSES_GOOGLE_WEB_CLIENT_SECRET', 'HOUSES_GOOGLE_DEVICE_CLIENT_ID', 'HOUSES_GOOGLE_DEVICE_CLIENT_SECRET'); ok = all(src.get(k) == got.get(k) for k in keys); print('all critical values match' if ok else 'value mismatch'); exit(0 if ok else 1)\""
   # force the deployment host/port — the LAN .env's values (or their
   # absence) would otherwise leave the app bound to loopback and the
   # firewall would never see a listener
@@ -182,7 +187,7 @@ curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 || { echo "Ch
   # fail loudly if the conversion dropped or blanked anything — the
   # critical keys must be present with a NON-EMPTY value (the file is
   # root-only, so the check needs sudo)
-  ssh ubuntu@<ip> "for k in HOUSES_SESSION_SECRET HOUSES_GOOGLE_WEB_CLIENT_ID HOUSES_GOOGLE_WEB_CLIENT_SECRET HOUSES_GOOGLE_DEVICE_CLIENT_ID HOUSES_GOOGLE_DEVICE_CLIENT_SECRET HOUSES_SHEET_ID; do sudo grep -q \"^\$k=.\" /etc/houses.env || { echo \"missing or empty \$k in /etc/houses.env\"; exit 1; }; done && echo 'secrets intact'"
+  ssh ubuntu@<ip> "for k in HOUSES_SESSION_SECRET HOUSES_GOOGLE_WEB_CLIENT_ID HOUSES_GOOGLE_WEB_CLIENT_SECRET HOUSES_GOOGLE_DEVICE_CLIENT_ID HOUSES_GOOGLE_DEVICE_CLIENT_SECRET; do sudo grep -q \"^\$k=.\" /etc/houses.env || { echo \"missing or empty \$k in /etc/houses.env\"; exit 1; }; done && echo 'secrets intact'"
   # `;` not `&&` — the /tmp copy is removed even on failure, so a failed
   # cutover never leaves secrets in /tmp; the verification makes a
   # failed install visible
