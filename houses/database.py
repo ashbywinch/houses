@@ -75,6 +75,27 @@ CREATE TABLE IF NOT EXISTS comments (
 
 _COMMENTS_INDEX = "CREATE INDEX IF NOT EXISTS idx_comments_rid ON comments(rid, created_at ASC)"
 
+# The scrape queue's table lives with the other app tables — its retry
+# state must survive box restarts (see houses/scrape_queue.py for the
+# queue logic; the DDL stays here to avoid an import cycle).
+_SCRAPES_TABLE = """
+CREATE TABLE IF NOT EXISTS pending_scrapes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rid TEXT NOT NULL,
+    url TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_retry_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    claimed_at TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL
+)
+"""
+
+_SCRAPES_INDEX = (
+    "CREATE INDEX IF NOT EXISTS idx_scrapes_due ON pending_scrapes(next_retry_at, status)"
+)
+
 
 def init_db() -> None:
     """Create all application tables if they don't exist.
@@ -85,4 +106,6 @@ def init_db() -> None:
     conn = get_connection()
     conn.execute(_COMMENTS_TABLE)
     conn.execute(_COMMENTS_INDEX)
+    conn.execute(_SCRAPES_TABLE)
+    conn.execute(_SCRAPES_INDEX)
     conn.commit()

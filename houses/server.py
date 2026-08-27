@@ -7,20 +7,21 @@ import subprocess
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from money import Money
 
 import houses.property_registry as _property_registry
+import houses.scrape_queue as _scrape_queue
 import houses.services as _services_mod
 import houses.services_provider as _sp
 import houses.town_desc as _town_desc
 import houses.web.broadcaster as _broadcaster_mod
 from dag.persistence import init_db as init_dag_db
 from dag.persistence import property_rids
-from dag.scheduler import set_after_refresh
+from dag.scheduler import flush_processor, set_after_refresh
 from dag.scheduler import start_processor as _start_processor
 from houses.admin_router import admin_router
 from houses.context import get_scrape_fn
@@ -36,7 +37,7 @@ from houses.rightmove_scraper import RightmoveProperty, stop_chrome
 from houses.services import Services
 from houses.settings import settings
 from houses.web.api_router import api_router
-from houses.web.auth import auth_router, get_session_user
+from houses.web.auth import auth_router, effective_session_user, get_session_user
 from houses.web.json_utils import asdict_serializable
 
 logger = logging.getLogger(__name__)
@@ -69,11 +70,17 @@ async def _scrape_url(url: str) -> tuple[RightmoveProperty | None, str | None]:
         logger.warning("Scrape failed for %s: %s", url, e)
         return None, str(e)
 
-
 def _seed_dag(rid2: str, enriched: EnrichedProperty) -> bool:
-    """Seed the DAG for *rid2*; returns True on success."""
+    """Seed the DAG for *rid2*; returns True on success.
+
+    Reuses the registry's existing PropertyNodes when present (re-seeding
+    after a scrape report must push onto the SAME nodes — a second
+    PropertyNodes instance collides by node-id in the scheduler and its
+    derived nodes starve behind the first instance's queued events).
+    """
     try:
-        prop = PropertyNodes(rid2)
+        registry = _sp.get_services().property_registry
+        prop = registry.get(rid2) or PropertyNodes(rid2)
         push_enriched_property(
             rid2,
             enriched,
@@ -86,7 +93,7 @@ def _seed_dag(rid2: str, enriched: EnrichedProperty) -> bool:
                 "postcode": prop.postcode,
             },
         )
-        _sp.get_services().property_registry.register(rid2, prop)
+        registry.register(rid2, prop)
         logger.info("Seeded DAG for %s", rid2)
         return True
     # lucidlint: ignore broad-except boundary — DAG-seeding failures return False instead of raising
@@ -255,13 +262,22 @@ def _duplicate_error(payload, rid: str, fields) -> JSONResponse | None:
 
 async def _scrape_for_address(payload):
     """Fill address/postcode/bedrooms/price from the scraper when the
-    payload lacks an address; returns (scraped, scrape_error, address)."""
+    payload lacks an address; returns
+    ``(scraped, scrape_error, address, scrape_pending)``.
+
+    ``scrape_pending`` is True when the scrape produced nothing for a
+    URL-only add — the job is queued for a worker (the LAN, where Chrome
+    exists) to complete later via /api/scrapes/report.
+    """
     address = payload.address
     if address or not payload.url:
-        return None, None, address
+        return None, None, address, False
     scraped, scrape_error = await _scrape_url(payload.url)
     if not scraped:
-        return scraped, scrape_error, address
+        rid = payload.rid or RightmoveProperty.rid_from_url(payload.url)
+        if rid:
+            _scrape_queue.enqueue_scrape(rid, payload.url)
+        return scraped, scrape_error, address, True
     if scraped.address:
         address = scraped.address
     if scraped.postcode and not payload.postcode:
@@ -270,7 +286,7 @@ async def _scrape_for_address(payload):
         payload.bedrooms = scraped.bedrooms
     if scraped.price is not None and payload.price is None:
         payload.price = Money(str(scraped.price), "GBP")
-    return scraped, scrape_error, address
+    return scraped, scrape_error, address, False
 
 
 def _enriched_bedrooms(payload, scraped) -> int:
@@ -334,8 +350,7 @@ async def upsert_property(
     duplicate = _duplicate_error(payload, rid, fields)
     if duplicate is not None:
         return duplicate
-
-    scraped, scrape_error, address = await _scrape_for_address(payload)
+    scraped, scrape_error, address, scrape_pending = await _scrape_for_address(payload)
     postcode = payload.postcode or extract_postcode(address)
 
     # ── Seed the DAG ─────────────────────────────────────────────
@@ -349,7 +364,83 @@ async def upsert_property(
     if scrape_error:
         extra["scrape_warning"] = scrape_error
         dump["_scrape_warning"] = scrape_error
+    if scrape_pending:
+        extra["scrape_pending"] = True
     return JSONResponse(content={"status": "ok", "rid": rid2, "data": dump, **extra}, status_code=200)
+
+
+def _require_superuser(request: Request) -> None:
+    """403 unless the request carries a signed-in superuser session."""
+    user = effective_session_user(request)
+    if not user or not user.get("is_superuser"):
+        raise HTTPException(status_code=403, detail="Superuser access required")
+
+
+def _job_wire(job):
+    """Serialization boundary: a claimed job as the worker sees it."""
+    if job is None:
+        return None
+    # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+    return {"id": job.id, "rid": job.rid, "url": job.url}
+
+
+# lucidlint: ignore record-shape wire-format dict — the worker's report body is a wire record (coding-standards.md)
+async def _apply_scraped_report(rid: str, data: dict) -> None:
+    """Push a worker's scraped listing into the property's DAG — the same
+    seed the sync add path performs, sourced entirely from the report."""
+    enriched = EnrichedProperty(
+        url=data.get("url", ""),
+        address=data.get("address", ""),
+        postcode=data.get("postcode", ""),
+        bedrooms=int(data["bedrooms"]) if data.get("bedrooms") is not None else 0,
+        price=Money(str(data["price"]), "GBP") if data.get("price") is not None else Money(amount="0", currency="GBP"),
+        approx_latitude=data.get("latitude"),
+        approx_longitude=data.get("longitude"),
+    )
+    _seed_dag(rid, enriched)
+    # Drain the downstream cascade so the client's immediate refetch
+    # reflects the completed enrichment (same pattern as patch_address).
+    await flush_processor()
+
+
+@app.post("/api/scrapes/claim", response_model=None)
+async def claim_scrape(request: Request) -> JSONResponse:
+    """Claim the oldest due scrape job for the worker (superuser)."""
+    _require_superuser(request)
+    job = _scrape_queue.claim_due_scrape()
+    return JSONResponse(content={"job": _job_wire(job)})
+
+
+@app.post("/api/scrapes/report", response_model=None)
+async def report_scrape(request: Request, body: dict) -> JSONResponse:
+    """Worker outcome for a claimed job (superuser).
+
+    ``{"job_id": N, "ok": true, "data": {...}}`` applies the scraped data
+    to the property's DAG and deletes the job.  ``{"job_id": N, "ok":
+    false, "error": "..."}`` re-queues it with exponential backoff (or
+    marks it failed after MAX_ATTEMPTS).
+    """
+    _require_superuser(request)
+    job_id = body.get("job_id")
+    if not isinstance(job_id, int):
+        raise HTTPException(status_code=422, detail="job_id required")
+    if body.get("ok"):
+        rid = _scrape_queue.report_scrape(job_id, ok=True)
+        if rid:
+            await _apply_scraped_report(rid, body.get("data") or {})
+        return JSONResponse(content={"status": "ok"})
+    _scrape_queue.report_scrape(job_id, ok=False, error=str(body.get("error") or ""))
+    return JSONResponse(content={"status": "ok"})
+
+
+@app.get("/api/scrapes/status", response_model=None)
+async def scrape_status(request: Request) -> JSONResponse:
+    """Queue depth by status for the operator (superuser)."""
+    _require_superuser(request)
+    st = _scrape_queue.scrape_queue_status()
+    return JSONResponse(
+        content={"scrapes": {"pending": st.pending, "in_progress": st.in_progress, "failed": st.failed}}
+    )
 
 @app.get("/health")
 async def health() -> JSONResponse:
