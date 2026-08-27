@@ -31,7 +31,8 @@ chown ubuntu:ubuntu /opt/houses
 cd /opt/houses
 sudo -u ubuntu git clone ${repo_url} blue
 sudo -u ubuntu git clone ${repo_url} green
-sudo -u ubuntu bash /opt/houses/blue/tools/deploy/box-setup.sh
 
-echo "startup complete — install /etc/houses.env (cutover), then:"
+# box-setup must run AS ROOT (installs systemd units, enables chrome); the
+# startup script already runs as root — no sudo -u ubuntu here.
+bash /opt/houses/blue/tools/deploy/box-setup.sh
 echo "  systemctl enable --now houses-blue"

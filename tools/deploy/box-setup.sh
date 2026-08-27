@@ -21,7 +21,6 @@ chmod +x "$ROOT/run-instance.sh" "$ROOT/release.sh" "$ROOT/switch.sh"
 chown -R ubuntu:ubuntu "$ROOT"
 
 cp "$ROOT/blue/tools/deploy/units/"*.service /etc/systemd/system/
-cp "$ROOT/blue/tools/deploy/units/"*.timer /etc/systemd/system/
 systemctl daemon-reload
 mkdir -p /var/lib/houses-chrome && chown ubuntu:ubuntu /var/lib/houses-chrome
 systemctl enable --now houses-chrome.service
