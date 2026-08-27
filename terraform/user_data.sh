@@ -29,8 +29,8 @@ dpkg -i /tmp/cloudflared.deb
 mkdir -p /opt/houses
 chown ubuntu:ubuntu /opt/houses
 cd /opt/houses
-sudo -u ubuntu git clone ${repo_url} blue
-sudo -u ubuntu git clone ${repo_url} green
+sudo -u ubuntu git clone -b ${repo_branch} ${repo_url} blue
+sudo -u ubuntu git clone -b ${repo_branch} ${repo_url} green
 
 # box-setup must run AS ROOT (installs systemd units, enables chrome); the
 # startup script already runs as root — no sudo -u ubuntu here.

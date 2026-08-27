@@ -93,7 +93,7 @@ resource "google_compute_instance" "houses" {
 
   metadata = {
     ssh-keys       = "ubuntu:${file(var.ssh_public_key_path)}"
-    startup-script = templatefile("${path.module}/user_data.sh", { repo_url = var.repo_url })
+    startup-script = templatefile("${path.module}/user_data.sh", { repo_url = var.repo_url, repo_branch = var.repo_branch })
   }
 
   depends_on = [google_compute_address.houses]

@@ -21,6 +21,12 @@ variable "ssh_public_key_path" {
   default     = "~/.ssh/oracle.pub"
 }
 
+variable "repo_branch" {
+  description = "Branch the box clones (the deploy tooling lives here until it merges to main)."
+  type        = string
+  default     = "deploy/oracle-free-tier"
+}
+
 variable "repo_url" {
   description = "Public clone URL for the repo — box-setup clones blue/green from it."
   type        = string
