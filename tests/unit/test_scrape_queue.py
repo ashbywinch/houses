@@ -1,0 +1,196 @@
+"""Scrape queue — durable retry with exponential backoff for Rightmove scrapes.
+
+The cloud box has no Chrome; property adds there enqueue scrape jobs, a
+worker (LAN, where Chrome exists) claims + scrapes + reports, and failed
+scrapes are re-queued with exponential backoff by the app. These tests pin
+the queue contract: enqueue on failed scrape, claim-once semantics,
+backoff growth, success applies scraped data to the DAG, max-attempts
+gives up permanently.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock
+
+from fastapi.testclient import TestClient
+
+from houses.database import get_connection
+from houses.server import app
+from houses.web.auth import _make_session_cookie
+from tests.helpers import inject_server_deps
+
+client = TestClient(app)
+client.cookies.set(
+    "session",
+    _make_session_cookie(email="simon@example.com", name="Simon", picture="", is_superuser=True),
+)
+
+URL = "https://www.rightmove.co.uk/properties/89498715"
+RID = "89498715"
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _scrape_rows() -> list[dict]:
+    conn = get_connection()
+    return [dict(r) for r in conn.execute("SELECT * FROM pending_scrapes ORDER BY id").fetchall()]
+
+
+def _add_url_only() -> dict:
+    """Add a URL-only property with a scrape that returns nothing; returns
+    the claim response's job dict."""
+    with inject_server_deps(scrape_fn=AsyncMock(return_value=None)):
+        client.post("/api/properties", json={"url": URL})
+    return client.post("/api/scrapes/claim").json()["job"]
+
+
+class TestEnqueueOnFailedScrape:
+    def test_url_only_add_enqueues_when_scrape_returns_nothing(self):
+        """A URL-only add whose scrape yields nothing must become a queue
+        job (the cloud box has no Chrome) and the response must say so."""
+        scrape_fn = AsyncMock(return_value=None)
+        with inject_server_deps(scrape_fn=scrape_fn):
+            resp = client.post("/api/properties", json={"url": URL})
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body.get("scrape_pending") is True, body
+        scrape_fn.assert_called_once()
+        rows = _scrape_rows()
+        assert len(rows) == 1
+        assert rows[0]["rid"] == RID
+        assert rows[0]["url"] == URL
+        assert rows[0]["attempts"] == 0
+        assert rows[0]["status"] == "pending"
+
+    def test_scraped_add_does_not_enqueue(self):
+        """A successful scrape (data returned) must NOT create a job."""
+        fake = AsyncMock()
+        fake.address = "Penwood Lane, Marlow, SL7 2AP"
+        fake.postcode = "SL7 2AP"
+        fake.bedrooms = 4
+        fake.price = 800000
+        fake.latitude = 51.5676
+        fake.longitude = -0.7842
+        fake.url = URL
+        scrape_fn = AsyncMock(return_value=fake)
+        with inject_server_deps(scrape_fn=scrape_fn):
+            resp = client.post("/api/properties", json={"url": URL})
+        assert resp.status_code == 200, resp.text
+        assert resp.json().get("scrape_pending") is None
+        assert _scrape_rows() == []
+
+    def test_duplicate_enqueue_is_skipped(self):
+        """Re-adding the same property while a job is active must not
+        create a second job."""
+        scrape_fn = AsyncMock(return_value=None)
+        with inject_server_deps(scrape_fn=scrape_fn):
+            client.post("/api/properties", json={"url": URL})
+            client.post("/api/properties", json={"url": URL})
+        assert len(_scrape_rows()) == 1
+
+
+class TestClaim:
+    def test_claim_returns_due_job_and_marks_in_progress(self):
+        with inject_server_deps(scrape_fn=AsyncMock(return_value=None)):
+            client.post("/api/properties", json={"url": URL})
+        resp = client.post("/api/scrapes/claim")
+        assert resp.status_code == 200, resp.text
+        job = resp.json()["job"]
+        assert job["rid"] == RID
+        assert job["url"] == URL
+        rows = _scrape_rows()
+        assert rows[0]["status"] == "in_progress"
+        assert rows[0]["claimed_at"] is not None
+        # A claimed job is not claimable again
+        resp2 = client.post("/api/scrapes/claim")
+        assert resp2.json()["job"] is None
+
+    def test_claim_respects_next_retry_at(self):
+        """A job whose backoff window has not elapsed must not be claimable."""
+        job = _add_url_only()
+        client.post("/api/scrapes/report", json={"job_id": job["id"], "ok": False, "error": "login wall"})
+        assert client.post("/api/scrapes/claim").json()["job"] is None
+        # Force the backoff window to pass — the job becomes claimable again
+        conn = get_connection()
+        conn.execute(
+            "UPDATE pending_scrapes SET next_retry_at=? WHERE id=?",
+            (datetime.now(UTC).isoformat(), job["id"]),
+        )
+        conn.commit()
+        job2 = client.post("/api/scrapes/claim").json()["job"]
+        assert job2 is not None and job2["id"] == job["id"]
+
+
+class TestBackoff:
+    def test_failure_backs_off_exponentially(self):
+        job = _add_url_only()
+        delays = []
+        for _ in range(3):
+            client.post("/api/scrapes/report", json={"job_id": job["id"], "ok": False, "error": "boom"})
+            rows = _scrape_rows()
+            retry_at = datetime.fromisoformat(rows[0]["next_retry_at"])
+            delays.append((retry_at - _now()).total_seconds())
+            assert rows[0]["attempts"] == len(delays)
+            client.post("/api/scrapes/claim")  # re-claim for the next failure
+        assert delays[0] > 0
+        assert delays[1] > delays[0]
+        assert delays[2] > delays[1]
+
+    def test_max_attempts_marks_job_failed_permanently(self):
+        from houses.scrape_queue import MAX_ATTEMPTS
+
+        job = _add_url_only()
+        for _ in range(MAX_ATTEMPTS):
+            client.post("/api/scrapes/report", json={"job_id": job["id"], "ok": False, "error": "boom"})
+            client.post("/api/scrapes/claim")
+        rows = _scrape_rows()
+        assert rows[0]["status"] == "failed"
+        assert rows[0]["attempts"] == MAX_ATTEMPTS
+        assert client.post("/api/scrapes/claim").json()["job"] is None
+
+
+class TestReportSuccess:
+    def test_success_applies_scraped_data_and_removes_job(self):
+        """A successful report must delete the job and push the scraped
+        values into the DAG (address, postcode, bedrooms, price)."""
+        job = _add_url_only()
+        resp = client.post(
+            "/api/scrapes/report",
+            json={
+                "job_id": job["id"],
+                "ok": True,
+                "data": {
+                    "address": "Penwood Lane, Marlow, SL7 2AP",
+                    "postcode": "SL7 2AP",
+                    "bedrooms": 4,
+                    "price": 800000,
+                    "latitude": 51.5676,
+                    "longitude": -0.7842,
+                },
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert _scrape_rows() == []
+        # The DAG now carries the scraped values
+        detail = client.get(f"/api/properties/{RID}").json()
+        assert detail["best_address"]["value"] == "Penwood Lane, Marlow, SL7 2AP"
+        assert detail["postcode"]["value"] == "SL7 2AP"
+        assert detail["rightmove_bedrooms"]["value"] == "4"
+        assert detail["rightmove_price"]["value"]["amount"] == "800000.00"
+
+
+class TestAuth:
+    def test_claim_requires_superuser(self):
+        # The auth middleware 401s unauthenticated /api/* calls
+        anon = TestClient(app)
+        assert anon.post("/api/scrapes/claim").status_code == 401
+        # A signed-in non-superuser gets 403 from the endpoint
+        non_super = TestClient(app)
+        non_super.cookies.set(
+            "session",
+            _make_session_cookie(email="george@example.com", name="George", picture="", is_superuser=False),
+        )
+        assert non_super.post("/api/scrapes/claim").status_code == 403
