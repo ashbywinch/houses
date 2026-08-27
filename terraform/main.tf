@@ -77,7 +77,7 @@ resource "google_compute_instance" "houses" {
 
   boot_disk {
     initialize_params {
-      image = "ubuntu-os-cloud/ubuntu-2404-lts"
+      image = "ubuntu-os-cloud/ubuntu-2404-lts-amd64"
       size  = 30
       type  = "pd-standard"
     }
