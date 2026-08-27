@@ -33,24 +33,18 @@ else
   DB="$SMOKE_DB"
 fi
 
-cd "$ROOT/$SIDE"
-# systemd's default PATH lacks ~/.local/bin (uv) — make's UV fallback handles
-# it, but be explicit so make/npm resolve identically to a shell.
-export PATH="$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-export HOUSES_HOST=0.0.0.0
-export HOUSES_PORT="$PORT"
-export HOUSES_SQLITE_PATH="$DB"
-
-# Wait for the scraper browser's CDP endpoint before serving (the app can
-# start either way, but property adds need it live) — and fail loudly if it
-# never comes up.
-for i in $(seq 1 30); do
-  curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 && break
-  sleep 1
-done
-curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 || {
-  echo "scraper browser not reachable on :9222" >&2
-  exit 1
-}
+# Wait for the scraper browser's CDP endpoint before serving — but only
+# when a browser is installed on this box. The GCP host has no Chrome
+# (the scraper lives on the LAN); the wait must not block startup there.
+if command -v google-chrome >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1; then
+  for i in $(seq 1 30); do
+    curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 && break
+    sleep 1
+  done
+  curl -fsS --max-time 3 localhost:9222/json/version >/dev/null 2>&1 || {
+    echo "scraper browser not reachable on :9222" >&2
+    exit 1
+  }
+fi
 
 exec make run-prod

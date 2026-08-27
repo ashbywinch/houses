@@ -23,8 +23,12 @@ chown -R ubuntu:ubuntu "$ROOT"
 cp "$ROOT/blue/tools/deploy/units/"*.service /etc/systemd/system/
 systemctl daemon-reload
 mkdir -p /var/lib/houses-chrome && chown ubuntu:ubuntu /var/lib/houses-chrome
-systemctl enable --now houses-chrome.service
-
+# The scraper lives on the LAN; the box has no Chrome. Enable the shared
+# chrome unit only when a browser binary is actually installed (the LAN
+# dev machine, or a fallback VPS that does host the scraper).
+if command -v google-chrome >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1; then
+  systemctl enable --now houses-chrome.service
+fi
 echo "box setup complete:"
 echo "  - install /etc/houses.env (secrets cutover), then:"
 echo "  - sudo systemctl enable --now houses-blue"
