@@ -102,7 +102,7 @@ stop:
 
 run-prod: sync-prod frontend-setup frontend-build
 	@echo "${YELLOW}Serving frontend build + backend on http://127.0.0.1:8765${NC}"
-	@$(UV) run python -c "import uvicorn; from houses.settings import settings; from houses.server import app; from fastapi.staticfiles import StaticFiles; from pathlib import Path; build_dir = Path('houses/frontend/dist'); if build_dir.exists(): app.mount('/', StaticFiles(directory=str(build_dir), html=True), name='frontend'); uvicorn.run(app, host=settings.host, port=settings.port, reload=False)"
+	@$(UV) run python -c 'import uvicorn; from houses.settings import settings; from houses.server import app; from fastapi.staticfiles import StaticFiles; from pathlib import Path; build_dir = Path("houses/frontend/dist"); app.mount("/", StaticFiles(directory=str(build_dir), html=True), name="frontend") if build_dir.exists() else None; uvicorn.run(app, host=settings.host, port=settings.port, reload=False)'
 
 sync-prod:
 	@$(UV) --version >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh
