@@ -33,6 +33,14 @@ else
   DB="$SMOKE_DB"
 fi
 
+cd "$ROOT/$SIDE"
+# systemd's default PATH lacks ~/.local/bin (uv) — make's UV fallback
+# handles it, but be explicit so make/npm resolve identically to a shell.
+export PATH="$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export HOUSES_HOST=0.0.0.0
+export HOUSES_PORT="$PORT"
+export HOUSES_SQLITE_PATH="$DB"
+
 # Wait for the scraper browser's CDP endpoint before serving — but only
 # when a browser is installed on this box. The GCP host has no Chrome
 # (the scraper lives on the LAN); the wait must not block startup there.
