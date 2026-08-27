@@ -16,8 +16,8 @@ done
 
 mkdir -p "$ROOT/data"
 echo blue > "$ROOT/ACTIVE"          # blue is live from day one
-cp "$ROOT/blue/tools/deploy/run-instance.sh" "$ROOT/blue/tools/deploy/release.sh" "$ROOT/blue/tools/deploy/switch.sh" "$ROOT/blue/tools/deploy/keepalive.sh" "$ROOT/"
-chmod +x "$ROOT/run-instance.sh" "$ROOT/release.sh" "$ROOT/switch.sh" "$ROOT/keepalive.sh"
+cp "$ROOT/blue/tools/deploy/run-instance.sh" "$ROOT/blue/tools/deploy/release.sh" "$ROOT/blue/tools/deploy/switch.sh" "$ROOT/"
+chmod +x "$ROOT/run-instance.sh" "$ROOT/release.sh" "$ROOT/switch.sh"
 chown -R ubuntu:ubuntu "$ROOT"
 
 cp "$ROOT/blue/tools/deploy/units/"*.service /etc/systemd/system/
@@ -25,11 +25,6 @@ cp "$ROOT/blue/tools/deploy/units/"*.timer /etc/systemd/system/
 systemctl daemon-reload
 mkdir -p /var/lib/houses-chrome && chown ubuntu:ubuntu /var/lib/houses-chrome
 systemctl enable --now houses-chrome.service
-# Keep the Always-Free box above Oracle's idle-reclaim thresholds from day
-# one (CPU 95th-pct <20% over 7 days = reclaimed). It tolerates a missing
-# /etc/houses.env until the cutover (skips the regenerate phase, still
-# exercises CPU).
-systemctl enable --now houses-keepalive.timer
 
 echo "box setup complete:"
 echo "  - install /etc/houses.env (secrets cutover), then:"

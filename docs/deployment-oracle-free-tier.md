@@ -1,12 +1,18 @@
-# Deployment Plan — houses on Oracle Cloud Free Tier
+# Deployment Plan — houses hosting (superseded Oracle draft)
 
-Host the houses app (FastAPI + Vue + SQLite + Rightmove scraper) on an Oracle
-Cloud **Free Tier ARM (Ampere A1)** instance so the family can reach it from
-anywhere without LAN/DNS tricks. The Chrome-based scraper stays in
-production, which is why the free ARM shape (24 GB RAM) is the host — no free
-"services" tier (Render sleeps, Fly is 256 MB, Railway isn't free) fits.
+**Superseded for the initial deploy (2026-08): the host is now Google Cloud —
+`terraform/` (e2-micro, permanent free tier, no idle-reclaim policy) +
+`tools/deploy/provision.md` is the canonical walkthrough. This doc remains
+authoritative for the host-agnostic phases (3 cutover, 6 backups/restore)
+and the OCI-specific shape as a fallback reference.**
 
----
+The original plan was to host the houses app (FastAPI + Vue + SQLite +
+Rightmove scraper) on an Oracle Cloud **Free Tier ARM (Ampere A1)** instance
+so the family can reach it from anywhere without LAN/DNS tricks. The
+Chrome-based scraper drove the 24 GB ARM pick — no free "services" tier
+(Render sleeps, Fly is 256 MB, Railway isn't free) fits. The scraper has
+since moved to the LAN (scrape queue with retry), which is what made the
+small always-free GCP box viable.
 
 ## Phase 0 — decisions before provisioning
 

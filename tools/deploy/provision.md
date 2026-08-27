@@ -26,43 +26,40 @@ exposes 8765/8766. **Only SSH (22) is open to the internet.**
 
 ---
 
-## 1. Oracle Cloud Free Tier box — Terraform (account + API key are the only manual bits)
+## 1. Google Cloud box — Terraform (account + gcloud login are the only manual bits)
 
-The whole Oracle side (VCN, security list, instance, reserved IP, cloud-init
-box setup) is `terraform/` in the repo. Your only manual steps:
+The whole GCP side (VPC, SSH-only firewall, e2-micro instance, static IP,
+startup-script box setup) is `terraform/` in the repo. Google's free tier
+here is **permanent** — one e2-micro (1 vCPU / 1 GB RAM) + 30 GB disk in
+us-west1/us-central1/us-east1, always-on, no sleep, no idle-reclaim
+policy. The app alone runs in ~100 MB; Chrome is NOT on this box (the
+Rightmove scraper lives on your LAN — see the worker in Step 4).
 
-1. **Create the account** at cloud.oracle.com (**Start for free**; credit
-   card for identity only — Free Tier doesn't charge it).
-2. **The API signing key** (one console touch, ~5 min):
+1. **Create the account** at cloud.google.com (**Start free**; a billing
+   account is required for the free tier but e2-micro + 30 GB stay free).
+2. **gcloud CLI + login** (this machine):
    ```bash
-   mkdir -p ~/.oci && cd ~/.oci
-   openssl genrsa -out oci_api_key.pem 2048 && chmod 600 oci_api_key.pem
-   openssl rsa -pubout -in oci_api_key.pem -out oci_api_key_public.pem
+   # install: https://cloud.google.com/sdk/docs/install — or snap/apt
+   gcloud auth application-default login   # browser OAuth, no key files
+   gcloud config set project <project-id>  # from the console project picker
    ```
-   Console → your profile → **API keys → Add API key** → upload
-   `oci_api_key_public.pem`. It shows a **fingerprint** (copy it). Also copy
-   your **Tenancy OCID** (profile → Tenancy) and **User OCID** (profile →
-   User settings). Region: pick one with A1 capacity (US regions usually;
-   eu-frankfurt-1 often works) — retry over a day if `apply` says
-   out-of-capacity; the fallback is a $4–6 VPS with ≥4 GB RAM.
 3. **The SSH key** for the box (this machine):
    ```bash
    ssh-keygen -t ed25519 -f ~/.ssh/oracle -N "" -C "oracle-houses"
    ```
-4. **Fill the variables** and apply (terraform on this machine — install
-   once: `brew install terraform` or the HashiCorp binary):
+4. **Fill the variables** and apply (terraform already installed on this
+   machine):
    ```bash
    cd terraform
-   cp terraform.tfvars.example terraform.tfvars   # fill the OCIDs/fingerprint/paths
+   cp terraform.tfvars.example terraform.tfvars   # fill project (+ region/zone)
    terraform init
-   terraform plan     # read it — security list is SSH-only, shape is A1.Flex
+   terraform plan     # read it — firewall is SSH-only, machine is e2-micro
    terraform apply
    terraform output ssh_command   # -> ssh -i ~/.ssh/oracle ubuntu@<ip>
    ```
-   `apply` runs cloud-init: apt deps, Chrome, cloudflared, uv, the two
-   checkouts (/opt/houses/blue + green), units, ACTIVE=blue. It can take
-   ~5–10 min after the instance boots (watch with
-   `ssh ubuntu@<ip> "sudo tail -f /var/log/cloud-init-output.log"`).
+   `apply` runs the startup script: apt deps, cloudflared, uv, the two
+   checkouts (/opt/houses/blue + green), units, ACTIVE=blue. ~5–10 min
+   after boot (watch: `ssh ubuntu@<ip> "sudo tail -f /var/log/syslog"`).
 
 ## 2. Secrets + data cutover (the manual part that stays manual)
 
@@ -75,6 +72,7 @@ box setup) is `terraform/` in the repo. Your only manual steps:
    # required: HOUSES_SESSION_SECRET, HOUSES_GOOGLE_WEB_CLIENT_ID/SECRET,
    #           HOUSES_GOOGLE_DEVICE_CLIENT_ID/SECRET, TFL_API_KEY,
    #           HEIGIT_API_KEY, PLACES_API_KEY, EPC_BEARER_TOKEN
+   # plus:    HOUSES_RIGHTMOVE_SCRAPER_OFFLINE=true   (no Chrome on the box)
    ```
    **Do not put HOUSES_PORT in /etc/houses.env** — run-instance.sh sets it
    per side (8765/8766). Add the tunnel vars too (Step 3's env block).
@@ -91,6 +89,16 @@ box setup) is `terraform/` in the repo. Your only manual steps:
    ```bash
    ssh ubuntu@<ip> "sudo systemctl enable --now houses-blue && curl -s --max-time 10 -o /dev/null -w 'blue: %{http_code}\n' http://localhost:8765/health"
    ```
+4. **Start the scrape worker on the LAN** (where Chrome lives — the box
+   enqueues scrape jobs, the worker completes them with exponential
+   backoff via the queue):
+   ```bash
+   HOUSES_SCRAPE_APP_URL=https://houses.blueumbrella.net \
+     .venv/bin/python tools/scrape_worker.py --loop --interval 60
+   # or --once on a cron/systemd timer every few minutes
+   ```
+   The worker mints its auth cookie from the LAN `.env`'s
+   HOUSES_SESSION_SECRET — the same secret the box has.
 
 ## 3. Cloudflare tunnel + DNS (where blueumbrella.net lives — find out)
 
