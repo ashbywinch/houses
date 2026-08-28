@@ -265,28 +265,20 @@ async def _scrape_for_address(payload):
     payload lacks an address; returns
     ``(scraped, scrape_error, address, scrape_pending)``.
 
-    ``scrape_pending`` is True when the scrape produced nothing for a
-    URL-only add — the job is queued for a worker (the LAN, where Chrome
-    exists) to complete later via /api/scrapes/report.
+    A URL-only add NEVER blocks on the scrape: the job is enqueued and
+    the request returns instantly with ``scrape_pending=True`` — the
+    queue + LAN worker complete it (regression: the add used to scrape
+    synchronously on hosts with a local scraper, hanging the request for
+    the whole fetch). Payloads WITH an address are the user's own facts
+    — seeded directly, no scrape, no enqueue.
     """
     address = payload.address
     if address or not payload.url:
         return None, None, address, False
-    scraped, scrape_error = await _scrape_url(payload.url)
-    if not scraped:
-        rid = payload.rid or RightmoveProperty.rid_from_url(payload.url)
-        if rid:
-            _scrape_queue.enqueue_scrape(rid, payload.url)
-        return scraped, scrape_error, address, True
-    if scraped.address:
-        address = scraped.address
-    if scraped.postcode and not payload.postcode:
-        payload.postcode = scraped.postcode
-    if scraped.bedrooms is not None and payload.bedrooms is None:
-        payload.bedrooms = scraped.bedrooms
-    if scraped.price is not None and payload.price is None:
-        payload.price = Money(str(scraped.price), "GBP")
-    return scraped, scrape_error, address, False
+    rid = payload.rid or RightmoveProperty.rid_from_url(payload.url)
+    if rid:
+        _scrape_queue.enqueue_scrape(rid, payload.url)
+    return None, None, address, True
 
 
 def _enriched_bedrooms(payload, scraped) -> int:

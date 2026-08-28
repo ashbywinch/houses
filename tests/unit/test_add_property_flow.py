@@ -58,20 +58,10 @@ class TestSummaryCarriesScrapeState:
 
     @staticmethod
     def test_no_scrape_key_when_no_job():
-        with inject_server_deps(
-            scrape_fn=AsyncMock(
-                return_value=AsyncMock(
-                    address="Penwood Lane, Marlow, SL7 2AP",
-                    postcode="SL7 2AP",
-                    bedrooms=4,
-                    price=800000,
-                    latitude=51.5676,
-                    longitude=-0.7842,
-                    url=URL,
-                )
-            )
-        ):
-            client.post("/api/properties", json={"url": URL})
+        """A payload WITH the user's own facts never enqueues — no scrape
+        state on the summary."""
+        with inject_server_deps(scrape_fn=AsyncMock()):
+            client.post("/api/properties", json={"url": URL, "address": "Penwood Lane, Marlow, SL7 2AP"})
         all_props = client.get("/api/properties/all").json()
         assert "scrape" not in all_props[RID]
 
