@@ -21,6 +21,18 @@ variable "ssh_public_key_path" {
   default     = "~/.ssh/oracle.pub"
 }
 
+variable "main_host" {
+  description = "Public hostname for the live app (Caddy + Google OAuth)."
+  type        = string
+  default     = "houses.blueumbrella.net"
+}
+
+variable "smoke_host" {
+  description = "Public hostname for the standby/smoke app."
+  type        = string
+  default     = "houses-smoke.blueumbrella.net"
+}
+
 variable "repo_branch" {
   description = "Branch the box clones (the deploy tooling lives here until it merges to main)."
   type        = string

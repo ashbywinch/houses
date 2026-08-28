@@ -18,7 +18,7 @@ case "$ACTIVE" in
   green) SIDE=blue ;;
   *) echo "release: bad ACTIVE marker '$ACTIVE' (expected blue|green)" >&2; exit 1 ;;
 esac
-case "$SIDE" in blue) PORT=8765 ;; green) PORT=8766 ;; esac
+PORT=8766  # the standby (this release target) always binds 8766 (role-based ports)
 
 echo "== release '$REF' -> $SIDE (standby; active=$ACTIVE)"
 

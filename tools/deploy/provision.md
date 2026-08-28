@@ -57,7 +57,7 @@ Rightmove scraper lives on your LAN — see the worker in Step 4).
    terraform apply
    terraform output ssh_command   # -> ssh -i ~/.ssh/oracle ubuntu@<ip>
    ```
-   `apply` runs the startup script: apt deps, cloudflared, uv, the two
+   `apply` runs the startup script: apt deps, Caddy, uv, the two
    checkouts (/opt/houses/blue + green), units, ACTIVE=blue. ~5–10 min
    after boot (watch: `ssh ubuntu@<ip> "sudo tail -f /var/log/syslog"`).
 
@@ -75,7 +75,7 @@ Rightmove scraper lives on your LAN — see the worker in Step 4).
    # plus:    HOUSES_RIGHTMOVE_SCRAPER_OFFLINE=true   (no Chrome on the box)
    ```
    **Do not put HOUSES_PORT in /etc/houses.env** — run-instance.sh sets it
-   per side (8765/8766). Add the tunnel vars too (Step 3's env block).
+   per side (8765/8766). Add the host vars too (Step 3's env block).
 2. **Copy the live data + DB** (from the LAN machine, `make stop` the LAN
    app first — same machinery as the plan doc Phase 3; the DB is ~520 MB
    now that it is compressed):
@@ -100,53 +100,38 @@ Rightmove scraper lives on your LAN — see the worker in Step 4).
    The worker mints its auth cookie from the LAN `.env`'s
    HOUSES_SESSION_SECRET — the same secret the box has.
 
-## 3. Cloudflare tunnel + DNS (where blueumbrella.net lives — find out)
+## 3. DNS + HTTPS (PointHQ A records + Caddy — no Cloudflare needed)
 
-The domain is blueumbrella.net and you don't yet know where it is configured.
-Find out: `whois blueumbrella.net` shows the registrar; log into that
-registrar's DNS console (GoDaddy/Namecheap/Cloudflare/123-reg/…). You do NOT
-need to move DNS — a cloudflared tunnel works behind any DNS host via CNAME.
+The domain is blueumbrella.net and its DNS lives at **PointHQ**
+(`dns4.pointhq.com` / `dns10.pointhq.com`). Log into your PointHQ account
+(or the registrar console — `whois blueumbrella.net` shows the registrar if
+you don't know your PointHQ login). The box has a static IP, so two plain
+**A records** are all DNS needs:
 
-1. On the box, install cloudflared and log in (this opens a browser to
-   authorize the account — do it from your laptop if the box is headless:
-   `cloudflared tunnel login` needs a browser; the token it writes is
-   `~/.cloudflared/cert.pem` — copy it to the box):
-   ```bash
-   curl -fL --retry 3 -o /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb
-   file /tmp/cloudflared.deb | grep -q "Debian binary package" || { echo "bad download"; exit 1; }
-   sudo dpkg -i /tmp/cloudflared.deb
-   cloudflared tunnel login
-   cloudflared tunnel create houses        # prints a UUID — that is HOUSES_TUNNEL_ID
-   sudo mkdir -p /root/.cloudflared
-   sudo cp ~/.cloudflared/<UUID>.json /root/.cloudflared/
-   ```
-2. In the registrar's DNS console add two CNAME records (both point at the
-   SAME tunnel hostname — cloudflared's ingress rules distinguish by
-   hostname):
-   - `houses.blueumbrella.net` → `<UUID>.cfargotunnel.com`
-   - `houses-smoke.blueumbrella.net` → `<UUID>.cfargotunnel.com`
-3. Configure the tunnel ingress. The switch.sh script renders
-   `/etc/cloudflared/config.yml` on every flip — it needs three env vars.
-   Persist them for switch.sh (and release.sh's smoke URL):
-   ```bash
-   sudo sh -c 'echo "HOUSES_MAIN_HOST=houses.blueumbrella.net" >> /etc/houses.env'
-   sudo sh -c 'echo "HOUSES_SMOKE_HOST=houses-smoke.blueumbrella.net" >> /etc/houses.env'
-   sudo sh -c 'echo "HOUSES_TUNNEL_ID=<UUID>" >> /etc/houses.env'
-   ```
-   Then install the tunnel as a service:
-   ```bash
-   sudo cloudflared --config /etc/cloudflared/config.yml service install
-   # first generate the config so the service has something to run:
-   sudo HOUSES_MAIN_HOST=houses.blueumbrella.net HOUSES_SMOKE_HOST=houses-smoke.blueumbrella.net \
-     HOUSES_TUNNEL_ID=<UUID> /opt/houses/switch.sh --noop 2>/dev/null || true   # renders config — see note
-   sudo systemctl restart cloudflared
-   ```
-   (If `switch.sh --noop` is not yet in your copy, render the config by hand
-   once — the file is the 4-line template in switch.sh — or just run a real
-   flip after the first release; cloudflared refuses to start only if the
-   config file is missing, so create it manually once.)
-4. Verify from outside your network (phone on cellular):
-   `https://houses.blueumbrella.net/health` → `{"status":"ok"}`.
+- `houses.blueumbrella.net` → `<box public IP>` (from `terraform output`)
+- `houses-smoke.blueumbrella.net` → `<box public IP>` (same IP)
+
+Caddy is ALREADY on the box (the terraform startup script installs it; on
+an existing box run `/opt/houses/install-caddy.sh` once). It terminates
+HTTPS with automatic Let's Encrypt certs and reverse-proxies:
+
+- `houses.blueumbrella.net` → `127.0.0.1:8765` (the ACTIVE side)
+- `houses-smoke.blueumbrella.net` → `127.0.0.1:8766` (the standby)
+
+Ports are role-based, so the Caddyfile is static forever — a blue/green
+flip never touches TLS or DNS. Hostnames come from `/etc/houses.env`
+(HOUSES_MAIN_HOST / HOUSES_SMOKE_HOST) or defaults; add them if you want
+non-default subdomains:
+
+```bash
+sudo sh -c 'echo "HOUSES_MAIN_HOST=houses.blueumbrella.net" >> /etc/houses.env'
+sudo sh -c 'echo "HOUSES_SMOKE_HOST=houses-smoke.blueumbrella.net" >> /etc/houses.env'
+```
+
+First-time cert issuance happens automatically once the A records resolve
+(Caddy retries in the background — `journalctl -u caddy`). Verify from
+outside your network (phone on cellular):
+`https://houses.blueumbrella.net/health` → `{"status":"ok"}`.
 
 ## 4. Google OAuth — allow the prod hostnames
 
@@ -185,7 +170,7 @@ Repo → Settings → Secrets and variables → Actions:
    (data from the snapshot); everything you do there writes only to the
    standby's copy.
 3. When it looks right: GitHub → Actions → Release → Run workflow →
-   action `switch`. Traffic moves to green; the tunnel hostnames swap; blue
+   action `switch`. Traffic moves to green; blue
    becomes the standby for next time.
 4. Something wrong? Run workflow → action `rollback`. Blue (previous code)
    comes back with the pre-flip DB snapshot restored.
@@ -212,9 +197,7 @@ a substitute.
   (extra_forbidden). Strip them when installing /etc/houses.env.
 - **A1 capacity**: if the instance won't launch, retry over a day; a $4–6
   VPS with 4+ GB RAM is the fallback — the scripts don't care what the box
-  is, only that Ubuntu + systemd + cloudflared exist.
-- **cloudflared restart on flip** causes a ~2 s tunnel blip — fine for a
-  family app; do flips outside peak use if it matters.
+  is, only that Ubuntu + systemd + Caddy exist.
 - **Rollback restores the pre-flip DB snapshot unconditionally** — anything
   written between flip and rollback is lost by design (deterministic,
   short window). If you need those writes, don't roll back; fix forward.

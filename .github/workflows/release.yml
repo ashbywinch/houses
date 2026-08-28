@@ -8,8 +8,8 @@ name: Release
 #             standby is then publicly reachable at the smoke hostname
 #             (https://houses-smoke.blueumbrella.net) for human eyeballing.
 #   switch  — flip: stop the live side, start the (smoke-verified) standby on
-#             the live DB, swap the tunnel hostnames. Run this AFTER the
-#             standby has been smoke-tested (automated + your eyes).
+#             the live DB (Caddy's config is static — nothing else changes).
+#             Run this AFTER the standby has been smoke-tested.
 #   rollback — undo the last switch (previous code + pre-flip DB snapshot).
 #
 # Triggers: push a tag v* (deploys automatically) or workflow_dispatch with

@@ -9,7 +9,7 @@
 #     (the Rightmove scraper lives on the LAN; the box enqueues scrape
 #     jobs with retry — see houses/scrape_queue.py)
 #   - static external IP (free while attached to a running VM)
-#   - startup-script (cloud-init): deps, cloudflared, uv, the two repo
+#   - startup-script (cloud-init): deps, Caddy (HTTPS), uv, the two repo
 #     checkouts, systemd units — see user_data.sh + box-setup.sh
 #
 # No secrets live here: the .env (Google OAuth, session secret) is
@@ -46,9 +46,8 @@ resource "google_compute_subnetwork" "houses" {
   ip_cidr_range = "10.0.0.0/24"
 }
 
-# SSH only — key-only auth. No 22/8765 ingress from the internet: public
-# traffic enters via the Cloudflare tunnel (outbound connection), so the
-# origin ports are never exposed.
+# SSH (key-only) + 443 (Caddy/Let's Encrypt). The app ports 8765/8766
+# are never exposed: Caddy proxies them from loopback.
 resource "google_compute_firewall" "ssh" {
   name          = "houses-allow-ssh"
   network       = google_compute_network.houses.name
@@ -57,6 +56,17 @@ resource "google_compute_firewall" "ssh" {
   allow {
     protocol = "tcp"
     ports    = ["22"]
+  }
+}
+
+resource "google_compute_firewall" "https" {
+  name          = "houses-allow-https"
+  network       = google_compute_network.houses.name
+  target_tags   = ["houses"]
+  source_ranges = ["0.0.0.0/0"]
+  allow {
+    protocol = "tcp"
+    ports    = ["443"]
   }
 }
 
@@ -93,7 +103,7 @@ resource "google_compute_instance" "houses" {
 
   metadata = {
     ssh-keys       = "ubuntu:${file(var.ssh_public_key_path)}"
-    startup-script = templatefile("${path.module}/user_data.sh", { repo_url = var.repo_url, repo_branch = var.repo_branch })
+    startup-script = templatefile("${path.module}/user_data.sh", { repo_url = var.repo_url, repo_branch = var.repo_branch, main_host = var.main_host, smoke_host = var.smoke_host })
   }
 
   depends_on = [google_compute_address.houses]

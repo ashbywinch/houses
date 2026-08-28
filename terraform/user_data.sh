@@ -19,18 +19,19 @@ apt-get install -y \
 # uv — install for the ubuntu service user (the app runs as ubuntu)
 sudo -u ubuntu -H sh -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 
-# cloudflared for the tunnel (arch matches the instance: amd64 on e2-micro)
-ARCH=$(dpkg --print-architecture)
-curl -fL --retry 3 -o /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$ARCH.deb
-file /tmp/cloudflared.deb | grep -q "Debian binary package" || { echo "cloudflared download failed"; exit 1; }
-dpkg -i /tmp/cloudflared.deb
-
 # Two checkouts + the box layout (ACTIVE marker, units, launchers)
 mkdir -p /opt/houses
 chown ubuntu:ubuntu /opt/houses
 cd /opt/houses
 sudo -u ubuntu git clone -b ${repo_branch} ${repo_url} blue
 sudo -u ubuntu git clone -b ${repo_branch} ${repo_url} green
+
+# Caddy for HTTPS (Google OAuth needs public-host https redirect URIs);
+# reverse-proxies the role-based ports. Needs apt deps for the repo; the
+# startup script runs as root, and install-caddy needs root too.
+apt-get install -y gpg debian-archive-keyring
+bash /opt/houses/blue/tools/deploy/install-caddy.sh
+
 
 # box-setup must run AS ROOT (installs systemd units, enables chrome); the
 # startup script already runs as root — no sudo -u ubuntu here.

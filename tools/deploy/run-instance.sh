@@ -7,10 +7,10 @@
 # replica whose writes land in the copy, never the live DB. That is the
 # pre-switch smoke target.
 #
-# Ports are FIXED per side (blue=8765, green=8766); the public hostnames are
-# mapped to those ports by the Cloudflare tunnel (switch.sh swaps the
-# mapping on flip). Env for both sides comes from /etc/houses.env; this
-# script overrides the per-instance bits (port, DB path, host).
+# Ports are ROLE-based: the ACTIVE side binds 8765, the standby 8766. Caddy
+# (install-caddy.sh) reverse-proxies the public hostnames to those ports,
+# so a flip never touches TLS config. Env for both sides comes from
+# /etc/houses.env; this script overrides the per-instance bits.
 set -eu
 
 SIDE="${1:?usage: run-instance.sh <blue|green>}"
@@ -19,9 +19,10 @@ LIVE_DB="$ROOT/data/houses.db"
 SMOKE_DB="$ROOT/${SIDE}-smoke.db"
 ACTIVE_FILE="$ROOT/ACTIVE"
 
+# Ports are ROLE-based (active=8765, standby=8766), not side-based — the
+# Caddyfile is therefore static forever and a flip never touches TLS config.
 case "$SIDE" in
-  blue)  PORT=8765 ;;
-  green) PORT=8766 ;;
+  blue|green) : ;;
   *) echo "usage: run-instance.sh <blue|green>" >&2; exit 1 ;;
 esac
 
@@ -29,8 +30,10 @@ esac
 # so a stray start can never touch a live DB it shouldn't.
 if [ -f "$ACTIVE_FILE" ] && [ "$(cat "$ACTIVE_FILE")" = "$SIDE" ]; then
   DB="$LIVE_DB"
+  PORT=8765
 else
   DB="$SMOKE_DB"
+  PORT=8766
 fi
 
 cd "$ROOT/$SIDE"
