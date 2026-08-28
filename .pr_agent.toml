@@ -27,6 +27,7 @@ repo_context_files = [
     "docs/testing-standards.md",
     "docs/writing-documentation.md",
     "docs/dag-library.md",
+    "docs/ux-standards.md",
 ]
 
 [litellm]
