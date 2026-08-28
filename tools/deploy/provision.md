@@ -133,6 +133,10 @@ First-time cert issuance happens automatically once the A records resolve
 outside your network (phone on cellular):
 `https://houses.blueumbrella.net/health` → `{"status":"ok"}`.
 
+**Gotcha:** if Caddy started before the A records propagated, its initial
+cert attempt failed and it serves HTTP-only until it retries (background
+backoff — can take a while). Fix instantly: `sudo systemctl restart caddy`.
+
 ## 4. Google OAuth — allow the prod hostnames
 
 In the Google Cloud console, open the OAuth consent screen → **Authorized
