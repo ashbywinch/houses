@@ -171,5 +171,5 @@ tracks the input 1:1 with no easing.
   action is explicit and confirmed.
 - **Surface-specific standards live in the repo.** Chat surfaces, capture
   flows, and other recurring patterns get their own documented standard
-  (e.g. `docs/CHAT-UX.md`), which the components layer beneath it — same
-  rule as the code modules.
+  (e.g. a surface-specific standard for the add-property flow), which the
+  components layer beneath it — same rule as the code modules.

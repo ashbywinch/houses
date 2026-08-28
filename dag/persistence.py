@@ -282,6 +282,13 @@ def property_created_at(rid: str) -> str | None:
     return row[0] if row and row[0] else None
 
 
+def delete_node_results_for_rid(rid: str) -> None:
+    """Remove every persisted row for a property (user-removed)."""
+    conn = _get_db()
+    conn.execute("DELETE FROM node_results WHERE node_id LIKE ?", (f"{rid}/%",))
+    conn.commit()
+
+
 def property_rids() -> list[str]:
     """Return distinct property RIDs from the node_results table."""
     if not _table_exists("node_results"):

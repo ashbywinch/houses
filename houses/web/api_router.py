@@ -32,6 +32,7 @@ from houses.model.domain import (
     home_equity_contributions,
 )
 from houses.nodes.settings_node import API_KEY_TO_NODE, aggregate_dict
+from houses.scrape_queue import scrape_status_for_rid
 from houses.services_provider import get_services
 from houses.web.auth import SESSION_MAX_AGE, effective_session_user, get_serializer
 from houses.web.broadcaster import register_client
@@ -301,6 +302,22 @@ def _score_from_summary(s: dict) -> int:
     return score
 
 
+
+# lucidlint: ignore record-shape wire-format dict — the summary is a wire record (coding-standards.md)
+def _attach_scrape_state(summary: dict, rid: str) -> None:
+    """Attach the property's REAL scrape-queue state to a summary, when a
+    job exists — the card's honest states come from here, never a fake
+    client-side timer. Wire-record at the serialization boundary."""
+    status = scrape_status_for_rid(rid)
+    if status is not None:
+        # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        summary["scrape"] = {
+            "status": status.status,
+            "attempts": status.attempts,
+            "created_at": status.created_at,
+            "claimed_at": status.claimed_at,
+        }
+
 @api_router.get("/properties/all")
 async def get_all_properties():
     results: dict[str, dict] = {}
@@ -308,7 +325,9 @@ async def get_all_properties():
         prop = _registry_property(rid)
         if prop is None:
             continue
-        results[rid] = await prop.to_json_summary()
+        summary = await prop.to_json_summary()
+        _attach_scrape_state(summary, rid)
+        results[rid] = summary
     scored = sorted(results.items(), key=lambda kv: _score_from_summary(kv[1]), reverse=True)
     return dict(scored)
 
@@ -336,7 +355,9 @@ async def get_property(rid: str):
     prop = _registry_property(rid)
     if prop is None:
         raise HTTPException(status_code=404, detail=f"Property {rid} not found")
-    return await prop.to_json()
+    summary = await prop.to_json()
+    _attach_scrape_state(summary, rid)
+    return summary
 
 
 @api_router.get("/properties/{rid}/detail")

@@ -28,6 +28,10 @@ class PropertyRegistry:
     def list_properties(self) -> list[str]:
         return list(self._properties)
 
+    def remove(self, rid: str) -> None:
+        """Drop a property from the registry (user-removed)."""
+        self._properties.pop(rid, None)
+
     def clear(self) -> None:
         self._properties.clear()
 

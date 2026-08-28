@@ -118,3 +118,10 @@ make stop                       # Stop dev server + frontend
 | `docs/current-ui/` | Saved reference HTML from the old frontend — compare `capture_dom.py` output against this |
 | `tools/capture_dom.py` | Reusable script to capture rendered Vue frontend DOM + screenshot |
 
+
+## UX work
+
+- UX standards: [docs/ux-standards.md](docs/ux-standards.md) (canonical, copied from omp-config).
+  Principles P1–P18; UI conventions (44px touch targets, primary-action
+  prominence); repo-specific baselines: docs/personas.md,
+  docs/usability-requirements.md, docs/ux-fixes-plan.md.
