@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { PropertySummary } from '../types'
 import { usePropertiesStore } from '../stores/properties'
 import CommutePill from './CommutePill.vue'
@@ -17,6 +17,58 @@ const triage = computed(() => store.triage[props.rid])
 const address = computed(() => props.data.best_address.succeeded
   ? props.data.best_address.value
   : props.rid)
+
+// ── Pending-scrape state (the add-flow card) ─────────────────────────
+// The card's status comes from the REAL queue state (summary.scrape),
+// never a client-side fiction: pending = queued & unclaimed, in_progress
+// = a worker is scraping NOW (the only 'fetching' moment), failed = the
+// queue gave up. The offline escalation is honest — it is the real
+// elapsed wait of an unclaimed job, computed at render.
+const scrapePending = computed(() => props.data.scrape != null && !props.data.best_address.succeeded)
+
+const listingUrl = computed(() => {
+  const u = props.data.rightmove_url
+  return u?.succeeded && u.value ? u.value : props.rid
+})
+
+const scrapeStatus = computed(() => {
+  const s = props.data.scrape
+  if (!s) return null
+  if (s.status === 'in_progress') {
+    return { kind: 'scraping', text: 'Fetching details now…', icon: 'spinner' }
+  }
+  if (s.status === 'failed') {
+    return { kind: 'failed', text: "Couldn't fetch the listing — check the link", icon: 'x' }
+  }
+  const ageMin = (Date.now() - new Date(s.created_at).getTime()) / 60000
+  if (ageMin > 2) {
+    return { kind: 'offline', text: "The scraper machine is off — details arrive when it's back", icon: 'clock' }
+  }
+  return { kind: 'queued', text: 'On the list — details coming', icon: 'dot' }
+})
+
+const showManual = ref(false)
+const manualAddress = ref('')
+const manualPrice = ref('')
+const manualBedrooms = ref('')
+
+async function saveManualDetails() {
+  if (!manualAddress.value.trim()) return
+  await store.saveDetails(props.rid, {
+    address: manualAddress.value.trim(),
+    price: manualPrice.value ? Number(manualPrice.value) : undefined,
+    bedrooms: manualBedrooms.value ? Number(manualBedrooms.value) : undefined,
+  })
+  showManual.value = false
+}
+
+async function retryScrape() {
+  await store.retryPropertyScrape(props.rid)
+}
+
+async function removeThisProperty() {
+  await store.removeFromList(props.rid)
+}
 
 const location = computed(() => props.data.best_location.succeeded
   ? props.data.best_location.value
@@ -190,8 +242,35 @@ async function toggleViewed() {
 </script>
 
 <template>
-  <article class="card" :class="{ 'card--dismissed': triage?.dismissed }">
-    <div class="card__body">
+  <article class="card" :class="[{ 'card--dismissed': triage?.dismissed }, 'card--' + (scrapeStatus?.kind ?? '')]">
+    <div v-if="scrapePending && scrapeStatus" class="card__body card__body--pending">
+      <div class="card__top">
+        <a :href="'#/property/' + rid" class="card__address" aria-label="Open the listing">
+          <h3 class="card__address-text card__address-text--url">{{ listingUrl }}</h3>
+        </a>
+      </div>
+      <div class="card__status" :class="'card__status--' + scrapeStatus.kind">
+        <span v-if="scrapeStatus.icon === 'spinner'" class="card__spinner" aria-hidden="true"></span>
+        <span v-else-if="scrapeStatus.icon === 'clock'" aria-hidden="true">⏱</span>
+        <span v-else-if="scrapeStatus.icon === 'x'" aria-hidden="true">✕</span>
+        <span>{{ scrapeStatus.text }}</span>
+      </div>
+      <div class="card__actions">
+        <button v-if="scrapeStatus.kind === 'failed'" class="btn btn--primary" @click="retryScrape">Retry</button>
+        <button v-if="!showManual" class="btn btn--ghost" @click="showManual = true">I know the details</button>
+        <button class="btn btn--ghost" @click="removeThisProperty">Remove</button>
+      </div>
+      <div v-if="showManual" class="card__manual">
+        <input v-model="manualAddress" placeholder="Address" aria-label="Address">
+        <input v-model="manualPrice" inputmode="numeric" placeholder="Price" aria-label="Price">
+        <input v-model="manualBedrooms" inputmode="numeric" placeholder="Bedrooms" aria-label="Bedrooms">
+        <div class="card__actions">
+          <button class="btn btn--primary" @click="saveManualDetails">Save details</button>
+          <button class="btn btn--ghost" @click="showManual = false">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <div v-else class="card__body">
       <!-- Top row: Address | Monthly cost -->
       <div class="card__top">
         <span v-if="triage?.favourite" class="card__fav-icon" role="img" aria-label="Favourite">
@@ -549,4 +628,21 @@ async function toggleViewed() {
 .card__school-row .pill--warn { background: var(--orange-bg); color: var(--orange-text); }
 .card__school-row .pill--bad { background: var(--red-bg); color: var(--red-text); }
 .card__school-row .pill--slate { background: var(--slate-100); color: var(--slate-600); margin-left: auto; }
+/* ── Pending-scrape card (add-flow states) ─────────────────────────── */
+.card--queued, .card--scraping { border-left: 4px solid var(--green); }
+.card--offline { border-left: 4px solid var(--amber); }
+.card--failed { border-left: 4px solid var(--red); }
+.card__body--pending { display: flex; flex-direction: column; gap: 10px; }
+.card__address-text--url { font-size: var(--fs-sm); color: var(--green-text); text-decoration: underline; word-break: break-all; }
+.card__status { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--text-secondary); }
+.card__status--failed { color: var(--red-text); }
+.card__status--offline { color: var(--amber-text); }
+.card__spinner { width: 14px; height: 14px; border: 2px solid var(--green-bg); border-top-color: var(--green); border-radius: 50%; animation: card-spin .8s linear infinite; }
+@keyframes card-spin { to { transform: rotate(360deg); } }
+.card__actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.card__actions .btn { min-height: 44px; border: none; border-radius: var(--radius-sm); padding: 8px 14px; font-size: var(--fs-sm); font-weight: 600; cursor: pointer; }
+.card__actions .btn--primary { background: var(--green); color: #fff; }
+.card__actions .btn--ghost { background: none; color: var(--slate-600); text-decoration: underline; padding: 8px 4px; }
+.card__manual { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--slate-200); padding-top: 10px; }
+.card__manual input { min-height: 44px; border: 1px solid var(--slate-300); border-radius: var(--radius-sm); padding: 0 12px; font-size: var(--fs-base); }
 </style>

@@ -9,6 +9,54 @@ import MapView, { type MapLayer, type MapMarker } from '../components/MapView.vu
 
 const store = usePropertiesStore()
 
+// ── Add a Rightmove URL (bottom sheet + tab-bar FAB) ─────────────────
+const addSheetOpen = ref(false)
+const addUrl = ref('')
+const addError = ref('')
+const addDuplicate = ref('')
+const addBusy = ref(false)
+
+function openAddSheet() {
+  addError.value = ''
+  addDuplicate.value = ''
+  addUrl.value = ''
+  addSheetOpen.value = true
+}
+
+function validateUrl(raw: string): string | null {
+  const url = raw.trim()
+  if (!/^https?:\/\/www\.rightmove\.co\.uk\/properties\/\d+/i.test(url)) {
+    return "That doesn't look like a Rightmove link — it needs a rightmove.co.uk property URL."
+  }
+  return null
+}
+
+async function submitAdd() {
+  const err = validateUrl(addUrl.value)
+  if (err) {
+    addError.value = err
+    return
+  }
+  addBusy.value = true
+  addError.value = ''
+  try {
+    const { rid, duplicate } = await store.addByUrl(addUrl.value.trim())
+    if (duplicate) {
+      addDuplicate.value = rid
+      return
+    }
+    addSheetOpen.value = false
+    activeTab.value = 'properties'
+  } finally {
+    addBusy.value = false
+  }
+}
+
+function jumpToDuplicate() {
+  addSheetOpen.value = false
+  window.location.hash = '#/property/' + addDuplicate.value
+}
+
 const sortBy = ref<string>('date_added')
 const showSortSheet = ref(false)
 const showFilterSheet = ref(false)
@@ -430,7 +478,38 @@ const ceilingLimitText = computed(() => {
       </svg>
       <span class="tab-bar__label">Map</span>
     </button>
+    <button class="tab-bar__add" aria-label="Add a property" @click="openAddSheet">
+      <span class="tab-bar__fab">+</span>
+      <span class="tab-bar__label tab-bar__label--add">Add</span>
+    </button>
   </nav>
+
+  <!-- Add-property bottom sheet (thumb zone, above the tab bar) -->
+  <div v-if="addSheetOpen" class="add-sheet-backdrop" @click.self="addSheetOpen = false"></div>
+  <section v-if="addSheetOpen" class="add-sheet" aria-label="Add a Rightmove listing">
+    <h3 class="add-sheet__title">Add a Rightmove listing</h3>
+    <div v-if="addDuplicate" class="add-sheet__duplicate">
+      Already added — this house is on your list.
+      <button class="btn btn--quiet" @click="jumpToDuplicate">Jump to it</button>
+    </div>
+    <input
+      v-else
+      v-model="addUrl"
+      class="add-sheet__input"
+      :class="{ 'add-sheet__input--error': addError }"
+      type="url"
+      placeholder="https://www.rightmove.co.uk/properties/…"
+      aria-label="Rightmove property URL"
+      @keyup.enter="submitAdd"
+    >
+    <p v-if="addError" class="add-sheet__error">{{ addError }}</p>
+    <div class="add-sheet__actions">
+      <button class="btn btn--quiet" @click="addSheetOpen = false">Cancel</button>
+      <button class="btn btn--primary" :disabled="addBusy" @click="submitAdd">
+        {{ addBusy ? 'Adding…' : 'Add property' }}
+      </button>
+    </div>
+  </section>
 </template>
 
 <style scoped>
@@ -635,4 +714,20 @@ const ceilingLimitText = computed(() => {
   z-index: 2;
 }
 .tab-bar__label { font-size: var(--fs-xs); font-weight: var(--fw-semibold); }
+/* ── Add FAB + bottom sheet ─────────────────────────────────────────── */
+.tab-bar__add { display: flex; flex-direction: column; align-items: center; gap: 2px; border: none; background: none; min-width: 64px; min-height: 52px; cursor: pointer; }
+.tab-bar__fab { width: 48px; height: 48px; border-radius: 50%; background: var(--green); color: #fff; font-size: 26px; font-weight: 700; display: grid; place-items: center; margin-top: -18px; box-shadow: 0 4px 10px rgba(45, 106, 79, 0.4); }
+.tab-bar__label--add { color: var(--green-text); font-weight: 600; }
+.add-sheet-backdrop { position: fixed; inset: 0; background: rgba(26, 26, 26, 0.3); z-index: 40; }
+.add-sheet { position: fixed; left: 8px; right: 8px; bottom: 74px; background: var(--card-bg); border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: 16px; z-index: 41; display: flex; flex-direction: column; gap: 10px; }
+.add-sheet__title { font-size: var(--fs-base); font-weight: 700; }
+.add-sheet__input { width: 100%; min-height: 48px; border: 1px solid var(--slate-300); border-radius: var(--radius-sm); padding: 0 12px; font-size: var(--fs-base); }
+.add-sheet__input--error { border-color: var(--red); }
+.add-sheet__error { color: var(--red-text); font-size: var(--fs-sm); }
+.add-sheet__duplicate { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--amber-bg); color: var(--amber-text); border-radius: var(--radius-sm); padding: 10px 12px; font-size: var(--fs-sm); font-weight: 600; }
+.add-sheet__actions { display: flex; gap: 8px; }
+.add-sheet__actions .btn { flex: 1; min-height: 48px; border: none; border-radius: var(--radius-sm); font-size: var(--fs-sm); font-weight: 600; cursor: pointer; }
+.add-sheet__actions .btn--primary { background: var(--green); color: #fff; }
+.add-sheet__actions .btn--primary:disabled { opacity: 0.5; }
+.add-sheet__actions .btn--quiet { background: var(--slate-100); color: var(--slate-700); }
 </style>

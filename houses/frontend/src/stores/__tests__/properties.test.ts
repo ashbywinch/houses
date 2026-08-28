@@ -7,6 +7,10 @@ vi.mock('../../services/api', () => ({
   fetchPropertyDetail: vi.fn(),
   fetchAllSummaries: vi.fn(),
   fetchSettings: vi.fn(),
+  addProperty: vi.fn(),
+  retryScrape: vi.fn(),
+  patchPropertyDetails: vi.fn(),
+  removeProperty: vi.fn(),
 }))
 
 import * as api from '../../services/api'
@@ -170,5 +174,58 @@ describe('properties store triage state', () => {
     expect(typeof t.favourite).toBe('boolean')
     expect(typeof t.dismissed).toBe('boolean')
     expect(typeof t.is_viewed).toBe('boolean')
+  })
+})
+
+describe('add-property flow', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.fetchAllSummaries).mockResolvedValue({
+      '9091': {
+        rid: '9091',
+        best_address: { succeeded: false, value: null, error: null, provenance: { label: 't' } },
+        best_location: { succeeded: false, value: null, error: null, provenance: { label: 't' } },
+        rightmove_price: { succeeded: false, value: null, error: null, provenance: { label: 't' } },
+        rightmove_bedrooms: { succeeded: false, value: null, error: null, provenance: { label: 't' } },
+        commutes: {},
+        schools: { primary: { school: { succeeded: false, value: null, error: null, provenance: { label: 't' } } }, secondary: { school: { succeeded: false, value: null, error: null, provenance: { label: 't' } } } },
+        group_monthly_cost: { succeeded: false, value: null, error: null, provenance: { label: 't' } },
+        walkability: { succeeded: false, value: null, error: null, provenance: { label: 't' } },
+        scrape: { status: 'pending', attempts: 0, created_at: new Date().toISOString(), claimed_at: null },
+      },
+    })
+  })
+
+  it('addByUrl adds the new property to the list when not a duplicate', async () => {
+    vi.mocked(api.addProperty).mockResolvedValue({ status: 'ok', rid: '9091' })
+    const store = usePropertiesStore()
+    const out = await store.addByUrl('https://www.rightmove.co.uk/properties/9091')
+    expect(out).toEqual({ rid: '9091', duplicate: false })
+    expect(api.fetchAllSummaries).toHaveBeenCalled()
+    expect(store.summaries['9091'].scrape?.status).toBe('pending')
+  })
+
+  it('addByUrl reports duplicates without touching the list', async () => {
+    vi.mocked(api.addProperty).mockResolvedValue({ status: 'ok', rid: '9091', duplicate: true })
+    const store = usePropertiesStore()
+    const out = await store.addByUrl('https://www.rightmove.co.uk/properties/9091')
+    expect(out.duplicate).toBe(true)
+    expect(api.fetchAllSummaries).not.toHaveBeenCalled()
+  })
+
+  it('saveDetails calls the details endpoint and refreshes', async () => {
+    vi.mocked(api.patchPropertyDetails).mockResolvedValue(new Response(null, { status: 200 }))
+    const store = usePropertiesStore()
+    await store.saveDetails('9091', { address: '1 Main St', price: 500000 })
+    expect(api.patchPropertyDetails).toHaveBeenCalledWith('9091', { address: '1 Main St', price: 500000 })
+  })
+
+  it('removeFromList deletes the property from the summaries', async () => {
+    vi.mocked(api.removeProperty).mockResolvedValue(new Response(null, { status: 200 }))
+    const store = usePropertiesStore()
+    await store.addByUrl('https://www.rightmove.co.uk/properties/9091')
+    await store.removeFromList('9091')
+    expect(api.removeProperty).toHaveBeenCalledWith('9091')
+    expect(store.summaries['9091']).toBeUndefined()
   })
 })

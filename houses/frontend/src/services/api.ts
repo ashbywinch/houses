@@ -51,6 +51,44 @@ export function fetchAllSummaries(): Promise<Record<string, PropertySummary>> {
 }
 
 
+export function addProperty(url: string): Promise<Record<string, unknown>> {
+  return fetch(`${BASE}/properties`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ url }),
+  })
+    .then(checkFor401)
+    .then(r => parseJson(r))
+}
+
+export function retryScrape(rid: string): Promise<Response> {
+  return fetch(`${BASE}/properties/${encodeURIComponent(rid)}/scrape/retry`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+  })
+    .then(checkFor401)
+}
+
+export function patchPropertyDetails(
+  rid: string,
+  fields: { address: string; price?: number; bedrooms?: number },
+): Promise<Response> {
+  return fetch(`${BASE}/properties/${encodeURIComponent(rid)}/details`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(fields),
+  })
+    .then(checkFor401)
+}
+
+export function removeProperty(rid: string): Promise<Response> {
+  return fetch(`${BASE}/properties/${encodeURIComponent(rid)}`, {
+    method: 'DELETE',
+    headers: { ...authHeaders() },
+  })
+    .then(checkFor401)
+}
+
 export function fetchPropertyDetail(rid: string): Promise<PropertyDetail> {
   return fetch(`${BASE}/properties/${encodeURIComponent(rid)}/detail`, { headers: { ...authHeaders() } }).then(checkFor401).then(r => parseJson(r))
 }
