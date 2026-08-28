@@ -23,7 +23,9 @@ from houses.database import get_connection
 MAX_ATTEMPTS = 8
 BACKOFF_BASE_SECONDS = 60
 BACKOFF_CAP_SECONDS = 3600
-
+STALE_CLAIM_SECONDS = 900
+"""An in_progress job older than this (worker died before reporting) is
+re-queued so the property's enrichment doesn't stall forever."""
 # pending -> claimable
 # in_progress -> claimed, awaiting report (or stale if the worker died)
 # failed -> gave up after MAX_ATTEMPTS; not claimable, visible via status
@@ -73,20 +75,33 @@ def enqueue_scrape(rid: str, url: str) -> bool:
 
 
 def claim_due_scrape() -> ScrapeJob | None:
-    """Claim the oldest job whose backoff window has elapsed.
+    """Claim the oldest due job whose backoff window has elapsed.
 
-    Claimed jobs are marked in_progress and cannot be claimed again until
-    the worker reports.  Returns None when nothing is due.
+    First, abandoned claims are re-queued: an in_progress job whose
+    claimed_at is older than STALE_CLAIM_SECONDS (a worker died before
+    reporting) goes back to pending so its property isn't stalled
+    forever. Then the oldest pending job past its retry time is claimed.
+
+    Only ``pending`` jobs are claimable — a job permanently failed after
+    MAX_ATTEMPTS must NEVER come back (a stale next_retry_at must not
+    resurrect it).  Returns None when nothing is due.
     """
     conn = get_connection()
     now = datetime.now(UTC).isoformat()
+    stale_before = (datetime.now(UTC) - timedelta(seconds=STALE_CLAIM_SECONDS)).isoformat()
+    conn.execute(
+        "UPDATE pending_scrapes SET status='pending', next_retry_at=?, claimed_at=NULL"
+        " WHERE status='in_progress' AND claimed_at IS NOT NULL AND claimed_at <= ?",
+        (now, stale_before),
+    )
     row = conn.execute(
         "SELECT id, rid, url FROM pending_scrapes"
-        " WHERE next_retry_at <= ? AND status IN ('pending', 'failed')"
+        " WHERE next_retry_at <= ? AND status = 'pending'"
         " ORDER BY created_at ASC LIMIT 1",
         (now,),
     ).fetchone()
     if row is None:
+        conn.commit()  # persist the stale-claim requeue even when nothing is due
         return None
     conn.execute(
         "UPDATE pending_scrapes SET status='in_progress', claimed_at=? WHERE id=?",
@@ -96,6 +111,16 @@ def claim_due_scrape() -> ScrapeJob | None:
     return ScrapeJob(id=row["id"], rid=row["rid"], url=row["url"])
 
 
+def scrape_job_rid(job_id: int) -> str | None:
+    """Look up a claimed job's rid WITHOUT mutating it.
+
+    The report endpoint applies the scraped data to the DAG before
+    deleting the job, so a failed apply can re-queue instead of losing
+    the listing forever.
+    """
+    conn = get_connection()
+    row = conn.execute("SELECT rid FROM pending_scrapes WHERE id=?", (job_id,)).fetchone()
+    return row["rid"] if row is not None else None
 def report_scrape(job_id: int, ok: bool, error: str | None = None) -> str | None:
     """Record a worker's outcome for a claimed job.
 

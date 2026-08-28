@@ -82,6 +82,8 @@ async def _run_job(client: httpx.AsyncClient, job: ScrapeJob) -> None:
         prop = await scrape(job.url)
         if prop is None:
             raise RuntimeError("scrape returned no data (offline mode / login wall?)")
+        if not prop.address:
+            raise RuntimeError("no address parsed (Rightmove block/login page?)")
         listing = ScrapedListing(
             url=prop.url or job.url,
             address=prop.address,
@@ -134,7 +136,9 @@ async def run_loop(interval: float) -> None:
         except Exception as exc:
             print(f"worker error: {exc}")
             continue
-        await asyncio.sleep(interval)
+        finally:
+            # Always sleep — a transient error must not tight-loop the poller.
+            await asyncio.sleep(interval)
 
 
 def main() -> None:

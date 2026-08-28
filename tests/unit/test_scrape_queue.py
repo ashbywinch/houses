@@ -4,18 +4,19 @@ The cloud box has no Chrome; property adds there enqueue scrape jobs, a
 worker (LAN, where Chrome exists) claims + scrapes + reports, and failed
 scrapes are re-queued with exponential backoff by the app. These tests pin
 the queue contract: enqueue on failed scrape, claim-once semantics,
-backoff growth, success applies scraped data to the DAG, max-attempts
-gives up permanently.
+backoff growth, permanent failure after MAX_ATTEMPTS, stale-claim
+recovery, success applies scraped data to the DAG, auth.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
 from houses.database import get_connection
+from houses.scrape_queue import MAX_ATTEMPTS, STALE_CLAIM_SECONDS
 from houses.server import app
 from houses.web.auth import _make_session_cookie
 from tests.helpers import inject_server_deps
@@ -34,17 +35,26 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+# lucidlint: ignore record-shape wire-format dict — sqlite row projection is
+# the serialization boundary (coding-standards.md)
 def _scrape_rows() -> list[dict]:
     conn = get_connection()
     return [dict(r) for r in conn.execute("SELECT * FROM pending_scrapes ORDER BY id").fetchall()]
 
 
+# lucidlint: ignore record-shape wire-format dict — the claim response is a wire record (coding-standards.md)
 def _add_url_only() -> dict:
     """Add a URL-only property with a scrape that returns nothing; returns
     the claim response's job dict."""
     with inject_server_deps(scrape_fn=AsyncMock(return_value=None)):
         client.post("/api/properties", json={"url": URL})
     return client.post("/api/scrapes/claim").json()["job"]
+
+
+def _fail_job_until_permanent(job_id: int) -> None:
+    for _ in range(MAX_ATTEMPTS):
+        client.post("/api/scrapes/report", json={"job_id": job_id, "ok": False, "error": "boom"})
+        client.post("/api/scrapes/claim")
 
 
 class TestEnqueueOnFailedScrape:
@@ -123,6 +133,38 @@ class TestClaim:
         job2 = client.post("/api/scrapes/claim").json()["job"]
         assert job2 is not None and job2["id"] == job["id"]
 
+    @staticmethod
+    def test_failed_job_is_never_claimable_again():
+        """Review-bug regression: after MAX_ATTEMPTS the job is failed
+        PERMANENTLY — a stale next_retry_at must not make it claimable
+        again, or the queue retries failed jobs forever."""
+        job = _add_url_only()
+        _fail_job_until_permanent(job["id"])
+        # Force the stale retry time into the past — the claim filter must
+        # still exclude it (status is 'failed', not 'pending').
+        conn = get_connection()
+        conn.execute(
+            "UPDATE pending_scrapes SET next_retry_at=? WHERE id=?",
+            (datetime(2020, 1, 1, tzinfo=UTC).isoformat(), job["id"]),
+        )
+        conn.commit()
+        assert client.post("/api/scrapes/claim").json()["job"] is None
+
+    @staticmethod
+    def test_stale_in_progress_job_is_reclaimed():
+        """Review-bug regression: a worker that dies after claiming (never
+        reports) must not stall the property forever — an in_progress job
+        older than the stale threshold becomes claimable again."""
+        job = _add_url_only()
+        conn = get_connection()
+        conn.execute(
+            "UPDATE pending_scrapes SET claimed_at=? WHERE id=?",
+            ((_now() - timedelta(seconds=STALE_CLAIM_SECONDS * 2)).isoformat(), job["id"]),
+        )
+        conn.commit()
+        job2 = client.post("/api/scrapes/claim").json()["job"]
+        assert job2 is not None and job2["id"] == job["id"]
+
 
 class TestBackoff:
     def test_failure_backs_off_exponentially(self):
@@ -140,12 +182,8 @@ class TestBackoff:
         assert delays[2] > delays[1]
 
     def test_max_attempts_marks_job_failed_permanently(self):
-        from houses.scrape_queue import MAX_ATTEMPTS
-
         job = _add_url_only()
-        for _ in range(MAX_ATTEMPTS):
-            client.post("/api/scrapes/report", json={"job_id": job["id"], "ok": False, "error": "boom"})
-            client.post("/api/scrapes/claim")
+        _fail_job_until_permanent(job["id"])
         rows = _scrape_rows()
         assert rows[0]["status"] == "failed"
         assert rows[0]["attempts"] == MAX_ATTEMPTS
@@ -180,6 +218,29 @@ class TestReportSuccess:
         assert detail["postcode"]["value"] == "SL7 2AP"
         assert detail["rightmove_bedrooms"]["value"] == "4"
         assert detail["rightmove_price"]["value"]["amount"] == "800000.00"
+
+    @staticmethod
+    def test_success_without_address_is_rejected():
+        """Review-bug regression: a login wall / block page can parse with
+        an empty address — the server must NOT delete the job and seed an
+        empty property; it re-queues the scrape instead."""
+        job = _add_url_only()
+        resp = client.post(
+            "/api/scrapes/report",
+            json={"job_id": job["id"], "ok": True, "data": {"address": "", "bedrooms": 4, "price": 500000}},
+        )
+        assert resp.status_code == 200, resp.text
+        rows = _scrape_rows()
+        assert len(rows) == 1, "empty-address report must not delete the job"
+        assert rows[0]["attempts"] == 1
+        # The property must not have been seeded with garbage
+        detail = client.get(f"/api/properties/{RID}").json()
+        assert detail["best_address"]["value"] in (None, "")
+
+    @staticmethod
+    def test_report_missing_job_id_is_422():
+        resp = client.post("/api/scrapes/report", json={"ok": True, "data": {"address": "x"}})
+        assert resp.status_code == 422
 
 
 class TestAuth:

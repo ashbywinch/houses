@@ -12,7 +12,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from dag.persistence import decompress_result
+from dag.persistence import compress_result, decompress_result
 
 DB_PATH = Path("data/houses.db")
 
@@ -66,19 +66,31 @@ def migrate_node_results(db_path: str | Path) -> int:
     conn.row_factory = sqlite3.Row
     migrated = 0
 
+    # result_json is zlib-compressed on disk, so a SQL LIKE on the raw
+    # BLOB matches nothing (review finding). Select ALL rows and pattern-
+    # match the decompressed JSON in Python instead.
+    patterns = (
+        "duration_minutes",
+        "distance_km",
+        "bus_walk_penalty_minutes",
+        "walk_to_town_minutes",
+        "magnitude",
+    )
     rows = conn.execute(
-        "SELECT id, node_id, result_json FROM node_results "
-        "WHERE result_json LIKE '%duration_minutes%' "
-        "OR result_json LIKE '%distance_km%' "
-        "OR result_json LIKE '%bus_walk_penalty_minutes%' "
-        "OR result_json LIKE '%walk_to_town_minutes%' "
-        "OR result_json LIKE '%magnitude%'"
+        "SELECT id, node_id, result_json FROM node_results"
     ).fetchall()
 
     for row in rows:
         try:
-            result = json.loads(decompress_result(row["result_json"]))
-        except (json.JSONDecodeError, TypeError) as e:
+            text = decompress_result(row["result_json"])
+        except (UnicodeDecodeError, TypeError) as e:
+            print(f"SKIP {row['node_id']}: {e}", file=sys.stderr)
+            continue
+        if not any(p in text for p in patterns):
+            continue
+        try:
+            result = json.loads(text)
+        except json.JSONDecodeError as e:
             print(f"SKIP {row['node_id']}: {e}", file=sys.stderr)
             continue
 
@@ -88,7 +100,7 @@ def migrate_node_results(db_path: str | Path) -> int:
 
         conn.execute(
             "UPDATE node_results SET result_json = ? WHERE id = ?",
-            (json.dumps(new_result), row["id"]),
+            (compress_result(json.dumps(new_result)), row["id"]),
         )
         migrated += 1
 
