@@ -9,6 +9,7 @@ from pint import Quantity
 from dag.attempt import Attempt
 from dag.scheduler import flush_processor
 from dag.user_input_node import UserInputNode
+from houses.commute import CostGroup, JourneyLeg, LegMode
 from houses.geopoint import GeoPoint
 from houses.model.domain import Commute, Person, PlaceOfInterest
 from houses.nodes.transit import RouteOptions, TflTransitNode, TransitOptions
@@ -474,3 +475,192 @@ class TestTflClientNoRoute:
         # no_bus probe — a plain description, not a log side-channel.
         nb_prov = await no_bus.build_provenance()
         assert "HTTP 404" in (nb_prov.description or "")
+
+class TestNationalRailFallback:
+    """TransitNode's National Rail fallback — routes origins beyond TfL
+    coverage (property 90691101, Hungerford: TfL 404s from every origin
+    form) via the wired transit_route_fn (Google Routes TRANSIT)."""
+
+    def _commute(self, minutes: int = 122) -> Commute:
+        """A feasible National Rail journey the router would return."""
+        legs = (
+            JourneyLeg(mode=LegMode.WALK, duration=Quantity(15, "minute")),
+            JourneyLeg(
+                mode=LegMode.TRAIN,
+                duration=Quantity(67, "minute"),
+                line_name="GWR",
+                end_station="London Paddington Rail Station",
+            ),
+            JourneyLeg(mode=LegMode.TUBE, duration=Quantity(26, "minute"), line_name="Victoria"),
+            JourneyLeg(mode=LegMode.WALK, duration=Quantity(5, "minute")),
+        )
+        return Commute(
+            person=Person(name="", has_car=False),
+            label="Pimlico",
+            destination=PlaceOfInterest(label="Pimlico", address="1 Drummond Gate, Pimlico, London SW1V 2QQ"),
+            duration=Quantity(minutes, "minute"),
+            daily_cost=Money("0", "GBP"),
+            mode="transit",
+            _details=(CostGroup(legs=legs, operator="TfL", cost=None),),
+        )
+
+    async def _run(self, fallback, no_bus=None, with_bus=None, has_car=False):
+        from typing import cast
+
+        from houses.nodes.transit import TflTransitNode, TransitNode, TransitOptions
+
+        def _dummy(nid: str) -> TflTransitNode:
+            return cast(TflTransitNode, UserInputNode[Commute](nid, Commute))
+
+        loc = UserInputNode[GeoPoint]("nrf_loc", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("nrf_poi", PlaceOfInterest)
+        options = TransitOptions(
+            best_location=loc,
+            poi=poi,
+            has_car=has_car,
+            no_bus_node=_dummy("nrf_nb"),
+            with_bus_node=_dummy("nrf_wb"),
+        )
+        if fallback is not None:
+            options = TransitOptions(
+                best_location=loc,
+                poi=poi,
+                has_car=has_car,
+                no_bus_node=_dummy("nrf_nb"),
+                with_bus_node=_dummy("nrf_wb"),
+                transit_route_fn=fallback,
+            )
+        node = TransitNode("nrf", options=options)
+        return await node.compute(
+            Attempt.succeeded(GeoPoint(51.415344, -1.511056)),
+            Attempt.succeeded(PlaceOfInterest(label="Pimlico", address="SW1V 2QQ")),
+            no_bus or Attempt.succeeded(self._infeasible_commute()),
+            with_bus or Attempt.succeeded(self._infeasible_commute()),
+        )
+
+    @staticmethod
+    def _infeasible_commute() -> Commute:
+        return Commute(
+            person=Person(name="", has_car=False),
+            label="NoRoute",
+            destination=PlaceOfInterest(label="NoRoute", address="RG17 0LA"),
+            duration=Quantity(0, "minute"),
+            daily_cost=Money("0", "GBP"),
+            mode="transit",
+            _details=(),
+            infeasible=True,
+            no_route_reason="TfL couldn't find a route for this journey",
+        )
+
+    @pytest.mark.asyncio
+    async def test_tfl_infeasible_falls_back_to_national_rail(self):
+        """Both TfL variants succeeded-infeasible + a wired fallback →
+        the National Rail journey wins (regression: Hungerford)."""
+        async def fake_route(loc, dest):
+            return self._commute()
+
+        a = await self._run(fake_route)
+        assert a.succeeded, f"National Rail fallback must produce a journey, got {a.status}: {a.error}"
+        _v = a.value_or_none()
+        assert _v is not None and not _v.infeasible
+        assert _v.duration.magnitude == 122
+        modes = [leg.mode for cg in _v.details for leg in cg.legs]
+        assert LegMode.TRAIN in modes, "the fallback journey must include the train leg"
+
+    @pytest.mark.asyncio
+    async def test_fallback_returning_none_keeps_infeasible(self):
+        """The router said 'no route' → the node keeps the
+        succeeded-infeasible result so the selector can try drive/walk."""
+        async def fake_route(loc, dest):
+            return None
+
+        a = await self._run(fake_route)
+        assert a.succeeded
+        _v = a.value_or_none()
+        assert _v is not None and _v.infeasible
+
+    @pytest.mark.asyncio
+    async def test_fallback_failure_keeps_infeasible(self):
+        """A Google failure must never crash the node nor mask the
+        drive/walk fallback."""
+        async def fake_route(loc, dest):
+            raise RuntimeError("google down")
+
+        a = await self._run(fake_route)
+        assert a.succeeded
+        _v = a.value_or_none()
+        assert _v is not None and _v.infeasible
+
+    @pytest.mark.asyncio
+    async def test_fallback_provenance_narrates_both_steps(self):
+        """The provenance says why TfL lost and what replaced it."""
+        from houses.nodes.transit import TransitNode, TransitOptions
+
+        async def fake_route(loc, dest):
+            return self._commute()
+
+        loc = UserInputNode[GeoPoint]("nrfp_loc", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("nrfp_poi", PlaceOfInterest)
+        node = TransitNode(
+            "nrfp",
+            options=TransitOptions(
+                best_location=loc,
+                poi=poi,
+                no_bus_node=UserInputNode[Commute]("nrfp_nb", Commute),
+                with_bus_node=UserInputNode[Commute]("nrfp_wb", Commute),
+                transit_route_fn=fake_route,
+            ),
+        )
+        loc.push(GeoPoint(51.415344, -1.511056), "geocode")
+        poi.push(PlaceOfInterest(label="Pimlico", address="SW1V 2QQ"), "persons_source")
+        # Drive the node directly through compute (same seam as _run) then
+        # assert the provenance description narrates the fallback.
+        await node.compute(
+            Attempt.succeeded(GeoPoint(51.415344, -1.511056)),
+            Attempt.succeeded(PlaceOfInterest(label="Pimlico", address="SW1V 2QQ")),
+            Attempt.succeeded(self._infeasible_commute()),
+            Attempt.succeeded(self._infeasible_commute()),
+        )
+
+        p = await node.build_provenance()
+        assert p.description is not None
+        assert "National Rail fallback" in p.description
+        assert "TfL" in p.description
+
+    @pytest.mark.asyncio
+    async def test_fallback_accepts_string_poi_like_the_real_pipeline(self):
+        """The builder's poi input is a UserInputNode[str] holding the
+        postcode (only schools arrive as PlaceOfInterest) — the fallback
+        must normalize the string, not crash (live regression: the box
+        logged 'str' object has no attribute 'address')."""
+        from houses.nodes.transit import TransitNode, TransitOptions
+
+        received = {}
+
+        async def fake_route(loc, dest):
+            received["dest"] = dest
+            return self._commute()
+
+        loc = UserInputNode[GeoPoint]("nrfs_loc", GeoPoint)
+        poi = UserInputNode[str]("nrfs_poi", str)
+        node = TransitNode(
+            "nrfs",
+            options=TransitOptions(
+                best_location=loc,
+                poi=poi,
+                no_bus_node=UserInputNode[Commute]("nrfs_nb", Commute),
+                with_bus_node=UserInputNode[Commute]("nrfs_wb", Commute),
+                transit_route_fn=fake_route,
+            ),
+        )
+        a = await node.compute(
+            Attempt.succeeded(GeoPoint(51.415344, -1.511056)),
+            Attempt.succeeded("1 Drummond Gate, Pimlico, London SW1V 2QQ"),
+            Attempt.succeeded(self._infeasible_commute()),
+            Attempt.succeeded(self._infeasible_commute()),
+        )
+        assert a.succeeded
+        _v = a.value_or_none()
+        assert _v is not None and not _v.infeasible
+        assert isinstance(received["dest"], PlaceOfInterest)
+        assert received["dest"].address == "1 Drummond Gate, Pimlico, London SW1V 2QQ"

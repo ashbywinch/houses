@@ -179,6 +179,11 @@ class _NoRoutesRouter:
 
     google_routes_post = None
 
+    async def transit_route(self, origin, dest):
+        """National Rail fallback disabled in unit tests — the builder
+        wires it, tests inject their own canned routes."""
+        return None
+
 
 class _NoPlanTflClient:
     """TfL client factory default for unit tests — transit planning is

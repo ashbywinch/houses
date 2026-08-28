@@ -64,6 +64,23 @@ class TestChoose:
         result = expr.evaluate()
         assert result.impossible
 
+    def test_no_winner_error_is_user_facing(self):
+        """Regression (property 90691101): the UI showed 'Could not
+        calculate Choose: no alternative selected' — internal expression
+        jargon. The user-facing message (what the UI renders) must be
+        plain language; the internal detail stays on error_info."""
+        a = _ref(Decimal("10"), "a")
+
+        expr = Choose(
+            alternatives={"a": a},
+            selector=lambda results: None,
+        )
+        result = expr.evaluate()
+        shown = result.error_info.display_message if result.error_info else result.error
+        assert shown == "No commute could be calculated for this journey"
+        assert "choose" not in shown.lower()
+        assert "alternative" not in shown.lower()
+
     def test_propagates_alternative_failure(self):
         """If a chosen alternative failed, the failure propagates."""
         a = _ref(Attempt.impossible("broken"), "a")

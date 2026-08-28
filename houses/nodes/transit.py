@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, override
@@ -172,6 +172,12 @@ class TransitOptions:
     best_address: Node | None = None
     no_bus_node: Node | None = None
     with_bus_node: Node | None = None
+    # National Rail fallback seam: called when both TfL variants are
+    # succeeded-infeasible (origin beyond TfL coverage).  Returns a
+    # feasible Commute or None.  Wired to the Google Routes TRANSIT
+    # router in the pipeline builder; None keeps the infeasible result
+    # so the commute selector still falls back to drive/walk.
+    transit_route_fn: Callable[[GeoPoint, PlaceOfInterest], Awaitable[Commute | None]] | None = None
 
 
 class PersonMaxWalkNode(DerivedNode[int]):
@@ -388,6 +394,8 @@ class TransitNode(DerivedNode[Commute]):
         self._has_car = options.has_car
         self._best_address = options.best_address
         self._poi_info = options.poi_info
+        self._transit_route_fn = options.transit_route_fn
+        self._last_fallback_detail: str | None = None
 
     @override
     async def compute(
@@ -432,9 +440,16 @@ class TransitNode(DerivedNode[Commute]):
         if val is None:
             return Attempt.impossible("transit returned empty result")
         if val.infeasible:
-            # No transit route — succeeded-infeasible so the selector can
-            # fall back to drive/walk. Never touch .details on an
-            # infeasible commute (the accessor raises).
+            # No TfL transit route — succeeded-infeasible so the selector
+            # can fall back to drive/walk.  When a transit_route_fn is
+            # wired (Google Routes TRANSIT), try the National Rail
+            # fallback first: TfL's planner has a coverage boundary west
+            # of Newbury, and the registry has a station + fare for those
+            # origins.  Never touch .details on an infeasible commute
+            # (the accessor raises).
+            fallback = await self._nr_fallback(location, poi)
+            if fallback is not None:
+                return Attempt.succeeded(fallback)
             return Attempt.succeeded(val)
 
         parts = self._id.split("/")
@@ -457,3 +472,48 @@ class TransitNode(DerivedNode[Commute]):
         if self._poi_info is not None:
             result = replace(result, destination=self._poi_info)
         return Attempt.succeeded(result)
+    async def _nr_fallback(
+        self,
+        location: Attempt[GeoPoint],
+        poi: Attempt[PlaceOfInterest],
+    ) -> Commute | None:
+        """National Rail fallback for origins beyond TfL coverage.
+
+        Calls the wired transit_route_fn (Google Routes TRANSIT) with the
+        property's location and the destination POI.  Returns the Commute
+        on success, None when unwired, unroutable, or failed — the
+        caller keeps the succeeded-infeasible result, so the commute
+        selector still falls back to drive/walk.
+        """
+        if self._transit_route_fn is None:
+            return None
+        location_val = location.value_or_none()
+        poi_val = poi.value_or_none()
+        if location_val is None or poi_val is None:
+            return None
+        # The pipeline's poi input is a UserInputNode[str] holding the
+        # postcode/address — only school POIs arrive as PlaceOfInterest.
+        # Normalize both to a PlaceOfInterest for the router seam.
+        if isinstance(poi_val, str):
+            poi_val = PlaceOfInterest(label="", address=poi_val)
+        elif not isinstance(poi_val, PlaceOfInterest):
+            return None
+        try:
+            fallback = await self._transit_route_fn(location_val, poi_val)
+        except Exception as e:  # lucidlint: ignore broad-except — the fallback must never mask drive/walk
+            logging.getLogger(__name__).warning("National Rail fallback failed: %s", e)
+            self._last_fallback_detail = f"National Rail fallback failed: {e}"
+            return None
+        if fallback is None or fallback.infeasible:
+            return None
+        self._last_fallback_detail = (
+            "TfL found no route for this journey — National Rail fallback (Google transit) used"
+        )
+        return fallback
+
+    @override
+    async def build_provenance(self) -> Provenance:
+        p = await super().build_provenance()
+        if self._last_fallback_detail is not None:
+            p.description = self._last_fallback_detail
+        return p

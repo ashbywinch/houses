@@ -433,10 +433,126 @@ class CommuteRouter:
             ),
             error=f"google_routes_{mode.lower()}: duration={duration_min}min distance={distance_meters}m",
         )
+    # National Rail operators that serve London → their London terminus.
+    # The Google Routes TRANSIT response omits stop names, so the
+    # fallback journey names its last rail leg from this map — RailFareNode
+    # then finds the terminal and prices the journey (LON-group fallback
+    # covers operators whose per-terminal fare is missing).  Unmapped
+    # operators leave the leg unnamed; the commute stays unpriced rather
+    # than carrying a guessed cost.
+    _NR_LONDON_TERMINUS: dict[str, str] = {
+        "GWR": "London Paddington Rail Station",
+        "Great Western Railway": "London Paddington Rail Station",
+        "LNER": "London Kings Cross Rail Station",
+        "London North Eastern Railway": "London Kings Cross Rail Station",
+        "Avanti West Coast": "London Euston Rail Station",
+        "South Western Railway": "London Waterloo Rail Station",
+        "SWR": "London Waterloo Rail Station",
+        "Southern": "London Bridge Rail Station",
+        "Southeastern": "London Victoria Rail Station",
+        "Thameslink": "London Blackfriars Rail Station",
+        "Greater Anglia": "London Liverpool Street Rail Station",
+        "Chiltern Railways": "London Marylebone Rail Station",
+        "c2c": "London Fenchurch Street Rail Station",
+        "East Midlands Railway": "London St Pancras International Rail Station",
+    }
+
+    async def transit_route(self, origin: GeoPoint, dest: PlaceOfInterest | str) -> Commute | None:
+        """National Rail fallback routing via Google Routes TRANSIT.
+
+        Called by TransitNode when TfL has no route for the origin (its
+        planner's coverage ends west of Newbury).  Returns a feasible
+        commute with the transit legs Google found (walk → GWR train →
+        tube/bus → walk); the fare is priced downstream by RailFareNode
+        from the property's nearest station to the London terminus.
+        ``dest`` is the destination address string or POI.  Returns None
+        when unroutable or on failure — the caller keeps its
+        succeeded-infeasible result so the commute selector still falls
+        back to drive/walk.
+        """
+        if isinstance(dest, str):
+            dest = PlaceOfInterest(label="", address=dest)
+# lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
+        body = {
+            "origin": self._address_waypoint(origin),
+            "destination": self._address_waypoint(dest.address),
+            "travelMode": "TRANSIT",
+        }
+        mask = (
+            "routes.duration,routes.legs.steps.travelMode,"
+            "routes.legs.steps.staticDuration,routes.legs.steps.transitDetails"
+        )
+        try:
+            data = await self._google_routes_client.post(
+                body, mask, options=GoogleRoutesOptions(timeout=15.0)
+            )
+        # lucidlint: ignore broad-except Google Routes failure → None, caller keeps infeasible
+        except Exception as e:
+            logger.warning("Google transit fallback failed for %s: %s", origin, e)
+            return None
+        if not data:
+            return None
+        routes = data.get("routes") or []
+        if not routes:
+            return None
+        legs = self._transit_legs(routes[0])
+        if not legs:
+            return None
+        # Total from the route's own duration — the sum of per-leg
+        # rounded minutes drifts (99.2 → 98 when legs round individually).
+        total_min = round(int(str(routes[0].get("duration", "0s")).rstrip("s")) / 60)
+        return Commute(
+            person=Person(name="", has_car=False),
+            label=dest.label,
+            destination=dest,
+            duration=Quantity(total_min, "minute"),
+            daily_cost=Money("0", "GBP"),
+            mode="transit",
+            _details=(CostGroup(legs=tuple(legs), operator="TfL", cost=None),),
+        )
+
+    def _transit_legs(self, route: dict[str, Any]) -> list[JourneyLeg]:
+        """Parse a Google Routes TRANSIT route into journey legs."""
+        legs: list[JourneyLeg] = []
+        for leg in route.get("legs") or []:
+            for step in leg.get("steps") or []:
+                duration = Quantity(round(int(str(step.get("staticDuration", "0s")).rstrip("s")) / 60), "minute")
+                travel_mode = step.get("travelMode", "")
+                transit_details = step.get("transitDetails") or {}
+                line = transit_details.get("transitLine") or {}
+                if travel_mode == "WALK":
+                    legs.append(JourneyLeg(mode=LegMode.WALK, duration=duration))
+                    continue
+                if travel_mode == "TRANSIT":
+                    mode = self._transit_leg_mode(line)
+                    line_name = line.get("nameShort") or line.get("name") or ""
+                    agencies = [a.get("name") or "" for a in line.get("agencies") or []]
+                    end_station = self._NR_LONDON_TERMINUS.get(agencies[0], "") if agencies else ""
+                    legs.append(
+                        JourneyLeg(
+                            mode=mode,
+                            duration=duration,
+                            line_name=line_name,
+                            end_station=end_station,
+                        )
+                    )
+        return legs
+
+    @staticmethod
+    def _transit_leg_mode(line: dict[str, Any]) -> LegMode:
+        """Classify a transit leg from its line/agency (the API gates
+        vehicle type).  TfL-run lines are tube when named, bus when
+        numbered; anything else on the national network is a train."""
+        name = (line.get("nameShort") or line.get("name") or "").strip()
+        agencies = [a.get("name") or "" for a in line.get("agencies") or []]
+        if any("Transport for London" in a for a in agencies):
+            return LegMode.BUS if name.isdigit() else LegMode.TUBE
+        return LegMode.TRAIN
 
     # ------------------------------------------------------------------
     # Transit — TfL via TflClient (London area)
     # ------------------------------------------------------------------
+
 
     async def _tfl_transit_commute(
         self,

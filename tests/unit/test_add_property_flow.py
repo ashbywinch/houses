@@ -8,10 +8,12 @@ job + the property's DAG rows + registry entry).
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 
+from dag.persistence import decompress_result
 from houses.database import get_connection
 from houses.scrape_queue import MAX_ATTEMPTS
 from houses.server import app
@@ -97,9 +99,56 @@ class TestManualDetails:
         )
         assert resp.status_code == 200, resp.text
         assert _scrape_rows() == [], "manual details must cancel the scrape job"
-        detail = client.get(f"/api/properties/{RID}").json()
+        detail = client.get(f"/api/properties/{RID}/detail").json()
         assert detail["best_address"]["value"] == "Penwood Lane, Marlow, SL7 2AP"
         assert detail["rightmove_price"]["value"]["amount"] == "650000.00"
+
+
+class TestCommuteComputesAfterDetails:
+    @staticmethod
+    def test_transit_recomputes_once_the_address_arrives():
+        """Regression (property 90691101): a URL-only add whose address
+        arrives LATER (manual details / scrape report) must trigger the
+        transit commute to COMPUTE — the DAG's contract is that
+        dependents recompute when new info arrives, with no extra wiring.
+        (The test env's TfL fake returns impossible; the point is the
+        node must run at all — the box showed it never did, a NO-ROW.)"""
+        _add_url_only()
+        resp = client.patch(
+            f"/api/properties/{RID}/details",
+            json={"address": "Penwood Lane, Marlow, SL7 2AP", "price": 650000, "bedrooms": 4},
+        )
+        assert resp.status_code == 200, resp.text
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT result_json FROM node_results WHERE node_id=? ORDER BY rowid DESC LIMIT 1",
+            (f"{RID}/Simon/Pimlico/computed_transit",),
+        ).fetchone()
+        assert row is not None, (
+            "the transit commute must be computed once the address arrives — "
+            "the DAG must auto-recompute dependents of the new location"
+        )
+        d = json.loads(decompress_result(row[0]))
+        assert d["status"] != "pending", "transit must have RUN, not stayed pending"
+
+    @staticmethod
+    def test_no_route_error_is_user_facing():
+        """The 'Choose: no alternative selected' error must read as plain
+        language in the UI — no internal expression jargon."""
+        _add_url_only()
+        client.patch(
+            f"/api/properties/{RID}/details",
+            json={"address": "Penwood Lane, Marlow, SL7 2AP", "price": 650000, "bedrooms": 4},
+        )
+        detail = client.get(f"/api/properties/{RID}/detail").json()
+        commutes = detail.get("commutes", {})
+        assert commutes
+        for _key, entry in commutes.items():
+            c = entry.get("commute", entry)
+            if c.get("status") == "impossible":
+                err = (c.get("error") or "").lower()
+                assert "choose" not in err, f"internal jargon leaked: {c.get('error')}"
+                assert "alternative" not in err, f"internal jargon leaked: {c.get('error')}"
 
 
 class TestRemove:
