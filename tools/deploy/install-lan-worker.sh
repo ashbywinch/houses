@@ -31,9 +31,14 @@ chown "$USER_NAME" /var/lib/houses-chrome
 sed -e "s|__REPO__|$REPO|g" -e "s|__USER__|$USER_NAME|g" -e "s|__APP_URL__|$APP_URL|g" \
   "$REPO/tools/deploy/units/houses-scrape-worker.service" \
   > /etc/systemd/system/houses-scrape-worker.service
+# A second worker drains the LAN DEV app's queue (localhost:8765) — dev
+# adds would otherwise sit unclaimed (the first worker serves the box).
+sed -e "s|__REPO__|$REPO|g" -e "s|__USER__|$USER_NAME|g" \
+  "$REPO/tools/deploy/units/houses-scrape-worker-dev.service" \
+  > /etc/systemd/system/houses-scrape-worker-dev.service
 
 systemctl daemon-reload
-systemctl enable --now houses-chrome.service houses-scrape-worker.service
+systemctl enable --now houses-chrome.service houses-scrape-worker.service houses-scrape-worker-dev.service
 
 sleep 2
 systemctl is-active houses-chrome houses-scrape-worker
