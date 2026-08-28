@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, override
 
 from money import Money
 
-from dag.attempt import Attempt, Formula, FormulaLine
+from dag.attempt import Attempt, AttemptError, Formula, FormulaLine
 from dag.measurement import Measurement
 
 if TYPE_CHECKING:
@@ -459,6 +459,23 @@ class Attr(Expression):
         return Attempt.succeeded(v)
 
 
+
+def _alternative_reason(name: str, att: Attempt) -> str:
+    """The user-facing reason an alternative didn't produce a journey.
+
+    A succeeded-infeasible commute carries ``no_route_reason`` (e.g. TfL's
+    "couldn't find a route"); an impossible attempt carries its error.
+    Falls back to a plain sentence so the UI never shows raw jargon.
+    """
+    if att.impossible and att.error:
+        return att.error
+    val = att.value_or_none()
+    reason = getattr(val, "no_route_reason", "") if val is not None else ""
+    if reason:
+        return reason
+    return f"{name} produced no route"
+
+
 class Choose(Expression):
     """Evaluates all alternatives and selects the best one.
 
@@ -509,7 +526,34 @@ class Choose(Expression):
             return Attempt.impossible(f"Choose selector failed: {e}")
 
         if winner is None:
-            return Attempt.impossible("Choose: no alternative selected")
+            # No alternative was feasible. Surface the ACTUAL reasons the
+            # alternatives failed (a succeeded-infeasible transit carries
+            # no_route_reason; an impossible attempt carries its error) —
+            # the UI must never show "no alternative selected" while the
+            # real reason (e.g. "TfL couldn't find a route") is one step
+            # deeper. Falls back to a plain sentence when nothing tells us
+            # more.
+            reasons = tuple(
+                AttemptError(
+                    code="no_data",
+                    message=name,
+                    user_message=_alternative_reason(name, att),
+                    source=name,
+                )
+                for name, att in results.items()
+                if att.impossible or (att.succeeded and getattr(att.value_or_none(), "infeasible", False))
+            )
+            first_reason = reasons[0].user_message if reasons else ""
+            return Attempt.impossible(
+                "Choose: no alternative selected",
+                error_info=AttemptError(
+                    code="no_data",
+                    message="Choose: no alternative selected",
+                    user_message=first_reason or "No commute could be calculated for this journey",
+                    source=self.description or "choose",
+                    causes=reasons,
+                ),
+            )
 
         if winner not in results:
             return Attempt.impossible(f"Choose: selector returned unknown alternative {winner!r}")

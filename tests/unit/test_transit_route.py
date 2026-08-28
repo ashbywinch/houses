@@ -511,3 +511,150 @@ class TestTflCachedApiCall4xx:
             except HttpError as e:
                 assert e.status == 409
                 assert "route planner unavailable" in str(e)
+
+
+class _FakeRoutesClient:
+    """RoutesPostClient stub returning a canned Google TRANSIT route."""
+
+    def __init__(self, payload):
+        self.payload = payload
+        self.posted = []
+
+    async def post(self, body, field_mask, *, options=None):
+        self.posted.append((body, field_mask))
+        return self.payload
+
+
+class _RaisingRoutesClient:
+    async def post(self, body, field_mask, *, options=None):
+        raise RuntimeError("google down")
+
+
+class TestGoogleTransitFallback:
+    """CommuteRouter.transit_route — the National Rail fallback router
+    (Google Routes TRANSIT) used for origins beyond TfL coverage."""
+
+    @staticmethod
+    def _route_payload():
+        """The live response shape probed for Hungerford → Pimlico:
+        walk → GWR train → walk → TfL bus 36 → walk.  Google's transit
+        response omits stop names and vehicle types — only line/agency."""
+        return {
+            "routes": [
+                {
+                    "duration": "5952s",
+                    "legs": [
+                        {
+                            "steps": [
+                                {"travelMode": "WALK", "staticDuration": "600s"},
+                                {
+                                    "travelMode": "TRANSIT",
+                                    "staticDuration": "780s",
+                                    "transitDetails": {
+                                        "transitLine": {
+                                            "nameShort": "GWR",
+                                            "agencies": [{"name": "GWR"}],
+                                        }
+                                    },
+                                },
+                                {
+                                    "travelMode": "TRANSIT",
+                                    "staticDuration": "2700s",
+                                    "transitDetails": {
+                                        "transitLine": {
+                                            "nameShort": "GWR",
+                                            "agencies": [{"name": "GWR"}],
+                                        }
+                                    },
+                                },
+                                {"travelMode": "WALK", "staticDuration": "200s"},
+                                {
+                                    "travelMode": "TRANSIT",
+                                    "staticDuration": "1586s",
+                                    "transitDetails": {
+                                        "transitLine": {
+                                            "nameShort": "36",
+                                            "agencies": [{"name": "Transport for London"}],
+                                        }
+                                    },
+                                },
+                                {"travelMode": "WALK", "staticDuration": "86s"},
+                            ]
+                        }
+                    ],
+                }
+            ]
+        }
+
+    @pytest.mark.asyncio
+    async def test_parses_transit_legs_and_duration(self):
+        from houses.commute import LegMode
+        from houses.commute_router import CommuteRouter
+        from houses.geopoint import GeoPoint
+        from houses.model.domain import PlaceOfInterest
+
+        router = CommuteRouter(routes_client=_FakeRoutesClient(self._route_payload()))
+        commute = await router.transit_route(
+            GeoPoint(51.415344, -1.511056),
+            PlaceOfInterest(label="Pimlico", address="1 Drummond Gate, Pimlico, London SW1V 2QQ"),
+        )
+        assert commute is not None and not commute.infeasible
+        assert commute.duration.magnitude == 99  # 5952s ≈ 99 min
+        modes = [leg.mode for cg in commute.details for leg in cg.legs]
+        assert modes == [
+            LegMode.WALK,
+            LegMode.TRAIN,
+            LegMode.TRAIN,
+            LegMode.WALK,
+            LegMode.BUS,
+            LegMode.WALK,
+        ], "the fallback journey is walk → train → walk → bus → walk"
+
+    @pytest.mark.asyncio
+    async def test_rail_leg_names_the_london_terminus_for_pricing(self):
+        """The terminal name is what lets RailFareNode price the journey
+        (Google's response omits stop names)."""
+        from houses.commute_router import CommuteRouter
+        from houses.geopoint import GeoPoint
+        from houses.model.domain import PlaceOfInterest
+
+        router = CommuteRouter(routes_client=_FakeRoutesClient(self._route_payload()))
+        commute = await router.transit_route(
+            GeoPoint(51.415344, -1.511056),
+            PlaceOfInterest(label="Pimlico", address="1 Drummond Gate, Pimlico, London SW1V 2QQ"),
+        )
+        assert commute is not None
+        train_legs = [leg for cg in commute.details for leg in cg.legs if leg.mode.name == "TRAIN"]
+        assert train_legs and all(
+            leg.end_station == "London Paddington Rail Station" for leg in train_legs
+        ), "GWR journeys name Paddington as the London terminus"
+        bus_leg = [
+            leg for cg in commute.details for leg in cg.legs if leg.mode.name == "BUS"
+        ][0]
+        assert bus_leg.line_name == "36" and bus_leg.end_station == ""
+
+    @pytest.mark.asyncio
+    async def test_no_routes_returns_none(self):
+        from houses.commute_router import CommuteRouter
+        from houses.geopoint import GeoPoint
+        from houses.model.domain import PlaceOfInterest
+
+        router = CommuteRouter(routes_client=_FakeRoutesClient({"routes": []}))
+        result = await router.transit_route(
+            GeoPoint(51.415344, -1.511056),
+            PlaceOfInterest(label="Pimlico", address="1 Drummond Gate, Pimlico, London SW1V 2QQ"),
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_api_failure_returns_none_not_crash(self):
+        from houses.commute_router import CommuteRouter
+        from houses.geopoint import GeoPoint
+        from houses.model.domain import PlaceOfInterest
+
+        router = CommuteRouter(routes_client=_RaisingRoutesClient())
+        result = await router.transit_route(
+            GeoPoint(51.415344, -1.511056),
+            PlaceOfInterest(label="Pimlico", address="1 Drummond Gate, Pimlico, London SW1V 2QQ"),
+        )
+        assert result is None

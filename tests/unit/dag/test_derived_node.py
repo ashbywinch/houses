@@ -266,6 +266,24 @@ class _DoubleNode(DerivedNode[int]):
         return Attempt.impossible("dep failed")
 
 
+class _HelperDoubleNode(DerivedNode[int]):
+    """Compute delegates to a self-helper — the fingerprint must cover
+    the helper's body, not just compute()'s own text."""
+
+    def __init__(self, node_id: str, deps):
+        super().__init__(node_id, int, deps)
+
+    def _multiplier(self, value: int) -> int:
+        return value * 2
+
+    @override
+    def compute(self, *dep_attempts) -> Attempt[int]:
+        val = dep_attempts[0].value_or_none()
+        if val is None:
+            return Attempt.impossible("dep failed")
+        return Attempt.succeeded(self._multiplier(val))
+
+
 class _RaisingHttpNode(DerivedNode[str]):
     """Mimics a service call that raises HttpError (e.g. TfL 404)."""
 
@@ -499,6 +517,7 @@ class TestNamedRequiredGuard:
         assert "b" in (attempt.error or "")
 
 
+
 class TestFingerprintNormalization:
     def test_comment_and_whitespace_edits_do_not_change_the_fingerprint(self):
         """A comment-only or reformat commit must NOT invalidate every
@@ -513,6 +532,25 @@ class TestFingerprintNormalization:
         na, nb, nc, nd = (_normalize_compute_source(s) for s in (a, b, c, d))
         assert na == nb == nc, "comments/whitespace must not change the normalized form"
         assert nd != na, "behavior changes still change the fingerprint"
+        assert nd != na, "behavior changes still change the fingerprint"
+
+    def test_self_helper_body_change_changes_the_fingerprint(self):
+        """A behavior change in a self-method helper leaves compute()'s
+        text unchanged — the fingerprint must still move, or persisted
+        results stay 'fresh' forever (live gap: the TransitNode fallback
+        fix in _nr_fallback was invisible to the staleness check)."""
+        from dag.derived_node import _CODE_VERSION_CACHE, _compute_code_version
+
+        node = _HelperDoubleNode("helper_fp", ())
+        _CODE_VERSION_CACHE.clear()
+        before = _compute_code_version(node)
+
+        # Same compute() text, different helper behavior.
+        _HelperDoubleNode._multiplier = lambda self, value: value * 3
+        _CODE_VERSION_CACHE.clear()
+        after = _compute_code_version(node)
+
+        assert after != before, "a self-helper body change must move the fingerprint"
 
 
 class TestCodeVersionStaleness:

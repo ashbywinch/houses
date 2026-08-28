@@ -135,6 +135,11 @@ def build_commute_pipeline(prop) -> None:
                     no_bus_node=no_bus_node,
                     with_bus_node=with_bus_node,
                     poi_info=poi,
+                    # National Rail fallback: TfL's planner has no
+                    # coverage west of Newbury (proven: Hungerford 404s
+                    # from every origin form) — route those journeys via
+                    # Google Routes TRANSIT and price them downstream.
+                    transit_route_fn=_commute_router().transit_route,
                 ),
             )
             prop._transit_nodes.append(transit_node)

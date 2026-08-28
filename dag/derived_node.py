@@ -6,6 +6,7 @@ import hashlib
 import inspect
 import inspect as _inspect
 import logging
+import textwrap
 import traceback
 from abc import abstractmethod
 from dataclasses import dataclass
@@ -40,7 +41,7 @@ def _normalize_compute_source(source: str) -> str:
     (the recompute-storm the review flagged).
     """
     try:
-        tree = ast.parse(source)
+        tree = ast.parse(textwrap.dedent(source))
     except SyntaxError:
         return source
     return ast.unparse(tree)
@@ -149,7 +150,7 @@ def _self_helper_sources(node_cls: type, self_methods: list[str]) -> _HelperSour
             continue
         parts.append(_normalize_compute_source(msrc))
         try:
-            mtree = ast.parse(msrc)
+            mtree = ast.parse(textwrap.dedent(msrc))
         except SyntaxError:
             continue
         m_module = _inspect.getmodule(method)
@@ -197,7 +198,7 @@ def _resolve_helper_sources(queue: list[_HelperRef]) -> list[str]:
         parts.append(_normalize_compute_source(hsrc))
         # recurse into the helper's own references, resolved in ITS module
         try:
-            htree = ast.parse(hsrc)
+            htree = ast.parse(textwrap.dedent(hsrc))
         except SyntaxError:
             continue
         h_module = _inspect.getmodule(obj)
@@ -229,7 +230,7 @@ def _referenced_helper_sources(func: FunctionType) -> list[str]:
     except (OSError, TypeError):
         return []
     try:
-        tree = ast.parse(func_src)
+        tree = ast.parse(textwrap.dedent(func_src))
     except SyntaxError:
         return []
     bound = _bound_names(tree)
