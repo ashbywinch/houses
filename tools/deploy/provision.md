@@ -151,6 +151,14 @@ HOUSES_GOOGLE_WEB_CLIENT_ID/SECRET — same project, add URIs; no new creds):
 - `https://houses.blueumbrella.net/api/auth/callback`
 - `https://houses-smoke.blueumbrella.net/api/auth/callback`
 
+## 4b. Production guard (applied automatically by box-setup.sh)
+
+The box's sudoers grants ONLY `/opt/houses/release.sh`, `/opt/houses/
+switch.sh`, and read-only `journalctl` — no interactive login can restart
+app units or mutate the deployment. Production changes go only through the
+Release workflow (tag → deploy to standby → smoke → switch). If that feels
+slow, improve the process; never ssh in and "just fix it" directly.
+
 ## 5. GitHub secrets for the release workflow
 
 Repo → Settings → Secrets and variables → Actions:
