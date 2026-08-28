@@ -1,0 +1,20 @@
+# /etc/systemd/system/houses-scrape-worker-dev.service — scrape worker for
+# the LAN DEV app's queue. The dev app (localhost:8765) has its own queue
+# (its own DB); the production worker polls the cloud box. Without this
+# second worker, properties added on the dev app would sit unclaimed.
+# Template: install-lan-worker.sh substitutes __REPO__ / __USER__.
+[Unit]
+Description=Houses Rightmove scrape worker (LAN dev app)
+After=network-online.target houses-chrome.service
+Wants=network-online.target houses-chrome.service
+
+[Service]
+User=__USER__
+WorkingDirectory=__REPO__
+Environment=HOUSES_SCRAPE_APP_URL=http://127.0.0.1:8765
+ExecStart=__REPO__/.venv/bin/python tools/scrape_worker.py --loop --interval 60
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

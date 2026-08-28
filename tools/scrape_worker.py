@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import sys
 from dataclasses import dataclass
 
 import httpx
@@ -142,6 +143,9 @@ async def run_loop(interval: float) -> None:
 
 
 def main() -> None:
+    # systemd pipes stdout — Python block-buffers pipes, so prints would
+    # never reach journald until the buffer fills or the process exits.
+    sys.stdout.reconfigure(line_buffering=True)  # type: ignore[attr-defined]  # reconfigure exists at runtime (3.7+); the TextIO stub omits it
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--once", action="store_true", help="process one job (or none) and exit")
     parser.add_argument("--loop", action="store_true", help="poll forever (default)")

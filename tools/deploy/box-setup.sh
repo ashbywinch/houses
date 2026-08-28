@@ -29,7 +29,21 @@ mkdir -p /var/lib/houses-chrome && chown ubuntu:ubuntu /var/lib/houses-chrome
 if command -v google-chrome >/dev/null 2>&1 || command -v chromium-browser >/dev/null 2>&1; then
   systemctl enable --now houses-chrome.service
 fi
+
+# Production guard: the ONLY elevated app operations are the release
+# scripts. Remove ubuntu from the sudo/google-sudoers groups and install a
+# restricted sudoers file — no interactive login (or agent session) can
+# restart app units or mutate the deployment directly; that is the
+# release process's job. journalctl stays for read-only diagnostics.
+for g in sudo google-sudoers; do
+  gpasswd -d ubuntu "$g" >/dev/null 2>&1 || true
+done
+cat > /etc/sudoers.d/houses-deploy <<'SUDOERS'
+ubuntu ALL=(root) NOPASSWD: /opt/houses/release.sh *
+ubuntu ALL=(root) NOPASSWD: /opt/houses/switch.sh *
+ubuntu ALL=(root) NOPASSWD: /usr/bin/journalctl *
+SUDOERS
+chmod 440 /etc/sudoers.d/houses-deploy
+visudo -c >/dev/null
+
 echo "box setup complete:"
-echo "  - install /etc/houses.env (secrets cutover), then:"
-echo "  - sudo systemctl enable --now houses-blue"
-echo "  - verify: curl -s http://localhost:8765/health"

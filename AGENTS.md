@@ -125,3 +125,21 @@ make stop                       # Stop dev server + frontend
   Principles P1–P18; UI conventions (44px touch targets, primary-action
   prominence); repo-specific baselines: docs/personas.md,
   docs/usability-requirements.md, docs/ux-fixes-plan.md.
+
+## Production deploy discipline (non-negotiable)
+
+- **Production changes go ONLY through the release process** — the GitHub
+  Release workflow (deploy-to-standby → smoke → switch) or the box's
+  release.sh/switch.sh. NEVER ssh into the box and pull/restart the app
+  directly; never run ad-hoc commands against prod to "just fix it".
+  If the release process is too slow, improve it — never bypass it.
+- **The box enforces this mechanically**: the box's sudoers grants ONLY
+  /opt/houses/release.sh, /opt/houses/switch.sh, and journalctl — no
+  interactive login can restart app units or mutate the deployment.
+- **A UI feature is NOT done on green tests.** It is done when (a) the
+  persona walk of the live surface passes (tap the buttons, observe
+  outcomes) and (b) every link of its runtime chain has been exercised
+  live. A broken verification environment is a blocker to fix, never a
+  waiver. (P13–P17, docs/ux-standards.md.)
+- **When the user reports a failure, diagnose from logs/state first** —
+  never explain it with an unverified assumption.
