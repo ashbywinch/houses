@@ -445,8 +445,8 @@ async def patch_triage(rid: str, body: dict):
 async def get_property_comments(rid: str):
     """Return all comments for a property.
 
-    Reads from the comments table only — old-style sheet comments are
-    migrated at deployment time via ``tools/migrate_comments.py``.
+    Reads from the comments table only (the sheet integration is gone;
+    its comments were migrated to this table long ago).
     """
     # Validate the property exists
     prop = _registry_property(rid)
