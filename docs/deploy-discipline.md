@@ -14,6 +14,11 @@ shape of it.
 - If the release process is too slow or awkward, **improve it** — never
   bypass it. A skipped smoke gate or an unreviewed direct deploy is exactly
   the failure mode the process exists to prevent.
+- Releases tag **main** only. Merge the PR first, then
+  `git tag vX.Y.Z && git push origin vX.Y.Z`. A non-main ref is released
+  only via an explicit `workflow_dispatch` with the `ref` input named —
+  the deliberate, reviewable bypass. The workflow enforces this: a tag
+  push not reachable from `main` fails the deploy job.
 
 ## The box enforces this mechanically
 

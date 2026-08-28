@@ -15,6 +15,12 @@ name: Release
 # Triggers: push a tag v* (deploys automatically) or workflow_dispatch with
 # the action of your choice.
 #
+# Ref guard: a tag push is accepted only when the tag is reachable from
+# main — the released code must have gone through a PR (see
+# docs/deploy-discipline.md).  A non-main ref is released only via an
+# explicit workflow_dispatch with the ref input named: the deliberate,
+# reviewable bypass, never a tag.
+#
 # Requires GitHub secrets: BOX_HOST (public IP or hostname), BOX_USER,
 # BOX_SSH_KEY (private key of the restricted deploy key; see
 # tools/deploy/provision.md).
@@ -40,6 +46,32 @@ jobs:
     if: github.event_name == 'push' || inputs.action == 'deploy'
     runs-on: ubuntu-latest
     steps:
+      - name: Guard — released ref must be on main (tags) or explicitly dispatched
+        env:
+          REF: ${{ github.event_name == 'push' && github.ref_name || inputs.ref }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Tag push: the tag must be reachable from main — the code
+            # went through a PR.  Tagging a feature branch directly is an
+            # unreviewed deploy; fail it (see docs/deploy-discipline.md).
+            echo "Tag push — verifying $REF is reachable from main..."
+            git init -q .
+            git remote add origin "https://github.com/${{ github.repository }}.git"
+            git fetch -q --filter=blob:none origin \
+              "+refs/heads/main:refs/remotes/origin/main" \
+              "+refs/tags/$REF:refs/tags/$REF"
+            if ! git merge-base --is-ancestor "$REF" origin/main; then
+              echo "ERROR: tag $REF is not reachable from main. Merge the PR first, then re-tag main." >&2
+              exit 1
+            fi
+          else
+            echo "workflow_dispatch with ref=$REF"
+            if [ "$REF" != "main" ]; then
+              echo "NOTE: releasing non-main ref $REF — the deliberate, reviewable bypass."
+            fi
+          fi
+
       - name: Deploy ref to standby and smoke-test it
         env:
           BOX_HOST: ${{ secrets.BOX_HOST }}
