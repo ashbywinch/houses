@@ -11,10 +11,10 @@
 # never touches TLS or DNS.
 #
 # Rollback semantics: the previous side still runs the previous release's
-# code, and the pre-flip snapshot is restored unconditionally — deterministic
-# and lossless within the (short) window between flip and rollback. If the
-# new release migrated the schema, the old code may not read it, which is
-# exactly why the snapshot is restored.
+# code, and the newest pre-flip snapshot is restored unconditionally —
+# deterministic and lossless within the (short) window between flip and
+# rollback. If the new release migrated the schema, the old code may not
+# read it, which is exactly why the snapshot is restored.
 set -eu
 
 ROOT="${HOUSES_ROOT:-/opt/houses}"
@@ -42,13 +42,33 @@ fi
 
 # Pre-flip snapshot: the rollback restore target (and belt-and-braces safety
 # net for the flip itself).
+SNAPSHOT="/var/backups/houses-pre-flip-$TS.db"
 echo "== pre-flip snapshot"
 sudo mkdir -p /var/backups
-sudo sqlite3 "$ROOT/data/houses.db" ".backup '/var/backups/houses-pre-flip-$TS.db'"
-sudo chmod 600 "/var/backups/houses-pre-flip-$TS.db"
+sudo sqlite3 "$ROOT/data/houses.db" ".backup '$SNAPSHOT'"
+sudo chmod 600 "$SNAPSHOT"
 
 echo "== stopping $OLD"
 sudo systemctl stop "houses-$OLD"
+
+# Rollback also restores the newest pre-flip snapshot BEFORE the old side
+# starts: the released side may have migrated the schema, and the contract
+# is "restored unconditionally". The snapshot taken above is the current
+# side's own pre-flip backup — for a rollback the NEWEST older snapshot is
+# the one that predates the flip being undone.
+if [ "$ACTION" = "--rollback" ]; then
+  OLDEST=$(ls -1t /var/backups/houses-pre-flip-*.db 2>/dev/null | tail -n +2 | head -1 || true)
+  RESTORE=${OLDEST:-}
+  if [ -n "$RESTORE" ] && [ "$RESTORE" != "$SNAPSHOT" ]; then
+    echo "== restoring pre-flip snapshot $RESTORE"
+    rm -f "$ROOT/data/houses.db-wal" "$ROOT/data/houses.db-shm"
+    sudo cp "$RESTORE" "$ROOT/data/houses.db"
+    sudo chmod 600 "$ROOT/data/houses.db"
+    sudo chown ubuntu:ubuntu "$ROOT/data/houses.db"
+  else
+    echo "WARNING: no pre-flip snapshot from before the flip found — rolling back without a DB restore" >&2
+  fi
+fi
 
 echo "$NEW" > "$ROOT/ACTIVE"
 echo "$OLD" > "$ROOT/PREVIOUS"
@@ -64,8 +84,8 @@ curl -fsS --max-time 3 "localhost:$PORT/health" >/dev/null 2>&1 || {
   echo "switch: $NEW not healthy on :$PORT — rolling back" >&2
   sudo systemctl stop "houses-$NEW" || true
   echo "$OLD" > "$ROOT/ACTIVE"
-  sudo sqlite3 "$ROOT/data/houses.db" ".restore '/var/backups/houses-pre-flip-$TS.db'" 2>/dev/null || \
-    sudo cp "/var/backups/houses-pre-flip-$TS.db" "$ROOT/data/houses.db"
+  sudo cp "$SNAPSHOT" "$ROOT/data/houses.db"
+  sudo chmod 600 "$ROOT/data/houses.db"
   sudo systemctl start "houses-$OLD"
   exit 1
 }
@@ -76,7 +96,7 @@ MAIN_HOST=$(grep '^HOUSES_MAIN_HOST=' /etc/houses.env 2>/dev/null | head -1 | cu
 MAIN_HOST=${MAIN_HOST:-houses.blueumbrella.net}
 echo "== verifying https://$MAIN_HOST (best-effort)"
 if curl -fsS --max-time 8 "https://$MAIN_HOST/health" >/dev/null 2>&1; then
-  echo "== live on $NEW: https://$MAIN_HOST (pre-flip snapshot /var/backups/houses-pre-flip-$TS.db)"
+  echo "== live on $NEW: https://$MAIN_HOST (pre-flip snapshot $SNAPSHOT)"
 else
   echo "WARNING: https check failed — the app is up locally; check the DNS A record and Caddy's cert state (journalctl -u caddy)."
 fi

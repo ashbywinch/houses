@@ -385,9 +385,10 @@ def _job_wire(job):
 
 
 # lucidlint: ignore record-shape wire-format dict — the worker's report body is a wire record (coding-standards.md)
-async def _apply_scraped_report(rid: str, data: dict) -> None:
+async def _apply_scraped_report(rid: str, data: dict) -> bool:
     """Push a worker's scraped listing into the property's DAG — the same
-    seed the sync add path performs, sourced entirely from the report."""
+    seed the sync add path performs, sourced entirely from the report.
+    Returns False when the DAG seed fails (the caller re-queues the job)."""
     enriched = EnrichedProperty(
         url=data.get("url", ""),
         address=data.get("address", ""),
@@ -397,11 +398,11 @@ async def _apply_scraped_report(rid: str, data: dict) -> None:
         approx_latitude=data.get("latitude"),
         approx_longitude=data.get("longitude"),
     )
-    _seed_dag(rid, enriched)
+    seeded = _seed_dag(rid, enriched)
     # Drain the downstream cascade so the client's immediate refetch
     # reflects the completed enrichment (same pattern as patch_address).
     await flush_processor()
-
+    return seeded
 
 @app.post("/api/scrapes/claim", response_model=None)
 async def claim_scrape(request: Request) -> JSONResponse:
@@ -425,9 +426,22 @@ async def report_scrape(request: Request, body: dict) -> JSONResponse:
     if not isinstance(job_id, int):
         raise HTTPException(status_code=422, detail="job_id required")
     if body.get("ok"):
-        rid = _scrape_queue.report_scrape(job_id, ok=True)
-        if rid:
-            await _apply_scraped_report(rid, body.get("data") or {})
+        data = body.get("data") or {}
+        # A login wall / block page can parse to an empty address — such a
+        # "success" would seed a garbage property. Reject it: the job is
+        # re-queued with backoff instead of deleted.
+        if not data.get("address"):
+            _scrape_queue.report_scrape(job_id, ok=False, error="report missing an address")
+            return JSONResponse(content={"status": "ok"})
+        rid = _scrape_queue.scrape_job_rid(job_id)
+        if rid is None:
+            raise HTTPException(status_code=404, detail="unknown job")
+        # Apply BEFORE deleting: a failed DAG seed must re-queue the job,
+        # not lose the listing forever.
+        if await _apply_scraped_report(rid, data):
+            _scrape_queue.report_scrape(job_id, ok=True)
+        else:
+            _scrape_queue.report_scrape(job_id, ok=False, error="DAG seed failed")
         return JSONResponse(content={"status": "ok"})
     _scrape_queue.report_scrape(job_id, ok=False, error=str(body.get("error") or ""))
     return JSONResponse(content={"status": "ok"})

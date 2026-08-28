@@ -16,9 +16,8 @@ variable "zone" {
 }
 
 variable "ssh_public_key_path" {
-  description = "Path to the SSH public key for the box (e.g. ~/.ssh/oracle.pub)."
+  description = "ABSOLUTE path to the SSH public key for the box (terraform's file() does not expand ~ — /home/<you>/.ssh/oracle.pub)."
   type        = string
-  default     = "~/.ssh/oracle.pub"
 }
 
 variable "main_host" {

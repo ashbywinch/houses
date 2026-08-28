@@ -50,6 +50,17 @@ class TestLifespanDbWiring:
         from houses.nodes import settings as nodes_settings
         from houses.settings import settings
 
+        # The lifespan refuses to start without OAuth configured, and CI has
+        # no .env — set the fields for the duration (the pydantic settings
+        # singleton has no injection seam; direct assignment + restore).
+        prev = (
+            settings.web_client_id,
+            settings.web_client_secret,
+            settings.session_secret,
+        )
+        settings.web_client_id = settings.web_client_id or "test-client"
+        settings.web_client_secret = settings.web_client_secret or "test-secret"
+        settings.session_secret = settings.session_secret or "test-session"
         prev_app_mode = nodes_settings._app_mode
         prev_after_refresh = scheduler_mod.get_scheduler()._after_refresh_callback
         p.DB_PATH = None  # module state, deliberately: assert what startup wires
@@ -62,6 +73,7 @@ class TestLifespanDbWiring:
         finally:
             nodes_settings._app_mode = prev_app_mode
             scheduler_mod.get_scheduler()._after_refresh_callback = prev_after_refresh
+            settings.web_client_id, settings.web_client_secret, settings.session_secret = prev
 
 
 class TestExtractPostcode:
