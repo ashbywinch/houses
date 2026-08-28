@@ -1,0 +1,22 @@
+# /etc/systemd/system/houses-scrape-worker.service — Rightmove scrape worker.
+# Runs WHERE CHROME EXISTS (the LAN machine). Claims jobs from the cloud
+# box's queue, scrapes, reports; the queue owns retry/backoff.
+# Template: install-lan-worker.sh substitutes __REPO__ / __USER__ /
+# __APP_URL__ (the chrome unit's User= is substituted the same way).
+[Unit]
+Description=Houses Rightmove scrape worker
+After=network-online.target houses-chrome.service
+Wants=network-online.target houses-chrome.service
+
+[Service]
+User=__USER__
+WorkingDirectory=__REPO__
+Environment=HOUSES_SCRAPE_APP_URL=__APP_URL__
+# The session secret comes from __REPO__/.env (pydantic reads it at import),
+# so the worker's minted cookie matches the cloud box's /etc/houses.env.
+ExecStart=__REPO__/.venv/bin/python tools/scrape_worker.py --loop --interval 60
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

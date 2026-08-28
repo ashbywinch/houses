@@ -81,5 +81,13 @@ fi
 echo "== smoke: frontend index"
 curl -fsS --max-time 10 "localhost:$PORT/" | grep -qi "<!doctype html\|<html"
 
+echo "== smoke: scrape-queue health (worker liveness)"
+STATUS=$(curl -fsS --max-time 10 -H "Cookie: session=$COOKIE" "localhost:$PORT/api/scrapes/status" || echo '{"scrapes":{}}')
+echo "   queue: $STATUS"
+PENDING=$(echo "$STATUS" | "$ROOT/$SIDE/.venv/bin/python" -c 'import json,sys; print(json.load(sys.stdin).get("scrapes", {}).get("pending", 0))' 2>/dev/null || echo 0)
+if [ "$PENDING" -gt 0 ]; then
+  echo "WARNING: $PENDING scrape job(s) pending — the LAN scrape worker may be down (journalctl -u houses-scrape-worker on the LAN machine)."
+fi
+
 echo "== release ready: smoke at http://localhost:$PORT (public: https://houses-smoke.blueumbrella.net)"
 echo "$SIDE" > "$ROOT/SMOKE_READY"

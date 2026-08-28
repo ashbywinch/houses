@@ -89,16 +89,22 @@ Rightmove scraper lives on your LAN — see the worker in Step 4).
    ```bash
    ssh ubuntu@<ip> "sudo systemctl enable --now houses-blue && curl -s --max-time 10 -o /dev/null -w 'blue: %{http_code}\n' http://localhost:8765/health"
    ```
-4. **Start the scrape worker on the LAN** (where Chrome lives — the box
+4. **Install the scrape worker on the LAN** (where Chrome lives — the box
    enqueues scrape jobs, the worker completes them with exponential
-   backoff via the queue):
+   backoff via the queue). Proper service install, not a manual loop:
    ```bash
-   HOUSES_SCRAPE_APP_URL=https://houses.blueumbrella.net \
-     .venv/bin/python tools/scrape_worker.py --loop --interval 60
-   # or --once on a cron/systemd timer every few minutes
+   sudo HOUSES_SCRAPE_APP_URL=https://houses.blueumbrella.net \
+     bash tools/deploy/install-lan-worker.sh
    ```
+   This installs two boot-enabled systemd units:
+   - `houses-chrome.service` — shared headless Chrome on :9222 (the dev
+     app and the worker reuse the same instance)
+   - `houses-scrape-worker.service` — polls the box's queue, scrapes,
+     reports (Restart=always; logs: `journalctl -u houses-scrape-worker -f`)
    The worker mints its auth cookie from the LAN `.env`'s
-   HOUSES_SESSION_SECRET — the same secret the box has.
+   HOUSES_SESSION_SECRET — the same secret the box has. If the LAN machine
+   is ever off, the queue simply holds jobs with backoff and the worker
+   drains them on return — no data loss, only scrape latency.
 
 ## 3. DNS + HTTPS (PointHQ A records + Caddy — no Cloudflare needed)
 
