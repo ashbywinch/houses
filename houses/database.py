@@ -96,6 +96,8 @@ _SCRAPES_INDEX = (
     "CREATE INDEX IF NOT EXISTS idx_scrapes_due ON pending_scrapes(next_retry_at, status)"
 )
 
+_SCRAPES_RID_INDEX = "CREATE INDEX IF NOT EXISTS idx_scrapes_rid ON pending_scrapes(rid)"
+
 
 def init_db() -> None:
     """Create all application tables if they don't exist.
@@ -108,4 +110,5 @@ def init_db() -> None:
     conn.execute(_COMMENTS_INDEX)
     conn.execute(_SCRAPES_TABLE)
     conn.execute(_SCRAPES_INDEX)
+    conn.execute(_SCRAPES_RID_INDEX)
     conn.commit()

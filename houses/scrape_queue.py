@@ -42,6 +42,18 @@ class ScrapeJob:
 
 
 @dataclass(frozen=True)
+class ScrapeJobStatus:
+    """One property's honest queue state (the card's states)."""
+
+    status: str
+    attempts: int
+    created_at: str
+    claimed_at: str | None
+    next_retry_at: str
+    last_error: str | None
+
+
+@dataclass(frozen=True)
 class ScrapeQueueStatus:
     """Per-status counts for operator visibility."""
 
@@ -100,6 +112,8 @@ def claim_due_scrape() -> ScrapeJob | None:
         " ORDER BY created_at ASC LIMIT 1",
         (now,),
     ).fetchone()
+    # lucidlint: ignore special-case sqlite row absence — a missing job row IS the
+    # absent case; a null-object dataclass would add ceremony for zero benefit
     if row is None:
         conn.commit()  # persist the stale-claim requeue even when nothing is due
         return None
@@ -155,6 +169,39 @@ def report_scrape(job_id: int, ok: bool, error: str | None = None) -> str | None
         )
     conn.commit()
     return None
+
+
+def scrape_status_for_rid(rid: str) -> ScrapeJobStatus | None:
+    """The job row's honest state for one property, or None when no job
+    exists. The card derives its message from these REAL fields — status
+    is pending (queued, not yet claimed), in_progress (a worker is
+    scraping NOW), or failed (gave up); created_at/claimed_at let the UI
+    show how long the wait has been without a fake timer."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT status, attempts, created_at, claimed_at, next_retry_at, last_error"
+        " FROM pending_scrapes WHERE rid=?",
+        (rid,),
+    ).fetchone()
+    if row is None:
+        return None
+    return ScrapeJobStatus(
+        status=row["status"],
+        attempts=row["attempts"],
+        created_at=row["created_at"],
+        claimed_at=row["claimed_at"],
+        next_retry_at=row["next_retry_at"],
+        last_error=row["last_error"],
+    )
+
+
+def cancel_scrape_for_rid(rid: str) -> bool:
+    """Drop any pending/in_progress/failed job for a property (manual
+    details completed it, or the user removed it)."""
+    conn = get_connection()
+    cur = conn.execute("DELETE FROM pending_scrapes WHERE rid=?", (rid,))
+    conn.commit()
+    return cur.rowcount > 0
 
 
 def scrape_queue_status() -> ScrapeQueueStatus:

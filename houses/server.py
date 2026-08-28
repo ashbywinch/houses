@@ -19,8 +19,8 @@ import houses.services as _services_mod
 import houses.services_provider as _sp
 import houses.town_desc as _town_desc
 import houses.web.broadcaster as _broadcaster_mod
+from dag.persistence import delete_node_results_for_rid, property_rids
 from dag.persistence import init_db as init_dag_db
-from dag.persistence import property_rids
 from dag.scheduler import flush_processor, set_after_refresh
 from dag.scheduler import start_processor as _start_processor
 from houses.admin_router import admin_router
@@ -456,7 +456,60 @@ async def scrape_status(request: Request) -> JSONResponse:
         content={"scrapes": {"pending": st.pending, "in_progress": st.in_progress, "failed": st.failed}}
     )
 
+
+@app.post("/api/properties/{rid}/scrape/retry", response_model=None)
+async def retry_scrape(rid: str) -> JSONResponse:
+    """Re-enqueue a property's scrape (the wireframe's Retry on a failed
+    card). The queue job is dropped and a fresh one enqueued — the URL
+    comes from the property's existing rightmove_url node."""
+    prop = _sp.get_services().property_registry.get(rid)
+    if prop is None:
+        raise HTTPException(status_code=404, detail=f"Property {rid} not found")
+    url_attempt = prop.rightmove_url.latest_attempt()
+    url = url_attempt.value_or_none() if url_attempt.succeeded else ""
+    if not url:
+        raise HTTPException(status_code=422, detail="no Rightmove URL on this property")
+    _scrape_queue.cancel_scrape_for_rid(rid)
+    _scrape_queue.enqueue_scrape(rid, url)
+    return JSONResponse(content={"status": "ok"})
+
+
+@app.patch("/api/properties/{rid}/details", response_model=None)
+async def patch_property_details(rid: str, body: dict) -> JSONResponse:
+    """'I know the details' — the user's own facts complete the property
+    instantly (P3: fix facts, not symptoms) and cancel the scrape job."""
+    prop = _sp.get_services().property_registry.get(rid)
+    if prop is None:
+        raise HTTPException(status_code=404, detail=f"Property {rid} not found")
+    address = body.get("address") or ""
+    if not address:
+        raise HTTPException(status_code=422, detail="address required")
+    enriched = EnrichedProperty(
+        address=address,
+        url=(prop.rightmove_url.latest_attempt().value_or_none() or "")
+        if prop.rightmove_url.latest_attempt().succeeded
+        else "",
+        bedrooms=int(body["bedrooms"]) if body.get("bedrooms") is not None else 0,
+        price=Money(str(body["price"]), "GBP") if body.get("price") is not None else Money(amount="0", currency="GBP"),
+    )
+    seeded = _seed_dag(rid, enriched)
+    if not seeded:
+        raise HTTPException(status_code=500, detail="failed to apply details")
+    _scrape_queue.cancel_scrape_for_rid(rid)
+    await flush_processor()
+    return JSONResponse(content={"status": "ok"})
+
+
+@app.delete("/api/properties/{rid}", response_model=None)
+async def remove_property(rid: str) -> JSONResponse:
+    """Remove a property (the wireframe's Remove): the scrape job, the
+    DAG rows, and the registry entry all go away."""
+    _scrape_queue.cancel_scrape_for_rid(rid)
+    delete_node_results_for_rid(rid)
+    _sp.get_services().property_registry.remove(rid)
+    return JSONResponse(content={"status": "ok"})
+
+
 @app.get("/health")
 async def health() -> JSONResponse:
     return JSONResponse(content={"status": "ok"})
-
