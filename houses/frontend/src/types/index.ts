@@ -180,10 +180,18 @@ export interface TriageResponse {
   triage_status: AttemptValue<string>
 }
 
+export interface ScrapeState {
+  status: 'pending' | 'in_progress' | 'failed'
+  attempts: number
+  created_at: string
+  claimed_at: string | null
+}
+
 export interface PropertySummary {
   rid: string
   best_address: AttemptValue<string>
   best_location: AttemptValue<GeoPoint>
+  rightmove_url?: AttemptValue<string>
   rightmove_price: AttemptValue<MoneyValue>
   rightmove_bedrooms: AttemptValue<string>
   commutes: Record<string, CommuteSummary>
@@ -197,6 +205,7 @@ export interface PropertySummary {
   walkability: AttemptValue<Record<string, unknown>>
   epc?: AttemptValue<{ band: string; potential?: string }>
   triage?: TriageResponse
+  scrape?: ScrapeState
   freshness?: {
     property_added_at: string | null
   }

@@ -1,7 +1,16 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { GroupMonthlyCost, PropertyDetail, PropertySummary, TriageEntry } from '../types'
-import { fetchAllSummaries, fetchPropertyDetail, fetchSettings, patchTriage } from '../services/api'
+import {
+  addProperty,
+  fetchAllSummaries,
+  fetchPropertyDetail,
+  fetchSettings,
+  patchPropertyDetails,
+  patchTriage,
+  removeProperty,
+  retryScrape,
+} from '../services/api'
 
 export const usePropertiesStore = defineStore('properties', () => {
   const rids = ref<string[]>([])
@@ -191,6 +200,41 @@ export const usePropertiesStore = defineStore('properties', () => {
     summaries.value[rid] = data
   }
 
+  /** Add a Rightmove URL. Returns { rid, duplicate } so the UI can jump
+   * to an existing property or show the new pending card. */
+  async function addByUrl(url: string): Promise<{ rid: string; duplicate: boolean }> {
+    const resp = await addProperty(url)
+    const rid = String(resp.rid ?? '')
+    const duplicate = Boolean(resp.duplicate)
+    if (rid && !duplicate) {
+      // The new property is seeded server-side; refresh so the pending
+      // card appears with its real scrape state.
+      const data = await fetchAllSummaries()
+      summaries.value = data
+      rids.value = Object.keys(data)
+    }
+    return { rid, duplicate }
+  }
+
+  async function retryPropertyScrape(rid: string) {
+    await retryScrape(rid)
+    const data = await fetchAllSummaries()
+    summaries.value = data
+  }
+
+  async function saveDetails(rid: string, fields: { address: string; price?: number; bedrooms?: number }) {
+    await patchPropertyDetails(rid, fields)
+    const data = await fetchAllSummaries()
+    summaries.value = data
+  }
+
+  async function removeFromList(rid: string) {
+    await removeProperty(rid)
+    delete summaries.value[rid]
+    const i = rids.value.indexOf(rid)
+    if (i >= 0) rids.value.splice(i, 1)
+  }
+
   function updateDetail(rid: string, data: PropertyDetail) {
     details.value[rid] = data
   }
@@ -198,6 +242,7 @@ export const usePropertiesStore = defineStore('properties', () => {
   return {
     rids, summaries, details, triage, settings, loading, error,
     commuteCeilings, commuteGoods, poiLabels, showOverCeiling, groupLabels, listScrollY,
+    addByUrl, retryPropertyScrape, saveDetails, removeFromList,
     whatIfTotals, applyWhatIf, clearWhatIf, coupleTotalFor, groupCostFor,
     loadAll, loadSettings, loadDetail, updateSummary, updateDetail, toggleTriage,
   }
