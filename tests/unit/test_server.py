@@ -1,6 +1,6 @@
 """Tests for the FastAPI server endpoints — pure unit tests, no API calls."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -114,41 +114,28 @@ class TestInjectProperty:
         resp = client.post("/api/properties", json=payload)
         assert resp.status_code == 422
 
-    def test_scraped_postcode_is_seeded_into_the_dag(self):
-        """Regression: POST /api/properties scrapes the listing and must
-        seed the scraped postcode into the DAG's postcode node.  The
-        sources dict used to omit 'postcode', so the node stayed pending
-        forever and every has-car commute (park_and_ride depends on
-        postcode) was permanently stuck 'pending' instead of computing."""
+    def test_url_only_add_enqueues_and_does_not_seed_postcode(self):
+        """Contract change: URL-only adds NEVER scrape synchronously — the
+        job is enqueued and the postcode arrives via the worker's report
+        (covered by the scrape-report tests). The scrape seam must not be
+        called and the postcode node must not be seeded at add time."""
         from houses.property_registry import get_property as get_registry_property
         from tests.helpers import inject_server_deps
 
-        fake_scrape = MagicMock()
-        fake_scrape.address = "Penwood Lane, Marlow, Buckinghamshire, SL7 2AP"
-        fake_scrape.postcode = "SL7 2AP"
-        fake_scrape.bedrooms = 4
-        fake_scrape.price = 800000
-        fake_scrape.latitude = 51.5676
-        fake_scrape.longitude = -0.7842
-        fake_scrape.url = "https://www.rightmove.co.uk/properties/89498715"
-
-        scrape_fn = AsyncMock(return_value=fake_scrape)
+        scrape_fn = AsyncMock(return_value=None)
         with inject_server_deps(scrape_fn=scrape_fn):
             resp = client.post(
                 "/api/properties",
                 json={"url": "https://www.rightmove.co.uk/properties/89498715"},
             )
         assert resp.status_code == 200, resp.text
-        scrape_fn.assert_called_once()
+        assert resp.json().get("scrape_pending") is True
+        scrape_fn.assert_not_called()
 
-        # The postcode node must have the scraped value — NOT stay pending
+        # The postcode node stays pending until the report applies it
         prop = get_registry_property("89498715")
         assert prop is not None
-        postcode_attempt = prop.postcode.latest_attempt()
-        assert postcode_attempt.succeeded, (
-            f"postcode node must be seeded, got {postcode_attempt.status}: {postcode_attempt.error}"
-        )
-        assert postcode_attempt.value_or_none() == "SL7 2AP"
+        assert prop.postcode.latest_attempt().pending
 
 
 class TestBackfillView:

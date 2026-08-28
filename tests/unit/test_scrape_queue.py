@@ -58,16 +58,18 @@ def _fail_job_until_permanent(job_id: int) -> None:
 
 
 class TestEnqueueOnFailedScrape:
-    def test_url_only_add_enqueues_when_scrape_returns_nothing(self):
-        """A URL-only add whose scrape yields nothing must become a queue
-        job (the cloud box has no Chrome) and the response must say so."""
+    def test_url_only_add_is_instant_and_enqueues(self):
+        """A URL-only add must NEVER block on the scrape — the request
+        returns immediately with scrape_pending and the queue owns the
+        work (regression: the add hung for the scrape on environments
+        with a local scraper)."""
         scrape_fn = AsyncMock(return_value=None)
         with inject_server_deps(scrape_fn=scrape_fn):
             resp = client.post("/api/properties", json={"url": URL})
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body.get("scrape_pending") is True, body
-        scrape_fn.assert_called_once()
+        scrape_fn.assert_not_called()
         rows = _scrape_rows()
         assert len(rows) == 1
         assert rows[0]["rid"] == RID
@@ -75,21 +77,18 @@ class TestEnqueueOnFailedScrape:
         assert rows[0]["attempts"] == 0
         assert rows[0]["status"] == "pending"
 
-    def test_scraped_add_does_not_enqueue(self):
-        """A successful scrape (data returned) must NOT create a job."""
-        fake = AsyncMock()
-        fake.address = "Penwood Lane, Marlow, SL7 2AP"
-        fake.postcode = "SL7 2AP"
-        fake.bedrooms = 4
-        fake.price = 800000
-        fake.latitude = 51.5676
-        fake.longitude = -0.7842
-        fake.url = URL
-        scrape_fn = AsyncMock(return_value=fake)
+    def test_address_payload_add_does_not_enqueue(self):
+        """A payload WITH the user's own facts is seeded directly — no
+        scrape, no enqueue (the scrape is for URL-only adds)."""
+        scrape_fn = AsyncMock(return_value=None)
         with inject_server_deps(scrape_fn=scrape_fn):
-            resp = client.post("/api/properties", json={"url": URL})
+            resp = client.post(
+                "/api/properties",
+                json={"url": URL, "address": "Penwood Lane, Marlow, SL7 2AP", "price": 650000},
+            )
         assert resp.status_code == 200, resp.text
         assert resp.json().get("scrape_pending") is None
+        scrape_fn.assert_not_called()
         assert _scrape_rows() == []
 
     def test_duplicate_enqueue_is_skipped(self):
