@@ -35,6 +35,9 @@ uv sync --all-extras
 echo "== snapshot live DB -> $SIDE smoke copy"
 sqlite3 "$ROOT/data/houses.db" ".backup '$ROOT/$SIDE-smoke.db'"
 chmod 600 "$ROOT/$SIDE-smoke.db"
+# release.sh runs as root (sudo), but the app unit runs as ubuntu — a
+# root-owned 600 file is unopenable by the standby (PR #68 review).
+chown ubuntu:ubuntu "$ROOT/$SIDE-smoke.db"
 
 systemctl restart "houses-$SIDE"
 

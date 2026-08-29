@@ -86,6 +86,10 @@ curl -fsS --max-time 3 "localhost:$PORT/health" >/dev/null 2>&1 || {
   echo "$OLD" > "$ROOT/ACTIVE"
   sudo cp "$SNAPSHOT" "$ROOT/data/houses.db"
   sudo chmod 600 "$ROOT/data/houses.db"
+  # The restored snapshot is root-owned; the app unit runs as ubuntu and
+  # cannot open it — a failed flip must not become an outage (PR #68
+  # review; matches the --rollback path).
+  sudo chown ubuntu:ubuntu "$ROOT/data/houses.db"
   sudo systemctl start "houses-$OLD"
   exit 1
 }

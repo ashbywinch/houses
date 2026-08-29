@@ -284,8 +284,15 @@ def property_created_at(rid: str) -> str | None:
 
 def delete_node_results_for_rid(rid: str) -> None:
     """Remove every persisted row for a property (user-removed)."""
+    # rid is user-supplied path input — escape LIKE wildcards so a
+    # '%'/'_' cannot turn this into a delete of unrelated properties'
+    # rows (PR #68 review, High).
+    escaped = rid.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     conn = _get_db()
-    conn.execute("DELETE FROM node_results WHERE node_id LIKE ?", (f"{rid}/%",))
+    conn.execute(
+        "DELETE FROM node_results WHERE node_id LIKE ? ESCAPE '\\'",
+        (f"{escaped}/%",),
+    )
     conn.commit()
 
 
