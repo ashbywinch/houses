@@ -180,7 +180,7 @@ def scrape_status_for_rid(rid: str) -> ScrapeJobStatus | None:
     conn = get_connection()
     row = conn.execute(
         "SELECT status, attempts, created_at, claimed_at, next_retry_at, last_error"
-        " FROM pending_scrapes WHERE rid=?",
+        " FROM pending_scrapes WHERE rid=? ORDER BY id DESC LIMIT 1",
         (rid,),
     ).fetchone()
     if row is None:
