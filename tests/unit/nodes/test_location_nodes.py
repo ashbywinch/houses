@@ -100,6 +100,47 @@ class TestBestAddressNode:
         assert (await node.attempt()).value_or_none() == "New Corrected St"
 
     @pytest.mark.asyncio
+    async def test_computes_from_corrected_while_rightmove_is_pending(self):
+        """A URL-only add has no rightmove address until the scrape
+        lands — a corrected address (address patch) must still resolve;
+        the pending hard dep must not stall the node (pre-existing gap,
+        surfaced by the postcode derivation work)."""
+        from houses.nodes.location import BestAddressNode
+
+        user = UserInputNode[str]("addr_user_norm", str)
+        corrected = UserInputNode[str]("addr_corr_norm", str)
+        rightmove = UserInputNode[str]("addr_rm_norm", str)
+        node = BestAddressNode(
+            "addr_best_norm",
+            user_entered_address=user,
+            corrected_address=corrected,
+            rightmove_address=rightmove,
+        )
+        corrected.push("Penwood Lane, Marlow, SL7 2AP", "user")
+        await flush_processor()
+        a = await node.attempt()
+        assert a.succeeded, f"corrected address must resolve while rightmove is pending: {a.error}"
+        assert a.value_or_none() == "Penwood Lane, Marlow, SL7 2AP"
+
+    @pytest.mark.asyncio
+    async def test_stays_pending_until_any_source_arrives(self):
+        """No address source has a value — the node must stay pending,
+        not fail the cascade (a fresh URL-only add)."""
+        from houses.nodes.location import BestAddressNode
+
+        user = UserInputNode[str]("addr_user_none", str)
+        corrected = UserInputNode[str]("addr_corr_none", str)
+        rightmove = UserInputNode[str]("addr_rm_none", str)
+        node = BestAddressNode(
+            "addr_best_none",
+            user_entered_address=user,
+            corrected_address=corrected,
+            rightmove_address=rightmove,
+        )
+        await flush_processor()
+        assert (await node.attempt()).pending
+
+    @pytest.mark.asyncio
     async def test_corrected_address_push_after_restart_recomputes(self):
         """A corrected_address push after a server restart must recompute
         best_address — the optional-source staleness snapshot is lost on

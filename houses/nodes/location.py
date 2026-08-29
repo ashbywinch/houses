@@ -15,57 +15,47 @@ class BestAddressNode(DerivedNode[str]):
 
     Priority: user_entered_address > corrected_address > rightmove_address.
 
-    user_entered_address and corrected_address are optional — only
-    rightmove_address is a hard dependency (every property with a
-    sheet address pushes to it).
+    All three are static deps (any change re-schedules), but
+    ``_get_active_deps`` includes only the sources carrying a value —
+    a pending source (rightmove before the scrape lands, on a URL-only
+    add) must not stall computing from the corrected/user-entered
+    address.  Mirrors the park-and-ride conditional-dep pattern.
     """
 
     def __init__(self, node_id: str, *, user_entered_address, corrected_address, rightmove_address):
-        self._user_entered = user_entered_address
-        self._corrected = corrected_address
-        super().__init__(node_id, str, (rightmove_address,))
-
-
-        # Optional sources are NOT hard deps (a permanently pending input
-        # must not block refresh), but their changes must still schedule a
-        # recompute — mirror BestLocationNode's optional-dep wiring.
-        for src in (self._user_entered, self._corrected):
-            slot = Slot(self._on_dep_changed)
-            self._slots.append(slot)
-            src.changed.connect(slot)
+        super().__init__(
+            node_id,
+            str,
+            (user_entered_address, corrected_address, rightmove_address),
+            dep_names=("user_entered", "corrected", "rightmove"),
+        )
 
     @override
-    def _is_stale(self) -> bool:
-        if self._attempt.pending:
-            return True
-        if super()._is_stale():
-            return True
-        # Detect optional-source changes exactly like the base class does
-        # for hard deps: a source persisted after this node last computed
-        # means the node's value predates it.  No in-memory snapshot — a
-        # snapshot is lost on restart and ambiguous when the source never
-        # had a value, which would mask the first push.
-        for src in (self._user_entered, self._corrected):
-            if (
-                src._persisted_at is not None
-                and self._computed_at is not None
-                and src._persisted_at > self._computed_at
-            ):
-                return True
-        return False
+    def _get_active_deps(self):
+        """Only valued sources are active — a pending/empty source must
+        not stall refresh.  The static deps still re-schedule the node
+        when a source arrives later (e.g. the scrape's rightmove
+        address landing after an address patch)."""
+        active = []
+        for src in self._deps:
+            a = src.latest_attempt()
+            if a.succeeded and a.value_or_none():
+                active.append(src)
+        return tuple(active)
 
     @override
-    async def compute(self, rightmove: Attempt[str]) -> Attempt[str]:
-        # Check optional sources in priority order
-        user_attempt = await self._user_entered.attempt()
-        if user_attempt.succeeded:
-            return user_attempt
-        corrected_attempt = await self._corrected.attempt()
-        if corrected_attempt.succeeded:
-            return corrected_attempt
-        if rightmove.succeeded:
-            return rightmove
-        return self._impossible({"rightmove_address": rightmove})
+    async def compute(
+        self,
+        user_entered: Attempt[str] | None = None,
+        corrected: Attempt[str] | None = None,
+        rightmove: Attempt[str] | None = None,
+    ) -> Attempt[str]:
+        for attempt in (user_entered, corrected, rightmove):
+            if attempt is not None and attempt.succeeded:
+                return attempt
+        # No source has a value yet — stay pending until one arrives
+        # (a fresh URL-only add has no address of any kind).
+        return Attempt.pending()
 
 
 class PostcodeNode(DerivedNode[str]):
