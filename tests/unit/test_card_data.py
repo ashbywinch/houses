@@ -101,7 +101,6 @@ def prop():
     p.rightmove_bedrooms.push("3", "Rightmove")
     p.rightmove_price.push(Money("450000", "GBP"), "Rightmove")
     p.rightmove_location.push(GeoPoint(51.5, -0.4), "Rightmove map")
-    p.postcode.push("UB2 5AD", "Rightmove")
     register_property(rid, p)
     return p
 

@@ -221,34 +221,61 @@ class TestBootstrapFromRow:
 
 class TestUpgradeAddress:
     def test_replaces_outcode_with_full_postcode(self):
-        from houses.nodes.bootstrap import _upgrade_address
+        from houses.location import upgrade_address as _upgrade_address
 
         result = _upgrade_address("31 Isambard Road, Southall, UB2", "UB2 4GN")
         assert result == "31 Isambard Road, Southall, UB2 4GN"
 
     def test_no_change_when_address_has_full_postcode(self):
-        from houses.nodes.bootstrap import _upgrade_address
+        from houses.location import upgrade_address as _upgrade_address
 
         result = _upgrade_address("31 Isambard Road, Southall, UB2 4GN", "UB2 4GN")
         assert result == "31 Isambard Road, Southall, UB2 4GN"
 
     def test_appends_when_no_outcode(self):
-        from houses.nodes.bootstrap import _upgrade_address
+        from houses.location import upgrade_address as _upgrade_address
 
         result = _upgrade_address("10 High St", "SW1V 2QQ")
         assert result == "10 High St, SW1V 2QQ"
 
     def test_empty_postcode_returns_original(self):
-        from houses.nodes.bootstrap import _upgrade_address
+        from houses.location import upgrade_address as _upgrade_address
 
         result = _upgrade_address("10 High St", "")
         assert result == "10 High St"
 
     def test_empty_address_returns_empty(self):
-        from houses.nodes.bootstrap import _upgrade_address
+        from houses.location import upgrade_address as _upgrade_address
 
         result = _upgrade_address("", "SW1V 2QQ")
         assert result == ""
+
+    def test_case_insensitive_present_postcode_is_not_doubled(self):
+        """The 'already present' check must be case-insensitive — a
+        lowercase postcode in the address plus an uppercase one would
+        otherwise append a duplicate (addresses arrive in mixed case)."""
+        from houses.location import upgrade_address as _upgrade_address
+
+        result = _upgrade_address("Penwood Lane, Marlow, sl7 2ap", "SL7 2AP")
+        assert result == "Penwood Lane, Marlow, sl7 2ap"
+
+    def test_repeated_upgrade_is_idempotent(self):
+        """Upgrading an already-upgraded address must not double the
+        postcode (re-enrich / re-report paths re-run the upgrade)."""
+        from houses.location import upgrade_address as _upgrade_address
+
+        once = _upgrade_address("31 Isambard Road, Southall, UB2", "UB2 4GN")
+        twice = _upgrade_address(once, "UB2 4GN")
+        assert once == "31 Isambard Road, Southall, UB2 4GN"
+        assert twice == once
+
+    def test_different_postcode_variant_is_not_doubled_onto_the_same_outcode(self):
+        """A full postcode must never be appended after the outcode the
+        address already carries in full form."""
+        from houses.location import upgrade_address as _upgrade_address
+
+        result = _upgrade_address("Winston Drive, Cobham, KT11", "KT11")
+        assert result == "Winston Drive, Cobham, KT11"
 
 class TestSeedInputDefaults:
     """A pending input node with no producer permanently blocks every
@@ -307,7 +334,6 @@ class TestSeedInputDefaults:
         prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
         prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.postcode.push("SW1V 2QQ", "test")
         prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
         # NOTE: comment_status deliberately left pending (production shape)
         from houses.property_registry import register_property

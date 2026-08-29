@@ -35,7 +35,6 @@ def test_enriched_property_defaults() -> None:
         url="https://www.rightmove.co.uk/properties/123",
     )
     assert ep.address == ""
-    assert ep.postcode == ""
     assert ep.bedrooms == 0
     assert ep.price == Money("0", "GBP")
     assert ep.simon_commute is None

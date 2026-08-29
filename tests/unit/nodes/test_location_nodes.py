@@ -475,3 +475,49 @@ class TestBestLocationNodeGeocodeFallback:
         geocode_result.push(gp2, "geocode")
         await flush_processor()
         assert (await node.attempt()).value_or_none() == gp2
+
+
+class TestPostcodeNode:
+    """The postcode is a projection of the best address — derived, never
+    pushed, so no address-writing path (scrape, correction, manual
+    details, address patch) can leave it blank."""
+
+    @pytest.fixture
+    def node(self):
+        from houses.nodes.location import PostcodeNode
+
+        addr = UserInputNode[str]("pc_addr", str)
+        return PostcodeNode("pc", best_address=addr), addr
+
+    @pytest.mark.asyncio
+    async def test_derives_the_full_postcode_from_the_address(self, node):
+        n, addr = node
+        addr.push("Penwood Lane, Marlow, SL7 2AP", "user")
+        await flush_processor()
+        a = await n.attempt()
+        assert a.succeeded and a.value_or_none() == "SL7 2AP"
+
+    @pytest.mark.asyncio
+    async def test_outcode_only_address_yields_the_outcode(self, node):
+        n, addr = node
+        addr.push("Winston Drive, Cobham, KT11", "user")
+        await flush_processor()
+        a = await n.attempt()
+        assert a.succeeded and a.value_or_none() == "KT11"
+
+    @pytest.mark.asyncio
+    async def test_pending_while_the_address_is_empty(self, node):
+        n, addr = node
+        addr.push("", "user")
+        await flush_processor()
+        assert (await n.attempt()).pending, (
+            "a URL-only add has no postcode yet — pending until the address arrives"
+        )
+
+    @pytest.mark.asyncio
+    async def test_empty_string_when_the_address_has_no_postcode(self, node):
+        n, addr = node
+        addr.push("Some Street, Somewhere", "user")
+        await flush_processor()
+        a = await n.attempt()
+        assert a.succeeded and a.value_or_none() == ""

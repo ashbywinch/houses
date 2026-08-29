@@ -20,7 +20,7 @@ from houses.nodes.epc_node import CouncilTaxNode, EpcNode
 from houses.nodes.equity_total_node import EquityTotalNode
 from houses.nodes.geocode_node import GeocodeNode
 from houses.nodes.life_insurance_total_node import LifeInsuranceTotalNode
-from houses.nodes.location import BestAddressNode, BestLocationNode
+from houses.nodes.location import BestAddressNode, BestLocationNode, PostcodeNode
 from houses.nodes.monthly_mortgage_payment_node import MonthlyMortgagePaymentNode
 from houses.nodes.monthly_sinking_fund_node import MonthlySinkingFundNode
 from houses.nodes.mortgage_required_node import MortgageRequiredNode
@@ -68,7 +68,6 @@ class PropertyNodes:
         self.precise_location = UserInputNode[GeoPoint](f"{rid}/precise_location", GeoPoint)
         self.corrected_address = UserInputNode[str](f"{rid}/corrected_address", str)
         self.user_entered_address = UserInputNode[str](f"{rid}/user_entered_address", str)
-        self.postcode = UserInputNode[str](f"{rid}/postcode", str)
 
         # Comments from View tab
         self.comment_status = UserInputNode[str](f"{rid}/status", str)
@@ -111,6 +110,10 @@ class PropertyNodes:
             user_entered_address=self.user_entered_address,
             corrected_address=self.corrected_address,
             rightmove_address=self.rightmove_address,
+        )
+        self.postcode = PostcodeNode(
+            f"{rid}/postcode",
+            best_address=self.best_address,
         )
         self.geocode = GeocodeNode(
             f"{rid}/geocode",

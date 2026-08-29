@@ -549,9 +549,13 @@ class TestCouncilTaxNodeProvenance:
         token = _sp.set(make_services(council_tax_service=CannedCouncilTaxService()))
         try:
             addr = UserInputNode("addr", str)
-            addr.push("Paddock Heights, Twyford, RG10", "test")
-            postcode = UserInputNode("pc", str)
-            postcode.push("RG10 0AP", "test")
+            addr.push("Paddock Heights, Twyford, RG10 0AP", "test")
+            # The postcode is a projection of the address (PostcodeNode)
+            # — the node-level test feeds the real derivation chain, not
+            # a detached postcode input.
+            from houses.nodes.location import PostcodeNode
+
+            postcode = PostcodeNode("ct/pc", best_address=addr)
 
             node = CouncilTaxNode("ct/council_tax", best_address=addr, postcode_node=postcode)
             await flush_processor()

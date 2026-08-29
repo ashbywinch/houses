@@ -77,7 +77,6 @@ async def test_bootstrap_pushes_sources_and_dag_computes():
         "precise_location": prop.precise_location,
         "corrected_address": prop.corrected_address,
         "user_entered_address": prop.user_entered_address,
-        "postcode": prop.postcode,
     }
     row = {
         "Rightmove ID": rid,

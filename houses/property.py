@@ -63,7 +63,6 @@ class EnrichedProperty:
     url: str
     rid: str = ""
     address: str = ""
-    postcode: str = ""
     bedrooms: int = 0
     price: Money = Money(amount="0", currency="GBP")
 
