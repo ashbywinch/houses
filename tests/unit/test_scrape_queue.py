@@ -169,10 +169,11 @@ class TestClaim:
         assert client.post("/api/scrapes/claim").json()["job"] is None
 
     @staticmethod
-    def test_stale_in_progress_job_is_reclaimed():
+    def test_stale_in_progress_job_is_reclaimed_with_backoff():
         """Review-bug regression: a worker that dies after claiming (never
-        reports) must not stall the property forever — an in_progress job
-        older than the stale threshold becomes claimable again."""
+        reports) must not stall the property forever — the abandoned job
+        is requeued counting as an attempt, with the backoff window, so
+        it is NOT instantly re-claimed."""
         job = _add_url_only()
         conn = get_connection()
         conn.execute(
@@ -180,9 +181,47 @@ class TestClaim:
             ((_now() - timedelta(seconds=STALE_CLAIM_SECONDS * 2)).isoformat(), job["id"]),
         )
         conn.commit()
-        job2 = client.post("/api/scrapes/claim").json()["job"]
-        assert job2 is not None and job2["id"] == job["id"]
+        assert client.post("/api/scrapes/claim").json()["job"] is None, (
+            "a stale-reclaimed job must back off, not be immediately claimable"
+        )
+        rows = _scrape_rows()
+        assert rows[0]["status"] == "pending"
+        assert rows[0]["attempts"] == 1
+        assert datetime.fromisoformat(rows[0]["next_retry_at"]) > _now()
 
+    @staticmethod
+    def test_repeated_stale_reclaims_converge_to_failed():
+        """A worker that keeps dying before reporting must not loop
+        forever — stale reclaims count toward MAX_ATTEMPTS and the job
+        reaches the failed terminal state the card's Retry expects
+        (PR #68 review)."""
+        job = _add_url_only()
+        conn = get_connection()
+        for _ in range(MAX_ATTEMPTS - 1):
+            conn.execute(
+                "UPDATE pending_scrapes SET claimed_at=? WHERE id=?",
+                ((_now() - timedelta(seconds=STALE_CLAIM_SECONDS * 2)).isoformat(), job["id"]),
+            )
+            conn.commit()
+            # reclaim: requeued with attempts+1 + backoff → nothing due yet
+            assert client.post("/api/scrapes/claim").json()["job"] is None
+            conn.execute(
+                "UPDATE pending_scrapes SET next_retry_at=? WHERE id=?",
+                (_now().isoformat(), job["id"]),
+            )
+            conn.commit()
+            job2 = client.post("/api/scrapes/claim").json()["job"]
+            assert job2 is not None and job2["id"] == job["id"]
+        # The final stale reclaim crosses MAX_ATTEMPTS → permanently failed.
+        conn.execute(
+            "UPDATE pending_scrapes SET claimed_at=? WHERE id=?",
+            ((_now() - timedelta(seconds=STALE_CLAIM_SECONDS * 2)).isoformat(), job["id"]),
+        )
+        conn.commit()
+        assert client.post("/api/scrapes/claim").json()["job"] is None
+        rows = _scrape_rows()
+        assert rows[0]["status"] == "failed"
+        assert rows[0]["attempts"] == MAX_ATTEMPTS
 
 class TestBackoff:
     def test_failure_backs_off_exponentially(self):

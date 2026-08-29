@@ -190,6 +190,46 @@ class TestRemove:
         assert get_services().property_registry.get(RID) is None
         assert client.get(f"/api/properties/{RID}").status_code == 404
 
+    @staticmethod
+    def test_remove_disconnects_the_dag_nodes():
+        """Remove must drop the property's nodes from the scheduler — a
+        re-add of the same URL must not collide with orphaned nodes
+        registered under the same ids (their queued events would clobber
+        the re-added property's rows; PR #68 review)."""
+        from dag.scheduler import get_scheduler
+
+        _add_url_only()
+        prefix = f"{RID}/"
+        assert any(nid.startswith(prefix) for nid in get_scheduler().registered_nodes())
+        resp = client.delete(f"/api/properties/{RID}")
+        assert resp.status_code == 200, resp.text
+        assert not any(nid.startswith(prefix) for nid in get_scheduler().registered_nodes()), (
+            "the removed property's nodes must be unregistered from the scheduler"
+        )
+
+    @staticmethod
+    def test_remove_then_readd_computes():
+        """Remove then re-add the same listing — the fresh PropertyNodes
+        must compute, not starve behind orphaned nodes (PR #68 review)."""
+        _add_url_only()
+        assert client.delete(f"/api/properties/{RID}").status_code == 200
+        _add_url_only()
+        job = client.post("/api/scrapes/claim").json()["job"]
+        client.post(
+            "/api/scrapes/report",
+            json={
+                "job_id": job["id"],
+                "ok": True,
+                "data": {"address": "Penwood Lane, Marlow, SL7 2AP"},
+            },
+        )
+        prop = get_services().property_registry.get(RID)
+        assert prop is not None
+        a = prop.postcode.latest_attempt()
+        assert a.succeeded and a.value_or_none() == "SL7 2AP", (
+            "a re-added property must compute like a fresh one"
+        )
+
 class TestAddressPatchDerivesPostcode:
     @staticmethod
     def test_editing_the_address_to_add_a_postcode_resolves_it():
@@ -233,3 +273,4 @@ class TestAddressPatchDerivesPostcode:
         assert a.succeeded and a.value_or_none() == "SL7 2AP", (
             "the user's edited address must override Rightmove's postcode"
         )
+

@@ -101,11 +101,29 @@ def claim_due_scrape() -> ScrapeJob | None:
     conn = get_connection()
     now = datetime.now(UTC).isoformat()
     stale_before = (datetime.now(UTC) - timedelta(seconds=STALE_CLAIM_SECONDS)).isoformat()
-    conn.execute(
-        "UPDATE pending_scrapes SET status='pending', next_retry_at=?, claimed_at=NULL"
+    # Stale reclaims count toward MAX_ATTEMPTS with the same backoff as
+    # reported failures: a worker that keeps dying before reporting must
+    # converge to the failed terminal state, not loop forever (the card's
+    # Retry flow depends on the terminal state; PR #68 review).
+    stale_rows = conn.execute(
+        "SELECT id, attempts FROM pending_scrapes"
         " WHERE status='in_progress' AND claimed_at IS NOT NULL AND claimed_at <= ?",
-        (now, stale_before),
-    )
+        (stale_before,),
+    ).fetchall()
+    for stale in stale_rows:
+        attempts = stale["attempts"] + 1
+        if attempts >= MAX_ATTEMPTS:
+            conn.execute(
+                "UPDATE pending_scrapes SET status='failed', attempts=?,"
+                " last_error='worker died before reporting' WHERE id=?",
+                (attempts, stale["id"]),
+            )
+        else:
+            conn.execute(
+                "UPDATE pending_scrapes SET status='pending', attempts=?, next_retry_at=?,"
+                " claimed_at=NULL, last_error='worker died before reporting' WHERE id=?",
+                (attempts, (datetime.now(UTC) + backoff_delay(attempts)).isoformat(), stale["id"]),
+            )
     row = conn.execute(
         "SELECT id, rid, url FROM pending_scrapes"
         " WHERE next_retry_at <= ? AND status = 'pending'"
