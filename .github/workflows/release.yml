@@ -51,6 +51,16 @@ jobs:
           REF: ${{ github.event_name == 'push' && github.ref_name || inputs.ref }}
         run: |
           set -euo pipefail
+          # The ref is interpolated into a remote shell command below —
+          # refuse anything outside the safe charset so a tag or dispatch
+          # input cannot break out of the quoting (PR #68 review,
+          # command injection).
+          case "$REF" in
+            *[!A-Za-z0-9._/-]*)
+              echo "ERROR: ref '$REF' contains characters outside [A-Za-z0-9._/-] — refusing to deploy." >&2
+              exit 1
+              ;;
+          esac
           if [ "${{ github.event_name }}" = "push" ]; then
             # Tag push: the tag must be reachable from main — the code
             # went through a PR.  Tagging a feature branch directly is an

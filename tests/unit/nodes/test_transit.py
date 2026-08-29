@@ -664,3 +664,53 @@ class TestNationalRailFallback:
         assert _v is not None and not _v.infeasible
         assert isinstance(received["dest"], PlaceOfInterest)
         assert received["dest"].address == "1 Drummond Gate, Pimlico, London SW1V 2QQ"
+
+    @pytest.mark.asyncio
+    async def test_plain_tfl_success_clears_fallback_narration(self):
+        """After a fallback run, a later compute where TfL succeeds must
+        NOT still narrate the National Rail fallback — provenance
+        describes the run that actually happened (PR #68 review)."""
+        from houses.nodes.transit import TransitNode, TransitOptions
+
+        async def fake_route(loc, dest):
+            return self._commute()
+
+        loc = UserInputNode[GeoPoint]("nrfn_loc", GeoPoint)
+        poi = UserInputNode[PlaceOfInterest]("nrfn_poi", PlaceOfInterest)
+        node = TransitNode(
+            "nrfn",
+            options=TransitOptions(
+                best_location=loc,
+                poi=poi,
+                no_bus_node=UserInputNode[Commute]("nrfn_nb", Commute),
+                with_bus_node=UserInputNode[Commute]("nrfn_wb", Commute),
+                transit_route_fn=fake_route,
+            ),
+        )
+        # 1) TfL infeasible → fallback used; provenance narrates it.
+        a = await node.compute(
+            Attempt.succeeded(GeoPoint(51.415344, -1.511056)),
+            Attempt.succeeded(PlaceOfInterest(label="Pimlico", address="SW1V 2QQ")),
+            Attempt.succeeded(self._infeasible_commute()),
+            Attempt.succeeded(self._infeasible_commute()),
+        )
+        assert a.succeeded
+        v = a.value_or_none()
+        assert v is not None and not v.infeasible
+        p = await node.build_provenance()
+        assert "National Rail fallback" in (p.description or "")
+
+        # 2) TfL succeeds this time → the fallback narration must be gone.
+        a2 = await node.compute(
+            Attempt.succeeded(GeoPoint(51.415344, -1.511056)),
+            Attempt.succeeded(PlaceOfInterest(label="Pimlico", address="SW1V 2QQ")),
+            Attempt.succeeded(self._commute()),
+            Attempt.succeeded(self._commute()),
+        )
+        assert a2.succeeded
+        v2 = a2.value_or_none()
+        assert v2 is not None and not v2.infeasible
+        p2 = await node.build_provenance()
+        assert "National Rail fallback" not in (p2.description or ""), (
+            "a plain TfL success must not narrate a fallback that did not run"
+        )

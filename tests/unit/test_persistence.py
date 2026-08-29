@@ -230,3 +230,33 @@ class TestCompressedStorage:
         loaded = latest_node_result(node_id)
         assert loaded is not None
         assert loaded["value"] == {"legacy": True}
+
+
+class TestDeleteNodeResultsForRid:
+    """The remove-property delete must not honor LIKE wildcards in the
+    user-supplied rid — a '%' or '_' would wipe unrelated properties'
+    rows (PR #68 review, High)."""
+
+    @staticmethod
+    def _seed(rid: str) -> None:
+        save_node_result(f"{rid}/node", {"status": "succeeded", "value": 1})
+
+    def test_wildcard_rid_does_not_delete_other_properties(self):
+        from dag import persistence as p
+
+        self._seed("123")
+        self._seed("456")
+        p.delete_node_results_for_rid("%")
+        assert p.latest_node_result("123/node") is not None
+        assert p.latest_node_result("456/node") is not None
+
+    def test_underscore_in_rid_matches_only_the_literal(self):
+        from dag import persistence as p
+
+        self._seed("12_3")
+        self._seed("12X3")
+        p.delete_node_results_for_rid("12_3")
+        assert p.latest_node_result("12_3/node") is None
+        assert p.latest_node_result("12X3/node") is not None, (
+            "an unescaped '_' matches any character — '12_3' would delete '12X3'"
+        )

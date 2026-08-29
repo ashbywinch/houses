@@ -406,7 +406,10 @@ class TransitNode(DerivedNode[Commute]):
         with_bus: Attempt[Commute],
         best_address: Attempt[str] | None = None,
     ) -> Attempt[Commute]:
-
+        # Provenance narrates only the run that actually happened: a
+        # fallback used by an earlier compute must not leak into a later
+        # plain-TfL success (PR #68 review).
+        self._last_fallback_detail = None
         no_bus_val = no_bus.value_or_none()
         with_bus_val = with_bus.value_or_none()
         if self._has_car and no_bus_val is not None and not no_bus_val.infeasible:
