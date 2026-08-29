@@ -27,7 +27,7 @@ from houses.admin_router import admin_router
 from houses.context import get_scrape_fn
 from houses.database import close_db as close_app_db
 from houses.database import init_db as init_app_db
-from houses.location import extract_postcode
+from houses.location import extract_postcode, upgrade_address
 from houses.nodes.bootstrap import load_property_nodes_from_db
 from houses.nodes.cutover import push_enriched_property
 from houses.nodes.property_nodes import PropertyNodes
@@ -90,7 +90,6 @@ def _seed_dag(rid2: str, enriched: EnrichedProperty) -> bool:
                 "rightmove_bedrooms": prop.rightmove_bedrooms,
                 "rightmove_price": prop.rightmove_price,
                 "rightmove_location": prop.rightmove_location,
-                "postcode": prop.postcode,
             },
         )
         registry.register(rid2, prop)
@@ -301,10 +300,14 @@ def _enriched_price(payload, scraped) -> Money:
 
 def _build_enriched(payload, scraped, address: str, postcode: str) -> EnrichedProperty:
     """Seed the DAG — a fresh enrichment."""
+    address = address or (scraped.address if scraped else "")
+    # The postcode node derives from the address — fold a separately-
+    # known postcode INTO the address so the derivation sees it (the
+    # address stays the single fact).
+    address = upgrade_address(address, postcode or (scraped.postcode if scraped else ""))
     return EnrichedProperty(
         url=payload.url or (scraped.url if scraped else ""),
-        address=address or (scraped.address if scraped else ""),
-        postcode=postcode or (scraped.postcode if scraped else ""),
+        address=address,
         bedrooms=_enriched_bedrooms(payload, scraped),
         price=_enriched_price(payload, scraped),
         approx_latitude=scraped.latitude if scraped else None,
@@ -352,6 +355,10 @@ async def upsert_property(
         _seed_dag(rid2, enriched)
 
     dump = asdict_serializable(enriched)
+    # The postcode is no longer an EnrichedProperty field (the address
+    # carries it, PostcodeNode derives) — keep it on the wire for
+    # clients that read the add response.
+    dump["postcode"] = postcode
     extra: dict[str, Any] = {}
     if scrape_error:
         extra["scrape_warning"] = scrape_error
@@ -374,8 +381,6 @@ def _job_wire(job):
         return None
     # lucidlint: ignore record-shape wire-format dict — serialization boundary owns the shape (coding-standards.md)
     return {"id": job.id, "rid": job.rid, "url": job.url}
-
-
 # lucidlint: ignore record-shape wire-format dict — the worker's report body is a wire record (coding-standards.md)
 async def _apply_scraped_report(rid: str, data: dict) -> bool:
     """Push a worker's scraped listing into the property's DAG — the same
@@ -383,13 +388,13 @@ async def _apply_scraped_report(rid: str, data: dict) -> bool:
     Returns False when the DAG seed fails (the caller re-queues the job)."""
     enriched = EnrichedProperty(
         url=data.get("url", ""),
-        address=data.get("address", ""),
-        postcode=data.get("postcode", ""),
+        address=upgrade_address(data.get("address", ""), data.get("postcode", "")),
         bedrooms=int(data["bedrooms"]) if data.get("bedrooms") is not None else 0,
         price=Money(str(data["price"]), "GBP") if data.get("price") is not None else Money(amount="0", currency="GBP"),
         approx_latitude=data.get("latitude"),
         approx_longitude=data.get("longitude"),
     )
+
     seeded = _seed_dag(rid, enriched)
     # Drain the downstream cascade so the client's immediate refetch
     # reflects the completed enrichment (same pattern as patch_address).
@@ -478,10 +483,6 @@ async def patch_property_details(rid: str, body: dict) -> JSONResponse:
         raise HTTPException(status_code=422, detail="address required")
     enriched = EnrichedProperty(
         address=address,
-        # The typed address embeds a postcode — seed it so postcode-
-        # derived nodes (park_and_ride etc.) compute instead of staying
-        # permanently pending (PR #68 review).
-        postcode=body.get("postcode") or extract_postcode(address) or "",
         url=(prop.rightmove_url.latest_attempt().value_or_none() or "")
         if prop.rightmove_url.latest_attempt().succeeded
         else "",

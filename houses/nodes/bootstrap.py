@@ -10,6 +10,7 @@ from money import Money
 from dag.persistence import property_rids
 from dag.user_input_node import UserInputNode
 from houses.geopoint import GeoPoint
+from houses.location import upgrade_address
 from houses.nodes.property_nodes import PropertyNodes
 from houses.property_registry import register_property
 
@@ -44,20 +45,6 @@ COMMENT_COLUMNS: dict[str, str] = {
     "comment_planning_needed": "Planning Needed",
 }
 
-
-_OUTCODE_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z0-9]?)\s*\Z", re.IGNORECASE)
-
-
-def _upgrade_address(address: str, postcode: str) -> str:
-    if not address or not postcode:
-        return address
-    if postcode in address:
-        return address
-    m = _OUTCODE_RE.search(address)
-    if m:
-        before = address[: m.start()].rstrip(", ").rstrip()
-        return f"{before}, {postcode}"
-    return f"{address}, {postcode}"
 
 def _push_geo_coords(sources: dict[str, UserInputNode], key: str, lat: str, lng: str, what: str) -> bool:
     """Push a sheet coordinate pair into sources; False when the cells aren't numeric."""
@@ -101,14 +88,13 @@ def _parse_price(value: str) -> Money | None:
         return None
     return Money(cleaned, "GBP")
 
-
 def _push_upgraded_address(sources: dict[str, UserInputNode], row: dict[str, str]) -> int:
     """Push the postcode-upgraded address onto both address nodes; 0–2 pushes."""
     address = (row.get("Address") or "").strip()
     postcode = (row.get("Postcode") or "").strip()
     if not address or not postcode:
         return 0
-    upgraded = _upgrade_address(address, postcode)
+    upgraded = upgrade_address(address, postcode)
     pushed = 0
     if upgraded != address and "user_entered_address" in sources:
         sources["user_entered_address"].push(upgraded, SOURCE_LABELS["user_entered_address"])

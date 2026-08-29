@@ -84,8 +84,7 @@ class TestPropertyApi:
 
         client, reg = self._setup()
         prop = PropertyNodes("prop123")
-        prop.rightmove_address.push("10 High St", "Rightmove")
-        prop.postcode.push("SW1V 2QQ", "Rightmove")
+        prop.rightmove_address.push("10 High St, SW1V 2QQ", "Rightmove")
         reg.register("prop123", prop)
         flush_all()
 
@@ -239,8 +238,7 @@ class TestPropertyApi:
         try:
             client, reg = self._setup()
             prop = PropertyNodes("prop123")
-            prop.rightmove_address.push("10 High St", "Rightmove")
-            prop.postcode.push("SW1V 2QQ", "Rightmove")
+            prop.rightmove_address.push("10 High St, SW1V 2QQ", "Rightmove")
             reg.register("prop123", prop)
             flush_all()
 
@@ -309,8 +307,7 @@ class TestPropertyApi:
             rid = "42345679"
             prop = PropertyNodes(rid)
             prop.rightmove_price.push(Money("500000", "GBP"), "test")
-            prop.rightmove_address.push("1 Test St", "test")
-            prop.postcode.push("SW1V 2QQ", "test")
+            prop.rightmove_address.push("1 Test St, SW1V 2QQ", "test")
             prop.works_estimates.push({}, "test")
             prop.rental_income.push(Money("0", "GBP"), "test")
             prop.comment_status.push("", "test")
@@ -415,7 +412,6 @@ class TestPropertyApi:
         prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
         prop.corrected_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.postcode.push("UB2 4GN", "test")
         prop.user_entered_address.push("31 Isambard Road, Southall, UB2 4GN", "test")
         prop.works_estimates.push({}, "test")
         prop.rental_income.push(Money("0", "GBP"), "test")
@@ -484,7 +480,6 @@ def _seed_property() -> str:
     prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
     prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
     prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-    prop.postcode.push("SW1V 2QQ", "test")
     prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
     prop.works_estimates.push({}, "test")
     prop.rental_income.push(Money("0", "GBP"), "test")
@@ -1285,7 +1280,6 @@ class TestWhatIfApi:
         prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
         prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.postcode.push("SW1V 2QQ", "test")
         prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
         prop.works_estimates.push({}, "test")
         prop.rental_income.push(Money("0", "GBP"), "test")
@@ -1383,7 +1377,6 @@ class TestRegenerateApi:
         prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
         prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.postcode.push("SW1V 2QQ", "test")
         prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
         prop.works_estimates.push({}, "test")
         prop.rental_income.push(Money("0", "GBP"), "test")
@@ -1535,7 +1528,6 @@ class TestWorksEstimateApi:
         prop.rightmove_location.push(GeoPoint(51.5, -0.1), "test")
         prop.corrected_address.push("1 Test St, SW1V 2QQ", "test")
         prop.precise_location.push(GeoPoint(51.5, -0.1), "test")
-        prop.postcode.push("SW1V 2QQ", "test")
         prop.user_entered_address.push("1 Test St, SW1V 2QQ", "test")
         prop.works_estimates.push({}, "test")
         from money import Money

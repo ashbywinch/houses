@@ -527,6 +527,11 @@ def is_outcode(s: str) -> bool:
     return bool(re.match(r"^[A-Z]{1,2}[0-9][A-Z0-9]?$", s))
 
 
+# Outcode at the END of an address string — where the full postcode is
+# appended when one is known separately (upgrade_address).
+_TRAILING_OUTCODE_RE = re.compile(r"\b([A-Z]{1,2}\d[A-Z0-9]?)\s*\Z", re.IGNORECASE)
+
+
 def extract_postcode(address: str) -> str:
     """Extract the best postcode from an address string.
 
@@ -540,6 +545,27 @@ def extract_postcode(address: str) -> str:
     if m:
         return m.group(0).strip().upper()
     return ""
+
+
+def upgrade_address(address: str, postcode: str) -> str:
+    """Append *postcode* to *address* when the address lacks it.
+
+    The DAG's postcode node derives from the best address, so a
+    separately-known postcode (scrape/payload field) must be folded INTO
+    the address — the address stays the single fact (bootstrap loads and
+    enrichment paths both use this).
+    """
+    if not address or not postcode:
+        return address
+    # Case-insensitive: addresses arrive in mixed case and a lowercase
+    # 'sl7 2ap' must not be doubled by an uppercase 'SL7 2AP'.
+    if postcode.upper() in address.upper():
+        return address
+    m = _TRAILING_OUTCODE_RE.search(address)
+    if m:
+        before = address[: m.start()].rstrip(", ").rstrip()
+        return f"{before}, {postcode}"
+    return f"{address}, {postcode}"
 
 
 # ── House location resolution ───────────────────────────────────────────

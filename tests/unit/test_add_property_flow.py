@@ -189,3 +189,28 @@ class TestRemove:
         assert after == 0, "DAG rows must be removed"
         assert get_services().property_registry.get(RID) is None
         assert client.get(f"/api/properties/{RID}").status_code == 404
+
+class TestAddressPatchDerivesPostcode:
+    @staticmethod
+    def test_editing_the_address_to_add_a_postcode_resolves_it():
+        """A scraped property's address has no postcode; the user edits
+        the address to add one — the DAG derives it (PostcodeNode), no
+        endpoint coordination (the blank-postcode bug that started this
+        thread)."""
+        _add_url_only()
+        job = client.post("/api/scrapes/claim").json()["job"]
+        # The scrape arrives with an address that has no postcode.
+        client.post(
+            "/api/scrapes/report",
+            json={"job_id": job["id"], "ok": True, "data": {"address": "Penwood Lane, Marlow"}},
+        )
+        resp = client.patch(
+            f"/api/properties/{RID}/address",
+            json={"address": "Penwood Lane, Marlow, SL7 2AP"},
+        )
+        assert resp.status_code == 200, resp.text
+        prop = get_services().property_registry.get(RID)
+        a = prop.postcode.latest_attempt()
+        assert a.succeeded and a.value_or_none() == "SL7 2AP", (
+            "the postcode node must derive from the edited address"
+        )

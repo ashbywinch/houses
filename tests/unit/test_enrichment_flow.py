@@ -366,8 +366,7 @@ class TestEnrichmentBootstrap:
         enriched = EnrichedProperty(
             url="https://rightmove.co.uk/properties/999",
             address="Pembroke Avenue, Hersham, KT12",
-            postcode="KT12 4NT",
-            bedrooms=3,
+                        bedrooms=3,
             price=300000,  # type: ignore[arg-type]  # why: legacy bare-int price is the fixture — push_enriched_property's non-Money wrap branch (isinstance guard → Money(str(price))) is the behaviour under test
             approx_latitude=None,
             approx_longitude=None,
@@ -415,8 +414,7 @@ class TestEnrichmentBootstrap:
         enriched = EnrichedProperty(
             url="",
             address="Some Road, Hersham",
-            postcode="KT12",
-            bedrooms=None,  # type: ignore[arg-type]  # why: push_enriched_property guards `enriched.bedrooms is not None`; None keeps rightmove_bedrooms unpushed (default 0 would wrongly seed it)
+                        bedrooms=None,  # type: ignore[arg-type]  # why: push_enriched_property guards `enriched.bedrooms is not None`; None keeps rightmove_bedrooms unpushed (default 0 would wrongly seed it)
             price=None,  # type: ignore[arg-type]  # why: same guard on price — None keeps rightmove_price unpushed in this location-only test
             approx_latitude=51.37,
             approx_longitude=-0.4,
