@@ -193,17 +193,10 @@ class TestRemove:
 class TestAddressPatchDerivesPostcode:
     @staticmethod
     def test_editing_the_address_to_add_a_postcode_resolves_it():
-        """A scraped property's address has no postcode; the user edits
-        the address to add one — the DAG derives it (PostcodeNode), no
-        endpoint coordination (the blank-postcode bug that started this
-        thread)."""
+        """A URL-only add has no postcode; the user edits the address to
+        add one — the DAG derives it (PostcodeNode), no endpoint
+        coordination (the blank-postcode bug that started this thread)."""
         _add_url_only()
-        job = client.post("/api/scrapes/claim").json()["job"]
-        # The scrape arrives with an address that has no postcode.
-        client.post(
-            "/api/scrapes/report",
-            json={"job_id": job["id"], "ok": True, "data": {"address": "Penwood Lane, Marlow"}},
-        )
         resp = client.patch(
             f"/api/properties/{RID}/address",
             json={"address": "Penwood Lane, Marlow, SL7 2AP"},
