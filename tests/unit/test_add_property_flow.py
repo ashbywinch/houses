@@ -103,6 +103,23 @@ class TestManualDetails:
         assert detail["best_address"]["value"] == "Penwood Lane, Marlow, SL7 2AP"
         assert detail["rightmove_price"]["value"]["amount"] == "650000.00"
 
+    @staticmethod
+    def test_details_patch_seeds_the_postcode_from_the_address():
+        """The typed address embeds a postcode — the postcode node must
+        resolve so postcode-derived nodes (park_and_ride) can compute
+        instead of staying permanently pending (PR #68 review, Medium)."""
+        _add_url_only()
+        resp = client.patch(
+            f"/api/properties/{RID}/details",
+            json={"address": "Penwood Lane, Marlow, SL7 2AP", "price": 650000, "bedrooms": 4},
+        )
+        assert resp.status_code == 200, resp.text
+        prop = get_services().property_registry.get(RID)
+        a = prop.postcode.latest_attempt()
+        assert a.succeeded and a.value_or_none() == "SL7 2AP", (
+            "the postcode embedded in the typed address must be seeded into the DAG"
+        )
+
 
 class TestCommuteComputesAfterDetails:
     @staticmethod

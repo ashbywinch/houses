@@ -63,6 +63,7 @@ class TestLifespanDbWiring:
         settings.session_secret = settings.session_secret or "test-session"
         prev_app_mode = nodes_settings._app_mode
         prev_after_refresh = scheduler_mod.get_scheduler()._after_refresh_callback
+        prev_db_path = p.DB_PATH
         p.DB_PATH = None  # module state, deliberately: assert what startup wires
         try:
             async with server_mod.lifespan(server_mod.app):
@@ -74,6 +75,11 @@ class TestLifespanDbWiring:
             nodes_settings._app_mode = prev_app_mode
             scheduler_mod.get_scheduler()._after_refresh_callback = prev_after_refresh
             settings.web_client_id, settings.web_client_secret, settings.session_secret = prev
+            # The real dev DB must not leak into later tests — a leftover
+            # DB_PATH made their DAG writes land in data/houses.db
+            # (PR #68 review).
+            p.DB_PATH = prev_db_path
+        assert prev_db_path == p.DB_PATH, "DB_PATH must be restored after the lifespan test"
 
 
 class TestExtractPostcode:

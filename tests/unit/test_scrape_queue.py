@@ -133,6 +133,25 @@ class TestClaim:
         assert job2 is not None and job2["id"] == job["id"]
 
     @staticmethod
+    def test_status_reads_the_newest_job_for_a_rid_with_several():
+        """A permanently failed job plus a re-enqueued one must report
+        the NEWEST job — an unordered read showed the stale 'failed'
+        state on the card (PR #68 review, Medium)."""
+        from houses.scrape_queue import enqueue_scrape, scrape_status_for_rid
+
+        job = _add_url_only()
+        conn = get_connection()
+        conn.execute("UPDATE pending_scrapes SET status='failed' WHERE id=?", (job["id"],))
+        conn.commit()
+        # failed is not an active status — the retry enqueues a second row
+        assert enqueue_scrape(job["rid"], job["url"]) is True
+        status = scrape_status_for_rid(job["rid"])
+        assert status is not None and status.status == "pending", (
+            "must report the re-enqueued job, not the stale failed row"
+        )
+        assert status.attempts == 0
+
+    @staticmethod
     def test_failed_job_is_never_claimable_again():
         """Review-bug regression: after MAX_ATTEMPTS the job is failed
         PERMANENTLY — a stale next_retry_at must not make it claimable

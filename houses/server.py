@@ -478,6 +478,10 @@ async def patch_property_details(rid: str, body: dict) -> JSONResponse:
         raise HTTPException(status_code=422, detail="address required")
     enriched = EnrichedProperty(
         address=address,
+        # The typed address embeds a postcode — seed it so postcode-
+        # derived nodes (park_and_ride etc.) compute instead of staying
+        # permanently pending (PR #68 review).
+        postcode=body.get("postcode") or extract_postcode(address) or "",
         url=(prop.rightmove_url.latest_attempt().value_or_none() or "")
         if prop.rightmove_url.latest_attempt().succeeded
         else "",
